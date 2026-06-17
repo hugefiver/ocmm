@@ -1,0 +1,50 @@
+{
+  "name": "ocmm",
+  "version": "0.1.0",
+  "description": "OpenCode Multi-Model Auto-Router plugin (ocmm). Per-agent model selection, variant -> param translation, intent-keyword mode injection.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "prompts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "model-routing",
+    "multi-model"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.5.2",
+      "onFail": "download"
+    }
+  }
+}
