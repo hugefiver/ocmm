@@ -1,0 +1,54 @@
+// Sample ocmm config. Drop this at:
+//   <project>/.opencode/ocmm.jsonc
+//   ~/.config/opencode/ocmm.jsonc      (Linux/macOS)
+//   %APPDATA%\opencode\ocmm.jsonc       (Windows)
+//
+// Project-level settings deep-merge over user-level settings; `disabledAgents`
+// and `fallbackModels` array values are unioned.
+{
+  // Built-in agents we don't want registered at all.
+  "disabledAgents": [],
+
+  // Override or extend agents.
+  "agents": {
+    // Shorthand: just pin a model. Variant defaults to whatever the chain
+    // entry has; `chat.params` translates that into provider-specific knobs.
+    "oracle": {
+      "model": "anthropic/claude-opus-4-7"
+    },
+
+    // Full ModelRequirement form (mirrors omo's schema for portability).
+    "sisyphus": {
+      "requirement": {
+        "variant": "max",
+        "requiresAnyModel": true,
+        "fallbackChain": [
+          { "providers": ["anthropic"], "model": "claude-opus-4-7", "variant": "max" },
+          { "providers": ["openai", "github-copilot"], "model": "gpt-5.5", "variant": "high" },
+          { "providers": ["zhipu"], "model": "glm-5.1" }
+        ]
+      }
+    }
+  },
+
+  // Intent gating - keyword detection on user messages.
+  "intent": {
+    "enabled": true,
+    "skipAgents": ["plan"]
+  },
+
+  // Fallback model strings (provider/model). Reserved for Phase 2.
+  "fallbackModels": [
+    "openai/gpt-5.4-mini",
+    "anthropic/claude-haiku-4-5"
+  ],
+
+  // Hard system default if nothing else matches.
+  "systemDefaultModel": "openai/gpt-5.4-mini",
+
+  // Override the prompts root if you want to ship your own ultrawork/*.md files.
+  // "promptsRoot": "/path/to/your/prompts",
+
+  // Extra logging.
+  "debug": false
+}
