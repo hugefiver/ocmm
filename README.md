@@ -1,6 +1,6 @@
 # ocmm — OpenCode Multi-Model Auto-Router
 
-A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, injects mode-specific prompts when intent keywords appear in user input, and reactively falls back to the next model in a chain when the active model fails at runtime.
+A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, injects mode-specific prompts when intent keywords appear in user input, reactively falls back to the next model in a chain when the active model fails at runtime, and supports named **profiles** for switching between model configurations.
 
 Designed from scratch. Concepts (model tiering, per-model specialized prompts, intent gating, proactive + reactive fallback) are inspired by [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode); naming and code are independent.
 
@@ -180,6 +180,97 @@ Each category has a prompt-append under `prompts/category/<name>.md` that is set
 | `superplan deepwork` (any order) | superplan + deepwork concatenated | combined |
 
 Intent triggers are latched per session. The same keyword in a follow-up message does not re-inject. Planner agents (`plan` / `planner`) skip the standalone deepwork trigger — they get the planner variant only when the composite `superplan deepwork` form is used.
+
+## Profiles
+
+A **profile** is a named partial overlay on the base config. It can override any top-level field (agents, categories, runtimeFallback, intent, debug, etc.) except `profiles` and `activeProfile` themselves. At load time, after merging user + project configs, the active profile is deep-merged over the result — profile wins over both.
+
+### Selecting a profile
+
+Two ways, in priority order:
+
+1. **`OCMM_PROFILE` env var** (highest priority, per-shell, not persisted):
+   ```bash
+   OCMM_PROFILE=gpu opencode run "..."
+   ```
+   Empty string is treated as unset — falls back to the config's `activeProfile`.
+
+2. **`activeProfile` in the config file** (persisted):
+   ```jsonc
+   { "activeProfile": "gpu" }
+   ```
+
+If the named profile doesn't exist, it is silently ignored — the base config loads unchanged. This prevents a stale `activeProfile` or `OCMM_PROFILE` value from breaking the plugin.
+
+### Profile merge semantics
+
+| Field type | Behavior under profile overlay |
+|---|---|
+| Scalars (`debug`, `systemDefaultModel`, ...) | Replaced |
+| Objects (`agents`, `categories`, `intent`, `runtimeFallback`) | Deep-merged (profile field wins per-key) |
+| `fallbackModels`, `disabledAgents` | **Replaced** (profile fully owns these arrays — a profile is a mode switch, not a patch) |
+| Other arrays (`intent.skipAgents`, `retryOnStatusCodes`, ...) | Replaced |
+
+If you want accumulation across user+project layers (NOT profiles), that still happens — `fallbackModels` and `disabledAgents` are unioned across user and project configs. Profiles are the one layer that replaces.
+
+### Config example
+
+```jsonc
+{
+  "agents": { "orchestrator": { "model": "hoo/glm-5.2" } },
+  "profiles": {
+    "gpu": {
+      "agents": { "orchestrator": { "model": "openai/gpt-5.5", "variant": "high" } },
+      "runtimeFallback": { "maxAttempts": 5 }
+    },
+    "claude": {
+      "agents": { "orchestrator": { "model": "anthropic/claude-opus-4-7", "variant": "max" } }
+    }
+  },
+  "activeProfile": "gpu"
+}
+```
+
+### CLI: `ocmm-profiles`
+
+A command-line tool for managing profiles without editing JSON by hand:
+
+```bash
+# List all profiles (* marks the active one)
+ocmm-profiles list
+
+# Set the active profile (persisted to config file)
+ocmm-profiles use claude
+
+# Print the active profile, or a named one
+ocmm-profiles show
+ocmm-profiles show gpu
+
+# Add/replace a profile from a JSON file
+ocmm-profiles add gpu ./gpu-profile.json
+
+# Delete a profile (clears activeProfile if it was active)
+ocmm-profiles rm gpu
+
+# Clear activeProfile (revert to base config)
+ocmm-profiles clear
+
+# Print just the active profile name (empty if none)
+ocmm-profiles current
+```
+
+The CLI reads/writes the **user** config file (`$XDG_CONFIG_HOME/opencode/ocmm.json[c]` → `%APPDATA%\opencode\ocmm.json[c]` → `~/.config/opencode/ocmm.json[c]`). It does NOT touch project configs. Comments are not preserved on write (output is plain JSON with `.jsonc` extension, which is valid JSONC).
+
+In dev (no build needed):
+```bash
+pnpm cli list
+pnpm cli use gpu
+```
+
+Or run the compiled binary directly:
+```bash
+node dist/cli/profiles.js list
+```
 
 ## Runtime fallback
 

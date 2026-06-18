@@ -83,6 +83,32 @@
     "skipAgents": ["plan"]
   },
 
+  // Named partial overlays. At load time, the active profile is deep-merged
+  // over the base config (profile wins). Select via `activeProfile` here or
+  // the OCMM_PROFILE env var (env wins). Missing profile = silently ignored.
+  "profiles": {
+    "gpu": {
+      "agents": {
+        "orchestrator": { "model": "openai/gpt-5.5", "variant": "high" },
+        "worker": { "model": "openai/gpt-5.5", "variant": "high" }
+      },
+      "runtimeFallback": { "maxAttempts": 5 }
+    },
+    "claude": {
+      "agents": {
+        "orchestrator": { "model": "anthropic/claude-opus-4-7", "variant": "max" },
+        "reviewer": { "model": "anthropic/claude-opus-4-7", "variant": "max" }
+      }
+    },
+    "minimal": {
+      "agents": { "orchestrator": { "model": "openai/gpt-5.4-mini" } },
+      "disabledAgents": ["media-reader", "plan-critic"],
+      "debug": true
+    }
+  },
+
+  // "activeProfile": "gpu",
+
   "fallbackModels": [
     "openai/gpt-5.4-mini",
     "anthropic/claude-haiku-4-5"

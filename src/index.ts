@@ -56,9 +56,11 @@ export function createPlugin(input?: ServerInput): {
 
   function loadOrDefault(): OcmmConfig {
     try {
-      const { config: c, sources } = loadConfig({ cwd })
+      const { config: c, sources, activeProfile } = loadConfig({ cwd })
       log.info(
-        `config loaded: project=${sources.project ?? "<none>"}, user=${sources.user ?? "<none>"}`,
+        `config loaded: project=${sources.project ?? "<none>"}, user=${sources.user ?? "<none>"}${
+          activeProfile ? `, profile=${activeProfile}` : ""
+        }`,
       )
       return c
     } catch (err) {

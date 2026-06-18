@@ -26,11 +26,15 @@ ocmm/
 ├── src/
 │   ├── index.ts                    # OpenCode plugin entry; binds all 5 hooks
 │   ├── config/
-│   │   ├── schema.ts               # Zod schema (shorthand + full form + runtimeFallback)
-│   │   ├── load.ts                 # XDG_CONFIG_HOME → APPDATA → ~/.config/opencode (XDG wins)
+│   │   ├── schema.ts               # Zod schema (shorthand + full form + runtimeFallback + profiles)
+│   │   ├── load.ts                 # XDG → APPDATA → ~/.config; profile overlay; OCMM_PROFILE env
 │   │   ├── normalize.ts            # shorthand → ModelRequirement expansion
 │   │   ├── load.test.ts
-│   │   └── normalize.test.ts
+│   │   ├── normalize.test.ts
+│   │   └── profiles.test.ts
+│   ├── cli/
+│   │   ├── profiles.ts             # ocmm-profiles CLI binary (list/use/show/add/rm/clear/current)
+│   │   └── profiles.test.ts
 │   ├── data/
 │   │   ├── agents.ts               # 10 built-in agents (orchestrator..task-runner)
 │   │   └── categories.ts           # 8 built-in categories (frontend..writing)
@@ -72,10 +76,11 @@ ocmm/
 ### `config(input, output)` hook
 
 1. Load user config from `<cwd>/.opencode/ocmm.json[c]` (project) and `$XDG_CONFIG_HOME/opencode/ocmm.json[c]` → `%APPDATA%\opencode\ocmm.json[c]` → `~/.config/opencode/ocmm.json[c]` (user). XDG wins over APPDATA on Windows. Project wins over user on conflicts; `disabledAgents` / `fallbackModels` are unioned.
-2. Load runtime prompts from `prompts/` (deepwork, mode, category).
-3. Register the 10 primary built-in agents into `input.config.agent` (or `input.agent` — both shapes handled).
-4. Register the 8 categories as `mode: "subagent"` agents, using the first entry of each category's fallback chain as the model and the matching `prompts/category/<name>.md` as the system prompt.
-5. Apply user overrides: `agents.<name>` can pin a model (shorthand), provide a full `ModelRequirement`, or set `disabled: true`. `categories.<name>` works the same way (minus `disabled`). User-set fields are never clobbered.
+2. **Profile overlay**: if `OCMM_PROFILE` env var is set (non-empty), use it as the active profile name; otherwise use `activeProfile` from the merged config. If the named profile exists in `profiles`, deep-merge it over the base with `{ profileOverlay: true }` (all arrays replaced — profile fully owns arrays, does not accumulate). Missing profile = silently ignored.
+3. Load runtime prompts from `prompts/` (deepwork, mode, category).
+4. Register the 10 primary built-in agents into `input.config.agent` (or `input.agent` — both shapes handled).
+5. Register the 8 categories as `mode: "subagent"` agents, using the first entry of each category's fallback chain as the model and the matching `prompts/category/<name>.md` as the system prompt.
+6. Apply user overrides: `agents.<name>` can pin a model (shorthand), provide a full `ModelRequirement`, or set `disabled: true`. `categories.<name>` works the same way (minus `disabled`). User-set fields are never clobbered.
 
 ### `chat.params(input, output)` hook
 
@@ -183,18 +188,75 @@ const RuntimeFallbackConfigSchema = z.object({
   retryOnPatterns: z.array(z.string()).default([/* 9 patterns */]),
 }).default({})
 
-const OcmmConfigSchema = z.object({
-  disabledAgents: z.array(z.string()).default([]),
-  agents: z.record(z.string(), AgentEntrySchema).default({}),
-  categories: z.record(z.string(), CategoryEntrySchema).default({}),
-  runtimeFallback: RuntimeFallbackConfigSchema,
-  intent: z.object({ enabled: z.boolean().default(true), skipAgents: z.array(z.string()).default([]) }).default({}),
-  fallbackModels: z.array(z.string()).default([]),
+// Profile entry: partial config overlay. runtimeFallback/intent are partial
+// (no .default) so omitted fields don't inject defaults that clobber the base.
+const ProfileEntrySchema = z.object({
+  categories: z.record(z.string(), CategoryEntrySchema).optional(),
+  agents: z.record(z.string(), AgentEntrySchema).optional(),
+  disabledAgents: z.array(z.string()).optional(),
+  fallbackModels: z.array(z.string()).optional(),
   systemDefaultModel: z.string().optional(),
-  registerBuiltinAgents: z.boolean().default(true),
-  debug: z.boolean().default(false),
+  intent: z.object({ enabled: z.boolean().optional(), skipAgents: z.array(z.string()).optional() }).optional(),
+  runtimeFallback: z.object({ /* partial fields */ }).optional(),
+  registerBuiltinAgents: z.boolean().optional(),
+  promptsRoot: z.string().optional(),
+  debug: z.boolean().optional(),
+}).strict()
+
+const OcmmConfigSchema = z.object({
+  // ... all top-level fields ...
+  profiles: z.record(z.string(), ProfileEntrySchema).default({}),
+  activeProfile: z.string().optional(),
+  // ...
 }).strict()
 ```
+
+## Profiles
+
+A profile is a named partial overlay applied at load time, AFTER user+project merge. Selection priority: `OCMM_PROFILE` env var (non-empty) > `activeProfile` config field > none.
+
+### Merge semantics
+
+- Scalars/objects: deep-merge (profile field wins per-key).
+- All arrays (`disabledAgents`, `fallbackModels`, `intent.skipAgents`, `retryOnStatusCodes`, ...): **replaced** by the profile's array. Profile fully owns arrays — it's a mode switch, not a patch. (User+project layers still union `disabledAgents`/`fallbackModels`; profiles are the one layer that replaces.)
+
+### `deepMerge` with `profileOverlay` option
+
+`deepMerge(base, override, parentKey?, opts?: { profileOverlay?: boolean })`:
+- Default (user+project): `disabledAgents`/`fallbackModels` unioned, other arrays replaced.
+- `profileOverlay: true`: ALL arrays replaced (no unioning).
+
+### Missing profile handling
+
+If `activeProfile` or `OCMM_PROFILE` names a profile that doesn't exist in `profiles`, it's silently ignored with a warning log. Base config loads unchanged. This prevents stale values from breaking the plugin.
+
+### CLI (`src/cli/profiles.ts`)
+
+`ocmm-profiles` binary manages profiles in the **user** config file:
+
+| Command | Action |
+|---|---|
+| `list` | Print all profile names; `*` marks active |
+| `use <name>` | Set `activeProfile` (fails if profile doesn't exist) |
+| `show [name]` | Print profile JSON (defaults to active) |
+| `add <name> <json>` | Add/replace profile from JSON file (validates against `ProfileEntrySchema`) |
+| `rm <name>` | Delete profile (clears `activeProfile` if it was active) |
+| `clear` | Clear `activeProfile` |
+| `current` | Print active profile name (empty if none) |
+
+The CLI does NOT preserve comments on write (output is plain JSON with `.jsonc` extension). For comment preservation, edit the file by hand.
+
+### Ctx plumbing
+
+`loadConfig` returns `{ config, sources, activeProfile? }`. The `activeProfile` field is surfaced so the plugin's startup log can show which profile is active:
+```
+[ocmm] config loaded: project=<none>, user=...ocmm.jsonc, profile=gpu
+```
+
+### Testing
+
+- `src/config/profiles.test.ts` (11 tests): profile overlay applies, env var override, missing profile no-op, profile wins over user+project, array replacement semantics, runtimeFallback override, no-activeProfile no-op, empty-string env fallback, schema rejects nested profiles, schema accepts valid partial.
+- `src/cli/profiles.test.ts` (18 tests): list/use/show/add/rm/clear/current/help, nonexistent profile handling, schema validation, config file creation, graceful failure when no config exists.
 
 ### Shorthand normalization (`src/config/normalize.ts`)
 

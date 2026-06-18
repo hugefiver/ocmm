@@ -95,17 +95,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Deep-merge two plain-object trees. Arrays are replaced (NOT concatenated)
- * for predictable override semantics — except for `fallbackModels` and
- * `disabledAgents` which we union de-duped.
+ * Deep-merge two plain-object trees.
+ *
+ * Default array policy: REPLACE (override wins) for predictable override
+ * semantics. Two arrays are UNIONED de-duped instead: `fallbackModels` and
+ * `disabledAgents` — these accumulate across user+project+profile layers so
+ * a project disabling an agent still applies when a profile is active.
+ *
+ * Pass `{ profileOverlay: true }` to force ALL arrays to replace (use when
+ * overlaying a profile that should fully own a field rather than accumulate).
  */
 export function deepMerge(
   base: unknown,
   override: unknown,
   parentKey?: string,
+  opts?: { profileOverlay?: boolean },
 ): unknown {
   if (override === undefined) return base
   if (Array.isArray(base) && Array.isArray(override)) {
+    if (opts?.profileOverlay) return override
     if (parentKey === "fallbackModels" || parentKey === "disabledAgents") {
       const set = new Set<string>([...base, ...override].map((x) => String(x)))
       return Array.from(set)
@@ -115,7 +123,7 @@ export function deepMerge(
   if (isPlainObject(base) && isPlainObject(override)) {
     const out: Record<string, unknown> = { ...base }
     for (const [k, v] of Object.entries(override)) {
-      out[k] = deepMerge(base[k], v, k)
+      out[k] = deepMerge(base[k], v, k, opts)
     }
     return out
   }
@@ -125,6 +133,8 @@ export function deepMerge(
 export type LoadedConfig = {
   config: OcmmConfig
   sources: { user?: string; project?: string }
+  /** Name of the profile applied (from config or OCMM_PROFILE env), if any. */
+  activeProfile?: string
 }
 
 export function loadConfig(opts: { cwd?: string } = {}): LoadedConfig {
@@ -150,13 +160,37 @@ export function loadConfig(opts: { cwd?: string } = {}): LoadedConfig {
     }
   }
 
+  // Profile selection: OCMM_PROFILE env var wins over config's activeProfile.
+  // Empty string is treated as unset so `OCMM_PROFILE= opencode ...` falls
+  // back to the config's activeProfile rather than selecting a "" profile.
+  const envProfile = process.env.OCMM_PROFILE || undefined
+  const mergedRecord = isPlainObject(merged) ? (merged as Record<string, unknown>) : {}
+  const activeProfileRaw = envProfile ?? mergedRecord.activeProfile
+  const activeProfile =
+    typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
+      ? activeProfileRaw
+      : undefined
+
+  // If an active profile is named, deep-merge it over the base. A missing
+  // profile is silently ignored so a stale activeProfile/OCMM_PROFILE value
+  // never breaks the plugin — base config loads unchanged.
+  if (activeProfile && isPlainObject(mergedRecord.profiles)) {
+    const profiles = mergedRecord.profiles as Record<string, unknown>
+    const profile = profiles[activeProfile]
+    if (isPlainObject(profile)) {
+      merged = deepMerge(merged, profile, undefined, { profileOverlay: true })
+    } else {
+      log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
+    }
+  }
+
   const parsed = OcmmConfigSchema.safeParse(merged)
   if (!parsed.success) {
     log.warn(
       `ocmm config validation failed; using defaults. issues:`,
       parsed.error.issues.slice(0, 5),
     )
-    return { config: defaultConfig(), sources }
+    return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
   }
-  return { config: parsed.data, sources }
+  return { config: parsed.data, sources, ...(activeProfile ? { activeProfile } : {}) }
 }
