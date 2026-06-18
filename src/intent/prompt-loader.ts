@@ -4,9 +4,10 @@
  * Layout under <pluginRoot>/prompts/:
  *     deepwork/{default,gpt,gemini,planner,codex}.md
  *     mode/{superplan,team}.md
+ *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
  *
- * The loader is synchronous, runs once at module init, and caches the results
- * in memory. Missing files are tolerated (we just skip them and log a warn).
+ * Synchronous, runs once at plugin init, caches in memory. Missing files are
+ * tolerated (skipped with a debug log).
  */
 
 import { readFileSync } from "node:fs"
@@ -22,12 +23,32 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 type DeepworkVariant = "default" | "gpt" | "gemini" | "planner" | "codex"
 type ModeVariant = "superplan" | "team"
+type CategoryName =
+  | "frontend"
+  | "creative"
+  | "hard-reasoning"
+  | "research"
+  | "quick"
+  | "low-effort"
+  | "high-effort"
+  | "writing"
 
 const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner", "codex"]
 const MODE_VARIANTS: ModeVariant[] = ["superplan", "team"]
+const CATEGORY_NAMES: CategoryName[] = [
+  "frontend",
+  "creative",
+  "hard-reasoning",
+  "research",
+  "quick",
+  "low-effort",
+  "high-effort",
+  "writing",
+]
 
 const deepworkPrompts = new Map<DeepworkVariant, string>()
 const modePrompts = new Map<ModeVariant, string>()
+const categoryPrompts = new Map<string, string>()
 
 function loadFile(absPath: string): string | null {
   try {
@@ -54,13 +75,21 @@ export function loadAllPrompts(rootDir = DEFAULT_PROMPTS_ROOT): void {
       modePrompts.set(v, text)
     }
   }
+  for (const name of CATEGORY_NAMES) {
+    const text = loadFile(join(rootDir, "category", `${name}.md`))
+    if (text == null) {
+      log.debug(`prompt missing: category/${name}.md (root=${rootDir})`)
+    } else {
+      categoryPrompts.set(name, text)
+    }
+  }
   log.info(
     `loaded prompts: deepwork=${deepworkPrompts.size}/${DEEPWORK_VARIANTS.length}, ` +
-      `mode=${modePrompts.size}/${MODE_VARIANTS.length}`,
+      `mode=${modePrompts.size}/${MODE_VARIANTS.length}, ` +
+      `category=${categoryPrompts.size}/${CATEGORY_NAMES.length}`,
   )
 }
 
-/** Pick the best deepwork variant for the active agent + model. */
 export function pickDeepworkVariant(opts: {
   agentName?: string | undefined
   providerID?: string | undefined
@@ -82,11 +111,10 @@ export function getDeepworkPrompt(variant: DeepworkVariant): string {
 export function getModePrompt(variant: ModeVariant): string {
   return modePrompts.get(variant) ?? ""
 }
+export function getCategoryPrompt(name: string): string {
+  return categoryPrompts.get(name) ?? ""
+}
 
-/**
- * Compose the full system-prompt addition for a detected intent.
- * Returns "" when nothing is loaded - caller should noop.
- */
 export function composeIntentPrompt(opts: {
   intent: IntentType
   agentName?: string | undefined
