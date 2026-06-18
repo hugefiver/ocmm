@@ -1,19 +1,20 @@
 # ocmm — OpenCode Multi-Model Auto-Router
 
-A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, and injects mode-specific prompts when intent keywords appear in user input.
+A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, injects mode-specific prompts when intent keywords appear in user input, and reactively falls back to the next model in a chain when the active model fails at runtime.
 
-Designed from scratch. Concepts (model tiering, per-model specialized prompts, intent gating) are inspired by [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode); naming and code are independent.
+Designed from scratch. Concepts (model tiering, per-model specialized prompts, intent gating, proactive + reactive fallback) are inspired by [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode); naming and code are independent.
 
 ## What it does
 
 | Hook | What ocmm does |
 |---|---|
-| `config` | Registers 10 named agents (`orchestrator`, `worker`, `reviewer`, `doc-search`, `code-search`, `planner`, `clarifier`, `plan-critic`, `media-reader`, `task-runner`) with their preferred provider/model. |
-| `chat.params` | When a session uses one of these agents, applies the right `reasoningEffort` / extended-thinking budget / temperature for the active model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...). |
-| `chat.message` | Detects `deepwork` / `dw` / `team` / `superplan` / `sp` keywords in user input and prepends the matching mode prompt. The deepwork prompt has GPT, Gemini, default, and planner variants picked by model family + agent. |
-| `event` | Cleans up per-session state when a session ends. |
+| `config` | Registers 10 primary agents + 8 category-subagents with their preferred provider/model. User config can add, override, or disable any of them. |
+| `chat.params` | Resolves the variant for the active agent/model (4-tier priority: user-config → agent-default → category-default → input-variant) and applies the right `reasoningEffort` / extended-thinking budget / temperature for the model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...). |
+| `chat.message` | Detects `deepwork` / `dw` / `team` / `superplan` / `sp` keywords in `output.parts` and queues a composed mode prompt for the session. The deepwork prompt has GPT, Gemini, default, and planner variants picked by model family + agent. |
+| `experimental.chat.system.transform` | Drains the queued prompt for the session and prepends it to `output.system`. This is the actual injection seam — `chat.message` cannot mutate the system prompt directly. |
+| `event` | Cleans up per-session state on `session.deleted` / `session.idle`. On `session.error`: classifies the error, and if retryable, dispatches the next model in the agent's fallback chain via `client.session.prompt`. |
 
-The plugin **does not** change the model on a per-call basis. OpenCode's `chat.params` cannot do that. Per-agent routing happens via the `config` hook, which is the only safe seam for model selection.
+The plugin **does not** change the model on a per-call basis via `chat.params`. OpenCode's `chat.params` output schema has no `model` field. Per-agent routing happens via the `config` hook (the only safe seam for model selection), and reactive re-routing happens via the `event` hook + `client.session.prompt`.
 
 ## Install
 
@@ -36,25 +37,70 @@ Then point your OpenCode config at the built plugin (path or installed package):
 Drop a config file in either of these locations (project wins on conflicts):
 
 * `<project>/.opencode/ocmm.jsonc`
-* `~/.config/opencode/ocmm.jsonc` (or `%APPDATA%\opencode\ocmm.jsonc` on Windows)
+* `~/.config/opencode/ocmm.jsonc` (Linux/macOS) — or `$XDG_CONFIG_HOME/opencode/ocmm.jsonc` if set
+* `%APPDATA%\opencode\ocmm.jsonc` (Windows, when `XDG_CONFIG_HOME` is unset)
 
-Schema (Zod-validated; unknown keys rejected):
+Schema (Zod-validated; unknown keys rejected). All fields optional:
 
 ```jsonc
 {
   "disabledAgents": ["media-reader"],
 
+  // Agents accept shorthand or full ModelRequirement form.
   "agents": {
-    "reviewer": { "model": "anthropic/claude-opus-4-7" },
+    // Shorthand: pin a single model (+ optional variant / fallback list).
+    "reviewer": {
+      "model": "anthropic/claude-opus-4-7",
+      "variant": "max"
+    },
+
+    // Shorthand with a fallback list (strings or full entries).
     "orchestrator": {
+      "model": "anthropic/claude-opus-4-7",
+      "variant": "max",
+      "fallbackModels": [
+        "openai/gpt-5.5",
+        { "providers": ["zhipu"], "model": "glm-5.1" }
+      ]
+    },
+
+    // Full ModelRequirement form (passthrough — no normalization).
+    "worker": {
       "requirement": {
-        "variant": "max",
+        "variant": "medium",
+        "requiresProvider": ["openai"],
         "fallbackChain": [
-          { "providers": ["anthropic"], "model": "claude-opus-4-7", "variant": "max" },
-          { "providers": ["openai"], "model": "gpt-5.5", "variant": "high" }
+          { "providers": ["openai"], "model": "gpt-5.5", "variant": "medium" }
         ]
       }
+    },
+
+    // Disable a built-in agent entirely.
+    "atlas": { "disabled": true }
+  },
+
+  // Categories work the same way. Each category is also registered
+  // as a mode:"subagent" entry, so callers can invoke it via
+  // `task(subagent_type="hard-reasoning", ...)`.
+  "categories": {
+    "hard-reasoning": {
+      "model": "openai/gpt-5.5",
+      "variant": "xhigh"
     }
+  },
+
+  // Reactive runtime fallback (see "Runtime fallback" below).
+  "runtimeFallback": {
+    "enabled": true,
+    "dispatch": true,
+    "maxAttempts": 3,
+    "cooldownSeconds": 60,
+    "retryOnStatusCodes": [429, 500, 502, 503, 504],
+    "retryOnPatterns": [
+      "rate limit", "overloaded", "temporarily unavailable",
+      "service unavailable", "internal server error",
+      "gateway timeout", "bad gateway", "capacity", "try again"
+    ]
   },
 
   "intent": {
@@ -62,10 +108,26 @@ Schema (Zod-validated; unknown keys rejected):
     "skipAgents": ["plan"]
   },
 
+  "fallbackModels": ["openai/gpt-5.4-mini"],
+  "systemDefaultModel": "openai/gpt-5.4-mini",
+
   "registerBuiltinAgents": true,
   "debug": false
 }
 ```
+
+### Shorthand vs full form
+
+Both `agents.*` and `categories.*` accept either shape:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model` | `"provider/model"` string | Primary model. Split into `providers: [provider]` + `model`. |
+| `variant` | `"low" \| "medium" \| "high" \| "xhigh" \| "max" \| "minimal" \| "none" \| "auto" \| "thinking"` | Promoted onto the first chain entry. |
+| `fallbackModels` | array of `string \| FallbackEntry` | Strings are parsed as `provider/model`; objects pass through. Prepended after the primary entry to form the fallback chain. |
+| `requirement` | full `ModelRequirement` object | If present, shorthand fields are ignored. Use this when you need `requiresProvider` / `requiresAnyModel` / `requiresModel`. |
+| `disabled` | `true` | (Agents only.) Removes the agent from registration. |
+| `description` | string | Overrides the built-in description (used in agent registration). |
 
 ## Variant table
 
@@ -93,18 +155,56 @@ media-reader    openai/gpt-5.5                 variant=medium  multimodal analys
 task-runner     anthropic/claude-sonnet-4-6    (none)          focused single-task executor
 ```
 
-These are defaults; users can override any of them in their config or disable them.
+## Built-in categories (also registered as subagents)
+
+```
+frontend        google/gemini-3.1-pro      variant=high    UI/UX, design, styling
+creative        google/gemini-3.1-pro      variant=high    unconventional approaches
+hard-reasoning  openai/gpt-5.5             variant=xhigh   heavy logic, architecture
+research        openai/gpt-5.5             variant=medium  autonomous multi-step solving
+quick           openai/gpt-5.4-mini        (none)          trivial single-file changes
+low-effort      anthropic/claude-sonnet-4-6 (none)         moderate effort fallback
+high-effort     anthropic/claude-opus-4-7  variant=max     high effort fallback
+writing         kimi-for-coding/k2p5       (none)          documentation, prose
+```
+
+Each category has a prompt-append under `prompts/category/<name>.md` that is set as the subagent's system prompt. Callers invoke them via `task(subagent_type="hard-reasoning", ...)`.
 
 ## Intent keywords
 
 | Keyword | Mode prompt | Variant routing |
 |---|---|---|
-| `deepwork` / `dw` | `prompts/deepwork/{default,gpt,gemini,planner}.md` | planner agents -> `planner.md`, GPT -> `gpt.md`, Gemini -> `gemini.md`, else `default.md` |
+| `deepwork` / `dw` | `prompts/deepwork/{default,gpt,gemini,planner,codex}.md` | planner agents → `planner.md`, GPT → `gpt.md`, Gemini → `gemini.md`, else `default.md` |
 | `team` / `team-mode` / `teammate` / `teamwork` | `prompts/mode/team.md` | n/a |
 | `superplan` / `sp` | `prompts/mode/superplan.md` | n/a |
 | `superplan deepwork` (any order) | superplan + deepwork concatenated | combined |
 
-Intent triggers are latched per session. The same keyword in a follow-up message does not re-inject.
+Intent triggers are latched per session. The same keyword in a follow-up message does not re-inject. Planner agents (`plan` / `planner`) skip the standalone deepwork trigger — they get the planner variant only when the composite `superplan deepwork` form is used.
+
+## Runtime fallback
+
+When a model call fails with a retryable error (HTTP 429/5xx, or a message matching `retryOnPatterns`), ocmm:
+
+1. Resolves the failing agent's `ModelRequirement` (user config → built-in defaults).
+2. Marks the just-failed model as failed with a timestamp.
+3. Finds the next entry in the fallback chain that is not in cooldown (default 60s).
+4. Dispatches a new `client.session.prompt` call with the next model, reusing the last user message's parts.
+5. Aborts the original session first (best-effort).
+
+Configuration:
+
+```jsonc
+"runtimeFallback": {
+  "enabled": true,           // master switch (false = event hook no-ops)
+  "dispatch": true,          // false = observe-only (classify + log, no retry)
+  "maxAttempts": 3,          // cap per session
+  "cooldownSeconds": 60,     // skip a failed model for this long
+  "retryOnStatusCodes": [429, 500, 502, 503, 504],
+  "retryOnPatterns": ["rate limit", "overloaded", /* ... */]
+}
+```
+
+Abort errors (`AbortError`, `MessageAbortedError`, `isAbort: true`) are never retried. Deduplication is enforced via an in-flight `Set<sessionID>` so a single error cannot trigger duplicate dispatches.
 
 ## Develop
 
@@ -114,7 +214,11 @@ pnpm test
 pnpm run build
 ```
 
-Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies.
+Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 105 tests across config, routing, intent, hooks, and runtime-fallback.
+
+### Isolated QA
+
+A real-OpenCode smoke harness lives under `%LOCALAPPDATA%\Temp\opencode\ocmm-test\` (not in the repo). It spins up an isolated XDG config tree, points the plugin at a single `hoo` provider, and runs `opencode run` / `opencode debug agent` scenarios. See `.kb/` for the design notes behind it.
 
 ## Knowledge base
 
