@@ -16,6 +16,7 @@
  */
 
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
+import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import type { AgentEntry, ModelRequirementConfig } from "../config/schema.ts"
 import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
 
@@ -34,7 +35,7 @@ export type Resolution = {
   entry: FallbackEntry
   /** Effective variant: chosen variant from input/entry/parent (or undefined). */
   variant?: Variant
-  source: "user-config" | "agent-default" | "input-variant"
+  source: "user-config" | "agent-default" | "category-default" | "input-variant"
 }
 
 function entryMatches(entry: FallbackEntry, modelID: string): boolean {
@@ -144,7 +145,33 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
     }
   }
 
-  // 3. variant-only resolution: user supplied variant on a model we don't otherwise know
+  // 3. category as agent (when an agent name happens to match a category, used for
+  //    category-subagents registered by the config hook).
+  if (agentName) {
+    const userCategoryReq = opts.categoriesConfig?.[agentName]
+    const builtinCategory = BUILTIN_CATEGORY_INDEX.get(agentName)
+    const req: ModelRequirement | ModelRequirementConfig | null = userCategoryReq ?? builtinCategory?.requirement ?? null
+    if (req) {
+      const matched = pickFromChain(req, modelID)
+      if (matched) {
+        let variant: Variant | undefined = matched.effectiveVariant
+        if (inputVariant && isValidVariant(inputVariant)) variant = inputVariant
+        const out: Resolution = { entry: matched.entry, source: "category-default" }
+        if (variant) out.variant = variant
+        return out
+      }
+      const fallback = req.fallbackChain[0]
+      if (fallback) {
+        let variant: Variant | undefined = (fallback.variant ?? req.variant) as Variant | undefined
+        if (inputVariant && isValidVariant(inputVariant)) variant = inputVariant
+        const out: Resolution = { entry: fallback as FallbackEntry, source: "category-default" }
+        if (variant) out.variant = variant
+        return out
+      }
+    }
+  }
+
+  // 4. variant-only resolution: user supplied variant on a model we don't otherwise know
   if (inputVariant && isValidVariant(inputVariant)) {
     return {
       entry: { providers: opts.providerID ? [opts.providerID] : [], model: modelID, variant: inputVariant },
