@@ -2,8 +2,8 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/:
- *     ultrawork/{default,gpt,gemini,planner,codex}.md
- *     mode/{hyperplan,team}.md
+ *     deepwork/{default,gpt,gemini,planner,codex}.md
+ *     mode/{superplan,team}.md
  *
  * The loader is synchronous, runs once at module init, and caches the results
  * in memory. Missing files are tolerated (we just skip them and log a warn).
@@ -18,16 +18,15 @@ import { classifyModelFamily, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-/** Default location: ../../prompts (relative to dist/intent/). */
 const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
-type UltraworkVariant = "default" | "gpt" | "gemini" | "planner" | "codex"
-type ModeVariant = "hyperplan" | "team"
+type DeepworkVariant = "default" | "gpt" | "gemini" | "planner" | "codex"
+type ModeVariant = "superplan" | "team"
 
-const ULTRAWORK_VARIANTS: UltraworkVariant[] = ["default", "gpt", "gemini", "planner", "codex"]
-const MODE_VARIANTS: ModeVariant[] = ["hyperplan", "team"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner", "codex"]
+const MODE_VARIANTS: ModeVariant[] = ["superplan", "team"]
 
-const ultraworkPrompts = new Map<UltraworkVariant, string>()
+const deepworkPrompts = new Map<DeepworkVariant, string>()
 const modePrompts = new Map<ModeVariant, string>()
 
 function loadFile(absPath: string): string | null {
@@ -39,12 +38,12 @@ function loadFile(absPath: string): string | null {
 }
 
 export function loadAllPrompts(rootDir = DEFAULT_PROMPTS_ROOT): void {
-  for (const v of ULTRAWORK_VARIANTS) {
-    const text = loadFile(join(rootDir, "ultrawork", `${v}.md`))
+  for (const v of DEEPWORK_VARIANTS) {
+    const text = loadFile(join(rootDir, "deepwork", `${v}.md`))
     if (text == null) {
-      log.debug(`prompt missing: ultrawork/${v}.md (root=${rootDir})`)
+      log.debug(`prompt missing: deepwork/${v}.md (root=${rootDir})`)
     } else {
-      ultraworkPrompts.set(v, text)
+      deepworkPrompts.set(v, text)
     }
   }
   for (const v of MODE_VARIANTS) {
@@ -56,17 +55,17 @@ export function loadAllPrompts(rootDir = DEFAULT_PROMPTS_ROOT): void {
     }
   }
   log.info(
-    `loaded prompts: ultrawork=${ultraworkPrompts.size}/${ULTRAWORK_VARIANTS.length}, ` +
+    `loaded prompts: deepwork=${deepworkPrompts.size}/${DEEPWORK_VARIANTS.length}, ` +
       `mode=${modePrompts.size}/${MODE_VARIANTS.length}`,
   )
 }
 
-/** Pick the best ultrawork variant for the active agent + model. */
-export function pickUltraworkVariant(opts: {
+/** Pick the best deepwork variant for the active agent + model. */
+export function pickDeepworkVariant(opts: {
   agentName?: string | undefined
   providerID?: string | undefined
   modelID: string
-}): UltraworkVariant {
+}): DeepworkVariant {
   if (isPlannerAgent(opts.agentName ?? "")) return "planner"
   const family = classifyModelFamily({
     providerID: opts.providerID,
@@ -77,9 +76,8 @@ export function pickUltraworkVariant(opts: {
   return "default"
 }
 
-/** Lookup helpers. Return empty string when missing so callers can string-concat safely. */
-export function getUltraworkPrompt(variant: UltraworkVariant): string {
-  return ultraworkPrompts.get(variant) ?? ""
+export function getDeepworkPrompt(variant: DeepworkVariant): string {
+  return deepworkPrompts.get(variant) ?? ""
 }
 export function getModePrompt(variant: ModeVariant): string {
   return modePrompts.get(variant) ?? ""
@@ -87,7 +85,7 @@ export function getModePrompt(variant: ModeVariant): string {
 
 /**
  * Compose the full system-prompt addition for a detected intent.
- * Returns "" when nothing is loaded — caller should noop.
+ * Returns "" when nothing is loaded - caller should noop.
  */
 export function composeIntentPrompt(opts: {
   intent: IntentType
@@ -95,35 +93,32 @@ export function composeIntentPrompt(opts: {
   providerID?: string | undefined
   modelID: string
 }): string {
-  const ultrawork = () =>
-    getUltraworkPrompt(
-      pickUltraworkVariant({
-        agentName: opts.agentName,
-        providerID: opts.providerID,
-        modelID: opts.modelID,
-      }),
-    )
+  const deepwork = () => {
+    const pickOpts: Parameters<typeof pickDeepworkVariant>[0] = { modelID: opts.modelID }
+    if (opts.agentName !== undefined) pickOpts.agentName = opts.agentName
+    if (opts.providerID !== undefined) pickOpts.providerID = opts.providerID
+    return getDeepworkPrompt(pickDeepworkVariant(pickOpts))
+  }
   switch (opts.intent) {
-    case "ultrawork":
-      return ultrawork()
+    case "deepwork":
+      return deepwork()
     case "team":
       return getModePrompt("team")
-    case "hyperplan":
-      return getModePrompt("hyperplan")
-    case "hyperplan-ultrawork": {
-      const hp = getModePrompt("hyperplan")
-      const uw = ultrawork()
-      if (!hp && !uw) return ""
-      if (!hp) return uw
-      if (!uw) return hp
-      return `${hp}\n\n---\n\n${uw}`
+    case "superplan":
+      return getModePrompt("superplan")
+    case "superplan-deepwork": {
+      const sp = getModePrompt("superplan")
+      const dw = deepwork()
+      if (!sp && !dw) return ""
+      if (!sp) return dw
+      if (!dw) return sp
+      return `${sp}\n\n---\n\n${dw}`
     }
     default:
       return ""
   }
 }
 
-/** Test helper: known classifier passthrough. */
 export const _internals = { classifyModelFamily } as {
   classifyModelFamily: (o: { providerID?: string; modelID: string }) => ModelFamily
 }

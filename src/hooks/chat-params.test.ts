@@ -14,7 +14,7 @@ function makeInput(overrides?: Partial<{
 }>) {
   return {
     sessionID: overrides?.sessionID ?? "sess-1",
-    agent: { name: overrides?.agentName ?? "oracle" },
+    agent: { name: overrides?.agentName ?? "reviewer" },
     model: {
       providerID: overrides?.providerID ?? "openai",
       modelID: overrides?.modelID ?? "gpt-5.5",
@@ -24,14 +24,12 @@ function makeInput(overrides?: Partial<{
   }
 }
 
-test("chat.params applies oracle's preferred variant on gpt-5.5", async () => {
+test("chat.params applies reviewer's preferred variant on gpt-5.5", async () => {
   clearResolutions()
   const cfg = defaultConfig()
   const handler = createChatParamsHandler({ getConfig: () => cfg })
   const output: Record<string, unknown> = { options: {} }
   await handler(makeInput(), output)
-
-  // oracle prefers variant="high" on gpt-5.5 -> reasoningEffort=high
   assert.equal((output.options as Record<string, unknown>).reasoningEffort, "high")
   const log = recentResolutions()
   assert.ok(log.length >= 1)
@@ -55,7 +53,7 @@ test("chat.params on claude-opus emits thinking block", async () => {
   const output: Record<string, unknown> = { options: {} }
   await handler(
     makeInput({
-      agentName: "sisyphus",
+      agentName: "orchestrator",
       providerID: "anthropic",
       modelID: "claude-opus-4-7",
     }),
@@ -87,5 +85,4 @@ test("chat.params tolerates malformed input without throwing", async () => {
   await handler(null, { options: {} })
   await handler({}, { options: {} })
   await handler({ sessionID: "x" }, { options: {} })
-  // no assertion — just ensure no throw
 })

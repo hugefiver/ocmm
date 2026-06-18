@@ -40,8 +40,8 @@ type ModelRequirement = {
   fallbackChain: FallbackEntry[]
   variant?: string         // default if entry omits it
   requiresModel?: string   // hard requirement, no fallback if missing
-  requiresAnyModel?: boolean  // must succeed (sisyphus pattern)
-  requiresProvider?: string[] // restrict provider set (hephaestus = openai-only)
+  requiresAnyModel?: boolean  // must succeed (orchestrator pattern)
+  requiresProvider?: string[] // restrict provider set (worker = openai-only)
 }
 ```
 
@@ -77,7 +77,7 @@ Each resolution emits a structured ledger entry for observability:
 {
   "step": 5,
   "origin": "provider-fallback",
-  "agent": "oracle",
+  "agent": "reviewer",
   "category": null,
   "selectedProvider": "github-copilot",
   "selectedModel": "claude-opus-4-7",

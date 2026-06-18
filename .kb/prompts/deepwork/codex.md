@@ -1,7 +1,7 @@
-<ultrawork-mode>
+<deepwork-mode>
 
 **MANDATORY**: First user-visible line this turn MUST be exactly:
-`ULTRAWORK MODE ENABLED!`
+`DEEPWORK MODE ENABLED!`
 
 [CODE RED] Maximum precision. Outcome-first. Evidence-driven.
 
@@ -49,7 +49,7 @@ exercises the surface; capture the artifact.
   1. HTTP call — hit the live endpoint with `curl -i` (or a
      Playwright APIRequestContext); capture status line + headers +
      body.
-  2. tmux — `tmux new-session -d -s ulw-qa-<criterion>`, drive with
+  2. tmux — `tmux new-session -d -s dw-qa-<criterion>`, drive with
      `send-keys`, dump via `tmux capture-pane -pS -E -`; transcript
      is the artifact.
   3. Browser use — use Chrome to drive the REAL page; if Chrome is
@@ -110,12 +110,12 @@ These scenarios are the contract. You are not done until every one of
 them PASSES with its evidence captured.
 
 ## 2. Open the durable notepad
-Run: `NOTE=$(mktemp -t ulw-$(date +%Y%m%d-%H%M%S).XXXXXX.md)`. Echo the
+Run: `NOTE=$(mktemp -t dw-$(date +%Y%m%d-%H%M%S).XXXXXX.md)`. Echo the
 path. Initialise it with these sections and APPEND (never rewrite) as
 you work:
 
 ```
-# Ultrawork Notepad — <one-line goal>
+# Deepwork Notepad — <one-line goal>
 Started: <ISO timestamp>
 
 ## Plan (exhaustively detailed)
@@ -193,7 +193,7 @@ serialize only when one output strictly feeds the next.
 When discovery needs multiple angles or the module layout is
 unfamiliar, delegate to the `explorer` subagent (read-only codebase
 search, absolute-path results). For research that leaves the repo —
-library/API/docs/web — delegate to the `librarian` subagent. Spawn them
+library/API/docs/web — delegate to the `doc-search` subagent. Spawn them
 `fork_context: false` and keep doing root work while they run.
 
 # Execution loop (PIN → RED → GREEN → SURFACE → CLEAN)
@@ -225,13 +225,13 @@ Until every success criterion PASSES with its evidence captured:
    Every runtime artifact the QA spawned in step 4 MUST be torn down
    before this step completes:
    server PIDs (`kill <pid>`; verify `kill -0` fails), `tmux` sessions
-   (`tmux kill-session -t ulw-qa-<criterion>`; verify with `tmux ls`),
+   (`tmux kill-session -t dw-qa-<criterion>`; verify with `tmux ls`),
    browser / Playwright contexts (`.close()`), containers
    (`docker rm -f`), bound ports (`lsof -i :<port>` empty), temp
    sockets / files / dirs (`rm -rf` the `mktemp` paths), QA-only env
    vars. Append a one-line cleanup receipt to the notepad next to the
-   artifact, e.g. `cleanup: killed 12345; tmux kill-session ulw-qa-foo;
-   rm -rf /tmp/ulw.aB12cD`. No receipt → criterion stays in_progress.
+   artifact, e.g. `cleanup: killed 12345; tmux kill-session dw-qa-foo;
+   rm -rf /tmp/dw.aB12cD`. No receipt → criterion stays in_progress.
 6. Verify: LSP diagnostics clean on changed files + full test suite
    green (no skipped, no xfail added this turn).
 7. Mark completed. Append non-obvious findings / learnings.
@@ -341,7 +341,7 @@ message + present for approval.
 - Parallel tool calls for any independent work.
 
 # Output discipline
-- First line literally: `ULTRAWORK MODE ENABLED!`
+- First line literally: `DEEPWORK MODE ENABLED!`
 - After bootstrap: 1-2 paragraph plan summary + notepad path.
 - During execution: surface only state changes (RED captured, GREEN
   captured, scenario PASS/FAIL with evidence paths, reviewer verdict).
@@ -361,4 +361,4 @@ message + present for approval.
 - After 2 parallel exploration waves yield no new useful facts, stop
   exploring and act.
 
-</ultrawork-mode>
+</deepwork-mode>

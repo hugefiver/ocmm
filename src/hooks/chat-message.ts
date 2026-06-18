@@ -115,9 +115,7 @@ export function createChatMessageHandler(args: {
     const intent = detectIntent(userText)
     if (!intent) return
 
-    // Skip standalone ultrawork on planner agents (planner.md handles that case
-    // only when the user explicitly composes hyperplan + ultrawork).
-    if (intent.type === "ultrawork" && isPlannerAgent(agentName)) return
+    if (intent.type === "deepwork" && isPlannerAgent(agentName)) return
 
     if (!latch(sessionID, intent.type)) return
 
