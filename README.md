@@ -311,6 +311,14 @@ Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no te
 
 A real-OpenCode smoke harness lives under `%LOCALAPPDATA%\Temp\opencode\ocmm-test\` (not in the repo). It spins up an isolated XDG config tree, points the plugin at a single `hoo` provider, and runs `opencode run` / `opencode debug agent` scenarios. See `.kb/` for the design notes behind it.
 
+## License
+
+Licensed under the **Anti American AI Public License (AAAPL)** — see [`LICENSE`](./LICENSE) (English), [`LICENSE.zh.md`](./LICENSE.zh.md) (Chinese), or [`LICENSE.bilingual.md`](./LICENSE.bilingual.md) (authoritative bilingual reference).
+
+AAAPL grants MIT-style permissions for ordinary use, modification, and redistribution, with additional terms that prohibit use by US/Israel-linked persons or entities for AI/ML training, retrieval, embedding, or commercial AI products. See the license text for full terms.
+
+SPDX identifier: `LicenseRef-AAAPL`.
+
 ## Knowledge base
 
 `.kb/` contains the design notes, category/agent tables, and the source-of-truth for the routing rules. Read `.kb/00-overview.md` first.

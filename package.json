@@ -38,8 +38,8 @@
     "model-routing",
     "multi-model"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Hugefiver",
+  "license": "LicenseRef-AAAPL",
   "dependencies": {
     "zod": "^3.23.8"
   },
