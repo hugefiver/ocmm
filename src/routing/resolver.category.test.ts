@@ -46,7 +46,7 @@ test("user category override beats built-in category", () => {
     categoriesConfig: {
       frontend: {
         variant: "low",
-        fallbackChain: [{ providers: ["openai"], model: "gpt-5.5", variant: "low" }],
+        model: "openai/gpt-5.5",
       },
     },
   })
