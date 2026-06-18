@@ -22,14 +22,14 @@ test("deepMerge: scalars and objects override; key-aware arrays union", () => {
     debug: false,
     intent: { enabled: true, skipAgents: ["a"] },
     fallbackModels: ["openai/gpt-5", "openai/gpt-4"],
-    disabledAgents: ["explore"],
+    disabledAgents: ["code-search"],
     other: [1, 2],
   }
   const b = {
     debug: true,
     intent: { skipAgents: ["b"] },
     fallbackModels: ["openai/gpt-5.5"],
-    disabledAgents: ["explore", "librarian"],
+    disabledAgents: ["code-search", "doc-search"],
     other: [3],
   }
   const merged = deepMerge(a, b) as typeof a
@@ -42,6 +42,6 @@ test("deepMerge: scalars and objects override; key-aware arrays union", () => {
     "openai/gpt-5",
     "openai/gpt-5.5",
   ])
-  assert.deepEqual(merged.disabledAgents.sort(), ["explore", "librarian"])
+  assert.deepEqual(merged.disabledAgents.sort(), ["code-search", "doc-search"])
   assert.deepEqual(merged.other, [3])
 })

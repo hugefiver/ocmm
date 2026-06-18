@@ -37,7 +37,7 @@ Per-session state needed:
 ```ts
 type SessionFallbackState = {
   sessionId: string
-  intentLatched: Set<"ultrawork" | "team" | "hyperplan" | "hyperplan-ultrawork">
+  intentLatched: Set<"deepwork" | "team" | "superplan" | "superplan-deepwork">
   attemptedEntries: Map<string, FallbackEntry[]> // key: agent or category
   resolutionLedger: ResolutionEntry[]
 }

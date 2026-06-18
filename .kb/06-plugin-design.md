@@ -3,7 +3,7 @@
 ## Goals
 
 1. **Auto-route** the active model based on category and agent identity.
-2. **Inject mode prompts** (ultrawork/hyperplan/team) when intent keywords detected.
+2. **Inject mode prompts** (deepwork/superplan/team) when intent keywords detected.
 3. **Pick model-specialized prompt variant** (gpt/gemini/default/planner) when injecting.
 4. **Apply variant → param translation** (reasoningEffort, thinking budgets, temperature).
 5. **Honor user config overrides** (per-category, per-agent, fallback list).
@@ -50,8 +50,8 @@ ocmm/
 │       ├── types.ts                # FallbackEntry, ModelRequirement, types
 │       └── logger.ts               # debug logger respecting OCMM_DEBUG env
 ├── prompts/                         # bundled prompts (copied from .kb/prompts)
-│   ├── ultrawork/{default,gpt,gemini,planner}.md
-│   └── mode/{hyperplan,team}.md
+│   ├── deepwork/{default,gpt,gemini,planner}.md
+│   └── mode/{superplan,team}.md
 └── .kb/                             # internal knowledge base (this folder)
 ```
 
@@ -78,7 +78,7 @@ So in Phase 1:
 ### `chat.message(input, output)` hook
 
 1. Strip `<SYSTEM_REMINDER>` blocks, then run `detectIntent(message, agent)`.
-2. If hit and not already latched for this session, compose mode + ultrawork prompts based on selected model family.
+2. If hit and not already latched for this session, compose mode + deepwork prompts based on selected model family.
 3. Prepend composed prompt to `output.system`.
 4. Mark intent latched in session state.
 

@@ -1,22 +1,24 @@
 /**
  * Built-in category catalog.
  *
- * Mirrors omo's 8 categories (visual-engineering, ultrabrain, deep, artistry,
- * quick, unspecified-low, unspecified-high, writing). Models are illustrative
- * defaults — users can override anything in their config.
- *
- * NOTE: Phase 1 does NOT route per-call by category — chat.params cannot change
- * the model. Categories surface here so the future delegate-task tool, agent
- * fallbacks that share a category, and config validation all share one source.
+ * 8 categories cover the practical work-content spectrum:
+ *   frontend       - UI/UX, design, styling, animation
+ *   creative       - unconventional / generative problem-solving
+ *   hard-reasoning - heavy-logic, architecture, deep tradeoffs
+ *   research       - autonomous multi-step research and delivery
+ *   quick          - trivial single-file changes
+ *   low-effort     - moderate-effort general-purpose work
+ *   high-effort    - high-effort general-purpose work
+ *   writing        - documentation, prose, technical writing
  */
 
 import type { Category } from "../shared/types.ts"
 
 export const BUILTIN_CATEGORIES: Category[] = [
   {
-    name: "visual-engineering",
+    name: "frontend",
     description:
-      "Frontend, UI/UX, design, styling, animation. Bias toward strong visual taste, design systems, and thoughtful typography.",
+      "UI/UX, design, styling, animation. Bias toward strong visual taste, design systems, and thoughtful typography.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -27,9 +29,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "artistry",
+    name: "creative",
     description:
-      "Creative, unconventional problem-solving. Generate diverse bold options first, embrace ambiguity, balance novelty with coherence.",
+      "Unconventional / generative problem-solving. Generate diverse bold options first, embrace ambiguity, balance novelty with coherence.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -40,9 +42,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "ultrabrain",
+    name: "hard-reasoning",
     description:
-      "Hard logic / heavy reasoning. Strategic-advisor mindset; one clear recommendation with risk + effort estimate.",
+      "Heavy logic, architecture, deep tradeoffs. Strategic-advisor mindset; one clear recommendation with risk + effort estimate.",
     requirement: {
       variant: "xhigh",
       fallbackChain: [
@@ -53,9 +55,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "deep",
+    name: "research",
     description:
-      "Goal-oriented autonomous problem-solving on hairy problems requiring deep research. Generous exploration budget; full delivery completion bar.",
+      "Autonomous multi-step research and delivery. Generous exploration budget; full delivery completion bar.",
     requirement: {
       variant: "medium",
       fallbackChain: [
@@ -68,7 +70,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   {
     name: "quick",
     description:
-      "Trivial single-file changes, typo fixes, simple modifications. Smaller model — needs EXHAUSTIVELY EXPLICIT prompts (TASK / MUST DO / MUST NOT DO / EXPECTED OUTPUT).",
+      "Trivial single-file changes, typo fixes, simple modifications. Smaller model - needs EXHAUSTIVELY EXPLICIT prompts (TASK / MUST DO / MUST NOT DO / EXPECTED OUTPUT).",
     requirement: {
       fallbackChain: [
         { providers: ["openai", "github-copilot"], model: "gpt-5.4-mini" },
@@ -77,9 +79,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "unspecified-low",
+    name: "low-effort",
     description:
-      "Tasks that don't fit other categories, low effort. Selection-gate: verify the task does not fit a more specific category.",
+      "Moderate-effort general-purpose work. Selection-gate: verify the task does not fit a more specific category.",
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
@@ -88,9 +90,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "unspecified-high",
+    name: "high-effort",
     description:
-      "Tasks that don't fit other categories, high effort. Selection-gate stricter than -low.",
+      "High-effort general-purpose work. Selection-gate stricter than low-effort.",
     requirement: {
       variant: "max",
       fallbackChain: [
@@ -102,7 +104,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   {
     name: "writing",
     description:
-      "Documentation, prose, technical writing. Anti-AI-slop posture: no em/en dashes, no AI filler (delve, leverage, utilize, robust, streamline).",
+      "Documentation, prose, technical writing. Anti-AI-slop posture: no em/en dashes, no AI filler.",
     requirement: {
       fallbackChain: [
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
@@ -113,7 +115,6 @@ export const BUILTIN_CATEGORIES: Category[] = [
   },
 ]
 
-/** Indexed lookup. */
 export const BUILTIN_CATEGORY_INDEX: ReadonlyMap<string, Category> = new Map(
   BUILTIN_CATEGORIES.map((c) => [c.name, c]),
 )

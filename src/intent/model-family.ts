@@ -60,7 +60,7 @@ export function isGeminiModel(fullId: string, providerID?: string): boolean {
   return extractModelName(fullId).toLowerCase().startsWith("gemini-")
 }
 
-/** Family enum used by variant translator and ultrawork variant selection. */
+/** Family enum used by variant translator and deepwork prompt variant selection. */
 export type ModelFamily =
   | "gpt"
   | "claude-opus-47-plus"

@@ -1,21 +1,29 @@
 /**
  * Built-in agent catalog with per-agent fallback chains.
  *
- * These are NEW agents this plugin can register through the OpenCode `config`
- * hook. Each agent gets a preferred model + a fallback list. We intentionally
- * mirror omo's role names (sisyphus, oracle, librarian, ...) so prompts and
- * conventions stay portable, but the models / variants are our defaults.
+ * Names are role-descriptive so users can read a stack trace or a config file
+ * and immediately know what an agent does. There is no shared lore.
  *
- * Names follow opencode agent naming (lowercase, kebab-case).
+ * 10 built-in agents:
+ *   orchestrator   - main coordinator; decomposes work + delegates
+ *   worker         - autonomous implementer pinned to GPT-class providers
+ *   reviewer       - read-only consultant for hard reasoning / debugging
+ *   doc-search     - external library / docs / OSS lookups
+ *   code-search    - internal codebase grep
+ *   planner        - produces structured work plans
+ *   clarifier      - pre-plan analysis (intent, ambiguity, risk surfaces)
+ *   plan-critic    - reviews plans for clarity / verifiability / completeness
+ *   media-reader   - multimodal: images, PDFs, diagrams
+ *   task-runner    - focused single-task executor with category + skill list
  */
 
 import type { Agent } from "../shared/types.ts"
 
 export const BUILTIN_AGENTS: Agent[] = [
   {
-    name: "sisyphus",
+    name: "orchestrator",
     description:
-      "Powerful orchestrator. Decomposes work, delegates to specialists, verifies results. Defaults to a flagship reasoning model.",
+      "Main coordinator. Decomposes work, delegates to specialists, verifies results. Defaults to a flagship reasoning model.",
     requirement: {
       variant: "max",
       requiresAnyModel: true,
@@ -29,9 +37,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "hephaestus",
+    name: "worker",
     description:
-      "Autonomous worker. Executes complex implementation independently. Pinned to GPT-class providers when available.",
+      "Autonomous implementer. Executes complex implementation independently. Pinned to GPT-class providers when available.",
     requirement: {
       requiresProvider: ["openai", "github-copilot", "vercel", "opencode"],
       requiresAnyModel: true,
@@ -42,9 +50,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "oracle",
+    name: "reviewer",
     description:
-      "Read-only consultation. Hard-problem reasoning, debugging, architecture review. Expensive, high-quality.",
+      "Read-only consultant for hard reasoning, debugging, architecture review. Expensive, high-quality.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -56,7 +64,7 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "librarian",
+    name: "doc-search",
     description:
       "External-reference lookup: docs, OSS examples, API references. Fast, broad, cheap.",
     requirement: {
@@ -69,7 +77,7 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "explore",
+    name: "code-search",
     description: "Internal contextual grep. Finds files, patterns, references inside the codebase.",
     requirement: {
       fallbackChain: [
@@ -81,8 +89,8 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "prometheus",
-    description: "Planner. Produces structured work plans; coordinator only — never edits code (other than markdown notes).",
+    name: "planner",
+    description: "Produces structured work plans. Coordinator only - never edits code beyond markdown notes.",
     requirement: {
       variant: "max",
       fallbackChain: [
@@ -94,8 +102,8 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "metis",
-    description: "Pre-planning consultant. Identifies hidden assumptions, ambiguities, AI failure points before plans are written.",
+    name: "clarifier",
+    description: "Pre-plan analysis. Identifies hidden assumptions, ambiguities, AI failure points before plans are written.",
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
@@ -106,8 +114,8 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "momus",
-    description: "Plan critic. Evaluates work plans against rigorous clarity / verifiability / completeness standards.",
+    name: "plan-critic",
+    description: "Plan reviewer. Evaluates work plans against rigorous clarity / verifiability / completeness standards.",
     requirement: {
       variant: "xhigh",
       fallbackChain: [
@@ -119,8 +127,8 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "multimodal-looker",
-    description: "Analyzes media (images, PDFs, diagrams) — extracts structured info from visual content.",
+    name: "media-reader",
+    description: "Analyzes media (images, PDFs, diagrams) - extracts structured info from visual content.",
     requirement: {
       variant: "medium",
       fallbackChain: [
@@ -131,20 +139,8 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "atlas",
-    description: "Master orchestrator for long-running boulder / background workflows.",
-    requirement: {
-      fallbackChain: [
-        { providers: ["anthropic"], model: "claude-sonnet-4-6" },
-        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
-        { providers: ["minimax"], model: "minimax-m3" },
-      ],
-    },
-  },
-  {
-    name: "sisyphus-junior",
-    description: "Focused single-task executor. Takes a category + skill list + clear goal.",
+    name: "task-runner",
+    description: "Focused single-task executor. Takes a category, skill list, and one clear goal.",
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },

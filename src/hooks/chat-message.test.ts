@@ -6,7 +6,6 @@ import { defaultConfig } from "../config/schema.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
 
-// Load the bundled prompts once for the whole test file.
 loadAllPrompts(join(process.cwd(), "prompts"))
 
 function makeInput(opts: {
@@ -18,7 +17,7 @@ function makeInput(opts: {
 }) {
   return {
     sessionID: opts.sessionID ?? "s1",
-    agent: { name: opts.agentName ?? "sisyphus" },
+    agent: { name: opts.agentName ?? "orchestrator" },
     model: {
       providerID: opts.providerID ?? "openai",
       modelID: opts.modelID ?? "gpt-5.5",
@@ -27,10 +26,10 @@ function makeInput(opts: {
   }
 }
 
-test("chat.message injects ultrawork prompt on ULW keyword", async () => {
+test("chat.message injects deepwork prompt on DW keyword", async () => {
   const cfg = defaultConfig()
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const input = makeInput({ text: "please ultrawork the refactor" })
+  const input = makeInput({ text: "please deepwork the refactor" })
   clearSessionIntent(input.sessionID)
   const output: Record<string, unknown> = {}
   await handler(input, output)
@@ -41,19 +40,18 @@ test("chat.message injects ultrawork prompt on ULW keyword", async () => {
 test("chat.message picks gpt variant when model is gpt", async () => {
   const cfg = defaultConfig()
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const input = makeInput({ text: "ulw plz", modelID: "gpt-5.5", providerID: "openai" })
+  const input = makeInput({ text: "dw plz", modelID: "gpt-5.5", providerID: "openai" })
   clearSessionIntent(input.sessionID)
   const output: Record<string, unknown> = {}
   await handler(input, output)
-  // gpt.md has unique markers; default.md doesn't — sanity-check by length differs from default
   const out = output.system as string
   assert.ok(out.length > 0)
 })
 
-test("chat.message latches per session — second hit no-ops", async () => {
+test("chat.message latches per session - second hit no-ops", async () => {
   const cfg = defaultConfig()
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const input = makeInput({ sessionID: "latch-test", text: "ulw" })
+  const input = makeInput({ sessionID: "latch-test", text: "dw" })
   clearSessionIntent(input.sessionID)
   const out1: Record<string, unknown> = {}
   await handler(input, out1)
@@ -63,13 +61,13 @@ test("chat.message latches per session — second hit no-ops", async () => {
   assert.equal(out2.system, undefined)
 })
 
-test("chat.message skips planner agent on standalone ultrawork", async () => {
+test("chat.message skips planner agent on standalone deepwork", async () => {
   const cfg = defaultConfig()
   const handler = createChatMessageHandler({ getConfig: () => cfg })
   const input = makeInput({
     sessionID: "p1",
-    agentName: "prometheus",
-    text: "ulw the plan",
+    agentName: "planner",
+    text: "dw the plan",
   })
   clearSessionIntent(input.sessionID)
   const output: Record<string, unknown> = {}
@@ -80,20 +78,19 @@ test("chat.message skips planner agent on standalone ultrawork", async () => {
 test("chat.message respects intent.enabled=false", async () => {
   const cfg = { ...defaultConfig(), intent: { enabled: false, skipAgents: [] } }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const input = makeInput({ sessionID: "off", text: "ultrawork now" })
+  const input = makeInput({ sessionID: "off", text: "deepwork now" })
   const output: Record<string, unknown> = {}
   await handler(input, output)
   assert.equal(output.system, undefined)
 })
 
-test("chat.message detects composite hyperplan-ultrawork", async () => {
+test("chat.message detects composite superplan-deepwork", async () => {
   const cfg = defaultConfig()
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const input = makeInput({ sessionID: "h1", text: "hpp ulw please" })
+  const input = makeInput({ sessionID: "h1", text: "sp dw please" })
   clearSessionIntent(input.sessionID)
   const output: Record<string, unknown> = {}
   await handler(input, output)
-  // composed prompt should be a non-trivial concatenation
   assert.ok(typeof output.system === "string")
   assert.ok((output.system as string).length > 100)
 })
