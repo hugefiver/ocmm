@@ -10,7 +10,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./profiles": {
+      "types": "./dist/cli/profiles.d.ts",
+      "import": "./dist/cli/profiles.js"
     }
+  },
+  "bin": {
+    "ocmm-profiles": "./dist/cli/profiles.js"
   },
   "files": [
     "dist",
@@ -22,6 +29,7 @@
     "build:watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
+    "cli": "node --experimental-strip-types src/cli/profiles.ts",
     "clean": "rimraf dist"
   },
   "keywords": [
