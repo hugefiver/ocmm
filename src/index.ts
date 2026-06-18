@@ -20,6 +20,7 @@ import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/
 import { createEventHandler } from "./hooks/event.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { log } from "./shared/logger.ts"
+import type { OcmmClient } from "./runtime-fallback/dispatcher.ts"
 
 export const PLUGIN_ID = "ocmm"
 
@@ -31,10 +32,15 @@ export type PluginInterface = {
   event?: (input: unknown) => Promise<void>
 }
 
+/**
+ * Subset of OpenCode's PluginInput we consume. The real shape is richer
+ * (project, worktree, serverUrl, experimental_workspace, $). We only need
+ * `directory` for config resolution and `client` for runtime-fallback dispatch.
+ */
 export type ServerInput = {
-  /** OpenCode passes a `directory`/`cwd` so plugins can find project-local config. */
   directory?: string
   cwd?: string
+  client?: OcmmClient
 }
 
 export function createPlugin(input?: ServerInput): {
@@ -80,7 +86,11 @@ export function createPlugin(input?: ServerInput): {
     "chat.params": createChatParamsHandler({ getConfig }),
     "chat.message": createChatMessageHandler({ getConfig }),
     "experimental.chat.system.transform": createSystemTransformHandler(),
-    event: createEventHandler(),
+    event: createEventHandler({
+      getConfig,
+      ...(input?.client !== undefined ? { client: input.client } : {}),
+      directory: cwd,
+    }),
   }
 
   return {
