@@ -1,24 +1,9 @@
-/**
- * `config` hook handler.
- *
- * Mutates OpenCode's `config.agent` map to:
- *   1. Register 10 built-in agents (orchestrator, worker, ...) with their
- *      preferred provider/model.
- *   2. Register 8 categories as subagents (frontend, creative, hard-reasoning,
- *      research, quick, low-effort, high-effort, writing). Each category-agent
- *      gets the category's preferred model PLUS the category prompt-append as
- *      its system prompt, and `mode: "subagent"` so it only appears as a
- *      delegation target, not in the main agent picker.
- *
- * Users can override any agent via the `agents` config map (full requirement
- * or shorthand `model` string). User-set fields are NEVER clobbered.
- */
-
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getCategoryPrompt } from "../intent/prompt-loader.ts"
-import type { Agent, Category, FallbackEntry } from "../shared/types.ts"
-import type { AgentEntry, ModelRequirementConfig, OcmmConfig } from "../config/schema.ts"
+import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
+import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
+import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord, log } from "../shared/logger.ts"
 
 function fmtModel(entry: FallbackEntry): string {
@@ -29,7 +14,7 @@ function fmtModel(entry: FallbackEntry): string {
 function applyAgentEntry(
   agentMap: Record<string, unknown>,
   agent: Agent,
-  override: AgentEntry | undefined,
+  override: NormalizedShorthand | undefined,
   extras?: { mode?: string; prompt?: string },
 ): void {
   if (override?.disabled) return
@@ -37,16 +22,9 @@ function applyAgentEntry(
   let chain: FallbackEntry[] = agent.requirement.fallbackChain
   const description = override?.description ?? agent.description
 
-  if (override?.requirement) {
-    chain = override.requirement.fallbackChain as FallbackEntry[]
-  } else if (override?.model) {
-    const m = override.model
-    const slash = m.indexOf("/")
-    const provider = slash >= 0 ? m.slice(0, slash) : ""
-    const model = slash >= 0 ? m.slice(slash + 1) : m
-    chain = [{ providers: provider ? [provider] : [], model }]
+  if (override?.requirement?.fallbackChain?.length) {
+    chain = override.requirement.fallbackChain
   }
-
   if (!chain.length) return
   const head = chain[0]!
   const modelStr = fmtModel(head)
@@ -65,11 +43,11 @@ function applyAgentEntry(
   agentMap[agent.name] = existing
 }
 
-function categoryAsAgent(c: Category): Agent {
+function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
   return {
     name: c.name,
     description: c.description,
-    requirement: c.requirement,
+    requirement: override ?? c.requirement,
   }
 }
 
@@ -87,42 +65,39 @@ export function createConfigHandler(args: {
 
     const disabled = new Set(cfg.disabledAgents ?? [])
 
-    // 1. Built-in named agents (primary mode by default).
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
-      applyAgentEntry(agentMap, a, cfg.agents?.[a.name])
+      applyAgentEntry(agentMap, a, normalizeShorthand(cfg.agents?.[a.name]))
     }
 
-    // 2. Categories as subagents. Each category-agent ships with its prompt-append.
     for (const c of BUILTIN_CATEGORIES) {
       if (disabled.has(c.name)) continue
-      const userOverride = cfg.agents?.[c.name]
-      const userCategoryReq: ModelRequirementConfig | undefined = cfg.categories?.[c.name]
-      const synthetic: Agent = userCategoryReq
-        ? { ...categoryAsAgent(c), requirement: userCategoryReq as Agent["requirement"] }
-        : categoryAsAgent(c)
+      const agentOverride = normalizeShorthand(cfg.agents?.[c.name])
+      const categoryOverride = normalizeShorthand(cfg.categories?.[c.name])
+
+      const baseAgent = categoryAsAgent(c, categoryOverride?.requirement)
+      const merged: NormalizedShorthand | undefined =
+        agentOverride ?? categoryOverride
 
       const prompt = getCategoryPrompt(c.name)
       const extras: { mode?: string; prompt?: string } = { mode: "subagent" }
       if (prompt) extras.prompt = prompt
-      applyAgentEntry(agentMap, synthetic, userOverride, extras)
+      applyAgentEntry(agentMap, baseAgent, merged, extras)
     }
 
-    // 3. Pure-config-only agents (not built-in, not a category) - register if user supplied requirement.
     if (cfg.agents) {
       for (const [name, entry] of Object.entries(cfg.agents)) {
         if (disabled.has(name)) continue
         if (BUILTIN_AGENTS.some((b) => b.name === name)) continue
         if (BUILTIN_CATEGORIES.some((c) => c.name === name)) continue
-        if (!entry.requirement && !entry.model) continue
+        const norm = normalizeShorthand(entry)
+        if (!norm?.requirement?.fallbackChain?.length) continue
         const synthetic: Agent = {
           name,
-          ...(entry.description ? { description: entry.description } : {}),
-          requirement: entry.requirement
-            ? (entry.requirement as Agent["requirement"])
-            : { fallbackChain: [{ providers: [], model: entry.model ?? "" }] },
+          ...(norm.description ? { description: norm.description } : {}),
+          requirement: norm.requirement,
         }
-        applyAgentEntry(agentMap, synthetic, entry)
+        applyAgentEntry(agentMap, synthetic, norm)
       }
     }
 

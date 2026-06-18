@@ -1,0 +1,68 @@
+import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
+import type {
+  AgentEntry,
+  CategoryEntry,
+  FallbackEntryConfig,
+  ModelRequirementConfig,
+} from "./schema.ts"
+
+export function parseModelString(
+  modelStr: string,
+  variant?: Variant,
+): FallbackEntry {
+  const slash = modelStr.indexOf("/")
+  const provider = slash >= 0 ? modelStr.slice(0, slash) : ""
+  const model = slash >= 0 ? modelStr.slice(slash + 1) : modelStr
+  const entry: FallbackEntry = {
+    providers: provider ? [provider] : [],
+    model,
+  }
+  if (variant) entry.variant = variant
+  return entry
+}
+
+function normalizeFallbackEntryConfig(
+  raw: string | FallbackEntryConfig,
+): FallbackEntry {
+  if (typeof raw === "string") return parseModelString(raw)
+  return raw as FallbackEntry
+}
+
+function normalizeRequirementConfig(
+  req: ModelRequirementConfig,
+): ModelRequirement {
+  return req as ModelRequirement
+}
+
+export type NormalizedShorthand = {
+  description?: string
+  requirement?: ModelRequirement
+  disabled?: boolean
+}
+
+export function normalizeShorthand(
+  entry: AgentEntry | CategoryEntry | undefined,
+): NormalizedShorthand | undefined {
+  if (!entry) return undefined
+  const out: NormalizedShorthand = {}
+  if (entry.description) out.description = entry.description
+  if ("disabled" in entry && entry.disabled) out.disabled = true
+
+  if (entry.requirement) {
+    out.requirement = normalizeRequirementConfig(entry.requirement)
+    return out
+  }
+
+  const chain: FallbackEntry[] = []
+  if (entry.model) chain.push(parseModelString(entry.model, entry.variant))
+  if (entry.fallbackModels) {
+    for (const m of entry.fallbackModels) chain.push(normalizeFallbackEntryConfig(m))
+  }
+  if (chain.length > 0) {
+    const req: ModelRequirement = { fallbackChain: chain }
+    if (entry.variant) req.variant = entry.variant
+    out.requirement = req
+  }
+
+  return out
+}

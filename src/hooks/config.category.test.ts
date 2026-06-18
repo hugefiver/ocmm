@@ -53,9 +53,7 @@ test("user category override changes the model without disabling subagent mode",
     categories: {
       frontend: {
         variant: "low" as const,
-        fallbackChain: [
-          { providers: ["openai"], model: "gpt-5.4-mini", variant: "low" as const },
-        ],
+        model: "openai/gpt-5.4-mini",
       },
     },
   }

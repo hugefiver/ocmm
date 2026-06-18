@@ -16,7 +16,7 @@ import { defaultConfig, type OcmmConfig } from "./config/schema.ts"
 import { loadConfig } from "./config/load.ts"
 import { createConfigHandler } from "./hooks/config.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
-import { createChatMessageHandler } from "./hooks/chat-message.ts"
+import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/chat-message.ts"
 import { createEventHandler } from "./hooks/event.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { log } from "./shared/logger.ts"
@@ -27,6 +27,7 @@ export type PluginInterface = {
   config?: (input: unknown, output: unknown) => Promise<void>
   "chat.params"?: (input: unknown, output: unknown) => Promise<void>
   "chat.message"?: (input: unknown, output: unknown) => Promise<void>
+  "experimental.chat.system.transform"?: (input: unknown, output: unknown) => Promise<void>
   event?: (input: unknown) => Promise<void>
 }
 
@@ -78,6 +79,7 @@ export function createPlugin(input?: ServerInput): {
     config: createConfigHandler({ getConfig }),
     "chat.params": createChatParamsHandler({ getConfig }),
     "chat.message": createChatMessageHandler({ getConfig }),
+    "experimental.chat.system.transform": createSystemTransformHandler(),
     event: createEventHandler(),
   }
 

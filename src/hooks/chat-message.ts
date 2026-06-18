@@ -1,87 +1,47 @@
-/**
- * `chat.message` hook handler.
- *
- * Detect intent keywords in the most recent user message; on hit, prepend the
- * composed mode-prompt to the system prompt OR push it as an extra system
- * message — whichever shape OpenCode hands us.
- *
- * Hook input shape (observed across OpenCode 1.4.x):
- *     {
- *       sessionID: string
- *       agent: { name?: string } | string
- *       model?: { providerID, modelID }
- *       message: { ... user-shaped ... }
- *     }
- *
- * Hook output shape varies; we tolerate either:
- *     output.system?: string     (single concatenated system prompt)
- *     output.messages?: Array<{ role: "system", content: string }>
- *     output.prepend?: string    (legacy; some versions)
- *
- * Strategy: never overwrite. Always APPEND or PREPEND so other plugins still
- * compose. We also track per-session "latched" intents so the same trigger
- * doesn't double-inject when the user follows up.
- */
-
 import { detectIntent, isPlannerAgent } from "../intent/detectors.ts"
 import { composeIntentPrompt } from "../intent/prompt-loader.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 
-/** Per-session latched intents; cleared on session.deleted. */
-const latched = new Map<string, Set<string>>()
+export type SessionIntentState = {
+  intents: Set<string>
+  prompts: string[]
+}
+
+const sessionState = new Map<string, SessionIntentState>()
 
 export function clearSessionIntent(sessionID: string): void {
-  latched.delete(sessionID)
+  sessionState.delete(sessionID)
 }
 
-function latch(sessionID: string, intent: string): boolean {
-  let set = latched.get(sessionID)
-  if (!set) {
-    set = new Set()
-    latched.set(sessionID, set)
+function getOrInit(sessionID: string): SessionIntentState {
+  let s = sessionState.get(sessionID)
+  if (!s) {
+    s = { intents: new Set(), prompts: [] }
+    sessionState.set(sessionID, s)
   }
-  if (set.has(intent)) return false
-  set.add(intent)
-  return true
+  return s
 }
 
-function readUserText(message: unknown): string {
-  if (typeof message === "string") return message
-  if (!isRecord(message)) return ""
-  if (typeof message.content === "string") return message.content
-  if (Array.isArray(message.content)) {
-    const parts: string[] = []
-    for (const c of message.content) {
-      if (typeof c === "string") parts.push(c)
-      else if (isRecord(c) && typeof c.text === "string") parts.push(c.text)
+export function getSessionPrompt(sessionID: string): string | null {
+  const s = sessionState.get(sessionID)
+  if (!s || s.prompts.length === 0) return null
+  return s.prompts.join("\n\n---\n\n")
+}
+
+function readUserTextFromParts(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  const out: string[] = []
+  for (const p of parts) {
+    if (typeof p === "string") {
+      out.push(p)
+      continue
     }
-    return parts.join("\n")
+    if (!isRecord(p)) continue
+    if (typeof p.text === "string") out.push(p.text)
+    else if (typeof p.content === "string") out.push(p.content)
   }
-  if (typeof message.text === "string") return message.text
-  if (typeof message.prompt === "string") return message.prompt
-  return ""
-}
-
-function appendSystemPrompt(output: Record<string, unknown>, prompt: string): void {
-  if (!prompt) return
-  // shape A: single string field
-  if (typeof output.system === "string") {
-    output.system = `${output.system}\n\n${prompt}`
-    return
-  }
-  // shape B: messages array
-  if (Array.isArray(output.messages)) {
-    output.messages.push({ role: "system", content: prompt })
-    return
-  }
-  // shape C: prepend field
-  if (typeof output.prepend === "string") {
-    output.prepend = `${prompt}\n\n${output.prepend}`
-    return
-  }
-  // shape D: nothing exists yet — initialise with a system string
-  output.system = prompt
+  return out.join("\n")
 }
 
 export function createChatMessageHandler(args: {
@@ -100,7 +60,6 @@ export function createChatMessageHandler(args: {
     else if (isRecord(rawInput.agent) && typeof rawInput.agent.name === "string") {
       agentName = rawInput.agent.name
     }
-
     if (cfg.intent.skipAgents.includes(agentName ?? "")) return
 
     let providerID: string | undefined
@@ -111,13 +70,21 @@ export function createChatMessageHandler(args: {
     }
     if (!modelID) return
 
-    const userText = readUserText(rawInput.message)
+    const parts = isRecord(rawOutput) ? rawOutput.parts : undefined
+    const userText = readUserTextFromParts(parts)
+    if (cfg.debug) {
+      log.debug(
+        `chat.message: agent=${agentName ?? "<none>"} model=${providerID}/${modelID} ` +
+          `parts=${Array.isArray(parts) ? parts.length : 0} textLen=${userText.length}`,
+      )
+    }
     const intent = detectIntent(userText)
     if (!intent) return
-
     if (intent.type === "deepwork" && isPlannerAgent(agentName)) return
 
-    if (!latch(sessionID, intent.type)) return
+    const state = getOrInit(sessionID)
+    if (state.intents.has(intent.type)) return
+    state.intents.add(intent.type)
 
     const prompt = composeIntentPrompt({
       intent: intent.type,
@@ -126,14 +93,44 @@ export function createChatMessageHandler(args: {
       modelID,
     })
     if (!prompt) return
+    state.prompts.push(prompt)
 
-    if (!isRecord(rawOutput)) {
-      log.warn(`chat.message output is not an object; cannot inject for ${intent.type}`)
+    log.info(
+      `intent=${intent.type} agent=${agentName ?? "<none>"} -> queued ${prompt.length} chars for system injection`,
+    )
+  }
+}
+
+export function createSystemTransformHandler(): (
+  input: unknown,
+  output: unknown,
+) => Promise<void> {
+  return async (rawInput, rawOutput) => {
+    if (!isRecord(rawInput)) return
+    const sessionID = typeof rawInput.sessionID === "string" ? rawInput.sessionID : ""
+    if (!sessionID) return
+    const merged = getSessionPrompt(sessionID)
+    if (!merged) return
+
+    if (!isRecord(rawOutput)) return
+    const sys = rawOutput.system
+    if (Array.isArray(sys)) {
+      sys.unshift(merged)
+      log.info(
+        `system.transform: prepended ${merged.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
+      )
       return
     }
-    appendSystemPrompt(rawOutput, prompt)
+    if (typeof sys === "string") {
+      rawOutput.system = `${merged}\n\n${sys}`
+      log.info(
+        `system.transform: prepended ${merged.length} chars to string system`,
+      )
+      return
+    }
+    rawOutput.system = [merged]
     log.info(
-      `intent=${intent.type} agent=${agentName ?? "<none>"} -> injected ${prompt.length} chars`,
+      `system.transform: initialized system with ${merged.length} chars`,
     )
   }
 }
