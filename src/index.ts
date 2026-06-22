@@ -1,7 +1,7 @@
 /**
  * ocmm — OpenCode Multi-Model Router plugin.
  *
- * Wires four hooks:
+ * Wires OpenCode hooks/tools:
  *   - `config`        : register/auto-route agents to preferred models
  *   - `chat.params`   : variant -> reasoning effort / thinking / temperature
  *   - `chat.message`  : intent-keyword detection -> mode prompt injection
@@ -18,8 +18,10 @@ import { createConfigHandler } from "./hooks/config.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/chat-message.ts"
 import { createEventHandler } from "./hooks/event.ts"
+import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { loadV1Skills } from "./intent/skill-loader.ts"
+import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/hashline-edit.ts"
 import { log } from "./shared/logger.ts"
 import type { OcmmClient } from "./runtime-fallback/dispatcher.ts"
 
@@ -30,6 +32,8 @@ export type PluginInterface = {
   "chat.params"?: (input: unknown, output: unknown) => Promise<void>
   "chat.message"?: (input: unknown, output: unknown) => Promise<void>
   "experimental.chat.system.transform"?: (input: unknown, output: unknown) => Promise<void>
+  "tool.execute.after"?: (input: unknown, output: unknown) => Promise<void>
+  tool?: Record<string, HashlineToolDefinition>
   event?: (input: unknown) => Promise<void>
 }
 
@@ -95,11 +99,16 @@ export function createPlugin(input?: ServerInput): {
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
     }),
     "experimental.chat.system.transform": createSystemTransformHandler(),
+    "tool.execute.after": createHashlineReadEnhancer({ getConfig }),
     event: createEventHandler({
       getConfig,
       ...(input?.client !== undefined ? { client: input.client } : {}),
       directory: cwd,
     }),
+  }
+
+  if (config.hashline.enabled) {
+    pluginInterface.tool = { edit: createHashlineEditTool() }
   }
 
   return {
