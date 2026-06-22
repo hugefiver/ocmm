@@ -29,12 +29,13 @@
  *   This includes -c/--continue, -s/--session, --model, --agent, run, etc.
  *
  * ISOLATED DIR:
- *   $XDG_DATA_HOME/ocmm-opencode/   (or ~/.local/share/ocmm-opencode/)
- *   --config-dir overrides this location entirely.
- *     opencode/   <- opencode.json + ocmm.jsonc (copied from global)
- *     data/
- *     state/
- *     cache/
+ *   ~/.config/opencode/ocmm-opencode/   (config only; data/state/cache stay global)
+ *     opencode.json   <- merged from global + ocmm plugin added
+ *     ocmm.jsonc      <- copied from global
+ *
+ * Only the config directory is isolated. Data, state, and cache stay at
+ * their global opencode locations so sessions, logs, and caches are shared.
+ * This differs from the test-harness isolation (which redirects all 4 XDG dirs).
  *
  * PROVIDER MERGE:
  *   Reads the global opencode.json and merges these fields into the
@@ -85,28 +86,21 @@ interface OpencodeConfig {
 
 // --- path helpers ---
 
-function xdgDataHome(): string {
-  const xdg = process.env.XDG_DATA_HOME
-  if (xdg) return xdg
-  if (platform() === "win32") {
-    const localAppData = process.env.LOCALAPPDATA
-    if (localAppData) return join(localAppData, "Data")
-  }
-  return join(homedir(), ".local", "share")
-}
-
-function isolatedDir(): string {
-  return join(xdgDataHome(), "ocmm-opencode")
-}
-
+/** Global opencode config dir. Matches opencode's own resolution:
+ *  $XDG_CONFIG_HOME/opencode -> ~/.config/opencode on all platforms
+ *  (including Windows, per opencode's convention). */
 function globalConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME
   if (xdg) return join(xdg, "opencode")
-  if (platform() === "win32") {
-    const appData = process.env.APPDATA
-    if (appData) return join(appData, "opencode")
-  }
   return join(homedir(), ".config", "opencode")
+}
+
+/** Isolated config dir for ocmm-managed opencode. Only config is isolated;
+ *  data/state/cache remain at their global opencode locations.
+ *  XDG_CONFIG_HOME is set to this dir at spawn time, so opencode resolves
+ *  its config path to <isoDir>/opencode/opencode.json. */
+function isolatedConfigDir(): string {
+  return join(globalConfigDir(), "ocmm-opencode")
 }
 
 // --- config helpers ---
@@ -342,11 +336,14 @@ PASSTHROUGH:
     ocmm -- run --model hoo/glm-5.2   # explicit separator
 
 ISOLATED DIR:
-  ${isolatedDir()}/
-    opencode/   opencode.json + ocmm.jsonc
-    data/
-    state/
-    cache/
+  ${isolatedConfigDir()}/
+    opencode/
+      opencode.json   merged from global config + ocmm plugin
+      ocmm.jsonc      copied from global
+
+Only config is isolated. Data, state, and cache stay at their global
+opencode locations so sessions, logs, and caches are shared with the
+global opencode installation.
 
 The oh-my-openagent (omo) plugin is stripped from the global config by default
 to avoid collision with ocmm. Use --keep-omo to retain it.
@@ -383,21 +380,16 @@ function main(): void {
 
   const defaults = readShimDefaults()
 
-  const isoDir = args.configDir ?? defaults.configDir ?? isolatedDir()
+  const isoDir = args.configDir ?? defaults.configDir ?? isolatedConfigDir()
 
-  // --reset: wipe the isolated dir
   if (args.reset && existsSync(isoDir)) {
     rmSync(isoDir, { recursive: true, force: true })
   }
 
-  // Create subdirs. XDG_CONFIG_HOME=isoDir so opencode finds isoDir/opencode/opencode.json
+  // opencode resolves config path as $XDG_CONFIG_HOME/opencode/opencode.json.
+  // We set XDG_CONFIG_HOME=<isoDir>, so files go in <isoDir>/opencode/.
   const ocConfigDir = join(isoDir, "opencode")
-  const dataDir = join(isoDir, "data")
-  const stateDir = join(isoDir, "state")
-  const cacheDir = join(isoDir, "cache")
-  for (const d of [ocConfigDir, dataDir, stateDir, cacheDir]) {
-    mkdirSync(d, { recursive: true })
-  }
+  mkdirSync(ocConfigDir, { recursive: true })
 
   const noProviders = args.noProviders || defaults.noProviders || false
   const noPlugins = args.noPlugins || defaults.noPlugins || false
@@ -413,14 +405,9 @@ function main(): void {
 
   copyOcmmConfig(ocConfigDir)
 
-  // Set XDG env vars
   const env = { ...process.env }
   env.XDG_CONFIG_HOME = isoDir
-  env.XDG_DATA_HOME = dataDir
-  env.XDG_STATE_HOME = stateDir
-  env.XDG_CACHE_HOME = cacheDir
 
-  // Set OCMM_PROFILE if given
   if (args.profile) {
     env.OCMM_PROFILE = args.profile
   }
