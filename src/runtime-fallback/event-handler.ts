@@ -11,7 +11,7 @@ import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import { normalizeShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
-import type { ModelRequirement } from "../shared/types.ts"
+import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { clearSessionIntent } from "../hooks/chat-message.ts"
 import { isRecord, log } from "../shared/logger.ts"
 
@@ -143,9 +143,22 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     }
 
     const eventModel = resolveEventModel(props)
-    const justFailedKey = eventModel
-      ? modelKey(eventModel.providerID, eventModel.modelID)
-      : (agent ?? "")
+    // Derive the failed-model key from the event when possible. When the
+    // event lacks a model, fall back to the first entry of the agent's own
+    // requirement chain rather than using the agent name itself (which is a
+    // role label, not a model identifier, and would pollute failedModels).
+    let justFailedKey: string | null = null
+    if (eventModel) {
+      justFailedKey = modelKey(eventModel.providerID, eventModel.modelID)
+    } else if (requirement.fallbackChain[0]) {
+      const primary: FallbackEntry = requirement.fallbackChain[0]
+      const primaryProvider = primary.providers[0] ?? ""
+      justFailedKey = modelKey(primaryProvider, primary.model)
+    }
+    if (!justFailedKey) {
+      log.info(`could not determine failed model for agent=${agent ?? "<none>"}; skipping`)
+      return
+    }
 
     let state = sessionStates.get(sessionID)
     if (!state) {

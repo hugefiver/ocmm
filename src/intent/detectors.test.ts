@@ -27,8 +27,20 @@ test("detectIntent ignores text inside SYSTEM_REMINDER blocks", () => {
 })
 
 test("stripSystemReminders removes both reminder shapes", () => {
-  const t = "a <SYSTEM_REMINDER>x</SYSTEM_REMINDER> b <dcp-system-reminder>y</dcp-system-reminder> c"
+  const t = "a <SYSTEM_REMINDER>x</SYSTEM_REMINDER> b  c"
   assert.equal(stripSystemReminders(t).replace(/\s+/g, " ").trim(), "a b c")
+})
+
+test("stripSystemReminders does not eat text before a lone closing dcp tag", () => {
+  const t = "important instructions here</dcp-system-reminder>"
+  // A lone closing tag without an opening tag must not match — the old regex
+  // /[\s\S]*?<\/dcp-system-reminder>/ would eat everything before the closer.
+  assert.equal(stripSystemReminders(t), t)
+})
+
+test("stripSystemReminders removes paired dcp-system-reminder blocks", () => {
+  const t = "before <dcp-system-reminder>secret</dcp-system-reminder> after"
+  assert.equal(stripSystemReminders(t), "before  after")
 })
 
 test("isPlannerAgent recognises plan/planner", () => {

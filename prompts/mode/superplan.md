@@ -21,5 +21,5 @@ After loading, follow the skill's full workflow EXACTLY:
 
 Do NOT improvise. Do NOT skip rounds. Do NOT write the plan yourself in step 6 — the handoff to the plan agent in step 7 is non-negotiable. Be the lead orchestrator and let the adversarial members do the cross-critique.
 
-If team-mode is unavailable (`team_*` tools missing), instruct the user to set `team_mode.enabled: true` in `~/.config/opencode/oh-my-opencode.jsonc` and restart opencode.
+If team-mode is unavailable (`team_*` tools missing), instruct the user to enable team-mode in their OpenCode configuration and restart opencode.
 </superplan-mode>
