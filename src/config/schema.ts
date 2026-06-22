@@ -134,6 +134,18 @@ export const ProfileEntrySchema = z
   })
   .strict()
 
+export const ShimConfigSchema = z
+  .object({
+    configDir: z.string().optional(),
+    opencode: z.string().optional(),
+    keepOmo: z.boolean().optional(),
+    noProviders: z.boolean().optional(),
+    noPlugins: z.boolean().optional(),
+  })
+  .strict()
+
+export type ShimConfig = z.infer<typeof ShimConfigSchema>
+
 export const OcmmConfigSchema = z
   .object({
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
@@ -161,6 +173,8 @@ export const OcmmConfigSchema = z
     registerBuiltinAgents: z.boolean().default(true),
     promptsRoot: z.string().optional(),
     debug: z.boolean().default(false),
+    /** Defaults for the `ocmm` shim binary. CLI flags override these. */
+    shim: ShimConfigSchema.optional(),
   })
   .strict()
 

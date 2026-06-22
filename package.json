@@ -17,11 +17,13 @@
     }
   },
   "bin": {
+    "ocmm": "./dist/cli/shim.js",
     "ocmm-profiles": "./dist/cli/profiles.js"
   },
   "files": [
     "dist",
     "prompts",
+    "skills",
     "README.md"
   ],
   "scripts": {
