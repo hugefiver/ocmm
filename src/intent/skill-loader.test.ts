@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { loadV1Skills, V1_SKILL_DIRS } from "./skill-loader.ts"
+import { loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "./skill-loader.ts"
 
 function makeSkillsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-skills-"))
@@ -40,3 +40,66 @@ test("loadV1Skills tolerates missing skill files", () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("loadSharedSkills scans top-level skills and excludes v1", () => {
+  const root = makeSkillsRoot()
+  try {
+    writeSkill(root, "git-master", "git-master", "Git tools")
+    writeSkill(root, "debugging", "debugging", "Debug tools")
+    writeFileSync(join(root, "v1", "brainstorming", "SKILL.md"), skillDoc("brainstorming", "v1"))
+
+    const skills = loadSharedSkills({ rootDir: root })
+
+    assert.deepEqual(skills.map((s) => s.name), ["debugging", "git-master"])
+    assert.ok(skills.every((s) => !s.path.includes(`${join("v1", "")}`)))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadSharedSkills applies enable and disable filters", () => {
+  const root = makeSkillsRoot()
+  try {
+    writeSkill(root, "git-master", "git-master", "Git tools")
+    writeSkill(root, "debugging", "debugging", "Debug tools")
+    writeSkill(root, "frontend", "frontend", "Frontend tools")
+
+    const skills = loadSharedSkills({
+      rootDir: root,
+      enable: ["debugging", "git-master"],
+      disable: ["debugging"],
+    })
+
+    assert.deepEqual(skills.map((s) => s.name), ["git-master"])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadSharedSkills scans additional sources recursively", () => {
+  const root = makeSkillsRoot()
+  const extra = mkdtempSync(join(tmpdir(), "ocmm-extra-skills-"))
+  try {
+    writeSkill(extra, join("nested", "ast-grep"), "ast-grep", "AST grep")
+
+    const skills = loadSharedSkills({
+      rootDir: root,
+      sources: [{ path: extra, recursive: true, glob: "nested/*" }],
+    })
+
+    assert.deepEqual(skills.map((s) => s.name), ["ast-grep"])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(extra, { recursive: true, force: true })
+  }
+})
+
+function writeSkill(root: string, dir: string, name: string, description: string): void {
+  const skillDir = join(root, dir)
+  mkdirSync(skillDir, { recursive: true })
+  writeFileSync(join(skillDir, "SKILL.md"), skillDoc(name, description))
+}
+
+function skillDoc(name: string, description: string): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\n`
+}
