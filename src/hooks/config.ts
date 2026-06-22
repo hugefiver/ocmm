@@ -1,6 +1,7 @@
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { DEFAULT_SKILLS_ROOT, loadSharedSkills } from "../intent/skill-loader.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
@@ -69,13 +70,20 @@ function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
 
 export function createConfigHandler(args: {
   getConfig: () => OcmmConfig
+  skillsRoot?: string
 }): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, _output) => {
     const cfg = args.getConfig()
-    if (!cfg.registerBuiltinAgents) return
     if (!isRecord(rawInput)) return
 
     const target = isRecord(rawInput.config) ? rawInput.config : rawInput
+    const registeredSkills = registerSharedSkills(target, cfg, args.skillsRoot)
+
+    if (!cfg.registerBuiltinAgents) {
+      log.info(`config: registered ${registeredSkills} skills`)
+      return
+    }
+
     if (!isRecord(target.agent)) target.agent = {}
     const agentMap = target.agent as Record<string, unknown>
 
@@ -122,7 +130,33 @@ export function createConfigHandler(args: {
     }
 
     log.info(
-      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user)`,
+      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills`,
     )
   }
+}
+
+function registerSharedSkills(
+  target: Record<string, unknown>,
+  cfg: OcmmConfig,
+  skillsRoot: string = DEFAULT_SKILLS_ROOT,
+): number {
+  const selected = loadSharedSkills({
+    rootDir: skillsRoot,
+    sources: cfg.skills.sources,
+    enable: cfg.skills.enable,
+    disable: [...cfg.skills.disable, ...(cfg.disabledSkills ?? [])],
+  })
+  if (!selected.length) return 0
+
+  if (!isRecord(target.skills)) target.skills = {}
+  const skillsConfig = target.skills as Record<string, unknown>
+  if (!Array.isArray(skillsConfig.paths)) skillsConfig.paths = []
+  const paths = skillsConfig.paths as unknown[]
+  const seen = new Set(paths.filter((p): p is string => typeof p === "string"))
+  for (const skill of selected) {
+    if (seen.has(skill.path)) continue
+    paths.push(skill.path)
+    seen.add(skill.path)
+  }
+  return selected.length
 }
