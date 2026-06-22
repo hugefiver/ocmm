@@ -1,11 +1,11 @@
 /**
  * Loads markdown prompts from disk at plugin startup.
  *
- * Layout under <pluginRoot>/prompts/:
+ * Layout under <pluginRoot>/prompts/<workflow>/:
  *     deepwork/{default,gpt,gemini,planner}.md
- *     mode/{superplan,team}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
  *
+ * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
  * Synchronous, runs once at plugin init, caches in memory. Missing files are
  * tolerated (skipped with a debug log).
  */
@@ -14,15 +14,15 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import type { IntentType } from "./detectors.ts"
 import { classifyModelFamily, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
+export type Workflow = "omo" | "v1"
+
 type DeepworkVariant = "default" | "gpt" | "gemini" | "planner"
-type ModeVariant = "superplan" | "team"
 type CategoryName =
   | "frontend"
   | "creative"
@@ -34,7 +34,6 @@ type CategoryName =
   | "writing"
 
 const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner"]
-const MODE_VARIANTS: ModeVariant[] = ["superplan", "team"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
   "creative",
@@ -47,7 +46,6 @@ const CATEGORY_NAMES: CategoryName[] = [
 ]
 
 const deepworkPrompts = new Map<DeepworkVariant, string>()
-const modePrompts = new Map<ModeVariant, string>()
 const categoryPrompts = new Map<string, string>()
 
 function loadFile(absPath: string): string | null {
@@ -58,52 +56,48 @@ function loadFile(absPath: string): string | null {
   }
 }
 
-export function loadAllPrompts(rootDir = DEFAULT_PROMPTS_ROOT): void {
-  // Clear stale entries so a reload after changing promptsRoot or removing a
-  // prompt file does not leave orphaned cached values behind.
+export function loadAllPrompts(
+  rootDir: string = DEFAULT_PROMPTS_ROOT,
+  workflow: Workflow = "omo",
+): void {
   deepworkPrompts.clear()
-  modePrompts.clear()
   categoryPrompts.clear()
+  const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
-    const text = loadFile(join(rootDir, "deepwork", `${v}.md`))
+    const text = loadFile(join(base, "deepwork", `${v}.md`))
     if (text == null) {
-      log.debug(`prompt missing: deepwork/${v}.md (root=${rootDir})`)
+      log.debug(`prompt missing: ${workflow}/deepwork/${v}.md (root=${rootDir})`)
     } else {
       deepworkPrompts.set(v, text)
     }
   }
-  for (const v of MODE_VARIANTS) {
-    const text = loadFile(join(rootDir, "mode", `${v}.md`))
-    if (text == null) {
-      log.debug(`prompt missing: mode/${v}.md (root=${rootDir})`)
-    } else {
-      modePrompts.set(v, text)
-    }
-  }
   for (const name of CATEGORY_NAMES) {
-    const text = loadFile(join(rootDir, "category", `${name}.md`))
+    const text = loadFile(join(base, "category", `${name}.md`))
     if (text == null) {
-      log.debug(`prompt missing: category/${name}.md (root=${rootDir})`)
+      log.debug(`prompt missing: ${workflow}/category/${name}.md (root=${rootDir})`)
     } else {
       categoryPrompts.set(name, text)
     }
   }
   log.info(
-    `loaded prompts: deepwork=${deepworkPrompts.size}/${DEEPWORK_VARIANTS.length}, ` +
-      `mode=${modePrompts.size}/${MODE_VARIANTS.length}, ` +
+    `loaded prompts: workflow=${workflow} deepwork=${deepworkPrompts.size}/${DEEPWORK_VARIANTS.length}, ` +
       `category=${categoryPrompts.size}/${CATEGORY_NAMES.length}`,
   )
 }
 
-export function pickDeepworkVariant(opts: {
-  agentName?: string | undefined
-  providerID?: string | undefined
-  modelID: string
+/**
+ * Config-time variant selection based on agent name + declared preference model.
+ * Unlike the old runtime `pickDeepworkVariant`, this does NOT inspect the
+ * actual chat model — it uses the agent's fallbackChain[0].model.
+ */
+export function pickDeepworkVariantForAgent(opts: {
+  agentName: string
+  preferenceModel: string
 }): DeepworkVariant {
-  if (isPlannerAgent(opts.agentName ?? "")) return "planner"
+  if (isPlannerAgent(opts.agentName)) return "planner"
   const family = classifyModelFamily({
-    providerID: opts.providerID,
-    modelID: opts.modelID,
+    providerID: "",
+    modelID: opts.preferenceModel,
   })
   if (family === "gpt") return "gpt"
   if (family === "gemini") return "gemini"
@@ -113,43 +107,8 @@ export function pickDeepworkVariant(opts: {
 export function getDeepworkPrompt(variant: DeepworkVariant): string {
   return deepworkPrompts.get(variant) ?? ""
 }
-export function getModePrompt(variant: ModeVariant): string {
-  return modePrompts.get(variant) ?? ""
-}
 export function getCategoryPrompt(name: string): string {
   return categoryPrompts.get(name) ?? ""
-}
-
-export function composeIntentPrompt(opts: {
-  intent: IntentType
-  agentName?: string | undefined
-  providerID?: string | undefined
-  modelID: string
-}): string {
-  const deepwork = () => {
-    const pickOpts: Parameters<typeof pickDeepworkVariant>[0] = { modelID: opts.modelID }
-    if (opts.agentName !== undefined) pickOpts.agentName = opts.agentName
-    if (opts.providerID !== undefined) pickOpts.providerID = opts.providerID
-    return getDeepworkPrompt(pickDeepworkVariant(pickOpts))
-  }
-  switch (opts.intent) {
-    case "deepwork":
-      return deepwork()
-    case "team":
-      return getModePrompt("team")
-    case "superplan":
-      return getModePrompt("superplan")
-    case "superplan-deepwork": {
-      const sp = getModePrompt("superplan")
-      const dw = deepwork()
-      if (!sp && !dw) return ""
-      if (!sp) return dw
-      if (!dw) return sp
-      return `${sp}\n\n---\n\n${dw}`
-    }
-    default:
-      return ""
-  }
 }
 
 export const _internals = { classifyModelFamily } as {

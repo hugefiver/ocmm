@@ -1,6 +1,6 @@
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { getCategoryPrompt } from "../intent/prompt-loader.ts"
+import { getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
@@ -43,6 +43,22 @@ function applyAgentEntry(
   agentMap[agent.name] = existing
 }
 
+function deepworkPromptForAgent(
+  agent: Agent,
+  override?: NormalizedShorthand,
+): string {
+  const chain =
+    override?.requirement?.fallbackChain?.length
+      ? override.requirement.fallbackChain
+      : agent.requirement.fallbackChain
+  const prefModel = chain[0]?.model ?? ""
+  const variant = pickDeepworkVariantForAgent({
+    agentName: agent.name,
+    preferenceModel: prefModel,
+  })
+  return getDeepworkPrompt(variant)
+}
+
 function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
   return {
     name: c.name,
@@ -67,7 +83,11 @@ export function createConfigHandler(args: {
 
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
-      applyAgentEntry(agentMap, a, normalizeShorthand(cfg.agents?.[a.name]))
+      const norm = normalizeShorthand(cfg.agents?.[a.name])
+      const prompt = deepworkPromptForAgent(a, norm)
+      const extras: { prompt?: string } = {}
+      if (prompt) extras.prompt = prompt
+      applyAgentEntry(agentMap, a, norm, extras)
     }
 
     for (const c of BUILTIN_CATEGORIES) {

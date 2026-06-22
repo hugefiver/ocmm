@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { deepMerge, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
+import { defaultConfig } from "./schema.ts"
 
 test("stripJsoncCommentsAndTrailingCommas keeps strings intact", () => {
   const src = `{
@@ -44,4 +45,16 @@ test("deepMerge: scalars and objects override; key-aware arrays union", () => {
   ])
   assert.deepEqual(merged.disabledAgents.sort(), ["code-search", "doc-search"])
   assert.deepEqual(merged.other, [3])
+})
+
+test("workflow field defaults to omo", () => {
+  const cfg = defaultConfig()
+  assert.equal(cfg.workflow, "omo")
+})
+
+test("deepMerge: workflow scalar replaces (project wins)", () => {
+  const user = { workflow: "v1" as const }
+  const project = { workflow: "omo" as const }
+  const merged = deepMerge(user, project) as { workflow: string }
+  assert.equal(merged.workflow, "omo")
 })

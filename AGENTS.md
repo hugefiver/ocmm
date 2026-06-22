@@ -6,7 +6,7 @@ Conventions and workflows for agents working on the ocmm codebase.
 
 ```bash
 pnpm run typecheck   # tsc --noEmit, strict mode
-pnpm test            # node --test, 142 tests, no external deps
+pnpm test            # node --test, no external deps
 pnpm run build       # tsc -> dist/
 ```
 
@@ -24,16 +24,30 @@ pnpm run build
 
 `dist/index.js` is the plugin entry point.
 
-### 2. Create a temp test directory
+### 2. Create an isolated test directory with XDG separation
+
+All OpenCode tests MUST use separate config and state directories to avoid polluting the current OpenCode session. Set XDG environment variables to redirect config, data, state, and cache into the test directory:
 
 ```powershell
 $testDir = "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 mkdir.exe -p "$testDir/.opencode"
+mkdir.exe -p "$testDir/xdg-config"
+mkdir.exe -p "$testDir/xdg-data"
+mkdir.exe -p "$testDir/xdg-state"
+mkdir.exe -p "$testDir/xdg-cache"
+
+# Set these before every opencode command in this test session:
+$env:XDG_CONFIG_HOME = "$testDir/xdg-config"
+$env:XDG_DATA_HOME   = "$testDir/xdg-data"
+$env:XDG_STATE_HOME   = "$testDir/xdg-state"
+$env:XDG_CACHE_HOME   = "$testDir/xdg-cache"
 ```
+
+Verify isolation with `opencode debug paths` — all paths should point inside `$testDir`.
 
 ### 3. Write a minimal opencode.json
 
-Point at the built plugin and any provider you want to test with. Only include the models you want to exercise. Replace `<provider>`, `<npm-package>`, `<baseURL>`, `<apiKey>`, and model IDs with your actual provider details:
+Point at the built plugin and any provider you want to test with. Only include the models you want to exercise. Replace `<provider>`, `<npm-package>`, `<baseURL>`, `<apiKey>`, and model IDs with your actual provider details. Set output limits slightly below the provider's actual max to avoid overflow from internal token accounting:
 
 ```jsonc
 {
@@ -48,8 +62,8 @@ Point at the built plugin and any provider you want to test with. Only include t
         "baseURL": "<baseURL>"
       },
       "models": {
-        "<model-a>": { "name": "Model A", "limit": { "context": 1000000, "output": 128000 } },
-        "<model-b>": { "name": "Model B", "limit": { "context": 256000, "output": 128000 } }
+        "<model-a>": { "name": "Model A", "limit": { "context": 1000000, "output": 127000 } },
+        "<model-b>": { "name": "Model B", "limit": { "context": 256000, "output": 127000 } }
       }
     }
   },
@@ -64,10 +78,11 @@ Write this to `$testDir\opencode.json`.
 
 ### 4. Write an ocmm config mapping agents to your provider's models
 
-Create `$testDir\.opencode\ocmm.jsonc`. The built-in agents reference models like `claude-opus-4-7` and `gpt-5.5` which your provider may not serve, so you must override them:
+Create `$testDir\.opencode\ocmm.jsonc`. The built-in agents reference models like `claude-opus-4-7` and `gpt-5.5` which your provider may not serve, so you must override them. Set `workflow` to `"v1"` or `"omo"` (default) to choose the prompt set:
 
 ```jsonc
 {
+  "workflow": "v1",
   "agents": {
     "orchestrator": { "model": "<provider>/<model-a>", "variant": "max", "fallbackModels": ["<provider>/<model-b>"] },
     "worker": { "model": "<provider>/<model-b>", "variant": "high" },
@@ -80,7 +95,7 @@ Create `$testDir\.opencode\ocmm.jsonc`. The built-in agents reference models lik
 
 ### 5. Run verification commands
 
-All commands run from `$testDir` (use `workdir` or `Set-Location`).
+All commands run from `$testDir` (use `workdir` or `Set-Location`). Ensure the XDG env vars from step 2 are set.
 
 **Check plugin loads and agents register:**
 
@@ -91,7 +106,8 @@ opencode debug config --print-logs --log-level DEBUG 2>&1 | rg "ocmm"
 Expected lines:
 ```
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
-[ocmm] loaded prompts: deepwork=4/4, mode=2/2, category=8/8
+[ocmm] loaded prompts: workflow=v1 deepwork=4/4, category=8/8
+[ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
 [ocmm] config: registered N agents (built-in + categories + user)
 ```
 
@@ -111,36 +127,33 @@ opencode run --model <provider>/<model-a> --agent orchestrator "Say hello in exa
 
 Should produce a model response with no errors. The header line shows `> orchestrator · <model-a>`.
 
-**Verify chat.params routing with debug logs:**
+**Verify chat.params routing and v1 skill injection with debug logs:**
 
 ```powershell
 $env:OCMM_DEBUG='1'
 opencode run --print-logs --log-level DEBUG --model <provider>/<model-a> --agent orchestrator "Say hi" 2>&1 | rg "ocmm"
 ```
 
-Expected:
+Expected (v1 workflow):
 ```
-[ocmm] chat.message: agent=orchestrator model=<provider>/<model-a> parts=1 textLen=N
+[ocmm] v1 skills queued: N chars (sessionID=ses_...)
+[ocmm] system.transform: prepended N chars (sessionID=ses_...)
 [ocmm] routed agent=orchestrator model=<provider>/<model-a> variant=max source=user-config
 ```
 
+Expected (omo workflow): no `v1 skills queued` line — omo attaches prompts declaratively at config time, no runtime injection.
+
 `OCMM_DEBUG=1` enables the `[ocmm] routed ...` debug line (the `debug: true` config field alone does not enable it; both are needed for full verbosity).
-
-**Test intent keyword detection (deepwork):**
-
-```bash
-opencode run --print-logs --log-level DEBUG --model <provider>/<model-a> --agent orchestrator "dw say hi" 2>&1 | rg "ocmm"
-```
-
-Expected:
-```
-[ocmm] intent=deepwork agent=orchestrator -> queued N chars for system injection
-[ocmm] system.transform: prepended N chars (sessionID=ses_...)
-```
 
 ### 6. Clean up
 
 ```powershell
+# Unset XDG env vars first
+$env:XDG_CONFIG_HOME = $null
+$env:XDG_DATA_HOME   = $null
+$env:XDG_STATE_HOME   = $null
+$env:XDG_CACHE_HOME   = $null
+
 rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 ```
 
@@ -150,8 +163,8 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 |---|---|---|
 | `config` | `registered N agents` | Plugin loaded, agents/categories registered with your provider's models |
 | `chat.params` | `routed agent=... variant=... source=...` | Variant resolved via 4-tier priority, translated to model params |
-| `chat.message` | `intent=deepwork ... queued N chars` | Keyword detection + prompt queueing |
-| `experimental.chat.system.transform` | `prepended N chars` | Queued prompt injected into system message |
+| `chat.message` | `v1 skills queued: N chars` (v1 only; omo is no-op) | v1 skill content queued on first message per session |
+| `experimental.chat.system.transform` | `prepended N chars` | Queued content injected into system message |
 | `event` | (no output on success) | Session lifecycle hooks fire without errors |
 
 ### Notes
@@ -160,3 +173,13 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 - The temp directory is outside the repo so it does not pollute git status.
 - `opencode debug config` reads from both `$testDir\opencode.json` and `$testDir\.opencode\*` — both must exist.
 - If `opencode run` shows no `[ocmm]` lines, the plugin failed to load. Check `--print-logs --log-level DEBUG` for import errors.
+- To test v1 workflow: add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message; omo (default) attaches prompts to agents declaratively with no runtime injection.
+- If you see `max_tokens` errors (`integer above maximum value`), lower the model's `output` limit in `opencode.json` — OpenCode adds internal overhead to the configured limit.
+
+## v1 Maintenance
+
+All v1 skill file changes (in `skills/v1/`) and v1 prompt file changes (in `prompts/v1/`) MUST be synchronized with `docs/v1-maintenance.md` in the same commit, and vice versa. A file change without a doc update, or a doc update without a file change, is a failed review.
+
+This applies to: content edits, new files, deletions, renames, and upstream skill syncs.
+
+omo prompts (`prompts/omo/`) are not tracked in this doc.

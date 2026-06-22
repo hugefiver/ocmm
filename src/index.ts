@@ -19,6 +19,7 @@ import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/chat-message.ts"
 import { createEventHandler } from "./hooks/event.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
+import { loadV1Skills } from "./intent/skill-loader.ts"
 import { log } from "./shared/logger.ts"
 import type { OcmmClient } from "./runtime-fallback/dispatcher.ts"
 
@@ -32,11 +33,6 @@ export type PluginInterface = {
   event?: (input: unknown) => Promise<void>
 }
 
-/**
- * Subset of OpenCode's PluginInput we consume. The real shape is richer
- * (project, worktree, serverUrl, experimental_workspace, $). We only need
- * `directory` for config resolution and `client` for runtime-fallback dispatch.
- */
 export type ServerInput = {
   directory?: string
   cwd?: string
@@ -45,14 +41,13 @@ export type ServerInput = {
 
 export function createPlugin(input?: ServerInput): {
   pluginInterface: PluginInterface
-  /** Useful for tests / introspection. */
   getConfig: () => OcmmConfig
-  /** Reload from disk (useful in dev). */
   reload: () => OcmmConfig
 } {
   const cwd = input?.directory ?? input?.cwd ?? process.cwd()
   let config: OcmmConfig
   let promptsLoaded = false
+  let v1SkillsCache: string | null = null
 
   function loadOrDefault(): OcmmConfig {
     try {
@@ -72,9 +67,18 @@ export function createPlugin(input?: ServerInput): {
   function ensurePromptsLoaded(): void {
     if (promptsLoaded) return
     try {
-      loadAllPrompts(config.promptsRoot)
+      loadAllPrompts(config.promptsRoot, config.workflow)
     } catch (err) {
       log.warn(`prompt load failed: ${(err as Error).message}`)
+    }
+    if (config.workflow === "v1") {
+      try {
+        v1SkillsCache = loadV1Skills()
+        log.info(`v1 skills loaded: ${v1SkillsCache.length} chars`)
+      } catch (err) {
+        log.warn(`v1 skill load failed: ${(err as Error).message}`)
+        v1SkillsCache = ""
+      }
     }
     promptsLoaded = true
   }
@@ -86,7 +90,10 @@ export function createPlugin(input?: ServerInput): {
   const pluginInterface: PluginInterface = {
     config: createConfigHandler({ getConfig }),
     "chat.params": createChatParamsHandler({ getConfig }),
-    "chat.message": createChatMessageHandler({ getConfig }),
+    "chat.message": createChatMessageHandler({
+      getConfig,
+      ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
+    }),
     "experimental.chat.system.transform": createSystemTransformHandler(),
     event: createEventHandler({
       getConfig,
@@ -101,18 +108,13 @@ export function createPlugin(input?: ServerInput): {
     reload(): OcmmConfig {
       config = loadOrDefault()
       promptsLoaded = false
+      v1SkillsCache = null
       ensurePromptsLoaded()
       return config
     },
   }
 }
 
-/**
- * The top-level plugin module OpenCode expects.
- *
- * `server(input, options)` must return a plain object whose keys are valid
- * OpenCode hook names. We also wire a `dispose()` for symmetry.
- */
 const pluginModule = {
   id: PLUGIN_ID,
   server(input: ServerInput): PluginInterface {

@@ -1,10 +1,7 @@
-import { detectIntent, isPlannerAgent } from "../intent/detectors.ts"
-import { composeIntentPrompt } from "../intent/prompt-loader.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 
 export type SessionIntentState = {
-  intents: Set<string>
   prompts: string[]
 }
 
@@ -17,7 +14,7 @@ export function clearSessionIntent(sessionID: string): void {
 function getOrInit(sessionID: string): SessionIntentState {
   let s = sessionState.get(sessionID)
   if (!s) {
-    s = { intents: new Set(), prompts: [] }
+    s = { prompts: [] }
     sessionState.set(sessionID, s)
   }
   return s
@@ -29,74 +26,27 @@ export function getSessionPrompt(sessionID: string): string | null {
   return s.prompts.join("\n\n---\n\n")
 }
 
-function readUserTextFromParts(parts: unknown): string {
-  if (!Array.isArray(parts)) return ""
-  const out: string[] = []
-  for (const p of parts) {
-    if (typeof p === "string") {
-      out.push(p)
-      continue
-    }
-    if (!isRecord(p)) continue
-    if (typeof p.text === "string") out.push(p.text)
-    else if (typeof p.content === "string") out.push(p.content)
-  }
-  return out.join("\n")
-}
-
 export function createChatMessageHandler(args: {
   getConfig: () => OcmmConfig
+  getV1Skills?: () => string
 }): (input: unknown, output: unknown) => Promise<void> {
-  return async (rawInput, rawOutput) => {
+  return async (rawInput, _rawOutput) => {
     if (!isRecord(rawInput)) return
     const cfg = args.getConfig()
-    if (!cfg.intent.enabled) return
+    if (cfg.workflow !== "v1") return
 
     const sessionID = typeof rawInput.sessionID === "string" ? rawInput.sessionID : ""
     if (!sessionID) return
 
-    let agentName: string | undefined
-    if (typeof rawInput.agent === "string") agentName = rawInput.agent
-    else if (isRecord(rawInput.agent) && typeof rawInput.agent.name === "string") {
-      agentName = rawInput.agent.name
-    }
-    if (cfg.intent.skipAgents.includes(agentName ?? "")) return
-
-    let providerID: string | undefined
-    let modelID: string | undefined
-    if (isRecord(rawInput.model)) {
-      providerID = typeof rawInput.model.providerID === "string" ? rawInput.model.providerID : undefined
-      modelID = typeof rawInput.model.modelID === "string" ? rawInput.model.modelID : undefined
-    }
-    if (!modelID) return
-
-    const parts = isRecord(rawOutput) ? rawOutput.parts : undefined
-    const userText = readUserTextFromParts(parts)
-    if (cfg.debug) {
-      log.debug(
-        `chat.message: agent=${agentName ?? "<none>"} model=${providerID}/${modelID} ` +
-          `parts=${Array.isArray(parts) ? parts.length : 0} textLen=${userText.length}`,
-      )
-    }
-    const intent = detectIntent(userText)
-    if (!intent) return
-    if (intent.type === "deepwork" && isPlannerAgent(agentName)) return
-
     const state = getOrInit(sessionID)
-    if (state.intents.has(intent.type)) return
-    state.intents.add(intent.type)
+    if (state.prompts.length > 0) return
 
-    const prompt = composeIntentPrompt({
-      intent: intent.type,
-      ...(agentName !== undefined ? { agentName } : {}),
-      ...(providerID !== undefined ? { providerID } : {}),
-      modelID,
-    })
-    if (!prompt) return
-    state.prompts.push(prompt)
+    const skills = args.getV1Skills ? args.getV1Skills() : ""
+    if (!skills) return
+    state.prompts.push(skills)
 
     log.info(
-      `intent=${intent.type} agent=${agentName ?? "<none>"} -> queued ${prompt.length} chars for system injection`,
+      `v1 skills queued: ${skills.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
     )
   }
 }

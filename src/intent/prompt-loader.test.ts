@@ -7,50 +7,96 @@ import { join } from "node:path"
 import {
   loadAllPrompts,
   getDeepworkPrompt,
-  getModePrompt,
   getCategoryPrompt,
+  pickDeepworkVariantForAgent,
 } from "./prompt-loader.ts"
 
-function makeTempRoot(): string {
+function makeTempRoot(workflow: "omo" | "v1"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
-  mkdirSync(join(root, "deepwork"), { recursive: true })
-  mkdirSync(join(root, "mode"), { recursive: true })
-  mkdirSync(join(root, "category"), { recursive: true })
+  mkdirSync(join(root, workflow, "deepwork"), { recursive: true })
+  mkdirSync(join(root, workflow, "category"), { recursive: true })
   return root
 }
 
-test("loadAllPrompts loads files that exist and tolerates missing ones", () => {
-  const root = makeTempRoot()
+test("loadAllPrompts loads files from the workflow subdir", () => {
+  const root = makeTempRoot("omo")
   try {
-    writeFileSync(join(root, "deepwork", "default.md"), "default-content")
-    writeFileSync(join(root, "mode", "team.md"), "team-content")
+    writeFileSync(join(root, "omo", "deepwork", "default.md"), "default-content")
+    writeFileSync(join(root, "omo", "category", "frontend.md"), "frontend-content")
+    loadAllPrompts(root, "omo")
+    assert.equal(getDeepworkPrompt("default"), "default-content")
+    assert.equal(getCategoryPrompt("frontend"), "frontend-content")
+    assert.equal(getCategoryPrompt("writing"), "")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadAllPrompts defaults to omo workflow", () => {
+  const root = makeTempRoot("omo")
+  try {
+    writeFileSync(join(root, "omo", "deepwork", "planner.md"), "planner-content")
     loadAllPrompts(root)
-    assert.ok(getDeepworkPrompt("default").length > 0)
-    assert.equal(getModePrompt("team"), "team-content")
-    assert.equal(getCategoryPrompt("frontend"), "")
+    assert.equal(getDeepworkPrompt("planner"), "planner-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
 test("reload clears stale cache so removed files disappear", () => {
-  const rootA = makeTempRoot()
-  const rootB = makeTempRoot()
+  const rootA = makeTempRoot("omo")
+  const rootB = makeTempRoot("v1")
   try {
-    writeFileSync(join(rootA, "deepwork", "default.md"), "from-root-a")
-    writeFileSync(join(rootA, "mode", "superplan.md"), "sp-a")
-    loadAllPrompts(rootA)
-    assert.equal(getDeepworkPrompt("default"), "from-root-a")
-    assert.equal(getModePrompt("superplan"), "sp-a")
+    writeFileSync(join(rootA, "omo", "deepwork", "default.md"), "from-omo")
+    loadAllPrompts(rootA, "omo")
+    assert.equal(getDeepworkPrompt("default"), "from-omo")
 
-    // rootB has a different file set — no default.md, but has gpt.md
-    writeFileSync(join(rootB, "deepwork", "gpt.md"), "gpt-b")
-    loadAllPrompts(rootB)
+    writeFileSync(join(rootB, "v1", "deepwork", "gpt.md"), "from-v1")
+    loadAllPrompts(rootB, "v1")
     assert.equal(getDeepworkPrompt("default"), "", "stale default.md must be gone after reload")
-    assert.equal(getDeepworkPrompt("gpt"), "gpt-b")
-    assert.equal(getModePrompt("superplan"), "", "stale superplan.md must be gone after reload")
+    assert.equal(getDeepworkPrompt("gpt"), "from-v1")
   } finally {
     rmSync(rootA, { recursive: true, force: true })
     rmSync(rootB, { recursive: true, force: true })
   }
+})
+
+test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),
+    "planner",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "plan", preferenceModel: "anything" }),
+    "planner",
+  )
+})
+
+test("pickDeepworkVariantForAgent picks gpt variant for gpt model", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "worker", preferenceModel: "gpt-5.5" }),
+    "gpt",
+  )
+})
+
+test("pickDeepworkVariantForAgent picks gemini variant for gemini model", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "reviewer", preferenceModel: "gemini-3.1-pro" }),
+    "gemini",
+  )
+})
+
+test("pickDeepworkVariantForAgent defaults for unknown families", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "claude-opus-4-7" }),
+    "default",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "glm-5.1" }),
+    "default",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "unknown-model" }),
+    "default",
+  )
 })
