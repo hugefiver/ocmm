@@ -98,9 +98,9 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * Deep-merge two plain-object trees.
  *
  * Default array policy: REPLACE (override wins) for predictable override
- * semantics. Two arrays are UNIONED de-duped instead: `fallbackModels` and
- * `disabledAgents` — these accumulate across user+project+profile layers so
- * a project disabling an agent still applies when a profile is active.
+ * semantics. Model fallback and feature-disable arrays are UNIONED de-duped
+ * instead — these accumulate across user+project layers so global/project
+ * gates compose predictably.
  *
  * Pass `{ profileOverlay: true }` to force ALL arrays to replace (use when
  * overlaying a profile that should fully own a field rather than accumulate).
@@ -114,7 +114,7 @@ export function deepMerge(
   if (override === undefined) return base
   if (Array.isArray(base) && Array.isArray(override)) {
     if (opts?.profileOverlay) return override
-    if (parentKey === "fallbackModels" || parentKey === "disabledAgents") {
+    if (parentKey && ACCUMULATING_ARRAY_KEYS.has(parentKey)) {
       const set = new Set<string>([...base, ...override].map((x) => String(x)))
       return Array.from(set)
     }
@@ -129,6 +129,16 @@ export function deepMerge(
   }
   return override
 }
+
+const ACCUMULATING_ARRAY_KEYS = new Set([
+  "fallbackModels",
+  "disabledAgents",
+  "disabledHooks",
+  "disabledTools",
+  "disabledSkills",
+  "disabledCommands",
+  "disabledMcps",
+])
 
 export type LoadedConfig = {
   config: OcmmConfig

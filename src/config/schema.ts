@@ -46,6 +46,14 @@ const ShorthandFields = {
   requirement: ModelRequirementSchema.optional(),
 }
 
+const FeatureGateArrayFields = {
+  disabledHooks: z.array(z.string()).optional(),
+  disabledTools: z.array(z.string()).optional(),
+  disabledSkills: z.array(z.string()).optional(),
+  disabledCommands: z.array(z.string()).optional(),
+  disabledMcps: z.array(z.string()).optional(),
+}
+
 export const CategoryEntrySchema = z.object(ShorthandFields).strict()
 
 export const AgentEntrySchema = z
@@ -107,6 +115,7 @@ export const ProfileEntrySchema = z
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
     agents: z.record(z.string(), AgentEntrySchema).optional(),
     disabledAgents: z.array(z.string()).optional(),
+    ...FeatureGateArrayFields,
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
     intent: z
@@ -156,6 +165,7 @@ export const OcmmConfigSchema = z
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
     agents: z.record(z.string(), AgentEntrySchema).optional(),
     disabledAgents: z.array(z.string()).optional(),
+    ...FeatureGateArrayFields,
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
     /** 'v1' enables the superpowers 5-phase chain; 'omo' uses upstream omo prompts. */
