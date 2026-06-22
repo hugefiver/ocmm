@@ -74,6 +74,15 @@ test("schema defaults shared skills namespace to empty arrays", () => {
   assert.deepEqual(parsed.skills, { sources: [], enable: [], disable: [] })
 })
 
+test("schema accepts hashline namespace and defaults disabled", () => {
+  assert.deepEqual(OcmmConfigSchema.parse({}).hashline, { enabled: false })
+
+  const parsed = OcmmConfigSchema.safeParse({ hashline: { enabled: true } })
+  assert.equal(parsed.success, true)
+  if (!parsed.success) return
+  assert.equal(parsed.data.hashline.enabled, true)
+})
+
 test("schema accepts rich agent override fields", () => {
   const parsed = OcmmConfigSchema.safeParse({
     agents: {
