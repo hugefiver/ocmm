@@ -224,6 +224,23 @@ test("profile can override runtimeFallback settings", () => {
   }
 })
 
+test("profile can override hashline settings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      hashline: { enabled: false },
+      profiles: {
+        editing: { hashline: { enabled: true } },
+      },
+      activeProfile: "editing",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.hashline.enabled, true)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile with no activeProfile does not apply", () => {
   const xdg = makeTempXdg()
   try {
@@ -304,6 +321,7 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
           enable: ["git-master"],
           disable: ["debugging"],
         },
+        hashline: { enabled: true },
         debug: true,
         registerBuiltinAgents: true,
       },
