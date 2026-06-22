@@ -1,11 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
-import { join } from "node:path"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
@@ -86,3 +88,38 @@ test("registerBuiltinAgents=false leaves agent map untouched", async () => {
   await handler(cfg, undefined)
   assert.deepEqual(cfg.agent, {})
 })
+
+test("config registers shared skill paths and preserves existing urls", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-hook-skills-"))
+  try {
+    writeSkill(root, "git-master", "git-master")
+    writeSkill(root, "debugging", "debugging")
+    writeSkill(root, "frontend", "frontend")
+
+    const c = {
+      ...defaultConfig(),
+      skills: { sources: [], enable: ["git-master", "debugging"], disable: ["debugging"] },
+    }
+    const handler = createConfigHandler({ getConfig: () => c, skillsRoot: root })
+    const cfg: { agent: Record<string, unknown>; skills: { paths: string[]; urls: string[] } } = {
+      agent: {},
+      skills: { paths: [join(root, "existing")], urls: ["https://example.com/skills"] },
+    }
+
+    await handler(cfg, undefined)
+
+    assert.deepEqual(cfg.skills.urls, ["https://example.com/skills"])
+    assert.deepEqual(cfg.skills.paths.sort(), [join(root, "existing"), join(root, "git-master")].sort())
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+function writeSkill(root: string, dir: string, name: string): void {
+  const skillDir = join(root, dir)
+  mkdirSync(skillDir, { recursive: true })
+  writeFileSync(
+    join(skillDir, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${name} skill\n---\n# ${name}\n`,
+  )
+}
