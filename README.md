@@ -108,8 +108,8 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     "skipAgents": ["plan"]
   },
 
-  "fallbackModels": ["openai/gpt-5.4-mini"],
-  "systemDefaultModel": "openai/gpt-5.4-mini",
+  "fallbackModels": ["openai/gpt-5.4-mini"],           // reserved — not yet consumed by the router
+  "systemDefaultModel": "openai/gpt-5.4-mini",          // reserved — not yet consumed by the router
 
   "registerBuiltinAgents": true,
   "debug": false
@@ -133,6 +133,7 @@ Both `agents.*` and `categories.*` accept either shape:
 
 | variant | GPT family | Claude (Opus 4.7+) | Gemini | Kimi/GLM/MiniMax/unknown |
 |---|---|---|---|---|
+| `none` | _(no override)_ | _(no override)_ | _(no override)_ | _(no override)_ |
 | `minimal` | `reasoningEffort=minimal` | `thinking={ disabled }` | `reasoningEffort=minimal` | `temperature=0.0` |
 | `low` | `low` | `thinking budget 4k` | `low` | `0.2` |
 | `medium` / `auto` | `medium` | `thinking budget 12k` | `medium` | `0.5` |
@@ -174,7 +175,7 @@ Each category has a prompt-append under `prompts/category/<name>.md` that is set
 
 | Keyword | Mode prompt | Variant routing |
 |---|---|---|
-| `deepwork` / `dw` | `prompts/deepwork/{default,gpt,gemini,planner,codex}.md` | planner agents → `planner.md`, GPT → `gpt.md`, Gemini → `gemini.md`, else `default.md` |
+| `deepwork` / `dw` | `prompts/deepwork/{default,gpt,gemini,planner}.md` | planner agents → `planner.md`, GPT → `gpt.md`, Gemini → `gemini.md`, else `default.md` |
 | `team` / `team-mode` / `teammate` / `teamwork` | `prompts/mode/team.md` | n/a |
 | `superplan` / `sp` | `prompts/mode/superplan.md` | n/a |
 | `superplan deepwork` (any order) | superplan + deepwork concatenated | combined |
@@ -305,7 +306,7 @@ pnpm test
 pnpm run build
 ```
 
-Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 105 tests across config, routing, intent, hooks, and runtime-fallback.
+Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 142 tests across config, routing, intent, hooks, and runtime-fallback.
 
 ### Isolated QA
 

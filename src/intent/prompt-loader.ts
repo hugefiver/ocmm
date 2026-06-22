@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/:
- *     deepwork/{default,gpt,gemini,planner,codex}.md
+ *     deepwork/{default,gpt,gemini,planner}.md
  *     mode/{superplan,team}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
  *
@@ -21,7 +21,7 @@ import { log } from "../shared/logger.ts"
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
-type DeepworkVariant = "default" | "gpt" | "gemini" | "planner" | "codex"
+type DeepworkVariant = "default" | "gpt" | "gemini" | "planner"
 type ModeVariant = "superplan" | "team"
 type CategoryName =
   | "frontend"
@@ -33,7 +33,7 @@ type CategoryName =
   | "high-effort"
   | "writing"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner", "codex"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner"]
 const MODE_VARIANTS: ModeVariant[] = ["superplan", "team"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -59,6 +59,11 @@ function loadFile(absPath: string): string | null {
 }
 
 export function loadAllPrompts(rootDir = DEFAULT_PROMPTS_ROOT): void {
+  // Clear stale entries so a reload after changing promptsRoot or removing a
+  // prompt file does not leave orphaned cached values behind.
+  deepworkPrompts.clear()
+  modePrompts.clear()
+  categoryPrompts.clear()
   for (const v of DEEPWORK_VARIANTS) {
     const text = loadFile(join(rootDir, "deepwork", `${v}.md`))
     if (text == null) {

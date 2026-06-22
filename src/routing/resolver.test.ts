@@ -97,3 +97,35 @@ test("unknown agent without variant -> null", () => {
   })
   assert.equal(r, null)
 })
+
+test("entryMatches does not reverse-prefix-match a shorter chain entry to a longer input", () => {
+  // Two-entry chain: ['gpt-5.5', 'gpt-5']. Input 'gpt-5'.
+  // Reverse-prefix (removed) would match entry 'gpt-5.5' to input 'gpt-5'
+  // because 'gpt-5.5'.startsWith('gpt-5') is true. Forward-only (correct)
+  // skips 'gpt-5.5' and matches 'gpt-5' exactly.
+  const r = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5",
+    providerID: "openai",
+    agentsConfig: {
+      reviewer: {
+        model: "openai/gpt-5.5",
+        fallbackModels: ["openai/gpt-5"],
+      },
+    },
+  })
+  assert.ok(r)
+  assert.equal(r!.source, "user-config")
+  assert.equal(r!.entry.model, "gpt-5", "should match the exact entry, not the reverse-prefix one")
+})
+
+test("entryMatches forward-prefix-matches versioned aliases", () => {
+  const r = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.5-20250101",
+    providerID: "openai",
+  })
+  assert.ok(r)
+  assert.equal(r!.entry.model, "gpt-5.5")
+  assert.equal(r!.source, "agent-default")
+})

@@ -227,3 +227,24 @@ test("handles flat event shape (no nested event wrapper)", async () => {
 
   assert.equal(calls.length, 1)
 })
+
+test("event without model uses agent's primary model as failed key (not agent name)", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // No model in event props — handler should derive the failed key from the
+  // agent's requirement chain, not use the agent name "orchestrator" as key.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+  // If the agent name were used as the failed key, the second error (below)
+  // would NOT advance past fallback-a because the key wouldn't match.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
+  }))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+})

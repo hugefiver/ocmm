@@ -33,8 +33,11 @@ const VARIANT_SET = new Set<Variant>([
 
 function entryMatches(entry: FallbackEntry, modelID: string): boolean {
   if (entry.model === modelID) return true
+  // Forward prefix match: a chain entry "gpt-5.5" matches an input
+  // "gpt-5.5-20250101" (versioned alias). We intentionally do NOT match the
+  // reverse ("gpt-5" matching "gpt-5.5") because that would let a shorter
+  // chain entry swallow newer model IDs it was never meant to cover.
   if (modelID.startsWith(entry.model)) return true
-  if (entry.model.startsWith(modelID)) return true
   return false
 }
 

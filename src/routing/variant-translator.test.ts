@@ -35,3 +35,13 @@ test("generic providers fall back to temperature shaping", () => {
   assert.deepEqual(translateVariant("glm", "max"), { temperature: 1.0 })
   assert.deepEqual(translateVariant("unknown", "minimal"), { temperature: 0.0 })
 })
+
+test("none variant is a true no-op across all families", () => {
+  assert.deepEqual(translateVariant("gpt", "none"), {})
+  assert.deepEqual(translateVariant("claude-opus-47-plus", "none"), {})
+  assert.deepEqual(translateVariant("claude", "none"), {})
+  assert.deepEqual(translateVariant("gemini", "none"), {})
+  assert.deepEqual(translateVariant("kimi", "none"), {})
+  assert.deepEqual(translateVariant("glm", "none"), {})
+  assert.deepEqual(translateVariant("unknown", "none"), {})
+})

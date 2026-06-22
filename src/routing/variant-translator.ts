@@ -27,13 +27,15 @@ const NEUTRAL: VariantEffect = {}
 /**
  * Map a variant to OpenAI-style reasoningEffort.
  *
- * minimal/none -> "minimal", low -> "low", medium -> "medium",
- * high/auto/thinking -> "high", xhigh/max -> "high" (OpenAI lacks an "xhigh" tier; we keep "high" but raise temperature).
+ * `none` is a true no-op (returns NEUTRAL) so callers can opt out of
+ * reasoning overrides entirely. The remaining ladder mirrors OpenAI's tiers;
+ * `xhigh`/`max` collapse to "high" since OpenAI has no higher step.
  */
 function gptVariant(variant: Variant): VariantEffect {
   switch (variant) {
-    case "minimal":
     case "none":
+      return NEUTRAL
+    case "minimal":
       return { reasoningEffort: "minimal" }
     case "low":
       return { reasoningEffort: "low" }
@@ -54,17 +56,17 @@ function gptVariant(variant: Variant): VariantEffect {
 /**
  * Anthropic extended-thinking ladder.
  *
- * On Opus-4.7+ we lean into thinking budgets. On other Claude variants we
- * still emit a thinking block but with smaller budgets so callers can
- * decide whether to keep it.
+ * `none` is a true no-op. `minimal` disables thinking explicitly. On
+ * Opus-4.7+ we lean into larger budgets; other Claude variants get half.
  */
 function claudeVariant(variant: Variant, opus47Plus: boolean): VariantEffect {
   const budget = (n: number) => ({
     thinking: { type: "enabled" as const, budgetTokens: n },
   })
   switch (variant) {
-    case "minimal":
     case "none":
+      return NEUTRAL
+    case "minimal":
       return { thinking: { type: "disabled" } }
     case "low":
       return budget(opus47Plus ? 4_096 : 2_048)
@@ -83,11 +85,12 @@ function claudeVariant(variant: Variant, opus47Plus: boolean): VariantEffect {
   }
 }
 
-/** Gemini reasoning is exposed via reasoningEffort + a coarse thinking flag. */
+/** Gemini reasoning is exposed via reasoningEffort + a coarse thinking flag. `none` is a no-op. */
 function geminiVariant(variant: Variant): VariantEffect {
   switch (variant) {
-    case "minimal":
     case "none":
+      return NEUTRAL
+    case "minimal":
       return { reasoningEffort: "minimal" }
     case "low":
       return { reasoningEffort: "low" }
@@ -107,12 +110,13 @@ function geminiVariant(variant: Variant): VariantEffect {
 
 /**
  * Best-effort fallback translator for providers without a public reasoning knob:
- * rough temperature shaping plus an effort hint that downstream providers may ignore.
+ * rough temperature shaping. `none` is a true no-op (no temperature override).
  */
 function genericVariant(variant: Variant): VariantEffect {
   switch (variant) {
-    case "minimal":
     case "none":
+      return NEUTRAL
+    case "minimal":
       return { temperature: 0.0 }
     case "low":
       return { temperature: 0.2 }
