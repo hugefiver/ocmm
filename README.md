@@ -1,20 +1,32 @@
 # ocmm — OpenCode Multi-Model Auto-Router
 
-A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, injects mode-specific prompts when intent keywords appear in user input, reactively falls back to the next model in a chain when the active model fails at runtime, and supports named **profiles** for switching between model configurations.
+A small OpenCode plugin that auto-routes per-agent models, translates a single "variant" knob into provider-specific reasoning settings, attaches workflow-specific prompts declaratively at config time, and reactively falls back to the next model in a chain when the active model fails at runtime.
 
-Designed from scratch. Concepts (model tiering, per-model specialized prompts, intent gating, proactive + reactive fallback) are inspired by [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode); naming and code are independent.
+Concepts (model tiering, per-model specialized prompts, intent gating, proactive + reactive fallback) are inspired by [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode); naming and code are independent.
 
 ## What it does
 
 | Hook | What ocmm does |
 |---|---|
-| `config` | Registers 10 primary agents + 8 category-subagents with their preferred provider/model. User config can add, override, or disable any of them. |
-| `chat.params` | Resolves the variant for the active agent/model (4-tier priority: user-config → agent-default → category-default → input-variant) and applies the right `reasoningEffort` / extended-thinking budget / temperature for the model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...). |
-| `chat.message` | Detects `deepwork` / `dw` / `team` / `superplan` / `sp` keywords in `output.parts` and queues a composed mode prompt for the session. The deepwork prompt has GPT, Gemini, default, and planner variants picked by model family + agent. |
-| `experimental.chat.system.transform` | Drains the queued prompt for the session and prepends it to `output.system`. This is the actual injection seam — `chat.message` cannot mutate the system prompt directly. |
+| `config` | Registers 10 primary agents + 8 category-subagents with their preferred provider/model. Attaches workflow-specific deepwork prompts to each agent based on model family. User config can add, override, or disable any of them. |
+| `chat.params` | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant) and applies the right `reasoningEffort` / extended-thinking budget / temperature for the model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...). |
+| `chat.message` | v1 workflow: queues superpowers skills content on the first message per session. omo workflow: no-op (prompts are declaratively attached at config time). |
+| `experimental.chat.system.transform` | v1 workflow: drains queued skills content and prepends to `output.system`. omo workflow: no-op. |
 | `event` | Cleans up per-session state on `session.deleted` / `session.idle`. On `session.error`: classifies the error, and if retryable, dispatches the next model in the agent's fallback chain via `client.session.prompt`. |
 
 The plugin **does not** change the model on a per-call basis via `chat.params`. OpenCode's `chat.params` output schema has no `model` field. Per-agent routing happens via the `config` hook (the only safe seam for model selection), and reactive re-routing happens via the `event` hook + `client.session.prompt`.
+
+## Workflows
+
+ocmm supports two workflows, switchable via the `workflow` config field:
+
+**`omo`** (default) — Upstream oh-my-opencode system prompts. Aggressive tone (CODE RED, ABSOLUTE CERTAINTY). Prompts are attached declaratively to agents at config time based on model family.
+
+**`v1`** — Superpowers 5-phase development chain (brainstorm -> plan -> implement -> review -> receive-review). Calm, structured tone. Prompts reference external skills loaded from `skills/v1/`. Model-family specialization retained (default/gpt/gemini/planner variants). Skills are injected on the first message per session via `chat.message` + `system.transform` hooks.
+
+```jsonc
+{ "workflow": "v1" }
+```
 
 ## Install
 
@@ -27,34 +39,31 @@ Then point your OpenCode config at the built plugin (path or installed package):
 
 ```jsonc
 // opencode.json
-{
-  "plugin": ["./node_modules/ocmm/dist/index.js"]
-}
+{ "plugin": ["./node_modules/ocmm/dist/index.js"] }
 ```
+
+Or use the `ocmm` shim binary (see below) to launch opencode with automatic plugin loading and config isolation.
 
 ## Configure
 
 Drop a config file in either of these locations (project wins on conflicts):
 
 * `<project>/.opencode/ocmm.jsonc`
-* `~/.config/opencode/ocmm.jsonc` (Linux/macOS) — or `$XDG_CONFIG_HOME/opencode/ocmm.jsonc` if set
-* `%APPDATA%\opencode\ocmm.jsonc` (Windows, when `XDG_CONFIG_HOME` is unset)
+* `~/.config/opencode/ocmm.jsonc` (all platforms, including Windows — follows opencode's convention)
 
 Schema (Zod-validated; unknown keys rejected). All fields optional:
 
 ```jsonc
 {
+  "workflow": "omo",  // "omo" (default) or "v1"
+
   "disabledAgents": ["media-reader"],
 
-  // Agents accept shorthand or full ModelRequirement form.
   "agents": {
-    // Shorthand: pin a single model (+ optional variant / fallback list).
     "reviewer": {
       "model": "anthropic/claude-opus-4-7",
       "variant": "max"
     },
-
-    // Shorthand with a fallback list (strings or full entries).
     "orchestrator": {
       "model": "anthropic/claude-opus-4-7",
       "variant": "max",
@@ -63,8 +72,6 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
         { "providers": ["zhipu"], "model": "glm-5.1" }
       ]
     },
-
-    // Full ModelRequirement form (passthrough — no normalization).
     "worker": {
       "requirement": {
         "variant": "medium",
@@ -74,14 +81,9 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
         ]
       }
     },
-
-    // Disable a built-in agent entirely.
     "atlas": { "disabled": true }
   },
 
-  // Categories work the same way. Each category is also registered
-  // as a mode:"subagent" entry, so callers can invoke it via
-  // `task(subagent_type="hard-reasoning", ...)`.
   "categories": {
     "hard-reasoning": {
       "model": "openai/gpt-5.5",
@@ -89,7 +91,6 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     }
   },
 
-  // Reactive runtime fallback (see "Runtime fallback" below).
   "runtimeFallback": {
     "enabled": true,
     "dispatch": true,
@@ -103,13 +104,15 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     ]
   },
 
-  "intent": {
-    "enabled": true,
-    "skipAgents": ["plan"]
+  "shim": {
+    "mode": "none",          // none|inline|config-file|config-dir|xdg (default: none)
+    "configDir": "/custom",  // target dir for config-dir/xdg modes
+    "configFile": "/path.json", // target file for config-file mode
+    "opencode": "/usr/local/bin/opencode",
+    "keepOmo": false,
+    "noProviders": false,
+    "noPlugins": false
   },
-
-  "fallbackModels": ["openai/gpt-5.4-mini"],           // reserved — not yet consumed by the router
-  "systemDefaultModel": "openai/gpt-5.4-mini",          // reserved — not yet consumed by the router
 
   "registerBuiltinAgents": true,
   "debug": false
@@ -169,22 +172,42 @@ high-effort     anthropic/claude-opus-4-7  variant=max     high effort fallback
 writing         kimi-for-coding/k2p5       (none)          documentation, prose
 ```
 
-Each category has a prompt-append under `prompts/category/<name>.md` that is set as the subagent's system prompt. Callers invoke them via `task(subagent_type="hard-reasoning", ...)`.
+Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the subagent's system prompt. Callers invoke them via `task(subagent_type="hard-reasoning", ...)`.
 
-## Intent keywords
+## Prompt architecture
 
-| Keyword | Mode prompt | Variant routing |
-|---|---|---|
-| `deepwork` / `dw` | `prompts/deepwork/{default,gpt,gemini,planner}.md` | planner agents → `planner.md`, GPT → `gpt.md`, Gemini → `gemini.md`, else `default.md` |
-| `team` / `team-mode` / `teammate` / `teamwork` | `prompts/mode/team.md` | n/a |
-| `superplan` / `sp` | `prompts/mode/superplan.md` | n/a |
-| `superplan deepwork` (any order) | superplan + deepwork concatenated | combined |
+Prompts are organized by workflow:
 
-Intent triggers are latched per session. The same keyword in a follow-up message does not re-inject. Planner agents (`plan` / `planner`) skip the standalone deepwork trigger — they get the planner variant only when the composite `superplan deepwork` form is used.
+```
+prompts/
+  omo/                              # upstream omo prompts
+    deepwork/{default,gpt,gemini,planner}.md
+    category/*.md (8 files)
+  v1/                               # superpowers-style prompts
+    deepwork/{default,gpt,gemini,planner}.md
+    category/*.md (8 files)
+skills/
+  v1/                               # forked superpowers skills (v1 only)
+    brainstorming/SKILL.md
+    writing-plans/SKILL.md
+    subagent-driven-development/SKILL.md
+    requesting-code-review/SKILL.md
+    receiving-code-review/SKILL.md
+```
+
+Model-family variant selection (`pickDeepworkVariantForAgent`):
+- planner agent -> `planner.md`
+- GPT family -> `gpt.md`
+- Gemini family -> `gemini.md`
+- others (Claude/Kimi/GLM/unknown) -> `default.md`
+
+Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. No runtime keyword detection — prompts are attached declaratively.
+
+For v1 workflow, superpowers skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). For omo workflow, `chat.message` and `system.transform` are no-ops.
 
 ## Profiles
 
-A **profile** is a named partial overlay on the base config. It can override any top-level field (agents, categories, runtimeFallback, intent, debug, etc.) except `profiles` and `activeProfile` themselves. At load time, after merging user + project configs, the active profile is deep-merged over the result — profile wins over both.
+A **profile** is a named partial overlay on the base config. It can override any top-level field (agents, categories, runtimeFallback, debug, etc.) except `profiles` and `activeProfile` themselves. At load time, after merging user + project configs, the active profile is deep-merged over the result — profile wins over both.
 
 ### Selecting a profile
 
@@ -201,102 +224,100 @@ Two ways, in priority order:
    { "activeProfile": "gpu" }
    ```
 
-If the named profile doesn't exist, it is silently ignored — the base config loads unchanged. This prevents a stale `activeProfile` or `OCMM_PROFILE` value from breaking the plugin.
+If the named profile doesn't exist, it is silently ignored — the base config loads unchanged.
 
 ### Profile merge semantics
 
 | Field type | Behavior under profile overlay |
 |---|---|
-| Scalars (`debug`, `systemDefaultModel`, ...) | Replaced |
-| Objects (`agents`, `categories`, `intent`, `runtimeFallback`) | Deep-merged (profile field wins per-key) |
-| `fallbackModels`, `disabledAgents` | **Replaced** (profile fully owns these arrays — a profile is a mode switch, not a patch) |
-| Other arrays (`intent.skipAgents`, `retryOnStatusCodes`, ...) | Replaced |
+| Scalars (`debug`, `workflow`, ...) | Replaced |
+| Objects (`agents`, `categories`, `runtimeFallback`) | Deep-merged (profile field wins per-key) |
+| `fallbackModels`, `disabledAgents` | **Replaced** (profile fully owns these arrays) |
+| Other arrays (`retryOnStatusCodes`, ...) | Replaced |
 
-If you want accumulation across user+project layers (NOT profiles), that still happens — `fallbackModels` and `disabledAgents` are unioned across user and project configs. Profiles are the one layer that replaces.
+`fallbackModels` and `disabledAgents` are unioned across user and project configs (NOT profiles). Profiles are the one layer that replaces.
 
-### Config example
+## `ocmm` shim
 
-```jsonc
-{
-  "agents": { "orchestrator": { "model": "hoo/glm-5.2" } },
-  "profiles": {
-    "gpu": {
-      "agents": { "orchestrator": { "model": "openai/gpt-5.5", "variant": "high" } },
-      "runtimeFallback": { "maxAttempts": 5 }
-    },
-    "claude": {
-      "agents": { "orchestrator": { "model": "anthropic/claude-opus-4-7", "variant": "max" } }
-    }
-  },
-  "activeProfile": "gpu"
-}
-```
-
-### CLI: `ocmm-profiles`
-
-A command-line tool for managing profiles without editing JSON by hand:
+The `ocmm` binary launches opencode with configurable config isolation. It merges providers from your global `opencode.json`, adds the ocmm plugin, and optionally strips the `oh-my-openagent` plugin to avoid collision.
 
 ```bash
-# List all profiles (* marks the active one)
-ocmm-profiles list
-
-# Set the active profile (persisted to config file)
-ocmm-profiles use claude
-
-# Print the active profile, or a named one
-ocmm-profiles show
-ocmm-profiles show gpu
-
-# Add/replace a profile from a JSON file
-ocmm-profiles add gpu ./gpu-profile.json
-
-# Delete a profile (clears activeProfile if it was active)
-ocmm-profiles rm gpu
-
-# Clear activeProfile (revert to base config)
-ocmm-profiles clear
-
-# Print just the active profile name (empty if none)
-ocmm-profiles current
+ocmm                              # start opencode (no isolation by default)
+ocmm -p work run "hello"          # select profile + run
+ocmm --mode xdg run "hello"       # full config isolation
+ocmm --mode config-file -c run x  # config-file mode + continue
+ocmm --help
 ```
 
-The CLI reads/writes the **user** config file (`$XDG_CONFIG_HOME/opencode/ocmm.json[c]` → `%APPDATA%\opencode\ocmm.json[c]` → `~/.config/opencode/ocmm.json[c]`). It does NOT touch project configs. Comments are not preserved on write (output is plain JSON with `.jsonc` extension, which is valid JSONC).
+### Flags
 
-In dev (no build needed):
+```
+-p, --profile <name>     Select ocmm profile (sets OCMM_PROFILE)
+    --mode <m>            Isolation: none|inline|config-file|config-dir|xdg (default: none)
+    --no-providers        Don't merge providers from global config
+    --no-plugins          Don't merge plugins from global config
+    --ocmm-only           Shorthand for --no-providers --no-plugins
+    --config-dir <path>   Target dir for config-dir/xdg modes
+    --config-file <path>  Target file for config-file mode
+    --opencode <path>     Custom opencode binary path
+    --keep-omo            Keep oh-my-openagent plugin (stripped by default in xdg)
+    --reset               Clear isolated dir before starting
+-h, --help                Show help
+--                        Separator; everything after passes to opencode verbatim
+```
+
+All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass through to opencode.
+
+### Isolation modes
+
+| Mode | Env var | Isolates? | Can strip omo? | Default path |
+|---|---|---|---|---|
+| `none` (default) | `OPENCODE_CONFIG_CONTENT` | No | No | n/a |
+| `inline` | `OPENCODE_CONFIG_CONTENT` | No | No | n/a |
+| `config-file` | `OPENCODE_CONFIG` | Single file | No | `<config-dir>/opencode.json` |
+| `config-dir` | `OPENCODE_CONFIG_DIR` | Dir (additive) | No | `~/.config/opencode/ocmm-opencode/` |
+| `xdg` | `XDG_CONFIG_HOME` | Full | Yes | `~/.config/opencode/ocmm-opencode/` |
+
+Config defaults can be set in the `shim` section of `ocmm.jsonc`. CLI flags override config values.
+
+## `ocmm-profiles` CLI
+
+Manage profiles without editing JSON:
+
 ```bash
-pnpm cli list
-pnpm cli use gpu
+ocmm-profiles list                 # list all (* = active)
+ocmm-profiles use claude           # set active profile (persisted)
+ocmm-profiles show [name]          # print a profile
+ocmm-profiles add gpu ./gpu.json  # add/replace from JSON file
+ocmm-profiles rm gpu              # delete a profile
+ocmm-profiles clear                # clear activeProfile
+ocmm-profiles current             # print active profile name
 ```
 
-Or run the compiled binary directly:
-```bash
-node dist/cli/profiles.js list
-```
+The CLI reads/writes the **user** config file at `~/.config/opencode/ocmm.json[c]`. Comments are not preserved on write.
 
 ## Runtime fallback
 
 When a model call fails with a retryable error (HTTP 429/5xx, or a message matching `retryOnPatterns`), ocmm:
 
-1. Resolves the failing agent's `ModelRequirement` (user config → built-in defaults).
+1. Resolves the failing agent's `ModelRequirement` (user config -> built-in defaults).
 2. Marks the just-failed model as failed with a timestamp.
 3. Finds the next entry in the fallback chain that is not in cooldown (default 60s).
 4. Dispatches a new `client.session.prompt` call with the next model, reusing the last user message's parts.
 5. Aborts the original session first (best-effort).
 
-Configuration:
-
 ```jsonc
 "runtimeFallback": {
-  "enabled": true,           // master switch (false = event hook no-ops)
-  "dispatch": true,          // false = observe-only (classify + log, no retry)
-  "maxAttempts": 3,          // cap per session
-  "cooldownSeconds": 60,     // skip a failed model for this long
+  "enabled": true,
+  "dispatch": true,
+  "maxAttempts": 3,
+  "cooldownSeconds": 60,
   "retryOnStatusCodes": [429, 500, 502, 503, 504],
-  "retryOnPatterns": ["rate limit", "overloaded", /* ... */]
+  "retryOnPatterns": ["rate limit", "overloaded", "..."]
 }
 ```
 
-Abort errors (`AbortError`, `MessageAbortedError`, `isAbort: true`) are never retried. Deduplication is enforced via an in-flight `Set<sessionID>` so a single error cannot trigger duplicate dispatches.
+Abort errors are never retried. Deduplication is enforced via an in-flight `Set<sessionID>`.
 
 ## Develop
 
@@ -306,17 +327,15 @@ pnpm test
 pnpm run build
 ```
 
-Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 142 tests across config, routing, intent, hooks, and runtime-fallback.
+Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 177 tests across config, routing, intent, hooks, runtime-fallback, and shim.
 
-### Isolated QA
+### Live integration test
 
-A real-OpenCode smoke harness lives under `%LOCALAPPDATA%\Temp\opencode\ocmm-test\` (not in the repo). It spins up an isolated XDG config tree, points the plugin at a single `hoo` provider, and runs `opencode run` / `opencode debug agent` scenarios. See `.kb/` for the design notes behind it.
+See `AGENTS.md` for the full live test procedure using isolated XDG dirs.
 
 ## License
 
 Licensed under the **Anti American AI Public License (AAAPL)** — see [`LICENSE`](./LICENSE) (English), [`LICENSE.zh.md`](./LICENSE.zh.md) (Chinese), or [`LICENSE.bilingual.md`](./LICENSE.bilingual.md) (authoritative bilingual reference).
-
-AAAPL grants MIT-style permissions for ordinary use, modification, and redistribution, with additional terms that prohibit use by US/Israel-linked persons or entities for AI/ML training, retrieval, embedding, or commercial AI products. See the license text for full terms.
 
 SPDX identifier: `LicenseRef-AAAPL`.
 
