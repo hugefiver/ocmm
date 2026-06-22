@@ -47,6 +47,42 @@ test("schema accepts agents shorthand identical to categories", () => {
   assert.equal(parsed.success, true)
 })
 
+test("schema accepts rich agent override fields", () => {
+  const parsed = OcmmConfigSchema.safeParse({
+    agents: {
+      reviewer: {
+        model: "openai/gpt-5.5",
+        tools: { bash: false, read: true },
+        skills: ["git-master", "debugging"],
+        promptAppend: "file://./reviewer-extra.md",
+        temperature: 0.2,
+        topP: 0.9,
+        maxTokens: 12000,
+        thinking: { type: "enabled", budgetTokens: 2000 },
+        reasoningEffort: "high",
+      },
+    },
+  })
+  assert.equal(parsed.success, true)
+  if (!parsed.success) return
+  assert.deepEqual(parsed.data.agents?.reviewer?.tools, { bash: false, read: true })
+  assert.deepEqual(parsed.data.agents?.reviewer?.skills, ["git-master", "debugging"])
+  assert.equal(parsed.data.agents?.reviewer?.promptAppend, "file://./reviewer-extra.md")
+  assert.equal(parsed.data.agents?.reviewer?.reasoningEffort, "high")
+})
+
+test("schema keeps categories strict for agent-only override fields", () => {
+  const parsed = OcmmConfigSchema.safeParse({
+    categories: {
+      frontend: {
+        model: "openai/gpt-5.5",
+        tools: { bash: false },
+      },
+    },
+  })
+  assert.equal(parsed.success, false)
+})
+
 test("normalizeShorthand turns shorthand model into single-entry chain", () => {
   const norm = normalizeShorthand({ model: "hoo/glm-5.2" })
   assert.ok(norm)

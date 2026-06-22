@@ -255,7 +255,19 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
   const result = OcmmConfigSchema.safeParse({
     profiles: {
       light: {
-        agents: { orchestrator: { model: "openai/gpt-5.4-mini" } },
+        agents: {
+          orchestrator: {
+            model: "openai/gpt-5.4-mini",
+            skills: ["git-master"],
+            tools: { bash: false },
+            promptAppend: "Keep answers brief.",
+            temperature: 0.1,
+            topP: 0.8,
+            maxTokens: 8000,
+            thinking: { type: "disabled" },
+            reasoningEffort: "minimal",
+          },
+        },
         debug: true,
         registerBuiltinAgents: true,
       },
