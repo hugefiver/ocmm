@@ -141,6 +141,8 @@ export const OcmmConfigSchema = z
     disabledAgents: z.array(z.string()).optional(),
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
+    /** 'v1' enables the superpowers 5-phase chain; 'omo' uses upstream omo prompts. */
+    workflow: z.enum(["omo", "v1"]).default("omo"),
     intent: z
       .object({
         enabled: z.boolean().default(true),

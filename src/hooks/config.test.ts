@@ -4,6 +4,10 @@ import assert from "node:assert/strict"
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
+import { loadAllPrompts } from "../intent/prompt-loader.ts"
+import { join } from "node:path"
+
+loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
 test("config registers all built-in agents with provider/model strings", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
@@ -16,6 +20,27 @@ test("config registers all built-in agents with provider/model strings", async (
     assert.equal(typeof entry!.model, "string")
     assert.match(entry!.model as string, /^[\w-]+\/[\w.-]+$/, `bad model for ${a.name}: ${entry!.model}`)
   }
+})
+
+test("config attaches deepwork prompt to built-in agents", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  for (const a of BUILTIN_AGENTS) {
+    const entry = cfg.agent[a.name] as Record<string, unknown> | undefined
+    assert.ok(entry, `missing agent ${a.name}`)
+    assert.equal(typeof entry!.prompt, "string", `agent ${a.name} should have prompt`)
+    assert.ok((entry!.prompt as string).length > 0, `agent ${a.name} prompt empty`)
+  }
+})
+
+test("planner agent gets planner variant prompt", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+  const entry = cfg.agent.planner as Record<string, unknown>
+  assert.ok(typeof entry.prompt === "string")
 })
 
 test("config does not clobber an existing user-set model", async () => {

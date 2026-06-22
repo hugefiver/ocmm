@@ -7,7 +7,7 @@ import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
 
-loadAllPrompts(join(process.cwd(), "prompts"))
+loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
 test("config registers all 8 categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })

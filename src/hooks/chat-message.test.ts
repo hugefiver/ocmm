@@ -8,126 +8,104 @@ import {
   getSessionPrompt,
 } from "./chat-message.ts"
 import { defaultConfig } from "../config/schema.ts"
-import { loadAllPrompts } from "../intent/prompt-loader.ts"
-import { join } from "node:path"
-
-loadAllPrompts(join(process.cwd(), "prompts"))
 
 function makeInput(opts: {
   sessionID?: string
   agentName?: string
-  providerID?: string
-  modelID?: string
 }) {
   return {
     sessionID: opts.sessionID ?? "s1",
     agent: opts.agentName ?? "orchestrator",
-    model: {
-      providerID: opts.providerID ?? "openai",
-      modelID: opts.modelID ?? "gpt-5.5",
-    },
     messageID: "msg-1",
   }
 }
 
-function makeOutput(text: string) {
+function makeOutput() {
   return {
     message: { id: "msg-1", role: "user" },
-    parts: [{ type: "text", text }],
+    parts: [{ type: "text", text: "hello" }],
   }
 }
 
-async function detect(handler: ReturnType<typeof createChatMessageHandler>, opts: {
-  sessionID: string
-  agentName?: string
-  providerID?: string
-  modelID?: string
-  text: string
-}) {
-  const input = makeInput(opts)
-  await handler(input, makeOutput(opts.text))
-  return input
-}
-
-test("chat.message latches deepwork intent on DW keyword and queues prompt", async () => {
-  const handler = createChatMessageHandler({ getConfig: () => defaultConfig() })
+test("omo workflow: chat.message is a no-op", async () => {
+  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const handler = createChatMessageHandler({ getConfig: () => cfg })
   clearSessionIntent("s1")
-  await detect(handler, { sessionID: "s1", text: "please deepwork the refactor" })
-  const queued = getSessionPrompt("s1")
-  assert.ok(queued, "expected queued prompt")
-  assert.ok(queued!.length > 100)
+  await handler(makeInput({ sessionID: "s1" }), makeOutput())
+  assert.equal(getSessionPrompt("s1"), null)
 })
 
-test("chat.message picks gpt variant when model is gpt", async () => {
-  const handler = createChatMessageHandler({ getConfig: () => defaultConfig() })
+test("v1 workflow: chat.message queues skills on first message", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const handler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL CONTENT HERE",
+  })
   clearSessionIntent("s2")
-  await detect(handler, { sessionID: "s2", text: "dw plz", modelID: "gpt-5.5", providerID: "openai" })
+  await handler(makeInput({ sessionID: "s2" }), makeOutput())
   const queued = getSessionPrompt("s2")
-  assert.ok(queued && queued.length > 0)
+  assert.ok(queued, "expected queued skills")
+  assert.ok(queued!.includes("SKILL CONTENT HERE"))
 })
 
-test("chat.message latches per session - same intent twice yields one queued prompt", async () => {
-  const handler = createChatMessageHandler({ getConfig: () => defaultConfig() })
+test("v1 workflow: second message does not re-queue (latching)", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const handler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "FIRST SKILL",
+  })
   clearSessionIntent("s3")
-  await detect(handler, { sessionID: "s3", text: "dw" })
+  await handler(makeInput({ sessionID: "s3" }), makeOutput())
   const after1 = getSessionPrompt("s3")
-  await detect(handler, { sessionID: "s3", text: "dw again" })
+  await handler(makeInput({ sessionID: "s3" }), makeOutput())
   const after2 = getSessionPrompt("s3")
   assert.equal(after1, after2)
 })
 
-test("chat.message skips planner agent on standalone deepwork", async () => {
-  const handler = createChatMessageHandler({ getConfig: () => defaultConfig() })
-  clearSessionIntent("s4")
-  await detect(handler, {
-    sessionID: "s4",
-    agentName: "planner",
-    text: "dw the plan",
+test("v1 workflow: empty skills content is not queued", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const handler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "",
   })
+  clearSessionIntent("s4")
+  await handler(makeInput({ sessionID: "s4" }), makeOutput())
   assert.equal(getSessionPrompt("s4"), null)
 })
 
-test("chat.message respects intent.enabled=false", async () => {
-  const cfg = { ...defaultConfig(), intent: { enabled: false, skipAgents: [] } }
-  const handler = createChatMessageHandler({ getConfig: () => cfg })
-  clearSessionIntent("s5")
-  await detect(handler, { sessionID: "s5", text: "deepwork now" })
-  assert.equal(getSessionPrompt("s5"), null)
-})
-
-test("chat.message detects composite superplan-deepwork", async () => {
-  const handler = createChatMessageHandler({ getConfig: () => defaultConfig() })
-  clearSessionIntent("s6")
-  await detect(handler, { sessionID: "s6", text: "sp dw please" })
-  const queued = getSessionPrompt("s6")
-  assert.ok(queued && queued.length > 100)
-})
-
-test("system.transform prepends queued prompt to system array", async () => {
-  const msgHandler = createChatMessageHandler({ getConfig: () => defaultConfig() })
+test("system.transform prepends queued skills to system array", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
   const sysHandler = createSystemTransformHandler()
-  clearSessionIntent("s7")
-  await detect(msgHandler, { sessionID: "s7", text: "dw" })
+  clearSessionIntent("s5")
+  await msgHandler(makeInput({ sessionID: "s5" }), makeOutput())
   const sysOutput: { system: string[] } = { system: ["base prompt"] }
-  await sysHandler({ sessionID: "s7" }, sysOutput)
+  await sysHandler({ sessionID: "s5" }, sysOutput)
   assert.equal(sysOutput.system.length, 2)
-  assert.ok(sysOutput.system[0]!.length > 100)
+  assert.ok(sysOutput.system[0]!.includes("SKILL TEXT"))
   assert.equal(sysOutput.system[1], "base prompt")
 })
 
 test("system.transform tolerates string system shape", async () => {
-  const msgHandler = createChatMessageHandler({ getConfig: () => defaultConfig() })
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
   const sysHandler = createSystemTransformHandler()
-  clearSessionIntent("s8")
-  await detect(msgHandler, { sessionID: "s8", text: "dw" })
+  clearSessionIntent("s6")
+  await msgHandler(makeInput({ sessionID: "s6" }), makeOutput())
   const sysOutput: Record<string, unknown> = { system: "base" }
-  await sysHandler({ sessionID: "s8" }, sysOutput)
+  await sysHandler({ sessionID: "s6" }, sysOutput)
   assert.equal(typeof sysOutput.system, "string")
   assert.ok((sysOutput.system as string).includes("base"))
-  assert.ok((sysOutput.system as string).length > (4 + 100))
+  assert.ok((sysOutput.system as string).includes("SKILL TEXT"))
 })
 
-test("system.transform no-ops when no intent latched", async () => {
+test("system.transform no-ops when no skills queued", async () => {
   const sysHandler = createSystemTransformHandler()
   const sysOutput: Record<string, unknown> = { system: ["unchanged"] }
   await sysHandler({ sessionID: "no-such-session" }, sysOutput)
