@@ -134,9 +134,13 @@ export const ProfileEntrySchema = z
   })
   .strict()
 
+export const IsolationModeSchema = z.enum(["none", "inline", "config-file", "config-dir", "xdg"])
+
 export const ShimConfigSchema = z
   .object({
+    mode: IsolationModeSchema.default("none"),
     configDir: z.string().optional(),
+    configFile: z.string().optional(),
     opencode: z.string().optional(),
     keepOmo: z.boolean().optional(),
     noProviders: z.boolean().optional(),
@@ -144,6 +148,7 @@ export const ShimConfigSchema = z
   })
   .strict()
 
+export type IsolationMode = z.infer<typeof IsolationModeSchema>
 export type ShimConfig = z.infer<typeof ShimConfigSchema>
 
 export const OcmmConfigSchema = z
