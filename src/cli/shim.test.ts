@@ -11,6 +11,7 @@ import {
   parseArgs,
   buildIsolatedConfig,
   resolvePluginPath,
+  readShimDefaults,
 } from "./shim.ts"
 
 function dedupArray<T>(arr: T[]): T[] {
@@ -106,9 +107,22 @@ describe("shim parseArgs", () => {
     assert.deepEqual(args.passthrough, ["-c", "run", "hello"])
   })
 
+  it("parses --mode", () => {
+    for (const m of ["none", "inline", "config-file", "config-dir", "xdg"] as const) {
+      const args = parseArgs(["--mode", m])
+      assert.equal(args.mode, m, `--mode ${m} should parse`)
+    }
+  })
+
+  it("parses --config-file", () => {
+    const args = parseArgs(["--config-file", "/tmp/my-config.json"])
+    assert.equal(args.configFile, "/tmp/my-config.json")
+  })
+
   it("handles empty args", () => {
     const args = parseArgs([])
     assert.equal(args.profile, undefined)
+    assert.equal(args.mode, undefined)
     assert.equal(args.noProviders, false)
     assert.deepEqual(args.passthrough, [])
   })
@@ -297,7 +311,9 @@ describe("shim readShimDefaults", () => {
       JSON.stringify({
         workflow: "v1",
         shim: {
+          mode: "inline",
           configDir: "/custom/iso-dir",
+          configFile: "/custom/opencode.json",
           opencode: "/usr/local/bin/opencode",
           keepOmo: true,
           noProviders: true,
@@ -319,7 +335,9 @@ describe("shim readShimDefaults", () => {
   it("reads shim defaults from ocmm.jsonc", async () => {
     const mod = await import("./shim.ts")
     const defaults = mod.readShimDefaults()
+    assert.equal(defaults.mode, "inline")
     assert.equal(defaults.configDir, "/custom/iso-dir")
+    assert.equal(defaults.configFile, "/custom/opencode.json")
     assert.equal(defaults.opencode, "/usr/local/bin/opencode")
     assert.equal(defaults.keepOmo, true)
     assert.equal(defaults.noProviders, true)

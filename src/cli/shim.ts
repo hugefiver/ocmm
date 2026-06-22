@@ -1,52 +1,27 @@
 #!/usr/bin/env node
 /**
- * ocmm — shim that launches opencode with isolated config/state dirs.
+ * ocmm — shim that launches opencode with isolated config.
  *
- * Prevents collision with a globally-installed omo setup by redirecting
- * all XDG paths into a dedicated directory. Merges provider config from
- * the global opencode.json so you don't redefine providers.
+ * Prevents collision with a globally-installed omo setup by injecting
+ * or isolating the opencode config. Merges provider config from the
+ * global opencode.json so you don't redefine providers.
  *
  * USAGE:
- *   ocmm [-p <name>] [--no-providers] [--no-plugins] [--ocmm-only]
+ *   ocmm [-p <name>] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
  *        [--config-dir <path>] [--opencode <path-or-name>]
  *        [--keep-omo] [--reset] [-- <opencode args...>]
  *   ocmm --help
  *
- * OCMM FLAGS:
- *   -p, --profile <name> Select ocmm profile at startup (sets OCMM_PROFILE)
- *   --no-providers      Don't merge providers from global opencode config
- *   --no-plugins        Don't merge plugins from global opencode config (ocmm only)
- *   --ocmm-only         Shorthand for --no-providers --no-plugins
- *   --config-dir <path> Use a custom isolated dir instead of the default
- *   --opencode <path>   Path or name of the opencode binary to launch (default: "opencode")
- *   --keep-omo          Keep the oh-my-openagent plugin from global config (removed by default)
- *   --reset             Clear isolated dir before starting (fresh state)
- *   --help, -h          Show this help
- *   --                  Separator; everything after passes to opencode verbatim
+ * ISOLATION MODES (--mode, mutually exclusive):
+ *   none         No isolation. Injects config via OPENCODE_CONFIG_CONTENT.
+ *                Default. Plugins additive — omo cannot be stripped.
+ *   inline       Same as none (explicit). OPENCODE_CONFIG_CONTENT env var.
+ *   config-file  OPENCODE_CONFIG env var (path to JSON file, uses --config-file)
+ *   config-dir   OPENCODE_CONFIG_DIR env var (redirects config dir, uses --config-dir)
+ *   xdg          XDG_CONFIG_HOME env var (full isolation, uses --config-dir, can strip plugins)
  *
- * PASSTHROUGH:
- *   All args that are not ocmm flags pass through to opencode verbatim.
- *   This includes -c/--continue, -s/--session, --model, --agent, run, etc.
- *
- * ISOLATED DIR:
- *   ~/.config/opencode/ocmm-opencode/   (config only; data/state/cache stay global)
- *     opencode.json   <- merged from global + ocmm plugin added
- *     ocmm.jsonc      <- copied from global
- *
- * Only the config directory is isolated. Data, state, and cache stay at
- * their global opencode locations so sessions, logs, and caches are shared.
- * This differs from the test-harness isolation (which redirects all 4 XDG dirs).
- *
- * PROVIDER MERGE:
- *   Reads the global opencode.json and merges these fields into the
- *   isolated opencode.json:
- *     - provider          (merged, user config wins)
- *     - disabled_providers (concatenated, deduped)
- *     - agent              (compaction/title models, shallow merge)
- *   Plugins from global config are kept unless --no-plugins is given.
- *   The oh-my-openagent plugin is removed by default to avoid collision
- *   with ocmm; use --keep-omo to retain it.
- *   The ocmm plugin is always added (resolved relative to this binary).
+ * All flags except -p/--profile, --reset, and --help can also be set in
+ * the \`shim\` section of ocmm.json[c]. CLI flags override config values.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from "node:fs"
@@ -55,15 +30,17 @@ import { join, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawn } from "node:child_process"
 import { stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
-import type { ShimConfig } from "../config/schema.ts"
+import type { ShimConfig, IsolationMode } from "../config/schema.ts"
 
 // --- types ---
 
 interface ShimArgs {
   profile?: string
+  mode?: IsolationMode
   noProviders: boolean
   noPlugins: boolean
   configDir?: string
+  configFile?: string
   opencodeBin?: string
   keepOmo: boolean
   reset: boolean
@@ -279,6 +256,29 @@ export function parseArgs(argv: string[]): ShimArgs {
         }
         args.configDir = argv[i]
         break
+      case "--config-file":
+        i++
+        if (i >= argv.length) {
+          console.error("ocmm: --config-file requires a value")
+          process.exit(1)
+        }
+        args.configFile = argv[i]
+        break
+      case "--mode":
+        i++
+        if (i >= argv.length) {
+          console.error("ocmm: --mode requires a value (none|inline|config-file|config-dir|xdg)")
+          process.exit(1)
+        }
+        {
+          const m = argv[i] as IsolationMode
+          if (!["none", "inline", "config-file", "config-dir", "xdg"].includes(m)) {
+            console.error(`ocmm: invalid --mode '${m}'. Use: none|inline|config-file|config-dir|xdg`)
+            process.exit(1)
+          }
+          args.mode = m
+        }
+        break
       case "--opencode":
         i++
         if (i >= argv.length) {
@@ -307,46 +307,47 @@ function printHelp(): void {
   console.log(`ocmm — launch opencode with isolated config
 
 USAGE:
-  ocmm [-p <name>] [--no-providers] [--no-plugins] [--ocmm-only]
+  ocmm [-p <name>] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
         [--config-dir <path>] [--opencode <path-or-name>]
         [--keep-omo] [--reset] [-- <opencode args...>]
   ocmm --help
 
 OCMM FLAGS:
   -p, --profile <name>  Select ocmm profile at startup (sets OCMM_PROFILE)
-      --no-providers    Don't merge providers from global opencode config
-      --no-plugins      Don't merge plugins from global opencode config (ocmm only)
-      --ocmm-only       Shorthand for --no-providers --no-plugins
-      --config-dir <p>  Use a custom isolated dir instead of the default
-      --opencode <p>    Path or name of the opencode binary (default: "opencode")
-      --keep-omo        Keep the oh-my-openagent plugin (removed by default)
-      --reset           Clear isolated dir before starting (fresh state)
+      --mode <m>         Isolation method: none|inline|config-file|config-dir|xdg
+                         (default: none, or 'shim.mode' in ocmm.jsonc)
+      --no-providers     Don't merge providers from global opencode config
+      --no-plugins       Don't merge plugins from global opencode config
+      --ocmm-only        Shorthand for --no-providers --no-plugins
+      --config-dir <p>   Target dir for config-dir/xdg modes
+                         (default: ~/.config/opencode/ocmm-opencode/)
+      --config-file <p>  Target file for config-file mode
+                         (default: <config-dir>/opencode.json)
+      --opencode <p>     Path or name of the opencode binary (default: "opencode")
+      --keep-omo         Keep the oh-my-openagent plugin (removed by default in xdg mode)
+      --reset            Clear isolated dir before starting
   -h, --help             Show this help
   --                     Separator; everything after passes to opencode verbatim
 
+ISOLATION MODES:
+  none         No isolation. Injects config via OPENCODE_CONFIG_CONTENT (inline JSON).
+               Default. Plugins are additive — omo cannot be stripped.
+  inline       Same as none (explicit). OPENCODE_CONFIG_CONTENT env var.
+  config-file  OPENCODE_CONFIG env var (path to JSON file, lower merge priority
+               than project config). Uses --config-file path.
+  config-dir   OPENCODE_CONFIG_DIR env var (redirects config dir, configs additive).
+               Uses --config-dir path.
+  xdg          XDG_CONFIG_HOME env var (full config isolation, can strip plugins).
+               Uses --config-dir path.
+
 PASSTHROUGH:
-  All args that are not ocmm flags are passed through to opencode verbatim.
+  All args that are not ocmm flags pass through to opencode verbatim.
   This includes -c/--continue, -s/--session, --model, --agent, run, etc.
-  Use -- to explicitly separate ocmm flags from opencode args.
 
   Examples:
-    ocmm -p work run "hello"           # profile=work, run with prompt
-    ocmm -c run "continue this"        # continue last session
-    ocmm -p work -c                    # profile + continue
-    ocmm -- run --model hoo/glm-5.2   # explicit separator
-
-ISOLATED DIR:
-  ${isolatedConfigDir()}/
-    opencode/
-      opencode.json   merged from global config + ocmm plugin
-      ocmm.jsonc      copied from global
-
-Only config is isolated. Data, state, and cache stay at their global
-opencode locations so sessions, logs, and caches are shared with the
-global opencode installation.
-
-The oh-my-openagent (omo) plugin is stripped from the global config by default
-to avoid collision with ocmm. Use --keep-omo to retain it.
+    ocmm -p work run "hello"            # profile=work, run with prompt
+    ocmm --mode inline run "hello"      # inline config injection
+    ocmm --mode config-file -c run "x"  # config-file mode + continue
 
 All flags except -p/--profile, --reset, and --help can also be set in the \`shim\`
 section of ocmm.json[c]. CLI flags override config values.`)
@@ -356,13 +357,13 @@ section of ocmm.json[c]. CLI flags override config values.`)
  * Read the `shim` section from the global ocmm.json[c] to use as defaults.
  * CLI flags override these; config provides the baseline.
  */
-export function readShimDefaults(): ShimConfig {
+export function readShimDefaults(): Partial<ShimConfig> {
   const dir = globalConfigDir()
   for (const name of ["ocmm.jsonc", "ocmm.json"]) {
     const p = join(dir, name)
     const cfg = readJsonc(p)
     if (cfg && typeof cfg.shim === "object" && cfg.shim !== null) {
-      return cfg.shim as ShimConfig
+      return cfg.shim as Partial<ShimConfig>
     }
   }
   return {}
@@ -379,37 +380,67 @@ function main(): void {
   }
 
   const defaults = readShimDefaults()
-
+  const mode: IsolationMode = args.mode ?? defaults.mode ?? "none"
   const isoDir = args.configDir ?? defaults.configDir ?? isolatedConfigDir()
+  const isoFile = args.configFile ?? defaults.configFile ?? join(isoDir, "opencode.json")
+  const noProviders = args.noProviders || defaults.noProviders || false
+  const noPlugins = args.noPlugins || defaults.noPlugins || false
+  const keepOmo = args.keepOmo || defaults.keepOmo || false
 
   if (args.reset && existsSync(isoDir)) {
     rmSync(isoDir, { recursive: true, force: true })
   }
-
-  // opencode resolves config path as $XDG_CONFIG_HOME/opencode/opencode.json.
-  // We set XDG_CONFIG_HOME=<isoDir>, so files go in <isoDir>/opencode/.
-  const ocConfigDir = join(isoDir, "opencode")
-  mkdirSync(ocConfigDir, { recursive: true })
-
-  const noProviders = args.noProviders || defaults.noProviders || false
-  const noPlugins = args.noPlugins || defaults.noPlugins || false
-  const keepOmo = args.keepOmo || defaults.keepOmo || false
 
   const config = buildIsolatedConfig({
     mergeProviders: !noProviders,
     mergePlugins: !noPlugins,
     keepOmo,
   })
-  const configPath = join(ocConfigDir, "opencode.json")
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8")
-
-  copyOcmmConfig(ocConfigDir)
 
   const env = { ...process.env }
-  env.XDG_CONFIG_HOME = isoDir
 
   if (args.profile) {
     env.OCMM_PROFILE = args.profile
+  }
+
+  switch (mode) {
+    case "none": {
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify(config)
+      break
+    }
+    case "inline": {
+      // OPENCODE_CONFIG_CONTENT: inline JSON, highest merge priority.
+      // Plugins are additive — omo cannot be stripped via this method.
+      if (!keepOmo) {
+        console.error("ocmm: --mode=inline cannot strip oh-my-openagent (plugins are additive). Use --keep-omo or --mode=xdg.")
+      }
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify(config)
+      break
+    }
+    case "config-file": {
+      mkdirSync(dirname(isoFile), { recursive: true })
+      writeFileSync(isoFile, JSON.stringify(config, null, 2) + "\n", "utf8")
+      env.OPENCODE_CONFIG = isoFile
+      break
+    }
+    case "config-dir": {
+      // OPENCODE_CONFIG_DIR: redirect config dir, configs are additive.
+      mkdirSync(join(isoDir, "opencode"), { recursive: true })
+      const configPath = join(isoDir, "opencode", "opencode.json")
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8")
+      copyOcmmConfig(join(isoDir, "opencode"))
+      env.OPENCODE_CONFIG_DIR = isoDir
+      break
+    }
+    case "xdg": {
+      // XDG_CONFIG_HOME: full config isolation, can strip plugins.
+      mkdirSync(join(isoDir, "opencode"), { recursive: true })
+      const configPath = join(isoDir, "opencode", "opencode.json")
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8")
+      copyOcmmConfig(join(isoDir, "opencode"))
+      env.XDG_CONFIG_HOME = isoDir
+      break
+    }
   }
 
   const opencodeBin = args.opencodeBin ?? defaults.opencode ?? "opencode"
