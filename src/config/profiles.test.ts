@@ -136,15 +136,25 @@ test("profile overlay replaces generic arrays (not union) for non-accumulator fi
   }
 })
 
-test("profile overlay REPLACES fallbackModels and disabledAgents (full ownership)", () => {
+test("profile overlay REPLACES fallbackModels, disabledAgents, and feature gates", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
       disabledAgents: ["code-search"],
+      disabledHooks: ["base-hook"],
+      disabledTools: ["base-tool"],
+      disabledSkills: ["base-skill"],
+      disabledCommands: ["base-command"],
+      disabledMcps: ["base-mcp"],
       fallbackModels: ["openai/gpt-5.4-mini"],
       profiles: {
         extra: {
           disabledAgents: ["doc-search"],
+          disabledHooks: ["profile-hook"],
+          disabledTools: ["profile-tool"],
+          disabledSkills: ["profile-skill"],
+          disabledCommands: ["profile-command"],
+          disabledMcps: ["profile-mcp"],
           fallbackModels: ["anthropic/claude-haiku-4-5"],
         },
       },
@@ -154,6 +164,11 @@ test("profile overlay REPLACES fallbackModels and disabledAgents (full ownership
     // Profiles fully own these arrays — a profile is a mode switch, not a
     // patch. If you want accumulation, list the full set in the profile.
     assert.deepEqual(config.disabledAgents, ["doc-search"])
+    assert.deepEqual(config.disabledHooks, ["profile-hook"])
+    assert.deepEqual(config.disabledTools, ["profile-tool"])
+    assert.deepEqual(config.disabledSkills, ["profile-skill"])
+    assert.deepEqual(config.disabledCommands, ["profile-command"])
+    assert.deepEqual(config.disabledMcps, ["profile-mcp"])
     assert.deepEqual(config.fallbackModels, ["anthropic/claude-haiku-4-5"])
   } finally {
     rmSync(xdg, { recursive: true, force: true })
