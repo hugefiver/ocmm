@@ -46,6 +46,24 @@ const ShorthandFields = {
   requirement: ModelRequirementSchema.optional(),
 }
 
+const AgentOverrideFields = {
+  tools: z.record(z.string(), z.boolean()).optional(),
+  skills: z.array(z.string()).optional(),
+  promptAppend: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  maxTokens: z.number().int().positive().optional(),
+  thinking: z
+    .object({
+      type: z.enum(["enabled", "disabled"]),
+      budgetTokens: z.number().int().positive().optional(),
+    })
+    .optional(),
+  reasoningEffort: z
+    .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    .optional(),
+}
+
 const FeatureGateArrayFields = {
   disabledHooks: z.array(z.string()).optional(),
   disabledTools: z.array(z.string()).optional(),
@@ -59,6 +77,7 @@ export const CategoryEntrySchema = z.object(ShorthandFields).strict()
 export const AgentEntrySchema = z
   .object({
     ...ShorthandFields,
+    ...AgentOverrideFields,
     disabled: z.boolean().optional(),
   })
   .strict()
