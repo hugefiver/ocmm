@@ -72,6 +72,34 @@ const FeatureGateArrayFields = {
   disabledMcps: z.array(z.string()).optional(),
 }
 
+export const SkillSourceEntrySchema = z.union([
+  z.string().min(1),
+  z
+    .object({
+      path: z.string().min(1),
+      recursive: z.boolean().default(true),
+      glob: z.string().optional(),
+    })
+    .strict(),
+])
+
+export const SkillsConfigSchema = z
+  .object({
+    sources: z.array(SkillSourceEntrySchema).default([]),
+    enable: z.array(z.string()).default([]),
+    disable: z.array(z.string()).default([]),
+  })
+  .strict()
+  .default({})
+
+const ProfileSkillsConfigSchema = z
+  .object({
+    sources: z.array(SkillSourceEntrySchema).optional(),
+    enable: z.array(z.string()).optional(),
+    disable: z.array(z.string()).optional(),
+  })
+  .strict()
+
 export const CategoryEntrySchema = z.object(ShorthandFields).strict()
 
 export const AgentEntrySchema = z
@@ -135,6 +163,7 @@ export const ProfileEntrySchema = z
     agents: z.record(z.string(), AgentEntrySchema).optional(),
     disabledAgents: z.array(z.string()).optional(),
     ...FeatureGateArrayFields,
+    skills: ProfileSkillsConfigSchema.optional(),
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
     intent: z
@@ -185,6 +214,7 @@ export const OcmmConfigSchema = z
     agents: z.record(z.string(), AgentEntrySchema).optional(),
     disabledAgents: z.array(z.string()).optional(),
     ...FeatureGateArrayFields,
+    skills: SkillsConfigSchema,
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
     /** 'v1' enables the superpowers 5-phase chain; 'omo' uses upstream omo prompts. */
@@ -219,6 +249,8 @@ export type FallbackEntryConfig = z.infer<typeof FallbackEntrySchema>
 export type ModelRequirementConfig = z.infer<typeof ModelRequirementSchema>
 export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
 export type ProfileEntry = z.infer<typeof ProfileEntrySchema>
+export type SkillSourceEntry = z.infer<typeof SkillSourceEntrySchema>
+export type SkillsConfig = z.infer<typeof SkillsConfigSchema>
 
 export function defaultConfig(): OcmmConfig {
   return OcmmConfigSchema.parse({})

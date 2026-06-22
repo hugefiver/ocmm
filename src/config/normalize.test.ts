@@ -47,6 +47,33 @@ test("schema accepts agents shorthand identical to categories", () => {
   assert.equal(parsed.success, true)
 })
 
+test("schema accepts shared skills namespace", () => {
+  const parsed = OcmmConfigSchema.safeParse({
+    skills: {
+      sources: [
+        "./skills-extra",
+        { path: "./more-skills", recursive: false, glob: "git-*" },
+      ],
+      enable: ["git-master"],
+      disable: ["debugging"],
+    },
+  })
+  assert.equal(parsed.success, true)
+  if (!parsed.success) return
+  assert.deepEqual(parsed.data.skills.enable, ["git-master"])
+  assert.deepEqual(parsed.data.skills.disable, ["debugging"])
+  assert.deepEqual(parsed.data.skills.sources[1], {
+    path: "./more-skills",
+    recursive: false,
+    glob: "git-*",
+  })
+})
+
+test("schema defaults shared skills namespace to empty arrays", () => {
+  const parsed = OcmmConfigSchema.parse({})
+  assert.deepEqual(parsed.skills, { sources: [], enable: [], disable: [] })
+})
+
 test("schema accepts rich agent override fields", () => {
   const parsed = OcmmConfigSchema.safeParse({
     agents: {

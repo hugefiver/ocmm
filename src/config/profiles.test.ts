@@ -175,6 +175,37 @@ test("profile overlay REPLACES fallbackModels, disabledAgents, and feature gates
   }
 })
 
+test("profile overlay replaces shared skills namespace arrays", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      skills: {
+        sources: ["./base-skills"],
+        enable: ["git-master"],
+        disable: ["debugging"],
+      },
+      profiles: {
+        focused: {
+          skills: {
+            sources: [{ path: "./profile-skills", recursive: false }],
+            enable: ["ast-grep"],
+            disable: ["frontend"],
+          },
+        },
+      },
+      activeProfile: "focused",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.deepEqual(config.skills.sources, [
+      { path: "./profile-skills", recursive: false },
+    ])
+    assert.deepEqual(config.skills.enable, ["ast-grep"])
+    assert.deepEqual(config.skills.disable, ["frontend"])
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile can override runtimeFallback settings", () => {
   const xdg = makeTempXdg()
   try {
@@ -267,6 +298,11 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
             thinking: { type: "disabled" },
             reasoningEffort: "minimal",
           },
+        },
+        skills: {
+          sources: ["./profile-skills"],
+          enable: ["git-master"],
+          disable: ["debugging"],
         },
         debug: true,
         registerBuiltinAgents: true,
