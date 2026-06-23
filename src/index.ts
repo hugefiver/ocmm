@@ -23,7 +23,9 @@ import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
 import { createRulesInjector } from "./hooks/rules-injector.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { loadV1Skills } from "./intent/skill-loader.ts"
+import { createConfiguredMcpManager, resolveMcpServers } from "./mcp/index.ts"
 import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/hashline-edit.ts"
+import { createSkillMcpTool, type SkillMcpToolDefinition } from "./tools/skill-mcp.ts"
 import { log } from "./shared/logger.ts"
 import type { OcmmClient } from "./runtime-fallback/dispatcher.ts"
 
@@ -35,7 +37,7 @@ export type PluginInterface = {
   "chat.message"?: (input: unknown, output: unknown) => Promise<void>
   "experimental.chat.system.transform"?: (input: unknown, output: unknown) => Promise<void>
   "tool.execute.after"?: (input: unknown, output: unknown) => Promise<void>
-  tool?: Record<string, HashlineToolDefinition>
+  tool?: Record<string, HashlineToolDefinition | SkillMcpToolDefinition>
   event?: (input: unknown) => Promise<void>
 }
 
@@ -99,7 +101,7 @@ export function createPlugin(input?: ServerInput): {
   ]
 
   const pluginInterface: PluginInterface = {
-    config: createConfigHandler({ getConfig }),
+    config: createConfigHandler({ getConfig, cwd }),
     "chat.params": createChatParamsHandler({ getConfig }),
     "chat.message": createChatMessageHandler({
       getConfig,
@@ -116,9 +118,15 @@ export function createPlugin(input?: ServerInput): {
     }),
   }
 
-  if (config.hashline.enabled) {
-    pluginInterface.tool = { edit: createHashlineEditTool() }
+  const tools: Record<string, HashlineToolDefinition | SkillMcpToolDefinition> = {}
+  if (config.hashline.enabled) tools.edit = createHashlineEditTool()
+
+  const mcpServers = resolveMcpServers(config.mcp, { disabledMcps: config.disabledMcps, cwd })
+  if (Object.keys(mcpServers).length > 0) {
+    tools.skill_mcp = createSkillMcpTool(createConfiguredMcpManager(mcpServers))
   }
+
+  if (Object.keys(tools).length > 0) pluginInterface.tool = tools
 
   return {
     pluginInterface,
