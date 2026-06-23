@@ -28,7 +28,7 @@ trap 'rm -rf "$OUTPUT_DIR"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 
-omo_runtime_slug() {
+ocmm_runtime_slug() {
   case "$(uname -s)" in
     Darwin) local os_slug="darwin" ;;
     MINGW*|MSYS*|CYGWIN*) local os_slug="win32" ;;
@@ -115,27 +115,27 @@ $HELPER doctor > "$OUTPUT_DIR/doc.out" 2>&1 || true
 grep -q "ast-grep-helper" "$OUTPUT_DIR/doc.out" || fail "doctor missing helper version line"
 pass "doctor produces output"
 
-# Given OMO_AST_GREP_SG_PATH points at a fake executable.
+# Given OCMM_AST_GREP_SG_PATH points at a fake executable.
 # When doctor resolves ast-grep, then it reports that exact path.
 FAKE_ENV_SG="$OUTPUT_DIR/fake-env/sg"
 fake_sg "$FAKE_ENV_SG"
-OMO_AST_GREP_SG_PATH="$FAKE_ENV_SG" $HELPER doctor > "$OUTPUT_DIR/omo-env.out" 2>&1
-grep -Fq "ast-grep binary: $FAKE_ENV_SG" "$OUTPUT_DIR/omo-env.out" || fail "OMO_AST_GREP_SG_PATH was not preferred: $(cat "$OUTPUT_DIR/omo-env.out")"
-pass "OMO_AST_GREP_SG_PATH resolves first"
+OCMM_AST_GREP_SG_PATH="$FAKE_ENV_SG" $HELPER doctor > "$OUTPUT_DIR/ocmm-env.out" 2>&1
+grep -Fq "ast-grep binary: $FAKE_ENV_SG" "$OUTPUT_DIR/ocmm-env.out" || fail "OCMM_AST_GREP_SG_PATH was not preferred: $(cat "$OUTPUT_DIR/ocmm-env.out")"
+pass "OCMM_AST_GREP_SG_PATH resolves first"
 
-# Given HOME has an OMO runtime sg executable.
+# Given HOME has an ocmm runtime sg executable.
 # When doctor resolves ast-grep, then it reports the HOME runtime path.
 RUNTIME_HOME="$OUTPUT_DIR/home"
-RUNTIME_SLUG="$(omo_runtime_slug)"
+RUNTIME_SLUG="$(ocmm_runtime_slug)"
 RUNTIME_BIN="sg"
 case "$RUNTIME_SLUG" in
   win32-*) RUNTIME_BIN="sg.exe" ;;
 esac
-FAKE_RUNTIME_SG="$RUNTIME_HOME/.omo/runtime/ast-grep/$RUNTIME_SLUG/$RUNTIME_BIN"
+FAKE_RUNTIME_SG="$RUNTIME_HOME/.ocmm/runtime/ast-grep/$RUNTIME_SLUG/$RUNTIME_BIN"
 fake_sg "$FAKE_RUNTIME_SG"
-HOME="$RUNTIME_HOME" CODEX_HOME= OMO_AST_GREP_SG_PATH= $HELPER doctor > "$OUTPUT_DIR/omo-runtime.out" 2>&1
-grep -Fq "ast-grep binary: $FAKE_RUNTIME_SG" "$OUTPUT_DIR/omo-runtime.out" || fail "OMO HOME runtime was not resolved: $(cat "$OUTPUT_DIR/omo-runtime.out")"
-pass "OMO HOME runtime resolves before standalone fallback"
+HOME="$RUNTIME_HOME" CODEX_HOME= OCMM_AST_GREP_SG_PATH= $HELPER doctor > "$OUTPUT_DIR/ocmm-runtime.out" 2>&1
+grep -Fq "ast-grep binary: $FAKE_RUNTIME_SG" "$OUTPUT_DIR/ocmm-runtime.out" || fail "ocmm HOME runtime was not resolved: $(cat "$OUTPUT_DIR/ocmm-runtime.out")"
+pass "ocmm HOME runtime resolves before standalone fallback"
 
 # 9. search w/o binary => either runs successfully (binary found) OR exits 3 with hint
 # The CI may or may not have ast-grep installed; both are valid.
