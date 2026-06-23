@@ -241,6 +241,24 @@ test("profile can override hashline settings", () => {
   }
 })
 
+test("profile can override rules settings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      rules: { enabled: false, skipClaudeUserRules: false },
+      profiles: {
+        strict: { rules: { enabled: true, skipClaudeUserRules: true } },
+      },
+      activeProfile: "strict",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.rules.enabled, true)
+    assert.equal(config.rules.skipClaudeUserRules, true)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile with no activeProfile does not apply", () => {
   const xdg = makeTempXdg()
   try {
@@ -322,6 +340,7 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
           disable: ["debugging"],
         },
         hashline: { enabled: true },
+        rules: { enabled: true, skipClaudeUserRules: true },
         debug: true,
         registerBuiltinAgents: true,
       },

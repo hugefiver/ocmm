@@ -162,6 +162,21 @@ const ProfileHashlineConfigSchema = z
   })
   .strict()
 
+export const RulesConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    skipClaudeUserRules: z.boolean().default(false),
+  })
+  .strict()
+  .default({})
+
+const ProfileRulesConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    skipClaudeUserRules: z.boolean().optional(),
+  })
+  .strict()
+
 /**
  * A profile is a partial config overlay. It may carry any top-level field
  * EXCEPT `profiles` and `activeProfile` themselves (nested profiles are not
@@ -199,6 +214,7 @@ export const ProfileEntrySchema = z
       })
       .optional(),
     hashline: ProfileHashlineConfigSchema.optional(),
+    rules: ProfileRulesConfigSchema.optional(),
     registerBuiltinAgents: z.boolean().optional(),
     promptsRoot: z.string().optional(),
     debug: z.boolean().optional(),
@@ -241,6 +257,7 @@ export const OcmmConfigSchema = z
       .default({ enabled: true, skipAgents: [] }),
     runtimeFallback: RuntimeFallbackConfigSchema,
     hashline: HashlineConfigSchema,
+    rules: RulesConfigSchema,
     /** Named partial overlays selectable via `activeProfile` or OCMM_PROFILE. */
     profiles: z.record(z.string(), ProfileEntrySchema).default({}),
     /**
@@ -264,6 +281,7 @@ export type FallbackEntryConfig = z.infer<typeof FallbackEntrySchema>
 export type ModelRequirementConfig = z.infer<typeof ModelRequirementSchema>
 export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
 export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
+export type RulesConfig = z.infer<typeof RulesConfigSchema>
 export type ProfileEntry = z.infer<typeof ProfileEntrySchema>
 export type SkillSourceEntry = z.infer<typeof SkillSourceEntrySchema>
 export type SkillsConfig = z.infer<typeof SkillsConfigSchema>
