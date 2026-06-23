@@ -29,6 +29,8 @@ This document is the single source of truth for v1 skill and prompt provenance, 
 | deepwork/default.md | all 5 | model-family specialization concept, forced context gathering, parallel delegation | CODE RED tone, ABSOLUTE CERTAINTY, NO EXCUSES, table emphasis, keyword injection | declarative skill invocation, calm tone, 5-phase chain |
 | deepwork/gpt.md | all 5 | GPT-structured-instruction adaptation concept | CODE RED tone | declarative, GPT-friendly checklist/IF-THEN format |
 | deepwork/gemini.md | all 5 | large-context gathering concept, intent-gate concept | CODE RED tone | declarative, Gemini-specific context emphasis, phase-transition gates |
+| deepwork/glm.md | all 5 | upstream GLM 5.x calibration, shallow/deep thinking split, evidence-first completion | CODE RED tone, no-excuses table emphasis, keyword injection | declarative, GLM reliability guardrails, 5-phase chain |
+| deepwork/codex.md | all 5 | upstream Codex tier triage, success criteria, RED/GREEN/SURFACE evidence loop | Codex-only notepad/update_plan tooling, Codex harness names, CODE RED tone | OpenCode/ocmm tool semantics, v1 skills, proportional process |
 | deepwork/planner.md | writing-plans | (no omo equivalent — omo planner.md is a different style) | — | condensed ~50 lines, references writing-plans skill directly |
 | category/frontend.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for frontend |
 | category/creative.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for creative |
