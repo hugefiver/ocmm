@@ -18,7 +18,7 @@ both `omo` and `v1` workflows:
    queue + `system.transform` mechanism. Skills are NOT registered via
    OpenCode's skill loader (no inlined skills metadata).
 3. **Model-family specialization preserved** — both workflows keep omo's
-   4-variant pattern (default/gpt/gemini/planner), selected at config time
+   model-family variant pattern (default/gpt/gemini/glm/codex/planner), selected at config time
    based on the agent's declared preference model.
 4. **v1 = superpowers 5-phase chain** — v1 prompts reference 5 superpowers
    skills (brainstorming, writing-plans, subagent-driven-development,
@@ -35,7 +35,7 @@ ocmm currently ships a single implicit workflow ("omo"). The `prompt-loader.ts`
 hardcodes loading from `prompts/{deepwork,mode,category}/`. Intent keywords
 (`dw`/`deepwork`, `sp`/`superplan`, `team`/`teamwork`) trigger runtime prompt
 injection via `chat.message` + `system.transform` hooks. Per-model-family
-variants (`default`/`gpt`/`gemini`/`planner`) let different models work in
+variants (`default`/`gpt`/`gemini`/`glm`/`codex`/`planner`) let different models work in
 their strong modes, selected at runtime via `pickDeepworkVariant` which
 inspects the actual model in the chat request.
 
@@ -148,6 +148,8 @@ prompts/
       default.md   (331 lines, omo style — content unchanged)
       gpt.md       (180 lines)
       gemini.md    (317 lines)
+      glm.md       (GLM specialization from upstream omo)
+      codex.md     (Codex specialization adapted to OpenCode/ocmm)
       planner.md   (24 lines)
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
@@ -158,6 +160,8 @@ prompts/
       default.md   (~120 lines, references 5 skills by name)
       gpt.md       (~120 lines, same structure + GPT specialization)
       gemini.md    (~140 lines, same structure + Gemini specialization)
+      glm.md       (same structure + GLM reliability guardrails)
+      codex.md     (same structure + Codex evidence-loop adaptation)
       planner.md   (~50 lines, references writing-plans skill)
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
@@ -236,9 +240,11 @@ protocols.
 
 | Variant | Specialization |
 |---------|----------------|
-| `default.md` | Generic, calm tone, numbered steps. For claude/kimi/glm/unknown families. |
+| `default.md` | Generic, calm tone, numbered steps. For claude/kimi/minimax/unknown families. |
 | `gpt.md` | Same structure, GPT-friendly format: explicit checklists, IF/THEN branch points, template fields. GPT excels at structured instruction following. |
 | `gemini.md` | Same structure, Gemini-specific emphasis: exhaustive context gathering, explicit phase-transition gates, mandated parallel tool calls. Gemini has large context windows. |
+| `glm.md` | Same 5-phase structure, GLM-specific emphasis: shallow/deep thinking split, evidence-backed claims, avoid overplanning after enough information exists. |
+| `codex.md` | Same 5-phase structure, Codex-specific emphasis: tier triage, exact success criteria, RED/GREEN/SURFACE evidence loop adapted to OpenCode/ocmm tools. |
 | `planner.md` | Condensed (~50 lines). References `writing-plans` skill directly. For the `planner`/`plan` agent. |
 
 #### Category Prompts (`prompts/<workflow>/category/*.md`)
@@ -270,8 +276,10 @@ function pickDeepworkVariantForAgent(agent: BuiltinAgent): DeepworkVariant {
   if (agent.name === 'planner' || agent.name === 'plan') return 'planner';
   const model = agent.requirement?.fallbackChain?.[0]?.model ?? '';
   const family = classifyModelFamily({ providerID: '', modelID: model });
+  if (family === 'codex') return 'codex';
   if (family === 'gpt') return 'gpt';
   if (family === 'gemini') return 'gemini';
+  if (family === 'glm') return 'glm';
   return 'default';
 }
 ```
@@ -453,6 +461,8 @@ Doc structure:
 | deepwork/default.md | all 5 | model-family specialization | CODE RED tone, keyword injection, table emphasis | declarative skill invocation, calm tone |
 | deepwork/gpt.md | all 5 | GPT-structured-instruction adaptation | CODE RED tone | declarative, GPT-friendly checklist format |
 | deepwork/gemini.md | all 5 | large-context gathering, intent-gate | CODE RED tone | declarative, Gemini-specific context emphasis |
+| deepwork/glm.md | all 5 | GLM calibration, evidence-first completion, shallow/deep thinking split | CODE RED tone, keyword injection | declarative, GLM reliability guardrails |
+| deepwork/codex.md | all 5 | Codex tier triage, exact success criteria, RED/GREEN/SURFACE loop | Codex-only tool names/notepad/update_plan, CODE RED tone | OpenCode/ocmm tool semantics, v1 skills |
 | deepwork/planner.md | writing-plans | (no omo equivalent) | — | condensed ~50 lines, references writing-plans skill |
 | category/*.md | varies | per-category role | omo tone | declarative, references skills by phase |
 
@@ -502,7 +512,8 @@ omo prompts (`prompts/omo/`) are not tracked in this doc.
    deepwork variant based on `fallbackChain[0].model`; categories get category
    prompts
 5. **Config hook variant selection**: planner agent -> `planner.md`; gpt family
-   model -> `gpt.md`; gemini family -> `gemini.md`; other -> `default.md`
+   model -> `gpt.md`; gemini family -> `gemini.md`; glm family -> `glm.md`;
+   codex family -> `codex.md`; other -> `default.md`
 6. **Chat hook omo no-op**: `workflow:'omo'` -> `chat.message` and
    `system.transform` return early, no modification
 7. **Chat hook v1 skill injection**: `workflow:'v1'` -> `chat.message` queues
@@ -553,7 +564,7 @@ Each v1 skill file reviewed for:
 ### Maintenance Doc Verification
 
 - `docs/v1-maintenance.md` exists with Skills Source Mapping (5 rows) and
-  Prompt Source Mapping (12 rows: 4 deepwork + 8 category)
+  Prompt Source Mapping (14 rows: 6 deepwork + 8 category)
 - `AGENTS.md` contains v1 Maintenance section with bidirectional sync rule
 - Every v1 file has a row; no row references non-existent file
 
