@@ -26,6 +26,28 @@ test("createBuiltinMcps returns enabled remote builtins and respects disabled li
   assert.equal(servers.codegraph?.enabled, false)
 })
 
+test("createBuiltinMcps only injects API-key headers when env allowlisted", () => {
+  const previous = process.env.EXA_API_KEY
+  process.env.EXA_API_KEY = "secret-exa"
+  try {
+    const blocked = createBuiltinMcps({ enabled: true, envAllowlist: [], websearch: { provider: "exa" }, servers: {} })
+    assert.equal(blocked.websearch?.type === "remote" ? blocked.websearch.headers : undefined, undefined)
+
+    const allowed = createBuiltinMcps({
+      enabled: true,
+      envAllowlist: ["EXA_API_KEY"],
+      websearch: { provider: "exa" },
+      servers: {},
+    })
+    assert.deepEqual(allowed.websearch?.type === "remote" ? allowed.websearch.headers : undefined, {
+      Authorization: "Bearer secret-exa",
+    })
+  } finally {
+    if (previous === undefined) delete process.env.EXA_API_KEY
+    else process.env.EXA_API_KEY = previous
+  }
+})
+
 test("resolveMcpServers merges builtins, mcp.json, and explicit config with disabled filter", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-mcp-resolve-"))
   try {

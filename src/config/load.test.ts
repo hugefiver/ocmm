@@ -1,7 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { deepMerge, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
+import { deepMerge, loadConfig, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
 import { defaultConfig } from "./schema.ts"
 
 test("stripJsoncCommentsAndTrailingCommas keeps strings intact", () => {
@@ -72,4 +75,25 @@ test("deepMerge: workflow scalar replaces (project wins)", () => {
   const project = { workflow: "omo" as const }
   const merged = deepMerge(user, project) as { workflow: string }
   assert.equal(merged.workflow, "omo")
+})
+
+test("project config cannot extend mcp envAllowlist", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-load-xdg-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-load-project-"))
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    mkdirSync(join(xdg, "opencode"), { recursive: true })
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify({ mcp: { envAllowlist: ["USER_KEY"] } }))
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ mcp: { envAllowlist: ["PROJECT_KEY"] } }))
+
+    const { config } = loadConfig({ cwd })
+    assert.deepEqual(config.mcp.envAllowlist, ["USER_KEY"])
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
 })

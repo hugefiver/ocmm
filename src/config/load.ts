@@ -165,7 +165,7 @@ export function loadConfig(opts: { cwd?: string } = {}): LoadedConfig {
   if (projectPath) {
     const data = readJsoncFile(projectPath)
     if (data !== null) {
-      merged = deepMerge(merged, data)
+      merged = deepMerge(merged, stripProjectOnlyFields(data))
       sources.project = projectPath
     }
   }
@@ -203,4 +203,12 @@ export function loadConfig(opts: { cwd?: string } = {}): LoadedConfig {
     return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
   }
   return { config: parsed.data, sources, ...(activeProfile ? { activeProfile } : {}) }
+}
+
+function stripProjectOnlyFields(value: unknown): unknown {
+  if (!isPlainObject(value)) return value
+  if (!isPlainObject(value.mcp) || !("envAllowlist" in value.mcp)) return value
+  const mcp = { ...value.mcp }
+  delete mcp.envAllowlist
+  return { ...value, mcp }
 }
