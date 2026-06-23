@@ -41,6 +41,23 @@ test("plugin exposes hashline edit tool when hashline is enabled", async () => {
   })
 })
 
+test("plugin exposes skill_mcp tool when MCP servers are configured", async () => {
+  await withIsolatedConfig(
+    { mcp: { servers: { docs: { type: "remote", url: "https://docs.example/mcp" } } } },
+    async (cwd) => {
+      const { pluginInterface } = createPlugin({ directory: cwd })
+      assert.equal(typeof pluginInterface.tool?.skill_mcp.execute, "function")
+
+      const result = await pluginInterface.tool!.skill_mcp.execute(
+        { mcp_name: "docs", tool_name: "search", arguments: { q: "zod" } },
+        {},
+      )
+      assert.match(result, /"mcp": "docs"/)
+      assert.match(result, /transport is not active/)
+    },
+  )
+})
+
 test("plugin tool after hook composes hashline and rules injectors", async () => {
   await withIsolatedConfig({ hashline: { enabled: true }, rules: { enabled: true } }, async (cwd) => {
     const file = join(cwd, "src", "app.ts")
