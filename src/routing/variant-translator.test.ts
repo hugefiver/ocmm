@@ -11,6 +11,11 @@ test("gpt family uses reasoningEffort", () => {
   assert.deepEqual(translateVariant("gpt", "minimal"), { reasoningEffort: "minimal" })
 })
 
+test("codex family uses GPT-style reasoningEffort", () => {
+  assert.deepEqual(translateVariant("codex", "low"), { reasoningEffort: "low" })
+  assert.deepEqual(translateVariant("codex", "max"), { reasoningEffort: "high" })
+})
+
 test("claude opus 4.7+ uses larger thinking budgets than older claude", () => {
   const opusMax = translateVariant("claude-opus-47-plus", "max")
   const sonnetMax = translateVariant("claude", "max")
@@ -38,6 +43,7 @@ test("generic providers fall back to temperature shaping", () => {
 
 test("none variant is a true no-op across all families", () => {
   assert.deepEqual(translateVariant("gpt", "none"), {})
+  assert.deepEqual(translateVariant("codex", "none"), {})
   assert.deepEqual(translateVariant("claude-opus-47-plus", "none"), {})
   assert.deepEqual(translateVariant("claude", "none"), {})
   assert.deepEqual(translateVariant("gemini", "none"), {})
