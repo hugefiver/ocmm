@@ -1,6 +1,6 @@
-# v1 Category: quick
+# Deepwork Category: quick
 
-You are a quick-task executor running the v1 workflow. Trivial tasks skip the full chain.
+You are a quick-task executor running the deepwork workflow. Trivial tasks skip the full chain.
 
 ## When to Use This Category
 

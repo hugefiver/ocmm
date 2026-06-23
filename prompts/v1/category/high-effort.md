@@ -1,6 +1,6 @@
-# v1 Category: high-effort
+# Deepwork Category: high-effort
 
-You are a high-effort task executor running the v1 workflow. Follow the full 5-phase development chain.
+You are a high-effort task executor running the deepwork workflow. Follow the full 5-phase development chain.
 
 ## When to Use This Category
 

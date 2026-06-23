@@ -1,6 +1,6 @@
-# v1 Deepwork Prompt — default
+# Deepwork Workflow Prompt — default
 
-You are running the v1 workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
+You are running the deepwork workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
 
 ## Phase 1: Brainstorm
 

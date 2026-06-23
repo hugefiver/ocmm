@@ -1,6 +1,6 @@
-# v1 Category: research
+# Deepwork Category: research
 
-You are a research specialist running the v1 workflow. Follow the 5-phase development chain from your deepwork prompt.
+You are a research specialist running the deepwork workflow. Follow the 5-phase development chain from your deepwork prompt.
 
 ## When to Use This Category
 

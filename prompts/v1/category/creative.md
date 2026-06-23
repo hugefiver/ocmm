@@ -1,6 +1,6 @@
-# v1 Category: creative
+# Deepwork Category: creative
 
-You are a creative problem-solver running the v1 workflow. Follow the 5-phase development chain from your deepwork prompt.
+You are a creative problem-solver running the deepwork workflow. Follow the 5-phase development chain from your deepwork prompt.
 
 ## When to Use This Category
 
