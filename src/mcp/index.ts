@@ -35,10 +35,10 @@ export function createBuiltinMcps(config: McpConfig, disabledMcps: readonly stri
   const servers: McpServerMap = {}
 
   if (!disabled.has("websearch")) {
-    const websearch = createWebsearchConfig(config.websearch.provider)
+    const websearch = createWebsearchConfig(config)
     if (websearch) servers.websearch = websearch
   }
-  if (!disabled.has("context7")) servers.context7 = remote("https://mcp.context7.com/mcp", context7Headers())
+  if (!disabled.has("context7")) servers.context7 = remote("https://mcp.context7.com/mcp", context7Headers(config))
   if (!disabled.has("grep_app")) servers.grep_app = remote("https://mcp.grep.app")
   if (!disabled.has("lsp")) servers.lsp = local(["lsp-tools-mcp", "mcp"], { enabled: false })
   if (!disabled.has("codegraph")) servers.codegraph = local(["codegraph", "serve", "--mcp"], { enabled: false })
@@ -141,22 +141,31 @@ export function normalizeServerConfig(server: McpServerConfig): McpServerConfig 
   return { ...server }
 }
 
-function createWebsearchConfig(provider: "exa" | "tavily"): McpServerConfig | undefined {
-  if (provider === "tavily") {
-    const key = process.env.TAVILY_API_KEY
+function createWebsearchConfig(config: McpConfig): McpServerConfig | undefined {
+  if (config.websearch.provider === "tavily") {
+    const key = envIfAllowed("TAVILY_API_KEY", config)
     if (!key) return undefined
     return remote("https://mcp.tavily.com/mcp/", { Authorization: `Bearer ${key}` })
   }
   return remote(
     "https://mcp.exa.ai/mcp?tools=web_search_exa",
-    process.env.EXA_API_KEY ? { Authorization: `Bearer ${process.env.EXA_API_KEY}` } : undefined,
+    exaHeaders(config),
   )
 }
 
-function context7Headers(): Record<string, string> | undefined {
-  return process.env.CONTEXT7_API_KEY
-    ? { Authorization: `Bearer ${process.env.CONTEXT7_API_KEY}` }
-    : undefined
+function exaHeaders(config: McpConfig): Record<string, string> | undefined {
+  const key = envIfAllowed("EXA_API_KEY", config)
+  return key ? { Authorization: `Bearer ${key}` } : undefined
+}
+
+function context7Headers(config: McpConfig): Record<string, string> | undefined {
+  const key = envIfAllowed("CONTEXT7_API_KEY", config)
+  return key ? { Authorization: `Bearer ${key}` } : undefined
+}
+
+function envIfAllowed(name: string, config: McpConfig): string | undefined {
+  if (!config.envAllowlist.includes(name)) return undefined
+  return process.env[name]
 }
 
 function remote(url: string, headers?: Record<string, string>): McpServerConfig {
