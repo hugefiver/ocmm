@@ -66,8 +66,8 @@ The requested outcome is the contract.
 | Failure mode | Required response |
 |---|---|
 | Missing context | Explore with tools or delegate exploration. |
-| Unknown library behavior | Use librarian/docs or inspect examples. |
-| Architecture uncertainty | Consult oracle after forming concrete options. |
+| Unknown library behavior | Use doc-search/docs or inspect examples. |
+| Architecture uncertainty | Consult reviewer after forming concrete options. |
 | Implementation obstacle | Try a different route and verify again. |
 | True user-only blocker | Ask one precise question and stop. |
 
@@ -90,9 +90,9 @@ Use the fastest path that increases certainty.
 | Trivial, visible pattern, single file | Do it yourself. |
 | Moderate, one domain, clear local tests | Do it yourself. |
 | Broad codebase search | Delegate explore in background, then keep working on non-overlapping tasks. |
-| External docs or API uncertainty | Delegate librarian or query docs. |
-| Hard architecture/debugging after 2 attempts | Ask oracle with evidence and options. |
-| 5+ dependent steps or unclear sequencing | Use a plan agent before implementation. |
+| External docs or API uncertainty | Delegate doc-search or query docs. |
+| Hard architecture/debugging after 2 attempts | Ask reviewer with evidence and options. |
+| 5+ dependent steps or unclear sequencing | Use a planner agent before implementation. |
 
 Delegation is not a substitute for ownership. You remain responsible for synthesis, edits, and verification.
 
@@ -102,10 +102,10 @@ Survey applicable skills before working raw. Use only resources that fit the tas
 
 | Resource | Use when | Output needed |
 |---|---|---|
-| explore agent | Repo patterns, ownership, hidden call sites | File paths, conventions, risks |
-| librarian agent | Official docs, external examples, APIs | Current guidance with source names |
-| oracle agent | Conflicting evidence or hard design choice | Recommendation with tradeoffs |
-| plan agent | Large dependent work | Ordered waves and verification plan |
+| code-search agent | Repo patterns, ownership, hidden call sites | File paths, conventions, risks |
+| doc-search agent | Official docs, external examples, APIs | Current guidance with source names |
+| reviewer agent | Conflicting evidence or hard design choice | Recommendation with tradeoffs |
+| planner agent | Large dependent work | Ordered waves and verification plan |
 | category + skill | Domain work exists | Specialized execution with criteria |
 
 <tool_usage_rules>

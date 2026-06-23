@@ -8,7 +8,7 @@ Concepts (model tiering, per-model specialized prompts, intent gating, proactive
 
 | Hook | What ocmm does |
 |---|---|
-| `config` | Registers 10 primary agents + 8 category-subagents with their preferred provider/model. Attaches workflow-specific deepwork prompts to each agent based on model family. User config can add, override, or disable any of them. |
+| `config` | Registers 10 primary agents + 8 category-subagents with their preferred provider/model. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
 | `chat.params` | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant) and applies the right `reasoningEffort` / extended-thinking budget / temperature for the model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...). |
 | `chat.message` | v1 workflow: queues superpowers skills content on the first message per session. omo workflow: no-op (prompts are declaratively attached at config time). |
 | `experimental.chat.system.transform` | v1 workflow: drains queued skills content and prepends to `output.system`. omo workflow: no-op. |
@@ -22,7 +22,7 @@ ocmm supports two workflows, switchable via the `workflow` config field:
 
 **`omo`** (default) — Upstream oh-my-opencode system prompts. Aggressive tone (CODE RED, ABSOLUTE CERTAINTY). Prompts are attached declaratively to agents at config time based on model family.
 
-**`v1`** — Superpowers 5-phase development chain (brainstorm -> plan -> implement -> review -> receive-review). Calm, structured tone. Prompts reference external skills loaded from `skills/v1/`. Model-family specialization retained (default/gpt/gemini/glm/codex/planner variants). Skills are injected on the first message per session via `chat.message` + `system.transform` hooks.
+**`v1`** — Skill-driven deepwork workflow. The config/path label stays `v1`, but model-facing prompt text calls it `deepwork`. The default prompt is a concise local controller; GPT/Gemini/GLM/Codex/planner variants stay close to upstream omo model-specific prompt style with local tool/agent/path adaptation. Skills are injected on the first message per session via `chat.message` + `system.transform` hooks.
 
 ```jsonc
 { "workflow": "v1" }
@@ -172,7 +172,7 @@ high-effort     anthropic/claude-opus-4-7  variant=max     high effort fallback
 writing         kimi-for-coding/k2p5       (none)          documentation, prose
 ```
 
-Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the subagent's system prompt. Callers invoke them via `task(subagent_type="hard-reasoning", ...)`.
+The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`worker`, `doc-search`, `code-search`, `media-reader`, `task-runner`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="hard-reasoning", ...)`.
 
 ## Prompt architecture
 
@@ -182,9 +182,11 @@ Prompts are organized by workflow:
 prompts/
   omo/                              # upstream omo prompts
     deepwork/{default,gpt,gemini,glm,codex,planner}.md
+    agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (8 files)
   v1/                               # superpowers-style prompts
     deepwork/{default,gpt,gemini,glm,codex,planner}.md
+    agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (8 files)
 skills/
   v1/                               # forked superpowers skills (v1 only)
@@ -203,7 +205,7 @@ Model-family variant selection (`pickDeepworkVariantForAgent`):
 - Codex family -> `codex.md`
 - others (Claude/Kimi/Minimax/unknown) -> `default.md`
 
-Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. No runtime keyword detection — prompts are attached declaratively.
+Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. For built-in functional agents, ocmm composes `agents/<name>.md` with the selected `deepwork/<variant>.md`; the role prompt is authoritative for that agent's scope and the deepwork prompt supplies workflow/model calibration. Categories receive only their category prompt. No runtime keyword detection — prompts are attached declaratively.
 
 For v1 workflow, superpowers skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). For omo workflow, `chat.message` and `system.transform` are no-ops.
 
