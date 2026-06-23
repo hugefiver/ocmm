@@ -1,6 +1,6 @@
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { DEFAULT_SKILLS_ROOT, loadSharedSkills } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
@@ -61,6 +61,14 @@ function deepworkPromptForAgent(
   return getDeepworkPrompt(variant)
 }
 
+function promptForBuiltinAgent(agent: Agent, override?: NormalizedShorthand): string {
+  const rolePrompt = getAgentPrompt(agent.name).trim()
+  const modelPrompt = deepworkPromptForAgent(agent, override).trim()
+  if (!rolePrompt) return modelPrompt
+  if (!modelPrompt) return rolePrompt
+  return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+}
+
 function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
   return {
     name: c.name,
@@ -95,7 +103,7 @@ export function createConfigHandler(args: {
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
       const norm = normalizeShorthand(cfg.agents?.[a.name])
-      const prompt = deepworkPromptForAgent(a, norm)
+      const prompt = promptForBuiltinAgent(a, norm)
       const extras: { prompt?: string } = {}
       if (prompt) extras.prompt = prompt
       applyAgentEntry(agentMap, a, norm, extras)

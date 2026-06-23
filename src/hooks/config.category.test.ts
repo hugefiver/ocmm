@@ -21,6 +21,7 @@ test("config registers all 8 categories as subagents", async () => {
     assert.equal(entry!.mode, "subagent", `category ${c.name} should be subagent`)
     assert.equal(typeof entry!.prompt, "string", `category ${c.name} should have prompt`)
     assert.ok((entry!.prompt as string).length > 100, `category ${c.name} prompt too short`)
+    assert.doesNotMatch(entry!.prompt as string, /Agent Role:/)
   }
 })
 

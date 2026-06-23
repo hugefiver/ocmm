@@ -7,6 +7,7 @@ import { join } from "node:path"
 import {
   loadAllPrompts,
   getDeepworkPrompt,
+  getAgentPrompt,
   getCategoryPrompt,
   pickDeepworkVariantForAgent,
 } from "./prompt-loader.ts"
@@ -14,6 +15,7 @@ import {
 function makeTempRoot(workflow: "omo" | "v1"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
   mkdirSync(join(root, workflow, "deepwork"), { recursive: true })
+  mkdirSync(join(root, workflow, "agents"), { recursive: true })
   mkdirSync(join(root, workflow, "category"), { recursive: true })
   return root
 }
@@ -71,6 +73,38 @@ test("loadAllPrompts loads glm and codex deepwork variants", () => {
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadAllPrompts loads functional agent prompts", () => {
+  const root = makeTempRoot("omo")
+  try {
+    writeFileSync(join(root, "omo", "agents", "reviewer.md"), "reviewer-role")
+    writeFileSync(join(root, "omo", "agents", "plan-critic.md"), "plan-critic-role")
+    loadAllPrompts(root, "omo")
+    assert.equal(getAgentPrompt("reviewer"), "reviewer-role")
+    assert.equal(getAgentPrompt("plan-critic"), "plan-critic-role")
+    assert.equal(getAgentPrompt("worker"), "")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("real workflows include functional agents and wrapped v1 deepwork prompts", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1"] as const) {
+    loadAllPrompts(root, workflow)
+    for (const name of ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]) {
+      assert.match(getAgentPrompt(name), new RegExp(`Agent Role: ${name}`), `${workflow}/${name}`)
+    }
+    for (const variant of ["default", "gpt", "gemini", "glm", "codex", "planner"] as const) {
+      const prompt = getDeepworkPrompt(variant)
+      assert.ok(prompt.length > 0, `${workflow}/${variant} prompt missing`)
+      if (workflow === "v1") {
+        assert.match(prompt, /^<deepwork-mode>/, `${workflow}/${variant} missing opening tag`)
+        assert.match(prompt, /<\/deepwork-mode>\s*$/, `${workflow}/${variant} missing closing tag`)
+      }
+    }
   }
 })
 

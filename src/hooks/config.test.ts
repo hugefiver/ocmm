@@ -45,6 +45,22 @@ test("planner agent gets planner variant prompt", async () => {
   assert.ok(typeof entry.prompt === "string")
 })
 
+test("functional agents compose role prompt with model-family deepwork prompt", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
+  assert.match(reviewerPrompt, /Agent Role: reviewer/)
+  assert.match(reviewerPrompt, /strategic technical advisor/i)
+  assert.match(reviewerPrompt, /workflow-model-calibration/)
+  assert.match(reviewerPrompt, /DEEPWORK MODE ENABLED/)
+
+  const clarifierPrompt = String((cfg.agent.clarifier as Record<string, unknown>).prompt)
+  assert.match(clarifierPrompt, /Agent Role: clarifier/)
+  assert.match(clarifierPrompt, /pre-planning consultant/i)
+})
+
 test("user model override selects specialized deepwork prompt variant", async () => {
   const c = {
     ...defaultConfig(),
@@ -58,7 +74,7 @@ test("user model override selects specialized deepwork prompt variant", async ()
   await handler(cfg, undefined)
 
   assert.match(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
-  assert.match(String((cfg.agent.worker as Record<string, unknown>).prompt), /Codex-class models/)
+  assert.match(String((cfg.agent.worker as Record<string, unknown>).prompt), /Expert coding agent/)
 })
 
 test("config does not clobber an existing user-set model", async () => {
