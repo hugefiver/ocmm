@@ -40,9 +40,11 @@ export type PluginInterface = {
   "tool.execute.before"?: (input: unknown, output: unknown) => Promise<void>
   "tool.execute.after"?: (input: unknown, output: unknown) => Promise<void>
   "tool.definition"?: (input: unknown, output: unknown) => Promise<void>
-  tool?: Record<string, HashlineToolDefinition | SkillMcpToolDefinition>
+  tool?: Record<string, PluginToolDefinition>
   event?: (input: unknown) => Promise<void>
 }
+
+type PluginToolDefinition = HashlineToolDefinition | SkillMcpToolDefinition
 
 export type ServerInput = {
   directory?: string
@@ -125,15 +127,20 @@ export function createPlugin(input?: ServerInput): {
     }),
   }
 
-  const tools: Record<string, HashlineToolDefinition | SkillMcpToolDefinition> = {}
-  if (config.hashline.enabled) tools.edit = createHashlineEditTool()
+  function refreshTools(): void {
+    const tools: Record<string, PluginToolDefinition> = {}
+    if (config.hashline.enabled) tools.edit = createHashlineEditTool()
 
-  const mcpServers = resolveMcpServers(config.mcp, { disabledMcps: config.disabledMcps, cwd })
-  if (Object.keys(mcpServers).length > 0) {
-    tools.skill_mcp = createSkillMcpTool(createConfiguredMcpManager(mcpServers))
+    const mcpServers = resolveMcpServers(config.mcp, { disabledMcps: config.disabledMcps, cwd })
+    if (Object.keys(mcpServers).length > 0) {
+      tools.skill_mcp = createSkillMcpTool(createConfiguredMcpManager(mcpServers))
+    }
+
+    if (Object.keys(tools).length > 0) pluginInterface.tool = tools
+    else delete pluginInterface.tool
   }
 
-  if (Object.keys(tools).length > 0) pluginInterface.tool = tools
+  refreshTools()
 
   return {
     pluginInterface,
@@ -143,6 +150,7 @@ export function createPlugin(input?: ServerInput): {
       promptsLoaded = false
       v1SkillsCache = null
       ensurePromptsLoaded()
+      refreshTools()
       return config
     },
   }
