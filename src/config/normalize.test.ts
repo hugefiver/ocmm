@@ -83,6 +83,21 @@ test("schema accepts hashline namespace and defaults disabled", () => {
   assert.equal(parsed.data.hashline.enabled, true)
 })
 
+test("schema accepts rules namespace and defaults disabled", () => {
+  assert.deepEqual(OcmmConfigSchema.parse({}).rules, {
+    enabled: false,
+    skipClaudeUserRules: false,
+  })
+
+  const parsed = OcmmConfigSchema.safeParse({
+    rules: { enabled: true, skipClaudeUserRules: true },
+  })
+  assert.equal(parsed.success, true)
+  if (!parsed.success) return
+  assert.equal(parsed.data.rules.enabled, true)
+  assert.equal(parsed.data.rules.skipClaudeUserRules, true)
+})
+
 test("schema accepts rich agent override fields", () => {
   const parsed = OcmmConfigSchema.safeParse({
     agents: {
