@@ -6,7 +6,7 @@ import { join } from "node:path"
 
 import { createPlugin } from "./index.ts"
 
-function withIsolatedConfig<T>(projectConfig: unknown | null, run: (cwd: string) => T): T {
+async function withIsolatedConfig<T>(projectConfig: unknown | null, run: (cwd: string) => T | Promise<T>): Promise<T> {
   const xdg = mkdtempSync(join(tmpdir(), "ocmm-index-xdg-"))
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-index-project-"))
   const previousXdg = process.env.XDG_CONFIG_HOME
@@ -16,7 +16,7 @@ function withIsolatedConfig<T>(projectConfig: unknown | null, run: (cwd: string)
       mkdirSync(join(cwd, ".opencode"), { recursive: true })
       writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify(projectConfig, null, 2))
     }
-    return run(cwd)
+    return await run(cwd)
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = previousXdg
@@ -25,18 +25,40 @@ function withIsolatedConfig<T>(projectConfig: unknown | null, run: (cwd: string)
   }
 }
 
-test("plugin omits hashline edit tool by default", () => {
-  withIsolatedConfig(null, (cwd) => {
+test("plugin omits hashline edit tool by default", async () => {
+  await withIsolatedConfig(null, (cwd) => {
     const { pluginInterface } = createPlugin({ directory: cwd })
     assert.equal(pluginInterface.tool, undefined)
     assert.equal(typeof pluginInterface["tool.execute.after"], "function")
   })
 })
 
-test("plugin exposes hashline edit tool when hashline is enabled", () => {
-  withIsolatedConfig({ hashline: { enabled: true } }, (cwd) => {
+test("plugin exposes hashline edit tool when hashline is enabled", async () => {
+  await withIsolatedConfig({ hashline: { enabled: true } }, (cwd) => {
     const { pluginInterface } = createPlugin({ directory: cwd })
     assert.equal(typeof pluginInterface["tool.execute.after"], "function")
     assert.equal(typeof pluginInterface.tool?.edit.execute, "function")
+  })
+})
+
+test("plugin tool after hook composes hashline and rules injectors", async () => {
+  await withIsolatedConfig({ hashline: { enabled: true }, rules: { enabled: true } }, async (cwd) => {
+    const file = join(cwd, "src", "app.ts")
+    mkdirSync(join(cwd, "src"), { recursive: true })
+    writeFileSync(file, "export const app = true\n")
+    writeFileSync(join(cwd, "src", "AGENTS.md"), "Use src context.\n")
+    mkdirSync(join(cwd, ".omo", "rules"), { recursive: true })
+    writeFileSync(
+      join(cwd, ".omo", "rules", "typescript.md"),
+      "---\nglobs: [\"**/*.ts\"]\n---\nUse strict types.\n",
+    )
+
+    const { pluginInterface } = createPlugin({ directory: cwd })
+    const output = { output: "1: export const app = true", metadata: { filePath: file } }
+    await pluginInterface["tool.execute.after"]?.({ tool: "read", args: { filePath: file } }, output)
+
+    assert.match(output.output, /^1#[A-Z]{2}\|export const app = true/)
+    assert.match(output.output, /\[Rule: \.omo\/rules\/typescript\.md\]/)
+    assert.match(output.output, /\[Directory Context: /)
   })
 })

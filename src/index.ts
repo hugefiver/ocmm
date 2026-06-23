@@ -18,7 +18,9 @@ import { createConfigHandler } from "./hooks/config.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/chat-message.ts"
 import { createEventHandler } from "./hooks/event.ts"
+import { createDirectoryAgentsInjector } from "./hooks/directory-agents-injector.ts"
 import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
+import { createRulesInjector } from "./hooks/rules-injector.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { loadV1Skills } from "./intent/skill-loader.ts"
 import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/hashline-edit.ts"
@@ -90,6 +92,11 @@ export function createPlugin(input?: ServerInput): {
   config = loadOrDefault()
   ensurePromptsLoaded()
   const getConfig = (): OcmmConfig => config
+  const toolAfterHandlers = [
+    createHashlineReadEnhancer({ getConfig }),
+    createRulesInjector({ getConfig, projectRoot: cwd }),
+    createDirectoryAgentsInjector({ getConfig, projectRoot: cwd }),
+  ]
 
   const pluginInterface: PluginInterface = {
     config: createConfigHandler({ getConfig }),
@@ -99,7 +106,9 @@ export function createPlugin(input?: ServerInput): {
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
     }),
     "experimental.chat.system.transform": createSystemTransformHandler(),
-    "tool.execute.after": createHashlineReadEnhancer({ getConfig }),
+    "tool.execute.after": async (hookInput, hookOutput) => {
+      for (const handler of toolAfterHandlers) await handler(hookInput, hookOutput)
+    },
     event: createEventHandler({
       getConfig,
       ...(input?.client !== undefined ? { client: input.client } : {}),
