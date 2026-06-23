@@ -50,9 +50,9 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 **IF YOU ARE NOT 100% CERTAIN:**
 
 1. **THINK DEEPLY** - What is the user's TRUE intent? What problem are they REALLY trying to solve?
-2. **EXPLORE THOROUGHLY** - Fire explore/doc-search agents to gather ALL relevant context
+2. **EXPLORE THOROUGHLY** - Fire code-search/doc-search agents to gather ALL relevant context
 3. **CONSULT SPECIALISTS** - For hard/complex tasks, DO NOT struggle alone. Delegate:
-   - **Oracle**: Conventional problems - architecture, debugging, complex logic
+   - **reviewer**: Conventional problems - architecture, debugging, complex logic
    - **Artistry**: Non-conventional problems - different approach needed, unusual constraints
 4. **ASK THE USER** - If ambiguity remains after exploration, ASK. Don't guess.
 
@@ -65,7 +65,7 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 
 **WHEN IN DOUBT:**
 ```
-task(subagent_type="explore", load_skills=[], prompt="I'm implementing [TASK DESCRIPTION] and need to understand [SPECIFIC KNOWLEDGE GAP]. Find [X] patterns in the codebase - show file paths, implementation approach, and conventions used. I'll use this to [HOW RESULTS WILL BE USED]. Focus on src/ directories, skip test files unless test patterns are specifically needed. Return concrete file paths with brief descriptions of what each file does.", run_in_background=true)
+task(subagent_type="code-search", load_skills=[], prompt="I'm implementing [TASK DESCRIPTION] and need to understand [SPECIFIC KNOWLEDGE GAP]. Find [X] patterns in the codebase - show file paths, implementation approach, and conventions used. I'll use this to [HOW RESULTS WILL BE USED]. Focus on src/ directories, skip test files unless test patterns are specifically needed. Return concrete file paths with brief descriptions of what each file does.", run_in_background=true)
 task(subagent_type="doc-search", load_skills=[], prompt="I'm working with [LIBRARY/TECHNOLOGY] and need [SPECIFIC INFORMATION]. Find official documentation and production-quality examples for [Y] - specifically: API reference, configuration options, recommended patterns, and common pitfalls. Skip beginner tutorials. I'll use this to [DECISION THIS WILL INFORM].", run_in_background=true)
 task(subagent_type="reviewer", load_skills=[], prompt="I need architectural review of my approach to [TASK]. Here's my plan: [DESCRIBE PLAN WITH SPECIFIC FILES AND CHANGES]. My concerns are: [LIST SPECIFIC UNCERTAINTIES]. Please evaluate: correctness of approach, potential issues I'm missing, and whether a better alternative exists.", run_in_background=false)
 ```
@@ -102,7 +102,7 @@ task(subagent_type="reviewer", load_skills=[], prompt="I need architectural revi
 **IF YOU ENCOUNTER A BLOCKER:**
 1. **DO NOT** give up
 2. **DO NOT** deliver a compromised version
-3. **DO** consult specialists (reviewer for conventional, creative for non-conventional)
+3. **DO** consult specialists (reviewer for conventional, artistry for non-conventional)
 4. **DO** ask the user for guidance
 5. **DO** explore alternative approaches
 
@@ -137,15 +137,15 @@ TELL THE USER WHAT AGENTS + SKILLS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUE
 
 | Condition | Action |
 |-----------|--------|
-| Task has 2+ steps | MUST call plan agent |
-| Task scope unclear | MUST call plan agent |
-| Implementation required | MUST call plan agent |
-| Architecture decision needed | MUST call plan agent |
+| Task has 2+ steps | MUST call planner agent |
+| Task scope unclear | MUST call planner agent |
+| Implementation required | MUST call planner agent |
+| Architecture decision needed | MUST call planner agent |
 
 **AFTER THE PLAN RETURNS:** execute in the EXACT wave order and parallel grouping it specifies, and run the verification IT defines per task. Do NOT invent your own ordering or skip its verification.
 
 ```
-task(subagent_type="plan", load_skills=[], run_in_background=false, prompt="<gathered context + user request>")
+task(subagent_type="planner", load_skills=[], run_in_background=false, prompt="<gathered context + user request>")
 ```
 
 ### SESSION CONTINUITY WITH PLAN AGENT (CRITICAL)
@@ -170,14 +170,14 @@ task(subagent_type="plan", load_skills=[], run_in_background=false, prompt="<gat
 
 | Task Type | Action | Why |
 |-----------|--------|-----|
-| Codebase exploration | task(subagent_type="explore", load_skills=[], run_in_background=true) | Parallel, context-efficient |
+| Codebase exploration | task(subagent_type="code-search", load_skills=[], run_in_background=true) | Parallel, context-efficient |
 | Documentation lookup | task(subagent_type="doc-search", load_skills=[], run_in_background=true) | Specialized knowledge |
-| Planning | task(subagent_type="plan", load_skills=[], run_in_background=false) | Parallel task graph + structured TODO list |
+| Planning | task(subagent_type="planner", load_skills=[], run_in_background=false) | Parallel task graph + structured TODO list |
 | Hard problem (conventional) | task(subagent_type="reviewer", load_skills=[], run_in_background=false) | Architecture, debugging, complex logic |
-| Hard problem (non-conventional) | task(category="creative", load_skills=[...], run_in_background=true) | Different approach needed |
+| Hard problem (non-conventional) | task(category="artistry", load_skills=[...], run_in_background=true) | Different approach needed |
 | Implementation | task(category="...", load_skills=[...], run_in_background=true) | Domain-optimized models |
 
-**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with explore agents, Read/Grep/Glob/LSP, and the ast-grep skill.
+**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with code-search agents, Read/Grep/Glob/LSP, and the ast-grep skill.
 
 **YOU SHOULD ONLY DO IT YOURSELF WHEN:**
 - Task is trivially simple (1-2 lines, obvious change)

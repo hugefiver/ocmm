@@ -81,7 +81,8 @@ keyword triggers. See Migration Path.)
    (v1 only)           (both)                    (both)
    skills/v1/          prompts/<workflow>/       config: attach prompts
    (5 skills,            deepwork/               to agents (declarative)
-    forked from          category/              chat.message:
+    forked from          agents/                chat.message:
+                         category/
     superpowers)                               - omo: no-op
                                                - v1: queue skill content
                                                  on first message per session
@@ -151,18 +152,22 @@ prompts/
       glm.md       (GLM specialization from upstream omo)
       codex.md     (Codex specialization adapted to OpenCode/ocmm)
       planner.md   (24 lines)
+    agents/
+      orchestrator.md, reviewer.md, planner.md, clarifier.md, plan-critic.md
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
       quick.md, low-effort.md, high-effort.md, writing.md (8 files)
     # NO mode/ — keyword-triggered modes removed
-  v1/                                   # new
+  v1/                                   # skill-driven deepwork workflow; v1 is config/path label only
     deepwork/
-      default.md   (~120 lines, references 5 skills by name)
-      gpt.md       (~120 lines, same structure + GPT specialization)
-      gemini.md    (~140 lines, same structure + Gemini specialization)
-      glm.md       (same structure + GLM reliability guardrails)
-      codex.md     (same structure + Codex evidence-loop adaptation)
-      planner.md   (~50 lines, references writing-plans skill)
+      default.md   (concise local deepwork controller)
+      gpt.md       (upstream-first GPT specialization + deepwork skill-layer note)
+      gemini.md    (upstream-first Gemini specialization + deepwork skill-layer note)
+      glm.md       (upstream-first GLM specialization + deepwork skill-layer note)
+      codex.md     (upstream-first Codex specialization, Codex harness commands adapted)
+      planner.md   (upstream-first planner doctrine + writing-plans skill-layer note)
+    agents/
+      orchestrator.md, reviewer.md, planner.md, clarifier.md, plan-critic.md
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
       quick.md, low-effort.md, high-effort.md, writing.md (8 files)
@@ -173,16 +178,18 @@ No `mode/` directory in either workflow — `superplan` and `team` were
 keyword-triggered concepts; both workflows now drop keyword detection.
 omo's `mode/superplan.md` and `mode/team.md` are removed.
 
-#### v1 Prompt Structure (all deepwork variants)
+#### Skill-Driven Deepwork Prompt Structure
 
-Each prompt has this skeleton:
+Files under `prompts/v1/` keep `v1` as the config/path label only. Model-facing prompt text uses `deepwork`, never `v1`.
+
+The default prompt is intentionally concise:
 
 ```markdown
-# v1 Deepwork Prompt — <variant>
+<deepwork-mode>
 
-You are running the v1 workflow. Follow the 5-phase development chain.
-The skill instructions are available in your system message — invoke them
-when entering each phase.
+# Deepwork Workflow Prompt — <variant>
+
+You are running the skill-driven deepwork workflow. The detailed deepwork skills are already injected into the system message. Use this prompt as the concise controller for when to apply those skills, which local agents to use, and how to verify completion.
 
 ## Phase 1: Brainstorm
 When the task is non-trivial (2+ steps, unclear scope, multiple modules):
@@ -220,13 +227,13 @@ When you receive review feedback:
 - Investigate before claiming — never speculate about unread code
 - Parallelize independent file reads
 
-## <Variant-Specific Specialization>
-<gpt/gemini/default-specific guidance here>
+## Deepwork Skill Chain
+Use the injected deepwork skills when their phase applies.
+
+</deepwork-mode>
 ```
 
-The prompt is ~120-140 lines. Skill CONTENT (detailed, long) lives in
-`skills/v1/` and is injected separately via `system.transform`. The prompt
-is a router that tells the model which skill to follow at each phase.
+The GPT/Gemini/GLM/Codex/planner files are upstream-first adaptations of omo's model-specific prompts. They retain upstream information density, constraints, and command style where compatible, then replace only upstream-specific agent names, paths, and harness-only commands with local OpenCode/ocmm semantics. Skill content lives in `skills/v1/` and is injected separately via `system.transform`.
 
 #### omo Prompt Structure
 
@@ -240,20 +247,33 @@ protocols.
 
 | Variant | Specialization |
 |---------|----------------|
-| `default.md` | Generic, calm tone, numbered steps. For claude/kimi/minimax/unknown families. |
-| `gpt.md` | Same structure, GPT-friendly format: explicit checklists, IF/THEN branch points, template fields. GPT excels at structured instruction following. |
-| `gemini.md` | Same structure, Gemini-specific emphasis: exhaustive context gathering, explicit phase-transition gates, mandated parallel tool calls. Gemini has large context windows. |
-| `glm.md` | Same 5-phase structure, GLM-specific emphasis: shallow/deep thinking split, evidence-backed claims, avoid overplanning after enough information exists. |
-| `codex.md` | Same 5-phase structure, Codex-specific emphasis: tier triage, exact success criteria, RED/GREEN/SURFACE evidence loop adapted to OpenCode/ocmm tools. |
-| `planner.md` | Condensed (~50 lines). References `writing-plans` skill directly. For the `planner`/`plan` agent. |
+| `default.md` | Concise local deepwork controller for default/unknown families. |
+| `gpt.md` | Upstream-first GPT structured-instruction prompt with local agent/tool names. |
+| `gemini.md` | Upstream-first Gemini intent-gate/tool-mandate prompt with local agent/tool names. |
+| `glm.md` | Upstream-first GLM reliability and evidence-discipline prompt. |
+| `codex.md` | Upstream-first Codex tier triage and evidence loop, with Codex-harness commands adapted to OpenCode/ocmm. |
+| `planner.md` | Upstream-first planner doctrine adapted to `planner` and `writing-plans`. |
 
 #### Category Prompts (`prompts/<workflow>/category/*.md`)
 
 Both workflows have 8 category prompts. Each ~30-50 lines, attached to
 category subagents at config time.
 
-v1 categories reference relevant skills for the category's workflow.
-omo categories are self-contained (no skills).
+Category prompts in both workflows stay strongly aligned. The skill-driven workflow gets deepwork mechanics from the deepwork prompt layer and injected skills, not from shortened category router prompts.
+
+#### Functional Agent Prompts (`prompts/<workflow>/agents/*.md`)
+
+Both workflows include five role prompts for the primary orchestration structure:
+
+| Local agent | Upstream role | Purpose |
+|-------------|---------------|---------|
+| `orchestrator` | Sisyphus | Main coordinator and router |
+| `reviewer` | Oracle | Read-only advisor for hard reasoning, review, architecture, debugging |
+| `planner` | Prometheus | Structured implementation-plan author |
+| `clarifier` | Metis | Pre-planning ambiguity, hidden intent, and risk analysis |
+| `plan-critic` | Momus | Blocker-focused plan review |
+
+At config time, built-in functional agents compose `agents/<name>.md` with the selected model-family `deepwork/<variant>.md`. The role prompt defines agent scope and output contract; the deepwork prompt supplies workflow/model reliability calibration. Category subagents use category prompts instead.
 
 ### Hook Layer
 
@@ -458,13 +478,18 @@ Doc structure:
 ## Prompt Source Mapping
 | v1 prompt | Skills referenced | Kept from omo | Dropped from omo | Adapted for v1 |
 |-----------|-------------------|---------------|------------------|-----------------|
-| deepwork/default.md | all 5 | model-family specialization | CODE RED tone, keyword injection, table emphasis | declarative skill invocation, calm tone |
-| deepwork/gpt.md | all 5 | GPT-structured-instruction adaptation | CODE RED tone | declarative, GPT-friendly checklist format |
-| deepwork/gemini.md | all 5 | large-context gathering, intent-gate | CODE RED tone | declarative, Gemini-specific context emphasis |
-| deepwork/glm.md | all 5 | GLM calibration, evidence-first completion, shallow/deep thinking split | CODE RED tone, keyword injection | declarative, GLM reliability guardrails |
-| deepwork/codex.md | all 5 | Codex tier triage, exact success criteria, RED/GREEN/SURFACE loop | Codex-only tool names/notepad/update_plan, CODE RED tone | OpenCode/ocmm tool semantics, v1 skills |
-| deepwork/planner.md | writing-plans | (no omo equivalent) | — | condensed ~50 lines, references writing-plans skill |
-| category/*.md | varies | per-category role | omo tone | declarative, references skills by phase |
+| deepwork/default.md | all 5 | local orchestration/evidence discipline | upstream long default bulk | concise local deepwork controller |
+| deepwork/gpt.md | all 5 | upstream GPT specialization | upstream-only names | local agent/tool names + skill-layer note |
+| deepwork/gemini.md | all 5 | upstream Gemini specialization | upstream-only names | local agent/tool names + skill-layer note |
+| deepwork/glm.md | all 5 | upstream GLM specialization | upstream-only names | local agent/tool names + skill-layer note |
+| deepwork/codex.md | all 5 | upstream Codex specialization | Codex harness-only commands | OpenCode/ocmm task/todowrite semantics + skill-layer note |
+| deepwork/planner.md | writing-plans | upstream planner doctrine | Prometheus branding | local planner name + writing-plans skill-layer note |
+| agents/orchestrator.md | all 5 | Sisyphus orchestration contract | upstream lore/tool names | local roles + category dispatch |
+| agents/reviewer.md | review skills | Oracle advisory contract | Oracle branding | local reviewer role |
+| agents/planner.md | writing-plans | Prometheus planning scope | `.omo`-only planning flow | local plan path + writing-plans skill |
+| agents/clarifier.md | brainstorming/writing-plans | Metis intent and ambiguity analysis | `call_omo_agent`, Prometheus-only handoff | local clarifier directives |
+| agents/plan-critic.md | writing-plans/review skills | Momus blocker-focused review | Momus branding, `.omo/plans`-only input | local plan-critic review |
+| category/*.md | varies | upstream/default omo category constraints | old shortened category routers | strongly aligned category roles; deepwork mechanics come from injected skills |
 
 ## Shared Characteristics
 5-phase chain, TDD, two-stage review, no performative agreement, bite-sized
@@ -564,7 +589,8 @@ Each v1 skill file reviewed for:
 ### Maintenance Doc Verification
 
 - `docs/v1-maintenance.md` exists with Skills Source Mapping (5 rows) and
-  Prompt Source Mapping (14 rows: 6 deepwork + 8 category)
+  Prompt Source Mapping (19 rows: 6 deepwork + 5 agents + 8 category)
+  Deepwork tag envelope note for `prompts/v1/deepwork/*.md`
 - `AGENTS.md` contains v1 Maintenance section with bidirectional sync rule
 - Every v1 file has a row; no row references non-existent file
 

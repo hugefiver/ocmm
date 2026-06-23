@@ -106,7 +106,7 @@ opencode debug config --print-logs --log-level DEBUG 2>&1 | rg "ocmm"
 Expected lines:
 ```
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
-[ocmm] loaded prompts: workflow=v1 deepwork=4/4, category=8/8
+[ocmm] loaded prompts: workflow=v1 deepwork=6/6, agents=5/5, category=8/8
 [ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
 [ocmm] config: registered N agents (built-in + categories + user)
 ```
@@ -176,6 +176,16 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 - To test v1 workflow: add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message; omo (default) attaches prompts to agents declaratively with no runtime injection.
 - If you see `max_tokens` errors (`integer above maximum value`), lower the model's `output` limit in `opencode.json` — OpenCode adds internal overhead to the configured limit.
 
+## Prompt Synchronization
+
+Prompt files are model-facing behavior and must stay synchronized with upstream intent and local workflow semantics.
+
+- `workflow: "v1"`, `prompts/v1/`, `skills/v1/`, and `docs/v1-maintenance.md` are config/path/version labels. Model-facing prompt text under `prompts/v1/**` must call the workflow `deepwork`, not `v1`.
+- `prompts/v1/deepwork/default.md` is intentionally concise and local to this project. Do not blindly replace it with the upstream long default prompt.
+- `prompts/v1/deepwork/{gpt,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
+- `prompts/v1/agents/*.md` and `prompts/v1/category/*.md` should stay strongly aligned with `prompts/omo/agents/*.md` and `prompts/omo/category/*.md`. Deepwork mechanics come from the deepwork layer and injected skills, not from shortened agent/category prompts.
+- Changes under `prompts/v1/` MUST update `docs/v1-maintenance.md` in the same commit. Changes under `prompts/omo/` MUST update `docs/prompt-sync.md` in the same commit. Changes that affect both workflows update both docs.
+- `prompts/omo/agents/` is ignored by the broad `omo/` ignore pattern. Stage intentional files there with `git add -f`.
 ## v1 Maintenance
 
 All v1 skill file changes (in `skills/v1/`) and v1 prompt file changes (in `prompts/v1/`) MUST be synchronized with `docs/v1-maintenance.md` in the same commit, and vice versa. A file change without a doc update, or a doc update without a file change, is a failed review.

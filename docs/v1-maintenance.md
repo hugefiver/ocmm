@@ -28,20 +28,25 @@ Naming note: `v1` remains the configuration value and on-disk version label. Pro
 
 | v1 prompt | Skills referenced | Kept from omo | Dropped from omo | Adapted for v1 |
 |-----------|-------------------|---------------|------------------|-----------------|
-| deepwork/default.md | all 5 | model-family specialization concept, forced context gathering, parallel delegation | CODE RED tone, ABSOLUTE CERTAINTY, NO EXCUSES, table emphasis, keyword injection | declarative skill invocation, calm tone, 5-phase chain |
-| deepwork/gpt.md | all 5 | GPT-structured-instruction adaptation concept | CODE RED tone | declarative, GPT-friendly checklist/IF-THEN format |
-| deepwork/gemini.md | all 5 | large-context gathering concept, intent-gate concept | CODE RED tone | declarative, Gemini-specific context emphasis, phase-transition gates |
-| deepwork/glm.md | all 5 | upstream GLM 5.x calibration, shallow/deep thinking split, evidence-first completion | CODE RED tone, no-excuses table emphasis, keyword injection | declarative, GLM reliability guardrails, 5-phase chain |
-| deepwork/codex.md | all 5 | upstream Codex tier triage, success criteria, RED/GREEN/SURFACE evidence loop | Codex-only notepad/update_plan tooling, Codex harness names, CODE RED tone | OpenCode/ocmm tool semantics, v1 skills, proportional process |
-| deepwork/planner.md | writing-plans | (no omo equivalent — omo planner.md is a different style) | — | condensed ~50 lines, references writing-plans skill directly |
-| category/frontend.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for frontend |
-| category/creative.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for creative |
-| category/hard-reasoning.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for hard-reasoning |
-| category/research.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase integration for research |
-| category/quick.md | (references deepwork prompt) | category role concept | omo tone | declarative, skip phases for trivial tasks |
-| category/low-effort.md | (references deepwork prompt) | category role concept | omo tone | declarative, condensed 5-phase |
-| category/high-effort.md | (references deepwork prompt) | category role concept | omo tone | declarative, full 5-phase |
-| category/writing.md | (references deepwork prompt) | category role concept | omo tone | declarative, 5-phase for documentation |
+| deepwork/default.md | all 5 | local ocmm agent/category structure, exact-scope and evidence discipline | upstream CODE RED bulk and model-specific ceremony | concise local deepwork controller; no visible version label |
+| deepwork/gpt.md | all 5 | upstream GPT structured-instruction adaptation, certainty protocol, TDD/QA/reviewer gate | upstream-only agent/tool names | local agent names plus deepwork skill-layer note |
+| deepwork/gemini.md | all 5 | upstream Gemini intent gate, tool mandate, delegation and QA strictness | upstream-only agent/tool names | local agent names plus deepwork skill-layer note |
+| deepwork/glm.md | all 5 | upstream GLM 5.x calibration, shallow/deep thinking split, evidence-first completion | upstream-only agent/tool names | local agent names plus deepwork skill-layer note |
+| deepwork/codex.md | all 5 | upstream Codex tier triage, success criteria, RED/GREEN/SURFACE loop, cleanup/review gates | Codex harness-only `multi_agent_v1`, `fork_context`, TOML routing, `update_plan`/`create_goal` | OpenCode/ocmm task/todowrite semantics plus deepwork skill-layer note |
+| deepwork/planner.md | writing-plans | upstream planner doctrine from ultrawork planner prompt | Prometheus branding and upstream skill name | local `planner` name plus writing-plans skill-layer note |
+| agents/orchestrator.md | all 5 | upstream Sisyphus orchestration structure | lore/brand-heavy identity, upstream-only tool names | local role names, v1 5-phase routing, category dispatch |
+| agents/reviewer.md | requesting-code-review | upstream Oracle advisor role | Oracle branding, upstream-only restrictions | local `reviewer` name, read-only review/architecture/debugging contract |
+| agents/planner.md | writing-plans | upstream Prometheus planner scope | `.omo`-specific plan-only command flow | local docs/superpowers plan path, writing-plans skill contract |
+| agents/clarifier.md | brainstorming, writing-plans | upstream Metis pre-planning analysis | Metis branding, `call_omo_agent`, Prometheus-only handoff | local `clarifier` name, deepwork planner directives |
+| agents/plan-critic.md | writing-plans, requesting-code-review | upstream Momus blocker-focused review | Momus branding, `.omo/plans`-only extraction | local `plan-critic` name, inline-or-file plan review |
+| category/frontend.md | (deepwork injected separately) | full omo frontend category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/creative.md | (deepwork injected separately) | full omo creative category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/hard-reasoning.md | (deepwork injected separately) | full omo hard-reasoning category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/research.md | (deepwork injected separately) | full omo research category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/quick.md | (deepwork injected separately) | full omo quick category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/low-effort.md | (deepwork injected separately) | full omo low-effort category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/high-effort.md | (deepwork injected separately) | full omo high-effort category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/writing.md | (deepwork injected separately) | full omo writing category constraints | old shortened category router | strongly aligned category role; no visible version label |
 
 ## Shared Characteristics
 
@@ -56,6 +61,8 @@ All v1 prompts share these principles (derived from superpowers skills):
 7. **Bite-sized tasks**: 2-5 minute steps in plans
 8. **Investigate before claiming**: never speculate about unread code
 9. **Parallelize reads**: batch independent file reads
+10. **Deepwork tag envelope**: every `prompts/v1/deepwork/*.md` file is wrapped in `<deepwork-mode>` to match the omo prompt envelope while keeping `v1` only as the config/path label.
+11. **No model-visible version label**: files under `prompts/v1/` must not mention `v1` to the model. Use `deepwork` wording in model-facing prompt text.
 
 ## Maintenance Rules
 
@@ -65,7 +72,7 @@ All v1 prompts share these principles (derived from superpowers skills):
 4. Adding a new v1 file requires adding a row to the relevant table.
 5. Removing a v1 file requires removing its row and updating any references in `src/intent/skill-loader.ts` or `src/intent/prompt-loader.ts`.
 6. Upstream skill sync requires updating the "Last synced" date and "Upstream version" column, plus re-applying any adjustments listed.
-7. omo prompts (`prompts/omo/`) are NOT tracked in this doc — they are the baseline, not derivatives. omo changes follow normal commit conventions.
+7. omo prompts (`prompts/omo/`) are tracked in `docs/prompt-sync.md`, not this v1 derivative table. Update that doc when omo prompt files change.
 
 ## Upstream Sync Procedure
 
