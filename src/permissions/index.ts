@@ -11,6 +11,7 @@ const README_BUDGET = 12000
 const DEFAULT_TRUNCATE_LIMIT = 50000
 const WEBFETCH_TRUNCATE_LIMIT = 10000
 const MAX_QUESTION_LABEL_LENGTH = 30
+const REDIRECT_TIMEOUT_MS = 3000
 
 const JSON_ERROR_NOTICE = `[JSON PARSE ERROR - IMMEDIATE ACTION REQUIRED]
 The previous tool output appears to contain a JSON parse failure. Inspect the raw output, identify the invalid JSON fragment, and retry with corrected JSON rather than repeating the same call.`
@@ -79,7 +80,7 @@ export function createPermissionGuards(args: {
       replaceEmptyTaskOutput(config, rawInput, rawOutput)
       await injectDirectoryReadme(config, rawInput, rawOutput, projectRoot)
       warnCommentChecker(config, rawInput, rawOutput)
-      await warnPlanFormat(config, rawInput, rawOutput)
+      await warnPlanFormat(config, rawInput, rawOutput, projectRoot)
       warnReadImageResize(config, rawInput, rawOutput)
       appendJsonRecovery(config, rawInput, rawOutput)
       appendFsyncWarnings(config, rawOutput, args.fsyncTracker)
@@ -103,7 +104,7 @@ async function trackReadPermission(
 ): Promise<void> {
   if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
   if (toolName(rawInput) !== READ_TOOL) return
-  const filePath = filePathFromArgs(rawInput)
+  const filePath = filePathFromArgs(rawInput, projectRoot)
   if (!filePath) return
   const canonical = canonicalExistingFile(filePath, projectRoot)
   if (!canonical || !isInside(projectRoot, canonical)) return
@@ -125,7 +126,7 @@ function guardExistingFileWrite(
   if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
   if (toolName(rawInput) !== WRITE_TOOL) return
   const args = argsRecord(rawInput)
-  const filePath = filePathFromArgs(rawInput)
+  const filePath = filePathFromArgs(rawInput, projectRoot)
   if (!filePath || args?.overwrite === true) return
 
   const canonical = canonicalExistingFile(filePath, projectRoot)
@@ -221,17 +222,30 @@ async function rewriteWebfetchRedirect(
   if (next && next !== args.url) args.url = next
 }
 
-export async function resolveRedirectUrl(url: string): Promise<string | null> {
+export async function resolveRedirectUrl(url: string, timeoutMs = REDIRECT_TIMEOUT_MS): Promise<string | null> {
   const fetchImpl = globalThis.fetch
   if (!fetchImpl) return null
   let current = url
   for (let i = 0; i < 5; i += 1) {
-    let response: Response
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let response: Response | null
     try {
-      response = await fetchImpl(current, { method: "HEAD", redirect: "manual" })
+      response = await Promise.race([
+        fetchImpl(current, { method: "HEAD", redirect: "manual", signal: controller.signal }),
+        new Promise<null>((resolveTimeout) => {
+          timeout = setTimeout(() => {
+            controller.abort()
+            resolveTimeout(null)
+          }, timeoutMs)
+        }),
+      ])
     } catch {
       return null
+    } finally {
+      if (timeout) clearTimeout(timeout)
     }
+    if (response === null) return null
     if (response.status < 300 || response.status >= 400) return current === url ? null : current
     const location = response.headers.get("location")
     if (!location) return null
@@ -259,7 +273,7 @@ async function injectDirectoryReadme(
   if (toolName(rawInput) !== READ_TOOL) return
   const out = outputRecord(rawOutput)
   if (!out || typeof out.output !== "string" || out.output.includes("[Directory README:")) return
-  const targetPath = filePathFromOutput(rawInput, out)
+  const targetPath = filePathFromOutput(rawInput, out, projectRoot)
   if (!targetPath) return
   const readme = findNearestReadme(targetPath, projectRoot)
   if (!readme || resolve(readme) === resolve(targetPath)) return
@@ -281,11 +295,16 @@ function warnCommentChecker(config: OcmmConfig, rawInput: unknown, rawOutput: un
   appendOutput(rawOutput, "\n\n[Comment Checker Warning]\nAvoid AI-attribution comments in committed source. Remove generated-by-AI comments or add an explicit bypass marker if intentional.")
 }
 
-async function warnPlanFormat(config: OcmmConfig, rawInput: unknown, rawOutput: unknown): Promise<void> {
+async function warnPlanFormat(
+  config: OcmmConfig,
+  rawInput: unknown,
+  rawOutput: unknown,
+  projectRoot: string,
+): Promise<void> {
   if (hookDisabled(config, "plan-format-validator", "planFormatValidator")) return
   const name = toolName(rawInput)
   if (name !== WRITE_TOOL && name !== "edit" && name !== "multiedit") return
-  const filePath = filePathFromArgs(rawInput)
+  const filePath = filePathFromArgs(rawInput, projectRoot)
   if (!filePath || !isPlanPath(filePath)) return
   const text = contentArgs(rawInput).join("\n") || await readText(filePath)
   if (!text) return
@@ -414,14 +433,14 @@ function hasImageMetadata(rawOutput: unknown): boolean {
   return attachments.some((item) => isRecord(item) && typeof item.mime === "string" && item.mime.startsWith("image/"))
 }
 
-function filePathFromOutput(rawInput: unknown, rawOutput: Record<string, unknown>): string | null {
+function filePathFromOutput(rawInput: unknown, rawOutput: Record<string, unknown>, baseDir: string): string | null {
   if (isRecord(rawOutput.metadata)) {
     for (const key of ["filePath", "path", "file", "file_path"]) {
       const value = rawOutput.metadata[key]
-      if (typeof value === "string" && value.length > 0) return absolutize(value, process.cwd())
+      if (typeof value === "string" && value.length > 0) return absolutize(value, baseDir)
     }
   }
-  return filePathFromArgs(rawInput)
+  return filePathFromArgs(rawInput, baseDir)
 }
 
 function filePathFromArgs(rawInput: unknown, baseDir = process.cwd()): string | null {

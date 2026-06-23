@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 
 import { defaultConfig } from "../config/schema.ts"
 import {
@@ -10,6 +10,7 @@ import {
   createFsyncSkipTracker,
   createPermissionGuards,
   isSimpleFileReadCommand,
+  resolveRedirectUrl,
   TODOWRITE_DESCRIPTION,
 } from "./index.ts"
 
@@ -41,6 +42,27 @@ test("write existing file guard requires a prior read in the same session", asyn
     await guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {})
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("write guard resolves relative paths from project root, not process cwd", async () => {
+  const root = tempProject()
+  const other = tempProject()
+  const previousCwd = process.cwd()
+  try {
+    mkdirSync(join(root, "src"), { recursive: true })
+    const file = join(root, "src", "existing.txt")
+    writeFileSync(file, "old")
+    process.chdir(other)
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    await assert.rejects(
+      guards.before({ tool: "write", args: { filePath: relative(root, file), content: "new" } }, {}),
+      /File already exists/,
+    )
+  } finally {
+    process.chdir(previousCwd)
+    rmSync(root, { recursive: true, force: true })
+    rmSync(other, { recursive: true, force: true })
   }
 })
 
@@ -79,6 +101,18 @@ test("before guards protect notepads, warn on bash reads, truncate question labe
     assert.deepEqual(webfetchOutput.args, { url: "https://example.com/final" })
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("redirect resolver timeout returns null instead of hanging", async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch
+    const started = Date.now()
+    assert.equal(await resolveRedirectUrl("https://example.com/slow", 10), null)
+    assert.ok(Date.now() - started < 1000)
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })
 
