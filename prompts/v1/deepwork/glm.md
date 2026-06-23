@@ -1,8 +1,8 @@
-# v1 Deepwork Prompt — glm
+# Deepwork Workflow Prompt — glm
 
-You are running the v1 workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
+You are running the deepwork workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
 
-GLM 5.x is strongest when it uses shallow deliberation for routine edits, deep deliberation only for genuinely hard reasoning, and verifies every claim with tool evidence. This prompt keeps v1's skill-driven workflow while adding GLM reliability guardrails from the upstream omo GLM specialization.
+GLM 5.x is strongest when it uses shallow deliberation for routine edits, deep deliberation only for genuinely hard reasoning, and verifies every claim with tool evidence. This prompt keeps the deepwork skill-driven workflow while adding GLM reliability guardrails from the upstream omo GLM specialization.
 
 ## Phase 0: Certainty Gate
 

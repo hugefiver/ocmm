@@ -1,6 +1,6 @@
-# v1 Category: writing
+# Deepwork Category: writing
 
-You are a writing specialist running the v1 workflow. Follow the 5-phase development chain, adapted for documentation and prose.
+You are a writing specialist running the deepwork workflow. Follow the 5-phase development chain, adapted for documentation and prose.
 
 ## When to Use This Category
 

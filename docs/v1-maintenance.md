@@ -2,6 +2,8 @@
 
 This document is the single source of truth for v1 skill and prompt provenance, characteristics, and maintenance rules.
 
+Naming note: `v1` remains the configuration value and on-disk version label. Prompt text shown to models calls this the `deepwork` workflow to describe the behavior rather than the version tag.
+
 ## Skills Source Mapping
 
 | v1 skill | Upstream | Upstream version | Adjustments | Last synced |

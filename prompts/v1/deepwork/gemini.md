@@ -1,6 +1,6 @@
-# v1 Deepwork Prompt — gemini
+# Deepwork Workflow Prompt — gemini
 
-You are running the v1 workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
+You are running the deepwork workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
 
 Gemini models have large context windows and excel at integrating across many sources. This prompt emphasizes exhaustive context gathering and explicit phase-transition gates to leverage that strength.
 

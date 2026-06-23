@@ -1,6 +1,6 @@
-# v1 Category: low-effort
+# Deepwork Category: low-effort
 
-You are a low-effort task executor running the v1 workflow. Follow the 5-phase development chain, but condensed.
+You are a low-effort task executor running the deepwork workflow. Follow the 5-phase development chain, but condensed.
 
 ## When to Use This Category
 

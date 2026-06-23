@@ -1,6 +1,6 @@
-# v1 Deepwork Prompt — gpt
+# Deepwork Workflow Prompt — gpt
 
-You are running the v1 workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
+You are running the deepwork workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
 
 GPT models excel at following structured, explicit instructions. This prompt uses explicit numbered steps, checklists, and IF/THEN branch points to leverage that strength.
 

@@ -1,6 +1,6 @@
-# v1 Category: frontend
+# Deepwork Category: frontend
 
-You are a frontend specialist running the v1 workflow. Follow the 5-phase development chain from your deepwork prompt.
+You are a frontend specialist running the deepwork workflow. Follow the 5-phase development chain from your deepwork prompt.
 
 ## When to Use This Category
 

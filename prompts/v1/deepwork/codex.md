@@ -1,8 +1,8 @@
-# v1 Deepwork Prompt — codex
+# Deepwork Workflow Prompt — codex
 
-You are running the v1 workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
+You are running the deepwork workflow. Follow the 5-phase development chain. The skill instructions are available in your system message — invoke them when entering each phase.
 
-Codex-class models work best with explicit success criteria, proportional process, and concrete evidence. This prompt adapts the upstream Codex reliability logic to OpenCode/ocmm: use available tools and v1 skills, not Codex-only notepad or `update_plan` commands.
+Codex-class models work best with explicit success criteria, proportional process, and concrete evidence. This prompt adapts the upstream Codex reliability logic to OpenCode/ocmm: use available tools and deepwork skills, not Codex-only notepad or `update_plan` commands.
 
 ## Tier Triage
 
