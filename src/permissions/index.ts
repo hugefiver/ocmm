@@ -586,7 +586,6 @@ function jsonRecoveryExcluded(name: string): boolean {
     "todowrite",
     "todoread",
     "task",
-    "call_omo_agent",
     "background_output",
     "skill",
     "skill_mcp",

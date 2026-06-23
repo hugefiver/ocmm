@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { homedir } from "node:os"
 
 const PROJECT_RULE_SOURCES = [
-  { source: "omo", dir: ".omo/rules", priority: 0, instructionsOnly: false },
+  { source: "project-compat", dir: ".omo/rules", priority: 0, instructionsOnly: false },
   { source: "claude", dir: ".claude/rules", priority: 1, instructionsOnly: false },
   { source: "cursor", dir: ".cursor/rules", priority: 2, instructionsOnly: false },
   { source: "github-instructions", dir: ".github/instructions", priority: 3, instructionsOnly: true },
@@ -11,7 +11,7 @@ const PROJECT_RULE_SOURCES = [
 ] as const
 
 const GLOBAL_RULE_SOURCES = [
-  { source: "global-omo", dir: ".omo/rules", priority: 0 },
+  { source: "global-compat", dir: ".omo/rules", priority: 0 },
   { source: "global-opencode", dir: ".opencode/rules", priority: 1 },
   { source: "global-sisyphus", dir: ".sisyphus/rules", priority: 2 },
   { source: "global-claude", dir: ".claude/rules", priority: 3 },
