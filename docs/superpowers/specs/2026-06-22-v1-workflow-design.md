@@ -482,7 +482,7 @@ Doc structure:
 | deepwork/gpt.md | all 5 | upstream GPT specialization | upstream-only names | local agent/tool names + skill-layer note |
 | deepwork/gemini.md | all 5 | upstream Gemini specialization | upstream-only names | local agent/tool names + skill-layer note |
 | deepwork/glm.md | all 5 | upstream GLM specialization | upstream-only names | local agent/tool names + skill-layer note |
-| deepwork/codex.md | all 5 | upstream Codex specialization | Codex harness-only commands | OpenCode/ocmm task/todowrite semantics + skill-layer note |
+| deepwork/codex.md | all 5 | upstream Codex specialization including TUI visual QA evidence discipline | Codex harness-only commands and Sparkshell-only command lens | OpenCode/ocmm task/todowrite semantics, local PowerShell command guidance, and skill-layer note |
 | deepwork/planner.md | writing-plans | upstream planner doctrine | Prometheus branding | local planner name + writing-plans skill-layer note |
 | agents/orchestrator.md | all 5 | Sisyphus orchestration contract | upstream lore/tool names | local roles + category dispatch |
 | agents/reviewer.md | review skills | Oracle advisory contract | Oracle branding | local reviewer role |
