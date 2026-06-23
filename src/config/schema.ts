@@ -177,6 +177,61 @@ const ProfileRulesConfigSchema = z
   })
   .strict()
 
+const McpLocalServerConfigSchema = z
+  .object({
+    type: z.literal("local"),
+    command: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    environment: z.record(z.string(), z.string()).optional(),
+    enabled: z.boolean().default(true),
+  })
+  .strict()
+
+const McpRemoteServerConfigSchema = z
+  .object({
+    type: z.literal("remote"),
+    url: z.string().url(),
+    headers: z.record(z.string(), z.string()).optional(),
+    oauth: z.boolean().optional(),
+    enabled: z.boolean().default(true),
+  })
+  .strict()
+
+export const McpServerConfigSchema = z.discriminatedUnion("type", [
+  McpLocalServerConfigSchema,
+  McpRemoteServerConfigSchema,
+])
+
+export const McpConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    envAllowlist: z.array(z.string()).default([]),
+    websearch: z
+      .object({
+        provider: z.enum(["exa", "tavily"]).default("exa"),
+      })
+      .strict()
+      .default({}),
+    servers: z.record(z.string(), McpServerConfigSchema).default({}),
+  })
+  .strict()
+  .default({})
+
+const ProfileMcpConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    envAllowlist: z.array(z.string()).optional(),
+    websearch: z
+      .object({
+        provider: z.enum(["exa", "tavily"]).optional(),
+      })
+      .strict()
+      .optional(),
+    servers: z.record(z.string(), McpServerConfigSchema).optional(),
+  })
+  .strict()
+
 /**
  * A profile is a partial config overlay. It may carry any top-level field
  * EXCEPT `profiles` and `activeProfile` themselves (nested profiles are not
@@ -215,6 +270,7 @@ export const ProfileEntrySchema = z
       .optional(),
     hashline: ProfileHashlineConfigSchema.optional(),
     rules: ProfileRulesConfigSchema.optional(),
+    mcp: ProfileMcpConfigSchema.optional(),
     registerBuiltinAgents: z.boolean().optional(),
     promptsRoot: z.string().optional(),
     debug: z.boolean().optional(),
@@ -258,6 +314,7 @@ export const OcmmConfigSchema = z
     runtimeFallback: RuntimeFallbackConfigSchema,
     hashline: HashlineConfigSchema,
     rules: RulesConfigSchema,
+    mcp: McpConfigSchema,
     /** Named partial overlays selectable via `activeProfile` or OCMM_PROFILE. */
     profiles: z.record(z.string(), ProfileEntrySchema).default({}),
     /**
@@ -282,6 +339,8 @@ export type ModelRequirementConfig = z.infer<typeof ModelRequirementSchema>
 export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
 export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
 export type RulesConfig = z.infer<typeof RulesConfigSchema>
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
+export type McpConfig = z.infer<typeof McpConfigSchema>
 export type ProfileEntry = z.infer<typeof ProfileEntrySchema>
 export type SkillSourceEntry = z.infer<typeof SkillSourceEntrySchema>
 export type SkillsConfig = z.infer<typeof SkillsConfigSchema>

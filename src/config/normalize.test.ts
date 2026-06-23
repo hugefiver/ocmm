@@ -98,6 +98,34 @@ test("schema accepts rules namespace and defaults disabled", () => {
   assert.equal(parsed.data.rules.skipClaudeUserRules, true)
 })
 
+test("schema accepts mcp namespace and defaults disabled", () => {
+  assert.deepEqual(OcmmConfigSchema.parse({}).mcp, {
+    enabled: false,
+    envAllowlist: [],
+    websearch: { provider: "exa" },
+    servers: {},
+  })
+
+  const parsed = OcmmConfigSchema.safeParse({
+    mcp: {
+      enabled: true,
+      envAllowlist: ["EXA_API_KEY"],
+      websearch: { provider: "tavily" },
+      servers: {
+        docs: { type: "remote", url: "https://example.com/mcp", oauth: false },
+        local: { type: "local", command: "node", args: ["server.js"] },
+      },
+    },
+  })
+  assert.equal(parsed.success, true)
+  if (!parsed.success) return
+  assert.equal(parsed.data.mcp.enabled, true)
+  assert.equal(parsed.data.mcp.websearch.provider, "tavily")
+  assert.deepEqual(parsed.data.mcp.envAllowlist, ["EXA_API_KEY"])
+  assert.equal(parsed.data.mcp.servers.docs?.type, "remote")
+  assert.equal(parsed.data.mcp.servers.local?.type, "local")
+})
+
 test("schema accepts rich agent override fields", () => {
   const parsed = OcmmConfigSchema.safeParse({
     agents: {
