@@ -60,6 +60,26 @@ test("plugin exposes skill_mcp tool when MCP servers are configured", async () =
   )
 })
 
+test("reload refreshes config-dependent tool map", async () => {
+  await withIsolatedConfig(null, (cwd) => {
+    const configPath = join(cwd, ".opencode", "ocmm.jsonc")
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(configPath, JSON.stringify({ hashline: { enabled: true } }))
+
+    const { pluginInterface, reload } = createPlugin({ directory: cwd })
+    assert.equal(typeof pluginInterface.tool?.edit.execute, "function")
+
+    writeFileSync(configPath, JSON.stringify({ mcp: { servers: { docs: { type: "remote", url: "https://docs.example/mcp" } } } }))
+    reload()
+    assert.equal(pluginInterface.tool?.edit, undefined)
+    assert.equal(typeof pluginInterface.tool?.skill_mcp.execute, "function")
+
+    writeFileSync(configPath, JSON.stringify({}))
+    reload()
+    assert.equal(pluginInterface.tool, undefined)
+  })
+})
+
 test("plugin tool after hook composes hashline and rules injectors", async () => {
   await withIsolatedConfig({ hashline: { enabled: true }, rules: { enabled: true } }, async (cwd) => {
     const file = join(cwd, "src", "app.ts")
