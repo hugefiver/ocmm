@@ -61,6 +61,19 @@ test("reload clears stale cache so removed files disappear", () => {
   }
 })
 
+test("loadAllPrompts loads glm and codex deepwork variants", () => {
+  const root = makeTempRoot("omo")
+  try {
+    writeFileSync(join(root, "omo", "deepwork", "glm.md"), "glm-content")
+    writeFileSync(join(root, "omo", "deepwork", "codex.md"), "codex-content")
+    loadAllPrompts(root, "omo")
+    assert.equal(getDeepworkPrompt("glm"), "glm-content")
+    assert.equal(getDeepworkPrompt("codex"), "codex-content")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),
@@ -86,13 +99,23 @@ test("pickDeepworkVariantForAgent picks gemini variant for gemini model", () => 
   )
 })
 
+test("pickDeepworkVariantForAgent picks glm variant for GLM models", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "glm-5.1" }),
+    "glm",
+  )
+})
+
+test("pickDeepworkVariantForAgent picks codex variant for Codex models", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "worker", preferenceModel: "codex-mini-latest" }),
+    "codex",
+  )
+})
+
 test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "claude-opus-4-7" }),
-    "default",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "glm-5.1" }),
     "default",
   )
   assert.equal(

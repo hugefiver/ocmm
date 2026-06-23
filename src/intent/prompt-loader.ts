@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gemini,planner}.md
+ *     deepwork/{default,gpt,gemini,glm,codex,planner}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
  *
  * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
@@ -22,7 +22,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "omo" | "v1"
 
-type DeepworkVariant = "default" | "gpt" | "gemini" | "planner"
+type DeepworkVariant = "default" | "gpt" | "gemini" | "glm" | "codex" | "planner"
 type CategoryName =
   | "frontend"
   | "creative"
@@ -33,7 +33,7 @@ type CategoryName =
   | "high-effort"
   | "writing"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "planner"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "glm", "codex", "planner"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
   "creative",
@@ -99,8 +99,10 @@ export function pickDeepworkVariantForAgent(opts: {
     providerID: "",
     modelID: opts.preferenceModel,
   })
+  if (family === "codex") return "codex"
   if (family === "gpt") return "gpt"
   if (family === "gemini") return "gemini"
+  if (family === "glm") return "glm"
   return "default"
 }
 
