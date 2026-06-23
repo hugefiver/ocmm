@@ -33,7 +33,7 @@ prompts/<workflow>/
 | `deepwork/gpt.md` | `packages/prompts-core/prompts/ultrawork/gpt.md` | Upstream-first; local agent/tool names only |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names only |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline |
-| `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm |
+| `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; synced through `./omo@c6058d5` TUI visual QA and command-lens updates |
 | `deepwork/planner.md` | `packages/prompts-core/prompts/ultrawork/planner.md` and Prometheus prompt | Upstream-first planner doctrine with local planner naming |
 
 ## Maintenance Rules
@@ -45,3 +45,9 @@ prompts/<workflow>/
 5. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
 6. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
 7. When syncing from upstream, compare against `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\omo-shared-skills\repo` or a fresh checkout of the same upstream repository, then re-apply local naming and OpenCode/ocmm tool semantics.
+
+## Last Upstream Prompt Check
+
+- Source checked: local upstream checkout `./omo` at `c6058d5db81851d822106a9df20a34d66313ade3`.
+- Prompt-relevant upstream changes since `f6b9ace452f04fe3fea8025c4356e6343959ee4f`: GLM ultrawork/Atlas prompt registration was already represented locally; Codex ultrawork added TUI visual QA evidence requirements and sharpened command-lens guidance.
+- Local sync: `prompts/omo/deepwork/codex.md` and `prompts/v1/deepwork/codex.md` now include the TUI visual evidence requirement and local OpenCode/PowerShell command guidance instead of upstream-only `script/qa/web-terminal-visual-qa.mjs` / Sparkshell wording.

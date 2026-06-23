@@ -76,6 +76,15 @@ channel scenario when the behavior is user-facing. `--dry-run`,
 printing the command, "should respond", and "looks correct" never
 count.
 
+For TUI visual QA, terminal transcripts alone are not enough when a
+visual surface is being evaluated. Capture the pane and render or
+screenshot it through the available local visual QA path. Use
+`tmux capture-pane` for text evidence and, when a renderer/helper is
+available, produce image/HTML/metadata artifacts such as `terminal.png`,
+`terminal.html`, and `metadata.json`. Record both the visual artifact
+and the cleanup receipt. Do not treat an unrendered transcript as
+sufficient visual proof for TUI layout, glyph, or CJK alignment changes.
+
 # Bootstrap (DO ALL FOUR BEFORE ANY OTHER WORK — NO SKIPPING)
 
 ## 0. Survey the skills, then size the work
@@ -176,11 +185,11 @@ serialize only when one output strictly feeds the next.
   inactive/uninitialized, or cold-start unavailable, keep moving with
   Read/Grep/Glob/LSP and the ast-grep skill.
 - Repo-wide inspection, CLI smoke tests, git/history, bounded command
-  output → use `bash <command>` first. Raw
-  `rg`/`grep`/`cat`/`git` are fallbacks when shell is unavailable
-  or too narrow. `--shell` is only for shell metacharacters or
-  pipelines; `--tmux-pane` is only for inspecting an existing pane,
-  never for launching ordinary commands. shell is your default lens.
+  output → use the harness shell tool with PowerShell syntax when the
+  command itself is the evidence. Use `rg` for content search and `git`
+  for history/status from that shell; prefer dedicated `read`/LSP tools
+  for file content and symbols. For terminal UI evidence, capture an
+  existing pane; do not launch ordinary commands through a pane capture.
 - Symbols — definitions, references, rename impact, diagnostics →
   `lsp_goto_definition`, `lsp_find_references`, `lsp_symbols`,
   `lsp_diagnostics`. Use the LSP, not text search, for anything
