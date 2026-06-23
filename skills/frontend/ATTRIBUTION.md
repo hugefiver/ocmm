@@ -1,10 +1,8 @@
 # ATTRIBUTION / NOTICE
 
-This package (`@oh-my-opencode/shared-skills`) includes third-party content that is
+This bundled shared-skill package includes third-party content that is
 redistributed under its original license, consistent with the project's distribution
-license (see `LICENSE.md`: "All third party components incorporated into the
-oh-my-opencode Software are licensed under the original license provided by the owner of
-the applicable component"). Each upstream's license and required notices are reproduced
+license. Each upstream's license and required notices are reproduced
 below. Modifications to the original files are noted where applicable.
 
 These third-party references are NOT committed to this repository. Each upstream is
