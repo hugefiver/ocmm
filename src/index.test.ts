@@ -29,7 +29,9 @@ test("plugin omits hashline edit tool by default", async () => {
   await withIsolatedConfig(null, (cwd) => {
     const { pluginInterface } = createPlugin({ directory: cwd })
     assert.equal(pluginInterface.tool, undefined)
+    assert.equal(typeof pluginInterface["tool.execute.before"], "function")
     assert.equal(typeof pluginInterface["tool.execute.after"], "function")
+    assert.equal(typeof pluginInterface["tool.definition"], "function")
   })
 })
 
@@ -77,5 +79,25 @@ test("plugin tool after hook composes hashline and rules injectors", async () =>
     assert.match(output.output, /^1#[A-Z]{2}\|export const app = true/)
     assert.match(output.output, /\[Rule: \.omo\/rules\/typescript\.md\]/)
     assert.match(output.output, /\[Directory Context: /)
+  })
+})
+
+test("plugin before and definition hooks expose permission guards", async () => {
+  await withIsolatedConfig(null, async (cwd) => {
+    const file = join(cwd, "existing.txt")
+    writeFileSync(file, "old")
+    const { pluginInterface } = createPlugin({ directory: cwd })
+
+    await assert.rejects(
+      pluginInterface["tool.execute.before"]?.(
+        { tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } },
+        {},
+      ),
+      /File already exists/,
+    )
+
+    const definitionOutput = { description: "old" }
+    await pluginInterface["tool.definition"]?.({ toolID: "todowrite" }, definitionOutput)
+    assert.match(definitionOutput.description, /WHERE, HOW, WHY/)
   })
 })
