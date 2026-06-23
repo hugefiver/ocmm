@@ -44,7 +44,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$CacheBinDir = if ($env:OMO_AST_GREP_BIN_DIR) { $env:OMO_AST_GREP_BIN_DIR } else { Join-Path $ScriptDir "bin" }
+$CacheBinDir = if ($env:OCMM_AST_GREP_BIN_DIR) { $env:OCMM_AST_GREP_BIN_DIR } else { Join-Path $ScriptDir "bin" }
 
 function Log([string]$msg) {
     if (-not $Quiet) {
