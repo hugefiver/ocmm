@@ -5,7 +5,13 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillDir  = Split-Path -Parent $ScriptDir
 $Helper    = Join-Path $SkillDir 'scripts/ast_grep_helper.py'
-$Python    = if (Get-Command py -ErrorAction SilentlyContinue) { 'py' } else { 'python' }
+$Python    = if (Get-Command py -ErrorAction SilentlyContinue) {
+    'py'
+} elseif (Get-Command pyenv -ErrorAction SilentlyContinue) {
+    (& pyenv which python).Trim()
+} else {
+    'python'
+}
 
 $Output = Join-Path $env:TEMP ("ast-grep-skill-smoke-" + [guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
@@ -13,16 +19,16 @@ New-Item -ItemType Directory -Path $Output -Force | Out-Null
 function Pass([string]$msg) { Write-Host "PASS: $msg" }
 function Fail([string]$msg) { Write-Host "FAIL: $msg" -ForegroundColor Red; Remove-Item -Recurse -Force $Output -ErrorAction SilentlyContinue; exit 1 }
 
-function Run([string[]]$Args) {
-    $stdoutFile = Join-Path $Output ("out-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".txt")
-    $proc = Start-Process -FilePath $Python -ArgumentList (@($Helper) + $Args) -NoNewWindow -PassThru -Wait -RedirectStandardOutput $stdoutFile -RedirectStandardError "$stdoutFile.err"
-    $stdout = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw } else { '' }
-    $stderr = if (Test-Path "$stdoutFile.err") { Get-Content "$stdoutFile.err" -Raw } else { '' }
+function Run([string[]]$ToolArgs) {
+    $output = & $Python @($Helper) @ToolArgs 2>&1
+    $exitCode = $LASTEXITCODE
+    $combined = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($combined.Length -gt 0) { $combined += [Environment]::NewLine }
     return [pscustomobject]@{
-        ExitCode = $proc.ExitCode
-        Stdout = $stdout
-        Stderr = $stderr
-        Combined = "$stdout`n$stderr"
+        ExitCode = $exitCode
+        Stdout = $combined
+        Stderr = ''
+        Combined = $combined
     }
 }
 
@@ -73,7 +79,7 @@ try {
     Pass 'doctor produces output'
 
     # 9. search w/o binary
-    $r = Run @('-q', 'search', 'foo()', '--lang', 'ts', 'C:/nonexistent-path-xyzzy')
+    $r = Run @('--quiet', 'search', 'foo()', 'C:/nonexistent-path-xyzzy', '--lang', 'ts')
     switch ($r.ExitCode) {
         { $_ -in 0,1,4 } { Pass "search runs (rc=$($r.ExitCode), ast-grep available)" }
         3 {
