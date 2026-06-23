@@ -180,7 +180,7 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 
 Prompt files are model-facing behavior and must stay synchronized with upstream intent and local workflow semantics.
 
-- `workflow: "v1"`, `prompts/v1/`, `skills/v1/`, and `docs/v1-maintenance.md` are config/path/version labels. Model-facing prompt text under `prompts/v1/**` must call the workflow `deepwork`, not `v1`.
+- `v1` exists only as the version label for the deepwork workflow: `workflow: "v1"`, `prompts/v1/`, `skills/v1/`, and `docs/v1-maintenance.md` are config/path/version labels, not model-facing names. Model-facing prompt text under `prompts/v1/**` must use `deepwork` or omit the workflow name entirely; never describe the workflow to the model as `v1`.
 - `prompts/v1/deepwork/default.md` is intentionally concise and local to this project. Do not blindly replace it with the upstream long default prompt.
 - `prompts/v1/deepwork/{gpt,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
 - `prompts/v1/agents/*.md` and `prompts/v1/category/*.md` should stay strongly aligned with `prompts/omo/agents/*.md` and `prompts/omo/category/*.md`. Deepwork mechanics come from the deepwork layer and injected skills, not from shortened agent/category prompts.
