@@ -5,6 +5,7 @@ import {
   classifyModelFamily,
   extractModelName,
   isClaudeOpus47OrLaterModel,
+  isCodexModel,
   isGeminiModel,
   isGptModel,
   isKimiK27Model,
@@ -21,6 +22,13 @@ test("isGptModel matches gpt family", () => {
   assert.equal(isGptModel("gpt-5.5"), true)
   assert.equal(isGptModel("openai/gpt-5.4-mini"), true)
   assert.equal(isGptModel("claude-opus-4-7"), false)
+})
+
+test("isCodexModel matches codex family without catching generic GPT", () => {
+  assert.equal(isCodexModel("codex-mini-latest"), true)
+  assert.equal(isCodexModel("openai/codex-1"), true)
+  assert.equal(isCodexModel("gpt-5.5"), false)
+  assert.equal(isCodexModel("gpt-5.5", "github-copilot"), false)
 })
 
 test("isClaudeOpus47OrLaterModel matches >= 4.7 and claude-fable", () => {
@@ -51,6 +59,7 @@ test("kimi family detection", () => {
 })
 
 test("classifyModelFamily picks the highest-priority match", () => {
+  assert.equal(classifyModelFamily({ modelID: "codex-mini-latest" }), "codex")
   assert.equal(classifyModelFamily({ modelID: "gpt-5.5" }), "gpt")
   assert.equal(classifyModelFamily({ modelID: "claude-opus-4-7" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "claude-sonnet-4-6" }), "claude")

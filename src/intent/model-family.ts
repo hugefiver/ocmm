@@ -15,6 +15,12 @@ export function isGptModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("gpt")
 }
 
+export function isCodexModel(modelID: string, providerID?: string): boolean {
+  const lc = modelID.toLowerCase()
+  const provider = providerID?.toLowerCase() ?? ""
+  return lc.includes("codex") || provider.includes("codex")
+}
+
 export function isClaudeModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("claude")
 }
@@ -62,6 +68,7 @@ export function isGeminiModel(fullId: string, providerID?: string): boolean {
 
 /** Family enum used by variant translator and deepwork prompt variant selection. */
 export type ModelFamily =
+  | "codex"
   | "gpt"
   | "claude-opus-47-plus"
   | "claude"
@@ -79,6 +86,7 @@ export function classifyModelFamily(opts: {
 }): ModelFamily {
   const { providerID, modelID } = opts
   const name = extractModelName(modelID)
+  if (isCodexModel(modelID, providerID) || isCodexModel(name, providerID)) return "codex"
   if (isGptModel(name)) return "gpt"
   if (isClaudeOpus47OrLaterModel(name)) return "claude-opus-47-plus"
   if (isClaudeModel(name)) return "claude"

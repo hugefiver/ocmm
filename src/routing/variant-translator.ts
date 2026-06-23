@@ -2,7 +2,7 @@
  * Variant -> per-model-family inference parameters.
  *
  * Different providers express "reasoning intensity" differently:
- *   - OpenAI / GPT family : `options.reasoningEffort` ∈ {minimal, low, medium, high}
+ *   - OpenAI / GPT/Codex family : `options.reasoningEffort` ∈ {minimal, low, medium, high}
  *   - Anthropic Claude   : `options.thinking = { type, budgetTokens }`
  *   - Anthropic Opus 4.7+: extended thinking with larger budget for `max`/`xhigh`
  *   - Google Gemini      : same `reasoningEffort` style; thinking via `options.thinking`
@@ -138,6 +138,7 @@ function genericVariant(variant: Variant): VariantEffect {
 export function translateVariant(family: ModelFamily, variant: Variant): VariantEffect {
   switch (family) {
     case "gpt":
+    case "codex":
       return gptVariant(variant)
     case "claude-opus-47-plus":
       return claudeVariant(variant, true)
