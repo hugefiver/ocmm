@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { OcmmConfigSchema } from "./schema.ts"
 import { normalizeShorthand } from "./normalize.ts"
 
-test("schema accepts omo-style category shorthand: model + fallbackModels", () => {
+test("schema accepts category shorthand: model + fallbackModels", () => {
   const parsed = OcmmConfigSchema.safeParse({
     categories: {
       frontend: {

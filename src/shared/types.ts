@@ -1,8 +1,8 @@
 /**
  * Shared types for ocmm.
  *
- * The model-routing data model intentionally mirrors the FallbackEntry/ModelRequirement
- * concepts from omo's model-core, so configs are mostly portable across the two systems.
+ * The model-routing data model intentionally mirrors the upstream
+ * FallbackEntry/ModelRequirement concepts, so configs stay portable.
  */
 
 export type ThinkingMode = "enabled" | "disabled"
@@ -33,7 +33,7 @@ export const KNOWN_VARIANTS: ReadonlySet<Variant> = new Set<Variant>([
 
 /**
  * One concrete fallback layer: provider candidates + model id, with optional inference knobs.
- * Compatible with omo's FallbackEntry shape.
+ * Compatible with the upstream FallbackEntry shape.
  */
 export type FallbackEntry = {
   /** Acceptable provider IDs in priority order (e.g. ["github-copilot", "openai"]). */
