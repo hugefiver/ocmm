@@ -3,6 +3,7 @@
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
  *     deepwork/{default,gpt,gemini,glm,codex,planner}.md
+ *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
  *
  * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
@@ -23,6 +24,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 export type Workflow = "omo" | "v1"
 
 type DeepworkVariant = "default" | "gpt" | "gemini" | "glm" | "codex" | "planner"
+type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
   | "creative"
@@ -34,6 +36,7 @@ type CategoryName =
   | "writing"
 
 const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "glm", "codex", "planner"]
+const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
   "creative",
@@ -46,6 +49,7 @@ const CATEGORY_NAMES: CategoryName[] = [
 ]
 
 const deepworkPrompts = new Map<DeepworkVariant, string>()
+const agentPrompts = new Map<string, string>()
 const categoryPrompts = new Map<string, string>()
 
 function loadFile(absPath: string): string | null {
@@ -61,6 +65,7 @@ export function loadAllPrompts(
   workflow: Workflow = "omo",
 ): void {
   deepworkPrompts.clear()
+  agentPrompts.clear()
   categoryPrompts.clear()
   const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
@@ -79,8 +84,17 @@ export function loadAllPrompts(
       categoryPrompts.set(name, text)
     }
   }
+  for (const name of AGENT_PROMPT_NAMES) {
+    const text = loadFile(join(base, "agents", `${name}.md`))
+    if (text == null) {
+      log.debug(`prompt missing: ${workflow}/agents/${name}.md (root=${rootDir})`)
+    } else {
+      agentPrompts.set(name, text)
+    }
+  }
   log.info(
     `loaded prompts: workflow=${workflow} deepwork=${deepworkPrompts.size}/${DEEPWORK_VARIANTS.length}, ` +
+      `agents=${agentPrompts.size}/${AGENT_PROMPT_NAMES.length}, ` +
       `category=${categoryPrompts.size}/${CATEGORY_NAMES.length}`,
   )
 }
@@ -108,6 +122,9 @@ export function pickDeepworkVariantForAgent(opts: {
 
 export function getDeepworkPrompt(variant: DeepworkVariant): string {
   return deepworkPrompts.get(variant) ?? ""
+}
+export function getAgentPrompt(name: string): string {
+  return agentPrompts.get(name) ?? ""
 }
 export function getCategoryPrompt(name: string): string {
   return categoryPrompts.get(name) ?? ""
