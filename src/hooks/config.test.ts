@@ -115,6 +115,33 @@ test("config registers shared skill paths and preserves existing urls", async ()
   }
 })
 
+test("config registers MCP servers and preserves user-disabled entries", async () => {
+  const c = {
+    ...defaultConfig(),
+    disabledMcps: ["grep_app"],
+    mcp: {
+      enabled: true,
+      envAllowlist: [],
+      websearch: { provider: "exa" as const },
+      servers: {
+        local_docs: { type: "remote" as const, url: "https://docs.example/mcp", enabled: true },
+      },
+    },
+  }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown>; mcp: Record<string, unknown> } = {
+    agent: {},
+    mcp: { context7: { enabled: false } },
+  }
+
+  await handler(cfg, undefined)
+
+  assert.equal(cfg.mcp.websearch && typeof cfg.mcp.websearch === "object", true)
+  assert.equal(cfg.mcp.grep_app, undefined)
+  assert.deepEqual(cfg.mcp.context7, { enabled: false })
+  assert.equal((cfg.mcp.local_docs as Record<string, unknown>).type, "remote")
+})
+
 function writeSkill(root: string, dir: string, name: string): void {
   const skillDir = join(root, dir)
   mkdirSync(skillDir, { recursive: true })

@@ -2,6 +2,7 @@ import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { DEFAULT_SKILLS_ROOT, loadSharedSkills } from "../intent/skill-loader.ts"
+import { resolveMcpServers } from "../mcp/index.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
@@ -71,6 +72,7 @@ function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
 export function createConfigHandler(args: {
   getConfig: () => OcmmConfig
   skillsRoot?: string
+  cwd?: string
 }): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, _output) => {
     const cfg = args.getConfig()
@@ -78,9 +80,10 @@ export function createConfigHandler(args: {
 
     const target = isRecord(rawInput.config) ? rawInput.config : rawInput
     const registeredSkills = registerSharedSkills(target, cfg, args.skillsRoot)
+    const registeredMcps = registerMcps(target, cfg, args.cwd)
 
     if (!cfg.registerBuiltinAgents) {
-      log.info(`config: registered ${registeredSkills} skills`)
+      log.info(`config: registered ${registeredSkills} skills, ${registeredMcps} MCPs`)
       return
     }
 
@@ -130,7 +133,7 @@ export function createConfigHandler(args: {
     }
 
     log.info(
-      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills`,
+      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills, ${registeredMcps} MCPs`,
     )
   }
 }
@@ -159,4 +162,19 @@ function registerSharedSkills(
     seen.add(skill.path)
   }
   return selected.length
+}
+
+function registerMcps(target: Record<string, unknown>, cfg: OcmmConfig, cwd?: string): number {
+  const selected = resolveMcpServers(cfg.mcp, { disabledMcps: cfg.disabledMcps, ...(cwd ? { cwd } : {}) })
+  if (!Object.keys(selected).length) return 0
+
+  if (!isRecord(target.mcp)) target.mcp = {}
+  const mcpConfig = target.mcp as Record<string, unknown>
+  for (const [name, server] of Object.entries(selected)) {
+    if (isRecord(mcpConfig[name]) && (mcpConfig[name] as Record<string, unknown>).enabled === false) {
+      continue
+    }
+    mcpConfig[name] = server
+  }
+  return Object.keys(selected).length
 }
