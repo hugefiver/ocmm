@@ -45,6 +45,22 @@ test("planner agent gets planner variant prompt", async () => {
   assert.ok(typeof entry.prompt === "string")
 })
 
+test("user model override selects specialized deepwork prompt variant", async () => {
+  const c = {
+    ...defaultConfig(),
+    agents: {
+      orchestrator: { model: "zhipu/glm-5.1" },
+      worker: { model: "openai/codex-mini-latest" },
+    },
+  }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  assert.match(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
+  assert.match(String((cfg.agent.worker as Record<string, unknown>).prompt), /Codex-class models/)
+})
+
 test("config does not clobber an existing user-set model", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg = {
