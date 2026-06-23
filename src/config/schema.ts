@@ -303,7 +303,7 @@ export const OcmmConfigSchema = z
     skills: SkillsConfigSchema,
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
-    /** 'v1' enables the superpowers 5-phase chain; 'omo' uses upstream omo prompts. */
+    /** 'v1' enables the deepwork 5-phase chain; 'omo' selects the default prompt set. */
     workflow: z.enum(["omo", "v1"]).default("omo"),
     intent: z
       .object({

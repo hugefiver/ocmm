@@ -1,8 +1,8 @@
 /**
  * Model-family detectors.
  *
- * Pure functions; no I/O. Mirror the rules from omo's model-core/model-family-detectors,
- * which OpenCode plugins all reuse for variant routing decisions.
+ * Pure functions; no I/O. Mirrors the upstream model-family detector rules
+ * used by OpenCode plugins for variant routing decisions.
  */
 
 /** Strip the leading "providerId/" if present. */
