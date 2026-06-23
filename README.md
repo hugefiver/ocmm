@@ -22,7 +22,7 @@ ocmm supports two workflows, switchable via the `workflow` config field:
 
 **`omo`** (default) — Upstream oh-my-opencode system prompts. Aggressive tone (CODE RED, ABSOLUTE CERTAINTY). Prompts are attached declaratively to agents at config time based on model family.
 
-**`v1`** — Superpowers 5-phase development chain (brainstorm -> plan -> implement -> review -> receive-review). Calm, structured tone. Prompts reference external skills loaded from `skills/v1/`. Model-family specialization retained (default/gpt/gemini/planner variants). Skills are injected on the first message per session via `chat.message` + `system.transform` hooks.
+**`v1`** — Superpowers 5-phase development chain (brainstorm -> plan -> implement -> review -> receive-review). Calm, structured tone. Prompts reference external skills loaded from `skills/v1/`. Model-family specialization retained (default/gpt/gemini/glm/codex/planner variants). Skills are injected on the first message per session via `chat.message` + `system.transform` hooks.
 
 ```jsonc
 { "workflow": "v1" }
@@ -181,10 +181,10 @@ Prompts are organized by workflow:
 ```
 prompts/
   omo/                              # upstream omo prompts
-    deepwork/{default,gpt,gemini,planner}.md
+    deepwork/{default,gpt,gemini,glm,codex,planner}.md
     category/*.md (8 files)
   v1/                               # superpowers-style prompts
-    deepwork/{default,gpt,gemini,planner}.md
+    deepwork/{default,gpt,gemini,glm,codex,planner}.md
     category/*.md (8 files)
 skills/
   v1/                               # forked superpowers skills (v1 only)
@@ -199,7 +199,9 @@ Model-family variant selection (`pickDeepworkVariantForAgent`):
 - planner agent -> `planner.md`
 - GPT family -> `gpt.md`
 - Gemini family -> `gemini.md`
-- others (Claude/Kimi/GLM/unknown) -> `default.md`
+- GLM family -> `glm.md`
+- Codex family -> `codex.md`
+- others (Claude/Kimi/Minimax/unknown) -> `default.md`
 
 Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. No runtime keyword detection — prompts are attached declaratively.
 
