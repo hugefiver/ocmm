@@ -24,6 +24,7 @@ import { createRulesInjector } from "./hooks/rules-injector.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
 import { loadV1Skills } from "./intent/skill-loader.ts"
 import { createConfiguredMcpManager, resolveMcpServers } from "./mcp/index.ts"
+import { createPermissionGuards } from "./permissions/index.ts"
 import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/hashline-edit.ts"
 import { createSkillMcpTool, type SkillMcpToolDefinition } from "./tools/skill-mcp.ts"
 import { log } from "./shared/logger.ts"
@@ -36,7 +37,9 @@ export type PluginInterface = {
   "chat.params"?: (input: unknown, output: unknown) => Promise<void>
   "chat.message"?: (input: unknown, output: unknown) => Promise<void>
   "experimental.chat.system.transform"?: (input: unknown, output: unknown) => Promise<void>
+  "tool.execute.before"?: (input: unknown, output: unknown) => Promise<void>
   "tool.execute.after"?: (input: unknown, output: unknown) => Promise<void>
+  "tool.definition"?: (input: unknown, output: unknown) => Promise<void>
   tool?: Record<string, HashlineToolDefinition | SkillMcpToolDefinition>
   event?: (input: unknown) => Promise<void>
 }
@@ -94,10 +97,12 @@ export function createPlugin(input?: ServerInput): {
   config = loadOrDefault()
   ensurePromptsLoaded()
   const getConfig = (): OcmmConfig => config
+  const permissionGuards = createPermissionGuards({ getConfig, projectRoot: cwd })
   const toolAfterHandlers = [
     createHashlineReadEnhancer({ getConfig }),
     createRulesInjector({ getConfig, projectRoot: cwd }),
     createDirectoryAgentsInjector({ getConfig, projectRoot: cwd }),
+    permissionGuards.after,
   ]
 
   const pluginInterface: PluginInterface = {
@@ -108,9 +113,11 @@ export function createPlugin(input?: ServerInput): {
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
     }),
     "experimental.chat.system.transform": createSystemTransformHandler(),
+    "tool.execute.before": permissionGuards.before,
     "tool.execute.after": async (hookInput, hookOutput) => {
       for (const handler of toolAfterHandlers) await handler(hookInput, hookOutput)
     },
+    "tool.definition": permissionGuards.definition,
     event: createEventHandler({
       getConfig,
       ...(input?.client !== undefined ? { client: input.client } : {}),
