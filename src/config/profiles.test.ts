@@ -259,6 +259,35 @@ test("profile can override rules settings", () => {
   }
 })
 
+test("profile can override mcp settings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      mcp: {
+        enabled: false,
+        envAllowlist: ["BASE_KEY"],
+        websearch: { provider: "exa" },
+      },
+      profiles: {
+        remote: {
+          mcp: {
+            enabled: true,
+            envAllowlist: ["PROFILE_KEY"],
+            websearch: { provider: "tavily" },
+          },
+        },
+      },
+      activeProfile: "remote",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.mcp.enabled, true)
+    assert.deepEqual(config.mcp.envAllowlist, ["PROFILE_KEY"])
+    assert.equal(config.mcp.websearch.provider, "tavily")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile with no activeProfile does not apply", () => {
   const xdg = makeTempXdg()
   try {
@@ -341,6 +370,14 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
         },
         hashline: { enabled: true },
         rules: { enabled: true, skipClaudeUserRules: true },
+        mcp: {
+          enabled: true,
+          envAllowlist: ["EXA_API_KEY"],
+          websearch: { provider: "exa" },
+          servers: {
+            docs: { type: "remote", url: "https://example.com/mcp" },
+          },
+        },
         debug: true,
         registerBuiltinAgents: true,
       },
