@@ -1,7 +1,7 @@
 # shared-skills Migration Cards (11 candidates)
 
 > **Source**: `omo/packages/shared-skills/skills/` (8 skills), `omo/.agents/skills/` (3 skills)
-> **Status**: Not migrated. HIGH migration value, LOW effort for 3 copy-as-is skills.
+> **Status**: Partially migrated. `git-master`, `ast-grep`, `frontend`, `debugging`, `init-deep`, and `lsp-setup` are present under local `skills/` and registered as slash commands by default.
 > **Principle**: Third-party skills (import directly); omo-own skills (reimplement or adapt)
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Skill loading dependency**: Skills are designed to be loaded via `task(load_skills=["skill-name"], ...)`. Verify OpenCode's built-in `task` tool supports `load_skills` — if not, Phase 7 (task enhancement) becomes a prerequisite. See design spec Open Question #3.
@@ -54,7 +54,7 @@ The `debugging` skill IS in `shared-skills/skills/` but was not in the 11-candid
 - **Path**: `omo/packages/shared-skills/skills/init-deep/`
 - **Deps**: `bash`, `find`, `wc`, `awk`, LSP tools (generic), optional `codegraph_explore` (MCP)
 - **omo refs**: Heavy `task(subagent_type="explore", ...)` with `run_in_background=true`. Uses `task(category="writing", ...)`.
-- **Adaptation**: **Minor rewrite.** Replace `task(subagent_type=...)` with ocmm's equivalent. Core algorithm (discover → score → generate → review) is omo-agnostic.
+- **Adaptation**: **Migrated with minor rewrite.** Added local ocmm/OpenCode notes, preserved `task(subagent_type="explore")` compatibility, and translated AGENTS writing from upstream `category="writing"` to local `category="documenting"`.
 - **Priority**: **Medium**
 
 ### Moderate Rewrite (Replace category routing)
@@ -130,13 +130,14 @@ The `debugging` skill IS in `shared-skills/skills/` but was not in the 11-candid
 ## Additional Candidate
 
 - **debugging** (in `shared-skills/skills/` but not in 11-candidate list): Copy as-is. No omo agent references, pure methodology + runtime references.
+- **lsp-setup** (in `shared-skills/skills/` but not in 11-candidate list): Migrated with local ocmm notes. It is useful because ocmm can register the `lsp` MCP server via `omo-lsp mcp`; the bundled `verify-lsp.ts` still requires an upstream omo checkout and should be treated as optional.
 
 ## Migration Strategy
 
 > **Phase mapping**: This section uses its own phase numbering for migration sequencing. These map to the design spec as: Phase 1→Phase 2, Phase 2→Phase 12 (PR 12), Phase 3→Phase 10 (PR 13a), Phase 4→Phase 10 (PR 13b), Phase 5→Phase 10 (PR 13c). See `docs/superpowers/specs/2026-06-23-omo-feature-migration-design.md` for the authoritative phase plan.
 
-1. **Step 1 (design spec Phase 2, immediate)**: Copy 3 quick-win skills (git-master, ast-grep, frontend) + debugging — zero adaptation needed
-2. **Step 2 (design spec Phase 10/PR 12)**: Minor rewrite for init-deep
+1. **Step 1 (design spec Phase 2, immediate)**: Copy 3 quick-win skills (git-master, ast-grep, frontend) + debugging — zero adaptation needed. **Done locally.**
+2. **Step 2 (design spec Phase 10/PR 12)**: Minor rewrite for init-deep. **Done locally.**
 3. **Step 3 (design spec Phase 10/PR 13a)**: Moderate rewrite for remove-ai-slops, visual-qa, tech-debt-audit — replace category routing
 4. **Step 4 (design spec Phase 10/PR 13b)**: Major rewrite for refactor, review-work — most valuable, heaviest omo-isms
 5. **Step 5 (design spec Phase 10/PR 13c)**: Major rewrite for github-triage, remove-deadcode — specialized, lower priority

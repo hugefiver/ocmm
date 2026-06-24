@@ -36,6 +36,7 @@ export const log = {
     }
   },
   warn(...args: unknown[]): void {
+    if (!debugEnabled()) return
     try {
       // eslint-disable-next-line no-console
       console.warn(PREFIX, ...args)
@@ -44,6 +45,7 @@ export const log = {
     }
   },
   error(...args: unknown[]): void {
+    if (!debugEnabled()) return
     try {
       // eslint-disable-next-line no-console
       console.error(PREFIX, ...args)

@@ -1,12 +1,13 @@
+---
+name: writing-plans
+description: Use when you have a spec or requirements for a multi-step task, before touching code
+---
+
 <!-- v1 fork of superpowers/writing-plans.
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed executing-plans cross-reference (excluded from v1);
      removed using-git-worktrees reference (not in v1); subagent-driven is the
      only execution path in v1. See docs/v1-maintenance.md for sync rules. -->
----
-name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
----
 
 # Writing Plans
 

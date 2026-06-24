@@ -1,3 +1,8 @@
+---
+name: subagent-driven-development
+description: Use when executing implementation plans with independent tasks in the current session
+---
+
 <!-- v1 fork of superpowers/subagent-driven-development.
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed executing-plans comparison (excluded from v1);
@@ -5,10 +10,6 @@
      (not in v1); removed test-driven-development reference (TDD is described
      inline in v1); final code review uses requesting-code-review skill only.
      See docs/v1-maintenance.md for sync rules. -->
----
-name: subagent-driven-development
-description: Use when executing implementation plans with independent tasks in the current session
----
 
 # Subagent-Driven Development
 

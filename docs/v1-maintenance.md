@@ -8,11 +8,11 @@ Naming note: `v1` remains the configuration value and on-disk version label. Pro
 
 | v1 skill | Upstream | Upstream version | Adjustments | Last synced |
 |----------|----------|------------------|-------------|-------------|
-| brainstorming | obra/superpowers/brainstorming | v6.0.3 | removed visual-companion section; removed spec-document-reviewer-prompt reference; replaced skill invocation language to match v1 auto-injected model | 2026-06-22 |
-| writing-plans | obra/superpowers/writing-plans | v6.0.3 | removed executing-plans cross-reference; removed using-git-worktrees reference; subagent-driven is the only execution path | 2026-06-22 |
-| subagent-driven-development | obra/superpowers/subagent-driven-development | v6.0.3 | removed executing-plans comparison; removed using-git-worktrees and finishing-a-development-branch references; removed test-driven-development reference (TDD described inline); final review uses requesting-code-review only | 2026-06-22 |
-| requesting-code-review | obra/superpowers/requesting-code-review | v6.0.3 | removed executing-plans and subagent-driven-development cross-references; no other changes | 2026-06-22 |
-| receiving-code-review | obra/superpowers/receiving-code-review | v6.0.3 | no content changes (skill is self-contained) | 2026-06-22 |
+| brainstorming | obra/superpowers/brainstorming | v6.0.3 | removed visual-companion section; removed spec-document-reviewer-prompt reference; replaced skill invocation language to match v1 auto-injected model; frontmatter kept as first bytes for OpenCode native slash skill loading | 2026-06-25 |
+| writing-plans | obra/superpowers/writing-plans | v6.0.3 | removed executing-plans cross-reference; removed using-git-worktrees reference; subagent-driven is the only execution path; frontmatter kept as first bytes for OpenCode native slash skill loading | 2026-06-25 |
+| subagent-driven-development | obra/superpowers/subagent-driven-development | v6.0.3 | removed executing-plans comparison; removed using-git-worktrees and finishing-a-development-branch references; removed test-driven-development reference (TDD described inline); final review uses requesting-code-review only; frontmatter kept as first bytes for OpenCode native slash skill loading | 2026-06-25 |
+| requesting-code-review | obra/superpowers/requesting-code-review | v6.0.3 | removed executing-plans and subagent-driven-development cross-references; frontmatter kept as first bytes for OpenCode native slash skill loading | 2026-06-25 |
+| receiving-code-review | obra/superpowers/receiving-code-review | v6.0.3 | no content changes (skill is self-contained); frontmatter kept as first bytes for OpenCode native slash skill loading | 2026-06-25 |
 
 ### Skill Template Files
 

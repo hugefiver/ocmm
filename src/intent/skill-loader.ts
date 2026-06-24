@@ -5,8 +5,8 @@
  * requesting-code-review,receiving-code-review}/SKILL.md and concatenates
  * them into a single string for injection via the system.transform hook.
  *
- * Skills are NOT registered with OpenCode's skill loader — ocmm injects
- * the content directly into the system message.
+ * In v1 workflow, the config hook also registers skills/v1 as an OpenCode
+ * skill path so these injected skills can be invoked with slash commands.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
@@ -31,6 +31,21 @@ export type SharedSkill = {
   path: string
 }
 
+export type SkillCommand = SharedSkill & {
+  template: string
+  agent?: string
+  model?: string
+  subtask?: boolean
+}
+
+type SkillMetadata = {
+  name?: string
+  description?: string
+  agent?: string
+  model?: string
+  subtask?: boolean
+}
+
 export const V1_SKILL_DIRS = [
   "brainstorming",
   "writing-plans",
@@ -53,6 +68,23 @@ export function loadV1Skills(
     }
   }
   return parts.join("\n\n---\n\n")
+}
+
+export function loadV1SkillCommands(args: {
+  rootDir?: string
+  disable?: readonly string[]
+} = {}): SkillCommand[] {
+  const rootDir = args.rootDir ?? DEFAULT_SKILLS_ROOT
+  const disable = new Set(args.disable ?? [])
+  const commands: SkillCommand[] = []
+  for (const dir of V1_SKILL_DIRS) {
+    const skillDir = join(rootDir, "v1", dir)
+    const command = readSkillCommand(skillDir, "ocmm deepwork")
+    if (!command) continue
+    if (matchesName(disable, command, skillDir)) continue
+    commands.push(command)
+  }
+  return commands.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function loadSharedSkills(args: {
@@ -91,6 +123,10 @@ export function loadSharedSkills(args: {
     skills.push(skill)
   }
   return skills.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function buildSkillCommand(skill: SharedSkill, scope = "ocmm"): SkillCommand | null {
+  return readSkillCommand(skill.path, scope)
 }
 
 function normalizeSource(source: SharedSkillSource): {
@@ -147,7 +183,7 @@ function readSharedSkill(dir: string): SharedSkill | null {
   const skillPath = join(dir, "SKILL.md")
   try {
     const content = readFileSync(skillPath, "utf8")
-    const meta = parseFrontmatter(content)
+    const { meta } = parseSkillDocument(content)
     const name = meta.name ?? basename(dir)
     return {
       name,
@@ -160,20 +196,65 @@ function readSharedSkill(dir: string): SharedSkill | null {
   }
 }
 
-function parseFrontmatter(content: string): { name?: string; description?: string } {
-  if (!content.startsWith("---")) return {}
+function readSkillCommand(dir: string, scope: string): SkillCommand | null {
+  const skillPath = join(dir, "SKILL.md")
+  try {
+    const content = readFileSync(skillPath, "utf8")
+    const { meta, body } = parseSkillDocument(content)
+    const name = meta.name ?? basename(dir)
+    const resolvedPath = resolve(dir).replace(/\\/g, "/")
+    const trimmedBody = body.trim()
+    const template = `<skill-instruction>\nBase directory for this skill: ${resolvedPath}/\nFile references (@path) in this skill are relative to this directory.\n\n${trimmedBody}\n</skill-instruction>\n\n<user-request>\n$ARGUMENTS\n</user-request>`
+
+    return {
+      name,
+      description: meta.description ? `(${scope} - Skill) ${meta.description}` : `(${scope} - Skill)`,
+      path: dir,
+      template,
+      ...(meta.agent ? { agent: meta.agent } : {}),
+      ...(meta.model ? { model: meta.model } : {}),
+      ...(meta.subtask !== undefined ? { subtask: meta.subtask } : {}),
+    }
+  } catch (err) {
+    log.warn(`failed to build skill command ${skillPath}: ${(err as Error).message}`)
+    return null
+  }
+}
+
+function parseSkillDocument(content: string): { meta: SkillMetadata; body: string } {
+  if (!content.startsWith("---")) return { meta: {}, body: content }
   const end = content.indexOf("\n---", 3)
-  if (end < 0) return {}
-  const meta: { name?: string; description?: string } = {}
+  if (end < 0) return { meta: {}, body: content }
+  const meta: SkillMetadata = {}
   const header = content.slice(3, end).trim()
   for (const line of header.split(/\r?\n/)) {
     const match = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line.trim())
     if (!match) continue
     const key = match[1]
-    if (key !== "name" && key !== "description") continue
-    meta[key] = unquoteYamlScalar(match[2] ?? "")
+    const value = unquoteYamlScalar(match[2] ?? "")
+    switch (key) {
+      case "name":
+        meta.name = value
+        break
+      case "description":
+        meta.description = value
+        break
+      case "agent":
+        meta.agent = value
+        break
+      case "model":
+        meta.model = value
+        break
+      case "subtask":
+        {
+          const parsed = parseYamlBoolean(value)
+          if (parsed !== undefined) meta.subtask = parsed
+        }
+        break
+    }
   }
-  return meta
+  const bodyStart = content.indexOf("\n", end + 4)
+  return { meta, body: bodyStart >= 0 ? content.slice(bodyStart + 1) : "" }
 }
 
 function unquoteYamlScalar(value: string): string {
@@ -186,6 +267,13 @@ function unquoteYamlScalar(value: string): string {
     }
   }
   return trimmed
+}
+
+function parseYamlBoolean(value: string): boolean | undefined {
+  const v = value.trim().toLowerCase()
+  if (v === "true") return true
+  if (v === "false") return false
+  return undefined
 }
 
 function matchesName(names: Set<string>, skill: SharedSkill, dir: string): boolean {
