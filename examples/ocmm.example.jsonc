@@ -9,6 +9,10 @@
 {
   "disabledAgents": [],
 
+  // Preferred language/locale for primary-capable agents. Examples:
+  // "zh", "zh-Hans", "zh-CN", "en-US". Omit to follow the user's language.
+  // "locale": "zh-CN",
+
   // Agents accept shorthand or full ModelRequirement form.
   "agents": {
     // Shorthand: pin a single model + optional variant.

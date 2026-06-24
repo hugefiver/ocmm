@@ -574,6 +574,9 @@
     "systemDefaultModel": {
       "type": "string"
     },
+    "locale": {
+      "type": "string"
+    },
     "workflow": {
       "type": "string",
       "enum": [
@@ -1252,6 +1255,9 @@
             }
           },
           "systemDefaultModel": {
+            "type": "string"
+          },
+          "locale": {
             "type": "string"
           },
           "intent": {

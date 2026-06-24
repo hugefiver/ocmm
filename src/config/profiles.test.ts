@@ -288,6 +288,23 @@ test("profile can override mcp settings", () => {
   }
 })
 
+test("profile can override locale", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      locale: "en-US",
+      profiles: {
+        chinese: { locale: "zh-CN" },
+      },
+      activeProfile: "chinese",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.locale, "zh-CN")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile with no activeProfile does not apply", () => {
   const xdg = makeTempXdg()
   try {
@@ -370,6 +387,7 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
         },
         hashline: { enabled: true },
         rules: { enabled: true, skipClaudeUserRules: true },
+        locale: "zh-Hans",
         mcp: {
           enabled: true,
           envAllowlist: ["EXA_API_KEY"],

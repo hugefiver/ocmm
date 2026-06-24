@@ -17,6 +17,12 @@ const COMPAT_AGENT_ALIASES = [
   { alias: "explore", target: "code-search" },
 ] as const
 
+const LOCALE_GUIDANCE_TAG = "ocmm-locale-guidance"
+const LOCALE_GUIDANCE_BLOCK = new RegExp(
+  `<${LOCALE_GUIDANCE_TAG}>[\\s\\S]*?<\\/${LOCALE_GUIDANCE_TAG}>\\s*(?:---\\s*)?`,
+  "g",
+)
+
 function fmtModel(entry: FallbackEntry): string {
   const provider = entry.providers[0] ?? ""
   return provider ? `${provider}/${entry.model}` : entry.model
@@ -26,7 +32,7 @@ function applyAgentEntry(
   agentMap: Record<string, unknown>,
   agent: Agent,
   override: NormalizedShorthand | undefined,
-  extras?: { mode?: string; prompt?: string },
+  extras?: { mode?: string; prompt?: string; promptPrefix?: string },
 ): void {
   if (override?.disabled) return
 
@@ -50,9 +56,41 @@ function applyAgentEntry(
   }
   if (extras?.mode && typeof existing.mode !== "string") existing.mode = extras.mode
   if (extras?.prompt && typeof existing.prompt !== "string") existing.prompt = extras.prompt
+  if (extras?.promptPrefix && typeof existing.prompt === "string") {
+    existing.prompt = prependPromptPrefix(existing.prompt, extras.promptPrefix)
+  }
   if (override?.permission) mergePermission(existing, override.permission, true)
 
   agentMap[agent.name] = existing
+}
+
+function buildLocaleGuidance(locale?: string): string {
+  const configuredLocale = locale?.trim()
+  const guidance = configuredLocale
+    ? [
+        `Configured locale: ${configuredLocale}.`,
+        "Prefer this language/locale for your thinking process, visible planning, and conversation with the user.",
+      ]
+    : [
+        "No locale is configured.",
+        "Infer the user's preferred language from their latest message and conversation context, then prefer that language for your thinking process, visible planning, and conversation.",
+        "If the user mixes languages, use the language that best matches the current request.",
+      ]
+
+  return [
+    `<${LOCALE_GUIDANCE_TAG}>`,
+    "Language and locale:",
+    ...guidance.map((line) => `- ${line}`),
+    "- Preserve code, identifiers, file paths, commands, protocol names, quotes, and user-requested wording in their original language when accuracy requires it.",
+    "- If the user explicitly asks for a different output language for a specific answer, follow that local request unless it conflicts with higher-priority instructions.",
+    `</${LOCALE_GUIDANCE_TAG}>`,
+  ].join("\n")
+}
+
+function prependPromptPrefix(prompt: string, prefix: string): string {
+  const body = prompt.replace(LOCALE_GUIDANCE_BLOCK, "").trim()
+  const cleanPrefix = prefix.trim()
+  return body ? `${cleanPrefix}\n\n---\n\n${body}` : cleanPrefix
 }
 
 function mergePermission(entry: Record<string, unknown>, permission: Record<string, string>, overwrite: boolean): void {
@@ -143,9 +181,12 @@ export function createConfigHandler(args: {
         : a.name === "planner" || a.name === "builder"
           ? "all"
           : "subagent"
-      const extras: { prompt?: string; mode?: string } = {}
+      const extras: { prompt?: string; mode?: string; promptPrefix?: string } = {}
       if (prompt) extras.prompt = prompt
       extras.mode = mode
+      if (mode === "primary" || mode === "all") {
+        extras.promptPrefix = buildLocaleGuidance(cfg.locale)
+      }
       applyAgentEntry(agentMap, a, norm, extras)
     }
 
