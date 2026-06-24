@@ -26,9 +26,9 @@ test("category-default: hard-reasoning + gpt-5.5 -> xhigh variant", () => {
   assert.equal(r!.variant, "xhigh")
 })
 
-test("category-default: writing has no variant when chain entry has none", () => {
+test("category-default: documenting has no variant when chain entry has none", () => {
   const r = resolveModelRouting({
-    agentName: "writing",
+    agentName: "documenting",
     modelID: "k2p5",
     providerID: "kimi-for-coding",
   })
@@ -76,4 +76,48 @@ test("input variant overrides category variant", () => {
   })
   assert.equal(r!.source, "category-default")
   assert.equal(r!.variant, "minimal")
+})
+
+test("category-default: coding resolves bounded code-edit category", () => {
+  const r = resolveModelRouting({
+    agentName: "coding",
+    modelID: "claude-sonnet-4-6",
+    providerID: "anthropic",
+  })
+  assert.ok(r)
+  assert.equal(r!.source, "category-default")
+  assert.equal(r!.entry.model, "claude-sonnet-4-6")
+})
+
+test("category-default: deep resolves autonomous delivery category", () => {
+  const r = resolveModelRouting({
+    agentName: "deep",
+    modelID: "claude-opus-4-7",
+    providerID: "anthropic",
+  })
+  assert.ok(r)
+  assert.equal(r!.source, "category-default")
+  assert.equal(r!.variant, "max")
+})
+
+test("category-default: normal-task resolves ordinary bounded task category", () => {
+  const r = resolveModelRouting({
+    agentName: "normal-task",
+    modelID: "claude-sonnet-4-6",
+    providerID: "anthropic",
+  })
+  assert.ok(r)
+  assert.equal(r!.source, "category-default")
+  assert.equal(r!.entry.model, "claude-sonnet-4-6")
+})
+
+test("category-default: complex resolves coordinated ordinary task category", () => {
+  const r = resolveModelRouting({
+    agentName: "complex",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+  })
+  assert.ok(r)
+  assert.equal(r!.source, "category-default")
+  assert.equal(r!.variant, "high")
 })

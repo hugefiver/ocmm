@@ -16,7 +16,7 @@ The primary structure is:
 - `clarifier`: analyzes hidden intent, ambiguity, and AI-slop risk before planning.
 - `plan-critic`: reviews plans for blockers and executable QA.
 
-Use categories for domain execution: `frontend`, `creative`, `hard-reasoning`, `research`, `quick`, `low-effort`, `high-effort`, and `writing`.
+Use categories for domain execution: `frontend`, `creative`, `hard-reasoning`, `research`, `quick`, `coding`, `normal-task`, `complex`, `deep`, and `documenting`.
 
 ## Turn Intent Gate
 

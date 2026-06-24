@@ -19,7 +19,18 @@ ocmm uses role-descriptive names:
 
 Utility agents support the workflow: `worker`, `doc-search`, `code-search`, `media-reader`, and `task-runner`.
 
-Categories handle implementation domains: `frontend`, `creative`, `hard-reasoning`, `research`, `quick`, `low-effort`, `high-effort`, and `writing`.
+Categories handle work shapes:
+
+- `quick`: fully specified mechanical edits with no design decision or investigation.
+- `coding`: determined code edits and bug fixes with known target behavior, affected area, and acceptance criteria.
+- `normal-task`: ordinary bounded tasks with known acceptance criteria that do not need cross-surface coordination.
+- `complex`: multi-step ordinary work with a known goal that needs coordination and judgment but not an autonomous delivery loop.
+- `deep`: autonomous system development and feature implementation with exploration, planning, implementation, verification, and continuation loops.
+- `hard-reasoning`: ultrabrain-style architecture, algorithm, correctness, or tradeoff decisions where the output is primarily a recommendation.
+- `research`: missing-fact investigations, external docs/API checks, history/context mining, or evidence gathering.
+- `frontend`: UI, UX, layout, styling, animation, accessibility, and visual QA.
+- `creative`: concept generation, naming, narrative, framing, and unconventional solution directions.
+- `documenting`: standalone text and documentation work that does not change product behavior.
 
 ## Intent Gate
 
@@ -46,7 +57,16 @@ Use the smallest agent/category that fits:
 | External docs or OSS examples | `doc-search` |
 | Internal codebase structure/patterns | `code-search` |
 | Visual/media extraction | `media-reader` |
-| Domain implementation | matching category |
+| Fully specified mechanical edit | `quick` |
+| Determined code edit or bug fix with known scope and acceptance criteria | `coding` |
+| Ordinary bounded task with known acceptance criteria | `normal-task` |
+| Multi-step ordinary task with known goal and coordinated files | `complex` |
+| Autonomous feature, system development, migration, integration, or cross-module refactor | `deep` |
+| Architecture, algorithm, correctness, or tradeoff recommendation | `hard-reasoning` |
+| Missing-fact investigation or evidence gathering | `research` |
+| UI/UX/styling/layout/animation/accessibility work | `frontend` |
+| Concept/naming/narrative/unconventional direction work | `creative` |
+| Standalone documentation/prose/release-note/copy work | `documenting` |
 | Focused single task with skills | `task-runner` |
 
 ## Delegation Prompt Contract

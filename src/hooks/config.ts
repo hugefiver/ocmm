@@ -8,6 +8,11 @@ import { normalizeShorthand, type NormalizedShorthand } from "../config/normaliz
 import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord, log } from "../shared/logger.ts"
 
+const COMPAT_AGENT_ALIASES = [
+  { alias: "oracle", target: "reviewer" },
+  { alias: "explore", target: "code-search" },
+] as const
+
 function fmtModel(entry: FallbackEntry): string {
   const provider = entry.providers[0] ?? ""
   return provider ? `${provider}/${entry.model}` : entry.model
@@ -140,9 +145,26 @@ export function createConfigHandler(args: {
       }
     }
 
+    registerCompatAgentAliases(agentMap, disabled)
+
     log.info(
       `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills, ${registeredMcps} MCPs`,
     )
+  }
+}
+
+function registerCompatAgentAliases(agentMap: Record<string, unknown>, disabled: Set<string>): void {
+  for (const { alias, target } of COMPAT_AGENT_ALIASES) {
+    if (disabled.has(alias) || disabled.has(target)) continue
+    const source = agentMap[target]
+    if (!isRecord(source)) continue
+
+    const existing = isRecord(agentMap[alias]) ? (agentMap[alias] as Record<string, unknown>) : {}
+    const aliasEntry = { ...source, ...existing }
+    if (typeof aliasEntry.description !== "string") {
+      aliasEntry.description = `Compatibility alias for @${target}.`
+    }
+    agentMap[alias] = aliasEntry
   }
 }
 
