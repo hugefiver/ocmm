@@ -13,7 +13,7 @@ loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
 test("config registers all built-in agents with provider/model strings", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
-  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  const cfg: { agent: Record<string, unknown>; default_agent?: string } = { agent: {} }
   await handler(cfg, undefined)
 
   for (const a of BUILTIN_AGENTS) {
@@ -22,6 +22,25 @@ test("config registers all built-in agents with provider/model strings", async (
     assert.equal(typeof entry!.model, "string")
     assert.match(entry!.model as string, /^[\w-]+\/[\w.-]+$/, `bad model for ${a.name}: ${entry!.model}`)
   }
+})
+
+test("config sets default_agent to orchestrator and disables OpenCode built-in primaries", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; default_agent?: string } = { agent: {} }
+  await handler(cfg, undefined)
+  assert.equal(cfg.default_agent, "orchestrator")
+  assert.equal((cfg.agent.build as Record<string, unknown> | undefined)?.disable, true)
+  assert.equal((cfg.agent.plan as Record<string, unknown> | undefined)?.disable, true)
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown> | undefined)?.mode, "primary")
+})
+
+test("config respects user-set defaultAgent and disableOpenCodeBuiltinAgents=false", async () => {
+  const cfg2 = { ...defaultConfig(), defaultAgent: "builder" as const, disableOpenCodeBuiltinAgents: false }
+  const handler2 = createConfigHandler({ getConfig: () => cfg2 })
+  const out: { agent: Record<string, unknown>; default_agent?: string } = { agent: {} }
+  await handler2(out, undefined)
+  assert.equal(out.default_agent, "builder")
+  assert.notEqual((out.agent.build as Record<string, unknown> | undefined)?.disable, true)
 })
 
 test("config attaches deepwork prompt to built-in agents", async () => {
@@ -90,7 +109,7 @@ test("user model override selects specialized deepwork prompt variant", async ()
     ...defaultConfig(),
     agents: {
       orchestrator: { model: "zhipu/glm-5.1" },
-      worker: { model: "openai/codex-mini-latest" },
+      builder: { model: "openai/codex-mini-latest" },
     },
   }
   const handler = createConfigHandler({ getConfig: () => c })
@@ -98,7 +117,7 @@ test("user model override selects specialized deepwork prompt variant", async ()
   await handler(cfg, undefined)
 
   assert.match(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
-  assert.match(String((cfg.agent.worker as Record<string, unknown>).prompt), /Expert coding agent/)
+  assert.match(String((cfg.agent.builder as Record<string, unknown>).prompt), /Expert coding agent/)
 })
 
 test("config does not clobber an existing user-set model", async () => {

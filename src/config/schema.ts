@@ -324,6 +324,8 @@ export const OcmmConfigSchema = z
      */
     activeProfile: z.string().optional(),
     registerBuiltinAgents: z.boolean().default(true),
+    defaultAgent: z.union([z.string(), z.boolean()]).default("orchestrator"),
+    disableOpenCodeBuiltinAgents: z.boolean().default(true),
     promptsRoot: z.string().optional(),
     debug: z.boolean().default(false),
     /** Defaults for the `ocmm` shim binary. CLI flags override these. */
