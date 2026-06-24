@@ -6,11 +6,17 @@ Conventions and workflows for agents working on the ocmm codebase.
 
 ```bash
 pnpm run typecheck   # tsc --noEmit, strict mode
-pnpm test            # node --test, no external deps
-pnpm run build       # tsc -> dist/
+pnpm test            # node --test + cargo test
+pnpm run build       # tsc -> dist/ and cargo release -> dist/bin/
 ```
 
-All three must pass before committing. Tests use `node --test --experimental-strip-types` (Node 22+), no test framework dependency.
+All three must pass before committing. TypeScript tests use `node --test --experimental-strip-types` (Node 22+), no test framework dependency. The Rust `ocmm-lsp` MCP server lives under `crates/ocmm-lsp/` and requires Cargo. `pnpm run build` writes both the local fallback binary name and the target-triple release name to `dist/bin/`.
+
+## Release Workflow
+
+The `.github/workflows/release.yml` workflow is GitHub-only: it publishes GitHub Release assets and, on tag releases or explicit manual opt-in, a scoped GitHub Packages package. Do not add npmjs.org publishing unless the user asks for that registry specifically.
+
+Release tags must match `package.json` as `vX.Y.Z`. The Release assets include the packed plugin/CLI tarball, standalone target-triple `ocmm-lsp-*` native binaries, and checksums. The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. Bundled Linux binaries are glibc/GNU targets; musl users need a local build or `OCMM_LSP_COMMAND`.
 
 ## Live Integration Test
 
@@ -111,7 +117,7 @@ Expected lines:
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
 [ocmm] loaded prompts: workflow=v1 deepwork=6/6, agents=5/5, category=10/10
 [ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
-[ocmm] config: registered N agents (built-in + categories + user)
+[ocmm] config: registered N agents (built-in + categories + user), N skills, N commands, N MCPs
 ```
 
 **Inspect a specific agent's resolved model:**
@@ -121,6 +127,14 @@ opencode debug agent orchestrator --print-logs --log-level DEBUG 2>&1 | rg '"mod
 ```
 
 Should show the `providerID` and `modelID` you configured. (This command does not require `OCMM_DEBUG`; it reads opencode's own debug output.)
+
+**Smoke-test the native LSP MCP wrapper after a build:**
+
+```powershell
+'{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist\cli\ocmm-lsp.js mcp
+```
+
+Should list the seven primary LSP tools: `status`, `diagnostics`, `goto_definition`, `find_references`, `symbols`, `prepare_rename`, and `rename`.
 
 **Run a real chat round-trip:**
 
@@ -146,7 +160,7 @@ Expected (v1 workflow):
 
 Expected (omo workflow): no `v1 skills queued` line — omo attaches prompts declaratively at config time, no runtime injection.
 
-`OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents`) and runtime routing (`v1 skills queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
+`OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents..., N MCPs`) and runtime routing (`v1 skills queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
 
 ### 6. Clean up
 
@@ -164,7 +178,7 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 
 | Hook | What to look for in logs | What it proves |
 |---|---|---|
-| `config` | `registered N agents` | Plugin loaded, agents/categories registered with your provider's models |
+| `config` | `registered N agents..., N MCPs` | Plugin loaded, agents/categories, skills, commands, and MCPs registered with your provider's models |
 | `chat.params` | `routed agent=... variant=... source=...` | Variant resolved via 4-tier priority, translated to model params |
 | `chat.message` | `v1 skills queued: N chars` (v1 only; omo is no-op) | v1 skill content queued on first message per session |
 | `experimental.chat.system.transform` | `prepended N chars` | Queued content injected into system message |

@@ -143,9 +143,9 @@ describe("shim dedupArray", () => {
 })
 
 describe("shim resolvePluginPath", () => {
-  it("returns a path ending in index.js", () => {
+  it("returns an existing plugin entry path", () => {
     const p = resolvePluginPath()
-    assert.ok(p.endsWith("index.js"), `expected index.js, got ${p}`)
+    assert.ok(/index\.(js|ts)$/.test(p), `expected index.js or index.ts, got ${p}`)
     assert.ok(existsSync(p), `plugin path does not exist: ${p}`)
   })
 })

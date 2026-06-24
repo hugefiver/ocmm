@@ -10,11 +10,11 @@ Configure the right Language Server for a project so the `lsp` MCP tools
 actually work. This skill is an index: detect what a project needs, install the
 server, write the config, then verify with a real roundtrip.
 
-Local ocmm note: ocmm registers the `lsp` MCP server through `omo-lsp mcp` when
-that binary is available. The per-language references mirror upstream omo LSP
-server definitions, but the real source of truth in this install is what
-OpenCode exposes in the current session. Check available MCP/tool names first,
-then use these references for install commands and config snippets.
+Local ocmm note: ocmm registers the `lsp` MCP server through the project-owned
+`ocmm-lsp mcp` by default. The per-language references mirror upstream omo LSP
+server definitions, but the real source of truth in this install is what the
+current `lsp` MCP exposes. Check available MCP/tool names first, then use these
+references for install commands and config snippets.
 
 ---
 
@@ -80,10 +80,14 @@ file extension. Write config only to: pick between competing servers, set a
 `priority`, pass `initialization` options, override `extensions`, set `env`, or
 `disable` a server.
 
-Two project-scoped config files, **identical JSON shape**:
+Project-scoped config files, **identical JSON shape**:
 
-- Codex harness → `.codex/lsp-client.json` (user: `~/.codex/lsp-client.json`)
-- OpenCode/ocmm harness → `.opencode/lsp.json`
+- Preferred ocmm/OpenCode path -> `.opencode/ocmm-lsp.json`
+- OpenCode/ocmm compatibility path -> `.opencode/lsp.json`
+- Codex harness compatibility path -> `.codex/lsp-client.json`
+
+The user-scoped ocmm config path is `~/.config/opencode/ocmm-lsp.json`, or the
+path set by `OCMM_LSP_USER_CONFIG`.
 
 ```jsonc
 {
@@ -100,25 +104,28 @@ Two project-scoped config files, **identical JSON shape**:
 }
 ```
 
-Rules enforced by `config-loader.ts`:
+Rules enforced by `ocmm-lsp`:
 
-- In a **project** config (`.codex/lsp-client.json`, `.opencode/lsp.json`) an
-  entry whose id is a **builtin** server inherits `command` automatically — you
-  only override `extensions` / `priority` / `initialization`. A non-builtin id
-  in a project config is **ignored**.
-- To define a **fully custom** (non-builtin) server with its own `command`, put
-  it in the **user** config (`~/.codex/lsp-client.json`, or the path set by
-  `LSP_TOOLS_MCP_USER_CONFIG`), where `command` + `extensions` are honored.
+- Builtin server ids inherit `command` and `extensions` automatically; override
+  only the fields you need (`priority`, `initialization`, `env`, etc.).
+- Custom server ids are allowed in project or user config when both `command`
+  and `extensions` are provided.
 - Project entries win over user entries; both win over builtin defaults.
+- `disabled: true` suppresses that server id.
 
 Each language reference gives a ready-to-paste snippet.
 
 ### 4. Verify
 
-Prefer a real diagnostics roundtrip through the current OpenCode/ocmm LSP MCP
-tools if they are available. If this checkout also contains upstream omo's
-`packages/lsp-tools-mcp/src`, the bundled script can perform the same kind of
-roundtrip:
+Prefer a real diagnostics roundtrip through the current OpenCode/ocmm `lsp` MCP
+tools if they are available. To smoke-test the packaged MCP surface directly:
+
+```bash
+printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | ocmm-lsp mcp
+```
+
+If this checkout also contains upstream omo's `packages/lsp-tools-mcp/src`, the
+bundled script can perform the same kind of roundtrip:
 
 ```bash
 bun scripts/verify-lsp.ts <path/to/file.ext>
@@ -128,7 +135,8 @@ bun scripts/verify-lsp.ts <file> --timeout=90000
 `OK` = the server started and answered. `FAIL: language server not installed`
 = go back to step 2. Other `FAIL` text carries the server/startup error.
 `SKIP` = the upstream engine source could not be located; in a plain ocmm
-checkout, call the OpenCode `lsp` MCP diagnostics tool directly instead.
+checkout, call the OpenCode `lsp` MCP diagnostics tool or `ocmm-lsp mcp`
+directly instead.
 
 ---
 

@@ -12,6 +12,7 @@ This document captures ocmm's design rationale, hook flow, and routing pipeline.
 6. **Honor user overrides** — user config always wins over built-in defaults; explicit config always wins over family-policy defaults.
 7. **Emit routing ledger** — append resolution entries to the OpenCode routing ledger for observability (capped at 256).
 8. **Expose skill/loop slash commands** — register shared skills, v1 deepwork skills, and loop protocol templates through OpenCode's `config.command`; expand bare ocmm slash commands in `opencode run` input as a compatibility path.
+9. **Own the default LSP MCP** — register the built-in OpenCode MCP name `lsp` with the project-owned native `ocmm-lsp mcp` server instead of depending on upstream `omo-lsp`.
 
 ## Non-goals
 
@@ -19,7 +20,7 @@ This document captures ocmm's design rationale, hook flow, and routing pipeline.
 - No team-mode orchestration or Boulder/Atlas runtime — out of scope.
 - No full Ralph/audit idle auto-continuation engine yet — ocmm currently exposes `/ralph-loop`, `/audit-loop`, and `/dwloop` command templates only.
 - No per-agent `runtimeFallback` override — fallback config is global.
-- No npm publish — the plugin ships as a built `dist/` referenced by path.
+- No npmjs.org publish — releases are GitHub-only unless a user explicitly asks for another registry.
 
 ## Two-axis routing matrix
 
@@ -148,6 +149,28 @@ Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-ha
 7. Register **10 categories as `mode:subagent`** (from `src/data/categories.ts`), using each category's first chain entry as the model and `prompts/{workflow}/category/<name>.md` as the system prompt.
 8. Apply user overrides: `agents.<name>` pins model/shorthand/disabled; `categories.<name>` same minus `disabled`.
 
+### MCP registration
+
+`registerMcps()` merges built-ins, project `.mcp.json`, and explicit
+`mcp.servers` config. `disabledMcps` removes matching names before registration;
+explicit `mcp.servers` entries win over built-ins.
+
+Built-ins:
+
+| MCP | Type | Default |
+|---|---|---|
+| `websearch` | remote | Exa by default, Tavily when configured; API-key headers only if env-allowlisted. |
+| `context7` | remote | `https://mcp.context7.com/mcp`, optional allowlisted API key. |
+| `grep_app` | remote | `https://mcp.grep.app`. |
+| `lsp` | local | Project-owned `ocmm-lsp mcp`. |
+
+`resolveOcmmLspCommand()` resolves `lsp` in this order: `OCMM_LSP_COMMAND`,
+bundled `dist/bin/ocmm-lsp-*`, local Cargo release/debug binaries, `cargo run`
+from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. If none exists, the built-in
+`lsp` config is registered disabled so an explicit override can still replace
+it. The MCP receives `OCMM_LSP_PROJECT_CONFIG` with `.opencode/ocmm-lsp.json`,
+`.opencode/lsp.json`, and `.codex/lsp-client.json`.
+
 ### `chat.message(input, output)`
 
 1. In v1 workflow, queue the injected deepwork skill bundle once per session.
@@ -203,7 +226,7 @@ CLI: `ocmm-profiles` (`list`/`use`/`show`/`add`/`rm`/`clear`/`current`) manages 
 
 ```
 src/
-├── cli/                  # CLI entry (shim.ts, profiles.ts)
+├── cli/                  # CLI entry (shim.ts, profiles.ts, ocmm-lsp.ts)
 ├── commands/             # built-in slash command templates
 ├── config/               # schema.ts, load.ts, normalize.ts, profiles.ts
 ├── data/                 # agents.ts, categories.ts (authoritative built-in definitions)
@@ -211,22 +234,26 @@ src/
 ├── hooks/                # config.ts, chat-params.ts, chat-message.ts, system-transform.ts, event.ts
 │                         # + rules-injector, hashline-read-enhancer, directory-agents-injector
 ├── intent/               # model-family.ts, skill-loader.ts, prompt-loader.ts
-├── mcp/                  # MCP server registration
+├── mcp/                  # MCP server registration and native LSP command resolution
 ├── permissions/         # permission rules
 ├── routing/              # resolver.ts, variant-translator.ts
 ├── rules/                # rule definitions
 ├── runtime-fallback/     # error-classifier, fallback-state, dispatcher, event-handler
 ├── shared/               # shared types/utilities
 └── tools/                # skill-mcp.ts, hashline-edit.ts
+crates/
+└── ocmm-lsp/             # Rust stdio MCP server exposing LSP tools
+scripts/
+└── build-ocmm-lsp.ts     # Cargo release build + dist/bin copy helper
 ```
 
-51 source `.ts` files (excluding tests). 273 tests across 29 test files.
+The TypeScript plugin and Rust `ocmm-lsp` crate are built together for releases.
 
 ## Build & test
 
-- **Build:** `pnpm run build` — `tsc` (target ES2022, module ES2022, moduleResolution Bundler, `allowImportingTsExtensions` + `rewriteRelativeImportExtensions`).
+- **Build:** `pnpm run build` — TypeScript into `dist/`, then Cargo release build copied into `dist/bin/` under both the target-triple release name and local fallback name.
 - **Typecheck:** `pnpm run typecheck` — `tsc --noEmit`, strict mode.
-- **Test:** `pnpm test` — `node --test --experimental-strip-types` (Node 22+). No test framework dependency.
+- **Test:** `pnpm test` — TypeScript tests via `node --test --experimental-strip-types` (Node 22+) plus `cargo test -p ocmm-lsp`.
 - **Runtime dep:** `zod ^3.23.8`.
 - **Dev deps:** `typescript ^5.6.0`, `@types/node ^22.10.0`, `rimraf ^6.0.1`.
 
@@ -235,6 +262,7 @@ src/
 - No `prompt-async-gate` — simple `Set<sessionID>` dedup instead.
 - No full loop runtime — `/ralph-loop`, `/audit-loop`, and `/dwloop` are command templates, not event-driven idle continuation. Noninteractive `opencode run` receives a compatibility expansion, but still no hidden background continuation. Ralph Loop runtime, stop/cancel, compaction, and verifier hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
 - No per-agent `runtimeFallback` override — global config only.
+- No full upstream LSP daemon — ocmm ships a direct native stdio MCP instead of the shared socket daemon.
 - No toast notifications — logs only.
 - No quota-error regression suite — 12 classifier tests exist, but no dedicated quota suite.
 - No reserved-retry backoff.

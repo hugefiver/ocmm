@@ -3,6 +3,14 @@
 > Source: `omo/packages/lsp-core/`, `omo/packages/lsp-tools-mcp/`, `omo/packages/lsp-daemon/`, `omo/packages/omo-opencode/src/mcp/`
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
+> **Current ocmm status**: Migrated as a project-owned Rust stdio MCP server,
+> `ocmm-lsp`. ocmm registers the built-in MCP name `lsp` with `ocmm-lsp mcp`
+> by default, replacing the earlier upstream `omo-lsp mcp` dependency. The
+> native server implements the same 7 primary tool contracts plus `lsp_*`
+> aliases, uses line or Content-Length JSON-RPC framing, and supports project
+> config at `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, and
+> `.codex/lsp-client.json`.
+
 ## 1. Package Layering
 
 ```
@@ -149,6 +157,31 @@ Under: v<version>/
 
 Environment variable set: `LSP_TOOLS_MCP_PROJECT_CONFIG = .opencode/lsp.json:.omo/lsp.json:.omo/lsp-client.json`
 
+### ocmm registration (`src/mcp/index.ts`)
+
+`createBuiltinMcps()` registers the OpenCode MCP named `lsp` with a local
+stdio command resolved by `resolveOcmmLspCommand()`:
+
+1. `OCMM_LSP_COMMAND` when explicitly set. JSON arrays are treated as exact
+   commands; plain strings receive the `mcp` argument.
+2. Bundled release binaries under `dist/bin/` (platform target first, fallback
+   binary name second).
+3. Local Cargo release/debug binaries under `target/`.
+4. `cargo run --manifest-path crates/ocmm-lsp/Cargo.toml -- mcp` when source is
+   present and Cargo is on PATH.
+5. A PATH `ocmm-lsp`.
+6. Disabled built-in config when none of the above exists.
+
+ocmm sets `OCMM_LSP_PROJECT_CONFIG` to this path list (using the platform path
+delimiter, `:` on POSIX and `;` on Windows):
+
+```
+.opencode/ocmm-lsp.json:.opencode/lsp.json:.codex/lsp-client.json
+```
+
+Use `disabledMcps:["lsp"]` to turn it off, or define `mcp.servers.lsp` to
+replace the built-in command.
+
 ### Config Gating (`oh-my-opencode-config.ts`)
 ```jsonc
 {
@@ -180,7 +213,9 @@ LSP tools appear in `LOW_PRIORITY_TOOL_ORDER` for `max_tools` trimming.
 }
 ```
 
-Config paths searched: `.opencode/lsp.json`, `.omo/lsp.json`, `.omo/lsp-client.json`, `.codex/lsp-client.json` (project), `~/.codex/lsp-client.json` (user). Merge priority: project > user > builtin.
+Upstream config paths searched: `.opencode/lsp.json`, `.omo/lsp.json`, `.omo/lsp-client.json`, `.codex/lsp-client.json` (project), `~/.codex/lsp-client.json` (user). Merge priority: project > user > builtin.
+
+ocmm config paths searched by `ocmm-lsp`: `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, `.codex/lsp-client.json` (project), then `~/.config/opencode/ocmm-lsp.json` (user). `OCMM_LSP_PROJECT_CONFIG` and `OCMM_LSP_USER_CONFIG` can override those paths. Builtin ids inherit command/extensions; custom ids are valid when a config entry supplies both `command` and `extensions`.
 
 ## 7. Dependencies
 
@@ -208,34 +243,46 @@ Covers: daemon round-trip, client connection, client retry, daemon startup, prox
 ### omo-opencode (1 file)
 - `src/mcp/lsp.test.ts` — `createLspMcpConfig()`: CLI resolution, bootstrap, security, disable when missing
 
-## 9. CRITICAL: ocmm Already Has These 7 LSP Tools
+## 9. ocmm Native LSP Migration Result
 
-**IMPORTANT FINDING**: The current session's available tools include: `lsp_diagnostics`, `lsp_find_references`, `lsp_goto_definition`, `lsp_prepare_rename`, `lsp_rename`, `lsp_status`, `lsp_symbols` — these are the SAME 7 LSP tools provided by OpenCode's built-in LSP integration (via the IDE/host environment).
+The previous assessment was that OpenCode environments may already expose the
+7 LSP tools. The migration decision is now settled for ocmm: we ship a native
+`ocmm-lsp` stdio MCP and register it as the default built-in `lsp` MCP when it
+can be resolved. This removes the runtime dependency on upstream `omo-lsp` and
+keeps the tool surface available in isolated OpenCode test environments.
 
-This means:
-- **ocmm may NOT need its own LSP daemon** if OpenCode's built-in LSP is sufficient
-- The daemon exists primarily for the **Codex edition** (where every tool call spawns a fresh process)
-- For OpenCode-only plugins, the direct `omo-lsp` MCP process (lsp-tools-mcp) is sufficient — starts once per plugin load and stays warm
+Implemented tools:
+- `status` / `lsp_status`
+- `diagnostics` / `lsp_diagnostics`
+- `goto_definition` / `lsp_goto_definition`
+- `find_references` / `lsp_find_references`
+- `symbols` / `lsp_symbols`
+- `prepare_rename` / `lsp_prepare_rename`
+- `rename` / `lsp_rename`
+
+This migration intentionally does not port the full upstream daemon. The native
+server is a direct stdio MCP process with a curated builtin language-server
+table and project/user config overrides.
 
 ## 10. Migration Decision Matrix
 
 | Approach | When to Use | Effort | Recommendation |
 |----------|-------------|--------|----------------|
-| **A. Skip LSP** — OpenCode built-in LSP is enough | If OpenCode's LSP works well in target environments | Zero | Default for ocmm |
-| **B. Port lsp-core only** — register as stdio MCP, no daemon | If need broader language coverage than built-in | Medium (~30 source files) | If built-in insufficient |
-| **C. Port full daemon** — lsp-core + lsp-daemon | If need shared daemon across sessions/cwd | High (~40 files + socket IPC) | Only if multi-cwd needed |
+| **A. Skip LSP** — OpenCode built-in LSP is enough | If a host already guarantees these tools | Zero | Superseded for ocmm default |
+| **B. Port core as stdio MCP, no daemon** | If need stable bundled tools without upstream runtime dependency | Medium | **Chosen: native Rust `ocmm-lsp`** |
+| **C. Port full daemon** — lsp-core + lsp-daemon | If need shared daemon across sessions/cwd | High (~40 files + socket IPC) | Future-only if multi-cwd reuse becomes necessary |
 
 ### Categorization
 - **Type**: Infrastructure — depends on OpenCode's built-in LSP coverage assessment
-- **Priority**: MEDIUM (OpenCode likely already provides this; verify gap first)
-- **Effort**: LOW (skip) / MEDIUM (port core) / HIGH (port daemon)
-- **Dependencies**: `@oh-my-opencode/mcp-stdio-core` (if porting)
+- **Priority**: Done for core stdio MCP; daemon remains low priority.
+- **Effort**: Implemented as a standalone Rust crate instead of importing upstream TS packages.
+- **Dependencies**: Cargo + `serde`/`serde_json`/`anyhow`; no upstream omo runtime dependency.
 
-### Migration steps (if porting — Approach B):
-1. Port `lsp-core/src/lsp/` — manager, client, connection, json-rpc-connection, config-loader, server-definitions, server-resolution, server-installation, formatters, workspace-edit, language-mappings, directory-diagnostics
-2. Port `lsp-core/src/mcp.ts` — `runMcpStdioServer()` handler
-3. Port `lsp-core/src/tools/` — 7 tool executors
-4. Skip: `lsp-daemon/src/` entirely (proxy, daemon-server, daemon-client, ensure-daemon, lock, socket-jsonrpc)
-5. Adapt: Config paths from `.codex/lsp-client.json` to ocmm convention
-6. Decide: Port all 51 server definitions or curate subset
-7. Register as stdio MCP in ocmm's plugin config
+### Historical migration checklist (superseded by native Rust implementation)
+1. Port `lsp-core/src/lsp/` — replaced by `crates/ocmm-lsp/src/main.rs`.
+2. Port `lsp-core/src/mcp.ts` — replaced by native stdio JSON-RPC handling.
+3. Port `lsp-core/src/tools/` — covered by the 7 native tool handlers.
+4. Skip `lsp-daemon/src/` — still skipped; no shared socket daemon locally.
+5. Adapt config paths — done with `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, and `.codex/lsp-client.json`.
+6. Decide server definitions — currently a curated builtin table plus config overrides.
+7. Register as stdio MCP in ocmm's plugin config — done through `createBuiltinMcps()`.

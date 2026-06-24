@@ -1,7 +1,7 @@
 # MCP Infrastructure
 
 > **Source**: `omo/packages/mcp-stdio-core/`, `omo/packages/mcp-client-core/`, `omo/packages/omo-opencode/src/mcp/`, `omo/packages/skills-loader-core/`
-> **Status**: Not migrated. MEDIUM migration value.
+> **Status**: Partially migrated. ocmm now has built-in MCP registration, `.mcp.json` and skill MCP config parsing, the `skill_mcp` dispatcher stub, and a native project-owned `ocmm-lsp` stdio MCP. Full `mcp-client-core` OAuth/lifecycle parity remains future work.
 > **Principle**: mcp-stdio-core + mcp-client-core = third-party (import); built-in MCPs + skill embedding = omo-own (reimplement config)
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
@@ -84,7 +84,7 @@ Registered by `createBuiltinMcps()` in `omo/packages/omo-opencode/src/mcp/index.
 | **websearch** | remote | `https://mcp.exa.ai/mcp?tools=web_search_exa` (Exa) or `https://mcp.tavily.com/mcp/` (Tavily) | `EXA_API_KEY` or `TAVILY_API_KEY` | Web search |
 | **context7** | remote | `https://mcp.context7.com/mcp` | `CONTEXT7_API_KEY` (optional) | Library docs |
 | **grep_app** | remote | `https://mcp.grep.app` | None | GitHub code search |
-| **lsp** | local stdio | Vendored `lsp-tools-mcp` / `lsp-daemon` | None | 7 lsp_* tools |
+| **lsp** | local stdio | ocmm default: project-owned `ocmm-lsp mcp`; upstream omo used vendored `lsp-tools-mcp` / `lsp-daemon` | None | 7 lsp_* tools |
 | **codegraph** | local stdio | `codegraph serve --mcp` | None | 8 codegraph_* tools |
 
 ## 4. Skill-Embedded MCP Manager (Tier 3)
@@ -217,7 +217,7 @@ await managers.skillMcpManager.disconnectSession(sessionInfo.id)
 |---------|-------------|
 | `mcp-stdio-core` | **None** (zero dependencies, Node.js streams only) |
 | `mcp-client-core` | `@modelcontextprotocol/sdk ^1.29.0`, `@oh-my-opencode/claude-code-compat-core`, `@oh-my-opencode/utils`, `zod ^4.4.3` |
-| Built-in MCPs (plugin-level) | LSP: vendored `lsp-tools-mcp`; codegraph: resolved from PATH or bundled npm; remote MCPs: HTTP only |
+| Built-in MCPs (plugin-level) | ocmm LSP: native `ocmm-lsp`; upstream LSP: vendored `lsp-tools-mcp`; codegraph: resolved from PATH or bundled npm; remote MCPs: HTTP only |
 | SKILL.md YAML parsing | `js-yaml ^4.1.1` |
 
 ## 8. Test Coverage
@@ -248,24 +248,31 @@ await managers.skillMcpManager.disconnectSession(sessionInfo.id)
 
 ## Migration Assessment
 
-**Verdict**: PORT core packages + reimplement plugin adapter
+**Verdict**: PARTIALLY PORTED. ocmm has reimplemented the plugin adapter pieces it currently needs and ships native `ocmm-lsp`; full OAuth-capable client lifecycle remains a future port.
 
 **What to port (third-party, import directly)**:
 1. `mcp-stdio-core` — zero-dep, directly usable
 2. `mcp-client-core` — OAuth self-contained, only depends on `@modelcontextprotocol/sdk`, `zod`, utils
 3. `SkillMcpManager` + `SkillMcpConfig` parsing from `skills-loader-core`
 
-**What to reimplement (omo-own)**:
-1. Built-in MCP definitions (websearch, context7, grep_app, lsp, codegraph) — plugin-level config objects, easy to replicate
-2. MCP config merge handler — adapt to ocmm's config hook
-3. `skill_mcp` tool registration — adapt to ocmm's tool registry
-4. `.mcp.json` loader (Tier-2) — Claude Code compatibility
+**What has been reimplemented locally**:
+1. Built-in MCP definitions for websearch, context7, grep_app, and lsp.
+2. `lsp` defaults to the project-owned `ocmm-lsp mcp`, with binary resolution and Cargo fallback.
+3. MCP config merge handler in ocmm's config hook, including `.mcp.json` compatibility and explicit `mcp.servers` overrides.
+4. `skill_mcp` tool registration against the dependency-free configured MCP manager stub.
+5. Skill-frontmatter and companion `mcp.json` parsing for registered skills.
+
+**What remains to port if needed**:
+1. `mcp-client-core` OAuth and long-lived remote/local client lifecycle.
+2. Production `skill_mcp` transport execution instead of the current configured-response stub.
+3. Codegraph provisioning/config parity.
 
 **Config fields for ocmm**:
-- `disabled_mcps: string[]` — disable by name
-- `mcp_env_allowlist: string[]` — env var allowlist for security
-- `websearch: { provider: "exa" | "tavily" }` — provider selection
-- `codegraph: { enabled, auto_provision, install_dir, telemetry }` — codegraph config
+- `disabledMcps: string[]` — disable by name
+- `mcp.envAllowlist: string[]` — env var allowlist for security
+- `mcp.websearch: { provider: "exa" | "tavily" }` — provider selection
+- `mcp.servers: Record<string, McpServerConfig>` — explicit server overrides and additions
+- `codegraph` config is not implemented locally yet.
 
-**Effort**: MEDIUM (~30 src files for mcp-client-core port + ~10 files for plugin adapter)
-**Priority**: MEDIUM — MCP infra is valuable but ocmm may not need all 5 built-in MCPs immediately
+**Effort**: Remaining work is MEDIUM (~30 src files for mcp-client-core style lifecycle + transport execution).
+**Priority**: MEDIUM — native LSP is complete enough for the default tool surface; full MCP client parity is valuable but separate.

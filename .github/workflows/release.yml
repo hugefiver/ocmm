@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, for example v0.1.0"
+        required: true
+        type: string
+      publish_github_package:
+        description: "Also publish @owner/ocmm to GitHub Packages"
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.5.2"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm test
+
+  native:
+    name: Native ocmm-lsp (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+            binary: ocmm-lsp-x86_64-unknown-linux-gnu
+            source: target/release/ocmm-lsp
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            binary: ocmm-lsp-aarch64-unknown-linux-gnu
+            source: target/release/ocmm-lsp
+          - os: windows-latest
+            platform: win32-x64
+            binary: ocmm-lsp-x86_64-pc-windows-msvc.exe
+            source: target/release/ocmm-lsp.exe
+          - os: windows-11-arm
+            platform: win32-arm64
+            binary: ocmm-lsp-aarch64-pc-windows-msvc.exe
+            source: target/release/ocmm-lsp.exe
+          - os: macos-15-intel
+            platform: darwin-x64
+            binary: ocmm-lsp-x86_64-apple-darwin
+            source: target/release/ocmm-lsp
+          - os: macos-14
+            platform: darwin-arm64
+            binary: ocmm-lsp-aarch64-apple-darwin
+            source: target/release/ocmm-lsp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check runner platform
+        shell: bash
+        run: |
+          node -e "const actual = `${process.platform}-${process.arch}`; const expected = '${{ matrix.platform }}'; if (actual !== expected) throw new Error(`runner ${actual} does not match ${expected}`)"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build native binary
+        run: cargo build --release -p ocmm-lsp
+
+      - name: Stage native binary
+        shell: bash
+        run: |
+          mkdir -p release-native
+          cp "${{ matrix.source }}" "release-native/${{ matrix.binary }}"
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            chmod 755 "release-native/${{ matrix.binary }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: release-native/${{ matrix.binary }}
+          if-no-files-found: error
+
+  package:
+    name: Package GitHub artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - verify
+      - native
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check release version
+        run: |
+          node -e "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); const expected = `v${pkg.version}`; if (process.env.RELEASE_TAG !== expected) throw new Error(`release tag ${process.env.RELEASE_TAG} does not match package version ${expected}`)"
+
+      - name: Build TypeScript
+        run: pnpm run build:ts
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ocmm-lsp-*
+          path: dist/bin
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find dist/bin -type f ! -name '*.exe' -exec chmod 755 {} +
+          node dist/cli/ocmm-lsp.js --help
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
+          cp dist/bin/ocmm-lsp-* release-assets/
+          npm pack --pack-destination release-assets
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: github-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+
+      - name: Publish scoped package to GitHub Packages
+        if: github.event_name == 'push' || inputs.publish_github_package
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          printf '@%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$owner" "$NODE_AUTH_TOKEN" > .npmrc
+          OWNER="$owner" node <<'NODE'
+          const fs = require("node:fs")
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
+          pkg.name = `@${process.env.OWNER}/ocmm`
+          pkg.repository = {
+            type: "git",
+            url: `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`,
+          }
+          pkg.publishConfig = { registry: "https://npm.pkg.github.com" }
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`)
+          NODE
+          version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          if npm view "@$owner/ocmm@$version" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "@$owner/ocmm@$version is already published to GitHub Packages; skipping."
+            exit 0
+          fi
+          npm publish --registry=https://npm.pkg.github.com
+
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: package
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-release-assets
+          path: release-assets
+
+      - name: Publish GitHub Release
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            release_args=(release create "$RELEASE_TAG" release-assets/* --title "$RELEASE_TAG" --generate-notes --verify-tag)
+            if [[ "$PRERELEASE" == "true" ]]; then
+              release_args+=(--prerelease)
+            fi
+            gh "${release_args[@]}"
+          fi

@@ -349,11 +349,9 @@ Phases 2-6, 8a can proceed in parallel after Phase 0+1 land. Phase 8b depends on
 
 1. **Task tool enhancement scope** — OpenCode already provides `task`, `background_output`, `background_cancel` as built-in tools. Does ocmm need to enhance them with category routing + skill injection + fallback models (omo's approach), or is the built-in sufficient? If sufficient, Phase 7 is skipped entirely.
 
-2. **LSP integration scope** — ocmm's available tools already include `lsp_diagnostics`, `lsp_find_references`, etc. (OpenCode built-in). Is there a gap that omo's LSP MCP fills? Need to verify before porting `lsp-daemon`.
+2. **Skill loading path** — omo scans `skills/` at runtime. ocmm's v1 skills are loaded at build time (bundled). Should shared-skills be runtime-scanned or build-time-bundled? Runtime is more flexible but adds startup cost. Also: does OpenCode's built-in `task` tool support `load_skills` parameter? If not, Phase 7 (task enhancement) becomes a prerequisite for Phase 2 skill loading.
 
-3. **Skill loading path** — omo scans `skills/` at runtime. ocmm's v1 skills are loaded at build time (bundled). Should shared-skills be runtime-scanned or build-time-bundled? Runtime is more flexible but adds startup cost. Also: does OpenCode's built-in `task` tool support `load_skills` parameter? If not, Phase 7 (task enhancement) becomes a prerequisite for Phase 2 skill loading.
-
-4. **Team Mode priority** — is it worth the 3-week effort, or should it stay out of scope for now?
+3. **Team Mode priority** — is it worth the 3-week effort, or should it stay out of scope for now?
 
 ## Resolved Questions
 
@@ -362,3 +360,5 @@ Phases 2-6, 8a can proceed in parallel after Phase 0+1 land. Phase 8b depends on
 - **`dispatchInternalPrompt` equivalent** — **RESOLVED**. There is no native "system message injection" API in OpenCode. The fix is NOT to avoid injection — it's to filter strictly by session ID (omo's bug was firing for ALL `session.idle` events). 3-tier approach: (1) track `session.stopping` PR #16598 for future clean migration, (2) use `session.idle` + `client.session.prompt()` with session-ID filter + re-entrancy guards (inFlight Set, 500ms debounce, 150ms settle), (3) use `experimental.chat.system.transform` for directive injection (no message dispatch). See Phase 8a above and §11 of `docs/kb/omo-features/loops.md`.
 
 - **Completion detection robustness** — **RESOLVED**. omo's `<promise>DONE</promise>` regex is fragile. Migration MUST tolerate whitespace, case, attributes, Markdown fences, and provide fallback keyword matching after timeout. See §11.2 of `docs/kb/omo-features/loops.md` and Phase 8a above for the robust regex pattern.
+
+- **LSP integration scope** — **RESOLVED**. ocmm now ships a project-owned native Rust `ocmm-lsp` stdio MCP and registers it as the default built-in `lsp` MCP when available. This ports the useful core tool surface without adopting upstream omo's full `lsp-daemon` socket architecture. See `docs/kb/omo-features/lsp-integration.md`.

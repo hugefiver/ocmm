@@ -1,9 +1,12 @@
-import { existsSync, readFileSync } from "node:fs"
+import { accessSync, constants, existsSync, readFileSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { basename, delimiter, dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import type { McpConfig, McpServerConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
+import { ocmmLspBinaryNames } from "../shared/ocmm-lsp-binary.ts"
+export { ocmmLspBinaryNames, ocmmLspReleaseTarget } from "../shared/ocmm-lsp-binary.ts"
 
 export type McpServerMap = Record<string, McpServerConfig>
 
@@ -30,7 +33,31 @@ export interface McpManager {
   invoke(request: McpOperationRequest): Promise<McpOperationResult>
 }
 
-export function createBuiltinMcps(config: McpConfig, disabledMcps: readonly string[] = []): McpServerMap {
+export interface BuiltinMcpOptions {
+  moduleUrl?: string
+  packageRoot?: string
+  exists?: (path: string) => boolean
+  pathEnv?: string
+  resolveExecutable?: (command: string) => string | undefined
+}
+
+export interface OcmmLspCommandResolution {
+  command: string[]
+  enabled: boolean
+  source: "env" | "package-bin" | "target-release" | "target-debug" | "path" | "cargo-source" | "missing"
+}
+
+const OCMM_LSP_PROJECT_CONFIGS = [
+  ".opencode/ocmm-lsp.json",
+  ".opencode/lsp.json",
+  ".codex/lsp-client.json",
+] as const
+
+export function createBuiltinMcps(
+  config: McpConfig,
+  disabledMcps: readonly string[] = [],
+  options: BuiltinMcpOptions = {},
+): McpServerMap {
   const disabled = new Set(disabledMcps)
   const servers: McpServerMap = {}
 
@@ -40,7 +67,13 @@ export function createBuiltinMcps(config: McpConfig, disabledMcps: readonly stri
   }
   if (!disabled.has("context7")) servers.context7 = remote("https://mcp.context7.com/mcp", context7Headers(config))
   if (!disabled.has("grep_app")) servers.grep_app = remote("https://mcp.grep.app")
-  if (!disabled.has("lsp")) servers.lsp = local(["omo-lsp", "mcp"], { enabled: commandAvailable("omo-lsp") })
+  if (!disabled.has("lsp")) {
+    const lsp = resolveOcmmLspCommand(options)
+    servers.lsp = local(lsp.command, {
+      enabled: lsp.enabled,
+      environment: { OCMM_LSP_PROJECT_CONFIG: OCMM_LSP_PROJECT_CONFIGS.join(delimiter) },
+    })
+  }
   return servers
 }
 
@@ -167,18 +200,101 @@ function envIfAllowed(name: string, config: McpConfig): string | undefined {
   return process.env[name]
 }
 
-function commandAvailable(command: string): boolean {
-  const pathEnv = process.env.PATH
-  if (!pathEnv) return false
+function resolveCommandPath(command: string, pathEnv = process.env.PATH): string | undefined {
+  if (!pathEnv) return undefined
   const extensions = process.platform === "win32"
     ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
     : [""]
   for (const dir of pathEnv.split(delimiter)) {
     for (const ext of extensions) {
-      if (existsSync(join(dir, command + ext.toLowerCase())) || existsSync(join(dir, command + ext))) return true
+      const lower = join(dir, command + ext.toLowerCase())
+      if (canExecute(lower)) return lower
+      const candidate = join(dir, command + ext)
+      if (canExecute(candidate)) return candidate
     }
   }
-  return false
+  return undefined
+}
+
+function executableName(base: string): string {
+  return process.platform === "win32" ? `${base}.exe` : base
+}
+
+function canExecute(path: string, pathExists: (path: string) => boolean = existsSync): boolean {
+  if (!pathExists(path)) return false
+  if (process.platform === "win32") return true
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function packageRootFor(moduleUrl: string, pathExists: (path: string) => boolean): string | undefined {
+  let dir: string
+  try {
+    dir = dirname(fileURLToPath(moduleUrl))
+  } catch {
+    return undefined
+  }
+  let previous = ""
+  while (dir !== previous) {
+    if (pathExists(join(dir, "package.json"))) return dir
+    previous = dir
+    dir = dirname(dir)
+  }
+  return undefined
+}
+
+function envCommand(): string[] | undefined {
+  const raw = process.env.OCMM_LSP_COMMAND?.trim()
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string") && parsed.length > 0) return parsed
+  } catch {
+    // Plain command form below.
+  }
+  return [raw, "mcp"]
+}
+
+export function resolveOcmmLspCommand(options: BuiltinMcpOptions = {}): OcmmLspCommandResolution {
+  const env = envCommand()
+  if (env) return { command: [...env], enabled: true, source: "env" }
+
+  const pathExists = options.exists ?? existsSync
+  const packageRoot = options.packageRoot ?? packageRootFor(options.moduleUrl ?? import.meta.url, pathExists)
+  const binName = executableName("ocmm-lsp")
+  const manifest = packageRoot ? join(packageRoot, "crates", "ocmm-lsp", "Cargo.toml") : undefined
+  if (packageRoot) {
+    const packageBinNames = ocmmLspBinaryNames()
+    const candidates: Array<{ path: string; source: OcmmLspCommandResolution["source"] }> = [
+      ...packageBinNames.map((name) => ({ path: join(packageRoot, "dist", "bin", name), source: "package-bin" as const })),
+      ...packageBinNames.map((name) => ({ path: join(packageRoot, "bin", name), source: "package-bin" as const })),
+      { path: join(packageRoot, "target", "release", binName), source: "target-release" },
+      { path: join(packageRoot, "target", "debug", binName), source: "target-debug" },
+    ]
+    for (const candidate of candidates) {
+      if (canExecute(candidate.path, pathExists)) {
+        return { command: [candidate.path, "mcp"], enabled: true, source: candidate.source }
+      }
+    }
+  }
+
+  const cargoCommand = options.resolveExecutable?.("cargo") ?? resolveCommandPath("cargo", options.pathEnv)
+  if (cargoCommand && manifest && pathExists(manifest)) {
+    return {
+      command: [cargoCommand, "run", "--quiet", "--manifest-path", manifest, "--", "mcp"],
+      enabled: true,
+      source: "cargo-source",
+    }
+  }
+
+  const pathCommand = options.resolveExecutable?.("ocmm-lsp") ?? resolveCommandPath("ocmm-lsp", options.pathEnv)
+  if (pathCommand) return { command: [pathCommand, "mcp"], enabled: true, source: "path" }
+
+  return { command: ["ocmm-lsp", "mcp"], enabled: false, source: "missing" }
 }
 
 function remote(url: string, headers?: Record<string, string>): McpServerConfig {
