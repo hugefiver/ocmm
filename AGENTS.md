@@ -99,7 +99,10 @@ All commands run from `$testDir` (use `workdir` or `Set-Location`). Ensure the X
 
 **Check plugin loads and agents register:**
 
-```bash
+All `[ocmm]` info lines are gated by `OCMM_DEBUG` (same as debug lines); set it to `1` to make them visible.
+
+```powershell
+$env:OCMM_DEBUG='1'
 opencode debug config --print-logs --log-level DEBUG 2>&1 | rg "ocmm"
 ```
 
@@ -117,7 +120,7 @@ Expected lines:
 opencode debug agent orchestrator --print-logs --log-level DEBUG 2>&1 | rg '"model"' -A2
 ```
 
-Should show the `providerID` and `modelID` you configured.
+Should show the `providerID` and `modelID` you configured. (This command does not require `OCMM_DEBUG`; it reads opencode's own debug output.)
 
 **Run a real chat round-trip:**
 
@@ -143,7 +146,7 @@ Expected (v1 workflow):
 
 Expected (omo workflow): no `v1 skills queued` line — omo attaches prompts declaratively at config time, no runtime injection.
 
-`OCMM_DEBUG=1` enables the `[ocmm] routed ...` debug line (the `debug: true` config field alone does not enable it; both are needed for full verbosity).
+`OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents`) and runtime routing (`v1 skills queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
 
 ### 6. Clean up
 
@@ -172,7 +175,7 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 - ocmm's `classifyModelFamily` classifies by model ID pattern. Check `src/intent/model-family.ts` to see how your provider's model IDs map to families (gpt, claude, gemini, kimi, glm, etc.) — this affects variant translation.
 - The temp directory is outside the repo so it does not pollute git status.
 - `opencode debug config` reads from both `$testDir\opencode.json` and `$testDir\.opencode\*` — both must exist.
-- If `opencode run` shows no `[ocmm]` lines, the plugin failed to load. Check `--print-logs --log-level DEBUG` for import errors.
+- If `opencode run` shows no `[ocmm]` lines even with `OCMM_DEBUG=1` set, the plugin failed to load. Check `--print-logs --log-level DEBUG` for import errors.
 - To test v1 workflow: add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message; omo (default) attaches prompts to agents declaratively with no runtime injection.
 - If you see `max_tokens` errors (`integer above maximum value`), lower the model's `output` limit in `opencode.json` — OpenCode adds internal overhead to the configured limit.
 

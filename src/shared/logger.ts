@@ -27,6 +27,7 @@ export const log = {
     }
   },
   info(...args: unknown[]): void {
+    if (!debugEnabled()) return
     try {
       // eslint-disable-next-line no-console
       console.log(PREFIX, ...args)
