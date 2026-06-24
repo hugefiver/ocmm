@@ -9,7 +9,7 @@ import { join } from "node:path"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
-test("config registers all 8 categories as subagents", async () => {
+test("config registers all 10 categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
@@ -26,12 +26,12 @@ test("config registers all 8 categories as subagents", async () => {
 })
 
 test("disabledAgents skips a category-subagent", async () => {
-  const c = { ...defaultConfig(), disabledAgents: ["frontend", "writing"] }
+  const c = { ...defaultConfig(), disabledAgents: ["frontend", "documenting"] }
   const handler = createConfigHandler({ getConfig: () => c })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
   assert.equal(cfg.agent.frontend, undefined)
-  assert.equal(cfg.agent.writing, undefined)
+  assert.equal(cfg.agent.documenting, undefined)
   assert.ok(cfg.agent["hard-reasoning"])
 })
 

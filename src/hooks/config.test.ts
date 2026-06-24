@@ -61,6 +61,30 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
   assert.match(clarifierPrompt, /pre-planning consultant/i)
 })
 
+test("config registers OMO-compatible direct delegation aliases", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  assert.deepEqual(cfg.agent.oracle, cfg.agent.reviewer)
+  assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
+  assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
+  assert.ok(cfg.agent.quick, "@quick should be available as category-subagent")
+})
+
+test("disabledAgents skips OMO-compatible aliases", async () => {
+  const c = { ...defaultConfig(), disabledAgents: ["oracle", "explore", "deep"] }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  assert.ok(cfg.agent.reviewer)
+  assert.ok(cfg.agent["code-search"])
+  assert.equal(cfg.agent.oracle, undefined)
+  assert.equal(cfg.agent.explore, undefined)
+  assert.equal(cfg.agent.deep, undefined)
+})
+
 test("user model override selects specialized deepwork prompt variant", async () => {
   const c = {
     ...defaultConfig(),

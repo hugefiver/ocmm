@@ -4,7 +4,7 @@
  * Layout under <pluginRoot>/prompts/<workflow>/:
  *     deepwork/{default,gpt,gemini,glm,codex,planner}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
- *     category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
+ *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
  *
  * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
  * Synchronous, runs once at plugin init, caches in memory. Missing files are
@@ -31,9 +31,11 @@ type CategoryName =
   | "hard-reasoning"
   | "research"
   | "quick"
-  | "low-effort"
-  | "high-effort"
-  | "writing"
+  | "coding"
+  | "normal-task"
+  | "complex"
+  | "deep"
+  | "documenting"
 
 const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "glm", "codex", "planner"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
@@ -43,9 +45,11 @@ const CATEGORY_NAMES: CategoryName[] = [
   "hard-reasoning",
   "research",
   "quick",
-  "low-effort",
-  "high-effort",
-  "writing",
+  "coding",
+  "normal-task",
+  "complex",
+  "deep",
+  "documenting",
 ]
 
 const deepworkPrompts = new Map<DeepworkVariant, string>()

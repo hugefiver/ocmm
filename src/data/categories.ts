@@ -1,15 +1,17 @@
 /**
  * Built-in category catalog.
  *
- * 8 categories cover the practical work-content spectrum:
+ * 10 categories cover concrete work shapes:
  *   frontend       - UI/UX, design, styling, animation
  *   creative       - unconventional / generative problem-solving
- *   hard-reasoning - heavy-logic, architecture, deep tradeoffs
+ *   hard-reasoning - local name for ultrabrain-style decisions
  *   research       - autonomous multi-step research and delivery
- *   quick          - trivial single-file changes
- *   low-effort     - moderate-effort general-purpose work
- *   high-effort    - high-effort general-purpose work
- *   writing        - documentation, prose, technical writing
+ *   quick          - fully specified mechanical edits
+ *   coding        - determined code edits and bug fixes
+ *   normal-task   - ordinary bounded tasks with known acceptance criteria
+ *   complex       - multi-step ordinary tasks below autonomous deep delivery
+ *   deep          - autonomous system development and feature delivery
+ *   documenting   - standalone text/documentation that does not change product behavior
  */
 
 import type { Category } from "../shared/types.ts"
@@ -18,7 +20,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   {
     name: "frontend",
     description:
-      "UI/UX, design, styling, animation. Bias toward strong visual taste, design systems, and thoughtful typography.",
+      "UI/UX, layout, styling, interaction states, accessibility, visual QA, and design-system-aware implementation.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -44,7 +46,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   {
     name: "hard-reasoning",
     description:
-      "Heavy logic, architecture, deep tradeoffs. Strategic-advisor mindset; one clear recommendation with risk + effort estimate.",
+      "Local name for ultrabrain-style work: architecture, algorithms, correctness, and tradeoff decisions where the output is primarily a recommendation with risks and concrete next steps.",
     requirement: {
       variant: "xhigh",
       fallbackChain: [
@@ -70,7 +72,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   {
     name: "quick",
     description:
-      "Trivial single-file changes, typo fixes, simple modifications. Smaller model - needs EXHAUSTIVELY EXPLICIT prompts (TASK / MUST DO / MUST NOT DO / EXPECTED OUTPUT).",
+      "Fully specified mechanical edits: typo fixes, exact string replacements, one-line config values, import cleanup, small copy edits, or single assertion updates.",
     requirement: {
       fallbackChain: [
         { providers: ["openai", "github-copilot"], model: "gpt-5.4-mini" },
@@ -79,9 +81,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "low-effort",
+    name: "coding",
     description:
-      "Moderate-effort general-purpose work. Selection-gate: verify the task does not fit a more specific category.",
+      "Determined code editing and bug fixing where the target behavior, affected area, and acceptance criteria are known before implementation starts.",
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
@@ -90,21 +92,50 @@ export const BUILTIN_CATEGORIES: Category[] = [
     },
   },
   {
-    name: "high-effort",
+    name: "normal-task",
     description:
-      "High-effort general-purpose work. Selection-gate stricter than low-effort.",
+      "Ordinary bounded tasks with known acceptance criteria: small config updates, tool output checks, straightforward file organization, or contained non-feature changes.",
     requirement: {
-      variant: "max",
       fallbackChain: [
-        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["google", "google-vertex"], model: "gemini-3-flash" },
+        { providers: ["minimax"], model: "minimax-m3" },
       ],
     },
   },
   {
-    name: "writing",
+    name: "complex",
     description:
-      "Documentation, prose, technical writing. Anti-AI-slop posture: no em/en dashes, no AI filler.",
+      "Multi-step ordinary tasks that need coordination and judgment but not an autonomous development loop: mixed config/docs/code edits, release-prep checks, or cross-file cleanup with a known goal.",
+    requirement: {
+      variant: "high",
+      fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
+      ],
+    },
+  },
+  {
+    name: "deep",
+    description:
+      "Autonomous system development and feature implementation: explore, plan, implement, verify, and continue the loop until a complete deliverable works.",
+    requirement: {
+      fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
+        { providers: ["zhipu"], model: "glm-5.1" },
+      ],
+    },
+  },
+  {
+    name: "documenting",
+    description:
+      "Standalone text and documentation work that does not change product behavior: guides, explanations, release notes, prose cleanup, and copy edits.",
     requirement: {
       fallbackChain: [
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },

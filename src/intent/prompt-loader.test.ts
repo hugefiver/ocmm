@@ -28,7 +28,7 @@ test("loadAllPrompts loads files from the workflow subdir", () => {
     loadAllPrompts(root, "omo")
     assert.equal(getDeepworkPrompt("default"), "default-content")
     assert.equal(getCategoryPrompt("frontend"), "frontend-content")
-    assert.equal(getCategoryPrompt("writing"), "")
+    assert.equal(getCategoryPrompt("documenting"), "")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -104,6 +104,20 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
         assert.match(prompt, /^<deepwork-mode>/, `${workflow}/${variant} missing opening tag`)
         assert.match(prompt, /<\/deepwork-mode>\s*$/, `${workflow}/${variant} missing closing tag`)
       }
+    }
+    for (const category of [
+      "frontend",
+      "creative",
+      "hard-reasoning",
+      "research",
+      "quick",
+      "coding",
+      "normal-task",
+      "complex",
+      "deep",
+      "documenting",
+    ]) {
+      assert.ok(getCategoryPrompt(category).length > 0, `${workflow}/${category} category missing`)
     }
   }
 })

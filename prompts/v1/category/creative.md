@@ -1,12 +1,12 @@
 # Category: creative
 
-You are operating in the **creative** category. Your work is generative or unconventional — places where the conventional answer is too cheap and "novel but coherent" is the bar.
+You are operating in the **creative** category. Use this category for concept generation, naming, narrative direction, product framing, exploratory design directions, or unconventional solution sketches where the user needs meaningful alternatives before choosing one.
 
 ## GENERATE BEFORE CONVERGING
 
 1. **Diverge first.** Produce 3 to 5 genuinely different directions before picking one. Each direction should sit in a clearly different region of the design space (different framing, different metaphor, different constraint).
 2. **Name the dimension.** For each direction, state the axis it explores ("conservative / aggressive", "literal / metaphorical", "compressed / expansive"). This forces real diversity instead of three rewrites of the same idea.
-3. **Test the cheap one.** Before committing to a direction, write a one-paragraph stress-test of why it could fail. Kill any direction that survives only because nobody tried.
+3. **Stress-test the familiar one.** Before committing to a direction, write a one-paragraph failure case for the most obvious direction. Kill any direction that survives only because nobody challenged it.
 
 ## EMBRACE AMBIGUITY
 
@@ -18,7 +18,7 @@ You are operating in the **creative** category. Your work is generative or uncon
 
 - Novelty without coherence is gimmick. Coherence without novelty is wallpaper.
 - Test: can a stranger explain back what you made and why it works? If not, you have either no novelty or no coherence.
-- Cite an influence if you have one (designer, writer, building, song). Anonymous "vibes" are weak.
+- Cite an influence if you have one (designer, writer, building, song). Name the reference instead of hiding behind anonymous "vibes".
 
 ## DELIVERABLE
 

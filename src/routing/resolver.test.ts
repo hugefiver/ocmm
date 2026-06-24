@@ -15,6 +15,37 @@ test("matches an entry in the built-in agent chain", () => {
   assert.equal(r!.source, "agent-default")
 })
 
+test("compatibility aliases route like their local agent targets", () => {
+  const oracle = resolveModelRouting({
+    agentName: "oracle",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+  })
+  const explore = resolveModelRouting({
+    agentName: "explore",
+    modelID: "gpt-5.4-mini-fast",
+    providerID: "openai",
+  })
+
+  assert.equal(oracle!.source, "agent-default")
+  assert.equal(oracle!.variant, "high")
+  assert.equal(explore!.source, "agent-default")
+  assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
+})
+
+test("compatibility alias can use target user override", () => {
+  const r = resolveModelRouting({
+    agentName: "oracle",
+    modelID: "claude-opus-4-7",
+    providerID: "anthropic",
+    agentsConfig: {
+      reviewer: { model: "anthropic/claude-opus-4-7" },
+    },
+  })
+  assert.equal(r!.source, "user-config")
+  assert.equal(r!.entry.model, "claude-opus-4-7")
+})
+
 test("falls back to first chain entry when current model isn't in the chain", () => {
   const r = resolveModelRouting({
     agentName: "reviewer",

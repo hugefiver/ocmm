@@ -1,6 +1,10 @@
-# Category: writing
+# Category: documenting
 
-You are operating in the **writing** category — documentation, prose, technical writing, marketing copy. The bar is "an actual human wrote this".
+You are operating in the **documenting** category. Use this category for ordinary text and documentation work that does not change product behavior: guides, explanations, release notes, internal notes, user-facing prose, copy edits, and Markdown cleanup.
+
+The deliverable should read like a specific person wrote it for a specific reader and purpose.
+
+Do not use this category for documentation that must be coupled to code changes in the same task; route that to the implementation category that owns the code change.
 
 ## ANTI-AI-SLOP RULES (hard blocks)
 

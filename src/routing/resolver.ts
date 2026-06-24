@@ -31,6 +31,15 @@ const VARIANT_SET = new Set<Variant>([
   "thinking",
 ])
 
+const AGENT_ALIASES = new Map([
+  ["oracle", "reviewer"],
+  ["explore", "code-search"],
+])
+
+function canonicalAgentName(name: string): string {
+  return AGENT_ALIASES.get(name) ?? name
+}
+
 function entryMatches(entry: FallbackEntry, modelID: string): boolean {
   if (entry.model === modelID) return true
   // Forward prefix match: a chain entry "gpt-5.5" matches an input
@@ -106,17 +115,23 @@ function resolveAgainstRequirement(
 
 export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
   const { agentName, modelID, inputVariant, agentsConfig, categoriesConfig } = opts
+  const canonicalName = agentName ? canonicalAgentName(agentName) : undefined
 
   if (agentName) {
-    const userReq = userAgentRequirement(agentsConfig?.[agentName])
+    const canonicalUserReq = canonicalName && canonicalName !== agentName
+      ? userAgentRequirement(agentsConfig?.[canonicalName])
+      : null
+    const userReq =
+      userAgentRequirement(agentsConfig?.[agentName]) ??
+      canonicalUserReq
     if (userReq) {
       const r = resolveAgainstRequirement(userReq, modelID, inputVariant, "user-config")
       if (r) return r
     }
   }
 
-  if (agentName) {
-    const builtin = BUILTIN_AGENT_INDEX.get(agentName)
+  if (canonicalName) {
+    const builtin = BUILTIN_AGENT_INDEX.get(canonicalName)
     if (builtin) {
       const r = resolveAgainstRequirement(
         builtin.requirement,

@@ -23,7 +23,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "orchestrator",
     description:
-      "Main coordinator. Decomposes work, delegates to specialists, verifies results. Defaults to a flagship reasoning model.",
+      "Main coordinator. Decomposes work, delegates to specialists, verifies results, and uses a model configured for broad coordination.",
     requirement: {
       variant: "max",
       requiresAnyModel: true,
@@ -52,7 +52,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "reviewer",
     description:
-      "Read-only consultant for hard reasoning, debugging, architecture review. Expensive, high-quality.",
+      "Read-only consultant for hard reasoning, debugging, and architecture review.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -66,7 +66,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "doc-search",
     description:
-      "External-reference lookup: docs, OSS examples, API references. Fast, broad, cheap.",
+      "External-reference lookup: docs, OSS examples, and API references.",
     requirement: {
       fallbackChain: [
         { providers: ["openai", "github-copilot"], model: "gpt-5.4-mini-fast" },
