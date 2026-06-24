@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import { homedir, platform } from "node:os"
+import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
 import { log } from "../shared/logger.ts"
@@ -15,14 +15,8 @@ import { log } from "../shared/logger.ts"
 const FILE_BASENAMES = ["ocmm.jsonc", "ocmm.json"]
 
 function userConfigDir(): string {
-  // Honor XDG_CONFIG_HOME first when explicitly set (sandbox-friendly,
-  // matches OpenCode's own resolution order). Fall back to platform default.
   const xdg = process.env.XDG_CONFIG_HOME
   if (xdg) return join(xdg, "opencode")
-  if (platform() === "win32") {
-    const appData = process.env.APPDATA
-    if (appData) return join(appData, "opencode")
-  }
   return join(homedir(), ".config", "opencode")
 }
 

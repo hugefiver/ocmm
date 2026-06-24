@@ -13,8 +13,7 @@
  *
  * Config target: the user config file at
  *   $XDG_CONFIG_HOME/opencode/ocmm.json[c]
- *   %APPDATA%\opencode\ocmm.json[c]         (Windows, no XDG)
- *   ~/.config/opencode/ocmm.json[c]
+ *   ~/.config/opencode/ocmm.json[c]         (all platforms, including Windows)
  *
  * The CLI reads, parses, mutates, and writes back. Comments are NOT
  * preserved on write (output is plain JSON with .jsonc extension, which is
@@ -23,7 +22,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
-import { homedir, platform } from "node:os"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
 import { ProfileEntrySchema } from "../config/schema.ts"
@@ -33,10 +32,6 @@ type Command = "list" | "use" | "show" | "add" | "rm" | "clear" | "current" | "h
 function userConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME
   if (xdg) return join(xdg, "opencode")
-  if (platform() === "win32") {
-    const appData = process.env.APPDATA
-    if (appData) return join(appData, "opencode")
-  }
   return join(homedir(), ".config", "opencode")
 }
 
