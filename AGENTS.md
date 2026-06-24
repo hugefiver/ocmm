@@ -85,7 +85,7 @@ Create `$testDir\.opencode\ocmm.jsonc`. The built-in agents reference models lik
   "workflow": "v1",
   "agents": {
     "orchestrator": { "model": "<provider>/<model-a>", "variant": "max", "fallbackModels": ["<provider>/<model-b>"] },
-    "worker": { "model": "<provider>/<model-b>", "variant": "high" },
+    "builder": { "model": "<provider>/<model-b>", "variant": "high" },
     "reviewer": { "model": "<provider>/<model-b>", "variant": "high" },
     "planner": { "model": "<provider>/<model-a>", "variant": "max" }
   },
@@ -185,7 +185,7 @@ Prompt files are model-facing behavior and must stay synchronized with upstream 
 - `prompts/v1/deepwork/{gpt,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
 - `prompts/v1/agents/*.md` and `prompts/v1/category/*.md` should stay strongly aligned with `prompts/omo/agents/*.md` and `prompts/omo/category/*.md`. Deepwork mechanics come from the deepwork layer and injected skills, not from shortened agent/category prompts.
 - Changes under `prompts/v1/` MUST update `docs/v1-maintenance.md` in the same commit. Changes under `prompts/omo/` MUST update `docs/prompt-sync.md` in the same commit. Changes that affect both workflows update both docs.
-- `prompts/omo/agents/` is ignored by the broad `omo/` ignore pattern. Stage intentional files there with `git add -f`.
+- The repository ignores the root upstream checkout as `/omo/`; `prompts/omo/**` is tracked. If intended prompt files under `prompts/omo/**` ever appear ignored, tighten `.gitignore` rather than leaving them untracked.
 ## v1 Maintenance
 
 All v1 skill file changes (in `skills/v1/`) and v1 prompt file changes (in `prompts/v1/`) MUST be synchronized with `docs/v1-maintenance.md` in the same commit, and vice versa. A file change without a doc update, or a doc update without a file change, is a failed review.

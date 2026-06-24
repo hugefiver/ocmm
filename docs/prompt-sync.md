@@ -44,10 +44,11 @@ prompts/<workflow>/
 4. Agent and category prompts should remain strongly aligned between `prompts/omo/` and `prompts/v1/`; the skill-driven workflow gets its distinct behavior from the deepwork layer and injected skills.
 5. Category prompts must describe the work shape each category handles. Avoid routing language based on model strength, weak/strong labels, or vague difficulty tiers; say what kind of deliverable belongs in the category.
    Local mapping for upstream categories: `hard-reasoning` is the ultrabrain-style decision category; `deep` is autonomous system development and feature delivery; `coding` is determined code editing and bug fixing. `normal-task` absorbs bounded fallback work with known acceptance criteria; `complex` absorbs coordinated cross-cutting fallback work that remains below autonomous feature delivery.
-6. Compatibility aliases are intentional: upstream-style `@oracle` maps to local `reviewer`, and `@explore` maps to local `code-search`. Category names such as `@deep` and `@quick` are exposed directly as category-subagents.
-7. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
-8. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
-9. When syncing from upstream, compare against `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\omo-shared-skills\repo` or a fresh checkout of the same upstream repository, then re-apply local naming and OpenCode/ocmm tool semantics.
+6. Built-in defaults for categories at or above `coding` should use the highest supported reasoning level (`max` in the local variant vocabulary). `quick` remains the lightweight mechanical-edit category. Explicit user model/variant/parameter declarations are respected as written.
+7. Compatibility aliases are intentional: upstream-style `@oracle` maps to local `reviewer`, and `@explore` maps to local `code-search`. Category names such as `@deep` and `@quick` are exposed directly as category-subagents.
+8. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
+9. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
+10. When syncing from upstream, compare against the local upstream checkout at `./omo` or a fresh checkout of the same repository, then re-apply local naming and OpenCode/ocmm tool semantics.
 
 ## Last Upstream Prompt Check
 
