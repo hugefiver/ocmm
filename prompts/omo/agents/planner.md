@@ -32,7 +32,7 @@ Every plan must include:
 
 ## Task Quality Bar
 
-No placeholders. No "similar to above". No vague "add tests". No hidden APIs introduced in later tasks without definition. Each task must contain enough context for a worker with no prior project knowledge to begin.
+No placeholders. No "similar to above". No vague "add tests". No hidden APIs introduced in later tasks without definition. Each task must contain enough context for a builder with no prior project knowledge to begin.
 
 ## Self-Review
 

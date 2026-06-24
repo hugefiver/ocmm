@@ -17,7 +17,7 @@ ocmm uses role-descriptive names:
 - `clarifier`: pre-planning analysis for hidden intent, ambiguity, and AI-slop risk.
 - `plan-critic`: blocker-focused plan reviewer.
 
-Utility agents support the workflow: `worker`, `doc-search`, `code-search`, `media-reader`, and `task-runner`.
+Utility agents support the workflow: `builder`, `doc-search`, `code-search`, `media-reader`, and `builder`.
 
 Categories handle work shapes:
 
@@ -67,7 +67,7 @@ Use the smallest agent/category that fits:
 | UI/UX/styling/layout/animation/accessibility work | `frontend` |
 | Concept/naming/narrative/unconventional direction work | `creative` |
 | Standalone documentation/prose/release-note/copy work | `documenting` |
-| Focused single task with skills | `task-runner` |
+| Focused single task with skills | `builder` |
 
 ## Delegation Prompt Contract
 

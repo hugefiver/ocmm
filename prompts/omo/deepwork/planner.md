@@ -9,7 +9,7 @@ Use the path-backed `writing-plans` skill as the canonical full planning workflo
 ## Planner Doctrine
 
 - Stay in planner scope. Read, search, analyze, and write planning artifacts only.
-- Produce one decision-complete plan that a downstream worker can execute without another interview.
+- Produce one decision-complete plan that a downstream builder can execute without another interview.
 - Explore before asking. Ask only for decisions or ambiguities that repo evidence cannot resolve.
 - Use `codegraph_explore` first for repo how/where/what/flow questions when codegraph_* tools exist; if absent, inactive/uninitialized, or cold-start unavailable, continue with Read/Grep/Glob/LSP and the ast-grep skill.
 - Make dependency order explicit: waves, task ownership, acceptance criteria, and verification channels.
