@@ -42,7 +42,7 @@ Published releases do not require npmjs.org. Each GitHub Release contains:
 For OpenCode, install the release tarball asset URL with your package manager:
 
 ```bash
-VERSION=0.1.0
+VERSION=0.1.1
 pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-opencode-plugin-${VERSION}.tgz"
 ```
 
@@ -64,7 +64,7 @@ codex plugin add ocmm@ocmm-local --json
 Or install directly from the Codex release package:
 
 ```bash
-VERSION=0.1.0
+VERSION=0.1.1
 curl -L -o "ocmm-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-codex-plugin-${VERSION}.tgz"
 mkdir -p .codex-plugins
 tar -xzf "ocmm-codex-plugin-${VERSION}.tgz" -C .codex-plugins
@@ -125,7 +125,7 @@ ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocm
 For direct external-program use, download the matching standalone asset and point `OCMM_LSP_COMMAND` at it:
 
 ```bash
-VERSION=0.1.0
+VERSION=0.1.1
 curl -L -o ~/.local/bin/ocmm-lsp "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-lsp-x86_64-unknown-linux-gnu"
 chmod +x ~/.local/bin/ocmm-lsp
 OCMM_LSP_COMMAND="$HOME/.local/bin/ocmm-lsp" opencode run "check diagnostics"
