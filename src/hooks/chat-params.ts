@@ -7,12 +7,36 @@
  */
 
 import { resolveModelRouting } from "../routing/resolver.ts"
-import { translateVariant } from "../routing/variant-translator.ts"
+import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution } from "../routing/ledger.ts"
-import { classifyModelFamily } from "../intent/model-family.ts"
+import { classifyModelFamily, isMiniModel } from "../intent/model-family.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { Variant } from "../shared/types.ts"
+
+const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
+const ABOVE_HIGH_REASONING = new Set(["xhigh", "max", "thinking"])
+
+function protectedModelHasNoReasoningParam(family: string): boolean {
+  return family === "claude-opus-47-plus"
+}
+
+function normalizeReasoningEffortForModel(args: {
+  family: string
+  modelID: string
+  reasoningEffort: string
+  explicit: boolean
+}): string | undefined {
+  if (args.explicit) return args.reasoningEffort
+  const effort = args.reasoningEffort.toLowerCase()
+  if (protectedModelHasNoReasoningParam(args.family)) return undefined
+  if ((args.family === "gpt" || args.family === "codex") && !isMiniModel(args.modelID)) {
+    return BELOW_HIGH_REASONING.has(effort) || ABOVE_HIGH_REASONING.has(effort)
+      ? "high"
+      : args.reasoningEffort
+  }
+  return args.reasoningEffort
+}
 
 /** Narrow the runtime shape OpenCode passes us. */
 type ChatParamsInput = {
@@ -114,7 +138,17 @@ export function createChatParamsHandler(args: {
     // Variant translation
     let appliedVariant: Variant | undefined = resolution.variant
     if (appliedVariant) {
-      const effect = translateVariant(family, appliedVariant)
+      if (resolution.source !== "user-config" && !input.message.variant) {
+        appliedVariant = normalizeVariantForModel({
+          family,
+          modelID: input.model.modelID,
+          variant: appliedVariant,
+        })
+      }
+      const effect = translateVariant(family, appliedVariant, {
+        modelID: input.model.modelID,
+        respectExplicit: resolution.source === "user-config" || !!input.message.variant,
+      })
       if (effect.reasoningEffort !== undefined) {
         output.options.reasoningEffort = effect.reasoningEffort
       }
@@ -126,11 +160,20 @@ export function createChatParamsHandler(args: {
       }
     }
 
-    // Direct entry overrides take priority over variant-derived values.
     if (resolution.entry.reasoningEffort !== undefined) {
-      output.options.reasoningEffort = resolution.entry.reasoningEffort
+      const effort = normalizeReasoningEffortForModel({
+        family,
+        modelID: input.model.modelID,
+        reasoningEffort: resolution.entry.reasoningEffort,
+        explicit: resolution.source === "user-config",
+      })
+      if (effort !== undefined) output.options.reasoningEffort = effort
+      else delete output.options.reasoningEffort
     }
-    if (resolution.entry.thinking !== undefined) {
+    if (
+      resolution.entry.thinking !== undefined
+      && (resolution.source === "user-config" || !protectedModelHasNoReasoningParam(family))
+    ) {
       output.options.thinking = resolution.entry.thinking
     }
     if (resolution.entry.temperature !== undefined) {
