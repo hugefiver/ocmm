@@ -8,10 +8,10 @@ Concepts (model tiering, per-model specialized prompts, intent gating, proactive
 
 | Hook                                 | What ocmm does                                                                                                                                                                                                                                                                                |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config`                             | Registers 9 primary agents + 10 category-subagents with their preferred provider/model. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
+| `config`                             | Registers 9 agents + 10 category-subagents with their preferred provider/model, shared skill paths, and slash commands. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
 | `chat.params`                        | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant), respects explicit user choices, and applies only the model-family parameters ocmm supports for that model. Built-in defaults normalize category work to model-appropriate high/max reasoning where supported and avoid implicit Opus 4.7+ thinking budgets.                  |
-| `chat.message`                       | v1 workflow: queues superpowers skills content on the first message per session. omo workflow: no-op (prompts are declaratively attached at config time).                                                                                                                                     |
-| `experimental.chat.system.transform` | v1 workflow: drains queued skills content and prepends to `output.system`. omo workflow: no-op.                                                                                                                                                                                               |
+| `chat.message`                       | v1 workflow: queues superpowers skills content on the first message per session. Also expands bare ocmm slash commands in noninteractive `opencode run` input so `/ralph-loop ...` and shared-skill commands get command context even when the TUI slash parser is bypassed. |
+| `experimental.chat.system.transform` | Prepends queued v1 skill content and one-shot slash command context to `output.system`. omo workflow only uses this hook when a bare slash command was expanded by `chat.message`.                                                                                                               |
 | `event`                              | Cleans up per-session state on `session.deleted` / `session.idle`. On `session.error`: classifies the error, and if retryable, dispatches the next model in the agent's fallback chain via `client.session.prompt`.                                                                           |
 
 The plugin **does not** change the model on a per-call basis via `chat.params`. OpenCode's `chat.params` output schema has no `model` field. Per-agent routing happens via the `config` hook (the only safe seam for model selection), and reactive re-routing happens via the `event` hook + `client.session.prompt`.
@@ -58,6 +58,14 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
   "workflow": "omo", // "omo" (default) or "v1"
 
   "disabledAgents": ["media-reader"],
+  "disabledSkills": ["debugging"],
+  "disabledCommands": ["ralph-loop"],
+
+  "skills": {
+    "sources": [],
+    "enable": [],
+    "disable": []
+  },
 
   "agents": {
     "reviewer": {
@@ -184,7 +192,7 @@ documenting     kimi-for-coding/k2p5        (none)          standalone documenta
 
 Variants shown are the **raw source values** from `src/data/categories.ts`. At runtime the variant policy normalizes categories from `coding` upward to model-appropriate `max` (which translates to the GPT/Codex `xhigh` reasoning effort for GPT-class models) unless the user explicitly overrides them; see the variant policy table above. Entries marked `(none)` carry no built-in variant and rely on this normalization.
 
-The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
+The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` and `planner` are registered with `mode:"all"` so they can be selected directly and used as delegated task agents. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
 
 ## Prompt architecture
 
@@ -201,6 +209,12 @@ prompts/
     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (10 files)
 skills/
+  ast-grep/                          # shared skills registered as OpenCode skills + slash commands
+  debugging/
+  frontend/
+  git-master/
+  init-deep/
+  lsp-setup/
   v1/                               # forked superpowers skills (v1 only)
     brainstorming/SKILL.md
     writing-plans/SKILL.md
@@ -220,7 +234,19 @@ Model-family variant selection (`pickDeepworkVariantForAgent`):
 
 Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. For built-in functional agents, ocmm composes `agents/<name>.md` with the selected `deepwork/<variant>.md`; the role prompt is authoritative for that agent's scope and the deepwork prompt supplies workflow/model calibration. Categories receive only their category prompt. No runtime keyword detection — prompts are attached declaratively.
 
-For v1 workflow, superpowers skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). For omo workflow, `chat.message` and `system.transform` are no-ops.
+For v1 workflow, superpowers skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). For omo workflow, prompts are attached declaratively at config time; `chat.message` and `system.transform` only participate when a bare noninteractive slash command needs compatibility expansion.
+
+## Slash Commands
+
+ocmm registers OpenCode `config.command` entries for:
+
+- Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/frontend`, `/debugging`, `/init-deep`, and `/lsp-setup` by default.
+- v1 injected deepwork skills when `workflow:"v1"` is active, available as `/brainstorming`, `/writing-plans`, `/subagent-driven-development`, `/requesting-code-review`, and `/receiving-code-review`. In v1, ocmm also adds `skills/v1` to OpenCode skill paths so native skill slash resolution works without "skill not found" noise.
+- Loop protocol commands `/ralph-loop`, `/audit-loop`, and `/dwloop` (`/dwloop` is the deepwork-loop alias for `/audit-loop`).
+
+Interactive OpenCode uses its native slash-command parser. For noninteractive `opencode run "/command args"` calls, OpenCode 1.17.9 passes the first message directly and does not parse project commands; ocmm compensates by expanding bare ocmm command text during `chat.message` and injecting the expanded command once through `system.transform`.
+
+The loop commands are command-template entry points only. The full upstream omo idle continuation engine, verifier orchestration, Boulder/Atlas state, and cancel/stop hooks are not yet migrated; the templates explicitly tell the model to run the loop inside the current session and not claim hidden auto-continuation. The Ralph Loop runtime and related hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
 
 ## Profiles
 

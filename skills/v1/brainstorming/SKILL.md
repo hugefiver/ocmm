@@ -1,3 +1,8 @@
+---
+name: brainstorming
+description: "Use before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+---
+
 <!-- v1 fork of superpowers/brainstorming.
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed visual-companion section (not applicable to ocmm's
@@ -5,10 +10,6 @@
      (spec review is handled by receiving-code-review skill in v1); replaced
      "invoke writing-plans skill" language to match v1's auto-injected skill
      model. See docs/v1-maintenance.md for sync rules. -->
----
-name: brainstorming
-description: "Use before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
----
 
 # Brainstorming Ideas Into Designs
 

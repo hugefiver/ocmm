@@ -1,12 +1,13 @@
+---
+name: requesting-code-review
+description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
+---
+
 <!-- v1 fork of superpowers/requesting-code-review.
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); no other
      changes needed. See docs/v1-maintenance.md for sync rules. -->
----
-name: requesting-code-review
-description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
----
 
 # Requesting Code Review
 

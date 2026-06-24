@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "./skill-loader.ts"
+import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1Skills, V1_SKILL_DIRS } from "./skill-loader.ts"
 
 function makeSkillsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-skills-"))
@@ -71,6 +71,44 @@ test("loadSharedSkills applies enable and disable filters", () => {
     })
 
     assert.deepEqual(skills.map((s) => s.name), ["git-master"])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("buildSkillCommand wraps a SKILL.md body as an OpenCode command template", () => {
+  const root = makeSkillsRoot()
+  try {
+    writeSkill(root, "git-master", "git-master", "Git tools")
+    const [skill] = loadSharedSkills({ rootDir: root })
+    assert.ok(skill)
+
+    const command = buildSkillCommand(skill, "test")
+
+    assert.equal(command?.name, "git-master")
+    assert.match(command?.description ?? "", /^\(test - Skill\) Git tools$/)
+    assert.match(command?.template ?? "", /<skill-instruction>/)
+    assert.match(command?.template ?? "", /Base directory for this skill:/)
+    assert.match(command?.template ?? "", /# git-master/)
+    assert.doesNotMatch(command?.template ?? "", /---\nname:/)
+    assert.match(command?.template ?? "", /<user-request>\n\$ARGUMENTS\n<\/user-request>/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadV1SkillCommands wraps v1 skills and applies disable filters", () => {
+  const root = makeSkillsRoot()
+  try {
+    for (const dir of V1_SKILL_DIRS) {
+      writeSkill(join(root, "v1"), dir, dir, `${dir} skill`)
+    }
+
+    const commands = loadV1SkillCommands({ rootDir: root, disable: ["writing-plans"] })
+
+    assert.ok(commands.some((command) => command.name === "brainstorming"))
+    assert.equal(commands.some((command) => command.name === "writing-plans"), false)
+    assert.ok(commands.every((command) => command.description.startsWith("(ocmm deepwork - Skill)")))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

@@ -4,7 +4,7 @@
  * Wires OpenCode hooks/tools:
  *   - `config`        : register/auto-route agents to preferred models
  *   - `chat.params`   : variant -> reasoning effort / thinking / temperature
- *   - `chat.message`  : intent-keyword detection -> mode prompt injection
+ *   - `chat.message`  : v1 skill queue + noninteractive slash-command expansion
  *   - `event`         : session lifecycle bookkeeping
  *
  * The plugin module follows OpenCode's PluginModule contract:

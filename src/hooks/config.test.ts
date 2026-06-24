@@ -34,6 +34,17 @@ test("config sets default_agent to orchestrator and disables OpenCode built-in p
   assert.equal((cfg.agent.orchestrator as Record<string, unknown> | undefined)?.mode, "primary")
 })
 
+test("builder and planner can be used as both primary and delegated agents", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown> | undefined)?.mode, "primary")
+  assert.equal((cfg.agent.builder as Record<string, unknown> | undefined)?.mode, "all")
+  assert.equal((cfg.agent.planner as Record<string, unknown> | undefined)?.mode, "all")
+  assert.equal((cfg.agent.reviewer as Record<string, unknown> | undefined)?.mode, "subagent")
+})
+
 test("config respects user-set defaultAgent and disableOpenCodeBuiltinAgents=false", async () => {
   const cfg2 = { ...defaultConfig(), defaultAgent: "builder" as const, disableOpenCodeBuiltinAgents: false }
   const handler2 = createConfigHandler({ getConfig: () => cfg2 })
@@ -222,7 +233,11 @@ test("config registers shared skill paths and preserves existing urls", async ()
       skills: { sources: [], enable: ["git-master", "debugging"], disable: ["debugging"] },
     }
     const handler = createConfigHandler({ getConfig: () => c, skillsRoot: root })
-    const cfg: { agent: Record<string, unknown>; skills: { paths: string[]; urls: string[] } } = {
+    const cfg: {
+      agent: Record<string, unknown>
+      skills: { paths: string[]; urls: string[] }
+      command?: Record<string, Record<string, unknown>>
+    } = {
       agent: {},
       skills: { paths: [join(root, "existing")], urls: ["https://example.com/skills"] },
     }
@@ -231,9 +246,57 @@ test("config registers shared skill paths and preserves existing urls", async ()
 
     assert.deepEqual(cfg.skills.urls, ["https://example.com/skills"])
     assert.deepEqual(cfg.skills.paths.sort(), [root, join(root, "existing")].sort())
+    assert.ok(cfg.command?.["git-master"], "enabled shared skill should be registered as slash command")
+    assert.equal(cfg.command?.debugging, undefined, "disabled shared skill should not register command")
+    assert.match(String(cfg.command?.["git-master"]?.template), /<skill-instruction>/)
+    assert.match(String(cfg.command?.["git-master"]?.template), /Base directory for this skill:/)
+    assert.doesNotMatch(String(cfg.command?.["git-master"]?.template), /^---/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("config registers v1 injected skills as slash commands in v1 workflow", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-hook-v1-skills-"))
+  try {
+    writeSkill(root, join("v1", "brainstorming"), "brainstorming", "Brainstorm")
+    writeSkill(root, join("v1", "writing-plans"), "writing-plans", "Plans")
+    writeSkill(root, join("v1", "subagent-driven-development"), "subagent-driven-development", "Subagents")
+    writeSkill(root, join("v1", "requesting-code-review"), "requesting-code-review", "Request review")
+    writeSkill(root, join("v1", "receiving-code-review"), "receiving-code-review", "Receive review")
+
+    const c = { ...defaultConfig(), workflow: "v1" as const, disabledCommands: ["writing-plans"] }
+    const handler = createConfigHandler({ getConfig: () => c, skillsRoot: root })
+    const cfg: {
+      agent: Record<string, unknown>
+      command?: Record<string, Record<string, unknown>>
+      skills?: { paths?: string[] }
+    } = { agent: {} }
+
+    await handler(cfg, undefined)
+
+    assert.ok(cfg.skills?.paths?.includes(join(root, "v1")))
+    assert.ok(cfg.command?.brainstorming)
+    assert.match(String(cfg.command?.brainstorming?.template), /<user-request>\n\$ARGUMENTS\n<\/user-request>/)
+    assert.equal(cfg.command?.["writing-plans"], undefined)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("config registers builtin loop slash commands and honors disabledCommands", async () => {
+  const c = { ...defaultConfig(), disabledCommands: ["dwloop"] }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown>; command?: Record<string, Record<string, unknown>> } = { agent: {} }
+
+  await handler(cfg, undefined)
+
+  assert.ok(cfg.command?.["ralph-loop"])
+  assert.ok(cfg.command?.["audit-loop"])
+  assert.equal(cfg.command?.dwloop, undefined)
+  assert.equal(cfg.command?.["ulw-loop"], undefined)
+  assert.match(String(cfg.command?.["ralph-loop"]?.template), /has not migrated omo's event-driven idle auto-continuation engine yet/)
+  assert.match(String(cfg.command?.["audit-loop"]?.template), /audit\/deepwork loop protocol/)
 })
 
 test("config registers MCP servers and preserves user-disabled entries", async () => {

@@ -1,12 +1,13 @@
+---
+name: receiving-code-review
+description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
+---
+
 <!-- v1 fork of superpowers/receiving-code-review.
      Upstream: obra/superpowers v6.0.3.
      Adjustments: no content changes needed — this skill is already
      self-contained and does not reference excluded skills.
      See docs/v1-maintenance.md for sync rules. -->
----
-name: receiving-code-review
-description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
----
 
 # Code Review Reception
 

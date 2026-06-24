@@ -6,16 +6,18 @@ This document captures ocmm's design rationale, hook flow, and routing pipeline.
 
 1. **Config-driven auto-routing** — route each request to the right model+variant based on the active agent and delegate_task category, with no per-call user input required.
 2. **Variant knob translation** — translate an abstract `variant` (e.g. `high`, `max`) into provider-specific parameters (`reasoningEffort`, `thinking`, `temperature`) via `chat.params`, since OpenCode locks the model before the hook fires.
-3. **Workflow prompt injection** — inject the active workflow's prompts (v1 = deepwork skills; omo = upstream oh-my-opencode prompts) into the system message via `chat.message` + `experimental.chat.system.transform`.
+3. **System context injection** — inject v1 deepwork skills and noninteractive slash-command context into the system message via `chat.message` + `experimental.chat.system.transform`; omo prompts are attached declaratively during `config`.
 4. **Model-specialized prompt variants** — pick the right deepwork prompt variant per model family (default/gpt/gemini/glm/codex/planner).
 5. **Reactive runtime fallback** — on `session.error`, retry with the next model in the agent's fallback chain via `client.session.prompt`.
 6. **Honor user overrides** — user config always wins over built-in defaults; explicit config always wins over family-policy defaults.
 7. **Emit routing ledger** — append resolution entries to the OpenCode routing ledger for observability (capped at 256).
+8. **Expose skill/loop slash commands** — register shared skills, v1 deepwork skills, and loop protocol templates through OpenCode's `config.command`; expand bare ocmm slash commands in `opencode run` input as a compatibility path.
 
 ## Non-goals
 
 - No custom `delegate_task` tool — use OpenCode's built-in task tool.
-- No team-mode orchestration, boulder, ralph, or MCP server — out of scope.
+- No team-mode orchestration or Boulder/Atlas runtime — out of scope.
+- No full Ralph/audit idle auto-continuation engine yet — ocmm currently exposes `/ralph-loop`, `/audit-loop`, and `/dwloop` command templates only.
 - No per-agent `runtimeFallback` override — fallback config is global.
 - No npm publish — the plugin ships as a built `dist/` referenced by path.
 
@@ -140,27 +142,27 @@ Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-ha
 1. Load user config (project > user; `disabledAgents` / `fallbackModels` unioned across sources).
 2. Apply profile overlay: `OCMM_PROFILE` env > `activeProfile`. `deepMerge` with `profileOverlay: true` replaces ALL arrays (unlike user+project union). Missing profile is silently ignored + warning.
 3. Load runtime prompts from `prompts/{workflow}/`.
-4. Register **9 primary agents** (from `src/data/agents.ts`).
-5. Register **10 categories as `mode:subagent`** (from `src/data/categories.ts`), using each category's first chain entry as the model and `prompts/{workflow}/category/<name>.md` as the system prompt.
-6. Apply user overrides: `agents.<name>` pins model/shorthand/disabled; `categories.<name>` same minus `disabled`.
+4. Register shared skill paths under `config.skills.paths`; in v1 workflow, also register `skills/v1` so injected deepwork skills resolve as native slash skills.
+5. Register slash commands under `config.command`: shared skills, v1 deepwork skills when `workflow:"v1"` is active, and loop protocol commands.
+6. Register **9 agents** (from `src/data/agents.ts`); `orchestrator` is `primary`, `builder` and `planner` are `all`, the rest are `subagent`.
+7. Register **10 categories as `mode:subagent`** (from `src/data/categories.ts`), using each category's first chain entry as the model and `prompts/{workflow}/category/<name>.md` as the system prompt.
+8. Apply user overrides: `agents.<name>` pins model/shorthand/disabled; `categories.<name>` same minus `disabled`.
+
+### `chat.message(input, output)`
+
+1. In v1 workflow, queue the injected deepwork skill bundle once per session.
+2. If the first text part is a bare ocmm slash command (`/ralph-loop`, `/audit-loop`, `/dwloop`, or a registered shared/v1 skill command), expand the matching command template and queue it as one-shot system context.
+3. Rewrite the text part to the command arguments so noninteractive `opencode run "/command args"` does not reach the model as an unknown literal slash command.
 
 ### `chat.params(input, output)`
 
 See "Proactive layer" above. Input: `{agent, model, variant?}`. Output mutated in place.
 
-### `chat.message(input, output)`
-
-Input shape (OpenCode 1.17.8): `{sessionID, agent?, model?, messageID?, variant?}`. Output: `{message: UserMessage, parts: Part[]}`. User text lives in `output.parts`, not `input.message`.
-
-**v1 workflow:** On the first message of a session, queues the 5 deepwork skills into a `Map<sessionId, string>`. Latches per-session so injection only happens once.
-
-**omo workflow:** No-op (prompts are attached declaratively at config time).
-
 ### `experimental.chat.system.transform(input, output)`
 
-Reads `input.sessionID`, drains the queued prompt, and prepends it to `output.system` (handles array/string/empty shapes). Logs `prepended N chars`. Fires multiple times per turn; idempotency guaranteed by the `chat.message` latch.
+Reads `input.sessionID` and prepends queued persistent v1 skill content plus any one-shot slash command context to `output.system` (handles array/string/empty shapes). It can fire multiple times in a turn, including title generation before the main model call, so one-shot slash context is cleared at the start of the next `chat.message` rather than drained on first transform.
 
-**omo workflow:** No-op.
+**omo workflow:** no persistent skill injection; this hook only modifies output when `chat.message` queued a bare noninteractive slash command.
 
 ### `event(input)`
 
@@ -183,6 +185,7 @@ Key shapes:
 - **AgentEntry:** extends `CategoryEntry` + `disabled` + override fields (`tools`, `permission`, `skills`, `promptAppend`, `temperature`, `topP`, `maxTokens`, `thinking`, `reasoningEffort`). `.strict()`.
 - **RuntimeFallbackConfig:** `.default({})`.
 - **ProfileEntry:** partial overlay, `.strict()`, excludes `profiles` / `activeProfile`.
+- **SkillsConfig:** `{sources, enable, disable}`. Top-level `disabledSkills` and `disabledCommands` further gate skill loading and command registration.
 
 ### Profiles
 
@@ -201,6 +204,7 @@ CLI: `ocmm-profiles` (`list`/`use`/`show`/`add`/`rm`/`clear`/`current`) manages 
 ```
 src/
 ├── cli/                  # CLI entry (shim.ts, profiles.ts)
+├── commands/             # built-in slash command templates
 ├── config/               # schema.ts, load.ts, normalize.ts, profiles.ts
 ├── data/                 # agents.ts, categories.ts (authoritative built-in definitions)
 ├── hashline/             # hashline line-hashing subsystem (16 files)
@@ -229,6 +233,7 @@ src/
 ## What's NOT implemented (vs upstream omo)
 
 - No `prompt-async-gate` — simple `Set<sessionID>` dedup instead.
+- No full loop runtime — `/ralph-loop`, `/audit-loop`, and `/dwloop` are command templates, not event-driven idle continuation. Noninteractive `opencode run` receives a compatibility expansion, but still no hidden background continuation. Ralph Loop runtime, stop/cancel, compaction, and verifier hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
 - No per-agent `runtimeFallback` override — global config only.
 - No toast notifications — logs only.
 - No quota-error regression suite — 12 classifier tests exist, but no dedicated quota suite.

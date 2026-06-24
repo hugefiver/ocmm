@@ -1,9 +1,11 @@
-import { dirname } from "node:path"
+import { existsSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
+import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
 import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
-import { DEFAULT_SKILLS_ROOT, loadSharedSkills } from "../intent/skill-loader.ts"
+import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
@@ -104,11 +106,11 @@ export function createConfigHandler(args: {
     if (!isRecord(rawInput)) return
 
     const target = isRecord(rawInput.config) ? rawInput.config : rawInput
-    const registeredSkills = registerSharedSkills(target, cfg, args.skillsRoot)
+    const registered = registerSkillsAndCommands(target, cfg, args.skillsRoot)
     const registeredMcps = registerMcps(target, cfg, args.cwd)
 
     if (!cfg.registerBuiltinAgents) {
-      log.info(`config: registered ${registeredSkills} skills, ${registeredMcps} MCPs`)
+      log.info(`config: registered ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`)
       return
     }
 
@@ -136,9 +138,9 @@ export function createConfigHandler(args: {
       if (disabled.has(a.name)) continue
       const norm = normalizeShorthand(cfg.agents?.[a.name])
       const prompt = promptForBuiltinAgent(a, norm)
-      const mode = a.name === "orchestrator" || a.name === "builder"
+      const mode = a.name === "orchestrator"
         ? "primary"
-        : a.name === "planner"
+        : a.name === "planner" || a.name === "builder"
           ? "all"
           : "subagent"
       const extras: { prompt?: string; mode?: string } = {}
@@ -182,7 +184,7 @@ export function createConfigHandler(args: {
     registerDefaultPermissions(target, agentMap)
 
     log.info(
-      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills, ${registeredMcps} MCPs`,
+      `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`,
     )
   }
 }
@@ -224,36 +226,79 @@ function registerCompatAgentAliases(
   }
 }
 
-function registerSharedSkills(
+function registerSkillsAndCommands(
   target: Record<string, unknown>,
   cfg: OcmmConfig,
   skillsRoot: string = DEFAULT_SKILLS_ROOT,
-): number {
+): { skills: number; commands: number } {
+  const disabledSkills = [...cfg.skills.disable, ...(cfg.disabledSkills ?? [])]
   const selected = loadSharedSkills({
     rootDir: skillsRoot,
     sources: cfg.skills.sources,
     enable: cfg.skills.enable,
-    disable: [...cfg.skills.disable, ...(cfg.disabledSkills ?? [])],
+    disable: disabledSkills,
   })
-  if (!selected.length) return 0
-
-  if (!isRecord(target.skills)) target.skills = {}
-  const skillsConfig = target.skills as Record<string, unknown>
-  if (!Array.isArray(skillsConfig.paths)) skillsConfig.paths = []
-  const paths = skillsConfig.paths as unknown[]
-  const seen = new Set(paths.filter((p): p is string => typeof p === "string"))
 
   const parentDirs = new Set<string>()
   for (const skill of selected) {
     parentDirs.add(dirname(skill.path))
   }
-  for (const dir of parentDirs) {
-    if (!seen.has(dir)) {
-      paths.push(dir)
-      seen.add(dir)
+  if (cfg.workflow === "v1") {
+    const v1SkillRoot = join(skillsRoot, "v1")
+    if (existsSync(v1SkillRoot)) parentDirs.add(v1SkillRoot)
+  }
+
+  if (parentDirs.size > 0) {
+    if (!isRecord(target.skills)) target.skills = {}
+    const skillsConfig = target.skills as Record<string, unknown>
+    if (!Array.isArray(skillsConfig.paths)) skillsConfig.paths = []
+    const paths = skillsConfig.paths as unknown[]
+    const seen = new Set(paths.filter((p): p is string => typeof p === "string"))
+
+    for (const dir of parentDirs) {
+      if (!seen.has(dir)) {
+        paths.push(dir)
+        seen.add(dir)
+      }
     }
   }
-  return selected.length
+
+  const skillCommands = selected
+    .map((skill) => buildSkillCommand(skill, "ocmm"))
+    .filter((skill): skill is NonNullable<typeof skill> => skill !== null)
+
+  const v1Commands =
+    cfg.workflow === "v1"
+      ? loadV1SkillCommands({ rootDir: skillsRoot, disable: disabledSkills })
+      : []
+
+  const commands = registerCommands(target, [
+    ...loadBuiltinCommands(cfg.disabledCommands),
+    ...skillCommands,
+    ...v1Commands,
+  ], new Set(cfg.disabledCommands ?? []))
+
+  return { skills: selected.length, commands }
+}
+
+function registerCommands(
+  target: Record<string, unknown>,
+  definitions: readonly CommandDefinition[],
+  disabled: ReadonlySet<string>,
+): number {
+  if (!definitions.length) return 0
+  if (!isRecord(target.command)) target.command = {}
+  const commandMap = target.command as Record<string, unknown>
+
+  let registered = 0
+  for (const definition of definitions) {
+    if (disabled.has(definition.name)) continue
+    if (commandMap[definition.name] !== undefined) continue
+    const { name: _name, path: _path, ...entry } = definition as CommandDefinition & { path?: string }
+    commandMap[definition.name] = entry
+    registered++
+  }
+  return registered
 }
 
 function registerMcps(target: Record<string, unknown>, cfg: OcmmConfig, cwd?: string): number {

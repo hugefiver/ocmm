@@ -1,6 +1,7 @@
 # omo Loop Systems
 
 > **Source**: `omo/packages/omo-opencode/src/hooks/ralph-loop/`, `src/hooks/stop-continuation-guard/`, `src/hooks/compaction-context-injector/`, `src/hooks/compaction-todo-preserver/`, `src/hooks/todo-continuation-enforcer/`, `src/hooks/unstable-agent-babysitter/`, `src/hooks/background-notification/`, `src/hooks/atlas/`
+> **Current ocmm status**: Only slash command templates are migrated locally (`/ralph-loop`, `/audit-loop`, `/dwloop`). They are registered through OpenCode `config.command` and ocmm also expands bare noninteractive `opencode run "/ralph-loop ..."` input as command context. The event-driven idle continuation engine, verifier orchestration, cancel/stop state, Boulder, and Atlas hooks remain future work.
 > **Status**: Research complete
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
@@ -13,7 +14,7 @@ omo has **4 loop commands** and **7 continuation hooks** that together form an a
 | Command | Purpose | Max Iterations | Strategy |
 |---------|---------|----------------|----------|
 | `/ralph-loop` | Self-referential development loop until completion | 100 | continue (default) or reset |
-| `/ulw-loop` (omo) → `/audit-loop` (ocmm) | Verified-completion loop with Oracle verification | 500 | continue (default) or reset |
+| `/audit-loop` (`/dwloop` alias) | Verified-completion deepwork loop with Oracle-style verification | 500 | continue (default) or reset |
 | `/cancel-ralph` | Cancel active Ralph/ULW loop | — | — |
 | `/stop-continuation` | Stop ALL continuation mechanisms + cancel descendants | — | — |
 
@@ -138,13 +139,13 @@ ralph_loop: {
 
 ## 2. ULW Loop (Ultrawork Loop) — renamed to **audit-loop** in ocmm
 
-Same infrastructure as Ralph Loop + `ultrawork: true` flag. In ocmm, this will be named **audit-loop** to emphasize the verification oracle (the defining feature) rather than the "ultrawork" branding. Key differences:
+Same infrastructure as Ralph Loop + `ultrawork: true` flag. In ocmm, this is named **audit-loop** to emphasize the verification oracle (the defining feature) rather than the "ultrawork" branding; `/dwloop` is the local deepwork-loop alias. Key differences:
 
 | Aspect | Ralph Loop | ULW Loop |
 |--------|-----------|----------|
 | Max iterations | 100 | 500 (`ULTRAWORK_MAX_ITERATIONS`) |
 | Verification | None | Two-phase Oracle verification |
-| Start command | `/ralph-loop` | `/ulw-loop` or `ultrawork` keyword |
+| Start command | `/ralph-loop` | Upstream omo: `/ulw-loop` or `ultrawork` keyword. Local ocmm: `/audit-loop` or `/dwloop`. |
 | System prompt | Standard | Pre-loads ultrawork system prompts |
 
 ### Two-Phase Verification Oracle
@@ -219,7 +220,7 @@ class StopContinuationGuard {
 
 **Clear conditions**:
 - `session.deleted` event
-- Explicit `clear()` from `/start-work`, `/ulw-loop`, `/ralph-loop`
+- Explicit `clear()` from upstream `/start-work`, `/ulw-loop`, `/ralph-loop`
 
 ---
 
@@ -388,6 +389,18 @@ No external npm packages. No external binaries.
 | **MEDIUM** | audit-loop verification oracle (was ULW) | Verified completion — the defining feature of audit-loop. Phase 8b promotes this to P2. | Medium (~466 LOC) |
 | **LOW** | todoContinuationEnforcer (Boulder) | Complex, OpenCode-tied. Deferred — not in Phase 8a/8b. | High (~2061 LOC) |
 | **LOW** | atlasHook | Very complex, deeply integrated. Deferred — not in Phase 8a/8b. | High (~1976 LOC) |
+
+### Follow-up Development Plan
+
+Current ocmm intentionally stops at slash-command loop templates. A future full loop runtime should be split into guarded, reviewable phases:
+
+1. **Ralph Loop runtime MVP**: add loop state storage, no-progress detection, completion-promise detection, continuation prompt building, and a session-scoped `session.idle` handler. The handler must filter strictly to the active loop session and must never re-prompt completed child/subagent sessions.
+2. **Stop/cancel safety hooks**: add `/cancel-ralph`, `/stop-continuation`, and the stop-continuation guard before enabling any automatic continuation by default. This is a prerequisite for safe idle continuation.
+3. **Compaction hooks**: migrate/adapt compaction context injection and todo preservation so a running loop can survive context compaction without losing agent/model/tool state or outstanding todos.
+4. **Audit verification loop**: extend `/audit-loop` and `/dwloop` beyond prompt templates with explicit reviewer/oracle verification. Prefer blocking task calls for verifier work to avoid extra idle continuation messages.
+5. **Deferred heavy hooks**: keep `todoContinuationEnforcer`/Boulder and `atlasHook` out of the MVP. They remain useful follow-up work after the core runtime is stable, because both are large and tightly tied to OpenCode's event/task model.
+
+Acceptance bar for enabling the runtime: unit tests for state, completion detection, stop/cancel, and no-progress behavior; integration tests for parent plus child sessions; and live isolated OpenCode tests proving the loop continues only its own session and stops on completion, cancellation, and verifier failure.
 
 ---
 
