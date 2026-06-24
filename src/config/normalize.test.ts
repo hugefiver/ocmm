@@ -74,6 +74,28 @@ test("schema defaults shared skills namespace to empty arrays", () => {
   assert.deepEqual(parsed.skills, { sources: [], enable: [], disable: [] })
 })
 
+test("schema accepts locale language and region tags", () => {
+  for (const locale of ["zh", "zh-Hans", "zh-CN", "en-US"]) {
+    const parsed = OcmmConfigSchema.safeParse({ locale })
+    assert.equal(parsed.success, true, `locale should be accepted: ${locale}`)
+    if (parsed.success) assert.equal(parsed.data.locale, locale)
+  }
+
+  const profileParsed = OcmmConfigSchema.safeParse({
+    profiles: {
+      chinese: { locale: "zh-CN" },
+    },
+  })
+  assert.equal(profileParsed.success, true)
+})
+
+test("schema rejects invalid locale tags", () => {
+  for (const locale of ["", "zh_CN", "english us", "x"]) {
+    const parsed = OcmmConfigSchema.safeParse({ locale })
+    assert.equal(parsed.success, false, `locale should be rejected: ${locale}`)
+  }
+})
+
 test("schema accepts hashline namespace and defaults disabled", () => {
   assert.deepEqual(OcmmConfigSchema.parse({}).hashline, { enabled: false })
 

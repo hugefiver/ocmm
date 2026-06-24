@@ -12,6 +12,14 @@ const VariantEnum = z.enum([
   "thinking",
 ])
 
+const LocaleCodeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/, {
+    message: "Use a BCP 47-style language or locale tag, for example zh, zh-Hans, zh-CN, or en-US.",
+  })
+
 export const FallbackEntrySchema = z.object({
   providers: z.array(z.string().min(1)).min(1),
   model: z.string().min(1),
@@ -250,6 +258,7 @@ export const ProfileEntrySchema = z
     skills: ProfileSkillsConfigSchema.optional(),
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
+    locale: LocaleCodeSchema.optional(),
     intent: z
       .object({
         enabled: z.boolean().optional(),
@@ -305,6 +314,7 @@ export const OcmmConfigSchema = z
     skills: SkillsConfigSchema,
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
+    locale: LocaleCodeSchema.optional(),
     /** 'v1' enables the deepwork 5-phase chain; 'omo' selects the default prompt set. */
     workflow: z.enum(["omo", "v1"]).default("omo"),
     intent: z

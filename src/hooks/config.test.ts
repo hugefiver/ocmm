@@ -45,6 +45,49 @@ test("builder and planner can be used as both primary and delegated agents", asy
   assert.equal((cfg.agent.reviewer as Record<string, unknown> | undefined)?.mode, "subagent")
 })
 
+test("config injects configured locale guidance into primary-capable agents only", async () => {
+  const c = { ...defaultConfig(), locale: "zh-CN" }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  for (const name of ["orchestrator", "builder", "planner"]) {
+    const prompt = String((cfg.agent[name] as Record<string, unknown>).prompt)
+    assert.match(prompt, /<ocmm-locale-guidance>/)
+    assert.match(prompt, /Configured locale: zh-CN/)
+    assert.match(prompt, /thinking process, visible planning, and conversation/)
+  }
+
+  const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
+  assert.doesNotMatch(reviewerPrompt, /<ocmm-locale-guidance>/)
+})
+
+test("config injects user-language guidance when locale is unset", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
+  assert.match(prompt, /No locale is configured/)
+  assert.match(prompt, /Infer the user's preferred language from their latest message/)
+})
+
+test("locale guidance preserves existing primary prompts", async () => {
+  const c = { ...defaultConfig(), locale: "en-US" }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg = {
+    agent: {
+      orchestrator: { prompt: "Custom primary prompt." },
+    },
+  }
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
+  assert.match(prompt, /Configured locale: en-US/)
+  assert.match(prompt, /Custom primary prompt\./)
+  assert.equal(prompt.match(/<ocmm-locale-guidance>/g)?.length, 1)
+})
+
 test("config respects user-set defaultAgent and disableOpenCodeBuiltinAgents=false", async () => {
   const cfg2 = { ...defaultConfig(), defaultAgent: "builder" as const, disableOpenCodeBuiltinAgents: false }
   const handler2 = createConfigHandler({ getConfig: () => cfg2 })
