@@ -6,8 +6,10 @@ import {
   extractModelName,
   isClaudeOpus47OrLaterModel,
   isCodexModel,
+  isDeepSeekModel,
   isGeminiModel,
   isGptModel,
+  isMiniModel,
   isKimiK27Model,
   isKimiK2Model,
 } from "./model-family.ts"
@@ -29,6 +31,12 @@ test("isCodexModel matches codex family without catching generic GPT", () => {
   assert.equal(isCodexModel("openai/codex-1"), true)
   assert.equal(isCodexModel("gpt-5.5"), false)
   assert.equal(isCodexModel("gpt-5.5", "github-copilot"), false)
+})
+
+test("isMiniModel matches mini model names", () => {
+  assert.equal(isMiniModel("gpt-5.4-mini"), true)
+  assert.equal(isMiniModel("codex-mini-latest"), true)
+  assert.equal(isMiniModel("gpt-5.5"), false)
 })
 
 test("isClaudeOpus47OrLaterModel matches >= 4.7 and claude-fable", () => {
@@ -58,6 +66,12 @@ test("kimi family detection", () => {
   assert.equal(isKimiK27Model("kimi-k2.6"), false)
 })
 
+test("deepseek family detection", () => {
+  assert.equal(isDeepSeekModel("deepseek-v4-pro"), true)
+  assert.equal(isDeepSeekModel("moonshot-v1", "deepseek"), true)
+  assert.equal(isDeepSeekModel("glm-5.2"), false)
+})
+
 test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "codex-mini-latest" }), "codex")
   assert.equal(classifyModelFamily({ modelID: "gpt-5.5" }), "gpt")
@@ -71,5 +85,6 @@ test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "kimi-k2.6" }), "kimi")
   assert.equal(classifyModelFamily({ modelID: "minimax-m3" }), "minimax")
   assert.equal(classifyModelFamily({ modelID: "glm-5.1" }), "glm")
+  assert.equal(classifyModelFamily({ modelID: "deepseek-v4-pro" }), "deepseek")
   assert.equal(classifyModelFamily({ modelID: "totally-unknown" }), "unknown")
 })

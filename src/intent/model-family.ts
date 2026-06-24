@@ -21,6 +21,11 @@ export function isCodexModel(modelID: string, providerID?: string): boolean {
   return lc.includes("codex") || provider.includes("codex")
 }
 
+export function isMiniModel(modelID: string): boolean {
+  const name = extractModelName(modelID).toLowerCase()
+  return /(^|[-_.])mini($|[-_.])/.test(name)
+}
+
 export function isClaudeModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("claude")
 }
@@ -53,6 +58,12 @@ export function isGlmModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("glm")
 }
 
+export function isDeepSeekModel(modelID: string, providerID?: string): boolean {
+  const lc = modelID.toLowerCase()
+  const provider = providerID?.toLowerCase() ?? ""
+  return lc.includes("deepseek") || provider.includes("deepseek")
+}
+
 export function isGeminiModel(fullId: string, providerID?: string): boolean {
   const lc = fullId.toLowerCase()
   if (lc.startsWith("google/") || lc.startsWith("google-vertex/")) return true
@@ -77,6 +88,7 @@ export type ModelFamily =
   | "kimi"
   | "minimax"
   | "glm"
+  | "deepseek"
   | "unknown"
 
 /** Coarsest family classification, in priority order. */
@@ -95,5 +107,6 @@ export function classifyModelFamily(opts: {
   if (isKimiK2Model(name)) return "kimi"
   if (isMiniMaxModel(name)) return "minimax"
   if (isGlmModel(name)) return "glm"
+  if (isDeepSeekModel(name, providerID)) return "deepseek"
   return "unknown"
 }
