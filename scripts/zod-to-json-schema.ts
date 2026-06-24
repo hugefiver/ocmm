@@ -16,19 +16,21 @@ export function zodToJsonSchema(
 
 function convert(schema: ZodTypeAny): JsonSchema {
   const def = schema._def as Record<string, unknown>
-  const typeName = def.typeName as string
+  const typeName = getTypeName(def)
 
   switch (typeName) {
     case "ZodObject": {
       const obj = schema as unknown as ZodObject<Record<string, ZodTypeAny>>
-      const shape = obj._def.shape()
+      const shapeDef = obj._def.shape as unknown
+      const shape =
+        typeof shapeDef === "function"
+          ? (shapeDef() as Record<string, ZodTypeAny>)
+          : (shapeDef as Record<string, ZodTypeAny>)
       const properties: Record<string, JsonSchema> = {}
       const required: string[] = []
       for (const [key, value] of Object.entries(shape)) {
         properties[key] = convert(value as ZodTypeAny)
-        const inner = unwrapOptional(value as ZodTypeAny)
         if (!isOptional(value as ZodTypeAny)) required.push(key)
-        void inner
       }
       const result: JsonSchema = { type: "object", properties, additionalProperties: false }
       if (required.length) result["required"] = required
@@ -36,7 +38,8 @@ function convert(schema: ZodTypeAny): JsonSchema {
     }
     case "ZodArray": {
       const arr = schema as unknown as ZodArray<ZodTypeAny>
-      return { type: "array", items: convert(arr._def.type) }
+      const element = (arr._def as unknown as { element?: ZodTypeAny; type?: ZodTypeAny }).element ?? arr._def.type
+      return { type: "array", items: convert(element) }
     }
     case "ZodString":
       return { type: "string" }
@@ -53,11 +56,14 @@ function convert(schema: ZodTypeAny): JsonSchema {
       return { type: "boolean" }
     case "ZodEnum": {
       const en = schema as unknown as ZodEnum<string[]>
-      return { type: "string", enum: en._def.values }
+      const enumDef = en._def as unknown as { values?: string[]; entries?: Record<string, string> }
+      const values = enumDef.values ?? Object.values(enumDef.entries ?? {})
+      return { type: "string", enum: values }
     }
     case "ZodLiteral": {
       const lit = schema as unknown as ZodLiteral<unknown>
-      const val = lit._def.value
+      const literalDef = lit._def as unknown as { value?: unknown; values?: unknown[] }
+      const val = literalDef.value ?? literalDef.values?.[0]
       if (typeof val === "string") return { type: "string", const: val }
       if (typeof val === "number") return { type: "number", const: val }
       if (typeof val === "boolean") return { type: "boolean", const: val }
@@ -84,8 +90,8 @@ function convert(schema: ZodTypeAny): JsonSchema {
       return convert(def._def.innerType)
     }
     case "ZodEffects": {
-      const eff = schema as unknown as { _def: { schema: ZodTypeAny } }
-      return convert(eff._def.schema)
+      const eff = schema as unknown as { _def: { schema?: ZodTypeAny; in?: ZodTypeAny } }
+      return convert(eff._def.schema ?? eff._def.in)
     }
     case "ZodIntersection": {
       const inter = schema as unknown as { _def: { left: ZodTypeAny; right: ZodTypeAny } }
@@ -98,18 +104,43 @@ function convert(schema: ZodTypeAny): JsonSchema {
   }
 }
 
-function isOptional(schema: ZodTypeAny): boolean {
-  const def = schema._def as Record<string, unknown>
-  return def.typeName === "ZodOptional" || def.typeName === "ZodDefault"
+function getTypeName(def: Record<string, unknown>): string {
+  if (typeof def.typeName === "string") return def.typeName
+  switch (def.type) {
+    case "object":
+      return "ZodObject"
+    case "array":
+      return "ZodArray"
+    case "string":
+      return "ZodString"
+    case "number":
+      return "ZodNumber"
+    case "boolean":
+      return "ZodBoolean"
+    case "enum":
+      return "ZodEnum"
+    case "literal":
+      return "ZodLiteral"
+    case "union":
+      return "ZodUnion"
+    case "record":
+      return "ZodRecord"
+    case "optional":
+      return "ZodOptional"
+    case "default":
+      return "ZodDefault"
+    case "pipe":
+    case "transform":
+      return "ZodEffects"
+    case "intersection":
+      return "ZodIntersection"
+    default:
+      return ""
+  }
 }
 
-function unwrapOptional(schema: ZodTypeAny): ZodTypeAny {
+function isOptional(schema: ZodTypeAny): boolean {
   const def = schema._def as Record<string, unknown>
-  if (def.typeName === "ZodOptional") {
-    return unwrapOptional((def as { innerType: ZodTypeAny }).innerType)
-  }
-  if (def.typeName === "ZodDefault") {
-    return unwrapOptional((def as { innerType: ZodTypeAny }).innerType)
-  }
-  return schema
+  const typeName = getTypeName(def)
+  return typeName === "ZodOptional" || typeName === "ZodDefault"
 }
