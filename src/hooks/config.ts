@@ -105,12 +105,33 @@ export function createConfigHandler(args: {
 
     const disabled = new Set(cfg.disabledAgents ?? [])
 
+    if (cfg.disableOpenCodeBuiltinAgents) {
+      for (const name of ["build", "plan"]) {
+        if (!isRecord(agentMap[name])) agentMap[name] = {}
+        const entry = agentMap[name] as Record<string, unknown>
+        if (entry.disable === undefined) entry.disable = true
+      }
+    }
+
+    if (cfg.defaultAgent !== false) {
+      const desired = typeof cfg.defaultAgent === "string" ? cfg.defaultAgent : "orchestrator"
+      if (!disabled.has(desired) && typeof target.default_agent !== "string") {
+        target.default_agent = desired
+      }
+    }
+
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
       const norm = normalizeShorthand(cfg.agents?.[a.name])
       const prompt = promptForBuiltinAgent(a, norm)
-      const extras: { prompt?: string } = {}
+      const mode = a.name === "orchestrator" || a.name === "builder"
+        ? "primary"
+        : a.name === "planner"
+          ? "all"
+          : "subagent"
+      const extras: { prompt?: string; mode?: string } = {}
       if (prompt) extras.prompt = prompt
+      extras.mode = mode
       applyAgentEntry(agentMap, a, norm, extras)
     }
 
@@ -153,7 +174,10 @@ export function createConfigHandler(args: {
   }
 }
 
-function registerCompatAgentAliases(agentMap: Record<string, unknown>, disabled: Set<string>): void {
+function registerCompatAgentAliases(
+  agentMap: Record<string, unknown>,
+  disabled: Set<string>,
+): void {
   for (const { alias, target } of COMPAT_AGENT_ALIASES) {
     if (disabled.has(alias) || disabled.has(target)) continue
     const source = agentMap[target]

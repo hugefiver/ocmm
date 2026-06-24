@@ -84,7 +84,7 @@ test("loadAllPrompts loads functional agent prompts", () => {
     loadAllPrompts(root, "omo")
     assert.equal(getAgentPrompt("reviewer"), "reviewer-role")
     assert.equal(getAgentPrompt("plan-critic"), "plan-critic-role")
-    assert.equal(getAgentPrompt("worker"), "")
+    assert.equal(getAgentPrompt("builder"), "")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -135,7 +135,7 @@ test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
 
 test("pickDeepworkVariantForAgent picks gpt variant for gpt model", () => {
   assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "worker", preferenceModel: "gpt-5.5" }),
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.5" }),
     "gpt",
   )
 })
@@ -156,7 +156,7 @@ test("pickDeepworkVariantForAgent picks glm variant for GLM models", () => {
 
 test("pickDeepworkVariantForAgent picks codex variant for Codex models", () => {
   assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "worker", preferenceModel: "codex-mini-latest" }),
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "codex-mini-latest" }),
     "codex",
   )
 })
