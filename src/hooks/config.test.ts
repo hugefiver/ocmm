@@ -91,6 +91,41 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
   assert.ok(cfg.agent.quick, "@quick should be available as category-subagent")
 })
 
+test("config applies default auto-approve permissions", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; permission?: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  assert.deepEqual(cfg.permission, { webfetch: "allow", external_directory: "allow", task: "deny" })
+  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).task, "allow")
+  assert.equal(((cfg.agent.builder as Record<string, unknown>).permission as Record<string, unknown>).question, "allow")
+  assert.equal(((cfg.agent.planner as Record<string, unknown>).permission as Record<string, unknown>)["task_*"], "allow")
+  assert.equal(((cfg.agent.reviewer as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
+  assert.equal(((cfg.agent["doc-search"] as Record<string, unknown>).permission as Record<string, unknown>)["grep_app_*"], "allow")
+})
+
+test("config preserves explicit permission overrides", async () => {
+  const c = {
+    ...defaultConfig(),
+    agents: {
+      orchestrator: { permission: { task: "deny" as const, custom: "allow" as const } },
+      reviewer: { tools: { task: true } },
+    },
+  }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown>; permission?: Record<string, unknown> } = {
+    agent: {},
+    permission: { webfetch: "deny" },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal(cfg.permission?.webfetch, "deny")
+  assert.equal(cfg.permission?.external_directory, "allow")
+  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
+  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).custom, "allow")
+  assert.equal(((cfg.agent.reviewer as Record<string, unknown>).permission as Record<string, unknown>).task, "allow")
+})
+
 test("disabledAgents skips OMO-compatible aliases", async () => {
   const c = { ...defaultConfig(), disabledAgents: ["oracle", "explore", "deep"] }
   const handler = createConfigHandler({ getConfig: () => c })
@@ -184,7 +219,7 @@ test("config registers shared skill paths and preserves existing urls", async ()
     await handler(cfg, undefined)
 
     assert.deepEqual(cfg.skills.urls, ["https://example.com/skills"])
-    assert.deepEqual(cfg.skills.paths.sort(), [join(root, "existing"), join(root, "git-master")].sort())
+    assert.deepEqual(cfg.skills.paths.sort(), [root, join(root, "existing")].sort())
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

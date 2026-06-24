@@ -12,7 +12,7 @@ import {
   resolveMcpServers,
 } from "./index.ts"
 
-test("createBuiltinMcps returns enabled remote builtins and respects disabled list", () => {
+test("createBuiltinMcps returns enabled builtins and respects disabled list", () => {
   const servers = createBuiltinMcps(
     { enabled: true, envAllowlist: [], websearch: { provider: "exa" }, servers: {} },
     ["grep_app", "lsp"],
@@ -22,8 +22,8 @@ test("createBuiltinMcps returns enabled remote builtins and respects disabled li
   assert.equal(servers.context7?.type, "remote")
   assert.equal(servers.grep_app, undefined)
   assert.equal(servers.lsp, undefined)
-  assert.equal(servers.codegraph?.type, "local")
-  assert.equal(servers.codegraph?.enabled, false)
+  assert.equal(servers.codegraph, undefined)
+  assert.equal(servers["ast-grep"], undefined)
 })
 
 test("createBuiltinMcps only injects API-key headers when env allowlisted", () => {

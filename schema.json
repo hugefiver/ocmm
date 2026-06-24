@@ -416,6 +416,17 @@
               "type": "boolean"
             }
           },
+          "permission": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            }
+          },
           "skills": {
             "type": "array",
             "items": {
@@ -1083,6 +1094,17 @@
                   "type": "object",
                   "additionalProperties": {
                     "type": "boolean"
+                  }
+                },
+                "permission": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": [
+                      "ask",
+                      "allow",
+                      "deny"
+                    ]
                   }
                 },
                 "skills": {

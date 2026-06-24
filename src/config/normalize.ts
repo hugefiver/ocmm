@@ -6,6 +6,8 @@ import type {
   ModelRequirementConfig,
 } from "./schema.ts"
 
+export type PermissionValue = "ask" | "allow" | "deny"
+
 export function parseModelString(
   modelStr: string,
   variant?: Variant,
@@ -38,6 +40,7 @@ export type NormalizedShorthand = {
   description?: string
   requirement?: ModelRequirement
   disabled?: boolean
+  permission?: Record<string, PermissionValue>
 }
 
 export function normalizeShorthand(
@@ -47,6 +50,14 @@ export function normalizeShorthand(
   const out: NormalizedShorthand = {}
   if (entry.description) out.description = entry.description
   if ("disabled" in entry && entry.disabled) out.disabled = true
+  if ("tools" in entry && entry.tools) {
+    out.permission = Object.fromEntries(
+      Object.entries(entry.tools).map(([name, enabled]) => [name, enabled ? "allow" : "deny"]),
+    ) as Record<string, PermissionValue>
+  }
+  if ("permission" in entry && entry.permission) {
+    out.permission = { ...(out.permission ?? {}), ...entry.permission }
+  }
 
   if (entry.requirement) {
     out.requirement = normalizeRequirementConfig(entry.requirement)
