@@ -36,6 +36,18 @@ const AGENT_ALIASES = new Map([
   ["explore", "code-search"],
 ])
 
+const MAX_REASONING_CATEGORIES = new Set([
+  "frontend",
+  "creative",
+  "hard-reasoning",
+  "research",
+  "coding",
+  "normal-task",
+  "complex",
+  "deep",
+  "documenting",
+])
+
 function canonicalAgentName(name: string): string {
   return AGENT_ALIASES.get(name) ?? name
 }
@@ -95,6 +107,18 @@ function buildResolution(
   return out
 }
 
+function applyCategoryVariantPolicy(
+  resolution: Resolution,
+  agentName: string | undefined,
+  inputVariant: string | undefined,
+): Resolution {
+  if (!agentName || !MAX_REASONING_CATEGORIES.has(agentName)) return resolution
+  if (resolution.source === "user-config" || resolution.source === "input-variant" || inputVariant) {
+    return resolution
+  }
+  return { ...resolution, variant: "max" }
+}
+
 function resolveAgainstRequirement(
   req: ModelRequirement,
   modelID: string,
@@ -126,7 +150,7 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
       canonicalUserReq
     if (userReq) {
       const r = resolveAgainstRequirement(userReq, modelID, inputVariant, "user-config")
-      if (r) return r
+      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
     }
   }
 
@@ -139,7 +163,7 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
         inputVariant,
         "agent-default",
       )
-      if (r) return r
+      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
     }
   }
 
@@ -148,13 +172,18 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
     const builtinCat = BUILTIN_CATEGORY_INDEX.get(agentName)
     const req = userCat ?? builtinCat?.requirement ?? null
     if (req) {
-      const r = resolveAgainstRequirement(req, modelID, inputVariant, "category-default")
-      if (r) return r
+      const r = resolveAgainstRequirement(
+        req,
+        modelID,
+        inputVariant,
+        userCat ? "user-config" : "category-default",
+      )
+      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
     }
   }
 
   if (inputVariant && isValidVariant(inputVariant)) {
-    return {
+    return applyCategoryVariantPolicy({
       entry: {
         providers: opts.providerID ? [opts.providerID] : [],
         model: modelID,
@@ -162,7 +191,7 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
       },
       variant: inputVariant,
       source: "input-variant",
-    }
+    }, agentName, inputVariant)
   }
 
   return null
