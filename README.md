@@ -8,7 +8,7 @@ Concepts (model tiering, per-model specialized prompts, intent gating, proactive
 
 | Hook                                 | What ocmm does                                                                                                                                                                                                                                                                                |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config`                             | Registers 10 primary agents + 10 category-subagents with their preferred provider/model. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
+| `config`                             | Registers 9 primary agents + 10 category-subagents with their preferred provider/model. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
 | `chat.params`                        | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant), respects explicit user choices, and applies only the model-family parameters ocmm supports for that model. Built-in defaults normalize category work to model-appropriate high/max reasoning where supported and avoid implicit Opus 4.7+ thinking budgets.                  |
 | `chat.message`                       | v1 workflow: queues superpowers skills content on the first message per session. omo workflow: no-op (prompts are declaratively attached at config time).                                                                                                                                     |
 | `experimental.chat.system.transform` | v1 workflow: drains queued skills content and prepends to `output.system`. omo workflow: no-op.                                                                                                                                                                                               |
@@ -81,7 +81,6 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
         ],
       },
     },
-    "atlas": { "disabled": true },
   },
 
   "categories": {
@@ -158,33 +157,34 @@ Both `agents.*` and `categories.*` accept either shape:
 
 ```
 orchestrator    anthropic/claude-opus-4-7      variant=max     main coordinator
-builder          openai/gpt-5.5                 variant=high    autonomous implementer
-reviewer        openai/gpt-5.5                 variant=high    read-only consultant
+builder         openai/gpt-5.5                  variant=high    autonomous implementer
+reviewer        openai/gpt-5.5                  variant=high    read-only consultant
 doc-search      openai/gpt-5.4-mini-fast       (none)          external docs / OSS lookup
 code-search     openai/gpt-5.4-mini-fast       (none)          internal codebase grep
 planner         anthropic/claude-opus-4-7      variant=max     work-plan author
 clarifier       anthropic/claude-sonnet-4-6    (none)          pre-plan analysis
 plan-critic     openai/gpt-5.5                 variant=xhigh   plan QA
 media-reader    openai/gpt-5.5                 variant=high    multimodal analysis
-builder     anthropic/claude-sonnet-4-6    (none)          focused single-task executor
 ```
 
 ## Built-in categories (also registered as subagents)
 
 ```
-frontend        google/gemini-3.1-pro      variant=max     UI/UX, layout, styling, visual QA
-creative        google/gemini-3.1-pro      variant=max     concepts, naming, narrative, framing
-hard-reasoning  openai/gpt-5.5             variant=max     ultrabrain-style decisions and tradeoffs
-research        openai/gpt-5.5             variant=max     missing-fact investigation and evidence gathering
-quick           openai/gpt-5.4-mini        (none)          fully specified mechanical edits
-coding          anthropic/claude-sonnet-4-6 variant=max    determined code edits and bug fixes
-normal-task     anthropic/claude-sonnet-4-6 variant=max    ordinary bounded tasks
-complex         openai/gpt-5.5             variant=max     coordinated multi-step ordinary tasks
-deep            openai/gpt-5.5             variant=max     autonomous system development and delivery
-documenting     kimi-for-coding/k2p5       variant=max     standalone documentation and prose
+frontend        google/gemini-3.1-pro       variant=high    UI/UX, layout, styling, visual QA
+creative        google/gemini-3.1-pro       variant=high    concepts, naming, narrative, framing
+hard-reasoning  openai/gpt-5.5              variant=xhigh   ultrabrain-style decisions and tradeoffs
+research        openai/gpt-5.5              variant=high    missing-fact investigation and evidence gathering
+quick           openai/gpt-5.4-mini         (none)          fully specified mechanical edits
+coding          anthropic/claude-sonnet-4-6  (none)          determined code edits and bug fixes
+normal-task     anthropic/claude-sonnet-4-6  (none)          ordinary bounded tasks
+complex         openai/gpt-5.5              variant=high    coordinated multi-step ordinary tasks
+deep            openai/gpt-5.5              (none)          autonomous system development and delivery
+documenting     kimi-for-coding/k2p5        (none)          standalone documentation and prose
 ```
 
-The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`, `builder`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
+Variants shown are the **raw source values** from `src/data/categories.ts`. At runtime the variant policy normalizes categories from `coding` upward to model-appropriate `max` (which translates to the GPT/Codex `xhigh` reasoning effort for GPT-class models) unless the user explicitly overrides them; see the variant policy table above. Entries marked `(none)` carry no built-in variant and rely on this normalization.
+
+The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
 
 ## Prompt architecture
 
@@ -359,6 +359,8 @@ Licensed under the **Anti American AI Public License (AAAPL)** — see [`LICENSE
 
 SPDX identifier: `LicenseRef-AAAPL`.
 
-## Knowledge base
+## Architecture & internals
 
-`.kb/` contains the design notes, category/agent tables, and the source-of-truth for the routing rules. Read `.kb/00-overview.md` first.
+For design rationale, hook flow, the 4-tier variant resolution pipeline, two-layer fallback system, and config schema overview, see [`docs/architecture.md`](./docs/architecture.md).
+
+Authoritative agent and category definitions live in `src/data/agents.ts` and `src/data/categories.ts`. For prompt provenance, see [`docs/v1-maintenance.md`](./docs/v1-maintenance.md) (v1/deepwork) and [`docs/prompt-sync.md`](./docs/prompt-sync.md) (omo).
