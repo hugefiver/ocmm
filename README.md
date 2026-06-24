@@ -32,10 +32,18 @@ ocmm supports two workflows, switchable via the `workflow` config field:
 
 ### From GitHub Release
 
-Published releases do not require npmjs.org. Each GitHub Release contains the plugin package tarball, standalone native `ocmm-lsp-*` binaries, and `SHA256SUMS.txt`. Install the tarball asset URL with your package manager:
+Published releases do not require npmjs.org. Each GitHub Release contains:
+
+- `ocmm-opencode-plugin-<version>.tgz` — package-manager install package for the OpenCode plugin, CLI wrappers, Codex bundle, and bundled native binaries.
+- `ocmm-codex-plugin-<version>.tgz` — direct Codex plugin package root for local marketplace installation.
+- `ocmm-lsp-*` — standalone native executables for external-program or custom `OCMM_LSP_COMMAND` setups.
+- `SHA256SUMS.txt` — checksums for every release asset.
+
+For OpenCode, install the release tarball asset URL with your package manager:
 
 ```bash
-pnpm add https://github.com/<owner>/ocmm/releases/download/v0.1.0/ocmm-0.1.0.tgz
+VERSION=0.1.0
+pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-opencode-plugin-${VERSION}.tgz"
 ```
 
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
@@ -46,10 +54,21 @@ It also includes the Codex marketplace file and generated plugin bundle under `.
 { "plugin": ["./node_modules/ocmm/dist/index.js"] }
 ```
 
-For Codex, add the installed package root as a local marketplace and install the bundled plugin:
+For Codex, either add the installed package root as a local marketplace:
 
 ```bash
 codex plugin marketplace add ./node_modules/ocmm --json
+codex plugin add ocmm@ocmm-local --json
+```
+
+Or install directly from the Codex release package:
+
+```bash
+VERSION=0.1.0
+curl -L -o "ocmm-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-codex-plugin-${VERSION}.tgz"
+mkdir -p .codex-plugins
+tar -xzf "ocmm-codex-plugin-${VERSION}.tgz" -C .codex-plugins
+codex plugin marketplace add ".codex-plugins/ocmm-codex-plugin-${VERSION}" --json
 codex plugin add ocmm@ocmm-local --json
 ```
 
@@ -82,10 +101,11 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 
 ### Native LSP Support
 
-GitHub releases distribute `ocmm-lsp` in two forms:
+GitHub releases distribute `ocmm-lsp` in three forms:
 
-- bundled inside the package tarball / GitHub Packages package under `dist/bin/`
-- as standalone release assets named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups
+- bundled inside the OpenCode package tarball / GitHub Packages package under `dist/bin/`;
+- bundled inside the Codex release package under `dist/bin/`;
+- standalone release assets named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
 
 Native binaries are built for:
 
@@ -101,6 +121,17 @@ Native binaries are built for:
 Linux musl distributions such as Alpine are not covered by the release binaries; build locally with `pnpm run build:lsp` or set `OCMM_LSP_COMMAND` to a custom command.
 
 ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocmm-lsp mcp` server by default. Resolution prefers bundled release binaries in `dist/bin/`, then local Cargo release/debug builds, then `cargo run` from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. Set `OCMM_LSP_COMMAND` to force a custom command, add `disabledMcps:["lsp"]` to disable it, or define `mcp.servers.lsp` to override the built-in.
+
+For direct external-program use, download the matching standalone asset and point `OCMM_LSP_COMMAND` at it:
+
+```bash
+VERSION=0.1.0
+curl -L -o ~/.local/bin/ocmm-lsp "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-lsp-x86_64-unknown-linux-gnu"
+chmod +x ~/.local/bin/ocmm-lsp
+OCMM_LSP_COMMAND="$HOME/.local/bin/ocmm-lsp" opencode run "check diagnostics"
+```
+
+Plain `OCMM_LSP_COMMAND` values automatically receive the `mcp` argument. Use a JSON array, for example `["/path/to/ocmm-lsp","mcp"]`, only when you need exact argument control.
 
 ### From source
 
@@ -507,11 +538,11 @@ Releases are GitHub-only. Push a tag that matches `package.json` (`vX.Y.Z`) or r
 
 1. Runs typecheck and tests.
 2. Builds native `ocmm-lsp` binaries for Linux x64/arm64 glibc, Windows x64/arm64, and macOS x64/arm64.
-3. Builds TypeScript, downloads all native binaries into `dist/bin/`, smoke-tests `node dist/cli/ocmm-lsp.js mcp`, and packs the plugin/CLI tarball.
-4. Publishes the tarball, standalone native binaries, and `SHA256SUMS.txt` to GitHub Release assets.
+3. Builds TypeScript, checks the generated Codex plugin bundle, downloads all native binaries into `dist/bin/`, smoke-tests `node dist/cli/ocmm-lsp.js mcp`, and packs release install packages.
+4. Publishes `ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`, standalone native binaries, and `SHA256SUMS.txt` to GitHub Release assets.
 5. Publishes `@<owner>/ocmm` to GitHub Packages by default for tag releases, without publishing to npmjs.org.
 
-The GitHub Release tarball and the GitHub Packages package contain the same runtime payload. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
+The OpenCode GitHub Release tarball and the GitHub Packages package contain the same runtime payload. The Codex tarball contains a package-root-shaped local marketplace install with the generated plugin and bundled `ocmm-lsp` wrapper. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
 
 ### Live integration test
 

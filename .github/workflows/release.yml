@@ -61,6 +61,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Check generated Codex plugin bundle
+        run: |
+          pnpm run gen:codex-plugin
+          git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm
+
   native:
     name: Native ocmm-lsp (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
@@ -169,12 +174,33 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
           mkdir -p release-assets
           find dist/bin -type f ! -name '*.exe' -exec chmod 755 {} +
+          pnpm run gen:codex-plugin
           node dist/cli/ocmm-lsp.js --help
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
           cp dist/bin/ocmm-lsp-* release-assets/
           npm pack --pack-destination release-assets
+          mv "release-assets/ocmm-${version}.tgz" "release-assets/ocmm-opencode-plugin-${version}.tgz"
+
+          codex_root_name="ocmm-codex-plugin-${version}"
+          codex_root="release-assets/${codex_root_name}"
+          mkdir -p "$codex_root"
+          cp package.json README.md LICENSE LICENSE.zh.md LICENSE.bilingual.md "$codex_root/"
+          cp -R .agents plugins dist "$codex_root/"
+          tar -czf "release-assets/${codex_root_name}.tgz" -C release-assets "$codex_root_name"
+          rm -rf "$codex_root"
+
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/dist/index.js"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.agents/plugins/marketplace.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/.codex-plugin/plugin.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/dist/bin/ocmm-lsp-"
+          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/.agents/plugins/marketplace.json"
+          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/plugins/ocmm/.codex-plugin/plugin.json"
+          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/dist/cli/ocmm-lsp.js"
+          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -q "^${codex_root_name}/dist/bin/ocmm-lsp-"
+
           cd release-assets
           shasum -a 256 * > SHA256SUMS.txt
 
