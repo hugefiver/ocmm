@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { isAbsolute, join } from "node:path"
 
@@ -13,7 +13,9 @@ import {
   createCodexMcpManifest,
   createMarketplaceManifest,
   createPluginManifest,
+  createPluginRuntimePackage,
   generateCodexPlugin,
+  stageCodexRuntime,
 } from "./plugin-generator.ts"
 
 test("Codex manifest declares ocmm plugin resources", () => {
@@ -24,6 +26,15 @@ test("Codex manifest declares ocmm plugin resources", () => {
   assert.equal(manifest.skills, "./skills/")
   assert.equal(manifest.mcpServers, "./.mcp.json")
   assert.equal((manifest.interface as Record<string, unknown>).displayName, "ocmm")
+})
+
+test("Codex plugin runtime package enables ESM wrappers", () => {
+  const manifest = createPluginRuntimePackage("1.2.3")
+
+  assert.equal(manifest.name, "ocmm-codex-plugin-runtime")
+  assert.equal(manifest.version, "1.2.3")
+  assert.equal(manifest.private, true)
+  assert.equal(manifest.type, "module")
 })
 
 test("Codex marketplace points at the local plugins/ocmm bundle", () => {
@@ -56,7 +67,7 @@ test("Codex MCP manifest uses Codex server shape", () => {
   assert.equal(manifest.mcpServers.websearch, undefined)
 })
 
-test("Codex MCP manifest publishes package-relative ocmm-lsp by default", () => {
+test("Codex MCP manifest publishes plugin-local ocmm-lsp by default", () => {
   const manifest = createCodexMcpManifest(
     defaultConfig(),
     process.cwd(),
@@ -65,13 +76,36 @@ test("Codex MCP manifest publishes package-relative ocmm-lsp by default", () => 
   const lsp = manifest.mcpServers.lsp as Record<string, unknown>
 
   assert.equal(lsp.command, "node")
-  assert.deepEqual(lsp.args, ["../../dist/cli/ocmm-lsp.js", "mcp"])
+  assert.deepEqual(lsp.args, ["./dist/cli/ocmm-lsp.js", "mcp"])
   assert.equal(lsp.cwd, ".")
 
   const serialized = JSON.stringify(lsp)
+  assert.doesNotMatch(serialized, /\.\.[\\/]\.\./)
   assert.doesNotMatch(serialized, /target[\\/]release/)
   assert.doesNotMatch(serialized, /crates[\\/]ocmm-lsp/)
   assert.equal(serialized.includes(process.cwd()), false)
+})
+
+test("stageCodexRuntime copies the LSP wrapper runtime into the plugin", () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-runtime-root-"))
+  const pluginRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-runtime-plugin-"))
+  try {
+    mkdirSync(join(root, "dist", "cli"), { recursive: true })
+    mkdirSync(join(root, "dist", "shared"), { recursive: true })
+    mkdirSync(join(root, "dist", "bin"), { recursive: true })
+    writeFileSync(join(root, "dist", "cli", "ocmm-lsp.js"), "import '../shared/ocmm-lsp-binary.js'\n")
+    writeFileSync(join(root, "dist", "shared", "ocmm-lsp-binary.js"), "export {}\n")
+    writeFileSync(join(root, "dist", "bin", "ocmm-lsp-test"), "binary\n")
+
+    stageCodexRuntime(root, pluginRoot)
+
+    assert.equal(existsSync(join(pluginRoot, "dist", "cli", "ocmm-lsp.js")), true)
+    assert.equal(existsSync(join(pluginRoot, "dist", "shared", "ocmm-lsp-binary.js")), true)
+    assert.equal(existsSync(join(pluginRoot, "dist", "bin", "ocmm-lsp-test")), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(pluginRoot, { recursive: true, force: true })
+  }
 })
 
 test("Codex MCP manifest preserves explicit lsp overrides", () => {
@@ -129,6 +163,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     })
 
     const manifest = JSON.parse(readFileSync(join(result.pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as Record<string, unknown>
+    const runtimePackage = JSON.parse(readFileSync(join(result.pluginRoot, "package.json"), "utf8")) as Record<string, unknown>
     const marketplace = JSON.parse(readFileSync(result.marketplacePath, "utf8")) as Record<string, unknown>
     const orchestrator = readFileSync(join(result.pluginRoot, "agents", "ocmm-orchestrator.toml"), "utf8")
     const workflowSkill = readFileSync(join(result.pluginRoot, "skills", "ocmm-workflow", "SKILL.md"), "utf8")
@@ -139,6 +174,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const lspEntrypoint = mcp.mcpServers.lsp?.args?.[0] ?? ""
 
     assert.equal(manifest.version, "9.9.9")
+    assert.equal(runtimePackage.type, "module")
     assert.equal(marketplace.name, CODEX_MARKETPLACE_NAME)
     assert.match(mcpManifest, /"lsp"/)
     assert.match(mcpManifest, /ocmm-lsp\.js/)

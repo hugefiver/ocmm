@@ -29,6 +29,11 @@ export const CODEX_MARKETPLACE_NAME = "ocmm-local"
 export const CODEX_PLUGIN_DIR = `plugins/${CODEX_PLUGIN_NAME}`
 export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
 const CODEX_LSP_ENTRYPOINT = join("dist", "cli", "ocmm-lsp.js")
+const CODEX_RUNTIME_DIRS = [
+  join("dist", "cli"),
+  join("dist", "shared"),
+  join("dist", "bin"),
+]
 
 const CODEX_COMPATIBLE_PROVIDERS = new Set([
   "openai",
@@ -87,6 +92,8 @@ export async function generateCodexPlugin(options: {
 
   mkdirSync(pluginRoot, { recursive: true })
   writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), createPluginManifest(version))
+  writeJson(join(pluginRoot, "package.json"), createPluginRuntimePackage(version))
+  stageCodexRuntime(projectRoot, pluginRoot)
   const mcpManifest = createCodexMcpManifest(loaded.config, projectRoot, pluginRoot)
   writeJson(join(pluginRoot, ".mcp.json"), mcpManifest)
 
@@ -216,7 +223,7 @@ function createCodexPackageLspServer(projectRoot: string, pluginRoot: string): R
   return {
     command: "node",
     args: [
-      relativeCodexPath(pluginRoot, join(projectRoot, CODEX_LSP_ENTRYPOINT)),
+      relativeCodexPath(pluginRoot, join(pluginRoot, CODEX_LSP_ENTRYPOINT)),
       "mcp",
     ],
     cwd: ".",
@@ -254,6 +261,15 @@ export function createPluginManifest(version: string): Record<string, unknown> {
       brandColor: "#0F766E",
       screenshots: [],
     },
+  }
+}
+
+export function createPluginRuntimePackage(version: string): Record<string, unknown> {
+  return {
+    name: "ocmm-codex-plugin-runtime",
+    version,
+    private: true,
+    type: "module",
   }
 }
 
@@ -336,11 +352,23 @@ function writePluginReadme(pluginRoot: string, config: OcmmConfig, agents: reado
     `- Generated agents: ${agents.length}`,
     "- Skills are copied from `skills/` plus flattened `skills/v1/` deepwork skills.",
     "- MCP servers are generated from the ocmm `mcp` config namespace.",
-    "- The default `lsp` MCP uses the package-relative `ocmm-lsp` wrapper and the bundled GitHub Release binary.",
+    "- The default `lsp` MCP uses the plugin-local `ocmm-lsp` wrapper and bundled GitHub Release binary.",
     "",
     "The OpenCode plugin remains `dist/index.js`; this directory is the Codex adapter bundle.",
   ]
   writeFileSync(join(pluginRoot, "README.md"), `${lines.join("\n")}\n`, "utf8")
+}
+
+export function stageCodexRuntime(projectRoot: string, pluginRoot: string): void {
+  const runtimeRoot = join(pluginRoot, "dist")
+  resetGeneratedDir(runtimeRoot, pluginRoot)
+  if (!existsSync(join(projectRoot, CODEX_LSP_ENTRYPOINT))) return
+
+  for (const relativeDir of CODEX_RUNTIME_DIRS) {
+    const source = join(projectRoot, relativeDir)
+    if (!existsSync(source)) continue
+    cpSync(source, join(pluginRoot, relativeDir), { recursive: true })
+  }
 }
 
 function renderAgentToml(agent: CodexAgentSpec): string {
