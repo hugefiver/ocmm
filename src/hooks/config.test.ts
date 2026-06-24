@@ -80,6 +80,17 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
   assert.match(clarifierPrompt, /pre-planning consultant/i)
 })
 
+test("orchestrator prompt requires intent verbalization", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
+  assert.match(prompt, /Intent Verbalization/)
+  assert.match(prompt, /我读到这是/)
+  assert.match(prompt, /I read this as/)
+})
+
 test("config registers OMO-compatible direct delegation aliases", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
