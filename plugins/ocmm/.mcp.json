@@ -15,7 +15,7 @@
     "lsp": {
       "command": "node",
       "args": [
-        "../../dist/cli/ocmm-lsp.js",
+        "./dist/cli/ocmm-lsp.js",
         "mcp"
       ],
       "cwd": "."

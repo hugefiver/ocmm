@@ -47,7 +47,7 @@ pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-ope
 ```
 
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
-It also includes the Codex marketplace file and generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/ocmm/`.
+It also includes the Codex marketplace file and a self-contained generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/ocmm/`; the Codex bundle carries its own plugin-local `dist/cli`, `dist/shared`, and `dist/bin` runtime so Codex's plugin cache can run the default `lsp` MCP.
 
 ```jsonc
 // opencode.json
@@ -103,8 +103,8 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 
 GitHub releases distribute `ocmm-lsp` in three forms:
 
-- bundled inside the OpenCode package tarball / GitHub Packages package under `dist/bin/`;
-- bundled inside the Codex release package under `dist/bin/`;
+- bundled inside the OpenCode package tarball / GitHub Packages package under `dist/bin/` and `plugins/ocmm/dist/bin/`;
+- bundled inside the Codex release package under `dist/bin/` and `plugins/ocmm/dist/bin/`;
 - standalone release assets named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
 
 Native binaries are built for:
@@ -158,7 +158,9 @@ ocmm also ships a Codex plugin bundle generated from the same local workflow dat
 plugins/ocmm/
   .codex-plugin/plugin.json
   .mcp.json
+  package.json
   agents/*.toml
+  dist/{cli,shared,bin}/
   skills/*
 ```
 
@@ -184,7 +186,7 @@ The Codex plugin exposes:
 
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
 - an `ocmm-workflow` skill that maps ocmm's planning/delegation semantics to Codex tools;
-- plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the package-relative `ocmm-lsp` wrapper;
+- plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
 - generated Codex agent TOML files under `plugins/ocmm/agents/` for installers or local agent registration.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
@@ -538,11 +540,11 @@ Releases are GitHub-only. Push a tag that matches `package.json` (`vX.Y.Z`) or r
 
 1. Runs typecheck and tests.
 2. Builds native `ocmm-lsp` binaries for Linux x64/arm64 glibc, Windows x64/arm64, and macOS x64/arm64.
-3. Builds TypeScript, checks the generated Codex plugin bundle, downloads all native binaries into `dist/bin/`, smoke-tests `node dist/cli/ocmm-lsp.js mcp`, and packs release install packages.
+3. Builds TypeScript, checks the generated Codex plugin bundle, downloads all native binaries into `dist/bin/`, smoke-tests both `node dist/cli/ocmm-lsp.js mcp` and `node plugins/ocmm/dist/cli/ocmm-lsp.js mcp`, and packs release install packages.
 4. Publishes `ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`, standalone native binaries, and `SHA256SUMS.txt` to GitHub Release assets.
 5. Publishes `@<owner>/ocmm` to GitHub Packages by default for tag releases, without publishing to npmjs.org.
 
-The OpenCode GitHub Release tarball and the GitHub Packages package contain the same runtime payload. The Codex tarball contains a package-root-shaped local marketplace install with the generated plugin and bundled `ocmm-lsp` wrapper. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
+The OpenCode GitHub Release tarball and the GitHub Packages package contain the same runtime payload. The Codex tarball contains a package-root-shaped local marketplace install with the generated plugin and plugin-local bundled `ocmm-lsp` wrapper, which continues to work after Codex copies the plugin into its cache. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
 
 ### Live integration test
 
