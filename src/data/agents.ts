@@ -44,7 +44,6 @@ export const BUILTIN_AGENTS: Agent[] = [
       requiresAnyModel: true,
       fallbackChain: [
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
   },
