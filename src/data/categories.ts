@@ -61,9 +61,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     description:
       "Autonomous multi-step research and delivery. Generous exploration budget; full delivery completion bar.",
     requirement: {
-      variant: "medium",
+      variant: "high",
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
       ],
@@ -87,7 +87,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
   },
@@ -98,7 +98,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["google", "google-vertex"], model: "gemini-3-flash" },
         { providers: ["minimax"], model: "minimax-m3" },
       ],
@@ -124,7 +124,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
       "Autonomous system development and feature implementation: explore, plan, implement, verify, and continue the loop until a complete deliverable works.",
     requirement: {
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },

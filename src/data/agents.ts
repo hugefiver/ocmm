@@ -4,9 +4,9 @@
  * Names are role-descriptive so users can read a stack trace or a config file
  * and immediately know what an agent does. There is no shared lore.
  *
- * 10 built-in agents:
+ * 9 built-in agents:
  *   orchestrator   - main coordinator; decomposes work + delegates
- *   worker         - autonomous implementer pinned to GPT-class providers
+ *   builder         - primary implementer; handles execution-heavy work
  *   reviewer       - read-only consultant for hard reasoning / debugging
  *   doc-search     - external library / docs / OSS lookups
  *   code-search    - internal codebase grep
@@ -14,7 +14,6 @@
  *   clarifier      - pre-plan analysis (intent, ambiguity, risk surfaces)
  *   plan-critic    - reviews plans for clarity / verifiability / completeness
  *   media-reader   - multimodal: images, PDFs, diagrams
- *   task-runner    - focused single-task executor with category + skill list
  */
 
 import type { Agent } from "../shared/types.ts"
@@ -31,20 +30,20 @@ export const BUILTIN_AGENTS: Agent[] = [
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
     },
   },
   {
-    name: "worker",
+    name: "builder",
     description:
-      "Autonomous implementer. Executes complex implementation independently. Pinned to GPT-class providers when available.",
+      "Primary implementer. Handles execution-heavy work and complex multi-step implementation. Pinned to GPT-class providers when available.",
     requirement: {
       requiresProvider: ["openai", "github-copilot", "vercel", "opencode"],
       requiresAnyModel: true,
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
@@ -130,23 +129,11 @@ export const BUILTIN_AGENTS: Agent[] = [
     name: "media-reader",
     description: "Analyzes media (images, PDFs, diagrams) - extracts structured info from visual content.",
     requirement: {
-      variant: "medium",
+      variant: "high",
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
         { providers: ["zhipu"], model: "glm-4.6v" },
-      ],
-    },
-  },
-  {
-    name: "task-runner",
-    description: "Focused single-task executor. Takes a category, skill list, and one clear goal.",
-    requirement: {
-      fallbackChain: [
-        { providers: ["anthropic"], model: "claude-sonnet-4-6" },
-        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "medium" },
-        { providers: ["minimax"], model: "minimax-m3" },
       ],
     },
   },
