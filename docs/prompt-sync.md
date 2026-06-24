@@ -10,7 +10,7 @@ Both workflows use the same prompt layers:
 prompts/<workflow>/
   agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
   deepwork/{default,gpt,gemini,glm,codex,planner}.md
-  category/{frontend,creative,hard-reasoning,research,quick,low-effort,high-effort,writing}.md
+  category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
 ```
 
 `workflow: "omo"` is the default local prompt set. `workflow: "v1"` is the deepwork skill-driven workflow that keeps the `v1` config/path label while model-visible text calls it the deepwork workflow.
@@ -42,9 +42,12 @@ prompts/<workflow>/
 2. Any change under `prompts/v1/` must update `docs/v1-maintenance.md`; if it changes upstream omo mapping, update this document too.
 3. Keep local model-facing prompts on local role names: `reviewer`, `planner`, `clarifier`, `plan-critic`, and `orchestrator`.
 4. Agent and category prompts should remain strongly aligned between `prompts/omo/` and `prompts/v1/`; the skill-driven workflow gets its distinct behavior from the deepwork layer and injected skills.
-5. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
-6. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
-7. When syncing from upstream, compare against `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\omo-shared-skills\repo` or a fresh checkout of the same upstream repository, then re-apply local naming and OpenCode/ocmm tool semantics.
+5. Category prompts must describe the work shape each category handles. Avoid routing language based on model strength, weak/strong labels, or vague difficulty tiers; say what kind of deliverable belongs in the category.
+   Local mapping for upstream categories: `hard-reasoning` is the ultrabrain-style decision category; `deep` is autonomous system development and feature delivery; `coding` is determined code editing and bug fixing. `normal-task` absorbs bounded fallback work with known acceptance criteria; `complex` absorbs coordinated cross-cutting fallback work that remains below autonomous feature delivery.
+6. Compatibility aliases are intentional: upstream-style `@oracle` maps to local `reviewer`, and `@explore` maps to local `code-search`. Category names such as `@deep` and `@quick` are exposed directly as category-subagents.
+7. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
+8. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
+9. When syncing from upstream, compare against `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\omo-shared-skills\repo` or a fresh checkout of the same upstream repository, then re-apply local naming and OpenCode/ocmm tool semantics.
 
 ## Last Upstream Prompt Check
 

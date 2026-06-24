@@ -1,5 +1,5 @@
 .omo/
-omo/
+/omo/
 node_modules/
 dist/
 *.log

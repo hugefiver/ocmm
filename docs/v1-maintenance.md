@@ -43,10 +43,12 @@ Naming note: `v1` remains the configuration value and on-disk version label. Pro
 | category/creative.md | (deepwork injected separately) | full omo creative category constraints | old shortened category router | strongly aligned category role; no visible version label |
 | category/hard-reasoning.md | (deepwork injected separately) | full omo hard-reasoning category constraints | old shortened category router | strongly aligned category role; no visible version label |
 | category/research.md | (deepwork injected separately) | full omo research category constraints | old shortened category router | strongly aligned category role; no visible version label |
-| category/quick.md | (deepwork injected separately) | full omo quick category constraints | old shortened category router | strongly aligned category role; no visible version label |
-| category/low-effort.md | (deepwork injected separately) | full omo low-effort category constraints | old shortened category router | strongly aligned category role; no visible version label |
-| category/high-effort.md | (deepwork injected separately) | full omo high-effort category constraints | old shortened category router | strongly aligned category role; no visible version label |
-| category/writing.md | (deepwork injected separately) | full omo writing category constraints | old shortened category router | strongly aligned category role; no visible version label |
+| category/quick.md | (deepwork injected separately) | full omo quick category constraints | old shortened category router | fully specified mechanical edits; strongly aligned category role; no visible version label |
+| category/coding.md | (deepwork injected separately) | bounded-code-edit category constraints | old shortened category router and vague effort label | determined code edits and bug fixes only; strongly aligned category role; no visible version label |
+| category/normal-task.md | (deepwork injected separately) | new local ordinary-task category | old vague effort category split | ordinary bounded tasks with known acceptance criteria; no visible version label |
+| category/complex.md | (deepwork injected separately) | new local coordinated-task category | old vague effort category split | coordinated multi-step ordinary tasks; no visible version label |
+| category/deep.md | (deepwork injected separately) | upstream deep category semantics | old shortened category router and vague effort label | autonomous system development and feature delivery loop; strongly aligned category role; no visible version label |
+| category/documenting.md | (deepwork injected separately) | prose and documentation discipline | old `writing` category name | standalone documentation/prose that does not change product behavior; no visible version label |
 
 ## Shared Characteristics
 
@@ -63,6 +65,7 @@ All v1 prompts share these principles (derived from superpowers skills):
 9. **Parallelize reads**: batch independent file reads
 10. **Deepwork tag envelope**: every `prompts/v1/deepwork/*.md` file is wrapped in `<deepwork-mode>` to match the omo prompt envelope while keeping `v1` only as the config/path label.
 11. **No model-visible version label**: files under `prompts/v1/` must not mention `v1` to the model. Use `deepwork` wording in model-facing prompt text.
+12. **Concrete category scope**: category prompts describe the work shape and deliverable they handle, not vague model strength or weak/strong capability levels. Local mapping: `hard-reasoning` covers ultrabrain-style decisions, `deep` covers autonomous system development and feature delivery, `coding` covers determined code edits and bug fixes, `normal-task` covers bounded fallback work with known acceptance criteria, `complex` covers coordinated multi-step or cross-cutting ordinary tasks that remain below autonomous feature delivery, and `documenting` covers standalone text.
 
 ## Maintenance Rules
 

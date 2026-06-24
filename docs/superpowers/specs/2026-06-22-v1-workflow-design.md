@@ -156,7 +156,8 @@ prompts/
       orchestrator.md, reviewer.md, planner.md, clarifier.md, plan-critic.md
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
-      quick.md, low-effort.md, high-effort.md, writing.md (8 files)
+      quick.md, coding.md, normal-task.md, complex.md, deep.md,
+      documenting.md (10 files)
     # NO mode/ — keyword-triggered modes removed
   v1/                                   # skill-driven deepwork workflow; v1 is config/path label only
     deepwork/
@@ -170,7 +171,8 @@ prompts/
       orchestrator.md, reviewer.md, planner.md, clarifier.md, plan-critic.md
     category/
       frontend.md, creative.md, hard-reasoning.md, research.md,
-      quick.md, low-effort.md, high-effort.md, writing.md (8 files)
+      quick.md, coding.md, normal-task.md, complex.md, deep.md,
+      documenting.md (10 files)
     # NO mode/ — no keyword-triggered modes
 ```
 
@@ -256,7 +258,7 @@ protocols.
 
 #### Category Prompts (`prompts/<workflow>/category/*.md`)
 
-Both workflows have 8 category prompts. Each ~30-50 lines, attached to
+Both workflows have 10 category prompts. Each ~20-60 lines, attached to
 category subagents at config time.
 
 Category prompts in both workflows stay strongly aligned. The skill-driven workflow gets deepwork mechanics from the deepwork prompt layer and injected skills, not from shortened category router prompts.
@@ -282,7 +284,7 @@ At config time, built-in functional agents compose `agents/<name>.md` with the s
 `src/hooks/config.ts` `createConfigHandler`:
 
 For **both** omo and v1:
-- Register 10 built-in agents + 8 categories
+- Register 10 built-in agents + 10 categories
 - Each built-in agent gets a `prompt` field set to the deepwork variant
   appropriate for its `requirement.fallbackChain[0].model` (model-family
   classification at config time)
@@ -489,7 +491,7 @@ Doc structure:
 | agents/planner.md | writing-plans | Prometheus planning scope | `.omo`-only planning flow | local plan path + writing-plans skill |
 | agents/clarifier.md | brainstorming/writing-plans | Metis intent and ambiguity analysis | `call_omo_agent`, Prometheus-only handoff | local clarifier directives |
 | agents/plan-critic.md | writing-plans/review skills | Momus blocker-focused review | Momus branding, `.omo/plans`-only input | local plan-critic review |
-| category/*.md | varies | upstream/default omo category constraints | old shortened category routers | strongly aligned category roles; deepwork mechanics come from injected skills |
+| category/*.md | varies | upstream/default omo category constraints plus local ordinary-task split | old shortened category routers and vague strength-tier language | strongly aligned category roles that describe concrete work shapes: `hard-reasoning` = ultrabrain-style decisions, `deep` = autonomous system development and feature delivery, `coding` = determined code edits and bug fixes, `normal-task`/`complex` = configurable ordinary-task levels, `documenting` = standalone text; deepwork mechanics come from injected skills |
 
 ## Shared Characteristics
 5-phase chain, TDD, two-stage review, no performative agreement, bite-sized
@@ -529,13 +531,13 @@ omo prompts (`prompts/omo/`) are not tracked in this doc.
 1. **Schema test**: `workflow` field accepts `'omo'`/`'v1'`, rejects invalid,
    defaults to `'omo'` when absent
 2. **Prompt-loader test**: `loadAllPrompts(root, 'v1')` loads from
-   `prompts/v1/` (deepwork + category, no mode); `loadAllPrompts(root, 'omo')`
-   loads from `prompts/omo/` (deepwork + category, no mode); default loads omo
+   `prompts/v1/` (deepwork + agents + category, no mode); `loadAllPrompts(root, 'omo')`
+   loads from `prompts/omo/` (deepwork + agents + category, no mode); default loads omo
 3. **Config merge test**: user `workflow:'v1'` + project `workflow:'omo'` ->
    project wins
-4. **Config hook test (both)**: built-in agents get `prompt` field set to
+4. **Config hook test (both)**: built-in functional agents get role prompt plus
    deepwork variant based on `fallbackChain[0].model`; categories get category
-   prompts
+   prompts; compatibility aliases expose `@oracle` and `@explore`
 5. **Config hook variant selection**: planner agent -> `planner.md`; gpt family
    model -> `gpt.md`; gemini family -> `gemini.md`; glm family -> `glm.md`;
    codex family -> `codex.md`; other -> `default.md`
@@ -570,13 +572,12 @@ Follow `AGENTS.md` live test procedure. Test both workflows:
 ### Manual Prompt Review
 
 Each v1 prompt file reviewed for:
-- No omo-style aggression (no CODE RED, no ABSOLUTE CERTAINTY, no NO EXCUSES)
-- References skills by name (does not inline skill content)
-- Contains the 5-phase chain
-- Contains TDD cycle mention
-- Contains two-stage review mention
-- Contains no performative agreement rule
-- Line count within target range
+- No model-visible `v1` wording; use `deepwork` when naming the workflow to the model.
+- `deepwork/default.md` remains the concise local controller.
+- Non-default model-family deepwork prompts preserve upstream constraints and command style with local OpenCode/ocmm adaptations.
+- Agent and category prompts stay aligned with omo counterparts.
+- Category prompts describe concrete work shape rather than model strength or vague difficulty.
+- Category names and docs expose `quick`, `coding`, `normal-task`, `complex`, `deep`, and `documenting` with distinct responsibilities. Upstream fallback-bucket semantics are folded into `normal-task` and `complex`; no separate fallback-bucket category names are exposed locally.
 
 ### Manual Skill Review
 
@@ -589,7 +590,7 @@ Each v1 skill file reviewed for:
 ### Maintenance Doc Verification
 
 - `docs/v1-maintenance.md` exists with Skills Source Mapping (5 rows) and
-  Prompt Source Mapping (19 rows: 6 deepwork + 5 agents + 8 category)
+  Prompt Source Mapping (21 rows: 6 deepwork + 5 agents + 10 category)
   Deepwork tag envelope note for `prompts/v1/deepwork/*.md`
 - `AGENTS.md` contains v1 Maintenance section with bidirectional sync rule
 - Every v1 file has a row; no row references non-existent file
@@ -643,7 +644,7 @@ None at design time.
    detection, `opencode run` works
 5. Live test `workflow:'v1'`: agents have v1 prompts attached, skills
    injected via `system.transform`, `opencode run` works
-6. Both `prompts/omo/` and `prompts/v1/` exist (deepwork + category, no mode)
+6. Both `prompts/omo/` and `prompts/v1/` exist (deepwork + agents + category, no mode)
 7. `skills/v1/` exists with 5 skill directories, each with SKILL.md + header
 8. `docs/v1-maintenance.md` exists with complete Source Mapping tables
 9. `AGENTS.md` contains v1 Maintenance bidirectional sync rule

@@ -106,7 +106,7 @@ opencode debug config --print-logs --log-level DEBUG 2>&1 | rg "ocmm"
 Expected lines:
 ```
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
-[ocmm] loaded prompts: workflow=v1 deepwork=6/6, agents=5/5, category=8/8
+[ocmm] loaded prompts: workflow=v1 deepwork=6/6, agents=5/5, category=10/10
 [ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
 [ocmm] config: registered N agents (built-in + categories + user)
 ```
