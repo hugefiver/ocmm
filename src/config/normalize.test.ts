@@ -98,9 +98,9 @@ test("schema accepts rules namespace and defaults disabled", () => {
   assert.equal(parsed.data.rules.skipClaudeUserRules, true)
 })
 
-test("schema accepts mcp namespace and defaults disabled", () => {
+test("schema accepts mcp namespace and defaults enabled", () => {
   assert.deepEqual(OcmmConfigSchema.parse({}).mcp, {
-    enabled: false,
+    enabled: true,
     envAllowlist: [],
     websearch: { provider: "exa" },
     servers: {},
@@ -132,6 +132,7 @@ test("schema accepts rich agent override fields", () => {
       reviewer: {
         model: "openai/gpt-5.5",
         tools: { bash: false, read: true },
+        permission: { task: "allow", question: "deny" },
         skills: ["git-master", "debugging"],
         promptAppend: "file://./reviewer-extra.md",
         temperature: 0.2,
@@ -145,6 +146,7 @@ test("schema accepts rich agent override fields", () => {
   assert.equal(parsed.success, true)
   if (!parsed.success) return
   assert.deepEqual(parsed.data.agents?.reviewer?.tools, { bash: false, read: true })
+  assert.deepEqual(parsed.data.agents?.reviewer?.permission, { task: "allow", question: "deny" })
   assert.deepEqual(parsed.data.agents?.reviewer?.skills, ["git-master", "debugging"])
   assert.equal(parsed.data.agents?.reviewer?.promptAppend, "file://./reviewer-extra.md")
   assert.equal(parsed.data.agents?.reviewer?.reasoningEffort, "high")
@@ -187,6 +189,15 @@ test("normalizeShorthand expands fallbackModels strings", () => {
   assert.equal(norm!.requirement?.fallbackChain.length, 3)
   assert.equal(norm!.requirement?.fallbackChain[1]?.model, "kimi-k2.6")
   assert.equal(norm!.requirement?.fallbackChain[2]?.model, "deepseek-v4-flash")
+})
+
+test("normalizeShorthand converts tools to permission and preserves explicit permission", () => {
+  const norm = normalizeShorthand({
+    model: "openai/gpt-5.5",
+    tools: { task: true, bash: false },
+    permission: { bash: "ask" },
+  })
+  assert.deepEqual(norm?.permission, { task: "allow", bash: "ask" })
 })
 
 test("normalizeShorthand passes through full requirement when present", () => {

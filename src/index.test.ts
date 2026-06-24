@@ -25,10 +25,11 @@ async function withIsolatedConfig<T>(projectConfig: unknown | null, run: (cwd: s
   }
 }
 
-test("plugin omits hashline edit tool by default", async () => {
+test("plugin omits hashline edit tool and exposes skill_mcp by default", async () => {
   await withIsolatedConfig(null, (cwd) => {
     const { pluginInterface } = createPlugin({ directory: cwd })
-    assert.equal(pluginInterface.tool, undefined)
+    assert.equal(pluginInterface.tool?.edit, undefined)
+    assert.equal(typeof pluginInterface.tool?.skill_mcp.execute, "function")
     assert.equal(typeof pluginInterface["tool.execute.before"], "function")
     assert.equal(typeof pluginInterface["tool.execute.after"], "function")
     assert.equal(typeof pluginInterface["tool.definition"], "function")
@@ -76,7 +77,8 @@ test("reload refreshes config-dependent tool map", async () => {
 
     writeFileSync(configPath, JSON.stringify({}))
     reload()
-    assert.equal(pluginInterface.tool, undefined)
+    assert.equal(pluginInterface.tool?.edit, undefined)
+    assert.equal(typeof pluginInterface.tool?.skill_mcp.execute, "function")
   })
 })
 

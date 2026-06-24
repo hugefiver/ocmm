@@ -48,6 +48,7 @@ const ShorthandFields = {
 
 const AgentOverrideFields = {
   tools: z.record(z.string(), z.boolean()).optional(),
+  permission: z.record(z.string(), z.enum(["ask", "allow", "deny"])).optional(),
   skills: z.array(z.string()).optional(),
   promptAppend: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -205,7 +206,7 @@ export const McpServerConfigSchema = z.discriminatedUnion("type", [
 
 export const McpConfigSchema = z
   .object({
-    enabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     envAllowlist: z.array(z.string()).default([]),
     websearch: z
       .object({

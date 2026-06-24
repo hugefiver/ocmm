@@ -1,3 +1,5 @@
+import { dirname } from "node:path"
+
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
@@ -46,8 +48,18 @@ function applyAgentEntry(
   }
   if (extras?.mode && typeof existing.mode !== "string") existing.mode = extras.mode
   if (extras?.prompt && typeof existing.prompt !== "string") existing.prompt = extras.prompt
+  if (override?.permission) mergePermission(existing, override.permission, true)
 
   agentMap[agent.name] = existing
+}
+
+function mergePermission(entry: Record<string, unknown>, permission: Record<string, string>, overwrite: boolean): void {
+  const existing = isRecord(entry.permission) ? entry.permission : {}
+  const merged = { ...existing }
+  for (const [name, value] of Object.entries(permission)) {
+    if (overwrite || merged[name] === undefined) merged[name] = value
+  }
+  entry.permission = merged
 }
 
 function deepworkPromptForAgent(
@@ -167,11 +179,31 @@ export function createConfigHandler(args: {
     }
 
     registerCompatAgentAliases(agentMap, disabled)
+    registerDefaultPermissions(target, agentMap)
 
     log.info(
       `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registeredSkills} skills, ${registeredMcps} MCPs`,
     )
   }
+}
+
+function registerDefaultPermissions(target: Record<string, unknown>, agentMap: Record<string, unknown>): void {
+  const topLevel = isRecord(target.permission) ? target.permission : {}
+  target.permission = topLevel
+  mergePermission(target, { webfetch: "allow", external_directory: "allow", task: "deny" }, false)
+
+  for (const name of ["orchestrator", "builder", "planner", "deep", "complex", "coding", "normal-task"]) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) mergePermission(entry, { task: "allow", question: "allow", "task_*": "allow" }, false)
+  }
+
+  for (const name of ["reviewer", "oracle", "doc-search", "code-search", "explore", "media-reader", "clarifier", "plan-critic"]) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) mergePermission(entry, { task: "deny" }, false)
+  }
+
+  const docSearch = agentMap["doc-search"]
+  if (isRecord(docSearch)) mergePermission(docSearch, { "grep_app_*": "allow" }, false)
 }
 
 function registerCompatAgentAliases(
@@ -210,10 +242,16 @@ function registerSharedSkills(
   if (!Array.isArray(skillsConfig.paths)) skillsConfig.paths = []
   const paths = skillsConfig.paths as unknown[]
   const seen = new Set(paths.filter((p): p is string => typeof p === "string"))
+
+  const parentDirs = new Set<string>()
   for (const skill of selected) {
-    if (seen.has(skill.path)) continue
-    paths.push(skill.path)
-    seen.add(skill.path)
+    parentDirs.add(dirname(skill.path))
+  }
+  for (const dir of parentDirs) {
+    if (!seen.has(dir)) {
+      paths.push(dir)
+      seen.add(dir)
+    }
   }
   return selected.length
 }

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
-import { basename, dirname, join, resolve } from "node:path"
+import { basename, delimiter, dirname, join, resolve } from "node:path"
 
 import type { McpConfig, McpServerConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
@@ -40,8 +40,7 @@ export function createBuiltinMcps(config: McpConfig, disabledMcps: readonly stri
   }
   if (!disabled.has("context7")) servers.context7 = remote("https://mcp.context7.com/mcp", context7Headers(config))
   if (!disabled.has("grep_app")) servers.grep_app = remote("https://mcp.grep.app")
-  if (!disabled.has("lsp")) servers.lsp = local(["lsp-tools-mcp", "mcp"], { enabled: false })
-  if (!disabled.has("codegraph")) servers.codegraph = local(["codegraph", "serve", "--mcp"], { enabled: false })
+  if (!disabled.has("lsp")) servers.lsp = local(["omo-lsp", "mcp"], { enabled: commandAvailable("omo-lsp") })
   return servers
 }
 
@@ -166,6 +165,20 @@ function context7Headers(config: McpConfig): Record<string, string> | undefined 
 function envIfAllowed(name: string, config: McpConfig): string | undefined {
   if (!config.envAllowlist.includes(name)) return undefined
   return process.env[name]
+}
+
+function commandAvailable(command: string): boolean {
+  const pathEnv = process.env.PATH
+  if (!pathEnv) return false
+  const extensions = process.platform === "win32"
+    ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
+    : [""]
+  for (const dir of pathEnv.split(delimiter)) {
+    for (const ext of extensions) {
+      if (existsSync(join(dir, command + ext.toLowerCase())) || existsSync(join(dir, command + ext))) return true
+    }
+  }
+  return false
 }
 
 function remote(url: string, headers?: Record<string, string>): McpServerConfig {
