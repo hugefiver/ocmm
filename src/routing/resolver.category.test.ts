@@ -12,10 +12,10 @@ test("category-default: matches frontend's preferred chain on gemini-3.1-pro", (
   assert.ok(r)
   assert.equal(r!.source, "category-default")
   assert.equal(r!.entry.model, "gemini-3.1-pro")
-  assert.equal(r!.variant, "high")
+  assert.equal(r!.variant, "max")
 })
 
-test("category-default: hard-reasoning + gpt-5.5 -> xhigh variant", () => {
+test("category-default: hard-reasoning + gpt-5.5 -> max variant", () => {
   const r = resolveModelRouting({
     agentName: "hard-reasoning",
     modelID: "gpt-5.5",
@@ -23,10 +23,10 @@ test("category-default: hard-reasoning + gpt-5.5 -> xhigh variant", () => {
   })
   assert.ok(r)
   assert.equal(r!.source, "category-default")
-  assert.equal(r!.variant, "xhigh")
+  assert.equal(r!.variant, "max")
 })
 
-test("category-default: documenting has no variant when chain entry has none", () => {
+test("category-default: documenting uses max variant for complex-task policy", () => {
   const r = resolveModelRouting({
     agentName: "documenting",
     modelID: "k2p5",
@@ -35,7 +35,7 @@ test("category-default: documenting has no variant when chain entry has none", (
   assert.ok(r)
   assert.equal(r!.source, "category-default")
   assert.equal(r!.entry.model, "k2p5")
-  assert.equal(r!.variant, undefined)
+  assert.equal(r!.variant, "max")
 })
 
 test("user category override beats built-in category", () => {
@@ -51,7 +51,7 @@ test("user category override beats built-in category", () => {
     },
   })
   assert.ok(r)
-  assert.equal(r!.source, "category-default")
+  assert.equal(r!.source, "user-config")
   assert.equal(r!.variant, "low")
 })
 
@@ -67,7 +67,7 @@ test("agent name takes priority over category lookup when both exist", () => {
   assert.equal(r!.variant, "max")
 })
 
-test("input variant overrides category variant", () => {
+test("explicit input variant is respected for category work", () => {
   const r = resolveModelRouting({
     agentName: "research",
     modelID: "gpt-5.5",
@@ -76,6 +76,17 @@ test("input variant overrides category variant", () => {
   })
   assert.equal(r!.source, "category-default")
   assert.equal(r!.variant, "minimal")
+})
+
+test("quick remains lightweight and can accept explicit low variant", () => {
+  const r = resolveModelRouting({
+    agentName: "quick",
+    modelID: "gpt-5.4-mini",
+    providerID: "openai",
+    inputVariant: "low",
+  })
+  assert.equal(r!.source, "category-default")
+  assert.equal(r!.variant, "low")
 })
 
 test("category-default: coding resolves bounded code-edit category", () => {
@@ -87,6 +98,7 @@ test("category-default: coding resolves bounded code-edit category", () => {
   assert.ok(r)
   assert.equal(r!.source, "category-default")
   assert.equal(r!.entry.model, "claude-sonnet-4-6")
+  assert.equal(r!.variant, "max")
 })
 
 test("category-default: deep resolves autonomous delivery category", () => {
@@ -109,6 +121,7 @@ test("category-default: normal-task resolves ordinary bounded task category", ()
   assert.ok(r)
   assert.equal(r!.source, "category-default")
   assert.equal(r!.entry.model, "claude-sonnet-4-6")
+  assert.equal(r!.variant, "max")
 })
 
 test("category-default: complex resolves coordinated ordinary task category", () => {
@@ -119,5 +132,5 @@ test("category-default: complex resolves coordinated ordinary task category", ()
   })
   assert.ok(r)
   assert.equal(r!.source, "category-default")
-  assert.equal(r!.variant, "high")
+  assert.equal(r!.variant, "max")
 })
