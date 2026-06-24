@@ -7,9 +7,11 @@ import { isAbsolute, join } from "node:path"
 import { defaultConfig } from "../config/schema.ts"
 import {
   buildCodexAgents,
+  CODEX_AGENT_PREFIX,
   CODEX_MARKETPLACE_NAME,
   CODEX_PLUGIN_DIR,
   CODEX_PLUGIN_NAME,
+  CODEX_WORKFLOW_SKILL_NAME,
   createCodexMcpManifest,
   createMarketplaceManifest,
   createPluginManifest,
@@ -26,6 +28,7 @@ test("Codex manifest declares ocmm plugin resources", () => {
   assert.equal(manifest.skills, "./skills/")
   assert.equal(manifest.mcpServers, "./.mcp.json")
   assert.equal((manifest.interface as Record<string, unknown>).displayName, "ocmm")
+  assert.match(String(manifest.description), /deepwork/)
 })
 
 test("Codex plugin runtime package enables ESM wrappers", () => {
@@ -133,10 +136,12 @@ test("Codex agents are generated from ocmm prompts and Codex-compatible fallback
     skillsRoot: join(process.cwd(), "skills"),
   })
 
-  const orchestrator = agents.find((agent) => agent.name === "ocmm-orchestrator")
-  const builder = agents.find((agent) => agent.name === "ocmm-builder")
-  const deep = agents.find((agent) => agent.name === "ocmm-deep")
-  const documenting = agents.find((agent) => agent.name === "ocmm-documenting")
+  const orchestrator = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-orchestrator`)
+  const builder = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-builder`)
+  const deep = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-deep`)
+  const documenting = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-documenting`)
+  const oracle = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle`)
+  const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
   assert.ok(orchestrator)
   assert.equal(orchestrator.model, "gpt-5.5")
@@ -149,6 +154,8 @@ test("Codex agents are generated from ocmm prompts and Codex-compatible fallback
   assert.equal(deep.reasoningEffort, "high")
   assert.ok(documenting)
   assert.equal(documenting.model, "gpt-5.5")
+  assert.ok(oracle)
+  assert.ok(creative)
 })
 
 test("generateCodexPlugin writes a self-contained bundle", async () => {
@@ -165,9 +172,12 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const manifest = JSON.parse(readFileSync(join(result.pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as Record<string, unknown>
     const runtimePackage = JSON.parse(readFileSync(join(result.pluginRoot, "package.json"), "utf8")) as Record<string, unknown>
     const marketplace = JSON.parse(readFileSync(result.marketplacePath, "utf8")) as Record<string, unknown>
-    const orchestrator = readFileSync(join(result.pluginRoot, "agents", "ocmm-orchestrator.toml"), "utf8")
-    const workflowSkill = readFileSync(join(result.pluginRoot, "skills", "ocmm-workflow", "SKILL.md"), "utf8")
+    const orchestrator = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-orchestrator.toml`), "utf8")
+    const oracle = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle.toml`), "utf8")
+    const creative = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-creative.toml`), "utf8")
+    const workflowSkill = readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8")
     const deepworkSkill = readFileSync(join(result.pluginRoot, "skills", "deepwork-writing-plans", "SKILL.md"), "utf8")
+    const debuggingSkill = readFileSync(join(result.pluginRoot, "skills", "debugging", "SKILL.md"), "utf8")
     const gitAgentMetadata = readFileSync(join(result.pluginRoot, "skills", "git-master", "agents", "openai.yaml"), "utf8")
     const mcpManifest = readFileSync(join(result.pluginRoot, ".mcp.json"), "utf8")
     const mcp = JSON.parse(mcpManifest) as { mcpServers: Record<string, { args?: string[] }> }
@@ -179,9 +189,15 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(mcpManifest, /"lsp"/)
     assert.match(mcpManifest, /ocmm-lsp\.js/)
     assert.equal(isAbsolute(lspEntrypoint), false)
-    assert.match(orchestrator, /^name = "ocmm-orchestrator"$/m)
+    assert.match(orchestrator, /^name = "dw-orchestrator"$/m)
+    assert.match(oracle, /^name = "dw-oracle"$/m)
+    assert.match(creative, /^name = "dw-creative"$/m)
+    assert.match(workflowSkill, /^---\nname: deepwork$/m)
     assert.match(workflowSkill, /Generated Agents/)
+    assert.match(workflowSkill, /\| dw-oracle \|/)
+    assert.match(workflowSkill, /\| dw-creative \|/)
     assert.match(deepworkSkill, /^---\nname: deepwork-writing-plans$/m)
+    assert.match(debuggingSkill, /Codex Compatibility/)
     assert.doesNotMatch(gitAgentMetadata, /search_terms/)
     assert.equal(result.agentCount > 10, true)
     assert.equal(result.skillCount >= 6, true)

@@ -28,6 +28,8 @@ export const CODEX_PLUGIN_NAME = "ocmm"
 export const CODEX_MARKETPLACE_NAME = "ocmm-local"
 export const CODEX_PLUGIN_DIR = `plugins/${CODEX_PLUGIN_NAME}`
 export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
+export const CODEX_AGENT_PREFIX = "dw"
+export const CODEX_WORKFLOW_SKILL_NAME = "deepwork"
 const CODEX_LSP_ENTRYPOINT = join("dist", "cli", "ocmm-lsp.js")
 const CODEX_RUNTIME_DIRS = [
   join("dist", "cli"),
@@ -168,7 +170,7 @@ export async function buildCodexAgents(args: {
       : `ocmm ${sourceName} agent.`
 
     agents.push({
-      name: `ocmm-${sourceName}`,
+      name: `${CODEX_AGENT_PREFIX}-${sourceName}`,
       sourceName,
       description,
       model,
@@ -239,7 +241,7 @@ export function createPluginManifest(version: string): Record<string, unknown> {
   return {
     name: CODEX_PLUGIN_NAME,
     version,
-    description: "Codex adapter for ocmm workflows, agents, skills, and MCP tool registrations.",
+    description: "Codex adapter for deepwork workflows, ocmm agents, skills, and MCP tool registrations.",
     author: { name: "Hugefiver" },
     license: "LicenseRef-AAAPL",
     keywords: ["codex", "codex-plugin", "ocmm", "workflow", "skills", "mcp"],
@@ -247,16 +249,16 @@ export function createPluginManifest(version: string): Record<string, unknown> {
     mcpServers: "./.mcp.json",
     interface: {
       displayName: "ocmm",
-      shortDescription: "ocmm workflows and tools for Codex",
+      shortDescription: "Deepwork workflows and ocmm tools for Codex",
       longDescription:
-        "ocmm exposes its OpenCode-proven workflow prompts, shared skills, deepwork skills, generated agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
+        "ocmm exposes its OpenCode-proven deepwork workflow prompts, shared skills, generated dw-* agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
       developerName: "Hugefiver",
       category: "Developer Tools",
       capabilities: ["Skills", "MCP Tools", "Workflow", "Multi-Agent Guidance"],
       defaultPrompt: [
-        "Use ocmm workflow to plan and ship this change.",
-        "Review this repo with ocmm reviewer discipline.",
-        "Use ocmm research tools for current docs.",
+        "Use deepwork to plan and ship this change.",
+        "Review this repo with deepwork reviewer discipline.",
+        "Use deepwork research tools for current docs.",
       ],
       brandColor: "#0F766E",
       screenshots: [],
@@ -332,7 +334,7 @@ function writeCodexSkills(args: {
     count += 1
   }
 
-  const workflowSkillDir = join(outDir, "ocmm-workflow")
+  const workflowSkillDir = join(outDir, CODEX_WORKFLOW_SKILL_NAME)
   mkdirSync(workflowSkillDir, { recursive: true })
   writeFileSync(
     join(workflowSkillDir, "SKILL.md"),
@@ -353,6 +355,8 @@ function writePluginReadme(pluginRoot: string, config: OcmmConfig, agents: reado
     "- Skills are copied from `skills/` plus flattened `skills/v1/` deepwork skills.",
     "- MCP servers are generated from the ocmm `mcp` config namespace.",
     "- The default `lsp` MCP uses the plugin-local `ocmm-lsp` wrapper and bundled GitHub Release binary.",
+    `- Workflow skill: \`${CODEX_WORKFLOW_SKILL_NAME}\`.`,
+    `- Generated Codex agent profiles use the \`${CODEX_AGENT_PREFIX}-*\` prefix, including functional agents such as \`${CODEX_AGENT_PREFIX}-oracle\` and \`${CODEX_AGENT_PREFIX}-creative\`.`,
     "",
     "The OpenCode plugin remains `dist/index.js`; this directory is the Codex adapter bundle.",
   ]
@@ -393,13 +397,13 @@ function renderWorkflowSkill(config: OcmmConfig, agents: readonly CodexAgentSpec
     .map((agent) => `| ${agent.name} | ${agent.model} | ${agent.reasoningEffort} | ${agent.sourceName} |`)
     .join("\n")
   return `---
-name: ocmm-workflow
-description: "MUST USE when the user asks for ocmm/deepwork-style planning, multi-agent execution, code review, research, or workflow routing inside Codex."
+name: ${CODEX_WORKFLOW_SKILL_NAME}
+description: "MUST USE when the user asks for deepwork-style planning, multi-agent execution, code review, research, or workflow routing inside Codex."
 ---
 
-# ocmm Workflow
+# Deepwork
 
-This is the Codex adapter skill for ocmm. Use it to apply ocmm's autonomous workflow semantics inside Codex while leaving the OpenCode plugin untouched.
+This is the Codex adapter skill for deepwork. Use it to apply ocmm's autonomous workflow semantics inside Codex while leaving the OpenCode plugin untouched.
 
 ## Runtime Mapping
 
@@ -407,14 +411,14 @@ This is the Codex adapter skill for ocmm. Use it to apply ocmm's autonomous work
 - Use Codex \`multi_agent_v1.spawn_agent\` when delegation is useful and available. Give each subagent a concrete, self-contained task and set \`fork_context=false\` unless the task genuinely needs inherited history.
 - Use Codex MCP tools exposed by this plugin for docs/search/context where available.
 - Use Codex \`apply_patch\` for manual edits; use shell commands for read-only inspection and project verification.
-- Use generated agent TOML files under \`plugins/ocmm/agents/\` as installable profiles when you want ocmm role prompts as Codex agents.
+- Use generated \`${CODEX_AGENT_PREFIX}-*\` agent TOML files under \`plugins/ocmm/agents/\` as installable profiles when you want ocmm role prompts as Codex agents.
 
 ## Workflow
 
 Configured workflow: \`${config.workflow}\`
 
 1. Classify the request into quick, normal-task, coding, complex, deep, research, frontend, hard-reasoning, creative, or documenting.
-2. Select the matching ocmm role or generated Codex agent.
+2. Select the matching ocmm role or generated \`${CODEX_AGENT_PREFIX}-*\` Codex agent.
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
@@ -434,7 +438,7 @@ function codexAgentInstructions(args: {
 }): string {
   const chain = args.preferredChain.length ? args.preferredChain.join(" -> ") : "<none>"
   return [
-    `You are the Codex adapter for ocmm agent "${args.sourceName}".`,
+    `You are the deepwork Codex adapter for ocmm agent "${args.sourceName}".`,
     `ocmm workflow: ${args.workflow}.`,
     `OpenCode preferred fallback chain: ${chain}.`,
     "",
