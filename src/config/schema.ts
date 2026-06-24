@@ -296,6 +296,7 @@ export type ShimConfig = z.infer<typeof ShimConfigSchema>
 
 export const OcmmConfigSchema = z
   .object({
+    $schema: z.string().optional(),
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
     agents: z.record(z.string(), AgentEntrySchema).optional(),
     disabledAgents: z.array(z.string()).optional(),

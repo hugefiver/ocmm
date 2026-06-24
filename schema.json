@@ -1,0 +1,1409 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "categories": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "minimal",
+              "none",
+              "auto",
+              "thinking"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "fallbackModels": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "reasoningEffort": {
+                      "type": "string"
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "topP": {
+                      "type": "number"
+                    },
+                    "maxTokens": {
+                      "type": "number"
+                    },
+                    "thinking": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enabled",
+                            "disabled"
+                          ]
+                        },
+                        "budgetTokens": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "providers",
+                    "model"
+                  ]
+                }
+              ]
+            }
+          },
+          "requirement": {
+            "type": "object",
+            "properties": {
+              "fallbackChain": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "reasoningEffort": {
+                      "type": "string"
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "topP": {
+                      "type": "number"
+                    },
+                    "maxTokens": {
+                      "type": "number"
+                    },
+                    "thinking": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enabled",
+                            "disabled"
+                          ]
+                        },
+                        "budgetTokens": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "providers",
+                    "model"
+                  ]
+                }
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "minimal",
+                  "none",
+                  "auto",
+                  "thinking"
+                ]
+              },
+              "requiresModel": {
+                "type": "string"
+              },
+              "requiresAnyModel": {
+                "type": "boolean"
+              },
+              "requiresProvider": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "fallbackChain"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "minimal",
+              "none",
+              "auto",
+              "thinking"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "fallbackModels": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "reasoningEffort": {
+                      "type": "string"
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "topP": {
+                      "type": "number"
+                    },
+                    "maxTokens": {
+                      "type": "number"
+                    },
+                    "thinking": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enabled",
+                            "disabled"
+                          ]
+                        },
+                        "budgetTokens": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "providers",
+                    "model"
+                  ]
+                }
+              ]
+            }
+          },
+          "requirement": {
+            "type": "object",
+            "properties": {
+              "fallbackChain": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "reasoningEffort": {
+                      "type": "string"
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "topP": {
+                      "type": "number"
+                    },
+                    "maxTokens": {
+                      "type": "number"
+                    },
+                    "thinking": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enabled",
+                            "disabled"
+                          ]
+                        },
+                        "budgetTokens": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "providers",
+                    "model"
+                  ]
+                }
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "minimal",
+                  "none",
+                  "auto",
+                  "thinking"
+                ]
+              },
+              "requiresModel": {
+                "type": "string"
+              },
+              "requiresAnyModel": {
+                "type": "boolean"
+              },
+              "requiresProvider": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "fallbackChain"
+            ]
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "promptAppend": {
+            "type": "string"
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "topP": {
+            "type": "number"
+          },
+          "maxTokens": {
+            "type": "number"
+          },
+          "thinking": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ]
+              },
+              "budgetTokens": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "type"
+            ]
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "disabledAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disabledHooks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disabledTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disabledSkills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disabledCommands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disabledMcps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "recursive": {
+                    "type": "boolean"
+                  },
+                  "glob": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "path"
+                ]
+              }
+            ]
+          }
+        },
+        "enable": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disable": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "fallbackModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "systemDefaultModel": {
+      "type": "string"
+    },
+    "workflow": {
+      "type": "string",
+      "enum": [
+        "omo",
+        "v1"
+      ]
+    },
+    "intent": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "skipAgents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeFallback": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "dispatch": {
+          "type": "boolean"
+        },
+        "maxAttempts": {
+          "type": "number"
+        },
+        "cooldownSeconds": {
+          "type": "number"
+        },
+        "retryOnStatusCodes": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "retryOnPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hashline": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "skipClaudeUserRules": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "mcp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "envAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "websearch": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "exa",
+                "tavily"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "servers": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max",
+                    "minimal",
+                    "none",
+                    "auto",
+                    "thinking"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "fallbackModels": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "minimal",
+                              "none",
+                              "auto",
+                              "thinking"
+                            ]
+                          },
+                          "reasoningEffort": {
+                            "type": "string"
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "topP": {
+                            "type": "number"
+                          },
+                          "maxTokens": {
+                            "type": "number"
+                          },
+                          "thinking": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "enabled",
+                                  "disabled"
+                                ]
+                              },
+                              "budgetTokens": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "providers",
+                          "model"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "requirement": {
+                  "type": "object",
+                  "properties": {
+                    "fallbackChain": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "minimal",
+                              "none",
+                              "auto",
+                              "thinking"
+                            ]
+                          },
+                          "reasoningEffort": {
+                            "type": "string"
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "topP": {
+                            "type": "number"
+                          },
+                          "maxTokens": {
+                            "type": "number"
+                          },
+                          "thinking": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "enabled",
+                                  "disabled"
+                                ]
+                              },
+                              "budgetTokens": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "providers",
+                          "model"
+                        ]
+                      }
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "requiresModel": {
+                      "type": "string"
+                    },
+                    "requiresAnyModel": {
+                      "type": "boolean"
+                    },
+                    "requiresProvider": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "fallbackChain"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "agents": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max",
+                    "minimal",
+                    "none",
+                    "auto",
+                    "thinking"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "fallbackModels": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "minimal",
+                              "none",
+                              "auto",
+                              "thinking"
+                            ]
+                          },
+                          "reasoningEffort": {
+                            "type": "string"
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "topP": {
+                            "type": "number"
+                          },
+                          "maxTokens": {
+                            "type": "number"
+                          },
+                          "thinking": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "enabled",
+                                  "disabled"
+                                ]
+                              },
+                              "budgetTokens": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "providers",
+                          "model"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "requirement": {
+                  "type": "object",
+                  "properties": {
+                    "fallbackChain": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "minimal",
+                              "none",
+                              "auto",
+                              "thinking"
+                            ]
+                          },
+                          "reasoningEffort": {
+                            "type": "string"
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "topP": {
+                            "type": "number"
+                          },
+                          "maxTokens": {
+                            "type": "number"
+                          },
+                          "thinking": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "enabled",
+                                  "disabled"
+                                ]
+                              },
+                              "budgetTokens": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "providers",
+                          "model"
+                        ]
+                      }
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "minimal",
+                        "none",
+                        "auto",
+                        "thinking"
+                      ]
+                    },
+                    "requiresModel": {
+                      "type": "string"
+                    },
+                    "requiresAnyModel": {
+                      "type": "boolean"
+                    },
+                    "requiresProvider": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "fallbackChain"
+                  ]
+                },
+                "tools": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                },
+                "skills": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "promptAppend": {
+                  "type": "string"
+                },
+                "temperature": {
+                  "type": "number"
+                },
+                "topP": {
+                  "type": "number"
+                },
+                "maxTokens": {
+                  "type": "number"
+                },
+                "thinking": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "enabled",
+                        "disabled"
+                      ]
+                    },
+                    "budgetTokens": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ]
+                },
+                "reasoningEffort": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "disabled": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "disabledAgents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledHooks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledSkills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledCommands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledMcps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "recursive": {
+                          "type": "boolean"
+                        },
+                        "glob": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "enable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "disable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "fallbackModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "systemDefaultModel": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "skipAgents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "runtimeFallback": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "dispatch": {
+                "type": "boolean"
+              },
+              "maxAttempts": {
+                "type": "number"
+              },
+              "cooldownSeconds": {
+                "type": "number"
+              },
+              "retryOnStatusCodes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "retryOnPatterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "hashline": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "skipClaudeUserRules": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "mcp": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "envAllowlist": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "websearch": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "exa",
+                      "tavily"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "servers": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": false
+          },
+          "registerBuiltinAgents": {
+            "type": "boolean"
+          },
+          "promptsRoot": {
+            "type": "string"
+          },
+          "debug": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "activeProfile": {
+      "type": "string"
+    },
+    "registerBuiltinAgents": {
+      "type": "boolean"
+    },
+    "defaultAgent": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "disableOpenCodeBuiltinAgents": {
+      "type": "boolean"
+    },
+    "promptsRoot": {
+      "type": "string"
+    },
+    "debug": {
+      "type": "boolean"
+    },
+    "shim": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "inline",
+            "config-file",
+            "config-dir",
+            "xdg"
+          ]
+        },
+        "configDir": {
+          "type": "string"
+        },
+        "configFile": {
+          "type": "string"
+        },
+        "opencode": {
+          "type": "string"
+        },
+        "keepOmo": {
+          "type": "boolean"
+        },
+        "noProviders": {
+          "type": "boolean"
+        },
+        "noPlugins": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OcmmConfig"
+}

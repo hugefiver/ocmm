@@ -32,7 +32,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
     "cli": "node --experimental-strip-types src/cli/profiles.ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts"
   },
   "keywords": [
     "opencode",
