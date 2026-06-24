@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 
 import { defaultConfig } from "../config/schema.ts"
 import {
@@ -135,12 +135,14 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const deepworkSkill = readFileSync(join(result.pluginRoot, "skills", "deepwork-writing-plans", "SKILL.md"), "utf8")
     const gitAgentMetadata = readFileSync(join(result.pluginRoot, "skills", "git-master", "agents", "openai.yaml"), "utf8")
     const mcpManifest = readFileSync(join(result.pluginRoot, ".mcp.json"), "utf8")
+    const mcp = JSON.parse(mcpManifest) as { mcpServers: Record<string, { args?: string[] }> }
+    const lspEntrypoint = mcp.mcpServers.lsp?.args?.[0] ?? ""
 
     assert.equal(manifest.version, "9.9.9")
     assert.equal(marketplace.name, CODEX_MARKETPLACE_NAME)
     assert.match(mcpManifest, /"lsp"/)
     assert.match(mcpManifest, /ocmm-lsp\.js/)
-    assert.equal(mcpManifest.includes(process.cwd()), false)
+    assert.equal(isAbsolute(lspEntrypoint), false)
     assert.match(orchestrator, /^name = "ocmm-orchestrator"$/m)
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(deepworkSkill, /^---\nname: deepwork-writing-plans$/m)
