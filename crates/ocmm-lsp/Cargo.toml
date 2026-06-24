@@ -1,0 +1,15 @@
+[package]
+name = "ocmm-lsp"
+version = "0.1.0"
+edition = "2021"
+description = "Project-owned Rust stdio MCP server exposing LSP tools for ocmm."
+license = "LicenseRef-AAAPL"
+
+[[bin]]
+name = "ocmm-lsp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -1,7 +1,7 @@
 # omo Config Schema & Plugin Registration Architecture
 
 > **Source**: `omo/packages/omo-opencode/src/config/schema/`, `omo/packages/omo-opencode/src/testing/create-plugin-module.ts`
-> **Status**: Not migrated. Reference for ocmm's config design.
+> **Status**: Reference doc. ocmm has selectively migrated the useful pieces (feature gates, skill sources, profile overlays, MCP config, hashline/rules toggles, and agent override controls) without adopting omo's full 37-field schema.
 > **Principle**: omo-own — reimplement selectively (take patterns, not the full 37-field schema)
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Agent list caveat**: omo has 14 named agents (below). ocmm has its own 10 builtin agents — this doc is reference material for omo's schema, NOT a migration target.
@@ -226,22 +226,22 @@ Timestamped backups: `<configPath>.bak.<ISO-timestamp>`. Only created when conte
 
 ocmm currently has:
 - `workflow: "omo" | "v1"` (default "omo")
-- `agents`, `categories` (with `ProfileEntrySchema`: model, variant, fallbackModels, requirement, disabled, description)
+- `agents`, `categories` (with shorthand model/variant/fallback fields plus agent overrides such as `tools`, `permission`, `skills`, `thinking`, and `reasoningEffort`)
+- `disabledHooks`, `disabledTools`, `disabledSkills`, `disabledCommands`, `disabledMcps`
+- `skills` (`sources`, `enable`, `disable`)
+- `mcp` (`enabled`, user-only `envAllowlist`, `websearch`, explicit `servers`)
 - `runtimeFallback` (enabled, dispatch, maxAttempts, cooldownSeconds, retryOnStatusCodes, retryOnPatterns)
 - `intent` (enabled, skipAgents)
-- `fallbackModels`, `systemDefaultModel` (reserved)
-- `registerBuiltinAgents`, `debug`
+- `hashline` and `rules`
+- `fallbackModels`, `systemDefaultModel` (reserved), `defaultAgent`, `disableOpenCodeBuiltinAgents`
+- `registerBuiltinAgents`, `promptsRoot`, `debug`, `shim`
 - `profiles`, `activeProfile` (named overlays)
 
-ocmm is missing: `disabled_*` arrays, per-agent `tools`/`permission`/`thinking`/`reasoningEffort` overrides, `mcp_env_allowlist`, skill sources config, config migration system.
+ocmm is still missing: a config migration system and most large omo-specific namespaces (`ralph_loop` runtime config, openclaw, tmux, tui, monitor, babysitting, team_mode, codegraph provisioning, etc.).
 
 ### Recommended ocmm Config Extensions
 
-1. **Add `disabled_hooks: string[]`** — uniform hook gating (needed for permission guards migration)
-2. **Extend `ProfileEntrySchema`** with optional `tools`, `permission`, `thinking`, `reasoningEffort` fields (for agent override parity)
-3. **Add `mcp` config section** — `disabled_mcps[]`, `mcp_env_allowlist[]`, built-in MCP toggles (for MCP migration)
-4. **Add `hashline` config** — `{ enabled: boolean }` (for hashline migration)
-5. **Add `rules` config** — `{ enabled: boolean, skipClaudeUserRules: boolean }` (for rules-engine migration)
-6. **Add `ralph_loop` config** — `{ enabled, max_iterations, strategy }` (for loops migration, Phase 8a)
-7. **Add `background_task` config** — concurrency, circuit breaker. **OPTIONAL** — OpenCode already provides `task`, `background_output`, `background_cancel` as built-in tools. Only needed if Phase 7 (task enhancement) is pursued. See design spec Phase 7.
-8. **Skip**: telemetry, i18n, agent sort shim, config basename migration, openclaw/tmux/tui/monitor configs (out of scope for ocmm)
+1. **Add loop runtime config** — e.g. `ralphLoop`/`auditLoop` once the event-driven loop runtime is migrated.
+2. **Add background task config only if needed** — concurrency/circuit breaker. OpenCode already provides `task`, `background_output`, and `background_cancel`; only needed if Phase 7 task enhancement is pursued.
+3. **Consider config migrations** — only if incompatible schema changes appear.
+4. **Skip**: telemetry, i18n, agent sort shim, config basename migration, openclaw/tmux/tui/monitor configs (out of scope for ocmm)

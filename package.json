@@ -18,7 +18,8 @@
   },
   "bin": {
     "ocmm": "./dist/cli/shim.js",
-    "ocmm-profiles": "./dist/cli/profiles.js"
+    "ocmm-profiles": "./dist/cli/profiles.js",
+    "ocmm-lsp": "./dist/cli/ocmm-lsp.js"
   },
   "files": [
     "dist",
@@ -27,12 +28,16 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm run build:ts && pnpm run build:lsp",
+    "build:ts": "tsc -p tsconfig.json",
+    "build:lsp": "node --experimental-strip-types scripts/build-ocmm-lsp.ts",
     "build:watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
+    "test": "pnpm run test:ts && pnpm run test:lsp",
+    "test:ts": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
+    "test:lsp": "cargo test -p ocmm-lsp",
     "cli": "node --experimental-strip-types src/cli/profiles.ts",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist target",
     "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts"
   },
   "keywords": [

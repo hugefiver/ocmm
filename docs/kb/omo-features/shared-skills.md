@@ -130,7 +130,7 @@ The `debugging` skill IS in `shared-skills/skills/` but was not in the 11-candid
 ## Additional Candidate
 
 - **debugging** (in `shared-skills/skills/` but not in 11-candidate list): Copy as-is. No omo agent references, pure methodology + runtime references.
-- **lsp-setup** (in `shared-skills/skills/` but not in 11-candidate list): Migrated with local ocmm notes. It is useful because ocmm can register the `lsp` MCP server via `omo-lsp mcp`; the bundled `verify-lsp.ts` still requires an upstream omo checkout and should be treated as optional.
+- **lsp-setup** (in `shared-skills/skills/` but not in 11-candidate list): Migrated with local ocmm notes. It is useful because ocmm now registers the `lsp` MCP server through the project-owned `ocmm-lsp mcp` by default; the bundled `verify-lsp.ts` still requires an upstream omo checkout and should be treated as optional.
 
 ## Migration Strategy
 

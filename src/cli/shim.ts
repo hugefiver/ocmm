@@ -103,6 +103,7 @@ export function resolvePluginPath(): string {
     resolve(here, "..", "index.js"),          // dist/cli/ -> dist/
     resolve(here, "..", "..", "index.js"),     // dist/cli/ -> root -> dist/
     resolve(here, "..", "..", "dist", "index.js"), // src/cli/ -> root -> dist/
+    resolve(here, "..", "index.ts"),          // src/cli/ -> src/ for node --experimental-strip-types tests
   ]
   for (const c of candidates) {
     if (existsSync(c)) return c
