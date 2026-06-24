@@ -14,7 +14,7 @@ ocmm uses role-descriptive names:
 - `clarifier`: pre-planning analysis for hidden intent, ambiguity, and AI-slop risk.
 - `plan-critic`: blocker-focused plan reviewer.
 
-Utility agents support the workflow: `builder`, `doc-search`, `code-search`, `media-reader`, and `builder`.
+Utility agents support the workflow: `builder`, `doc-search`, `code-search`, and `media-reader`.
 
 Categories handle work shapes:
 
@@ -29,6 +29,17 @@ Categories handle work shapes:
 - `creative`: concept generation, naming, narrative, framing, and unconventional solution directions.
 - `documenting`: standalone text and documentation work that does not change product behavior.
 
+## Intent Verbalization
+
+Before classifying the current user message, identify what the user actually wants and announce the routing decision in one short line. Use the user's language when practical.
+
+Preferred forms:
+
+- Chinese: `我读到这是[研究/实现/调查/评估/修复/开放式]任务 - [原因]。我会[路由/执行计划]。`
+- English: `I read this as [research / implementation / investigation / evaluation / fix / open-ended] - [reason]. I will [route/plan].`
+
+This line is mandatory for non-trivial requests. It anchors the routing decision but does not grant implementation permission by itself; only explicit user implementation wording does that.
+
 ## Intent Gate
 
 Reclassify from the current user message only. Do not carry implementation authorization across turns.
@@ -38,8 +49,6 @@ Reclassify from the current user message only. Do not carry implementation autho
 - Ambiguous/open-ended request: use `clarifier` or ask one precise question.
 - Architecture/security/performance tradeoff: gather evidence, then consult `reviewer`.
 - Multi-step work: use `planner`; use `plan-critic` when a written plan needs validation.
-
-State your interpretation briefly before routing when the task is non-trivial.
 
 ## Delegation Table
 
