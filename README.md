@@ -185,9 +185,9 @@ codex plugin list --available --json
 The Codex plugin exposes:
 
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
-- an `ocmm-workflow` skill that maps ocmm's planning/delegation semantics to Codex tools;
+- a `deepwork` skill that maps ocmm's planning/delegation semantics to Codex tools;
 - plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
-- generated Codex agent TOML files under `plugins/ocmm/agents/` for installers or local agent registration.
+- generated `dw-*` Codex agent TOML files under `plugins/ocmm/agents/` for installers or local agent registration, including functional agents such as `dw-oracle` and `dw-creative`.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 
