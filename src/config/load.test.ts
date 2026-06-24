@@ -97,3 +97,41 @@ test("project config cannot extend mcp envAllowlist", () => {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+test("default user config path uses ~/.config/opencode instead of APPDATA", () => {
+  const fakeHome = mkdtempSync(join(tmpdir(), "ocmm-load-home-"))
+  const fakeAppData = mkdtempSync(join(tmpdir(), "ocmm-load-appdata-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-load-cwd-"))
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  const previousHome = process.env.HOME
+  const previousUserProfile = process.env.USERPROFILE
+  const previousAppData = process.env.APPDATA
+  try {
+    delete process.env.XDG_CONFIG_HOME
+    process.env.HOME = fakeHome
+    process.env.USERPROFILE = fakeHome
+    process.env.APPDATA = fakeAppData
+
+    mkdirSync(join(fakeHome, ".config", "opencode"), { recursive: true })
+    mkdirSync(join(fakeAppData, "opencode"), { recursive: true })
+    writeFileSync(join(fakeHome, ".config", "opencode", "ocmm.jsonc"), JSON.stringify({ debug: true }))
+    writeFileSync(join(fakeAppData, "opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "v1" }))
+
+    const loaded = loadConfig({ cwd })
+    assert.equal(loaded.sources.user, join(fakeHome, ".config", "opencode", "ocmm.jsonc"))
+    assert.equal(loaded.config.debug, true)
+    assert.equal(loaded.config.workflow, "omo")
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE
+    else process.env.USERPROFILE = previousUserProfile
+    if (previousAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = previousAppData
+    rmSync(fakeHome, { recursive: true, force: true })
+    rmSync(fakeAppData, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
