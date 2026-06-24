@@ -22,7 +22,9 @@
     "ocmm-lsp": "./dist/cli/ocmm-lsp.js"
   },
   "files": [
+    ".agents",
     "dist",
+    "plugins",
     "prompts",
     "skills",
     "README.md"
@@ -38,11 +40,13 @@
     "test:lsp": "cargo test -p ocmm-lsp",
     "cli": "node --experimental-strip-types src/cli/profiles.ts",
     "clean": "rimraf dist target",
-    "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts"
+    "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts",
+    "gen:codex-plugin": "node --experimental-strip-types scripts/gen-codex-plugin.ts"
   },
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "codex-plugin",
     "model-routing",
     "multi-model"
   ],

@@ -1,0 +1,39 @@
+{
+  "name": "ocmm",
+  "version": "0.1.0",
+  "description": "Codex adapter for ocmm workflows, agents, skills, and MCP tool registrations.",
+  "author": {
+    "name": "Hugefiver"
+  },
+  "license": "LicenseRef-AAAPL",
+  "keywords": [
+    "codex",
+    "codex-plugin",
+    "ocmm",
+    "workflow",
+    "skills",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "ocmm",
+    "shortDescription": "ocmm workflows and tools for Codex",
+    "longDescription": "ocmm exposes its OpenCode-proven workflow prompts, shared skills, deepwork skills, generated agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
+    "developerName": "Hugefiver",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Skills",
+      "MCP Tools",
+      "Workflow",
+      "Multi-Agent Guidance"
+    ],
+    "defaultPrompt": [
+      "Use ocmm workflow to plan and ship this change.",
+      "Review this repo with ocmm reviewer discipline.",
+      "Use ocmm research tools for current docs."
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}

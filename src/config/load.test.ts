@@ -135,3 +135,59 @@ test("default user config path uses ~/.config/opencode instead of APPDATA", () =
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+test("codex host reads CODEX_HOME and project .codex config without changing opencode defaults", () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "ocmm-load-codex-home-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-load-codex-project-"))
+  const previousCodexHome = process.env.CODEX_HOME
+  try {
+    process.env.CODEX_HOME = codexHome
+
+    mkdirSync(codexHome, { recursive: true })
+    mkdirSync(join(cwd, ".codex"), { recursive: true })
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(codexHome, "ocmm.jsonc"), JSON.stringify({ workflow: "v1" }))
+    writeFileSync(join(cwd, ".codex", "ocmm.jsonc"), JSON.stringify({ debug: true }))
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "omo", debug: false }))
+
+    const loaded = loadConfig({ cwd, host: "codex" })
+    assert.equal(loaded.sources.user, join(codexHome, "ocmm.jsonc"))
+    assert.equal(loaded.sources.project, join(cwd, ".codex", "ocmm.jsonc"))
+    assert.equal(loaded.config.workflow, "v1")
+    assert.equal(loaded.config.debug, true)
+
+    const opencodeLoaded = loadConfig({ cwd })
+    assert.equal(opencodeLoaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
+    assert.equal(opencodeLoaded.config.workflow, "omo")
+    assert.equal(opencodeLoaded.config.debug, false)
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodexHome
+    rmSync(codexHome, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("includeUser=false ignores user config while keeping project config", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-load-no-user-xdg-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-load-no-user-project-"))
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    mkdirSync(join(xdg, "opencode"), { recursive: true })
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "v1", debug: false }))
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ debug: true }))
+
+    const loaded = loadConfig({ cwd, includeUser: false })
+    assert.equal(loaded.sources.user, undefined)
+    assert.equal(loaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
+    assert.equal(loaded.config.workflow, "omo")
+    assert.equal(loaded.config.debug, true)
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

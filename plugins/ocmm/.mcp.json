@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "websearch": {
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa",
+      "oauth": false
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "oauth": false
+    },
+    "grep_app": {
+      "url": "https://mcp.grep.app",
+      "oauth": false
+    },
+    "lsp": {
+      "command": "node",
+      "args": [
+        "../../dist/cli/ocmm-lsp.js",
+        "mcp"
+      ],
+      "cwd": "."
+    }
+  }
+}

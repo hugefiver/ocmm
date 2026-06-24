@@ -14,14 +14,17 @@ import { log } from "../shared/logger.ts"
 
 const FILE_BASENAMES = ["ocmm.jsonc", "ocmm.json"]
 
-function userConfigDir(): string {
+export type ConfigHost = "opencode" | "codex"
+
+function userConfigDir(host: ConfigHost): string {
+  if (host === "codex") return process.env.CODEX_HOME ?? join(homedir(), ".codex")
   const xdg = process.env.XDG_CONFIG_HOME
   if (xdg) return join(xdg, "opencode")
   return join(homedir(), ".config", "opencode")
 }
 
-function projectConfigDir(cwd: string): string {
-  return join(cwd, ".opencode")
+function projectConfigDir(cwd: string, host: ConfigHost): string {
+  return join(cwd, host === "codex" ? ".codex" : ".opencode")
 }
 
 /** Strip // line and /* block comments + trailing commas. Cheap, sufficient for our config. */
@@ -141,12 +144,13 @@ export type LoadedConfig = {
   activeProfile?: string
 }
 
-export function loadConfig(opts: { cwd?: string } = {}): LoadedConfig {
+export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?: boolean } = {}): LoadedConfig {
   const cwd = resolve(opts.cwd ?? process.cwd())
+  const host = opts.host ?? "opencode"
   const sources: { user?: string; project?: string } = {}
 
-  const userPath = locateFile(userConfigDir())
-  const projectPath = locateFile(projectConfigDir(cwd))
+  const userPath = opts.includeUser === false ? null : locateFile(userConfigDir(host))
+  const projectPath = locateFile(projectConfigDir(cwd, host))
 
   let merged: unknown = {}
   if (userPath) {

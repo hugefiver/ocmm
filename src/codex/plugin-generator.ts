@@ -1,0 +1,574 @@
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import { basename, join, relative, resolve, sep } from "node:path"
+
+import { normalizeShorthand } from "../config/normalize.ts"
+import { type OcmmConfig } from "../config/schema.ts"
+import { loadConfig, type ConfigHost } from "../config/load.ts"
+import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
+import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
+import { createConfigHandler } from "../hooks/config.ts"
+import { classifyModelFamily } from "../intent/model-family.ts"
+import { loadAllPrompts } from "../intent/prompt-loader.ts"
+import { DEFAULT_SKILLS_ROOT, loadSharedSkills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
+import { loadMcpJsonSync, resolveMcpServers } from "../mcp/index.ts"
+import { translateVariant } from "../routing/variant-translator.ts"
+import { isRecord } from "../shared/logger.ts"
+import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
+
+export const CODEX_PLUGIN_NAME = "ocmm"
+export const CODEX_MARKETPLACE_NAME = "ocmm-local"
+export const CODEX_PLUGIN_DIR = `plugins/${CODEX_PLUGIN_NAME}`
+export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
+const CODEX_LSP_ENTRYPOINT = join("dist", "cli", "ocmm-lsp.js")
+
+const CODEX_COMPATIBLE_PROVIDERS = new Set([
+  "openai",
+  "github-copilot",
+  "opencode",
+  "vercel",
+  "codex",
+])
+const CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"])
+const AGENT_ALIASES = new Map([
+  ["oracle", "reviewer"],
+  ["explore", "code-search"],
+])
+
+export type CodexPluginGenerationResult = {
+  pluginRoot: string
+  marketplacePath: string
+  configHost: ConfigHost | "provided"
+  agentCount: number
+  skillCount: number
+  mcpCount: number
+}
+
+export type CodexAgentSpec = {
+  name: string
+  sourceName: string
+  description: string
+  model: string
+  reasoningEffort: string
+  preferredChain: string[]
+  developerInstructions: string
+}
+
+type CodexMcpManifest = {
+  mcpServers: Record<string, Record<string, unknown>>
+}
+
+type LoadedAdapterConfig = {
+  config: OcmmConfig
+  host: ConfigHost | "provided"
+}
+
+export async function generateCodexPlugin(options: {
+  projectRoot?: string
+  pluginRoot?: string
+  marketplacePath?: string
+  config?: OcmmConfig
+  packageVersion?: string
+} = {}): Promise<CodexPluginGenerationResult> {
+  const projectRoot = resolve(options.projectRoot ?? process.cwd())
+  const pluginRoot = resolve(options.pluginRoot ?? join(projectRoot, CODEX_PLUGIN_DIR))
+  const marketplacePath = resolve(options.marketplacePath ?? join(projectRoot, CODEX_MARKETPLACE_FILE))
+  const version = options.packageVersion ?? readPackageVersion(projectRoot)
+  const loaded = loadAdapterConfig(projectRoot, options.config)
+  const skillsRoot = join(projectRoot, "skills")
+
+  mkdirSync(pluginRoot, { recursive: true })
+  writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), createPluginManifest(version))
+  const mcpManifest = createCodexMcpManifest(loaded.config, projectRoot, pluginRoot)
+  writeJson(join(pluginRoot, ".mcp.json"), mcpManifest)
+
+  const agents = await buildCodexAgents({
+    config: loaded.config,
+    cwd: projectRoot,
+    skillsRoot,
+  })
+  writeCodexAgents(pluginRoot, agents)
+  const skillCount = writeCodexSkills({
+    config: loaded.config,
+    projectRoot,
+    pluginRoot,
+    skillsRoot,
+    agents,
+  })
+  writePluginReadme(pluginRoot, loaded.config, agents)
+  writeJson(marketplacePath, createMarketplaceManifest())
+
+  return {
+    pluginRoot,
+    marketplacePath,
+    configHost: loaded.host,
+    agentCount: agents.length,
+    skillCount,
+    mcpCount: Object.keys(mcpManifest.mcpServers).length,
+  }
+}
+
+export function loadAdapterConfig(projectRoot: string, config?: OcmmConfig): LoadedAdapterConfig {
+  if (config) return { config, host: "provided" }
+
+  const codex = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
+  if (codex.sources.project || codex.sources.user) return { config: codex.config, host: "codex" }
+
+  const opencode = loadConfig({ cwd: projectRoot, host: "opencode", includeUser: false })
+  return { config: opencode.config, host: "opencode" }
+}
+
+export async function buildCodexAgents(args: {
+  config: OcmmConfig
+  cwd: string
+  skillsRoot?: string
+}): Promise<CodexAgentSpec[]> {
+  loadAllPrompts(args.config.promptsRoot ?? join(args.cwd, "prompts"), args.config.workflow)
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  const handler = createConfigHandler({
+    getConfig: () => args.config,
+    cwd: args.cwd,
+    skillsRoot: args.skillsRoot ?? DEFAULT_SKILLS_ROOT,
+  })
+  await handler(target, undefined)
+
+  const agents: CodexAgentSpec[] = []
+  for (const [sourceName, raw] of Object.entries(target.agent).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!isRecord(raw) || raw.disable === true) continue
+    const prompt = typeof raw.prompt === "string" ? raw.prompt.trim() : ""
+    if (!prompt) continue
+    const requirement = requirementForName(sourceName, args.config)
+    const selected = selectCodexModel(requirement, args.config)
+    const model = selected.entry?.model ?? args.config.systemDefaultModel ?? "gpt-5.5"
+    const reasoningEffort = codexReasoningEffort({
+      entry: selected.entry,
+      model,
+      variant: selected.variant,
+    })
+    const preferredChain = (requirement?.fallbackChain ?? [])
+      .map((entry) => formatFallbackEntry(entry))
+      .filter((entry) => entry.length > 0)
+    const description = typeof raw.description === "string" && raw.description.trim()
+      ? raw.description.trim()
+      : `ocmm ${sourceName} agent.`
+
+    agents.push({
+      name: `ocmm-${sourceName}`,
+      sourceName,
+      description,
+      model,
+      reasoningEffort,
+      preferredChain,
+      developerInstructions: codexAgentInstructions({
+        sourceName,
+        prompt,
+        workflow: args.config.workflow,
+        preferredChain,
+      }),
+    })
+  }
+  return agents
+}
+
+export function createCodexMcpManifest(config: OcmmConfig, cwd: string, pluginRoot = join(cwd, CODEX_PLUGIN_DIR)): CodexMcpManifest {
+  const servers = resolveMcpServers(config.mcp, { disabledMcps: config.disabledMcps, cwd })
+  const projectMcpServers = loadMcpJsonSync(cwd)
+  const hasExplicitLsp = Boolean(config.mcp.servers.lsp ?? projectMcpServers.lsp)
+  const mcpServers: CodexMcpManifest["mcpServers"] = {}
+  for (const [name, server] of Object.entries(servers)) {
+    if (name === "lsp" && !hasExplicitLsp) {
+      mcpServers.lsp = createCodexPackageLspServer(cwd, pluginRoot)
+      continue
+    }
+    if (server.enabled === false) continue
+    if (server.type === "remote") {
+      mcpServers[name] = {
+        url: server.url,
+        ...(server.headers ? { headers: server.headers } : {}),
+        ...(server.oauth !== undefined ? { oauth: server.oauth } : {}),
+      }
+      continue
+    }
+
+    const command = Array.isArray(server.command) ? server.command : [server.command, ...(server.args ?? [])]
+    const [executable, ...args] = command
+    if (!executable) continue
+    mcpServers[name] = {
+      command: executable,
+      ...(args.length > 0 ? { args } : {}),
+      ...(server.env ? { env: server.env } : {}),
+      ...(server.environment ? { env: { ...(server.env ?? {}), ...server.environment } } : {}),
+      cwd: ".",
+    }
+  }
+  return { mcpServers }
+}
+
+function createCodexPackageLspServer(projectRoot: string, pluginRoot: string): Record<string, unknown> {
+  return {
+    command: "node",
+    args: [
+      relativeCodexPath(pluginRoot, join(projectRoot, CODEX_LSP_ENTRYPOINT)),
+      "mcp",
+    ],
+    cwd: ".",
+  }
+}
+
+function relativeCodexPath(from: string, to: string): string {
+  const value = relative(from, to).replace(/\\/g, "/")
+  return value.startsWith(".") ? value : `./${value}`
+}
+
+export function createPluginManifest(version: string): Record<string, unknown> {
+  return {
+    name: CODEX_PLUGIN_NAME,
+    version,
+    description: "Codex adapter for ocmm workflows, agents, skills, and MCP tool registrations.",
+    author: { name: "Hugefiver" },
+    license: "LicenseRef-AAAPL",
+    keywords: ["codex", "codex-plugin", "ocmm", "workflow", "skills", "mcp"],
+    skills: "./skills/",
+    mcpServers: "./.mcp.json",
+    interface: {
+      displayName: "ocmm",
+      shortDescription: "ocmm workflows and tools for Codex",
+      longDescription:
+        "ocmm exposes its OpenCode-proven workflow prompts, shared skills, deepwork skills, generated agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
+      developerName: "Hugefiver",
+      category: "Developer Tools",
+      capabilities: ["Skills", "MCP Tools", "Workflow", "Multi-Agent Guidance"],
+      defaultPrompt: [
+        "Use ocmm workflow to plan and ship this change.",
+        "Review this repo with ocmm reviewer discipline.",
+        "Use ocmm research tools for current docs.",
+      ],
+      brandColor: "#0F766E",
+      screenshots: [],
+    },
+  }
+}
+
+export function createMarketplaceManifest(): Record<string, unknown> {
+  return {
+    name: CODEX_MARKETPLACE_NAME,
+    interface: { displayName: "ocmm Local" },
+    plugins: [
+      {
+        name: CODEX_PLUGIN_NAME,
+        source: { source: "local", path: `./${CODEX_PLUGIN_DIR}` },
+        policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+        category: "Developer Tools",
+      },
+    ],
+  }
+}
+
+function writeCodexAgents(pluginRoot: string, agents: readonly CodexAgentSpec[]): void {
+  const agentsDir = join(pluginRoot, "agents")
+  resetGeneratedDir(agentsDir, pluginRoot)
+  for (const agent of agents) {
+    writeFileSync(join(agentsDir, `${agent.name}.toml`), renderAgentToml(agent), "utf8")
+  }
+}
+
+function writeCodexSkills(args: {
+  config: OcmmConfig
+  projectRoot: string
+  pluginRoot: string
+  skillsRoot: string
+  agents: readonly CodexAgentSpec[]
+}): number {
+  const outDir = join(args.pluginRoot, "skills")
+  resetGeneratedDir(outDir, args.pluginRoot)
+  let count = 0
+
+  const sharedSkills = loadSharedSkills({
+    rootDir: args.skillsRoot,
+    sources: args.config.skills.sources,
+    enable: args.config.skills.enable,
+    disable: [...args.config.skills.disable, ...(args.config.disabledSkills ?? [])],
+  })
+  for (const skill of sharedSkills) {
+    const target = join(outDir, basename(skill.path))
+    copySkillDirectory(skill.path, target)
+    normalizeSkillForCodex(target)
+    count += 1
+  }
+
+  const disabled = new Set([...(args.config.skills.disable ?? []), ...(args.config.disabledSkills ?? [])])
+  for (const name of V1_SKILL_DIRS) {
+    const codexName = `deepwork-${name}`
+    if (disabled.has(name) || disabled.has(codexName)) continue
+    const source = join(args.skillsRoot, "v1", name)
+    if (!existsSync(join(source, "SKILL.md"))) continue
+    const target = join(outDir, codexName)
+    copySkillDirectory(source, target)
+    normalizeSkillForCodex(target, codexName)
+    count += 1
+  }
+
+  const workflowSkillDir = join(outDir, "ocmm-workflow")
+  mkdirSync(workflowSkillDir, { recursive: true })
+  writeFileSync(
+    join(workflowSkillDir, "SKILL.md"),
+    renderWorkflowSkill(args.config, args.agents),
+    "utf8",
+  )
+  return count + 1
+}
+
+function writePluginReadme(pluginRoot: string, config: OcmmConfig, agents: readonly CodexAgentSpec[]): void {
+  const lines = [
+    "# ocmm Codex Plugin",
+    "",
+    "Generated from the ocmm source tree. Do not edit generated files by hand; run `pnpm run gen:codex-plugin` from the repository root.",
+    "",
+    `- Workflow: \`${config.workflow}\``,
+    `- Generated agents: ${agents.length}`,
+    "- Skills are copied from `skills/` plus flattened `skills/v1/` deepwork skills.",
+    "- MCP servers are generated from the ocmm `mcp` config namespace.",
+    "- The default `lsp` MCP uses the package-relative `ocmm-lsp` wrapper and the bundled GitHub Release binary.",
+    "",
+    "The OpenCode plugin remains `dist/index.js`; this directory is the Codex adapter bundle.",
+  ]
+  writeFileSync(join(pluginRoot, "README.md"), `${lines.join("\n")}\n`, "utf8")
+}
+
+function renderAgentToml(agent: CodexAgentSpec): string {
+  const comments = agent.preferredChain.length
+    ? [`# ocmm preferred chain: ${agent.preferredChain.join(" -> ")}`]
+    : ["# ocmm preferred chain: <none>"]
+  return [
+    "# Generated by ocmm. Do not edit by hand.",
+    ...comments,
+    `name = ${tomlString(agent.name)}`,
+    `description = ${tomlString(agent.description)}`,
+    `nickname_candidates = [${[agent.name, agent.sourceName].map(tomlString).join(", ")}]`,
+    `model = ${tomlString(agent.model)}`,
+    `model_reasoning_effort = ${tomlString(agent.reasoningEffort)}`,
+    `developer_instructions = ${tomlString(agent.developerInstructions)}`,
+    "",
+  ].join("\n")
+}
+
+function renderWorkflowSkill(config: OcmmConfig, agents: readonly CodexAgentSpec[]): string {
+  const agentRows = agents
+    .map((agent) => `| ${agent.name} | ${agent.model} | ${agent.reasoningEffort} | ${agent.sourceName} |`)
+    .join("\n")
+  return `---
+name: ocmm-workflow
+description: "MUST USE when the user asks for ocmm/deepwork-style planning, multi-agent execution, code review, research, or workflow routing inside Codex."
+---
+
+# ocmm Workflow
+
+This is the Codex adapter skill for ocmm. Use it to apply ocmm's autonomous workflow semantics inside Codex while leaving the OpenCode plugin untouched.
+
+## Runtime Mapping
+
+- Use Codex \`update_plan\` for TodoWrite-style planning.
+- Use Codex \`multi_agent_v1.spawn_agent\` when delegation is useful and available. Give each subagent a concrete, self-contained task and set \`fork_context=false\` unless the task genuinely needs inherited history.
+- Use Codex MCP tools exposed by this plugin for docs/search/context where available.
+- Use Codex \`apply_patch\` for manual edits; use shell commands for read-only inspection and project verification.
+- Use generated agent TOML files under \`plugins/ocmm/agents/\` as installable profiles when you want ocmm role prompts as Codex agents.
+
+## Workflow
+
+Configured workflow: \`${config.workflow}\`
+
+1. Classify the request into quick, normal-task, coding, complex, deep, research, frontend, hard-reasoning, creative, or documenting.
+2. Select the matching ocmm role or generated Codex agent.
+3. Load task-relevant skills explicitly before doing specialized work.
+4. Verify with the repository's own commands before reporting completion.
+
+## Generated Agents
+
+| Codex agent | Model | Effort | ocmm source |
+|---|---|---|---|
+${agentRows}
+`
+}
+
+function codexAgentInstructions(args: {
+  sourceName: string
+  prompt: string
+  workflow: OcmmConfig["workflow"]
+  preferredChain: readonly string[]
+}): string {
+  const chain = args.preferredChain.length ? args.preferredChain.join(" -> ") : "<none>"
+  return [
+    `You are the Codex adapter for ocmm agent "${args.sourceName}".`,
+    `ocmm workflow: ${args.workflow}.`,
+    `OpenCode preferred fallback chain: ${chain}.`,
+    "",
+    "Codex tool compatibility:",
+    "- Use update_plan for TodoWrite-style planning.",
+    "- Use multi_agent_v1.spawn_agent for subagent delegation when available; make delegated tasks self-contained.",
+    "- Use apply_patch for manual code edits.",
+    "- Use shell commands for inspection and verification, preferring rg for text search.",
+    "- Treat AGENTS.md as native Codex project guidance.",
+    "",
+    "Original ocmm prompt:",
+    args.prompt,
+  ].join("\n")
+}
+
+function requirementForName(name: string, config: OcmmConfig): ModelRequirement | null {
+  const canonical = AGENT_ALIASES.get(name) ?? name
+  const agentOverride = normalizeShorthand(config.agents?.[name]) ?? normalizeShorthand(config.agents?.[canonical])
+  if (agentOverride?.disabled) return null
+  if (agentOverride?.requirement) return agentOverride.requirement
+
+  const builtinAgent = BUILTIN_AGENT_INDEX.get(canonical)
+  if (builtinAgent) return builtinAgent.requirement
+
+  const categoryOverride = normalizeShorthand(config.categories?.[name])
+  if (categoryOverride?.requirement) return categoryOverride.requirement
+
+  return BUILTIN_CATEGORY_INDEX.get(name)?.requirement ?? null
+}
+
+function selectCodexModel(
+  requirement: ModelRequirement | null,
+  config: OcmmConfig,
+): { entry?: FallbackEntry; variant?: Variant } {
+  const chain = requirement?.fallbackChain ?? []
+  const selected = chain.find(isCodexCompatibleEntry)
+    ?? chain.find((entry) => classifyModelFamily({ modelID: entry.model, providerID: entry.providers[0] }) === "gpt")
+    ?? chain.find((entry) => classifyModelFamily({ modelID: entry.model, providerID: entry.providers[0] }) === "codex")
+  const fallback = selected ?? (config.systemDefaultModel ? { providers: ["codex"], model: config.systemDefaultModel } : undefined)
+  return {
+    ...(fallback ? { entry: fallback } : {}),
+    ...(fallback?.variant ?? requirement?.variant ? { variant: (fallback?.variant ?? requirement?.variant) as Variant } : {}),
+  }
+}
+
+function isCodexCompatibleEntry(entry: FallbackEntry): boolean {
+  if (entry.providers.some((provider) => CODEX_COMPATIBLE_PROVIDERS.has(provider))) return true
+  const family = classifyModelFamily({ providerID: entry.providers[0], modelID: entry.model })
+  return family === "gpt" || family === "codex"
+}
+
+function codexReasoningEffort(args: {
+  entry?: FallbackEntry
+  model: string
+  variant?: Variant
+}): string {
+  const direct = args.entry?.reasoningEffort
+  const effort = direct ?? (args.variant
+    ? translateVariant("codex", args.variant, { modelID: args.model }).reasoningEffort
+    : undefined)
+  if (effort === "max") return "xhigh"
+  if (effort && CODEX_REASONING_EFFORTS.has(effort)) return effort
+  return "high"
+}
+
+function formatFallbackEntry(entry: FallbackEntry): string {
+  const provider = entry.providers[0] ?? ""
+  return provider ? `${provider}/${entry.model}` : entry.model
+}
+
+function copySkillDirectory(source: string, target: string): void {
+  rmSync(target, { recursive: true, force: true })
+  cpSync(source, target, { recursive: true })
+}
+
+function normalizeSkillForCodex(skillDir: string, name?: string): void {
+  const skillPath = join(skillDir, "SKILL.md")
+  let text = readFileSync(skillPath, "utf8")
+  text = text.replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
+  if (name) text = text.replace(/^name:\s*.+$/m, `name: ${name}`)
+  if (!text.includes("## Codex Compatibility")) {
+    text = `${text.trimEnd()}\n\n## Codex Compatibility\n\n- When this skill mentions TodoWrite, use Codex \`update_plan\`.\n- When this skill mentions OpenCode \`task(...)\`, use Codex \`multi_agent_v1.spawn_agent\` when available.\n- When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.\n`
+  }
+  writeFileSync(
+    skillPath,
+    text,
+    "utf8",
+  )
+  sanitizeSkillAgentMetadata(skillDir)
+}
+
+function sanitizeSkillAgentMetadata(skillDir: string): void {
+  const agentsDir = join(skillDir, "agents")
+  if (!existsSync(agentsDir)) return
+  for (const path of listFiles(agentsDir)) {
+    if (!/\.(ya?ml)$/i.test(path)) continue
+    const original = readFileSync(path, "utf8")
+    const sanitized = removeYamlBlock(original, "search_terms")
+    if (sanitized !== original) writeFileSync(path, sanitized, "utf8")
+  }
+}
+
+function listFiles(root: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(root)) {
+    const path = join(root, entry)
+    if (statSync(path).isDirectory()) out.push(...listFiles(path))
+    else out.push(path)
+  }
+  return out
+}
+
+function removeYamlBlock(text: string, key: string): string {
+  const lines = text.split(/\r?\n/)
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    const match = line.match(/^(\s*)([A-Za-z0-9_-]+):\s*$/)
+    if (!match || match[2] !== key) {
+      out.push(line)
+      continue
+    }
+    const indent = match[1].length
+    i += 1
+    while (i < lines.length) {
+      const next = lines[i]
+      if (next.trim() && leadingSpaces(next) <= indent) {
+        i -= 1
+        break
+      }
+      i += 1
+    }
+  }
+  return out.join("\n")
+}
+
+function leadingSpaces(value: string): number {
+  const match = value.match(/^ */)
+  return match ? match[0].length : 0
+}
+
+function resetGeneratedDir(path: string, pluginRoot: string): void {
+  const resolvedPath = resolve(path)
+  const resolvedPluginRoot = resolve(pluginRoot)
+  if (!resolvedPath.startsWith(`${resolvedPluginRoot}${sep}`)) {
+    throw new Error(`refusing to remove path outside plugin root: ${resolvedPath}`)
+  }
+  rmSync(resolvedPath, { recursive: true, force: true })
+  mkdirSync(resolvedPath, { recursive: true })
+}
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(resolve(path, ".."), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8")
+}
+
+function readPackageVersion(projectRoot: string): string {
+  const parsed = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8")) as unknown
+  if (isRecord(parsed) && typeof parsed.version === "string") return parsed.version
+  return "0.0.0"
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value.replace(/\r\n/g, "\n"))
+}

@@ -39,10 +39,18 @@ pnpm add https://github.com/<owner>/ocmm/releases/download/v0.1.0/ocmm-0.1.0.tgz
 ```
 
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
+It also includes the Codex marketplace file and generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/ocmm/`.
 
 ```jsonc
 // opencode.json
 { "plugin": ["./node_modules/ocmm/dist/index.js"] }
+```
+
+For Codex, add the installed package root as a local marketplace and install the bundled plugin:
+
+```bash
+codex plugin marketplace add ./node_modules/ocmm --json
+codex plugin add ocmm@ocmm-local --json
 ```
 
 ### From GitHub Packages
@@ -61,6 +69,13 @@ pnpm add @<owner>/ocmm
 ```jsonc
 // opencode.json
 { "plugin": ["./node_modules/@<owner>/ocmm/dist/index.js"] }
+```
+
+For Codex, use the scoped package root as the marketplace root:
+
+```bash
+codex plugin marketplace add ./node_modules/@<owner>/ocmm --json
+codex plugin add ocmm@ocmm-local --json
 ```
 
 In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token when the workflow has package read permission.
@@ -102,6 +117,46 @@ Then point your OpenCode config at the built plugin:
 ```
 
 Or use the `ocmm` shim binary (see below) to launch opencode with automatic plugin loading and config isolation.
+
+## Codex adapter
+
+ocmm also ships a Codex plugin bundle generated from the same local workflow data:
+
+```
+.agents/plugins/marketplace.json
+plugins/ocmm/
+  .codex-plugin/plugin.json
+  .mcp.json
+  agents/*.toml
+  skills/*
+```
+
+Generate or refresh it after changing prompts, skills, agents, categories, or MCP config logic:
+
+```bash
+pnpm run gen:codex-plugin
+```
+
+The generator is intentionally separate from the OpenCode runtime. It reads project config from `<project>/.codex/ocmm.jsonc` first, then `<project>/.opencode/ocmm.jsonc`; it does **not** read user-global config by default, so local provider names or secrets are not baked into the committed Codex bundle. If no project config exists, it uses ocmm defaults.
+
+Install into an isolated Codex home for testing:
+
+```powershell
+$env:CODEX_HOME = "$env:LOCALAPPDATA\Temp\codex\ocmm-test"
+mkdir.exe -p $env:CODEX_HOME
+codex plugin marketplace add . --json
+codex plugin add ocmm@ocmm-local --json
+codex plugin list --available --json
+```
+
+The Codex plugin exposes:
+
+- copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
+- an `ocmm-workflow` skill that maps ocmm's planning/delegation semantics to Codex tools;
+- plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the package-relative `ocmm-lsp` wrapper;
+- generated Codex agent TOML files under `plugins/ocmm/agents/` for installers or local agent registration.
+
+OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 
 ## Configure
 
@@ -284,7 +339,6 @@ skills/
   frontend/
   git-master/
   init-deep/
-  lsp-setup/
   v1/                               # forked superpowers skills (v1 only)
     brainstorming/SKILL.md
     writing-plans/SKILL.md
@@ -310,13 +364,15 @@ For v1 workflow, superpowers skills are injected on the first message per sessio
 
 ocmm registers OpenCode `config.command` entries for:
 
-- Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/frontend`, `/debugging`, `/init-deep`, and `/lsp-setup` by default.
+- Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/frontend`, `/debugging`, and `/init-deep` by default.
 - v1 injected deepwork skills when `workflow:"v1"` is active, available as `/brainstorming`, `/writing-plans`, `/subagent-driven-development`, `/requesting-code-review`, and `/receiving-code-review`. In v1, ocmm also adds `skills/v1` to OpenCode skill paths so native skill slash resolution works without "skill not found" noise.
 - Loop protocol commands `/ralph-loop`, `/audit-loop`, and `/dwloop` (`/dwloop` is the deepwork-loop alias for `/audit-loop`).
 
 Interactive OpenCode uses its native slash-command parser. For noninteractive `opencode run "/command args"` calls, OpenCode 1.17.9 passes the first message directly and does not parse project commands; ocmm compensates by expanding bare ocmm command text during `chat.message` and injecting the expanded command once through `system.transform`.
 
 The loop commands are command-template entry points only. The full upstream omo idle continuation engine, verifier orchestration, Boulder/Atlas state, and cancel/stop hooks are not yet migrated; the templates explicitly tell the model to run the loop inside the current session and not claim hidden auto-continuation. The Ralph Loop runtime and related hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
+
+ocmm does not ship a separate `/lsp-setup` command. OpenCode already provides LSP setup guidance, while ocmm's responsibility is to register and distribute the default `lsp` MCP backed by `ocmm-lsp`. Configure external language servers through `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, or `.codex/lsp-client.json` when overrides are needed.
 
 ## Profiles
 

@@ -20,6 +20,8 @@ Release tags must match `package.json` as `vX.Y.Z`. The Release assets include t
 
 The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. Bundled Linux binaries are glibc/GNU targets; musl users need a local build or `OCMM_LSP_COMMAND`. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
 
+The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/ocmm/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add ocmm@ocmm-local`; the Codex `.mcp.json` must keep the default `lsp` MCP package-relative to `dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, or `target/` paths.
+
 ## Live Integration Test
 
 The unit tests cover hooks in isolation but do not exercise the real OpenCode runtime. To verify the plugin against a live OpenCode instance:
