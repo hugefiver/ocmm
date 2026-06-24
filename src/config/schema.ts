@@ -81,6 +81,51 @@ const FeatureGateArrayFields = {
   disabledMcps: z.array(z.string()).optional(),
 }
 
+const defaultSkillsConfig = () => ({
+  sources: [],
+  enable: [],
+  disable: [],
+})
+
+const defaultRuntimeFallbackConfig = () => ({
+  enabled: true,
+  dispatch: true,
+  maxAttempts: 3,
+  cooldownSeconds: 60,
+  retryOnStatusCodes: [429, 500, 502, 503, 504],
+  retryOnPatterns: [
+    "rate limit",
+    "overloaded",
+    "temporarily unavailable",
+    "service unavailable",
+    "internal server error",
+    "gateway timeout",
+    "bad gateway",
+    "capacity",
+    "try again",
+  ],
+})
+
+const defaultHashlineConfig = () => ({
+  enabled: false,
+})
+
+const defaultRulesConfig = () => ({
+  enabled: false,
+  skipClaudeUserRules: false,
+})
+
+const defaultMcpWebsearchConfig = () => ({
+  provider: "exa" as const,
+})
+
+const defaultMcpConfig = () => ({
+  enabled: true,
+  envAllowlist: [],
+  websearch: defaultMcpWebsearchConfig(),
+  servers: {},
+})
+
 export const SkillSourceEntrySchema = z.union([
   z.string().min(1),
   z
@@ -99,7 +144,7 @@ export const SkillsConfigSchema = z
     disable: z.array(z.string()).default([]),
   })
   .strict()
-  .default({})
+  .default(defaultSkillsConfig)
 
 const ProfileSkillsConfigSchema = z
   .object({
@@ -156,14 +201,14 @@ export const RuntimeFallbackConfigSchema = z
         "try again",
       ]),
   })
-  .default({})
+  .default(defaultRuntimeFallbackConfig)
 
 export const HashlineConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
   })
   .strict()
-  .default({})
+  .default(defaultHashlineConfig)
 
 const ProfileHashlineConfigSchema = z
   .object({
@@ -177,7 +222,7 @@ export const RulesConfigSchema = z
     skipClaudeUserRules: z.boolean().default(false),
   })
   .strict()
-  .default({})
+  .default(defaultRulesConfig)
 
 const ProfileRulesConfigSchema = z
   .object({
@@ -221,11 +266,11 @@ export const McpConfigSchema = z
         provider: z.enum(["exa", "tavily"]).default("exa"),
       })
       .strict()
-      .default({}),
+      .default(defaultMcpWebsearchConfig),
     servers: z.record(z.string(), McpServerConfigSchema).default({}),
   })
   .strict()
-  .default({})
+  .default(defaultMcpConfig)
 
 const ProfileMcpConfigSchema = z
   .object({
