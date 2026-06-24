@@ -1,0 +1,20 @@
+{
+  "name": "ocmm-local",
+  "interface": {
+    "displayName": "ocmm Local"
+  },
+  "plugins": [
+    {
+      "name": "ocmm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ocmm"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 .omo/
 /omo/
+!.agents/
+!.agents/plugins/
+!.agents/plugins/marketplace.json
 node_modules/
 dist/
 target/
