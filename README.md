@@ -9,7 +9,7 @@ Concepts (model tiering, per-model specialized prompts, intent gating, proactive
 | Hook                                 | What ocmm does                                                                                                                                                                                                                                                                                |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `config`                             | Registers 10 primary agents + 10 category-subagents with their preferred provider/model. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
-| `chat.params`                        | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant) and applies the right `reasoningEffort` / extended-thinking budget / temperature for the model family (GPT, Claude, Gemini, Kimi, GLM, MiniMax, ...).    |
+| `chat.params`                        | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant), respects explicit user choices, and applies only the model-family parameters ocmm supports for that model. Built-in defaults normalize category work to model-appropriate high/max reasoning where supported and avoid implicit Opus 4.7+ thinking budgets.                  |
 | `chat.message`                       | v1 workflow: queues superpowers skills content on the first message per session. omo workflow: no-op (prompts are declaratively attached at config time).                                                                                                                                     |
 | `experimental.chat.system.transform` | v1 workflow: drains queued skills content and prepends to `output.system`. omo workflow: no-op.                                                                                                                                                                                               |
 | `event`                              | Cleans up per-session state on `session.deleted` / `session.idle`. On `session.error`: classifies the error, and if retryable, dispatches the next model in the agent's fallback chain via `client.session.prompt`.                                                                           |
@@ -72,12 +72,12 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
         { "providers": ["zhipu"], "model": "glm-5.1" },
       ],
     },
-    "worker": {
+    "builder": {
       "requirement": {
-        "variant": "medium",
+        "variant": "high",
         "requiresProvider": ["openai"],
         "fallbackChain": [
-          { "providers": ["openai"], "model": "gpt-5.5", "variant": "medium" },
+          { "providers": ["openai"], "model": "gpt-5.5", "variant": "high" },
         ],
       },
     },
@@ -138,49 +138,53 @@ Both `agents.*` and `categories.*` accept either shape:
 | `disabled`       | `true`                                                                                           | (Agents only.) Removes the agent from registration.                                                                         |
 | `description`    | string                                                                                           | Overrides the built-in description (used in agent registration).                                                            |
 
-## Variant table
+## Variant policy
 
-| variant             | GPT family                | Claude (Opus 4.7+)      | Gemini                    | Kimi/GLM/MiniMax/unknown |
-| ------------------- | ------------------------- | ----------------------- | ------------------------- | ------------------------ |
-| `none`              | _(no override)_           | _(no override)_         | _(no override)_           | _(no override)_          |
-| `minimal`           | `reasoningEffort=minimal` | `thinking={ disabled }` | `reasoningEffort=minimal` | `temperature=0.0`        |
-| `low`               | `low`                     | `thinking budget 4k`    | `low`                     | `0.2`                    |
-| `medium` / `auto`   | `medium`                  | `thinking budget 12k`   | `medium`                  | `0.5`                    |
-| `high` / `thinking` | `high`                    | `thinking budget 24k`   | `high` + thinking         | `0.7`                    |
-| `xhigh`             | `high`                    | `thinking budget 49k`   | `high` + thinking         | `0.85`                   |
-| `max`               | `high`                    | `thinking budget 65k`   | `high` + thinking         | `1.0`                    |
+`variant` is a routing hint, not a portable provider API. ocmm normalizes it by model family before writing `chat.params`:
+
+| Model family | ocmm behavior |
+| ------------ | ------------- |
+| Explicit user config or request | Respected as written. ocmm does not silently rewrite user-declared `model`, `variant`, `reasoningEffort`, or `thinking` values. |
+| GPT/Codex non-mini built-in defaults | Built-in defaults never request below `high`; category defaults from `coding` upward resolve to `max`, which currently translates to the GPT/Codex `xhigh` reasoning effort. |
+| GPT/Codex mini | Keeps the full OpenAI reasoning ladder, including `minimal`, `low`, and no-op `none`. |
+| Claude Opus 4.7+ / Fable | Built-in defaults do not emit an ocmm-owned `thinking` budget or `reasoningEffort`; explicit user config is passed through as written. |
+| Older Claude | Uses Anthropic `thinking` budgets for non-`none` variants. |
+| Gemini | Uses `reasoningEffort`; high and above also enable provider thinking. |
+| Latest GLM / DeepSeek | Built-in defaults normalize low/medium-style local variants to canonical high/max controls where the provider family supports them; explicit user config or request variants are left as written. |
+| Category defaults | `quick` stays lightweight. Built-in category defaults from `coding` upward resolve to `max`; explicit user category config or input variants are respected as written. |
+| Kimi / MiniMax / unknown | Uses the existing temperature shaping fallback when no better family-specific knob exists. |
 
 ## Built-in agents
 
 ```
 orchestrator    anthropic/claude-opus-4-7      variant=max     main coordinator
-worker          openai/gpt-5.5                 variant=medium  autonomous implementer
+builder          openai/gpt-5.5                 variant=high    autonomous implementer
 reviewer        openai/gpt-5.5                 variant=high    read-only consultant
 doc-search      openai/gpt-5.4-mini-fast       (none)          external docs / OSS lookup
 code-search     openai/gpt-5.4-mini-fast       (none)          internal codebase grep
 planner         anthropic/claude-opus-4-7      variant=max     work-plan author
 clarifier       anthropic/claude-sonnet-4-6    (none)          pre-plan analysis
 plan-critic     openai/gpt-5.5                 variant=xhigh   plan QA
-media-reader    openai/gpt-5.5                 variant=medium  multimodal analysis
-task-runner     anthropic/claude-sonnet-4-6    (none)          focused single-task executor
+media-reader    openai/gpt-5.5                 variant=high    multimodal analysis
+builder     anthropic/claude-sonnet-4-6    (none)          focused single-task executor
 ```
 
 ## Built-in categories (also registered as subagents)
 
 ```
-frontend        google/gemini-3.1-pro      variant=high    UI/UX, layout, styling, visual QA
-creative        google/gemini-3.1-pro      variant=high    concepts, naming, narrative, framing
-hard-reasoning  openai/gpt-5.5             variant=xhigh   ultrabrain-style decisions and tradeoffs
-research        openai/gpt-5.5             variant=medium  missing-fact investigation and evidence gathering
+frontend        google/gemini-3.1-pro      variant=max     UI/UX, layout, styling, visual QA
+creative        google/gemini-3.1-pro      variant=max     concepts, naming, narrative, framing
+hard-reasoning  openai/gpt-5.5             variant=max     ultrabrain-style decisions and tradeoffs
+research        openai/gpt-5.5             variant=max     missing-fact investigation and evidence gathering
 quick           openai/gpt-5.4-mini        (none)          fully specified mechanical edits
-coding          anthropic/claude-sonnet-4-6 (none)         determined code edits and bug fixes
-normal-task     anthropic/claude-sonnet-4-6 (none)         ordinary bounded tasks
-complex         openai/gpt-5.5             variant=high    coordinated multi-step ordinary tasks
-deep            openai/gpt-5.5             variant=medium autonomous system development and delivery
-documenting     kimi-for-coding/k2p5       (none)          standalone documentation and prose
+coding          anthropic/claude-sonnet-4-6 variant=max    determined code edits and bug fixes
+normal-task     anthropic/claude-sonnet-4-6 variant=max    ordinary bounded tasks
+complex         openai/gpt-5.5             variant=max     coordinated multi-step ordinary tasks
+deep            openai/gpt-5.5             variant=max     autonomous system development and delivery
+documenting     kimi-for-coding/k2p5       variant=max     standalone documentation and prose
 ```
 
-The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`worker`, `doc-search`, `code-search`, `media-reader`, `task-runner`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
+The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`, `builder`) still use the workflow/model-family deepwork prompt without an additional role prompt. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
 
 ## Prompt architecture
 
@@ -235,6 +239,7 @@ Two ways, in priority order:
    Empty string is treated as unset — falls back to the config's `activeProfile`.
 
 2. **`activeProfile` in the config file** (persisted):
+
    ```jsonc
    { "activeProfile": "gpu" }
    ```
@@ -285,16 +290,13 @@ All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass th
 
 ### Isolation modes
 
-| Mode             | Env var                   | Isolates?      | Can strip omo? | Default path                        |
-| ---------------- | ------------------------- | -------------- | -------------- | ----------------------------------- |
-| `none` (default) | `OPENCODE_CONFIG_CONTENT` | No             | No             | n/a                                 |
-| `inline`         | `OPENCODE_CONFIG_CONTENT` | No             | No             | n/a                                 |
-| `config-file`    | `OPENCODE_CONFIG`         | Single file    | No             | `<config-dir>/opencode.json`        |
-| `config-dir`     | `OPENCODE_CONFIG_DIR`     | Dir (additive) | No             | `~/.config/opencode/ocmm-opencode/` |
-| `xdg`            | `XDG_CONFIG_HOME`         | Full           | Yes            No | No | n/a |
-| `config-file` | `OPENCODE_CONFIG` | Single file | No | `<config-dir>/opencode.json` |
-| `config-dir` | `OPENCODE_CONFIG_DIR` | Dir (additive) | No | `~/.config/opencode/ocmm-opencode/` |
-| `xdg` | `XDG_CONFIG_HOME` | Full | Yes | `~/.config/opencode/ocmm-opencode/` |
+| Mode             | Env var                   | Isolation                           | Notes |
+| ---------------- | ------------------------- | ----------------------------------- | ----- |
+| `none` (default) | `OPENCODE_CONFIG_CONTENT` | No config-dir isolation             | Inline config is additive; it cannot remove an already-loaded global plugin. |
+| `inline`         | `OPENCODE_CONFIG_CONTENT` | No config-dir isolation             | Explicit form of `none`. |
+| `config-file`    | `OPENCODE_CONFIG`         | Generated single config file        | Writes `<config-dir>/opencode.json`. |
+| `config-dir`     | `OPENCODE_CONFIG_DIR`     | Generated config directory          | Uses `~/.config/opencode/ocmm-opencode/` unless `--config-dir` overrides it. |
+| `xdg`            | `XDG_CONFIG_HOME`         | Full OpenCode config-dir isolation  | Uses the same default isolated directory and can strip global plugins. |
 
 Config defaults can be set in the `shim` section of `ocmm.jsonc`. CLI flags override config values.
 
@@ -345,7 +347,7 @@ pnpm test
 pnpm run build
 ```
 
-Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies. 177 tests across config, routing, intent, hooks, runtime-fallback, and shim.
+Tests use `node --test --experimental-strip-types` (Node 22+). No bundler, no test framework dependencies.
 
 ### Live integration test
 

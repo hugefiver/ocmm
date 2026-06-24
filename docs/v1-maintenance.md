@@ -66,6 +66,7 @@ All v1 prompts share these principles (derived from superpowers skills):
 10. **Deepwork tag envelope**: every `prompts/v1/deepwork/*.md` file is wrapped in `<deepwork-mode>` to match the omo prompt envelope while keeping `v1` only as the config/path label.
 11. **No model-visible version label**: files under `prompts/v1/` must not mention `v1` to the model. Use `deepwork` wording in model-facing prompt text.
 12. **Concrete category scope**: category prompts describe the work shape and deliverable they handle, not vague model strength or weak/strong capability levels. Local mapping: `hard-reasoning` covers ultrabrain-style decisions, `deep` covers autonomous system development and feature delivery, `coding` covers determined code edits and bug fixes, `normal-task` covers bounded fallback work with known acceptance criteria, `complex` covers coordinated multi-step or cross-cutting ordinary tasks that remain below autonomous feature delivery, and `documenting` covers standalone text.
+13. **Reasoning defaults**: built-in category defaults from `coding` upward should use the highest supported reasoning level (`max` in the local variant vocabulary); `quick` remains lightweight. User-declared model, variant, and provider parameters are respected as explicit configuration.
 
 ## Maintenance Rules
 

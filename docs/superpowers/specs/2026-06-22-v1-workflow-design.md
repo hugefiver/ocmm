@@ -491,7 +491,7 @@ Doc structure:
 | agents/planner.md | writing-plans | Prometheus planning scope | `.omo`-only planning flow | local plan path + writing-plans skill |
 | agents/clarifier.md | brainstorming/writing-plans | Metis intent and ambiguity analysis | `call_omo_agent`, Prometheus-only handoff | local clarifier directives |
 | agents/plan-critic.md | writing-plans/review skills | Momus blocker-focused review | Momus branding, `.omo/plans`-only input | local plan-critic review |
-| category/*.md | varies | upstream/default omo category constraints plus local ordinary-task split | old shortened category routers and vague strength-tier language | strongly aligned category roles that describe concrete work shapes: `hard-reasoning` = ultrabrain-style decisions, `deep` = autonomous system development and feature delivery, `coding` = determined code edits and bug fixes, `normal-task`/`complex` = configurable ordinary-task levels, `documenting` = standalone text; deepwork mechanics come from injected skills |
+| category/*.md | varies | upstream/default omo category constraints plus local ordinary-task split | old shortened category routers and vague strength-tier language | strongly aligned category roles that describe concrete work shapes: `hard-reasoning` = ultrabrain-style decisions, `deep` = autonomous system development and feature delivery, `coding` = determined code edits and bug fixes, `normal-task` = bounded known-acceptance tasks, `complex` = coordinated multi-step ordinary tasks, `documenting` = standalone text; deepwork mechanics come from injected skills |
 
 ## Shared Characteristics
 5-phase chain, TDD, two-stage review, no performative agreement, bite-sized
@@ -578,6 +578,7 @@ Each v1 prompt file reviewed for:
 - Agent and category prompts stay aligned with omo counterparts.
 - Category prompts describe concrete work shape rather than model strength or vague difficulty.
 - Category names and docs expose `quick`, `coding`, `normal-task`, `complex`, `deep`, and `documenting` with distinct responsibilities. Upstream fallback-bucket semantics are folded into `normal-task` and `complex`; no separate fallback-bucket category names are exposed locally.
+- Built-in category defaults from `coding` upward use the highest supported local variant (`max`), while `quick` remains lightweight. Explicit user model/variant/provider-parameter declarations are respected as written.
 
 ### Manual Skill Review
 
