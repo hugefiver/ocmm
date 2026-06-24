@@ -16,7 +16,9 @@ All three must pass before committing. TypeScript tests use `node --test --exper
 
 The `.github/workflows/release.yml` workflow is GitHub-only: it publishes GitHub Release assets and, on tag releases or explicit manual opt-in, a scoped GitHub Packages package. Do not add npmjs.org publishing unless the user asks for that registry specifically.
 
-Release tags must match `package.json` as `vX.Y.Z`. The Release assets include the packed plugin/CLI tarball, standalone target-triple `ocmm-lsp-*` native binaries, and checksums. The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. Bundled Linux binaries are glibc/GNU targets; musl users need a local build or `OCMM_LSP_COMMAND`.
+Release tags must match `package.json` as `vX.Y.Z`. The Release assets include the packed plugin/CLI tarball, standalone target-triple `ocmm-lsp-*` native binaries, and checksums. The package tarball and GitHub Packages package both include `dist/bin/ocmm-lsp-*` so the OpenCode `lsp` MCP can use the bundled native binary by default. Standalone `ocmm-lsp-*` assets are also published for direct external-program use or custom `OCMM_LSP_COMMAND` setups.
+
+The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. Bundled Linux binaries are glibc/GNU targets; musl users need a local build or `OCMM_LSP_COMMAND`. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
 
 ## Live Integration Test
 
@@ -49,7 +51,7 @@ $env:XDG_STATE_HOME   = "$testDir/xdg-state"
 $env:XDG_CACHE_HOME   = "$testDir/xdg-cache"
 ```
 
-Verify isolation with `opencode debug paths` — all paths should point inside `$testDir`.
+Verify isolation with `opencode debug paths` — the generated OpenCode `data`, `bin`, `log`, `repos`, `cache`, `config`, and `state` paths should point inside `$testDir`. The fixed `home` and `tmp` rows may still point to the OS user home/temp roots.
 
 ### 3. Write a minimal opencode.json
 

@@ -32,13 +32,13 @@ ocmm supports two workflows, switchable via the `workflow` config field:
 
 ### From GitHub Release
 
-Published releases do not require npmjs.org. Download the package tarball from the GitHub Release and install that URL with your package manager:
+Published releases do not require npmjs.org. Each GitHub Release contains the plugin package tarball, standalone native `ocmm-lsp-*` binaries, and `SHA256SUMS.txt`. Install the tarball asset URL with your package manager:
 
 ```bash
 pnpm add https://github.com/<owner>/ocmm/releases/download/v0.1.0/ocmm-0.1.0.tgz
 ```
 
-The release tarball bundles the plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
+The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
 
 ```jsonc
 // opencode.json
@@ -47,7 +47,7 @@ The release tarball bundles the plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-l
 
 ### From GitHub Packages
 
-The release workflow can also publish an npm-compatible package to GitHub Packages as `@<owner>/ocmm`. This still avoids npmjs.org, but installs through `npm.pkg.github.com` and normally requires a GitHub personal access token with `read:packages` in `.npmrc`:
+The release workflow can also publish the same package contents to GitHub Packages as `@<owner>/ocmm`. This still avoids npmjs.org, but installs through `npm.pkg.github.com` and normally requires a GitHub personal access token with `read:packages` in `.npmrc`:
 
 ```ini
 @<owner>:registry=https://npm.pkg.github.com
@@ -67,7 +67,12 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 
 ### Native LSP Support
 
-GitHub releases include native `ocmm-lsp` binaries for:
+GitHub releases distribute `ocmm-lsp` in two forms:
+
+- bundled inside the package tarball / GitHub Packages package under `dist/bin/`
+- as standalone release assets named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups
+
+Native binaries are built for:
 
 | Platform | Asset |
 | --- | --- |
@@ -78,7 +83,7 @@ GitHub releases include native `ocmm-lsp` binaries for:
 | macOS x64 | `ocmm-lsp-x86_64-apple-darwin` |
 | macOS arm64 | `ocmm-lsp-aarch64-apple-darwin` |
 
-Linux musl distributions such as Alpine are not covered by the bundled binaries; build locally with `pnpm run build:lsp` or set `OCMM_LSP_COMMAND` to a custom command.
+Linux musl distributions such as Alpine are not covered by the release binaries; build locally with `pnpm run build:lsp` or set `OCMM_LSP_COMMAND` to a custom command.
 
 ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocmm-lsp mcp` server by default. Resolution prefers bundled release binaries in `dist/bin/`, then local Cargo release/debug builds, then `cargo run` from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. Set `OCMM_LSP_COMMAND` to force a custom command, add `disabledMcps:["lsp"]` to disable it, or define `mcp.servers.lsp` to override the built-in.
 
@@ -446,9 +451,11 @@ Releases are GitHub-only. Push a tag that matches `package.json` (`vX.Y.Z`) or r
 
 1. Runs typecheck and tests.
 2. Builds native `ocmm-lsp` binaries for Linux x64/arm64 glibc, Windows x64/arm64, and macOS x64/arm64.
-3. Builds TypeScript, collects all native binaries into `dist/bin/`, and packs the plugin/CLI tarball.
+3. Builds TypeScript, downloads all native binaries into `dist/bin/`, smoke-tests `node dist/cli/ocmm-lsp.js mcp`, and packs the plugin/CLI tarball.
 4. Publishes the tarball, standalone native binaries, and `SHA256SUMS.txt` to GitHub Release assets.
 5. Publishes `@<owner>/ocmm` to GitHub Packages by default for tag releases, without publishing to npmjs.org.
+
+The GitHub Release tarball and the GitHub Packages package contain the same runtime payload. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
 
 ### Live integration test
 
