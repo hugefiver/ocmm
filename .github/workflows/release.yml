@@ -181,7 +181,7 @@ jobs:
           node dist/cli/ocmm-lsp.js --help
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
           cp dist/bin/ocmm-lsp-* release-assets/
-          npm pack --pack-destination release-assets
+          pnpm pack --pack-destination release-assets
           mv "release-assets/ocmm-${version}.tgz" "release-assets/ocmm-opencode-plugin-${version}.tgz"
 
           codex_root_name="ocmm-codex-plugin-${version}"
@@ -233,7 +233,7 @@ jobs:
             echo "@$owner/ocmm@$version is already published to GitHub Packages; skipping."
             exit 0
           fi
-          npm publish --registry=https://npm.pkg.github.com
+          pnpm publish --registry=https://npm.pkg.github.com --no-git-checks
 
   github-release:
     name: GitHub Release
