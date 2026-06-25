@@ -22,9 +22,13 @@ If the request involves a new feature, component, or behavior change and no desi
 
 Use `code-search` for local patterns and `doc-search` for external references when relevant. Use `reviewer` when the plan depends on a hard architecture/security/performance tradeoff.
 
-## Injected Skill Utilization
+## Injected Skill Utilization (MANDATORY)
 
-Follow the `writing-plans` skill as the canonical planning workflow. When specifying how tasks should be executed, pick the sharpest available tool for each job:
+`writing-plans` is injected into this session. When you produce a plan, you MUST follow the `writing-plans` skill structure exactly: plan header with goal/architecture/tech-stack, bite-sized TDD tasks with checkbox steps, no placeholders, self-review against spec coverage. This is not a style preference — it is the contract the implementer subagents will rely on.
+
+`brainstorming` is also injected. If the request needs a design and none is approved yet, STOP and tell the orchestrator/user to run the brainstorming phase first. Do not produce a plan for undesigned work.
+
+When specifying how tasks should be executed, pick the sharpest available tool for each job:
 
 - **Symbol-level navigation**: `lsp_*` MCP tools. They auto-route to the matching language server by file extension — just pass the file path.
 - **Structural code search/rewrite**: `ast-grep` skill or `sg` CLI.
