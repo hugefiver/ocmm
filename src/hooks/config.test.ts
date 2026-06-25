@@ -338,7 +338,7 @@ test("config registers builtin loop slash commands and honors disabledCommands",
   assert.ok(cfg.command?.["audit-loop"])
   assert.equal(cfg.command?.dwloop, undefined)
   assert.equal(cfg.command?.["ulw-loop"], undefined)
-  assert.match(String(cfg.command?.["ralph-loop"]?.template), /has not migrated omo's event-driven idle auto-continuation engine yet/)
+  assert.match(String(cfg.command?.["ralph-loop"]?.template), /Idle auto-continuation: when `idleContinuation\.enabled` is true/)
   assert.match(String(cfg.command?.["audit-loop"]?.template), /audit\/deepwork loop protocol/)
 })
 

@@ -12,7 +12,7 @@ export type CommandDefinition = CommandConfigEntry & {
 
 const RALPH_LOOP_TEMPLATE = `You are starting an ocmm Ralph Loop protocol.
 
-Important capability boundary: this local ocmm port currently exposes the slash command prompt, but it has not migrated omo's event-driven idle auto-continuation engine yet. Do not claim that the plugin will automatically re-prompt you after idle. Instead, run the loop deliberately inside the current session: keep todos current, continue making progress until the task is complete or genuinely blocked, and only finish when the completion promise is true.
+Idle auto-continuation: when \`idleContinuation.enabled\` is true in ocmm config (or toggled on via \`/idle-continuation on\`), the plugin will automatically re-prompt you after idle if the todo list has unfinished items.
 
 ## Loop Contract
 
@@ -33,7 +33,7 @@ Accepted argument shape:
 
 const AUDIT_LOOP_TEMPLATE = `You are starting an ocmm audit/deepwork loop protocol for verified completion.
 
-Important capability boundary: this local ocmm port currently exposes the slash command prompt, but it has not migrated omo's background Oracle-verification continuation engine yet. Do not claim that a hidden verifier will run automatically. Instead, perform the verification loop explicitly in the current session and use reviewer/oracle-style task delegation when available.
+Idle auto-continuation: when \`idleContinuation.enabled\` is true in ocmm config (or toggled on via \`/idle-continuation on\`), the plugin will automatically re-prompt you after idle if the todo list has unfinished items.
 
 ## Verified Loop Contract
 
@@ -74,6 +74,11 @@ export function loadBuiltinCommands(disabledCommands?: readonly string[]): Comma
       name: "dwloop",
       description: "(ocmm builtin) Alias for the deepwork verified completion loop protocol",
       template: wrapCommandInstruction(AUDIT_LOOP_TEMPLATE),
+    },
+    {
+      name: "idle-continuation",
+      description: "Toggle idle auto-continuation for this session. Usage: /idle-continuation [on|off|status]",
+      template: "Idle auto-continuation toggle. The command.execute hook processes on/off/status arguments.",
     },
   ]
   return definitions.filter((definition) => !disabled.has(definition.name))
