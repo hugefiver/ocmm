@@ -44,7 +44,7 @@ export type PluginInterface = {
   "tool.definition"?: (input: unknown, output: unknown) => Promise<void>
   tool?: Record<string, PluginToolDefinition>
   event?: (input: unknown) => Promise<void>
-  "command.execute"?: (
+  "command.execute.before"?: (
     input: { command: string; arguments?: string; sessionID: string },
     output: { parts: Array<{ type: string; text?: string }> },
   ) => Promise<void>
@@ -137,7 +137,7 @@ export function createPlugin(input?: ServerInput): {
       directory: cwd,
       idleState,
     }),
-    "command.execute": createCommandExecuteHandler({ idleState }),
+    "command.execute.before": createCommandExecuteHandler({ idleState }),
   }
 
   function refreshTools(): void {

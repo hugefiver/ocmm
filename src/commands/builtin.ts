@@ -78,7 +78,7 @@ export function loadBuiltinCommands(disabledCommands?: readonly string[]): Comma
     {
       name: "idle-continuation",
       description: "Toggle idle auto-continuation for this session. Usage: /idle-continuation [on|off|status]",
-      template: "Idle auto-continuation toggle. The command.execute hook processes on/off/status arguments.",
+      template: "",
     },
   ]
   return definitions.filter((definition) => !disabled.has(definition.name))
