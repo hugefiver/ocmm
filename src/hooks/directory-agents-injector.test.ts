@@ -70,3 +70,53 @@ test("directory AGENTS injector is read-only and disabledHooks gated", async () 
     rmSync(project, { recursive: true, force: true })
   }
 })
+
+test("agents injector caches per session — does not re-inject same dir", async () => {
+  const root = makeRoot()
+  try {
+    write(join(root, "src", "AGENTS.md"), "# Project Rules\n")
+    write(join(root, "src", "app.ts"), "")
+    const sessionCache = new Map<string, Set<string>>()
+    const injector = createDirectoryAgentsInjector({
+      getConfig: () => ({ ...defaultConfig(), rules: { enabled: true, skipClaudeUserRules: false } }),
+      projectRoot: root,
+      sessionCache,
+    })
+    const input1 = { tool: "read", sessionID: "s1", args: { filePath: join(root, "src", "app.ts") } }
+    const output1 = { output: "file content" }
+    await injector(input1, output1)
+    assert.match(output1.output, /\[Directory Context:/)
+    const input2 = { tool: "read", sessionID: "s1", args: { filePath: join(root, "src", "app.ts") } }
+    const output2 = { output: "file content 2" }
+    await injector(input2, output2)
+    assert.doesNotMatch(output2.output, /\[Directory Context:/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("agents injector injects again for different session", async () => {
+  const root = makeRoot()
+  try {
+    write(join(root, "src", "AGENTS.md"), "# Project Rules\n")
+    write(join(root, "src", "app.ts"), "")
+    const sessionCache = new Map<string, Set<string>>()
+    const injector = createDirectoryAgentsInjector({
+      getConfig: () => ({ ...defaultConfig(), rules: { enabled: true, skipClaudeUserRules: false } }),
+      projectRoot: root,
+      sessionCache,
+    })
+    await injector(
+      { tool: "read", sessionID: "s1", args: { filePath: join(root, "src", "app.ts") } },
+      { output: "content" },
+    )
+    const output2 = { output: "content 2" }
+    await injector(
+      { tool: "read", sessionID: "s2", args: { filePath: join(root, "src", "app.ts") } },
+      output2,
+    )
+    assert.match(output2.output, /\[Directory Context:/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

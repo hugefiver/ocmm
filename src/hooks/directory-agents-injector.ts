@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { dirname } from "node:path"
 
 import type { OcmmConfig } from "../config/schema.ts"
 import { findAgentsMdUp } from "../rules/index.ts"
@@ -15,7 +16,9 @@ type ToolOutput = {
 export function createDirectoryAgentsInjector(args: {
   getConfig: () => OcmmConfig
   projectRoot: string
+  sessionCache?: Map<string, Set<string>>
 }): (input: unknown, output: unknown) => Promise<void> {
+  const sessionCache = args.sessionCache ?? new Map<string, Set<string>>()
   return async (rawInput, rawOutput) => {
     const config = args.getConfig()
     if (!config.rules.enabled || config.disabledHooks?.includes(HOOK_NAME)) return
@@ -27,7 +30,14 @@ export function createDirectoryAgentsInjector(args: {
     const filePath = inputFilePath(rawInput, output)
     if (!filePath) return
 
-    const blocks = await agentsBlocks({ filePath, projectRoot: args.projectRoot })
+    const session = sessionId(rawInput) ?? "default"
+    let injected = sessionCache.get(session)
+    if (!injected) {
+      injected = new Set<string>()
+      sessionCache.set(session, injected)
+    }
+
+    const blocks = await agentsBlocks({ filePath, projectRoot: args.projectRoot, sessionCache: injected })
     if (blocks.length === 0) return
     output.output = `${output.output}${blocks.join("")}`
   }
@@ -36,12 +46,17 @@ export function createDirectoryAgentsInjector(args: {
 export async function agentsBlocks(args: {
   filePath: string
   projectRoot: string
+  sessionCache?: Set<string>
 }): Promise<string[]> {
+  const sessionCache = args.sessionCache ?? new Set<string>()
   const paths = findAgentsMdUp({ startDir: args.filePath, rootDir: args.projectRoot })
   const blocks: string[] = []
   for (const agentsPath of paths) {
+    const agentsDir = dirname(agentsPath)
+    if (sessionCache.has(agentsDir)) continue
     const content = await readAgentsFile(agentsPath)
     if (content === null) continue
+    sessionCache.add(agentsDir)
     blocks.push(formatAgentsBlock(agentsPath, content))
   }
   return blocks
@@ -85,6 +100,15 @@ function toolName(rawInput: unknown): string | null {
       const value = tool[key]
       if (typeof value === "string" && value.length > 0) return value.toLowerCase()
     }
+  }
+  return null
+}
+
+function sessionId(rawInput: unknown): string | null {
+  if (!isRecord(rawInput)) return null
+  for (const key of ["sessionID", "sessionId", "session_id"]) {
+    const value = rawInput[key]
+    if (typeof value === "string" && value.length > 0) return value
   }
   return null
 }
