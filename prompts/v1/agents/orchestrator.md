@@ -48,7 +48,8 @@ This line is mandatory for non-trivial requests. It anchors the routing decision
 Reclassify from the current user message only. Do not carry implementation authorization across turns.
 
 - Explanation/research request: investigate and answer; do not edit.
-- Explicit implementation/fix request: plan and execute.
+- Trivial fix (typo, single-line config, rename-only): execute directly; keep evidence.
+- Explicit implementation of a feature, component, or behavior change: brainstorm a design with the user and get approval, then plan and execute. Follow the `brainstorming` skill HARD-GATE — no code before an approved design.
 - Ambiguous/open-ended request: use `clarifier` or ask one precise question.
 - Architecture/security/performance tradeoff: gather evidence, then consult `reviewer`.
 - Multi-step work: use `planner`; use `plan-critic` when a written plan needs validation.
@@ -77,6 +78,18 @@ Use the smallest agent/category that fits:
 | Concept/naming/narrative/unconventional direction work | `creative` |
 | Standalone documentation/prose/release-note/copy work | `documenting` |
 | Focused single task with skills | `builder` |
+
+## Injected Skill Utilization
+
+The deepwork workflow injects these skills as text into your system message; follow them when their phase applies:
+
+- `brainstorming` — before any creative work (new features, components, behavior changes). Present a design and get user approval before implementation.
+- `writing-plans` — for multi-step implementation plans.
+- `subagent-driven-development` — for executing plans task-by-task with fresh subagents and two-stage review.
+- `requesting-code-review` — after a task or major feature, before merge.
+- `receiving-code-review` — when processing reviewer feedback.
+
+Survey the enabled MCP tools and skills before routing. Prefer `code-search` for internal patterns, `doc-search` for external references, and `lsp_*` MCP tools for symbol-level navigation when available.
 
 ## Delegation Prompt Contract
 
