@@ -12,6 +12,7 @@ const DEFAULT_TRUNCATE_LIMIT = 50000
 const WEBFETCH_TRUNCATE_LIMIT = 10000
 const MAX_QUESTION_LABEL_LENGTH = 30
 const REDIRECT_TIMEOUT_MS = 3000
+const MAX_TRACKED_SESSIONS = 50
 
 const JSON_ERROR_NOTICE = `[JSON PARSE ERROR - IMMEDIATE ACTION REQUIRED]
 The previous tool output appears to contain a JSON parse failure. Inspect the raw output, identify the invalid JSON fragment, and retry with corrected JSON rather than repeating the same call.`
@@ -28,6 +29,7 @@ export type PermissionGuardHooks = {
   before: ToolHook
   after: ToolHook
   definition: ToolDefinitionHook
+  event?: (input: unknown) => Promise<void>
 }
 
 export type FsyncSkipEvent = {
@@ -62,12 +64,14 @@ export function createPermissionGuards(args: {
   fsyncTracker?: FsyncSkipTracker
 }): PermissionGuardHooks {
   const readPermissions = new Map<string, Set<string>>()
+  const readmeSessionCache = new Map<string, Set<string>>()
+  const lastAccess = new Map<string, number>()
   const projectRoot = canonicalDirectory(args.projectRoot)
 
   return {
     before: async (rawInput, rawOutput) => {
       const config = args.getConfig()
-      await trackReadPermission(config, rawInput, readPermissions, projectRoot)
+      await trackReadPermission(config, rawInput, readPermissions, readmeSessionCache, lastAccess, projectRoot)
       guardNotepadWrite(config, rawInput, projectRoot)
       guardExistingFileWrite(config, rawInput, readPermissions, projectRoot)
       warnBashFileRead(config, rawInput, rawOutput)
@@ -78,7 +82,7 @@ export function createPermissionGuards(args: {
     after: async (rawInput, rawOutput) => {
       const config = args.getConfig()
       replaceEmptyTaskOutput(config, rawInput, rawOutput)
-      await injectDirectoryReadme(config, rawInput, rawOutput, projectRoot)
+      await injectDirectoryReadme(config, rawInput, rawOutput, projectRoot, readmeSessionCache)
       warnCommentChecker(config, rawInput, rawOutput)
       await warnPlanFormat(config, rawInput, rawOutput, projectRoot)
       warnReadImageResize(config, rawInput, rawOutput)
@@ -93,6 +97,26 @@ export function createPermissionGuards(args: {
       if (toolIdentifier(rawInput) !== "todowrite") return
       rawOutput.description = TODOWRITE_DESCRIPTION
     },
+    event: createGuardEventHandler({ readPermissions, readmeSessionCache, lastAccess }),
+  }
+}
+
+function createGuardEventHandler(caches: {
+  readPermissions: Map<string, Set<string>>
+  readmeSessionCache: Map<string, Set<string>>
+  lastAccess: Map<string, number>
+}): (input: unknown) => Promise<void> {
+  return async (raw: unknown) => {
+    if (!isRecord(raw)) return
+    const event = (raw as Record<string, unknown>).event ?? raw
+    const eventType = (event as Record<string, unknown>).type
+    if (eventType !== "session.deleted" && eventType !== "session.compacted") return
+    const props = (event as Record<string, unknown>).properties ?? event
+    const sid = (props as Record<string, unknown>).sessionID ?? (props as Record<string, unknown>).sessionId
+    if (typeof sid !== "string") return
+    caches.readPermissions.delete(sid)
+    caches.readmeSessionCache.delete(sid)
+    caches.lastAccess.delete(sid)
   }
 }
 
@@ -100,6 +124,8 @@ async function trackReadPermission(
   config: OcmmConfig,
   rawInput: unknown,
   readPermissions: Map<string, Set<string>>,
+  readmeSessionCache: Map<string, Set<string>>,
+  lastAccess: Map<string, number>,
   projectRoot: string,
 ): Promise<void> {
   if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
@@ -115,6 +141,32 @@ async function trackReadPermission(
     readPermissions.set(session, paths)
   }
   paths.add(canonical)
+  touchSession(lastAccess, session, MAX_TRACKED_SESSIONS, readPermissions, readmeSessionCache)
+}
+
+function touchSession(
+  lastAccess: Map<string, number>,
+  sessionId: string,
+  maxSessions: number,
+  ...cachesToClean: Array<Map<string, unknown>>
+): void {
+  lastAccess.set(sessionId, Date.now())
+  if (lastAccess.size <= maxSessions) return
+  let oldestKey: string | null = null
+  let oldestTime = Infinity
+  for (const [key, time] of lastAccess) {
+    if (key === sessionId) continue
+    if (time < oldestTime) {
+      oldestTime = time
+      oldestKey = key
+    }
+  }
+  if (oldestKey) {
+    lastAccess.delete(oldestKey)
+    for (const cache of cachesToClean) {
+      cache.delete(oldestKey)
+    }
+  }
 }
 
 function guardExistingFileWrite(
@@ -268,6 +320,7 @@ async function injectDirectoryReadme(
   rawInput: unknown,
   rawOutput: unknown,
   projectRoot: string,
+  readmeSessionCache: Map<string, Set<string>>,
 ): Promise<void> {
   if (hookDisabled(config, "directory-readme-injector", "directoryReadmeInjector")) return
   if (toolName(rawInput) !== READ_TOOL) return
@@ -277,8 +330,17 @@ async function injectDirectoryReadme(
   if (!targetPath) return
   const readme = findNearestReadme(targetPath, projectRoot)
   if (!readme || resolve(readme) === resolve(targetPath)) return
+  const session = sessionId(rawInput) ?? "default"
+  const readmeDir = dirname(readme)
+  let injected = readmeSessionCache.get(session)
+  if (!injected) {
+    injected = new Set<string>()
+    readmeSessionCache.set(session, injected)
+  }
+  if (injected.has(readmeDir)) return
   const content = await readText(readme)
   if (content === null) return
+  injected.add(readmeDir)
   const { text, truncated } = truncateText(content, README_BUDGET)
   out.output = `${out.output}\n\n[Directory README: ${readme}]\n${text}${
     truncated ? `\n[Directory README truncated: ${readme}]` : ""

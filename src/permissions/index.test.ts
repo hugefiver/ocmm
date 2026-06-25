@@ -183,3 +183,119 @@ test("definition guard overrides todowrite description and disabledHooks gates g
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("directory readme injector injects only once per session per readme dir", async () => {
+  const root = tempProject()
+  try {
+    mkdirSync(join(root, "src"), { recursive: true })
+    const file = join(root, "src", "app.ts")
+    writeFileSync(file, "export const app = true\n")
+    writeFileSync(join(root, "src", "README.md"), "README content.\n")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
+    assert.match(out1.output, /\[Directory README: /)
+
+    const out2 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out2)
+    assert.doesNotMatch(out2.output, /\[Directory README: /)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("directory readme injector injects again for a different session", async () => {
+  const root = tempProject()
+  try {
+    mkdirSync(join(root, "src"), { recursive: true })
+    const file = join(root, "src", "app.ts")
+    writeFileSync(file, "export const app = true\n")
+    writeFileSync(join(root, "src", "README.md"), "README content.\n")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
+    assert.match(out1.output, /\[Directory README: /)
+
+    const out2 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s2", args: { filePath: file } }, out2)
+    assert.match(out2.output, /\[Directory README: /)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("event handler cleans up per-session read permissions on session.deleted", async () => {
+  const root = tempProject()
+  try {
+    const file = join(root, "existing.txt")
+    writeFileSync(file, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
+
+    if (guards.event) {
+      await guards.event({ type: "session.deleted", properties: { sessionID: "s1" } })
+    }
+
+    await assert.rejects(
+      guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {}),
+      /File already exists/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("event handler cleans up per-session readme cache on session.compacted", async () => {
+  const root = tempProject()
+  try {
+    mkdirSync(join(root, "src"), { recursive: true })
+    const file = join(root, "src", "app.ts")
+    writeFileSync(file, "export const app = true\n")
+    writeFileSync(join(root, "src", "README.md"), "README content.\n")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
+    assert.match(out1.output, /\[Directory README: /)
+
+    if (guards.event) {
+      await guards.event({ type: "session.compacted", properties: { sessionID: "s1" } })
+    }
+
+    const out2 = { output: "1: export const app = true", metadata: { filePath: file } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out2)
+    assert.match(out2.output, /\[Directory README: /)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("event handler ignores unknown event types", async () => {
+  const root = tempProject()
+  try {
+    const file = join(root, "existing.txt")
+    writeFileSync(file, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
+    if (guards.event) {
+      await guards.event({ type: "session.idle", properties: { sessionID: "s1" } })
+    }
+    await guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("event handler is optional and not invoked when absent", () => {
+  const root = tempProject()
+  try {
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    assert.equal(typeof guards.event, "function")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
