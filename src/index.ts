@@ -29,6 +29,8 @@ import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/has
 import { createSkillMcpTool, type SkillMcpToolDefinition } from "./tools/skill-mcp.ts"
 import { log } from "./shared/logger.ts"
 import type { OcmmClient } from "./runtime-fallback/dispatcher.ts"
+import { createIdleContinuationState } from "./runtime-fallback/idle-state.ts"
+import { createCommandExecuteHandler } from "./hooks/command-execute.ts"
 
 export const PLUGIN_ID = "ocmm"
 
@@ -42,6 +44,10 @@ export type PluginInterface = {
   "tool.definition"?: (input: unknown, output: unknown) => Promise<void>
   tool?: Record<string, PluginToolDefinition>
   event?: (input: unknown) => Promise<void>
+  "command.execute"?: (
+    input: { command: string; arguments?: string; sessionID: string },
+    output: { parts: Array<{ type: string; text?: string }> },
+  ) => Promise<void>
 }
 
 type PluginToolDefinition = HashlineToolDefinition | SkillMcpToolDefinition
@@ -58,6 +64,7 @@ export function createPlugin(input?: ServerInput): {
   reload: () => OcmmConfig
 } {
   const cwd = input?.directory ?? input?.cwd ?? process.cwd()
+  const idleState = createIdleContinuationState()
   let config: OcmmConfig
   let promptsLoaded = false
   let v1SkillsCache: string | null = null
@@ -99,6 +106,10 @@ export function createPlugin(input?: ServerInput): {
   config = loadOrDefault()
   ensurePromptsLoaded()
   const getConfig = (): OcmmConfig => config
+  const syncIdleEnabled = (): void => {
+    idleState.globalEnabled = getConfig().idleContinuation?.enabled ?? false
+  }
+  syncIdleEnabled()
   const permissionGuards = createPermissionGuards({ getConfig, projectRoot: cwd })
   const toolAfterHandlers = [
     createHashlineReadEnhancer({ getConfig }),
@@ -124,7 +135,9 @@ export function createPlugin(input?: ServerInput): {
       getConfig,
       ...(input?.client !== undefined ? { client: input.client } : {}),
       directory: cwd,
+      idleState,
     }),
+    "command.execute": createCommandExecuteHandler({ idleState }),
   }
 
   function refreshTools(): void {
@@ -150,6 +163,7 @@ export function createPlugin(input?: ServerInput): {
       promptsLoaded = false
       v1SkillsCache = null
       ensurePromptsLoaded()
+      syncIdleEnabled()
       refreshTools()
       return config
     },
