@@ -176,9 +176,9 @@ export function createConfigHandler(args: {
       if (disabled.has(a.name)) continue
       const norm = normalizeShorthand(cfg.agents?.[a.name])
       const prompt = promptForBuiltinAgent(a, norm)
-      const mode = a.name === "orchestrator"
+      const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
-        : a.name === "planner" || a.name === "builder"
+        : a.name === "planner"
           ? "all"
           : "subagent"
       const extras: { prompt?: string; mode?: string; promptPrefix?: string } = {}

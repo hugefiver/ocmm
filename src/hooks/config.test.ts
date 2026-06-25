@@ -34,13 +34,13 @@ test("config sets default_agent to orchestrator and disables OpenCode built-in p
   assert.equal((cfg.agent.orchestrator as Record<string, unknown> | undefined)?.mode, "primary")
 })
 
-test("builder and planner can be used as both primary and delegated agents", async () => {
+test("builder is primary-only; planner can be both primary and delegated", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
   assert.equal((cfg.agent.orchestrator as Record<string, unknown> | undefined)?.mode, "primary")
-  assert.equal((cfg.agent.builder as Record<string, unknown> | undefined)?.mode, "all")
+  assert.equal((cfg.agent.builder as Record<string, unknown> | undefined)?.mode, "primary")
   assert.equal((cfg.agent.planner as Record<string, unknown> | undefined)?.mode, "all")
   assert.equal((cfg.agent.reviewer as Record<string, unknown> | undefined)?.mode, "subagent")
 })
