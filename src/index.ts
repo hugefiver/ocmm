@@ -110,13 +110,32 @@ export function createPlugin(input?: ServerInput): {
     idleState.globalEnabled = getConfig().idleContinuation?.enabled ?? false
   }
   syncIdleEnabled()
-  const permissionGuards = createPermissionGuards({ getConfig, projectRoot: cwd })
+  const agentsSessionCache = new Map<string, Set<string>>()
+  const permissionGuards = createPermissionGuards({
+    getConfig,
+    projectRoot: cwd,
+    agentsSessionCache,
+  })
   const toolAfterHandlers = [
     createHashlineReadEnhancer({ getConfig }),
     createRulesInjector({ getConfig, projectRoot: cwd }),
-    createDirectoryAgentsInjector({ getConfig, projectRoot: cwd }),
+    createDirectoryAgentsInjector({ getConfig, projectRoot: cwd, sessionCache: agentsSessionCache }),
     permissionGuards.after,
   ]
+
+  // Composed event handler — calls both the runtime-fallback handler (model
+  // fallback + idle continuation) and the permission-guards handler (per-session
+  // cache cleanup) so session.deleted/compacted clears all shared caches.
+  const fallbackEventHandler = createEventHandler({
+    getConfig,
+    ...(input?.client !== undefined ? { client: input.client } : {}),
+    directory: cwd,
+    idleState,
+  })
+  const composedEvent = async (raw: unknown) => {
+    await fallbackEventHandler(raw)
+    await permissionGuards.event?.(raw)
+  }
 
   const pluginInterface: PluginInterface = {
     config: createConfigHandler({ getConfig, cwd }),
@@ -131,12 +150,7 @@ export function createPlugin(input?: ServerInput): {
       for (const handler of toolAfterHandlers) await handler(hookInput, hookOutput)
     },
     "tool.definition": permissionGuards.definition,
-    event: createEventHandler({
-      getConfig,
-      ...(input?.client !== undefined ? { client: input.client } : {}),
-      directory: cwd,
-      idleState,
-    }),
+    event: composedEvent,
     "command.execute.before": createCommandExecuteHandler({ idleState }),
   }
 

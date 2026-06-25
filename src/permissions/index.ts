@@ -62,6 +62,7 @@ export function createPermissionGuards(args: {
   taskSystemEnabled?: () => boolean
   redirectResolver?: RedirectResolver
   fsyncTracker?: FsyncSkipTracker
+  agentsSessionCache?: Map<string, Set<string>>
 }): PermissionGuardHooks {
   const readPermissions = new Map<string, Set<string>>()
   const readmeSessionCache = new Map<string, Set<string>>()
@@ -97,7 +98,12 @@ export function createPermissionGuards(args: {
       if (toolIdentifier(rawInput) !== "todowrite") return
       rawOutput.description = TODOWRITE_DESCRIPTION
     },
-    event: createGuardEventHandler({ readPermissions, readmeSessionCache, lastAccess }),
+    event: createGuardEventHandler({
+      readPermissions,
+      readmeSessionCache,
+      lastAccess,
+      ...(args.agentsSessionCache !== undefined ? { agentsSessionCache: args.agentsSessionCache } : {}),
+    }),
   }
 }
 
@@ -105,6 +111,7 @@ function createGuardEventHandler(caches: {
   readPermissions: Map<string, Set<string>>
   readmeSessionCache: Map<string, Set<string>>
   lastAccess: Map<string, number>
+  agentsSessionCache?: Map<string, Set<string>>
 }): (input: unknown) => Promise<void> {
   return async (raw: unknown) => {
     if (!isRecord(raw)) return
@@ -117,6 +124,7 @@ function createGuardEventHandler(caches: {
     caches.readPermissions.delete(sid)
     caches.readmeSessionCache.delete(sid)
     caches.lastAccess.delete(sid)
+    caches.agentsSessionCache?.delete(sid)
   }
 }
 
