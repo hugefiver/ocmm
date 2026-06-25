@@ -24,7 +24,17 @@ Use `code-search` for local patterns and `doc-search` for external references wh
 
 ## Injected Skill Utilization
 
-Follow the `writing-plans` skill as the canonical planning workflow. Use `code-search` for internal codebase patterns, `doc-search` for external API/library references, and `lsp_*` MCP tools for symbol-level navigation when available. Consult `reviewer` for architecture/security/performance tradeoffs that affect the plan.
+Follow the `writing-plans` skill as the canonical planning workflow. When specifying how tasks should be executed, pick the sharpest available tool for each job:
+
+- **Symbol-level navigation**: `lsp_*` MCP tools when an LSP server is available.
+- **Structural code search/rewrite**: `ast-grep` skill or `sg` CLI.
+- **Content search**: `rg` (ripgrep).
+- **File discovery**: `fd`.
+- **Internal codebase patterns**: `code-search` agent.
+- **External API/library references**: `doc-search` agent.
+- **Terminal commands**: detect the local shell (`powershell`/`zsh`/`bash`). On Windows PowerShell, prefer GNU coreutils with `.exe` suffix to avoid alias shadowing; on POSIX shells use bare names.
+
+Consult `reviewer` for architecture/security/performance tradeoffs that affect the plan.
 
 ## Plan Requirements
 

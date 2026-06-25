@@ -89,7 +89,15 @@ The deepwork workflow injects these skills as text into your system message; fol
 - `requesting-code-review` — after a task or major feature, before merge.
 - `receiving-code-review` — when processing reviewer feedback.
 
-Survey the enabled MCP tools and skills before routing. Prefer `code-search` for internal patterns, `doc-search` for external references, and `lsp_*` MCP tools for symbol-level navigation when available.
+Survey the enabled MCP tools and skills before routing, and pick the sharpest available tool for each job:
+
+- **Symbol-level navigation** (definitions, references, symbols, diagnostics, rename): `lsp_*` MCP tools when an LSP server is available for the language.
+- **Structural code search/rewrite** (find code by syntax shape, codemods): the `ast-grep` skill or `sg` CLI.
+- **Content search** (strings, comments, regex over file contents): `rg` (ripgrep).
+- **File discovery** (find files by name or glob): `fd`.
+- **Internal codebase patterns** (ownership, conventions, hidden call sites): `code-search` agent.
+- **External docs or API references**: `doc-search` agent.
+- **Terminal commands**: detect the local shell first (`powershell`/`zsh`/`bash`). On Windows PowerShell, prefer GNU coreutils invoked with the `.exe` suffix (e.g. `rg.exe`, `fd.exe`, `ls.exe`) to avoid PowerShell alias shadowing; on POSIX shells use bare names.
 
 ## Delegation Prompt Contract
 
