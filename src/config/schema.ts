@@ -106,6 +106,11 @@ const defaultRuntimeFallbackConfig = () => ({
   ],
 })
 
+const defaultIdleContinuationConfig = () => ({
+  enabled: false,
+  maxContinuations: 20,
+})
+
 const defaultHashlineConfig = () => ({
   enabled: false,
 })
@@ -202,6 +207,14 @@ export const RuntimeFallbackConfigSchema = z
       ]),
   })
   .default(defaultRuntimeFallbackConfig)
+
+export const IdleContinuationConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    maxContinuations: z.number().int().min(0).max(100).default(20),
+    prompt: z.string().optional(),
+  })
+  .default(defaultIdleContinuationConfig)
 
 export const HashlineConfigSchema = z
   .object({
@@ -323,6 +336,13 @@ export const ProfileEntrySchema = z
         retryOnPatterns: z.array(z.string()).optional(),
       })
       .optional(),
+    idleContinuation: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxContinuations: z.number().int().min(0).max(100).optional(),
+        prompt: z.string().optional(),
+      })
+      .optional(),
     hashline: ProfileHashlineConfigSchema.optional(),
     rules: ProfileRulesConfigSchema.optional(),
     mcp: ProfileMcpConfigSchema.optional(),
@@ -369,6 +389,7 @@ export const OcmmConfigSchema = z
       })
       .default({ enabled: true, skipAgents: [] }),
     runtimeFallback: RuntimeFallbackConfigSchema,
+    idleContinuation: IdleContinuationConfigSchema,
     hashline: HashlineConfigSchema,
     rules: RulesConfigSchema,
     mcp: McpConfigSchema,
@@ -396,6 +417,7 @@ export type CategoryEntry = z.infer<typeof CategoryEntrySchema>
 export type FallbackEntryConfig = z.infer<typeof FallbackEntrySchema>
 export type ModelRequirementConfig = z.infer<typeof ModelRequirementSchema>
 export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
+export type IdleContinuationConfig = z.infer<typeof IdleContinuationConfigSchema>
 export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
 export type RulesConfig = z.infer<typeof RulesConfigSchema>
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
