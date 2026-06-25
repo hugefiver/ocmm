@@ -401,7 +401,7 @@ function appendJsonRecovery(config: OcmmConfig, rawInput: unknown, rawOutput: un
 }
 
 export function containsJsonParseError(text: string): boolean {
-  return /(json\.parse|unexpected (token|end).*json|invalid json|json parse error|failed to parse json)/i.test(text)
+  return /(json\.parse|unexpected (token|end).*json|invalid json|json parse error|failed to parse json|malformed json|unexpected end of json input|syntaxerror: unexpected token.*json|json[^\n]*expected \}|json[^\n]*unexpected eof)/i.test(text)
 }
 
 function appendFsyncWarnings(config: OcmmConfig, rawOutput: unknown, tracker: FsyncSkipTracker | undefined): void {
@@ -650,7 +650,6 @@ function jsonRecoveryExcluded(name: string): boolean {
     "grep",
     "webfetch",
     "look_at",
-    "grep_app_searchgithub",
     "grep_app_searchgithub",
     "websearch_web_search_exa",
     "todowrite",
