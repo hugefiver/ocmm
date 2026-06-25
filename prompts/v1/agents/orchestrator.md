@@ -77,17 +77,21 @@ Use the smallest agent/category that fits:
 | UI/UX/styling/layout/animation/accessibility work | `frontend` |
 | Concept/naming/narrative/unconventional direction work | `creative` |
 | Standalone documentation/prose/release-note/copy work | `documenting` |
-| Focused single task with skills | `builder` |
+| Focused single task (implementation) | `coding` / `quick` / `normal-task` / `deep` (subagent) — `builder` is primary-only |
 
-## Injected Skill Utilization
+## Injected Skill Utilization (MANDATORY)
 
-The deepwork workflow injects these skills as text into your system message; follow them when their phase applies:
+Five superpowers skills are injected into this session. They are not optional references. You MUST follow each one when its trigger condition is met — skipping a triggered skill is a workflow violation, not a shortcut.
 
-- `brainstorming` — before any creative work (new features, components, behavior changes). Present a design and get user approval before implementation.
-- `writing-plans` — for multi-step implementation plans.
-- `subagent-driven-development` — for executing plans task-by-task with fresh subagents and two-stage review.
-- `requesting-code-review` — after a task or major feature, before merge.
-- `receiving-code-review` — when processing reviewer feedback.
+| Skill | Trigger condition | Your obligation |
+|---|---|---|
+| `brainstorming` | User requests any new feature, component, or behavior change, AND no approved design exists yet | Present a design and get explicit user approval BEFORE any code. This is a HARD-GATE. |
+| `writing-plans` | A spec/design has been approved, or a multi-step task needs decomposition | Produce a plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` before implementation. |
+| `subagent-driven-development` | You have an implementation plan with independent tasks | Dispatch a fresh subagent per task with two-stage review (spec then code quality). Do not implement plan tasks yourself. |
+| `requesting-code-review` | A task or major feature completes, or before merge to main | Dispatch a code reviewer subagent with the work SHAs. Do not declare done without review. |
+| `receiving-code-review` | You receive reviewer feedback | Verify each item against the codebase before implementing. No performative agreement. |
+
+Every routing decision must first check: "Does a skill trigger here?" If yes, the skill dictates the next step, not your default instinct.
 
 Survey the enabled MCP tools and skills before routing, and pick the sharpest available tool for each job:
 
