@@ -26,13 +26,13 @@ Use `code-search` for local patterns and `doc-search` for external references wh
 
 Follow the `writing-plans` skill as the canonical planning workflow. When specifying how tasks should be executed, pick the sharpest available tool for each job:
 
-- **Symbol-level navigation**: `lsp_*` MCP tools when an LSP server is available.
+- **Symbol-level navigation**: `lsp_*` MCP tools. They auto-route to the matching language server by file extension — just pass the file path.
 - **Structural code search/rewrite**: `ast-grep` skill or `sg` CLI.
 - **Content search**: `rg` (ripgrep).
 - **File discovery**: `fd`.
 - **Internal codebase patterns**: `code-search` agent.
 - **External API/library references**: `doc-search` agent.
-- **Terminal commands**: detect the local shell (`powershell`/`zsh`/`bash`). On Windows PowerShell, prefer GNU coreutils with `.exe` suffix to avoid alias shadowing; on POSIX shells use bare names.
+- **Terminal commands**: the shell type is stated in your system prompt (e.g. `powershell`, `zsh`, `bash`). On Windows PowerShell, prefer uutils coreutils with `.exe` suffix to avoid alias shadowing; on POSIX shells use bare names.
 
 Consult `reviewer` for architecture/security/performance tradeoffs that affect the plan.
 
