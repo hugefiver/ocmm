@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import { dirname, isAbsolute, relative, resolve } from "node:path"
 
 import type { OcmmConfig } from "../config/schema.ts"
 import { findAgentsMdUp } from "../rules/index.ts"
@@ -29,6 +29,10 @@ export function createDirectoryAgentsInjector(args: {
     if (typeof output.output !== "string") return
     const filePath = inputFilePath(rawInput, output)
     if (!filePath) return
+    // Only inject for files inside the project root — avoid polluting context
+    // with README/AGENTS.md from external directories (e.g. ~/.config/opencode).
+    const rel = relative(args.projectRoot, resolve(filePath))
+    if (rel.startsWith("..") || isAbsolute(rel)) return
 
     const session = sessionId(rawInput) ?? "default"
     let injected = sessionCache.get(session)

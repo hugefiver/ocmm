@@ -120,3 +120,33 @@ test("agents injector injects again for different session", async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("agents injector does not inject for files outside project root", async () => {
+  const project = mkdtempSync(join(tmpdir(), "ocmm-agents-"))
+  const externalDir = mkdtempSync(join(tmpdir(), "ocmm-external-"))
+  try {
+    mkdirSync(join(project, "src"), { recursive: true })
+    writeFileSync(join(project, "src", "AGENTS.md"), "# Project agents context.\n")
+    writeFileSync(join(project, "src", "app.ts"), "export const app = true\n")
+
+    const externalFile = join(externalDir, "external.ts")
+    writeFileSync(externalFile, "export const external = true\n")
+    writeFileSync(join(externalDir, "AGENTS.md"), "# External agents context.\n")
+
+    const injector = createDirectoryAgentsInjector({
+      getConfig: () => ({
+        ...defaultConfig(),
+        rules: { enabled: true, skipClaudeUserRules: false },
+        disabledHooks: [],
+      }),
+      projectRoot: project,
+    })
+
+    const output = { output: "1: export const external = true", metadata: { filePath: externalFile } }
+    await injector({ tool: "read", args: { filePath: externalFile } }, output)
+    assert.doesNotMatch(output.output, /\[Directory Context:/)
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(externalDir, { recursive: true, force: true })
+  }
+})

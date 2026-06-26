@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
 
@@ -67,7 +67,7 @@ export function createPermissionGuards(args: {
   const readPermissions = new Map<string, Set<string>>()
   const readmeSessionCache = new Map<string, Set<string>>()
   const lastAccess = new Map<string, number>()
-  const projectRoot = canonicalDirectory(args.projectRoot)
+  const projectRoot = resolve(args.projectRoot)
 
   return {
     before: async (rawInput, rawOutput) => {
@@ -336,6 +336,11 @@ async function injectDirectoryReadme(
   if (!out || typeof out.output !== "string" || out.output.includes("[Directory README:")) return
   const targetPath = filePathFromOutput(rawInput, out, projectRoot)
   if (!targetPath) return
+  // Only inject for files inside the project root — avoid polluting context
+  // with README from external directories (e.g. ~/.config/opencode).
+  const root = resolve(projectRoot)
+  const rel = relative(root, resolve(targetPath))
+  if (rel.startsWith("..") || isAbsolute(rel)) return
   const readme = findNearestReadme(targetPath, projectRoot)
   if (!readme || resolve(readme) === resolve(targetPath)) return
   const session = sessionId(rawInput) ?? "default"
@@ -595,20 +600,7 @@ function hookDisabled(config: OcmmConfig, name: string, alias?: string): boolean
 function canonicalExistingFile(filePath: string, projectRoot: string): string | null {
   const absolute = absolutize(filePath, projectRoot)
   if (!safeStatFile(absolute)) return null
-  try {
-    return realpathSync.native(absolute)
-  } catch {
-    return absolute
-  }
-}
-
-function canonicalDirectory(dirPath: string): string {
-  const absolute = resolve(dirPath)
-  try {
-    return realpathSync.native(absolute)
-  } catch {
-    return absolute
-  }
+  return absolute
 }
 
 function safeStatFile(filePath: string): boolean {

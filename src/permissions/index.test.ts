@@ -303,3 +303,23 @@ test("event handler is optional and not invoked when absent", () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("directory readme injector does not inject for files outside project root", async () => {
+  const root = tempProject()
+  const externalDir = mkdtempSync(join(tmpdir(), "ocmm-external-"))
+  try {
+    mkdirSync(join(root, "src"), { recursive: true })
+    writeFileSync(join(root, "src", "README.md"), "Project README.\n")
+    const externalFile = join(externalDir, "external.ts")
+    writeFileSync(externalFile, "export const external = true\n")
+    writeFileSync(join(externalDir, "README.md"), "External README.\n")
+
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
+    const out = { output: "1: export const external = true", metadata: { filePath: externalFile } }
+    await guards.after({ tool: "read", sessionID: "s1", args: { filePath: externalFile } }, out)
+    assert.doesNotMatch(out.output, /\[Directory README: /)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(externalDir, { recursive: true, force: true })
+  }
+})
