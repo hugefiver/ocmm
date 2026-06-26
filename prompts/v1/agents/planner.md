@@ -66,6 +66,13 @@ Before reporting completion:
 - Check that file paths and function/type names are consistent across tasks.
 - Ensure QA is agent-executable and does not require user manual confirmation.
 
+## Parallel Task Dispatch
+
+When gathering context for a plan, emit all independent `task` tool calls (e.g. multiple `code-search`, `doc-search`, or `reviewer` consultations) in **one message** — do not wait for one to complete before dispatching the next. OpenCode executes multiple tool calls in a single response concurrently. Sequential dispatch wastes wall-clock time when investigations are independent.
+
+- Dispatch in parallel: independent searches, independent doc lookups, independent analyses.
+- Dispatch sequentially only when: one task's output is another's input.
+
 ## Handoff
 
 Report the plan path, the intended execution order, and any risks or assumptions that still matter.
