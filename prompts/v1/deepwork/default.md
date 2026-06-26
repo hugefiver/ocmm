@@ -53,6 +53,16 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 - Never suppress type errors with `as any`, `@ts-ignore`, or `@ts-expect-error`.
 - Never delete or weaken tests to pass.
 
+## Output Discipline
+
+Do not write large files in a single output. Think and output incrementally:
+
+- For **new files** over ~60 lines: write the skeleton first (imports + types + function signatures), then fill in each function in subsequent steps. Do NOT produce a 200-line file in one Write call.
+- For **edits to existing files**: use the Edit tool for targeted changes. Do NOT rewrite the entire file when only a section changed.
+- For **multi-file changes**: complete one file, verify it, then move to the next. Do NOT batch multiple large file writes.
+- If a single output would exceed ~80 lines of code, break it into logical units (one function, one class, one module section at a time).
+- Prefer many small, verifiable edits over one large dump. Each edit should be self-contained and typecheck-clean.
+
 ## Verification Bar
 
 Nothing is done without evidence.
