@@ -18,6 +18,10 @@ function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "ocmm-guards-"))
 }
 
+function configWithReadme(): ReturnType<typeof defaultConfig> {
+  return { ...defaultConfig(), disabledHooks: [] }
+}
+
 test("bash file read detector matches only simple file reads", () => {
   assert.equal(isSimpleFileReadCommand("cat src/index.ts"), true)
   assert.equal(isSimpleFileReadCommand("head -n 20 src/index.ts"), true)
@@ -124,7 +128,7 @@ test("after guards add task/json/readme/plan/fsync/truncation notices", async ()
     writeFileSync(file, "export const app = true\n")
     writeFileSync(join(root, "src", "README.md"), "Use local README context.\n")
     const tracker = createFsyncSkipTracker()
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root, fsyncTracker: tracker })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root, fsyncTracker: tracker })
 
     const taskOutput = { output: "" }
     await guards.after({ tool: "task" }, taskOutput)
@@ -191,7 +195,7 @@ test("directory readme injector injects only once per session per readme dir", a
     const file = join(root, "src", "app.ts")
     writeFileSync(file, "export const app = true\n")
     writeFileSync(join(root, "src", "README.md"), "README content.\n")
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
     await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
@@ -212,7 +216,7 @@ test("directory readme injector injects again for a different session", async ()
     const file = join(root, "src", "app.ts")
     writeFileSync(file, "export const app = true\n")
     writeFileSync(join(root, "src", "README.md"), "README content.\n")
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
     await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
@@ -231,7 +235,7 @@ test("event handler cleans up per-session read permissions on session.deleted", 
   try {
     const file = join(root, "existing.txt")
     writeFileSync(file, "old")
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
 
@@ -255,7 +259,7 @@ test("event handler cleans up per-session readme cache on session.compacted", as
     const file = join(root, "src", "app.ts")
     writeFileSync(file, "export const app = true\n")
     writeFileSync(join(root, "src", "README.md"), "README content.\n")
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     const out1 = { output: "1: export const app = true", metadata: { filePath: file } }
     await guards.after({ tool: "read", sessionID: "s1", args: { filePath: file } }, out1)
@@ -278,7 +282,7 @@ test("event handler ignores unknown event types", async () => {
   try {
     const file = join(root, "existing.txt")
     writeFileSync(file, "old")
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
     if (guards.event) {
@@ -293,7 +297,7 @@ test("event handler ignores unknown event types", async () => {
 test("event handler is optional and not invoked when absent", () => {
   const root = tempProject()
   try {
-    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+    const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
     assert.equal(typeof guards.event, "function")
   } finally {
     rmSync(root, { recursive: true, force: true })

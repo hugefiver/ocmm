@@ -139,9 +139,8 @@ test("add creates a new profile from JSON file", () => {
     assert.ok(stdout.includes('profile "gpu" added'))
     const cfg = readConfig(xdg)
     assert.ok(cfg.profiles && typeof cfg.profiles === "object")
-    assert.deepEqual((cfg.profiles as Record<string, unknown>).gpu, {
-      agents: { orchestrator: { model: "hoo/glm-5.2" } },
-    })
+    const gpuProfile = (cfg.profiles as Record<string, unknown>).gpu as Record<string, unknown>
+    assert.deepEqual(gpuProfile.agents, { orchestrator: { model: "hoo/glm-5.2" } })
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }

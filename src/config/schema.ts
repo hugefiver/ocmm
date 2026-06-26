@@ -73,8 +73,31 @@ const AgentOverrideFields = {
     .optional(),
 }
 
+const HOOK_NAMES = [
+  "directory-readme-injector",
+  "directory-agents-injector",
+  "write-existing-file-guard",
+  "notepad-write-guard",
+  "bash-file-read-guard",
+  "question-label-truncator",
+  "tasks-todowrite-disabler",
+  "webfetch-redirect-guard",
+  "empty-task-response-detector",
+  "comment-checker",
+  "plan-format-validator",
+  "read-image-resizer",
+  "json-error-recovery",
+  "fsync-skip-warning",
+  "tool-output-truncator",
+  "todo-description-override",
+] as const
+
+export type HookName = (typeof HOOK_NAMES)[number]
+
+const HookNameSchema = z.enum(HOOK_NAMES)
+
 const FeatureGateArrayFields = {
-  disabledHooks: z.array(z.string()).optional(),
+  disabledHooks: z.array(z.union([HookNameSchema, z.string()])).default(["directory-readme-injector"]),
   disabledTools: z.array(z.string()).optional(),
   disabledSkills: z.array(z.string()).optional(),
   disabledCommands: z.array(z.string()).optional(),
