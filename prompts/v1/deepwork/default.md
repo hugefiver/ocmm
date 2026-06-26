@@ -55,13 +55,13 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 
 ## Output Discipline
 
-Do not write large files in a single output. Think and output incrementally:
+Think and output incrementally. Do not produce large files in a single output.
 
-- For **new files** over ~60 lines: write the skeleton first (imports + types + function signatures), then fill in each function in subsequent steps. Do NOT produce a 200-line file in one Write call.
+- **New files**: think about the framework first (imports, types, module structure, function signatures). Write the skeleton, then fill in each function or section in subsequent steps. Do NOT produce a >200-line file in one Write call.
+- **Large edits (>200 lines total)**: prefer splitting into multiple smaller edits. Break by logical unit (one function, one class, one section at a time). Each edit should be self-contained and typecheck-clean.
+- **Multiple edits (<200 lines total)**: if several independent edits are needed and their combined size is under ~200 lines, you MAY batch them in parallel tool calls. Use this for surgical multi-spot fixes, not for large rewrites.
 - For **edits to existing files**: use the Edit tool for targeted changes. Do NOT rewrite the entire file when only a section changed.
-- For **multi-file changes**: complete one file, verify it, then move to the next. Do NOT batch multiple large file writes.
-- If a single output would exceed ~80 lines of code, break it into logical units (one function, one class, one module section at a time).
-- Prefer many small, verifiable edits over one large dump. Each edit should be self-contained and typecheck-clean.
+- Think in the thinking channel about the structure and approach BEFORE writing. Then write the code in segments.
 
 ## Verification Bar
 
