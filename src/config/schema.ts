@@ -93,14 +93,49 @@ const HOOK_NAMES = [
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]
+export type AgentName = (typeof AGENT_NAMES)[number]
+export type CommandName = (typeof COMMAND_NAMES)[number]
 
 const HookNameSchema = z.enum(HOOK_NAMES)
+
+const AGENT_NAMES = [
+  "orchestrator",
+  "builder",
+  "reviewer",
+  "doc-search",
+  "code-search",
+  "planner",
+  "clarifier",
+  "plan-critic",
+  "media-reader",
+  "frontend",
+  "creative",
+  "hard-reasoning",
+  "research",
+  "quick",
+  "coding",
+  "normal-task",
+  "complex",
+  "deep",
+  "documenting",
+] as const
+
+const AgentNameSchema = z.enum(AGENT_NAMES)
+
+const COMMAND_NAMES = [
+  "ralph-loop",
+  "audit-loop",
+  "dwloop",
+  "idle-continuation",
+] as const
+
+const CommandNameSchema = z.enum(COMMAND_NAMES)
 
 const FeatureGateArrayFields = {
   disabledHooks: z.array(z.union([HookNameSchema, z.string()])).default(["directory-readme-injector"]),
   disabledTools: z.array(z.string()).optional(),
   disabledSkills: z.array(z.string()).optional(),
-  disabledCommands: z.array(z.string()).optional(),
+  disabledCommands: z.array(z.union([CommandNameSchema, z.string()])).optional(),
   disabledMcps: z.array(z.string()).optional(),
 }
 
@@ -334,7 +369,7 @@ export const ProfileEntrySchema = z
   .object({
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
     agents: z.record(z.string(), AgentEntrySchema).optional(),
-    disabledAgents: z.array(z.string()).optional(),
+    disabledAgents: z.array(z.union([AgentNameSchema, z.string()])).optional(),
     ...FeatureGateArrayFields,
     skills: ProfileSkillsConfigSchema.optional(),
     fallbackModels: z.array(z.string()).optional(),
@@ -397,7 +432,7 @@ export const OcmmConfigSchema = z
     $schema: z.string().optional(),
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
     agents: z.record(z.string(), AgentEntrySchema).optional(),
-    disabledAgents: z.array(z.string()).optional(),
+    disabledAgents: z.array(z.union([AgentNameSchema, z.string()])).optional(),
     ...FeatureGateArrayFields,
     skills: SkillsConfigSchema,
     fallbackModels: z.array(z.string()).optional(),
