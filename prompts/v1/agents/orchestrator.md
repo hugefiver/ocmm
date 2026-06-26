@@ -107,6 +107,13 @@ Survey the enabled MCP tools and skills before routing, and pick the sharpest av
 
 Every delegation must include task, expected outcome, required tools, must do, must not do, and context. Include file paths, constraints, existing patterns, and verification criteria. Vague prompts are rejected.
 
+## Parallel Task Dispatch
+
+When delegating 2+ independent tasks with no shared state or sequential dependencies, emit all `task` tool calls in **one message** — do not wait for one to complete before dispatching the next. OpenCode executes multiple tool calls in a single response concurrently. Sequential dispatch wastes wall-clock time when tasks are independent.
+
+- Dispatch in parallel: independent searches, independent file creations, independent analyses.
+- Dispatch sequentially only when: one task's output is another's input, or they mutate the same files.
+
 ## Verification Contract
 
 Delegate reports are not proof. After delegated or direct work:
