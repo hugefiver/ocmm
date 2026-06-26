@@ -22,6 +22,36 @@ The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm re
 
 The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/ocmm/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add ocmm@ocmm-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` and `dw-creative`.
 
+### Publishing a new release
+
+```bash
+# 1. Bump version in both files (keep them in sync)
+#    package.json: "version": "X.Y.Z" -> "X.Y.W"
+#    crates/ocmm-lsp/Cargo.toml: version = "X.Y.Z" -> "X.Y.W"
+
+# 2. Regenerate the Codex plugin bundle — the bundle embeds the version number
+#    in plugins/ocmm/.codex-plugin/plugin.json and plugins/ocmm/package.json.
+#    If you skip this, the release workflow will fail at the
+#    "Check generated Codex plugin bundle" step (git diff --exit-code).
+pnpm run build:ts
+pnpm run gen:codex-plugin
+git add .agents/plugins/marketplace.json plugins/ocmm
+git commit -m "chore: bump version to X.Y.W"
+
+# 3. Tag and push
+git tag vX.Y.W
+git push origin master
+git push origin vX.Y.W
+
+# 4. Monitor the release workflow
+#    https://github.com/<owner>/ocmm/actions/workflows/release.yml
+#    The "Verify" job runs typecheck, test, and the Codex bundle check.
+#    Six "Native ocmm-lsp" jobs build platform binaries in parallel.
+#    On success, "GitHub Release" publishes assets automatically.
+```
+
+Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's `git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm` check fails if the committed bundle does not match what `gen:codex-plugin` produces from the current `package.json` version.
+
 ## Live Integration Test
 
 The unit tests cover hooks in isolation but do not exercise the real OpenCode runtime. To verify the plugin against a live OpenCode instance:
