@@ -1,6 +1,6 @@
 {
   "name": "ocmm",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Codex adapter for deepwork workflows, ocmm agents, skills, and MCP tool registrations.",
   "author": {
     "name": "Hugefiver"
