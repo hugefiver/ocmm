@@ -62,6 +62,7 @@ Think and output incrementally. Do not produce large files in a single output.
 - **Multiple edits (<200 lines total)**: if several independent edits are needed and their combined size is under ~200 lines, you MAY batch them in parallel tool calls. Use this for surgical multi-spot fixes, not for large rewrites.
 - For **edits to existing files**: use the Edit tool for targeted changes. Do NOT rewrite the entire file when only a section changed.
 - Think in the thinking channel about the structure and approach BEFORE writing. Then write the code in segments.
+- Thinking in segments does NOT mean producing minimal segments. After the skeleton, expand each section fully — write complete function bodies, not stubs; write full reasoning, not one-liners. Incremental output limits the size of each tool call, never the completeness of the work.
 
 ## Verification Bar
 
