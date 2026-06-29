@@ -65,9 +65,9 @@ test("deepMerge: scalars and objects override; key-aware arrays union", () => {
   assert.deepEqual(merged.other, [3])
 })
 
-test("workflow field defaults to omo", () => {
+test("workflow field defaults to v1", () => {
   const cfg = defaultConfig()
-  assert.equal(cfg.workflow, "omo")
+  assert.equal(cfg.workflow, "v1")
 })
 
 test("deepMerge: workflow scalar replaces (project wins)", () => {
@@ -120,7 +120,7 @@ test("default user config path uses ~/.config/opencode instead of APPDATA", () =
     const loaded = loadConfig({ cwd })
     assert.equal(loaded.sources.user, join(fakeHome, ".config", "opencode", "ocmm.jsonc"))
     assert.equal(loaded.config.debug, true)
-    assert.equal(loaded.config.workflow, "omo")
+    assert.equal(loaded.config.workflow, "v1")
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = previousXdg
@@ -182,7 +182,7 @@ test("includeUser=false ignores user config while keeping project config", () =>
     const loaded = loadConfig({ cwd, includeUser: false })
     assert.equal(loaded.sources.user, undefined)
     assert.equal(loaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
-    assert.equal(loaded.config.workflow, "omo")
+    assert.equal(loaded.config.workflow, "v1")
     assert.equal(loaded.config.debug, true)
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME

@@ -441,7 +441,7 @@ export const OcmmConfigSchema = z
     systemDefaultModel: z.string().optional(),
     locale: LocaleCodeSchema.optional(),
     /** 'v1' enables the deepwork 5-phase chain; 'omo' selects the default prompt set. */
-    workflow: z.enum(["omo", "v1"]).default("omo"),
+    workflow: z.enum(["omo", "v1"]).default("v1"),
     intent: z
       .object({
         enabled: z.boolean().default(true),

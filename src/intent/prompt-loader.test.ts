@@ -34,10 +34,10 @@ test("loadAllPrompts loads files from the workflow subdir", () => {
   }
 })
 
-test("loadAllPrompts defaults to omo workflow", () => {
-  const root = makeTempRoot("omo")
+test("loadAllPrompts defaults to v1 workflow", () => {
+  const root = makeTempRoot("v1")
   try {
-    writeFileSync(join(root, "omo", "deepwork", "planner.md"), "planner-content")
+    writeFileSync(join(root, "v1", "deepwork", "planner.md"), "planner-content")
     loadAllPrompts(root)
     assert.equal(getDeepworkPrompt("planner"), "planner-content")
   } finally {

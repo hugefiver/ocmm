@@ -66,7 +66,7 @@ function loadFile(absPath: string): string | null {
 
 export function loadAllPrompts(
   rootDir: string = DEFAULT_PROMPTS_ROOT,
-  workflow: Workflow = "omo",
+  workflow: Workflow = "v1",
 ): void {
   deepworkPrompts.clear()
   agentPrompts.clear()

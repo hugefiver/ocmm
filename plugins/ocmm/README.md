@@ -2,7 +2,7 @@
 
 Generated from the ocmm source tree. Do not edit generated files by hand; run `pnpm run gen:codex-plugin` from the repository root.
 
-- Workflow: `omo`
+- Workflow: `v1`
 - Generated agents: 21
 - Skills are copied from `skills/` plus flattened `skills/v1/` deepwork skills.
 - MCP servers are generated from the ocmm `mcp` config namespace.

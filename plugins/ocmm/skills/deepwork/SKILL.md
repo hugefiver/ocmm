@@ -17,7 +17,7 @@ This is the Codex adapter skill for deepwork. Use it to apply ocmm's autonomous 
 
 ## Workflow
 
-Configured workflow: `omo`
+Configured workflow: `v1`
 
 1. Classify the request into quick, normal-task, coding, complex, deep, research, frontend, hard-reasoning, creative, or documenting.
 2. Select the matching ocmm role or generated `dw-*` Codex agent.
