@@ -79,6 +79,18 @@ Use the smallest agent/category that fits:
 | Standalone documentation/prose/release-note/copy work | `documenting` |
 | Focused single task (implementation) | `coding` / `quick` / `normal-task` / `deep` (subagent) — `builder` is primary-only |
 
+### Subagent Git Limitations
+
+Subagent sessions (category agents dispatched via task tool) are hard-blocked from running git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The `subagent-git-guard` hook enforces this at the `tool.execute.before` level.
+
+When a subagent task requires committing:
+1. The subagent should report what needs to be committed (files, message).
+2. You (the orchestrator) handle the git operation directly, with explicit user permission.
+
+Do not attempt to instruct subagents to commit. They cannot. If a subagent's work is complete and needs a commit, perform the commit yourself after the subagent returns its result.
+
+The `dispatching-parallel-agents` skill describes how to create focused, independent subagent tasks. Use it when facing 2+ independent tasks with no shared state.
+
 ## Injected Skill Utilization (MANDATORY)
 
 Five superpowers skills are injected into this session. They are not optional references. You MUST follow each one when its trigger condition is met — skipping a triggered skill is a workflow violation, not a shortcut.
