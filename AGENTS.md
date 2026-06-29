@@ -244,3 +244,7 @@ All v1 skill file changes (in `skills/v1/`) and v1 prompt file changes (in `prom
 This applies to: content edits, new files, deletions, renames, and upstream skill syncs.
 
 omo prompts (`prompts/omo/`) are not tracked in this doc.
+
+## Config Schema Sync
+
+`schema.json` (repo root) is generated from `OcmmConfigSchema` in `src/config/schema.ts` via `pnpm run gen-schema` (`scripts/gen-schema.ts`). Any task that modifies the config schema — adding/removing fields, changing types, adding hook names, agent names, command names, or any other `HOOK_NAMES`/`AGENT_NAMES`/`COMMAND_NAMES` entries — MUST regenerate `schema.json` and include it in the same commit as the schema change. A schema code change without a `schema.json` update, or vice versa, is a failed review.

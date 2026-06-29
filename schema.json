@@ -486,13 +486,67 @@
     "disabledAgents": {
       "type": "array",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "orchestrator",
+              "builder",
+              "reviewer",
+              "doc-search",
+              "code-search",
+              "planner",
+              "clarifier",
+              "plan-critic",
+              "media-reader",
+              "frontend",
+              "creative",
+              "hard-reasoning",
+              "research",
+              "quick",
+              "coding",
+              "normal-task",
+              "complex",
+              "deep",
+              "documenting"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ]
       }
     },
     "disabledHooks": {
       "type": "array",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "directory-readme-injector",
+              "directory-agents-injector",
+              "write-existing-file-guard",
+              "notepad-write-guard",
+              "bash-file-read-guard",
+              "question-label-truncator",
+              "tasks-todowrite-disabler",
+              "webfetch-redirect-guard",
+              "empty-task-response-detector",
+              "comment-checker",
+              "plan-format-validator",
+              "read-image-resizer",
+              "json-error-recovery",
+              "fsync-skip-warning",
+              "tool-output-truncator",
+              "todo-description-override",
+              "commit-guard-injector"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ]
       }
     },
     "disabledTools": {
@@ -510,7 +564,20 @@
     "disabledCommands": {
       "type": "array",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "ralph-loop",
+              "audit-loop",
+              "dwloop",
+              "idle-continuation"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ]
       }
     },
     "disabledMcps": {
@@ -625,6 +692,21 @@
           "items": {
             "type": "string"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "idleContinuation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxContinuations": {
+          "type": "number"
+        },
+        "prompt": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1249,13 +1331,67 @@
           "disabledAgents": {
             "type": "array",
             "items": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "orchestrator",
+                    "builder",
+                    "reviewer",
+                    "doc-search",
+                    "code-search",
+                    "planner",
+                    "clarifier",
+                    "plan-critic",
+                    "media-reader",
+                    "frontend",
+                    "creative",
+                    "hard-reasoning",
+                    "research",
+                    "quick",
+                    "coding",
+                    "normal-task",
+                    "complex",
+                    "deep",
+                    "documenting"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
             }
           },
           "disabledHooks": {
             "type": "array",
             "items": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "directory-readme-injector",
+                    "directory-agents-injector",
+                    "write-existing-file-guard",
+                    "notepad-write-guard",
+                    "bash-file-read-guard",
+                    "question-label-truncator",
+                    "tasks-todowrite-disabler",
+                    "webfetch-redirect-guard",
+                    "empty-task-response-detector",
+                    "comment-checker",
+                    "plan-format-validator",
+                    "read-image-resizer",
+                    "json-error-recovery",
+                    "fsync-skip-warning",
+                    "tool-output-truncator",
+                    "todo-description-override",
+                    "commit-guard-injector"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
             }
           },
           "disabledTools": {
@@ -1273,7 +1409,20 @@
           "disabledCommands": {
             "type": "array",
             "items": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "ralph-loop",
+                    "audit-loop",
+                    "dwloop",
+                    "idle-continuation"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
             }
           },
           "disabledMcps": {
@@ -1381,6 +1530,21 @@
                 "items": {
                   "type": "string"
                 }
+              }
+            },
+            "additionalProperties": false
+          },
+          "idleContinuation": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "maxContinuations": {
+                "type": "number"
+              },
+              "prompt": {
+                "type": "string"
               }
             },
             "additionalProperties": false
