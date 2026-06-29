@@ -21,7 +21,7 @@ import { log } from "../shared/logger.ts"
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
-export type Workflow = "omo" | "v1"
+export type Workflow = "omo" | "v1" | "codex"
 
 type DeepworkVariant = "default" | "gpt" | "gemini" | "glm" | "codex" | "planner"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"

@@ -19,6 +19,17 @@ Naming note: `v1` remains the configuration value and on-disk version label. Pro
 
 **Shared skill (not v1):** `remove-ai-slops` at `skills/remove-ai-slops/SKILL.md` — simplified fork from omo's `shared-skills/remove-ai-slops` (317→~150 lines, generalized from Python-specific). Auto-discovered by `loadSharedSkills`, registered as `/remove-ai-slops`. Not injected into system message.
 
+## Codex Plugin Prompts (`prompts/codex/`)
+
+The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory (parallel to `prompts/v1/` and `prompts/omo/`). These are v1 prompts adapted for the Codex environment:
+
+- **Tool substitutions**: `task()` → `multi_agent_v1.spawn_agent`, TodoWrite → `update_plan`, Edit/Write → `apply_patch`, `lsp_diagnostics` → LSP via lsp MCP.
+- **Skill Reference**: slash commands (`/writing-plans`) → load by name (`deepwork-writing-plans`).
+- **Brainstorming injection**: brainstorming SKILL.md is embedded into each agent's `developer_instructions` at packaging time (Codex has no runtime system message injection).
+- **Codex Environment note**: deepwork/gpt.md includes a Codex-specific compatibility section.
+- `loadAdapterConfig` forces `workflow: "codex"` for Deepwork plugin packaging regardless of source config.
+- Session resume via `task_id` is not supported in Codex (noted as limitation in gemini.md, codex.md).
+
 ### Skill Template Files
 
 | v1 file | Upstream file | Adjustments |

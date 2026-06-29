@@ -649,7 +649,8 @@
       "type": "string",
       "enum": [
         "omo",
-        "v1"
+        "v1",
+        "codex"
       ]
     },
     "intent": {

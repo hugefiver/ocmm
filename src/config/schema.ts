@@ -440,8 +440,8 @@ export const OcmmConfigSchema = z
     fallbackModels: z.array(z.string()).optional(),
     systemDefaultModel: z.string().optional(),
     locale: LocaleCodeSchema.optional(),
-    /** 'v1' enables the deepwork 5-phase chain; 'omo' selects the default prompt set. */
-    workflow: z.enum(["omo", "v1"]).default("v1"),
+    /** 'v1' enables the deepwork 5-phase chain; 'omo' selects the default prompt set; 'codex' uses Codex-adapted prompts for the Codex plugin bundle. */
+    workflow: z.enum(["omo", "v1", "codex"]).default("v1"),
     intent: z
       .object({
         enabled: z.boolean().default(true),

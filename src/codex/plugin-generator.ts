@@ -18,7 +18,7 @@ import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import { createConfigHandler } from "../hooks/config.ts"
 import { classifyModelFamily } from "../intent/model-family.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
-import { DEFAULT_SKILLS_ROOT, loadSharedSkills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
+import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
 import { loadMcpJsonSync, resolveMcpServers } from "../mcp/index.ts"
 import { translateVariant } from "../routing/variant-translator.ts"
 import { isRecord } from "../shared/logger.ts"
@@ -129,10 +129,14 @@ export function loadAdapterConfig(projectRoot: string, config?: OcmmConfig): Loa
   if (config) return { config, host: "provided" }
 
   const codex = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
-  if (codex.sources.project || codex.sources.user) return { config: codex.config, host: "codex" }
+  if (codex.sources.project || codex.sources.user) {
+    // Force codex workflow for Codex plugin packaging (uses prompts/codex/).
+    return { config: { ...codex.config, workflow: "codex" }, host: "codex" }
+  }
 
   const opencode = loadConfig({ cwd: projectRoot, host: "opencode", includeUser: false })
-  return { config: opencode.config, host: "opencode" }
+  // Force codex workflow for Codex plugin packaging regardless of source config.
+  return { config: { ...opencode.config, workflow: "codex" }, host: "opencode" }
 }
 
 export async function buildCodexAgents(args: {
@@ -141,6 +145,10 @@ export async function buildCodexAgents(args: {
   skillsRoot?: string
 }): Promise<CodexAgentSpec[]> {
   loadAllPrompts(args.config.promptsRoot ?? join(args.cwd, "prompts"), args.config.workflow)
+  // Load brainstorming skill for injection into agent TOML (Codex has no runtime
+  // system message injection, so the HARD-GATE brainstorming skill is embedded
+  // at packaging time).
+  const brainstormingSkill = loadV1Skills(args.skillsRoot ?? DEFAULT_SKILLS_ROOT)
   const target: { agent: Record<string, unknown> } = { agent: {} }
   const handler = createConfigHandler({
     getConfig: () => args.config,
@@ -181,6 +189,7 @@ export async function buildCodexAgents(args: {
         prompt,
         workflow: args.config.workflow,
         preferredChain,
+        brainstormingSkill,
       }),
     })
   }
@@ -469,6 +478,7 @@ function codexAgentInstructions(args: {
   prompt: string
   workflow: OcmmConfig["workflow"]
   preferredChain: readonly string[]
+  brainstormingSkill: string
 }): string {
   const chain = args.preferredChain.length ? args.preferredChain.join(" -> ") : "<none>"
   return [
@@ -483,6 +493,11 @@ function codexAgentInstructions(args: {
     "- Use shell commands for inspection and verification, preferring rg for text search.",
     "- Treat AGENTS.md as native Codex project guidance.",
     "- The model and reasoning_effort in your profile are defaults. The main agent may override them via spawn_agent's model and reasoning_effort parameters when spawning you.",
+    "",
+    "## Injected Brainstorming Skill (HARD-GATE)",
+    "The following skill is always loaded. It is mandatory for any new feature, component, or behavior change — present a design and get explicit user approval BEFORE any code.",
+    "",
+    args.brainstormingSkill,
     "",
     "Original ocmm prompt:",
     args.prompt,
