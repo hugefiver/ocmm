@@ -346,6 +346,36 @@ test("OCMM_PROFILE set to empty string falls back to config activeProfile", () =
   }
 })
 
+test("OCMM_NO_PROFILE disables all profile loading", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "hoo/glm-5.2" } },
+      profiles: {
+        a: { agents: { orchestrator: { model: "openai/gpt-5.5" } } },
+      },
+      activeProfile: "a",
+    })
+    const prevNo = process.env.OCMM_NO_PROFILE
+    const prevProf = process.env.OCMM_PROFILE
+    process.env.OCMM_NO_PROFILE = "1"
+    process.env.OCMM_PROFILE = "a"
+    try {
+      const { config, activeProfile } = loadWithXdg(xdg)
+      assert.equal(activeProfile, undefined)
+      // Base config loads unchanged — profile overlay NOT applied
+      assert.equal(config.agents?.orchestrator?.model, "hoo/glm-5.2")
+    } finally {
+      if (prevNo === undefined) delete process.env.OCMM_NO_PROFILE
+      else process.env.OCMM_NO_PROFILE = prevNo
+      if (prevProf === undefined) delete process.env.OCMM_PROFILE
+      else process.env.OCMM_PROFILE = prevProf
+    }
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("ProfileEntrySchema rejects nested profiles/activeProfile fields", () => {
   const result = OcmmConfigSchema.safeParse({
     profiles: {

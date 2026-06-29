@@ -35,6 +35,16 @@ describe("shim parseArgs", () => {
     assert.deepEqual(args.passthrough, [])
   })
 
+  it("parses --no-profile", () => {
+    const args = parseArgs(["--no-profile"])
+    assert.equal(args.noProfile, true)
+  })
+
+  it("parses -n as shorthand for --no-profile", () => {
+    const args = parseArgs(["-n"])
+    assert.equal(args.noProfile, true)
+  })
+
   it("parses --no-providers and --no-plugins separately", () => {
     const a1 = parseArgs(["--no-providers"])
     assert.equal(a1.noProviders, true)

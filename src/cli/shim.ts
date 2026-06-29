@@ -7,7 +7,7 @@
  * global opencode.json so you don't redefine providers.
  *
  * USAGE:
- *   ocmm [-p <name>] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+ *   ocmm [-p <name>] [-n] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
  *        [--config-dir <path>] [--opencode <path-or-name>]
  *        [--keep-omo] [--reset] [-- <opencode args...>]
  *   ocmm --help
@@ -36,6 +36,7 @@ import type { ShimConfig, IsolationMode } from "../config/schema.ts"
 
 interface ShimArgs {
   profile?: string
+  noProfile: boolean
   mode?: IsolationMode
   noProviders: boolean
   noPlugins: boolean
@@ -204,6 +205,7 @@ export function parseArgs(argv: string[]): ShimArgs {
   const args: ShimArgs = {
     noProviders: false,
     noPlugins: false,
+    noProfile: false,
     keepOmo: false,
     reset: false,
     help: false,
@@ -238,6 +240,10 @@ export function parseArgs(argv: string[]): ShimArgs {
           process.exit(1)
         }
         args.profile = argv[i]
+        break
+      case "--no-profile":
+      case "-n":
+        args.noProfile = true
         break
       case "--no-providers":
         args.noProviders = true
@@ -308,13 +314,14 @@ function printHelp(): void {
   console.log(`ocmm — launch opencode with isolated config
 
 USAGE:
-  ocmm [-p <name>] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+  ocmm [-p <name>] [-n] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
         [--config-dir <path>] [--opencode <path-or-name>]
         [--keep-omo] [--reset] [-- <opencode args...>]
   ocmm --help
 
 OCMM FLAGS:
   -p, --profile <name>  Select ocmm profile at startup (sets OCMM_PROFILE)
+  -n, --no-profile      Start without loading any profile (overrides activeProfile)
       --mode <m>         Isolation method: none|inline|config-file|config-dir|xdg
                          (default: none, or 'shim.mode' in ocmm.jsonc)
       --no-providers     Don't merge providers from global opencode config
@@ -402,6 +409,9 @@ function main(): void {
 
   if (args.profile) {
     env.OCMM_PROFILE = args.profile
+  }
+  if (args.noProfile) {
+    env.OCMM_NO_PROFILE = "1"
   }
 
   switch (mode) {

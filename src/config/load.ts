@@ -232,9 +232,11 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
   // Profile selection: OCMM_PROFILE env var wins over config's activeProfile.
   // Empty string is treated as unset so `OCMM_PROFILE= opencode ...` falls
   // back to the config's activeProfile rather than selecting a "" profile.
-  const envProfile = process.env.OCMM_PROFILE || undefined
+  // OCMM_NO_PROFILE=1 disables profile loading entirely (overrides everything).
+  const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
+  const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
   const mergedRecord = isPlainObject(merged) ? (merged as Record<string, unknown>) : {}
-  const activeProfileRaw = envProfile ?? mergedRecord.activeProfile
+  const activeProfileRaw = noProfile ? undefined : (envProfile ?? mergedRecord.activeProfile)
   const activeProfile =
     typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
       ? activeProfileRaw
