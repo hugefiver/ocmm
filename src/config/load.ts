@@ -6,7 +6,7 @@
  * Zod, then deep-merges (project wins). Missing files are silently tolerated.
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
@@ -89,6 +89,67 @@ function locateFile(dir: string): string | null {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Load profile entries from a directory of `<name>.jsonc` / `<name>.json` files.
+ *
+ * Each file is parsed (JSONC) and returned under its basename (extension
+ * stripped). Parse failures are warned and skipped. `profiles` and
+ * `activeProfile` keys are defensively stripped from each entry to prevent
+ * nested-profile leakage (ProfileEntrySchema forbids them, but this function
+ * does not run schema validation — the merge step would otherwise leak them).
+ *
+ * `.jsonc` is preferred when both `<name>.jsonc` and `<name>.json` exist.
+ * Returns `{}` if the directory does not exist or is empty.
+ */
+export function loadProfilesFromDir(dir: string): Record<string, unknown> {
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return {}
+  }
+  const out: Record<string, unknown> = {}
+  const seen = new Set<string>()
+  // Sort so .jsonc is processed after .json (later wins) for same basename.
+  const files = entries.filter((n) => n.endsWith(".jsonc") || n.endsWith(".json")).sort()
+  for (const name of files) {
+    const baseName = name.replace(/\.(jsonc|json)$/, "")
+    const ext = name.endsWith(".jsonc") ? "jsonc" : "json"
+    // If we already have a .jsonc version, skip .json.
+    if (ext === "json" && seen.has(baseName + ":jsonc")) continue
+    const path = join(dir, name)
+    const raw = readFileSync(path, "utf8")
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(stripJsoncCommentsAndTrailingCommas(raw))
+    } catch (err) {
+      log.warn(`failed to parse profile ${path}: ${(err as Error).message}`)
+      continue
+    }
+    if (!isPlainObject(parsed)) {
+      log.warn(`profile ${path} is not a JSON object; skipped`)
+      continue
+    }
+    // Defensive: strip forbidden keys.
+    const cleaned: Record<string, unknown> = { ...parsed }
+    let stripped = false
+    if ("profiles" in cleaned) {
+      delete cleaned.profiles
+      stripped = true
+    }
+    if ("activeProfile" in cleaned) {
+      delete cleaned.activeProfile
+      stripped = true
+    }
+    if (stripped) {
+      log.warn(`profile ${path} contained profiles/activeProfile; stripped`)
+    }
+    out[baseName] = cleaned
+    seen.add(baseName + ":" + ext)
+  }
+  return out
 }
 
 /**

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { deepMerge, loadConfig, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
+import { deepMerge, loadConfig, loadProfilesFromDir, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
 import { defaultConfig } from "./schema.ts"
 
 test("stripJsoncCommentsAndTrailingCommas keeps strings intact", () => {
@@ -190,4 +190,63 @@ test("includeUser=false ignores user config while keeping project config", () =>
     rmSync(xdg, { recursive: true, force: true })
     rmSync(cwd, { recursive: true, force: true })
   }
+})
+
+// --- loadProfilesFromDir tests ---
+
+test("loadProfilesFromDir returns {} for missing dir", () => {
+  const result = loadProfilesFromDir(join("/nonexistent", "path", "x"))
+  assert.deepEqual(result, {})
+})
+
+test("loadProfilesFromDir returns {} for empty dir", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "ocmm-empty-"))
+  const result = loadProfilesFromDir(tmp)
+  assert.deepEqual(result, {})
+})
+
+test("loadProfilesFromDir loads .jsonc files by basename", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "ocmm-profiles-"))
+  writeFileSync(
+    join(tmp, "co.jsonc"),
+    `// comment\n{ "agents": { "orchestrator": { "model": "gpt-5" } } }`,
+  )
+  writeFileSync(
+    join(tmp, "oa.jsonc"),
+    `{ "agents": { "reviewer": { "model": "claude" } } }`,
+  )
+  const result = loadProfilesFromDir(tmp)
+  assert.deepEqual(Object.keys(result).sort(), ["co", "oa"])
+  assert.deepEqual((result.co as Record<string, unknown>).agents, {
+    orchestrator: { model: "gpt-5" },
+  })
+})
+
+test("loadProfilesFromDir prefers .jsonc over .json for same basename", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "ocmm-dup-"))
+  writeFileSync(join(tmp, "co.json"), `{ "src": "json" }`)
+  writeFileSync(join(tmp, "co.jsonc"), `{ "src": "jsonc" }`)
+  const result = loadProfilesFromDir(tmp)
+  assert.equal((result.co as Record<string, unknown>).src, "jsonc")
+})
+
+test("loadProfilesFromDir skips unparseable files with warn", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "ocmm-bad-"))
+  writeFileSync(join(tmp, "good.jsonc"), `{ "a": 1 }`)
+  writeFileSync(join(tmp, "bad.jsonc"), `{ this is broken`)
+  const result = loadProfilesFromDir(tmp)
+  assert.deepEqual(Object.keys(result), ["good"])
+})
+
+test("loadProfilesFromDir strips nested profiles/activeProfile keys defensively", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "ocmm-leak-"))
+  writeFileSync(
+    join(tmp, "sneaky.jsonc"),
+    `{ "agents": {}, "profiles": { "nested": {} }, "activeProfile": "nested" }`,
+  )
+  const result = loadProfilesFromDir(tmp)
+  const sneaky = result.sneaky as Record<string, unknown>
+  assert.ok(!("profiles" in sneaky))
+  assert.ok(!("activeProfile" in sneaky))
+  assert.ok("agents" in sneaky)
 })
