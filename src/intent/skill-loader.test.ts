@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1Skills, V1_SKILL_DIRS } from "./skill-loader.ts"
+import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1Skills, V1_COMMAND_SKILLS, V1_INJECTED_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
 
 function makeSkillsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-skills-"))
@@ -14,20 +14,35 @@ function makeSkillsRoot(): string {
   return root
 }
 
-test("loadV1Skills concatenates all 5 SKILL.md files", () => {
+test("loadV1Skills injects only brainstorming (HARD-GATE)", () => {
   const root = makeSkillsRoot()
   try {
     let i = 0
-    for (const dir of V1_SKILL_DIRS) {
-      writeFileSync(join(root, "v1", dir, "SKILL.md"), `# Skill ${i++}`)
+    for (const dir of V1_COMMAND_SKILLS) {
+      writeFileSync(join(root, "v1", dir, "SKILL.md"), `# Skill ${dir}`)
     }
     const skills = loadV1Skills(root)
-    assert.ok(skills.includes("# Skill 0"))
-    assert.ok(skills.includes("# Skill 4"))
-    assert.ok(skills.includes("---"), "skills should be separated by ---")
+    // Only brainstorming is injected
+    assert.ok(skills.includes("# Skill brainstorming"))
+    assert.ok(!skills.includes("# Skill writing-plans"))
+    assert.ok(!skills.includes("# Skill subagent-driven-development"))
+    assert.ok(!skills.includes("# Skill requesting-code-review"))
+    assert.ok(!skills.includes("# Skill receiving-code-review"))
+    assert.ok(!skills.includes("# Skill dispatching-parallel-agents"))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("V1_INJECTED_SKILLS contains only brainstorming", () => {
+  assert.deepEqual([...V1_INJECTED_SKILLS], ["brainstorming"])
+})
+
+test("V1_COMMAND_SKILLS contains all 6 v1 skills", () => {
+  assert.equal(V1_COMMAND_SKILLS.length, 6)
+  assert.ok(V1_COMMAND_SKILLS.includes("brainstorming"))
+  assert.ok(V1_COMMAND_SKILLS.includes("writing-plans"))
+  assert.ok(V1_COMMAND_SKILLS.includes("dispatching-parallel-agents"))
 })
 
 test("loadV1Skills tolerates missing skill files", () => {

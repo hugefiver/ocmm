@@ -46,7 +46,13 @@ type SkillMetadata = {
   subtask?: boolean
 }
 
-export const V1_SKILL_DIRS = [
+// Skills injected into the system message (only brainstorming — HARD-GATE protection).
+export const V1_INJECTED_SKILLS = [
+  "brainstorming",
+] as const
+
+// Skills registered as slash commands (all v1 skills, loaded on demand via /command).
+export const V1_COMMAND_SKILLS = [
   "brainstorming",
   "writing-plans",
   "subagent-driven-development",
@@ -55,11 +61,14 @@ export const V1_SKILL_DIRS = [
   "dispatching-parallel-agents",
 ] as const
 
+/** @deprecated Use V1_INJECTED_SKILLS or V1_COMMAND_SKILLS. Kept for backward compat. */
+export const V1_SKILL_DIRS = V1_COMMAND_SKILLS
+
 export function loadV1Skills(
   rootDir: string = DEFAULT_SKILLS_ROOT,
 ): string {
   const parts: string[] = []
-  for (const dir of V1_SKILL_DIRS) {
+  for (const dir of V1_INJECTED_SKILLS) {
     const skillPath = join(rootDir, "v1", dir, "SKILL.md")
     try {
       const content = readFileSync(skillPath, "utf8")
@@ -78,7 +87,7 @@ export function loadV1SkillCommands(args: {
   const rootDir = args.rootDir ?? DEFAULT_SKILLS_ROOT
   const disable = new Set(args.disable ?? [])
   const commands: SkillCommand[] = []
-  for (const dir of V1_SKILL_DIRS) {
+  for (const dir of V1_COMMAND_SKILLS) {
     const skillDir = join(rootDir, "v1", dir)
     const command = readSkillCommand(skillDir, "ocmm deepwork")
     if (!command) continue
