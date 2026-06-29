@@ -479,3 +479,86 @@ test("use rejects invalid profile names", () => {
     rmSync(xdg, { recursive: true, force: true })
   }
 })
+
+// ---- Task 5: comment-preservation tests ----
+
+/** Write raw JSONC content (with comments) to the config file. */
+function writeConfigRaw(xdg: string, content: string): void {
+  mkdirSync(join(xdg, "opencode"), { recursive: true })
+  writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), content)
+}
+
+/** Read raw content (string, not parsed) from the config file. */
+function readConfigRaw(xdg: string): string {
+  return readFileSync(join(xdg, "opencode", "ocmm.jsonc"), "utf8")
+}
+
+test("use sets activeProfile preserving comments in ocmm.jsonc", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfigRaw(xdg, `{
+  // top comment
+  "profiles": {
+    "co": { "agents": {} }
+  },
+  "activeProfile": "old",
+  // trailing comment
+  "other": true
+}
+`)
+    const { exitCode, stdout } = runCli(xdg, ["use", "co"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes('active profile set to "co"'))
+    const raw = readConfigRaw(xdg)
+    assert.ok(raw.includes("// top comment"), "top comment should survive")
+    assert.ok(raw.includes("// trailing comment"), "trailing comment should survive")
+    assert.ok(raw.includes('"activeProfile": "co"'), "activeProfile should be co")
+    assert.ok(!raw.includes('"old"'), "old value should be gone")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("clear removes activeProfile preserving comments", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfigRaw(xdg, `{
+  // top comment
+  "activeProfile": "old",
+  // middle comment
+  "other": true
+}
+`)
+    const { exitCode, stdout } = runCli(xdg, ["clear"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes("cleared active profile"))
+    const raw = readConfigRaw(xdg)
+    assert.ok(raw.includes("// top comment"), "top comment should survive")
+    assert.ok(raw.includes("// middle comment"), "middle comment should survive")
+    assert.ok(!raw.includes("activeProfile"), "activeProfile key should be removed")
+    assert.ok(raw.includes('"other": true'), "other key should survive")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("use inserts activeProfile when field absent", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfigRaw(xdg, `{
+  // config comment
+  "profiles": {
+    "co": { "agents": {} }
+  }
+}
+`)
+    const { exitCode, stdout } = runCli(xdg, ["use", "co"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes('active profile set to "co"'))
+    const raw = readConfigRaw(xdg)
+    assert.ok(raw.includes("// config comment"), "comment should survive")
+    assert.ok(raw.includes('"activeProfile": "co"'), "activeProfile should be inserted")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})

@@ -26,6 +26,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
 import { ProfileEntrySchema } from "../config/schema.ts"
+import { patchTopLevelScalar, PatchError } from "../config/jsonc-patch.ts"
 
 type Command = "list" | "use" | "show" | "add" | "rm" | "clear" | "current" | "help"
 
@@ -150,9 +151,19 @@ function cmdUse(configPath: string, name: string): void {
     const avail = [...dirProfiles.keys(), ...Object.keys(inlineProfiles)].sort().join(", ") || "(none)"
     fail(`profile "${name}" does not exist. Available: ${avail}`)
   }
-  // TODO Task 5: replace writeConfigRaw with comment-preserving jsonc-patch.
-  cfg.activeProfile = name
-  writeConfigRaw(configPath, cfg)
+  const raw = readFileSync(configPath, "utf8")
+  try {
+    const patched = patchTopLevelScalar(raw, "activeProfile", name)
+    writeFileSync(configPath, patched, "utf8")
+  } catch (err) {
+    if (err instanceof PatchError) {
+      console.error(`ocmm-profiles: comment preservation failed (${err.message}); rewriting without comments`)
+      cfg.activeProfile = name
+      writeConfigRaw(configPath, cfg)
+    } else {
+      throw err
+    }
+  }
   console.log(`active profile set to "${name}"`)
 }
 
@@ -248,8 +259,19 @@ function cmdClear(configPath: string): void {
     return
   }
   const prev = cfg.activeProfile
-  delete cfg.activeProfile
-  writeConfigRaw(configPath, cfg)
+  const raw = readFileSync(configPath, "utf8")
+  try {
+    const patched = patchTopLevelScalar(raw, "activeProfile", null)
+    writeFileSync(configPath, patched, "utf8")
+  } catch (err) {
+    if (err instanceof PatchError) {
+      console.error(`ocmm-profiles: comment preservation failed (${err.message}); rewriting without comments`)
+      delete cfg.activeProfile
+      writeConfigRaw(configPath, cfg)
+    } else {
+      throw err
+    }
+  }
   console.log(`cleared active profile (was "${prev}")`)
 }
 
