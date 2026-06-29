@@ -427,6 +427,40 @@ Configured workflow: \`${config.workflow}\`
 | Codex agent | Model | Effort | ocmm source |
 |---|---|---|---|
 ${agentRows}
+
+## Runtime Model Selection
+
+When spawning a subagent via \`multi_agent_v1.spawn_agent\`, select the model and \`reasoning_effort\` based on the agent's tier. The static model in the agent's TOML is a fallback default; override it via the \`model\` and \`reasoning_effort\` parameters of \`spawn_agent\`.
+
+### Tier assignments
+
+| Tier | Agents | Model | Effort |
+|---|---|---|---|
+| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Latest-gen flagship | xhigh |
+| Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
+| Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Latest-gen mini | high |
+| Cross-gen review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic | Previous-gen flagship | xhigh |
+
+### Model tier definitions
+
+- **Flagship**: the most capable model of the latest generation (e.g., gpt-5.5 in the 5.x gen).
+- **Mid-tier**: a lighter-but-capable model within the latest generation. If the latest gen has no mid-tier, use the flagship at \`high\` effort instead.
+- **Mini**: the smallest/cheapest model of the latest generation (e.g., \`-mini\` variants).
+- **Previous-gen flagship**: the flagship of the previous generation (e.g., gpt-5.4 when gpt-5.5 is current).
+
+### Cross-generation review rule
+
+${CODEX_AGENT_PREFIX}-reviewer and ${CODEX_AGENT_PREFIX}-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. If the main model is the latest flagship, the reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
+
+### Example (gpt-5.x generation — verify against your available models)
+
+| Tier | Example model | Effort |
+|---|---|---|
+| Flagship | gpt-5.5 | xhigh |
+| Mid (with 5.4 available) | gpt-5.4 | max |
+| Mid (no 5.4) | gpt-5.5 | high |
+| Mini | gpt-5.4-mini | high |
+| Cross-gen review | gpt-5.4 | xhigh |
 `
 }
 
@@ -448,6 +482,7 @@ function codexAgentInstructions(args: {
     "- Use apply_patch for manual code edits.",
     "- Use shell commands for inspection and verification, preferring rg for text search.",
     "- Treat AGENTS.md as native Codex project guidance.",
+    "- The model and reasoning_effort in your profile are defaults. The main agent may override them via spawn_agent's model and reasoning_effort parameters when spawning you.",
     "",
     "Original ocmm prompt:",
     args.prompt,

@@ -49,3 +49,37 @@ Configured workflow: `omo`
 | dw-quick | gpt-5.4-mini | high | quick |
 | dw-research | gpt-5.5 | high | research |
 | dw-reviewer | gpt-5.5 | high | reviewer |
+
+## Runtime Model Selection
+
+When spawning a subagent via `multi_agent_v1.spawn_agent`, select the model and `reasoning_effort` based on the agent's tier. The static model in the agent's TOML is a fallback default; override it via the `model` and `reasoning_effort` parameters of `spawn_agent`.
+
+### Tier assignments
+
+| Tier | Agents | Model | Effort |
+|---|---|---|---|
+| Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning | Latest-gen flagship | xhigh |
+| Mid | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
+| Mini | dw-quick, dw-code-search, dw-explore | Latest-gen mini | high |
+| Cross-gen review | dw-reviewer, dw-plan-critic | Previous-gen flagship | xhigh |
+
+### Model tier definitions
+
+- **Flagship**: the most capable model of the latest generation (e.g., gpt-5.5 in the 5.x gen).
+- **Mid-tier**: a lighter-but-capable model within the latest generation. If the latest gen has no mid-tier, use the flagship at `high` effort instead.
+- **Mini**: the smallest/cheapest model of the latest generation (e.g., `-mini` variants).
+- **Previous-gen flagship**: the flagship of the previous generation (e.g., gpt-5.4 when gpt-5.5 is current).
+
+### Cross-generation review rule
+
+dw-reviewer and dw-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. If the main model is the latest flagship, the reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
+
+### Example (gpt-5.x generation — verify against your available models)
+
+| Tier | Example model | Effort |
+|---|---|---|
+| Flagship | gpt-5.5 | xhigh |
+| Mid (with 5.4 available) | gpt-5.4 | max |
+| Mid (no 5.4) | gpt-5.5 | high |
+| Mini | gpt-5.4-mini | high |
+| Cross-gen review | gpt-5.4 | xhigh |
