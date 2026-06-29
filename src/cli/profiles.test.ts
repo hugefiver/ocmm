@@ -38,7 +38,7 @@ function runCli(xdg: string, args: string[]): { stdout: string; stderr: string; 
   }
 }
 
-test("list shows profiles with * on active", () => {
+test("list shows profiles with * on active and [inline] source", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
@@ -48,8 +48,9 @@ test("list shows profiles with * on active", () => {
     const { stdout, exitCode } = runCli(xdg, ["list"])
     assert.equal(exitCode, 0)
     const lines = stdout.trim().split("\n")
-    assert.ok(lines.some((l) => l.includes("light") && !l.includes("*")))
-    assert.ok(lines.some((l) => l.includes("heavy") && l.includes("*")))
+    // File-based list shows [inline] source marker and * for active.
+    assert.ok(lines.some((l) => l.includes("light") && l.includes("[inline]") && !l.includes("*")))
+    assert.ok(lines.some((l) => l.includes("heavy") && l.includes("[inline]") && l.includes("*")))
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -93,7 +94,7 @@ test("use fails on nonexistent profile", () => {
   }
 })
 
-test("show prints active profile by default", () => {
+test("show prints active profile by default with source", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
@@ -105,13 +106,14 @@ test("show prints active profile by default", () => {
     const parsed = JSON.parse(stdout)
     assert.equal(parsed.name, "a")
     assert.equal(parsed.active, true)
+    assert.equal(parsed.source, "inline")
     assert.equal(parsed.config.debug, true)
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
 })
 
-test("show prints named profile", () => {
+test("show prints named profile with source", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
@@ -123,6 +125,7 @@ test("show prints named profile", () => {
     const parsed = JSON.parse(stdout)
     assert.equal(parsed.name, "b")
     assert.equal(parsed.active, false)
+    assert.equal(parsed.source, "inline")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -136,11 +139,13 @@ test("add creates a new profile from JSON file", () => {
     // No existing config — add should create one.
     const { exitCode, stdout } = runCli(xdg, ["add", "gpu", jsonFile])
     assert.equal(exitCode, 0)
-    assert.ok(stdout.includes('profile "gpu" added'))
-    const cfg = readConfig(xdg)
-    assert.ok(cfg.profiles && typeof cfg.profiles === "object")
-    const gpuProfile = (cfg.profiles as Record<string, unknown>).gpu as Record<string, unknown>
-    assert.deepEqual(gpuProfile.agents, { orchestrator: { model: "hoo/glm-5.2" } })
+    assert.ok(stdout.includes(`profile "gpu" added`))
+    // File-based: profile goes to ocmm-profiles/ dir, not inline.
+    const target = join(xdg, "opencode", "ocmm-profiles", "gpu.jsonc")
+    assert.ok(existsSync(target))
+    const content = readFileSync(target, "utf8")
+    const parsed = JSON.parse(content) as Record<string, unknown>
+    assert.deepEqual(parsed.agents, { orchestrator: { model: "hoo/glm-5.2" } })
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -164,26 +169,34 @@ test("add validates profile schema and rejects invalid", () => {
 test("rm deletes a profile", () => {
   const xdg = makeTempXdg()
   try {
-    writeConfig(xdg, { profiles: { a: {}, b: {} } })
+    writeConfig(xdg, {})
+    // Pre-create profile file in directory
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(join(profDir, "a.jsonc"), JSON.stringify({ debug: true }))
+    writeFileSync(join(profDir, "b.jsonc"), JSON.stringify({ debug: false }))
     const { exitCode, stdout } = runCli(xdg, ["rm", "a"])
     assert.equal(exitCode, 0)
     assert.ok(stdout.includes('removed profile "a"'))
-    const cfg = readConfig(xdg)
-    assert.ok(!((cfg.profiles as Record<string, unknown>).a))
+    assert.ok(!existsSync(join(profDir, "a.jsonc")))
+    assert.ok(existsSync(join(profDir, "b.jsonc")))
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
 })
 
-test("rm clears activeProfile if it was the active one", () => {
+test("rm notes stale activeProfile when deleting the active one", () => {
   const xdg = makeTempXdg()
   try {
-    writeConfig(xdg, { profiles: { a: {} }, activeProfile: "a" })
+    writeConfig(xdg, { activeProfile: "a" })
+    // Pre-create profile file in directory
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(join(profDir, "a.jsonc"), JSON.stringify({ debug: true }))
     const { exitCode, stdout } = runCli(xdg, ["rm", "a"])
     assert.equal(exitCode, 0)
-    assert.ok(stdout.includes("activeProfile cleared"))
-    const cfg = readConfig(xdg)
-    assert.equal(cfg.activeProfile, undefined)
+    assert.ok(stdout.includes('removed profile "a" (file)'))
+    assert.ok(stdout.includes("activeProfile in ocmm.jsonc is now stale"))
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -270,6 +283,198 @@ test("add creates config file when none exists", () => {
     writeFileSync(jsonFile, JSON.stringify({ debug: true }))
     runCli(xdg, ["add", "first", jsonFile])
     assert.ok(existsSync(join(xdg, "opencode", "ocmm.jsonc")))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+// ---- Task 4: file-based add/rm/list/show tests ----
+
+test("add copies source file to profiles dir as <name>.jsonc", () => {
+  const xdg = makeTempXdg()
+  const srcFile = join(xdg, "src.jsonc")
+  writeFileSync(
+    srcFile,
+    `// my profile comment\n{ "agents": { "orchestrator": { "model": "gpt-5" } } }`,
+  )
+  try {
+    const { exitCode, stdout } = runCli(xdg, ["add", "co", srcFile])
+    assert.equal(exitCode, 0)
+    const target = join(xdg, "opencode", "ocmm-profiles", "co.jsonc")
+    assert.ok(existsSync(target))
+    // Raw copy preserves comments
+    const content = readFileSync(target, "utf8")
+    assert.ok(content.includes("// my profile comment"))
+    assert.ok(stdout.includes(`profile "co" added`))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("add rejects invalid JSONC source", () => {
+  const xdg = makeTempXdg()
+  const srcFile = join(xdg, "bad.jsonc")
+  writeFileSync(srcFile, `{ this is not valid`)
+  try {
+    const { exitCode, stderr } = runCli(xdg, ["add", "co", srcFile])
+    assert.notEqual(exitCode, 0)
+    assert.ok(stderr.includes("invalid JSONC"))
+    assert.ok(!existsSync(join(xdg, "opencode", "ocmm-profiles", "co.jsonc")))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("add rejects schema-violating source (nested profiles)", () => {
+  const xdg = makeTempXdg()
+  const srcFile = join(xdg, "bad-schema.jsonc")
+  writeFileSync(srcFile, JSON.stringify({ profiles: { nested: {} } }))
+  try {
+    const { exitCode, stderr } = runCli(xdg, ["add", "co", srcFile])
+    assert.notEqual(exitCode, 0)
+    assert.ok(stderr.includes("profile JSON invalid"))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("add creates profiles dir if missing", () => {
+  const xdg = makeTempXdg()
+  const srcFile = join(xdg, "src.jsonc")
+  writeFileSync(srcFile, `{ "agents": {} }`)
+  try {
+    runCli(xdg, ["add", "co", srcFile])
+    assert.ok(existsSync(join(xdg, "opencode", "ocmm-profiles")))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("add overwrites existing profile", () => {
+  const xdg = makeTempXdg()
+  const src1 = join(xdg, "s1.jsonc")
+  const src2 = join(xdg, "s2.jsonc")
+  writeFileSync(src1, `{ "agents": { "orchestrator": { "model": "a" } } }`)
+  writeFileSync(src2, `{ "agents": { "orchestrator": { "model": "b" } } }`)
+  try {
+    runCli(xdg, ["add", "co", src1])
+    runCli(xdg, ["add", "co", src2])
+    const target = join(xdg, "opencode", "ocmm-profiles", "co.jsonc")
+    const content = readFileSync(target, "utf8")
+    assert.ok(content.includes(`"b"`))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+// ---- File-based rm tests ----
+
+test("rm on inline-only profile prints informative message", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, { profiles: { inlineOnly: { debug: true } } })
+    const { exitCode, stdout } = runCli(xdg, ["rm", "inlineOnly"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes("exists only inline"))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("rm on nonexistent profile fails", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {})
+    const { exitCode, stderr } = runCli(xdg, ["rm", "nonexistent"])
+    assert.notEqual(exitCode, 0)
+    assert.ok(stderr.includes("not found"))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+// ---- File-based list tests ----
+
+test("list shows [file] source for directory profiles", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {})
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(join(profDir, "co.jsonc"), JSON.stringify({ agents: {} }))
+    const { stdout, exitCode } = runCli(xdg, ["list"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes("co [file]"))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("list shows [file (shadows inline)] when both exist", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, { profiles: { co: { debug: true } } })
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(join(profDir, "co.jsonc"), JSON.stringify({ agents: {} }))
+    const { stdout, exitCode } = runCli(xdg, ["list"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes("co [file (shadows inline)]"))
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+// ---- File-based show tests ----
+
+test("show reads from directory profile file", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, { activeProfile: "co" })
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(
+      join(profDir, "co.jsonc"),
+      `// comment\n{ "agents": { "orchestrator": { "model": "dir-gpt" } } }`,
+    )
+    const { stdout, exitCode } = runCli(xdg, ["show", "co"])
+    assert.equal(exitCode, 0)
+    const parsed = JSON.parse(stdout)
+    assert.equal(parsed.name, "co")
+    assert.equal(parsed.source, "file")
+    const agents = parsed.config.agents as Record<string, { model: string }>
+    assert.equal(agents.orchestrator.model, "dir-gpt")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+// ---- use with directory profiles ----
+
+test("use accepts a directory profile", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {})
+    const profDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    writeFileSync(join(profDir, "co.jsonc"), JSON.stringify({ agents: {} }))
+    const { exitCode, stdout } = runCli(xdg, ["use", "co"])
+    assert.equal(exitCode, 0)
+    assert.ok(stdout.includes('active profile set to "co"'))
+    const cfg = readConfig(xdg)
+    assert.equal(cfg.activeProfile, "co")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("use rejects invalid profile names", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {})
+    const { exitCode, stderr } = runCli(xdg, ["use", "../escape"])
+    assert.notEqual(exitCode, 0)
+    assert.ok(stderr.includes("invalid profile name"))
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
