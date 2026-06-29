@@ -1,6 +1,6 @@
 {
   "name": "Deepwork",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Codex adapter for deepwork workflows, Deepwork agents, skills, and MCP tool registrations.",
   "author": {
     "name": "Hugefiver"
