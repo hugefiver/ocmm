@@ -169,9 +169,12 @@ function profilePath(name: string): string {
 ```
 
 **`add <name> <src-file>`** (L125-148 refactor):
-- Read + parse + validate source file against `ProfileEntrySchema` (unchanged).
+- Read source file raw text. Fail early if file not found or unreadable.
+- **JSONC validity check**: strip comments via `stripJsoncCommentsAndTrailingCommas`, then `JSON.parse`. If strip+parse fails, fail with `invalid JSONC in <src-file>: <parse error>` — do NOT copy the file. This catches syntax errors (trailing commas handled by the stripper, but unterminated strings, unbalanced braces, bad escapes, etc. still surface here).
+- **Schema validation**: parse result through `ProfileEntrySchema.safeParse`. If it fails, fail with the schema issues — do NOT copy.
 - Ensure `profilesDir()` exists (`mkdirSync` recursive).
 - Copy source file content (raw text, not re-serialized — preserves comments in the source) to `profilePath(name)`.
+- **Post-copy verification**: read the copied file back, strip+parse, `ProfileEntrySchema.safeParse` again. This catches filesystem corruption and encoding issues. If it fails (shouldn't on a normal filesystem), unlink the partial copy and fail.
 - If target exists, overwrite (idempotent, matches current `add` replace semantics).
 - Print `profile "name" added (file: <path>)`.
 
@@ -213,7 +216,9 @@ function profilePath(name: string): string {
 
 - **Profiles dir missing**: `loadProfilesFromDir` returns `{}`; `list` shows only inline; `add` creates the dir.
 - **Profile file parse failure**: `log.warn` + skip (load); CLI `add` validates before copy so bad files don't get added.
-- **`add` source invalid**: `ProfileEntrySchema.safeParse` fails → error exit (unchanged).
+- **`add` source invalid JSONC**: strip+parse fails → error exit with parse error detail. File is not copied.
+- **`add` source fails schema**: `ProfileEntrySchema.safeParse` fails → error exit with schema issues. File is not copied.
+- **`add` post-copy verification fails**: unlink partial copy, error exit (defensive; should not happen on normal filesystems).
 - **`rm` file missing**: error exit with hint.
 - **`use` profile missing**: check dir then inline; both miss → error exit listing available (unchanged UX).
 - **`jsonc-patch` failure**: fallback to full rewrite + warn. Never blocks the operation.
@@ -228,7 +233,7 @@ function profilePath(name: string): string {
 
 ### `src/cli/profiles.test.ts` additions
 
-- `add`: copies source to `profilesDir/<name>.jsonc`; preserves source comments (raw copy); validates before copy; creates dir if missing; overwrites existing.
+- `add`: copies source to `profilesDir/<name>.jsonc`; preserves source comments (raw copy); validates before copy; creates dir if missing; overwrites existing; **rejects invalid JSONC** (unterminated string, unbalanced braces); **rejects schema-violating content** (e.g., nested `profiles` field); **post-copy verification** (read-back parse succeeds).
 - `rm`: deletes file; missing file errors; active profile note printed.
 - `list`: shows directory + inline; source markers; active marker.
 - `show`: directory first, then inline; `source` field in output.
