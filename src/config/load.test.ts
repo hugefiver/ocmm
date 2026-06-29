@@ -250,3 +250,178 @@ test("loadProfilesFromDir strips nested profiles/activeProfile keys defensively"
   assert.ok(!("activeProfile" in sneaky))
   assert.ok("agents" in sneaky)
 })
+
+// --- loadConfig directory profile integration tests ---
+
+test("loadConfig applies a directory profile, shadowing inline same-name", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-int-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-int-cwd-"))
+  const ocDir = join(xdg, "opencode")
+  const profDir = join(ocDir, "ocmm-profiles")
+  mkdirSync(profDir, { recursive: true })
+  // Base config: inline profile "co" with model A, activeProfile=co
+  writeFileSync(
+    join(ocDir, "ocmm.jsonc"),
+    JSON.stringify({
+      agents: { orchestrator: { model: "hoo/glm" } },
+      profiles: {
+        co: { agents: { orchestrator: { model: "INLINE-MODEL" } } },
+      },
+      activeProfile: "co",
+    }),
+  )
+  // Directory profile "co" with model DIR-MODEL (shadows inline)
+  writeFileSync(
+    join(profDir, "co.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "DIR-MODEL" } } }),
+  )
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "co")
+    assert.equal(
+      (config.agents!.orchestrator as Record<string, unknown>).model,
+      "DIR-MODEL",
+    )
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("loadConfig uses inline profile when no directory file exists", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-inline-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-inline-cwd-"))
+  const ocDir = join(xdg, "opencode")
+  mkdirSync(ocDir, { recursive: true })
+  writeFileSync(
+    join(ocDir, "ocmm.jsonc"),
+    JSON.stringify({
+      agents: { orchestrator: { model: "hoo/glm" } },
+      profiles: {
+        oa: { agents: { orchestrator: { model: "INLINE-OA" } } },
+      },
+      activeProfile: "oa",
+    }),
+  )
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "oa")
+    assert.equal(
+      (config.agents!.orchestrator as Record<string, unknown>).model,
+      "INLINE-OA",
+    )
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("loadConfig: OCMM_PROFILE selects a directory profile", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-env-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-env-cwd-"))
+  const ocDir = join(xdg, "opencode")
+  const profDir = join(ocDir, "ocmm-profiles")
+  mkdirSync(profDir, { recursive: true })
+  writeFileSync(
+    join(ocDir, "ocmm.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "hoo/glm" } } }),
+  )
+  writeFileSync(
+    join(profDir, "env.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "ENV-MODEL" } } }),
+  )
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  const prevEnv = process.env.OCMM_PROFILE
+  process.env.XDG_CONFIG_HOME = xdg
+  process.env.OCMM_PROFILE = "env"
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "env")
+    assert.equal(
+      (config.agents!.orchestrator as Record<string, unknown>).model,
+      "ENV-MODEL",
+    )
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+    if (prevEnv === undefined) delete process.env.OCMM_PROFILE
+    else process.env.OCMM_PROFILE = prevEnv
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("loadConfig: project profiles dir shadows user profiles dir", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-user-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-proj-"))
+  const userOc = join(xdg, "opencode")
+  const userProf = join(userOc, "ocmm-profiles")
+  const projProf = join(cwd, ".opencode", "ocmm-profiles")
+  mkdirSync(userProf, { recursive: true })
+  mkdirSync(projProf, { recursive: true })
+  writeFileSync(
+    join(userOc, "ocmm.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "hoo/glm" } }, activeProfile: "p" }),
+  )
+  writeFileSync(
+    join(userProf, "p.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "USER" } } }),
+  )
+  writeFileSync(
+    join(projProf, "p.jsonc"),
+    JSON.stringify({ agents: { orchestrator: { model: "PROJ" } } }),
+  )
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "p")
+    assert.equal(
+      (config.agents!.orchestrator as Record<string, unknown>).model,
+      "PROJ",
+    )
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("loadConfig silently ignores missing directory profile", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-miss-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-miss-cwd-"))
+  const ocDir = join(xdg, "opencode")
+  mkdirSync(ocDir, { recursive: true })
+  writeFileSync(
+    join(ocDir, "ocmm.jsonc"),
+    JSON.stringify({
+      agents: { orchestrator: { model: "hoo/glm" } },
+      activeProfile: "nonexistent",
+    }),
+  )
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "nonexistent")
+    // base config unchanged
+    assert.equal(
+      (config.agents!.orchestrator as Record<string, unknown>).model,
+      "hoo/glm",
+    )
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

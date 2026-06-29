@@ -240,12 +240,24 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
       ? activeProfileRaw
       : undefined
 
+  // Collect profiles from inline + user dir + project dir.
+  // Directory shadows inline; project shadows user.
+  const inlineProfiles = isPlainObject(mergedRecord.profiles) ? mergedRecord.profiles : {}
+  const userDirProfiles = loadProfilesFromDir(join(userConfigDir(host), "ocmm-profiles"))
+  const projectDirProfiles = host === "opencode"
+    ? loadProfilesFromDir(join(projectConfigDir(cwd, host), "ocmm-profiles"))
+    : {}
+  const allProfiles: Record<string, unknown> = {
+    ...inlineProfiles,
+    ...userDirProfiles,
+    ...projectDirProfiles,
+  }
+
   // If an active profile is named, deep-merge it over the base. A missing
   // profile is silently ignored so a stale activeProfile/OCMM_PROFILE value
   // never breaks the plugin — base config loads unchanged.
-  if (activeProfile && isPlainObject(mergedRecord.profiles)) {
-    const profiles = mergedRecord.profiles as Record<string, unknown>
-    const profile = profiles[activeProfile]
+  if (activeProfile && isPlainObject(allProfiles)) {
+    const profile = allProfiles[activeProfile]
     if (isPlainObject(profile)) {
       merged = deepMerge(merged, profile, undefined, { profileOverlay: true })
     } else {
