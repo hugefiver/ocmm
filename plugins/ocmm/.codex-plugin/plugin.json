@@ -1,7 +1,7 @@
 {
   "name": "Deepwork",
   "version": "0.2.5",
-  "description": "Codex adapter for deepwork workflows, ocmm agents, skills, and MCP tool registrations.",
+  "description": "Codex adapter for deepwork workflows, Deepwork agents, skills, and MCP tool registrations.",
   "author": {
     "name": "Hugefiver"
   },
@@ -9,7 +9,7 @@
   "keywords": [
     "codex",
     "codex-plugin",
-    "ocmm",
+    "deepwork",
     "workflow",
     "skills",
     "mcp"
@@ -18,8 +18,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Deepwork",
-    "shortDescription": "Deepwork workflows and ocmm tools for Codex",
-    "longDescription": "ocmm exposes its OpenCode-proven deepwork workflow prompts, shared skills, generated dw-* agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
+    "shortDescription": "Deepwork workflows and tools for Codex",
+    "longDescription": "Deepwork exposes its OpenCode-proven deepwork workflow prompts, shared skills, generated dw-* agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
     "developerName": "Hugefiver",
     "category": "Developer Tools",
     "capabilities": [

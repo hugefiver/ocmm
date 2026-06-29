@@ -5,7 +5,7 @@ description: "MUST USE when the user asks for deepwork-style planning, multi-age
 
 # Deepwork
 
-This is the Codex adapter skill for deepwork. Use it to apply ocmm's autonomous workflow semantics inside Codex while leaving the OpenCode plugin untouched.
+This is the Codex adapter skill for deepwork. Use it to apply Deepwork's autonomous workflow semantics inside Codex while leaving the OpenCode plugin untouched.
 
 ## Runtime Mapping
 
@@ -13,20 +13,20 @@ This is the Codex adapter skill for deepwork. Use it to apply ocmm's autonomous 
 - Use Codex `multi_agent_v1.spawn_agent` when delegation is useful and available. Give each subagent a concrete, self-contained task and set `fork_context=false` unless the task genuinely needs inherited history.
 - Use Codex MCP tools exposed by this plugin for docs/search/context where available.
 - Use Codex `apply_patch` for manual edits; use shell commands for read-only inspection and project verification.
-- Use generated `dw-*` agent TOML files under `plugins/ocmm/agents/` as installable profiles when you want ocmm role prompts as Codex agents.
+- Use generated `dw-*` agent TOML files under `plugins/ocmm/agents/` as installable profiles when you want Deepwork role prompts as Codex agents.
 
 ## Workflow
 
 Configured workflow: `codex`
 
 1. Classify the request into quick, normal-task, coding, complex, deep, research, frontend, hard-reasoning, creative, or documenting.
-2. Select the matching ocmm role or generated `dw-*` Codex agent.
+2. Select the matching Deepwork role or generated `dw-*` Codex agent.
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
 ## Generated Agents
 
-| Codex agent | Model | Effort | ocmm source |
+| Codex agent | Model | Effort | Deepwork source |
 |---|---|---|---|
 | dw-builder | gpt-5.5 | high | builder |
 | dw-clarifier | gpt-5.5 | high | clarifier |

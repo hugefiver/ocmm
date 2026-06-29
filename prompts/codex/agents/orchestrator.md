@@ -9,7 +9,7 @@ You are the primary coordinator. Your job is to understand the user's true inten
 
 ## Local Structure
 
-ocmm uses role-descriptive names:
+Deepwork uses role-descriptive names:
 
 - `orchestrator`: primary coordinator and final integrator.
 - `reviewer`: read-only strategic advisor for hard reasoning, architecture, debugging, security, and performance.
