@@ -8,6 +8,7 @@ import {
   loadV1SkillCommands,
   type SkillCommand,
 } from "../intent/skill-loader.ts"
+import { hookDisabled } from "../permissions/index.ts"
 
 export type SessionIntentState = {
   prompts: string[]
@@ -180,36 +181,61 @@ const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
 const placeholderRegex = /\$(\d+)/g
 const quoteTrimRegex = /^["']|["']$/g
 
-export function createSystemTransformHandler(): (
-  input: unknown,
-  output: unknown,
-) => Promise<void> {
+const COMMIT_GUARD_TEXT = `## Commit Guard
+
+You must not execute git commit, git push, git tag, or any other git write
+command on your own. All version control writes require explicit user
+permission in the conversation. If a task needs committing, state what should
+be committed and ask the user to approve or perform it.`
+
+export function createSystemTransformHandler(opts: {
+  getConfig: () => OcmmConfig
+}): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, rawOutput) => {
     if (!isRecord(rawInput)) return
     const sessionID = typeof rawInput.sessionID === "string" ? rawInput.sessionID : ""
     if (!sessionID) return
     const merged = getSessionPrompt(sessionID)
-    if (!merged) return
+    if (merged) {
+      if (!isRecord(rawOutput)) return
+      const sys = rawOutput.system
+      if (Array.isArray(sys)) {
+        sys.unshift(merged)
+        log.info(
+          `system.transform: prepended ${merged.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
+        )
+      } else if (typeof sys === "string") {
+        rawOutput.system = `${merged}\n\n${sys}`
+        log.info(
+          `system.transform: prepended ${merged.length} chars to string system`,
+        )
+      } else {
+        rawOutput.system = [merged]
+        log.info(
+          `system.transform: initialized system with ${merged.length} chars`,
+        )
+      }
+    }
 
+    // Commit guard injection (appended to system end, after skills prepend).
     if (!isRecord(rawOutput)) return
-    const sys = rawOutput.system
-    if (Array.isArray(sys)) {
-      sys.unshift(merged)
-      log.info(
-        `system.transform: prepended ${merged.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
-      )
-      return
+    try {
+      const config = opts.getConfig()
+      if (!hookDisabled(config, "commit-guard-injector", "commitGuardInjector")) {
+        const sys = rawOutput.system
+        if (Array.isArray(sys)) {
+          sys.push(COMMIT_GUARD_TEXT)
+          log.info(`system.transform: appended commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
+        } else if (typeof sys === "string") {
+          rawOutput.system = `${sys}\n\n${COMMIT_GUARD_TEXT}`
+          log.info(`system.transform: appended commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
+        } else if (sys === undefined) {
+          rawOutput.system = [COMMIT_GUARD_TEXT]
+          log.info(`system.transform: initialized system with commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
+        }
+      }
+    } catch (err) {
+      log.warn(`system.transform: commit guard skipped due to error: ${(err as Error).message}`)
     }
-    if (typeof sys === "string") {
-      rawOutput.system = `${merged}\n\n${sys}`
-      log.info(
-        `system.transform: prepended ${merged.length} chars to string system`,
-      )
-      return
-    }
-    rawOutput.system = [merged]
-    log.info(
-      `system.transform: initialized system with ${merged.length} chars`,
-    )
   }
 }

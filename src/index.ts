@@ -144,7 +144,7 @@ export function createPlugin(input?: ServerInput): {
       getConfig,
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
     }),
-    "experimental.chat.system.transform": createSystemTransformHandler(),
+    "experimental.chat.system.transform": createSystemTransformHandler({ getConfig }),
     "tool.execute.before": permissionGuards.before,
     "tool.execute.after": async (hookInput, hookOutput) => {
       for (const handler of toolAfterHandlers) await handler(hookInput, hookOutput)

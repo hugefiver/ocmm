@@ -593,7 +593,7 @@ function sessionId(rawInput: unknown): string {
   return "global"
 }
 
-function hookDisabled(config: OcmmConfig, name: string, alias?: string): boolean {
+export function hookDisabled(config: OcmmConfig, name: string, alias?: string): boolean {
   return config.disabledHooks?.includes(name) === true || (alias !== undefined && config.disabledHooks?.includes(alias) === true)
 }
 

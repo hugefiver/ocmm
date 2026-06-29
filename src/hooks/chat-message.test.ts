@@ -11,6 +11,7 @@ import {
   getSessionPrompt,
 } from "./chat-message.ts"
 import { defaultConfig } from "../config/schema.ts"
+import type { OcmmConfig } from "../config/schema.ts"
 
 function makeInput(opts: {
   sessionID?: string
@@ -88,7 +89,7 @@ test("v1 workflow: empty skills content is not queued", async () => {
 test("chat.message expands builtin slash commands for noninteractive run input", async () => {
   const cfg = { ...defaultConfig(), workflow: "omo" as const }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
-  const sysHandler = createSystemTransformHandler()
+  const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("cmd1")
 
   const output = makeOutput("/ralph-loop Ship the tiny fix")
@@ -180,7 +181,7 @@ test("v1 workflow queues skills plus one-shot slash command", async () => {
     getConfig: () => cfg,
     getV1Skills: () => "SKILL TEXT",
   })
-  const sysHandler = createSystemTransformHandler()
+  const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("cmd-v1")
 
   const output = makeOutput("/audit-loop Verify everything")
@@ -214,7 +215,7 @@ test("system.transform prepends queued skills to system array", async () => {
     getConfig: () => cfg,
     getV1Skills: () => "SKILL TEXT",
   })
-  const sysHandler = createSystemTransformHandler()
+  const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("s5")
   await msgHandler(makeInput({ sessionID: "s5" }), makeOutput())
   const sysOutput: { system: string[] } = { system: ["base prompt"] }
@@ -230,7 +231,7 @@ test("system.transform tolerates string system shape", async () => {
     getConfig: () => cfg,
     getV1Skills: () => "SKILL TEXT",
   })
-  const sysHandler = createSystemTransformHandler()
+  const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("s6")
   await msgHandler(makeInput({ sessionID: "s6" }), makeOutput())
   const sysOutput: Record<string, unknown> = { system: "base" }
@@ -241,8 +242,63 @@ test("system.transform tolerates string system shape", async () => {
 })
 
 test("system.transform no-ops when no skills queued", async () => {
-  const sysHandler = createSystemTransformHandler()
+  const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   const sysOutput: Record<string, unknown> = { system: ["unchanged"] }
   await sysHandler({ sessionID: "no-such-session" }, sysOutput)
   assert.deepEqual(sysOutput.system, ["unchanged"])
+})
+
+test("system.transform appends commit guard to array system when enabled", async () => {
+  const sessionID = "ses_test_guard_arr"
+  clearSessionIntent(sessionID)
+  const getConfig = () => ({ disabledHooks: [] }) as unknown as OcmmConfig
+  const handler = createSystemTransformHandler({ getConfig })
+  const input = { sessionID }
+  const output = { system: ["ORIGINAL"] }
+  await handler(input, output)
+  assert.ok(Array.isArray(output.system))
+  assert.equal(output.system.length, 2)
+  assert.equal(output.system[0], "ORIGINAL")
+  assert.ok(typeof output.system[1] === "string")
+  assert.ok((output.system[1] as string).includes("Commit Guard"))
+  assert.ok((output.system[1] as string).includes("git commit"))
+})
+
+test("system.transform appends commit guard to string system when enabled", async () => {
+  const sessionID = "ses_test_guard_str"
+  clearSessionIntent(sessionID)
+  const getConfig = () => ({ disabledHooks: [] }) as unknown as OcmmConfig
+  const handler = createSystemTransformHandler({ getConfig })
+  const input = { sessionID }
+  const output = { system: "ORIGINAL" }
+  await handler(input, output)
+  assert.equal(typeof output.system, "string")
+  assert.ok((output.system as string).startsWith("ORIGINAL"))
+  assert.ok((output.system as string).includes("Commit Guard"))
+  assert.ok((output.system as string).includes("git commit"))
+})
+
+test("system.transform does not append commit guard when disabled", async () => {
+  const sessionID = "ses_test_guard_off"
+  clearSessionIntent(sessionID)
+  const getConfig = () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig
+  const handler = createSystemTransformHandler({ getConfig })
+  const input = { sessionID }
+  const output = { system: ["ORIGINAL"] }
+  await handler(input, output)
+  assert.ok(Array.isArray(output.system))
+  assert.equal(output.system.length, 1)
+  assert.equal(output.system[0], "ORIGINAL")
+})
+
+test("system.transform tolerates getConfig throwing", async () => {
+  const sessionID = "ses_test_guard_err"
+  clearSessionIntent(sessionID)
+  const getConfig = () => { throw new Error("config unavailable") }
+  const handler = createSystemTransformHandler({ getConfig })
+  const input = { sessionID }
+  const output = { system: ["ORIGINAL"] }
+  await handler(input, output)
+  assert.equal(output.system.length, 1)
+  assert.equal(output.system[0], "ORIGINAL")
 })
