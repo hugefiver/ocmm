@@ -104,8 +104,13 @@ function mergePermission(entry: Record<string, unknown>, permission: Record<stri
 
 function deepworkPromptForAgent(
   agent: Agent,
-  override?: NormalizedShorthand,
+  override: NormalizedShorthand | undefined,
+  workflow: string,
 ): string {
+  // For Codex plugin packaging, always use the GPT-specialized variant.
+  if (workflow === "codex") {
+    return getDeepworkPrompt("gpt")
+  }
   const chain =
     override?.requirement?.fallbackChain?.length
       ? override.requirement.fallbackChain
@@ -118,9 +123,9 @@ function deepworkPromptForAgent(
   return getDeepworkPrompt(variant)
 }
 
-function promptForBuiltinAgent(agent: Agent, override?: NormalizedShorthand): string {
+function promptForBuiltinAgent(agent: Agent, override: NormalizedShorthand | undefined, workflow: string): string {
   const rolePrompt = getAgentPrompt(agent.name).trim()
-  const modelPrompt = deepworkPromptForAgent(agent, override).trim()
+  const modelPrompt = deepworkPromptForAgent(agent, override, workflow).trim()
   if (!rolePrompt) return modelPrompt
   if (!modelPrompt) return rolePrompt
   return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
@@ -175,7 +180,7 @@ export function createConfigHandler(args: {
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
       const norm = normalizeShorthand(cfg.agents?.[a.name])
-      const prompt = promptForBuiltinAgent(a, norm)
+      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
         : a.name === "planner"
