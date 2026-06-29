@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
 
 import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
+import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 
 const READ_TOOL = "read"
 const WRITE_TOOL = "write"
@@ -63,6 +64,7 @@ export function createPermissionGuards(args: {
   redirectResolver?: RedirectResolver
   fsyncTracker?: FsyncSkipTracker
   agentsSessionCache?: Map<string, Set<string>>
+  sessionAgentMap?: Map<string, string>
 }): PermissionGuardHooks {
   const readPermissions = new Map<string, Set<string>>()
   const readmeSessionCache = new Map<string, Set<string>>()
@@ -76,6 +78,7 @@ export function createPermissionGuards(args: {
       guardNotepadWrite(config, rawInput, projectRoot)
       guardExistingFileWrite(config, rawInput, readPermissions, projectRoot)
       warnBashFileRead(config, rawInput, rawOutput)
+      guardSubagentGit(config, rawInput, args.sessionAgentMap)
       truncateQuestionLabels(config, rawInput, rawOutput)
       guardTodoRead(config, rawInput, args.taskSystemEnabled)
       await rewriteWebfetchRedirect(config, rawInput, rawOutput, args.redirectResolver)
@@ -103,6 +106,7 @@ export function createPermissionGuards(args: {
       readmeSessionCache,
       lastAccess,
       ...(args.agentsSessionCache !== undefined ? { agentsSessionCache: args.agentsSessionCache } : {}),
+      ...(args.sessionAgentMap !== undefined ? { sessionAgentMap: args.sessionAgentMap } : {}),
     }),
   }
 }
@@ -112,6 +116,7 @@ function createGuardEventHandler(caches: {
   readmeSessionCache: Map<string, Set<string>>
   lastAccess: Map<string, number>
   agentsSessionCache?: Map<string, Set<string>>
+  sessionAgentMap?: Map<string, string>
 }): (input: unknown) => Promise<void> {
   return async (raw: unknown) => {
     if (!isRecord(raw)) return
@@ -125,6 +130,7 @@ function createGuardEventHandler(caches: {
     caches.readmeSessionCache.delete(sid)
     caches.lastAccess.delete(sid)
     caches.agentsSessionCache?.delete(sid)
+    caches.sessionAgentMap?.delete(sid)
   }
 }
 
@@ -224,6 +230,26 @@ function warnBashFileRead(config: OcmmConfig, rawInput: unknown, rawOutput: unkn
   const out = outputRecord(rawOutput)
   if (!out) return
   out.message = "This looks like a simple file read. Prefer the Read tool so line numbers and file metadata stay structured."
+}
+
+function guardSubagentGit(
+  config: OcmmConfig,
+  rawInput: unknown,
+  sessionAgentMap?: Map<string, string>,
+): void {
+  if (hookDisabled(config, "subagent-git-guard", "subagentGitGuard")) return
+  if (!sessionAgentMap) return
+  if (toolName(rawInput) !== "bash") return
+  const command = stringArg(rawInput, "command")
+  if (!command) return
+  if (!isGitWriteCommand(command)) return
+  const sid = sessionId(rawInput)
+  const agentName = sessionAgentMap.get(sid)
+  if (!agentName) return // unknown session — safe default, don't block
+  if (isBuiltinAgentName(agentName)) return // main agent — allow
+  throw new Error(
+    `ocmm: subagent sessions are not allowed to run git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The main agent must handle version control. (agent: ${agentName})`,
+  )
 }
 
 export function isSimpleFileReadCommand(command: string): boolean {
@@ -591,6 +617,20 @@ function sessionId(rawInput: unknown): string {
     if (typeof value === "string" && value.length > 0) return value
   }
   return "global"
+}
+
+const GIT_WRITE_COMMAND_RE = /\bgit\s+(?:commit|push|tag|reset\s+--hard|rebase|cherry-pick|revert)\b/
+
+const BUILTIN_AGENT_ALIASES = new Set(["oracle", "explore"])
+
+/** Check if a shell command string contains a git write operation. */
+export function isGitWriteCommand(command: string): boolean {
+  return GIT_WRITE_COMMAND_RE.test(command)
+}
+
+/** Check if an agent name is a builtin agent (including aliases like oracle, explore). */
+export function isBuiltinAgentName(name: string): boolean {
+  return BUILTIN_AGENT_INDEX.has(name) || BUILTIN_AGENT_ALIASES.has(name)
 }
 
 export function hookDisabled(config: OcmmConfig, name: string, alias?: string): boolean {

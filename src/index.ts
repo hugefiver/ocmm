@@ -111,10 +111,12 @@ export function createPlugin(input?: ServerInput): {
   }
   syncIdleEnabled()
   const agentsSessionCache = new Map<string, Set<string>>()
+  const sessionAgentMap = new Map<string, string>()
   const permissionGuards = createPermissionGuards({
     getConfig,
     projectRoot: cwd,
     agentsSessionCache,
+    sessionAgentMap,
   })
   const toolAfterHandlers = [
     createHashlineReadEnhancer({ getConfig }),
@@ -139,7 +141,7 @@ export function createPlugin(input?: ServerInput): {
 
   const pluginInterface: PluginInterface = {
     config: createConfigHandler({ getConfig, cwd }),
-    "chat.params": createChatParamsHandler({ getConfig }),
+    "chat.params": createChatParamsHandler({ getConfig, sessionAgentMap }),
     "chat.message": createChatMessageHandler({
       getConfig,
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
