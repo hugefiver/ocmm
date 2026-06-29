@@ -1,5 +1,5 @@
 {
-  "name": "ocmm",
+  "name": "Deepwork",
   "version": "0.2.1",
   "description": "Codex adapter for deepwork workflows, ocmm agents, skills, and MCP tool registrations.",
   "author": {
@@ -17,7 +17,7 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "ocmm",
+    "displayName": "Deepwork",
     "shortDescription": "Deepwork workflows and ocmm tools for Codex",
     "longDescription": "ocmm exposes its OpenCode-proven deepwork workflow prompts, shared skills, generated dw-* agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
     "developerName": "Hugefiver",

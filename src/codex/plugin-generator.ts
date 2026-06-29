@@ -24,9 +24,9 @@ import { translateVariant } from "../routing/variant-translator.ts"
 import { isRecord } from "../shared/logger.ts"
 import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
 
-export const CODEX_PLUGIN_NAME = "ocmm"
+export const CODEX_PLUGIN_NAME = "Deepwork"
 export const CODEX_MARKETPLACE_NAME = "ocmm-local"
-export const CODEX_PLUGIN_DIR = `plugins/${CODEX_PLUGIN_NAME}`
+export const CODEX_PLUGIN_DIR = `plugins/ocmm`
 export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
 export const CODEX_AGENT_PREFIX = "dw"
 export const CODEX_WORKFLOW_SKILL_NAME = "deepwork"
@@ -248,7 +248,7 @@ export function createPluginManifest(version: string): Record<string, unknown> {
     skills: "./skills/",
     mcpServers: "./.mcp.json",
     interface: {
-      displayName: "ocmm",
+      displayName: "Deepwork",
       shortDescription: "Deepwork workflows and ocmm tools for Codex",
       longDescription:
         "ocmm exposes its OpenCode-proven deepwork workflow prompts, shared skills, generated dw-* agent profiles, and MCP tool registrations as a self-contained Codex plugin without changing the OpenCode plugin entrypoint.",
@@ -278,7 +278,7 @@ export function createPluginRuntimePackage(version: string): Record<string, unkn
 export function createMarketplaceManifest(): Record<string, unknown> {
   return {
     name: CODEX_MARKETPLACE_NAME,
-    interface: { displayName: "ocmm Local" },
+    interface: { displayName: "Deepwork Local" },
     plugins: [
       {
         name: CODEX_PLUGIN_NAME,

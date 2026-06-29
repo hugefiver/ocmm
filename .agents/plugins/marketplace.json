@@ -1,11 +1,11 @@
 {
   "name": "ocmm-local",
   "interface": {
-    "displayName": "ocmm Local"
+    "displayName": "Deepwork Local"
   },
   "plugins": [
     {
-      "name": "ocmm",
+      "name": "Deepwork",
       "source": {
         "source": "local",
         "path": "./plugins/ocmm"

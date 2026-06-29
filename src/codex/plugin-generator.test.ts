@@ -27,7 +27,7 @@ test("Codex manifest declares ocmm plugin resources", () => {
   assert.equal(manifest.version, "1.2.3")
   assert.equal(manifest.skills, "./skills/")
   assert.equal(manifest.mcpServers, "./.mcp.json")
-  assert.equal((manifest.interface as Record<string, unknown>).displayName, "ocmm")
+  assert.equal((manifest.interface as Record<string, unknown>).displayName, "Deepwork")
   assert.match(String(manifest.description), /deepwork/)
 })
 
