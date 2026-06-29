@@ -95,6 +95,7 @@ function ensureOutput(raw: unknown): ChatParamsOutput | null {
 
 export function createChatParamsHandler(args: {
   getConfig: () => OcmmConfig
+  sessionAgentMap?: Map<string, string>
 }): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, rawOutput) => {
     const input = readInput(rawInput)
@@ -104,6 +105,10 @@ export function createChatParamsHandler(args: {
 
     const cfg = args.getConfig()
     const agentName = typeof input.agent === "string" ? input.agent : input.agent.name
+
+    if (args.sessionAgentMap && input.sessionID) {
+      args.sessionAgentMap.set(input.sessionID, agentName ?? "")
+    }
 
     const resolution = resolveModelRouting({
       agentName,

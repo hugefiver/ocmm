@@ -189,3 +189,13 @@ test("chat.params tolerates malformed input without throwing", async () => {
   await handler({}, { options: {} })
   await handler({ sessionID: "x" }, { options: {} })
 })
+
+test("chat.params records sessionID → agentName in sessionAgentMap", async () => {
+  clearResolutions()
+  const sessionAgentMap = new Map<string, string>()
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg, sessionAgentMap })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(makeInput({ sessionID: "ses_test_agent_map", agentName: "coding" }), output)
+  assert.equal(sessionAgentMap.get("ses_test_agent_map"), "coding")
+})
