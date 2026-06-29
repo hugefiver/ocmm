@@ -286,13 +286,29 @@ function printHelp(): void {
 
 USAGE:
   ocmm-profiles list                    List all profiles (* = active)
-  ocmm-profiles use <name>              Set the active profile
+                                        Shows [file] and [inline] sources.
+  ocmm-profiles use <name>              Set the active profile (comment-preserving)
   ocmm-profiles show [name]             Print a profile (defaults to active)
-  ocmm-profiles add <name> <json-file>  Add/replace a profile from a JSON file
-  ocmm-profiles rm <name>               Delete a profile
-  ocmm-profiles clear                   Clear activeProfile
+  ocmm-profiles add <name> <json-file>  Add/replace a profile from a JSONC file
+                                        (copied to ~/.config/opencode/ocmm-profiles/<name>.jsonc)
+  ocmm-profiles rm <name>               Delete a profile file
+                                        (inline profiles in ocmm.jsonc are not removable via rm)
+  ocmm-profiles clear                   Clear activeProfile (comment-preserving)
   ocmm-profiles current                 Print the active profile name
   ocmm-profiles help                    Show this help
+
+FILE-BASED PROFILES:
+  Directory profiles live in:
+    ~/.config/opencode/ocmm-profiles/<name>.jsonc   (user)
+    <cwd>/.opencode/ocmm-profiles/<name>.jsonc      (project, shadows user)
+  Each file is a ProfileEntrySchema (partial overlay) with the same merge
+  semantics as inline profiles. Directory profiles shadow inline profiles
+  with the same name.
+
+INLINE PROFILES:
+  Profiles defined in ocmm.jsonc's "profiles" object are still loaded but
+  cannot be managed via add/rm (edit ocmm.jsonc by hand). They are shown
+  in list with an [inline] marker and shadowed by same-name directory files.
 
 The OCMM_PROFILE env var overrides activeProfile at load time but is NOT
 persisted by this CLI. Use 'ocmm-profiles use <name>' to persist a switch.

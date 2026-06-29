@@ -257,6 +257,11 @@ test("help prints usage", () => {
   assert.equal(exitCode, 0)
   assert.ok(stdout.includes("USAGE:"))
   assert.ok(stdout.includes("ocmm-profiles list"))
+  assert.ok(stdout.includes("FILE-BASED PROFILES"))
+  assert.ok(stdout.includes("ocmm-profiles/<name>.jsonc"))
+  assert.ok(stdout.includes("INLINE PROFILES"))
+  assert.ok(stdout.includes("shadowed"))
+  assert.ok(stdout.includes("comment-preserving"))
 })
 
 test("no command prints help", () => {
