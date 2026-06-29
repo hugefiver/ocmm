@@ -90,6 +90,7 @@ const HOOK_NAMES = [
   "fsync-skip-warning",
   "tool-output-truncator",
   "todo-description-override",
+  "commit-guard-injector",
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]
