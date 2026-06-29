@@ -91,6 +91,7 @@ const HOOK_NAMES = [
   "tool-output-truncator",
   "todo-description-override",
   "commit-guard-injector",
+  "subagent-git-guard",
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]

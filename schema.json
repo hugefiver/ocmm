@@ -540,7 +540,8 @@
               "fsync-skip-warning",
               "tool-output-truncator",
               "todo-description-override",
-              "commit-guard-injector"
+              "commit-guard-injector",
+              "subagent-git-guard"
             ]
           },
           {
@@ -1385,7 +1386,8 @@
                     "fsync-skip-warning",
                     "tool-output-truncator",
                     "todo-description-override",
-                    "commit-guard-injector"
+                    "commit-guard-injector",
+                    "subagent-git-guard"
                   ]
                 },
                 {
