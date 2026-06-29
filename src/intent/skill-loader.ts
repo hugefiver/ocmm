@@ -52,6 +52,7 @@ export const V1_SKILL_DIRS = [
   "subagent-driven-development",
   "requesting-code-review",
   "receiving-code-review",
+  "dispatching-parallel-agents",
 ] as const
 
 export function loadV1Skills(
