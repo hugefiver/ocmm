@@ -567,3 +567,21 @@ test("use inserts activeProfile when field absent", () => {
     rmSync(xdg, { recursive: true, force: true })
   }
 })
+
+test("show fails cleanly on a corrupted directory profile file", () => {
+  const xdg = makeTempXdg()
+  try {
+    const ocDir = join(xdg, "opencode")
+    const profDir = join(ocDir, "ocmm-profiles")
+    mkdirSync(profDir, { recursive: true })
+    // Write a valid ocmm.jsonc so config loads
+    writeConfig(xdg, {})
+    // Write a corrupted profile file
+    writeFileSync(join(profDir, "broken.jsonc"), `{ this is not valid`)
+    const { exitCode, stderr } = runCli(xdg, ["show", "broken"])
+    assert.notEqual(exitCode, 0)
+    assert.ok(stderr.includes("corrupted"), `expected corrupted message; stderr: ${stderr}`)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})

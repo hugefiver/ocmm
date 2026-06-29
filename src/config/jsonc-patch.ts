@@ -59,77 +59,262 @@ function serializeValue(value: string | number | boolean): string {
   return String(value)
 }
 
+/** Skip leading whitespace; return index of first non-ws char. */
+function scanValueStart(src: string, start: number): number {
+  let i = start
+  while (i < src.length && /[ \t]/.test(src[i]!)) i++
+  return i
+}
+
+/**
+ * Scan a scalar value (string, number, boolean, null) starting at position
+ * `start` (must point at the first char of the value, not whitespace).
+ * Returns the index just past the value (i.e., the next structural char:
+ * comma, newline, or closing brace — outside strings/comments).
+ *
+ * String- and comment-aware: commas/braces inside string literals or
+ * comments do not terminate the scan.
+ */
+function scanScalarEnd(src: string, start: number): number {
+  let i = start
+  if (i >= src.length) return i
+  const c = src[i]!
+  if (c === '"' || c === "'") {
+    const quote = c
+    i++
+    while (i < src.length) {
+      const ch = src[i]!
+      if (ch === "\\" && i + 1 < src.length) {
+        i += 2
+        continue
+      }
+      if (ch === quote) {
+        i++
+        return i
+      }
+      i++
+    }
+    return i
+  }
+  while (i < src.length) {
+    const ch = src[i]!
+    if (ch === "," || ch === "\n" || ch === "\r" || ch === "}") return i
+    if (ch === "/" && src[i + 1] === "/") return i
+    if (ch === "/" && src[i + 1] === "*") return i
+    i++
+  }
+  return i
+}
+
 export function patchTopLevelScalar(
   source: string,
   key: string,
   value: string | number | boolean | null,
 ): string {
-  // Regex: a line whose only top-level content is "key": <scalar>.
-  // Handles leading block comments (/* ... */) before the key and trailing
-  // content (comments) after the value+comma on the same line.
-  // Groups: 1=leading ws+comments, 2=value, 3=comma, 4=rest of line
-  const keyPattern = new RegExp(
-    `^(\\s*(?:\\/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*\\/\\s*)*)"${key}"\\s*:\\s*([^\\n,}]+)(,?)([^\\n]*)$`,
-    "m",
-  )
-  const match = source.match(keyPattern)
+  // Locate the top-level "key": <scalar> line via a char-aware scan.
+  // We find the key as a JSON property name at depth 1 (not inside nested
+  // objects/arrays or strings/comments), then scan its value.
+  const found = findTopLevelKey(source, key)
   if (value !== null) {
-    // Set (insert or replace).
     const serialized = serializeValue(value)
-    if (match) {
-      const replacement = `${match[1]}"${key}": ${serialized}${match[3]}${match[4]}`
-      const result = source.replace(keyPattern, replacement)
+    if (found) {
+      // Replace the value region [valueStart, valueEnd) with serialized.
+      const before = source.slice(0, found.valueStart)
+      const after = source.slice(found.valueEnd)
+      const result = before + serialized + after
       validateJsonc(result, key)
       return result
     }
-    // Insert before final closing brace.
     return insertField(source, key, serialized)
   }
   // Remove.
-  if (!match) {
-    // Nothing to remove; return unchanged.
-    return source
+  if (!found) return source
+  return removeLine(source, found.lineStart, found.lineEnd, key)
+}
+
+interface KeyLocation {
+  /** Index of the start of the line containing the key (for removal). */
+  lineStart: number
+  /** Index just past the end of the line (including newline) containing the key. */
+  lineEnd: number
+  /** Index where the value starts (after `": `). */
+  valueStart: number
+  /** Index just past the value (structural terminator position). */
+  valueEnd: number
+}
+
+/**
+ * Find a top-level property `key` in the JSONC source. Returns its location
+ * or null if not found. Uses a depth-tracking, string/comment-aware scan.
+ *
+ * Key insight: at depth 1, a `"` could be either a property key or a string
+ * value. We check for the `"key":` pattern *before* entering string-scan mode;
+ * if it doesn't match a key, we treat it as a string value and skip to its
+ * closing quote.
+ */
+function findTopLevelKey(src: string, key: string): KeyLocation | null {
+  let i = 0
+  let depth = 0
+  const keyQuoted = `"${key}"`
+  while (i < src.length) {
+    const c = src[i]!
+    // Comment skipping.
+    if (c === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i + 2)
+      i = nl < 0 ? src.length : nl + 1
+      continue
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2)
+      i = end < 0 ? src.length : end + 2
+      continue
+    }
+    if (c === "{" || c === "[") {
+      depth++
+      i++
+      continue
+    }
+    if (c === "}" || c === "]") {
+      depth--
+      i++
+      continue
+    }
+    // At depth 1, check if this is our target key before treating " as string.
+    if (depth === 1 && c === '"' && src.startsWith(keyQuoted, i)) {
+      // Verify it's a key (followed by optional ws + colon).
+      let j = i + keyQuoted.length
+      while (j < src.length && /[ \t]/.test(src[j]!)) j++
+      if (src[j] === ":") {
+        j++
+        const lineStart = src.lastIndexOf("\n", i) + 1
+        const valueStart = scanValueStart(src, j)
+        const valueEnd = scanScalarEnd(src, valueStart)
+        let nl = src.indexOf("\n", valueEnd)
+        if (nl < 0) nl = src.length
+        else nl++
+        return { lineStart, lineEnd: nl, valueStart, valueEnd }
+      }
+    }
+    // If it's a string (key or value) that isn't our target, skip to closing quote.
+    if (c === '"' || c === "'") {
+      const quote = c
+      i++
+      while (i < src.length) {
+        const ch = src[i]!
+        if (ch === "\\" && i + 1 < src.length) {
+          i += 2
+          continue
+        }
+        if (ch === quote) break
+        i++
+      }
+      i++
+      continue
+    }
+    i++
   }
-  return removeLine(source, match[0], key)
+  return null
+}
+
+/**
+ * Find the position of the last non-whitespace, non-comment character before
+ * `closeIdx` in the source. Used to decide whether a comma is needed when
+ * inserting a new field before the closing brace.
+ *
+ * Comment-aware: skips // line comments and /* block comments.
+ */
+function lastSignificantCharBefore(src: string, closeIdx: number): number {
+  let i = closeIdx - 1
+  while (i >= 0) {
+    const c = src[i]!
+    if (/[ \t\n\r]/.test(c)) {
+      i--
+      continue
+    }
+    // Skip back over a line comment: // ... \n
+    if (c === "\n") {
+      i--
+      continue
+    }
+    // Check if we're inside a line comment: scan back for // on this line.
+    const lineStart = src.lastIndexOf("\n", i) + 1
+    const lineText = src.slice(lineStart, i + 1)
+    const lineCommentIdx = lineText.lastIndexOf("//")
+    if (lineCommentIdx >= 0) {
+      // Everything from // to end of line is a comment.
+      i = lineStart + lineCommentIdx - 1
+      continue
+    }
+    // Check if we're inside a block comment: /* ... */
+    // Scan back for the nearest /* before this position that isn't closed.
+    const blockEnd = src.lastIndexOf("*/", i)
+    if (blockEnd >= 0 && blockEnd < i) {
+      // Is there an opening /* before this */ without another */ between?
+      // Simplify: find the /* that pairs with this */.
+      const blockStart = src.lastIndexOf("/*", blockEnd)
+      if (blockStart >= 0) {
+        // If our position i is between blockStart and blockEnd+2, we're in the comment.
+        if (i >= blockStart && i < blockEnd + 2) {
+          i = blockStart - 1
+          continue
+        }
+      }
+    }
+    return i
+  }
+  return -1
 }
 
 function insertField(source: string, key: string, serializedValue: string): string {
-  // Find the last top-level closing brace (naive: last `}` in file).
   const closeIdx = source.lastIndexOf("}")
   if (closeIdx < 0) throw new PatchError("no closing brace found")
-  let before = source.slice(0, closeIdx)
-  const after = source.slice(closeIdx)
-  // Determine if we need a leading comma: scan backward for non-whitespace.
-  let i = before.length - 1
-  while (i >= 0 && /\s/.test(before[i]!)) i--
-  const needsComma = i >= 0 && before[i] !== "{" && before[i] !== ","
-  // Preserve indentation: match the indentation of the last property line if possible.
+
+  // Find the last significant (non-ws, non-comment) char before the close.
+  const lastIdx = lastSignificantCharBefore(source, closeIdx)
   const indent = detectIndent(source)
 
-  // If a comma is needed, append it right after the last non-whitespace character
-  // (the end of the last property value), before the trailing whitespace.
-  if (needsComma) {
-    before = before.slice(0, i + 1) + ","
+  // Strategy: insert `,"<key>": <value>` right after lastIdx (if comma needed),
+  // then let the existing whitespace/newline before `}` carry the new field
+  // onto its own line. If lastIdx is the opening `{` (empty-ish object),
+  // no comma needed; insert the field on a new line with proper indent.
+  let insertionPoint: number
+  let insertion: string
+  if (lastIdx >= 0 && source[lastIdx] !== "{" && source[lastIdx] !== ",") {
+    // Need a comma. Insert right after the last significant char.
+    insertionPoint = lastIdx + 1
+    // After the comma, add a newline + indent + the field. The existing
+    // content between lastIdx+1 and closeIdx (whitespace/comments/newline)
+    // follows the insertion, so we end up with: lastChar , \n indent field <existing-ws> }
+    insertion = `,\n${indent}"${key}": ${serializedValue}`
+  } else if (lastIdx >= 0 && (source[lastIdx] === "{" || source[lastIdx] === ",")) {
+    // Object already has content ending in a comma or opening brace; no new comma.
+    insertionPoint = lastIdx + 1
+    insertion = `\n${indent}"${key}": ${serializedValue}`
+  } else {
+    // Empty object `{}` or `{  }`.
+    insertionPoint = closeIdx
+    insertion = `\n${indent}"${key}": ${serializedValue}\n`
   }
 
-  const insertion = `\n${indent}"${key}": ${serializedValue}`
-  const result = before + insertion + after
+  const result = source.slice(0, insertionPoint) + insertion + source.slice(insertionPoint)
   validateJsonc(result, key)
   return result
 }
 
-function removeLine(source: string, line: string, key: string): string {
-  // Remove the matched line plus its trailing newline.
-  const withNewline = line.endsWith("\n") ? line : line + "\n"
-  let result = source.replace(withNewline, "")
+function removeLine(
+  source: string,
+  lineStart: number,
+  lineEnd: number,
+  key: string,
+): string {
+  let result = source.slice(0, lineStart) + source.slice(lineEnd)
   // Handle dangling comma: if the removed line was the last property, the
   // preceding property may now have a trailing comma before `}`.
   const closeIdx = result.lastIndexOf("}")
   if (closeIdx > 0) {
-    let i = closeIdx - 1
-    while (i >= 0 && /\s/.test(result[i]!)) i--
-    if (i >= 0 && result[i] === ",") {
-      result = result.slice(0, i) + result.slice(i + 1)
+    const lastIdx = lastSignificantCharBefore(result, closeIdx)
+    if (lastIdx >= 0 && result[lastIdx] === ",") {
+      result = result.slice(0, lastIdx) + result.slice(lastIdx + 1)
     }
   }
   validateJsonc(result, key)

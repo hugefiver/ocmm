@@ -108,3 +108,48 @@ test("value with special chars is JSON-escaped", () => {
   const out = patchTopLevelScalar(src, "activeProfile", 'a"b\\c')
   assert.ok(out.includes(`"activeProfile": "a\\"b\\\\c"`))
 })
+
+test("sets an existing field whose current value contains a comma (no duplicate key)", () => {
+  const src = `{
+  "activeProfile": "a,b"
+}`
+  const out = patchTopLevelScalar(src, "activeProfile", "co")
+  // Must not produce a duplicate key — count occurrences of the key.
+  const keyCount = (out.match(/"activeProfile"/g) || []).length
+  assert.equal(keyCount, 1)
+  assert.ok(out.includes(`"activeProfile": "co"`))
+  assert.ok(!out.includes(`"a,b"`))
+})
+
+test("sets an existing field whose current value contains a brace", () => {
+  const src = `{
+  "note": "a}b"
+}`
+  const out = patchTopLevelScalar(src, "note", "x")
+  const keyCount = (out.match(/"note"/g) || []).length
+  assert.equal(keyCount, 1)
+  assert.ok(out.includes(`"note": "x"`))
+})
+
+test("inserts a new field when last property has a trailing line comment", () => {
+  const src = `{
+  "workflow": "v1" // my workflow
+}`
+  const out = patchTopLevelScalar(src, "activeProfile", "co")
+  assert.ok(out.includes(`"activeProfile": "co"`))
+  assert.ok(out.includes(`// my workflow`))
+  // must be valid (no PatchError thrown)
+  const keyCount = (out.match(/"activeProfile"/g) || []).length
+  assert.equal(keyCount, 1)
+})
+
+test("inserts a new field when object contains only comments", () => {
+  const src = `{
+  // just a comment
+}`
+  const out = patchTopLevelScalar(src, "activeProfile", "co")
+  assert.ok(out.includes(`"activeProfile": "co"`))
+  assert.ok(out.includes(`// just a comment`))
+  // comment text must not be corrupted with a comma
+  assert.ok(!out.includes(`comment,`))
+})

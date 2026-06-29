@@ -4,21 +4,25 @@
  *
  * Commands:
  *   list                       List all profiles (* marks the active one)
- *   use <name>                 Set activeProfile
+ *   use <name>                 Set activeProfile (comment-preserving)
  *   show [name]                Print a profile (defaults to active)
- *   add <name> <json-file>     Add/replace a profile from a JSON file
- *   rm <name>                  Delete a profile
- *   clear                      Clear activeProfile (revert to base config)
+ *   add <name> <json-file>     Add/replace a profile from a JSONC file (copied to profiles dir)
+ *   rm <name>                  Delete a profile file
+ *   clear                      Clear activeProfile (comment-preserving)
  *   current                    Print the active profile name (or empty)
+ *
+ * Profiles live as files under ~/.config/opencode/ocmm-profiles/<name>.jsonc
+ * (and project-local <cwd>/.opencode/ocmm-profiles/). Inline profiles in
+ * ocmm.jsonc are still loaded but shadowed by same-name directory files.
  *
  * Config target: the user config file at
  *   $XDG_CONFIG_HOME/opencode/ocmm.json[c]
  *   ~/.config/opencode/ocmm.json[c]         (all platforms, including Windows)
  *
- * The CLI reads, parses, mutates, and writes back. Comments are NOT
- * preserved on write (output is plain JSON with .jsonc extension, which is
- * valid JSONC). This is a known limitation — if you need comment
- * preservation, edit the file by hand.
+ * `use` and `clear` modify the `activeProfile` field in ocmm.jsonc using a
+ * comment-preserving patcher (src/config/jsonc-patch.ts). If the patcher
+ * fails, they fall back to a full JSON rewrite (losing comments) with a
+ * warning. `add` copies source files verbatim, preserving any comments.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
@@ -181,7 +185,11 @@ function cmdShow(configPath: string, name?: string): void {
   if (dirProfiles.has(target)) {
     source = "file"
     const raw = readFileSync(dirProfiles.get(target)!, "utf8")
-    entry = JSON.parse(stripJsoncCommentsAndTrailingCommas(raw))
+    try {
+      entry = JSON.parse(stripJsoncCommentsAndTrailingCommas(raw))
+    } catch (err) {
+      fail(`profile "${target}" file is corrupted: ${(err as Error).message}`)
+    }
   } else if (isPlainObject(inlineProfiles[target])) {
     source = "inline"
     entry = inlineProfiles[target]
