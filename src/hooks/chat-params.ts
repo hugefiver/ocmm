@@ -8,11 +8,11 @@
 
 import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
-import { recordResolution } from "../routing/ledger.ts"
+import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
 import { classifyModelFamily, isMiniModel } from "../intent/model-family.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
-import type { Variant } from "../shared/types.ts"
+import type { Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
 const ABOVE_HIGH_REASONING = new Set(["xhigh", "max", "thinking"])
@@ -96,7 +96,9 @@ function ensureOutput(raw: unknown): ChatParamsOutput | null {
 export function createChatParamsHandler(args: {
   getConfig: () => OcmmConfig
   sessionAgentMap?: Map<string, string>
+  recordResolution?: (entry: ResolutionEntry) => void
 }): (input: unknown, output: unknown) => Promise<void> {
+  const record = args.recordResolution ?? defaultRecordResolution
   return async (rawInput, rawOutput) => {
     const input = readInput(rawInput)
     if (!input) return
@@ -120,7 +122,7 @@ export function createChatParamsHandler(args: {
     })
 
     if (!resolution) {
-      recordResolution({
+      record({
         ts: Date.now(),
         sessionID: input.sessionID,
         agent: agentName ?? "",
@@ -191,7 +193,7 @@ export function createChatParamsHandler(args: {
       output.maxOutputTokens = resolution.entry.maxTokens
     }
 
-    recordResolution({
+    record({
       ts: Date.now(),
       sessionID: input.sessionID,
       agent: agentName ?? "",

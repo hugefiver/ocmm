@@ -16,34 +16,56 @@ export type SessionIntentState = {
   v1SkillsQueued: boolean
 }
 
-const sessionState = new Map<string, SessionIntentState>()
-
-export function clearSessionIntent(sessionID: string): void {
-  sessionState.delete(sessionID)
+export interface SessionIntentStore {
+  getOrInit(sessionID: string): SessionIntentState
+  getSessionPrompt(sessionID: string): string | null
+  clearSessionIntent(sessionID: string): void
 }
 
-function getOrInit(sessionID: string): SessionIntentState {
-  let s = sessionState.get(sessionID)
-  if (!s) {
-    s = { prompts: [], oncePrompts: [], v1SkillsQueued: false }
-    sessionState.set(sessionID, s)
+export function createSessionIntentStore(): SessionIntentStore {
+  const sessionState = new Map<string, SessionIntentState>()
+
+  function getOrInit(sessionID: string): SessionIntentState {
+    let s = sessionState.get(sessionID)
+    if (!s) {
+      s = { prompts: [], oncePrompts: [], v1SkillsQueued: false }
+      sessionState.set(sessionID, s)
+    }
+    return s
   }
-  return s
+
+  function getSessionPrompt(sessionID: string): string | null {
+    const s = sessionState.get(sessionID)
+    if (!s) return null
+    const prompts = [...s.prompts, ...s.oncePrompts]
+    if (prompts.length === 0) return null
+    return prompts.join("\n\n---\n\n")
+  }
+
+  function clearSessionIntent(sessionID: string): void {
+    sessionState.delete(sessionID)
+  }
+
+  return { getOrInit, getSessionPrompt, clearSessionIntent }
+}
+
+const defaultStore = createSessionIntentStore()
+
+export function clearSessionIntent(sessionID: string): void {
+  defaultStore.clearSessionIntent(sessionID)
 }
 
 export function getSessionPrompt(sessionID: string): string | null {
-  const s = sessionState.get(sessionID)
-  if (!s) return null
-  const prompts = [...s.prompts, ...s.oncePrompts]
-  if (prompts.length === 0) return null
-  return prompts.join("\n\n---\n\n")
+  return defaultStore.getSessionPrompt(sessionID)
 }
 
 export function createChatMessageHandler(args: {
   getConfig: () => OcmmConfig
   getV1Skills?: () => string
   skillsRoot?: string
+  store?: SessionIntentStore
 }): (input: unknown, output: unknown) => Promise<void> {
+  const store = args.store ?? defaultStore
   return async (rawInput, rawOutput) => {
     if (!isRecord(rawInput)) return
     const cfg = args.getConfig()
@@ -51,7 +73,7 @@ export function createChatMessageHandler(args: {
     const sessionID = typeof rawInput.sessionID === "string" ? rawInput.sessionID : ""
     if (!sessionID) return
 
-    const state = getOrInit(sessionID)
+    const state = store.getOrInit(sessionID)
     state.oncePrompts = []
 
     if (cfg.workflow === "v1" && !state.v1SkillsQueued) {
@@ -190,12 +212,14 @@ be committed and ask the user to approve or perform it.`
 
 export function createSystemTransformHandler(opts: {
   getConfig: () => OcmmConfig
+  store?: SessionIntentStore
 }): (input: unknown, output: unknown) => Promise<void> {
+  const store = opts.store ?? defaultStore
   return async (rawInput, rawOutput) => {
     if (!isRecord(rawInput)) return
     const sessionID = typeof rawInput.sessionID === "string" ? rawInput.sessionID : ""
     if (!sessionID) return
-    const merged = getSessionPrompt(sessionID)
+    const merged = store.getSessionPrompt(sessionID)
     if (merged) {
       if (!isRecord(rawOutput)) return
       const sys = rawOutput.system

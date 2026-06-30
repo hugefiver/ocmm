@@ -7,11 +7,13 @@ export function createEventHandler(args: {
   client?: OcmmClient
   directory?: string
   idleState?: IdleContinuationState
+  clearSessionIntent?: (sessionID: string) => void
 }): (input: unknown) => Promise<void> {
   return createRuntimeFallbackEventHandler({
     getConfig: args.getConfig,
     ...(args.client !== undefined ? { client: args.client } : {}),
     ...(args.directory !== undefined ? { directory: args.directory } : {}),
     ...(args.idleState !== undefined ? { idleState: args.idleState } : {}),
+    ...(args.clearSessionIntent !== undefined ? { clearSessionIntent: args.clearSessionIntent } : {}),
   })
 }

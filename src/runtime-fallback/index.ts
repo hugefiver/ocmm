@@ -10,9 +10,11 @@ export {
   isModelInCooldown,
   markModelFailed,
   modelKey,
+  peekNextFallback,
+  commitFallback,
   prepareFallback,
   type FallbackState,
-  type PrepareResult,
+  type PeekResult,
 } from "./fallback-state.ts"
 export {
   dispatchFallbackRetry,

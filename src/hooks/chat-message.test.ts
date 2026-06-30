@@ -7,6 +7,7 @@ import { join } from "node:path"
 import {
   clearSessionIntent,
   createChatMessageHandler,
+  createSessionIntentStore,
   createSystemTransformHandler,
   getSessionPrompt,
 } from "./chat-message.ts"
@@ -301,4 +302,136 @@ test("system.transform tolerates getConfig throwing", async () => {
   await handler(input, output)
   assert.equal(output.system.length, 1)
   assert.equal(output.system[0], "ORIGINAL")
+})
+
+// --- SessionIntentStore isolation tests ---
+
+test("createSessionIntentStore returns isolated maps", () => {
+  const storeA = createSessionIntentStore()
+  const storeB = createSessionIntentStore()
+
+  storeA.getOrInit("s1").prompts.push("from-a")
+  storeB.getOrInit("s1").prompts.push("from-b")
+
+  const promptA = storeA.getSessionPrompt("s1")
+  const promptB = storeB.getSessionPrompt("s1")
+
+  assert.ok(promptA!.includes("from-a"))
+  assert.ok(!promptA!.includes("from-b"))
+  assert.ok(promptB!.includes("from-b"))
+  assert.ok(!promptB!.includes("from-a"))
+})
+
+test("independent stores do not share v1SkillsQueued state", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const storeA = createSessionIntentStore()
+  const storeB = createSessionIntentStore()
+
+  const handlerA = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL-A",
+    store: storeA,
+  })
+  const handlerB = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL-B",
+    store: storeB,
+  })
+
+  // Queue skills via handler A — should NOT set v1SkillsQueued in store B
+  await handlerA(makeInput({ sessionID: "shared-session" }), makeOutput())
+  assert.equal(storeA.getOrInit("shared-session").v1SkillsQueued, true)
+  assert.equal(storeB.getOrInit("shared-session").v1SkillsQueued, false)
+
+  // Handler B should now queue its own skills (first time for store B)
+  await handlerB(makeInput({ sessionID: "shared-session" }), makeOutput())
+  assert.equal(storeB.getOrInit("shared-session").v1SkillsQueued, true)
+
+  const promptA = storeA.getSessionPrompt("shared-session")
+  const promptB = storeB.getSessionPrompt("shared-session")
+  assert.ok(promptA!.includes("SKILL-A"))
+  assert.ok(!promptA!.includes("SKILL-B"))
+  assert.ok(promptB!.includes("SKILL-B"))
+  assert.ok(!promptB!.includes("SKILL-A"))
+})
+
+test("independent stores do not share once-prompts (slash commands)", async () => {
+  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const storeA = createSessionIntentStore()
+  const storeB = createSessionIntentStore()
+
+  const handlerA = createChatMessageHandler({ getConfig: () => cfg, store: storeA })
+  const handlerB = createChatMessageHandler({ getConfig: () => cfg, store: storeB })
+
+  // Queue a slash command via handler A
+  await handlerA(makeInput({ sessionID: "s-cmd" }), makeOutput("/ralph-loop Fix from A"))
+  // Then queue a different slash command via handler B (should NOT clear A's once-prompt)
+  await handlerB(makeInput({ sessionID: "s-cmd" }), makeOutput("/ralph-loop Fix from B"))
+
+  // Both stores should have their respective commands queued
+  const promptA = storeA.getSessionPrompt("s-cmd")
+  const promptB = storeB.getSessionPrompt("s-cmd")
+
+  assert.ok(promptA!.includes("Fix from A"))
+  assert.ok(promptB!.includes("Fix from B"))
+})
+
+test("clearSessionIntent on store A does not affect store B", () => {
+  const storeA = createSessionIntentStore()
+  const storeB = createSessionIntentStore()
+
+  storeA.getOrInit("s1").prompts.push("a-data")
+  storeB.getOrInit("s1").prompts.push("b-data")
+
+  storeA.clearSessionIntent("s1")
+
+  assert.equal(storeA.getSessionPrompt("s1"), null)
+  assert.ok(storeB.getSessionPrompt("s1")!.includes("b-data"))
+})
+
+test("default store (compatibility wrappers) is independent from created stores", () => {
+  const custom = createSessionIntentStore()
+
+  // Use the compatibility wrapper
+  clearSessionIntent("compat-test")
+  getSessionPrompt("compat-test") // initializes default store
+
+  custom.getOrInit("compat-test").prompts.push("custom-data")
+
+  // Default store should be empty
+  assert.equal(getSessionPrompt("compat-test"), null)
+  // Custom store should have its data
+  assert.ok(custom.getSessionPrompt("compat-test")!.includes("custom-data"))
+})
+
+test("injected store: chat+transform share custom store, default transform is isolated", async () => {
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const customStore = createSessionIntentStore()
+
+  const chatHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "CUSTOM SKILLS",
+    store: customStore,
+  })
+  const customSysHandler = createSystemTransformHandler({
+    getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig,
+    store: customStore,
+  })
+  const defaultSysHandler = createSystemTransformHandler({
+    getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig,
+  })
+
+  // Queue v1 skills via the custom-store chat handler
+  await chatHandler(makeInput({ sessionID: "store-share" }), makeOutput())
+
+  // Custom-store transform should see the queued prompt
+  const customSysOutput: { system: string[] } = { system: ["base"] }
+  await customSysHandler({ sessionID: "store-share" }, customSysOutput)
+  assert.ok(customSysOutput.system[0]!.includes("CUSTOM SKILLS"))
+
+  // Default-store transform should NOT see the queued prompt
+  const defaultSysOutput: { system: string[] } = { system: ["base"] }
+  await defaultSysHandler({ sessionID: "store-share" }, defaultSysOutput)
+  assert.equal(defaultSysOutput.system.length, 1)
+  assert.equal(defaultSysOutput.system[0], "base")
 })

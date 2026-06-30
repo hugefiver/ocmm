@@ -3,7 +3,8 @@ import {
   createFallbackState,
   markModelFailed,
   modelKey,
-  prepareFallback,
+  peekNextFallback,
+  commitFallback,
   type FallbackState,
 } from "./fallback-state.ts"
 import { dispatchFallbackRetry, isDispatchInFlight, type OcmmClient } from "./dispatcher.ts"
@@ -12,7 +13,7 @@ import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import { normalizeShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
-import { clearSessionIntent } from "../hooks/chat-message.ts"
+import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-message.ts"
 import {
   isIdleContinuationEnabled,
   markSessionAborted,
@@ -90,6 +91,7 @@ export type RuntimeFallbackDeps = {
   client?: OcmmClient
   directory?: string
   idleState?: IdleContinuationState
+  clearSessionIntent?: (sessionID: string) => void
 }
 
 export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
@@ -113,7 +115,7 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
 
     if (eventType === "session.deleted") {
       if (sessionID) {
-        clearSessionIntent(sessionID)
+        (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         sessionStates.delete(sessionID)
         if (deps.idleState) clearSession(deps.idleState, sessionID)
       }
@@ -122,8 +124,11 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
 
     if (eventType === "session.idle") {
       if (sessionID) {
-        clearSessionIntent(sessionID)
-        sessionStates.delete(sessionID)
+        (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
+        // Do NOT delete sessionStates here — the session may still be live
+        // and a later session.error must continue from existing fallback
+        // state (fallbackIndex, activeModel, attempts). Only session.deleted
+        // and session.created reset fallback state.
         await handleIdleContinuation(deps, sessionID)
       }
       return
@@ -166,13 +171,26 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     }
 
     const eventModel = resolveEventModel(props)
-    // Derive the failed-model key from the event when possible. When the
-    // event lacks a model, fall back to the first entry of the agent's own
-    // requirement chain rather than using the agent name itself (which is a
-    // role label, not a model identifier, and would pollute failedModels).
+
+    // Retrieve or create session state before resolving the failed-model key so
+    // we can use state.activeModel as the mid-priority source.
+    let state = sessionStates.get(sessionID)
+    if (!state) {
+      state = createFallbackState(requirement.fallbackChain[0]
+        ? modelKey(requirement.fallbackChain[0].providers[0] ?? "", requirement.fallbackChain[0].model)
+        : "unknown")
+      sessionStates.set(sessionID, state)
+    }
+
+    // Priority order for the failed-model key:
+    // 1. Explicit model from the event payload.
+    // 2. The state's activeModel (previously dispatched fallback model).
+    // 3. The agent's primary fallback-chain entry (first entry).
     let justFailedKey: string | null = null
     if (eventModel) {
       justFailedKey = modelKey(eventModel.providerID, eventModel.modelID)
+    } else if (state.activeModel) {
+      justFailedKey = state.activeModel
     } else if (requirement.fallbackChain[0]) {
       const primary: FallbackEntry = requirement.fallbackChain[0]
       const primaryProvider = primary.providers[0] ?? ""
@@ -183,28 +201,23 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
       return
     }
 
-    let state = sessionStates.get(sessionID)
-    if (!state) {
-      state = createFallbackState(justFailedKey)
-      sessionStates.set(sessionID, state)
-    }
     markModelFailed(state, justFailedKey)
 
-    const prep = prepareFallback(
+    const peek = peekNextFallback(
       state,
       requirement,
       justFailedKey,
       cfg.runtimeFallback.maxAttempts,
       cfg.runtimeFallback.cooldownSeconds,
     )
-    if (!prep.ok) {
-      log.warn(`fallback exhausted: ${prep.reason} (session=${sessionID.slice(0, 16)}…)`)
+    if (!peek.ok) {
+      log.warn(`fallback exhausted: ${peek.reason} (session=${sessionID.slice(0, 16)}…)`)
       return
     }
 
     log.info(
-      `fallback attempt ${prep.attempts}/${cfg.runtimeFallback.maxAttempts}: ` +
-        `model=${prep.entry.providers[0] ?? ""}/${prep.entry.model}`,
+      `fallback attempt ${peek.nextAttempts}/${cfg.runtimeFallback.maxAttempts}: ` +
+        `model=${peek.entry.providers[0] ?? ""}/${peek.entry.model}`,
     )
 
     if (!cfg.runtimeFallback.dispatch) {
@@ -216,14 +229,17 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
       return
     }
 
-    await dispatchFallbackRetry({
+    const dispatched = await dispatchFallbackRetry({
       client: deps.client,
       sessionID,
       ...(deps.directory !== undefined ? { directory: deps.directory } : {}),
       ...(agent !== undefined ? { agent } : {}),
-      newEntry: prep.entry,
+      newEntry: peek.entry,
       reason: classification.reason,
     })
+    if (dispatched) {
+      commitFallback(state, peek.entry, peek.index)
+    }
   }
 }
 

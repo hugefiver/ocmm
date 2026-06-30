@@ -15,6 +15,9 @@ export type FallbackState = {
   attempts: number
   /** Map of "providerID/modelID" -> epoch-ms of last failure. */
   failedModels: Map<string, number>
+  /** The model currently active / most recently dispatched (providerID/modelID).
+   *  Used as the failed-model key when an error event carries no model info. */
+  activeModel?: string
 }
 
 export function createFallbackState(originalModel: string): FallbackState {
@@ -75,17 +78,63 @@ export function findNextAvailableFallback(
   return null
 }
 
-export type PrepareResult =
-  | { ok: true; entry: FallbackEntry; index: number; attempts: number }
+export type PeekResult =
+  | { ok: true; entry: FallbackEntry; index: number; nextAttempts: number }
   | { ok: false; reason: "max-attempts" | "no-fallback-chain" | "no-next-model" }
 
 /**
- * Advance the state machine to the next fallback entry if allowed.
+ * Peek at the next eligible fallback entry WITHOUT mutating state.
  *
- * Mutates `state` on success (increments attempts + fallbackIndex).
- * Does NOT mark the just-failed model — the caller does that via
- * `markModelFailed` so we have a clean separation of concerns.
+ * Use this before dispatch to check whether a fallback is available.
+ * After a successful dispatch, call {@link commitFallback} to advance
+ * the state machine.
  */
+export function peekNextFallback(
+  state: FallbackState,
+  requirement: ModelRequirement | null,
+  justFailedModelKey: string,
+  maxAttempts: number,
+  cooldownSeconds: number,
+  now: number = Date.now(),
+): PeekResult {
+  if (state.attempts >= maxAttempts) {
+    return { ok: false, reason: "max-attempts" }
+  }
+  if (!requirement || requirement.fallbackChain.length === 0) {
+    return { ok: false, reason: "no-fallback-chain" }
+  }
+
+  const next = findNextAvailableFallback(
+    state,
+    requirement.fallbackChain,
+    cooldownSeconds,
+    justFailedModelKey,
+    now,
+  )
+  if (!next) {
+    return { ok: false, reason: "no-next-model" }
+  }
+
+  return { ok: true, entry: next.entry, index: next.index, nextAttempts: state.attempts + 1 }
+}
+
+/**
+ * Commit a fallback entry to the state machine after a successful dispatch.
+ *
+ * Advances `fallbackIndex`, increments `attempts`, and sets `activeModel`.
+ * Only call this after the model has actually been dispatched.
+ */
+export function commitFallback(
+  state: FallbackState,
+  entry: FallbackEntry,
+  index: number,
+): void {
+  state.fallbackIndex = index
+  state.attempts += 1
+  state.activeModel = modelKey(entry.providers[0] ?? "", entry.model)
+}
+
+/** @deprecated Use {@link peekNextFallback} + {@link commitFallback} instead. */
 export function prepareFallback(
   state: FallbackState,
   requirement: ModelRequirement | null,
@@ -93,7 +142,7 @@ export function prepareFallback(
   maxAttempts: number,
   cooldownSeconds: number,
   now: number = Date.now(),
-): PrepareResult {
+): { ok: true; entry: FallbackEntry; index: number; attempts: number } | { ok: false; reason: string } {
   if (state.attempts >= maxAttempts) {
     return { ok: false, reason: "max-attempts" }
   }
@@ -114,5 +163,6 @@ export function prepareFallback(
 
   state.fallbackIndex = next.index
   state.attempts += 1
+  state.activeModel = modelKey(next.entry.providers[0] ?? "", next.entry.model)
   return { ok: true, entry: next.entry, index: next.index, attempts: state.attempts }
 }

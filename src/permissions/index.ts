@@ -619,13 +619,367 @@ function sessionId(rawInput: unknown): string {
   return "global"
 }
 
-const GIT_WRITE_COMMAND_RE = /\bgit\s+(?:commit|push|tag|reset\s+--hard|rebase|cherry-pick|revert)\b/
+/** Git global options that consume a following value (skip option + value). */
+const GIT_VALUE_OPTIONS = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--config-env",
+  "--exec-path",
+  "--super-prefix",
+])
+
+/** Git global flags that do NOT consume a following value (skip flag only). */
+const GIT_FLAG_OPTIONS = new Set([
+  "--no-pager",
+  "--paginate",
+  "--bare",
+  "--literal-pathspecs",
+  "--no-optional-locks",
+])
+
+/** Git post-subcommand options that consume a following value.
+ *  Used by hasHelpFlag to skip option+value so that --help used as
+ *  an option value is not mistaken for a help flag.
+ *  -u / --local-user is subcommand-specific: value-consuming only for tag
+ *  (--local-user), not for commit/push (--set-upstream). Handled in hasHelpFlag. */
+const GIT_POST_VALUE_OPTIONS = new Set([
+  "-m", "--message",
+  "--author",
+  "-F", "--file",
+  "--date",
+  "-c", "--reuse-message",
+  "-C", "--reedit-message",
+  "--template",
+  "--trailer",
+  "--repo",
+  "--receive-pack",
+  "-o", "--push-option",
+  "--exec",
+  "--onto",
+  "--strategy", "--strategy-option",
+])
+
+/** Tag-specific options that consume a following value.
+ *  Only treated as value-consuming when subcommand is "tag". */
+const GIT_TAG_VALUE_OPTIONS = new Set(["-u", "--local-user"])
+
+/** Git subcommands that mutate the repository or push to remotes. */
+const GIT_WRITE_SUBCOMMANDS = new Set([
+  "commit",
+  "push",
+  "tag",
+  "reset",
+  "rebase",
+  "cherry-pick",
+  "revert",
+])
 
 const BUILTIN_AGENT_ALIASES = new Set(["oracle", "explore"])
 
-/** Check if a shell command string contains a git write operation. */
+type GitCommandToken = { text: string; quoted: boolean }
+
+const ESCAPED_GIT_SEPARATOR_CHARS = new Map<string, string>([
+  [";", "\uE000"],
+  ["&", "\uE001"],
+  ["|", "\uE002"],
+])
+
+/** Shell command separators including single `&` for cmd /c compatibility. */
+const GIT_COMMAND_SEPARATORS = new Set([";", "&&", "||", "|", "&"])
+
+/**
+ * Check if a shell command string contains a git write operation.
+ *
+ * Splits the command into segments at shell separators (`;`, `&&`, `||`, `|`, `&`).
+ * For each segment:
+ * - Shell wrappers (`pwsh -c`, `powershell -Command`, `cmd /c`) are recursively inspected.
+ * - A leading `git` token triggers git subcommand classification within that segment only.
+ *
+ * Scans are bounded to the current segment — tokens after separators are not visible
+ * to `reset --hard` or `tag` listing logic within the segment.
+ *
+ * Only `reset --hard` is blocked; non-hard `git reset` is allowed.
+ * `git tag` is only blocked for create/delete, not for listing (`-l`, `--list`, or bare).
+ * `git help` and `git --help` are treated as read-only.
+ */
 export function isGitWriteCommand(command: string): boolean {
-  return GIT_WRITE_COMMAND_RE.test(command)
+  return containsGitWriteTokens(tokenizeGitCommand(command))
+}
+
+/** Core git-write check operating on pre-tokenized GitCommandTokens.
+ *  Splits separators, splits into segments, and checks each segment
+ *  for git write subcommands — including recursive wrapper inspection. */
+function containsGitWriteTokens(tokens: GitCommandToken[]): boolean {
+  // Split glued separators only in unquoted tokens.
+  const splitTokens = splitGitSeparators(tokens)
+
+  // Split into segments bounded by shell separators.
+  const segments = splitIntoSegmentsGit(splitTokens)
+
+  for (const segment of segments) {
+    if (segment.length === 0) continue
+
+    // Detect shell wrappers at the start of this segment only.
+    const segWrapper = extractWrapperScriptGit(segment)
+    if (segWrapper !== null) {
+      // Leading quoted token = shell script string (e.g. pwsh -c "git status;git commit -m x").
+      // Parse it as a full command so internal separators are handled at the shell level.
+      // Additional tokens after a quoted PowerShell/cmd payload are wrapper arguments,
+      // not part of the script string, and must not hide writes in the script.
+      if (segWrapper[0]?.quoted) {
+        if (isGitWriteCommand(segWrapper[0]!.text)) return true
+      } else {
+        // Multiple tokens or unquoted payload: process with quote metadata preserved
+        // so that quoted ordinary args (e.g. -m "hi;bye") are not split into command boundaries.
+        if (containsGitWriteTokens(segWrapper)) return true
+      }
+      continue
+    }
+
+    // Only match git at the start of a segment (case-insensitive, .exe suffix normalized)
+    if (normalizeCommandName(segment[0]!.text) !== "git") continue
+
+    // Map segment tokens to plain strings for subcommand helpers.
+    const segTexts = segment.map((t) => t.text)
+
+    const subIdx = findGitSubcommandIndex(segTexts, 1)
+    if (subIdx === -1) continue
+    const subcommand = segTexts[subIdx]
+    if (subcommand === undefined || !GIT_WRITE_SUBCOMMANDS.has(subcommand)) continue
+    // --help anywhere after the subcommand means this is a help request (read-only)
+    if (hasHelpFlag(segTexts, subIdx + 1, subcommand)) continue
+    // reset requires --hard (bounded to this segment)
+    if (subcommand === "reset" && !hasResetHardFlag(segTexts, subIdx + 1)) continue
+    // tag: only block create/delete, not list (bounded to this segment)
+    if (subcommand === "tag" && isTagListOnly(segTexts, subIdx + 1)) continue
+    return true
+  }
+  return false
+}
+
+/** Split GitCommandTokens on glued shell separators (`;`, `&&`, `||`, `|`, `&`) only in unquoted tokens.
+ *  Quoted tokens are passed through unsplit so that separators inside quoted strings
+ *  (e.g. `-m "hi;bye"`) are not mistaken for command boundaries. */
+function splitGitSeparators(tokens: GitCommandToken[]): GitCommandToken[] {
+  const result: GitCommandToken[] = []
+  // Match longer separators first so `||` is not split as two `|` tokens.
+  const sepRe = /(&&|\|\||[;&|])/g
+  for (const token of tokens) {
+    // Quoted tokens are passed through unsplit.
+    if (token.quoted) {
+      result.push(token)
+      continue
+    }
+    // Fast path: no separator characters at all.
+    if (!/[;&|]/.test(token.text)) {
+      result.push(token)
+      continue
+    }
+    const parts = token.text.split(sepRe)
+    for (const part of parts) {
+      if (part !== undefined && part !== "") {
+        result.push({ text: restoreEscapedGitSeparators(part), quoted: false })
+      }
+    }
+  }
+  return result
+}
+
+/** Split GitCommandTokens into command segments separated by `;`, `&&`, `||`, `|`, or `&`. */
+function splitIntoSegmentsGit(tokens: GitCommandToken[]): GitCommandToken[][] {
+  const segments: GitCommandToken[][] = []
+  let current: GitCommandToken[] = []
+  for (const token of tokens) {
+    if (GIT_COMMAND_SEPARATORS.has(token.text)) {
+      if (current.length > 0) {
+        segments.push(current)
+        current = []
+      }
+    } else {
+      current.push(token)
+    }
+  }
+  if (current.length > 0) segments.push(current)
+  return segments
+}
+
+/** If the segment starts with a shell wrapper (`pwsh`, `powershell`, `cmd`,
+ *  each optionally with `.exe`), scan forward from position 1 for the
+ *  payload-delimiter flag and return tokens after it.
+ *
+ *  pwsh / powershell: find first `-c` or `-command` (case-insensitive) after
+ *    segment[0]; payload starts after that flag. Common flags like `-NoProfile`
+ *    before `-c` are skipped.
+ *  cmd: find first `/c` (case-insensitive) after segment[0]; payload starts
+ *    after that flag. `/d` before `/c` is skipped.
+ *
+ *  Only checks at segment start — wrapper words in plain arguments
+ *  (e.g. `echo pwsh -c x`) are not mistaken for wrappers. */
+function extractWrapperScriptGit(segment: GitCommandToken[]): GitCommandToken[] | null {
+  if (segment.length < 3) return null
+  const cmd = normalizeCommandName(segment[0]!.text)
+
+  if (cmd === "pwsh" || cmd === "powershell") {
+    // Find first -c or -Command flag (case-insensitive) after position 0
+    for (let i = 1; i < segment.length; i++) {
+      const t = segment[i]!.text.toLowerCase()
+      if (t === "-c" || t === "-command") {
+        return segment.slice(i + 1)
+      }
+    }
+    return null
+  }
+
+  if (cmd === "cmd") {
+    // Find first /c flag (case-insensitive) after position 0
+    for (let i = 1; i < segment.length; i++) {
+      const t = segment[i]!.text.toLowerCase()
+      if (t === "/c") {
+        return segment.slice(i + 1)
+      }
+    }
+    return null
+  }
+
+  return null
+}
+
+/** Find the index of the git subcommand after `start`, skipping global options.
+ * Returns -1 for help invocations (`git help`, `git --help`). */
+function findGitSubcommandIndex(tokens: string[], start: number): number {
+  let i = start
+  while (i < tokens.length) {
+    const token = tokens[i]
+    if (token === undefined) return -1
+    // -- ends option parsing; next token is the subcommand (if any)
+    if (token === "--") return i + 1 < tokens.length ? i + 1 : -1
+    // --help/-h anywhere before the subcommand means the command is a help request
+    if (token === "--help" || token === "-h") return -1
+    // Value-consuming global option: skip option and its value
+    if (GIT_VALUE_OPTIONS.has(token)) {
+      i += 2
+      continue
+    }
+    // Standalone flag or unknown long option: skip one token
+    if (GIT_FLAG_OPTIONS.has(token) || token.startsWith("--")) {
+      i += 1
+      continue
+    }
+    // Unknown short option (e.g. -C, -v): skip conservatively (one token only)
+    if (token.startsWith("-") && token.length > 1) {
+      i += 1
+      continue
+    }
+    // First non-option token is the subcommand
+    if (token === "help") return -1 // git help <anything> is read-only
+    return i
+  }
+  return -1
+}
+
+/** `git tag` with no name, `-l`, or `--list` is read-only listing — not a write.
+ *  Once list mode (`-l`/`--list`) is seen before `--`, remaining non-option
+ *  operands are list patterns, not tag-name writes — unless a write option
+ *  (`-d`, `-a`, `-s`, `-m`, `-u` or their long forms) also appears.
+ *  Tag filter options (`--contains`, `--no-contains`, `--merged`, `--no-merged`,
+ *  `--points-at`) imply read-only list/filter mode and consume the following value.
+ *  Display/verify/list options (`-n`, `-v`, `--sort`, `--format`, `--ignore-case`)
+ *  imply read-only mode. `--sort=...` and `--format=...` are single-token forms.
+ *  Returns true only when no write signal appears and at least bare-list
+ *  or list-mode semantics remain. */
+function isTagListOnly(tokens: string[], start: number): boolean {
+  let listMode = false
+  for (let i = start; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t === undefined) continue
+    if (t === "--") {
+      // -- ends option parsing. If we're in list mode and no write option
+      // has appeared, operands after -- are list patterns → read-only.
+      // But if we're not in list mode, operands after -- are tag names → write.
+      return listMode
+    }
+    if (t === "-d" || t === "--delete" || t === "-a" || t === "--annotate" || t === "-s" || t === "--sign" || t === "-m" || t === "--message" || t === "-u" || t === "--local-user") {
+      return false
+    }
+    if (t === "-l" || t === "--list" || t === "-n" || t === "-v" || t === "--ignore-case" || t === "-i" || t === "--verify"
+        || (t.startsWith("-n") && /^-n\d+$/.test(t))
+        || t === "--column" || t.startsWith("--column=") || t === "--no-column"
+        || t === "--color" || t.startsWith("--color=") || t === "--no-color"
+        || t === "--omit-empty") {
+      listMode = true
+      continue
+    }
+    // --sort[=...] and --format[=...]: single-token or value-consuming forms
+    if (t === "--sort" || t.startsWith("--sort=") || t === "--format" || t.startsWith("--format=")) {
+      listMode = true
+      // --sort=... / --format=... are single-token; --sort / --format consume next token
+      if (t === "--sort" || t === "--format") {
+        i += 1 // skip the value consumed by this option
+      }
+      continue
+    }
+    // Tag filter options (fused `=` form): single-token, no value to skip
+    if (t.startsWith("--contains=") || t.startsWith("--no-contains=") || t.startsWith("--merged=") || t.startsWith("--no-merged=") || t.startsWith("--points-at=")) {
+      listMode = true
+      continue
+    }
+    // Tag filter options (space-separated form): consume next token as value
+    if (t === "--contains" || t === "--no-contains" || t === "--merged" || t === "--no-merged" || t === "--points-at") {
+      listMode = true
+      i += 1 // skip the value consumed by this option
+      continue
+    }
+    // Non-option token: if list mode is active, it's a list pattern (read-only).
+    // If not, it's a tag name → write.
+    if (!t.startsWith("-")) {
+      if (!listMode) return false
+      // In list mode, non-option tokens are patterns — still read-only
+      continue
+    }
+    // Unknown option flag — skip it (conservative: assume it doesn't signal a write)
+  }
+  // Reached end of tokens without a write option.
+  // Bare `git tag` or `git tag -l`/`git tag --list` with only patterns → read-only.
+  return true
+}
+
+/** Check whether `reset` is followed by `--hard` before `--` end-of-options.
+ *  `--hard` after `--` is a path operand, not a reset mode flag. */
+function hasResetHardFlag(tokens: string[], start: number): boolean {
+  for (let i = start; i < tokens.length; i++) {
+    if (tokens[i] === "--") return false
+    if (tokens[i] === "--hard") return true
+  }
+  return false
+}
+
+/** Check whether a `--help` or `-h` flag appears after the subcommand.
+ *  `--help`/`-h` used as an option value (e.g. `-m --help`, `-m -h`, `--author --help`) or after `--` is NOT a help flag.
+ *  Value-consuming post-subcommand options skip the following token so that
+ *  `--help` appearing as an option value is not mistaken for a help flag.
+ *  `-u`/`--local-user` only consumes a value for the `tag` subcommand
+ *  (where it means `--local-user`); for other subcommands it's `--set-upstream`
+ *  or a regular flag and does not consume a following token. */
+function hasHelpFlag(tokens: string[], start: number, subcommand?: string): boolean {
+  for (let i = start; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t === undefined) continue
+    if (t === "--") return false // --help/-h after -- is an operand, not a flag
+    if (GIT_POST_VALUE_OPTIONS.has(t)) {
+      i += 1 // skip the value consumed by this option
+      continue
+    }
+    // -u/--local-user only consumes a value for the tag subcommand
+    if (subcommand === "tag" && GIT_TAG_VALUE_OPTIONS.has(t)) {
+      i += 1
+      continue
+    }
+    if (t === "--help" || t === "-h") return true
+  }
+  return false
 }
 
 /** Check if an agent name is a builtin agent (including aliases like oracle, explore). */
@@ -671,6 +1025,84 @@ function tokenizeCommand(command: string): string[] {
   let match: RegExpExecArray | null
   while ((match = pattern.exec(command)) !== null) tokens.push(match[1] ?? match[2] ?? match[3] ?? "")
   return tokens
+}
+
+/** Quote-aware tokenizer for git command parsing.
+ *  Preserves whether each token came from double/single quotes so that
+ *  separators inside quoted strings are not split into command boundaries. */
+function tokenizeGitCommand(command: string): GitCommandToken[] {
+  const tokens: GitCommandToken[] = []
+  let current = ""
+  let quoted = false
+  let quote: "'" | '"' | null = null
+
+  const push = () => {
+    if (current.length > 0 || quoted) tokens.push({ text: current, quoted })
+    current = ""
+    quoted = false
+  }
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+    if (ch === undefined) continue
+
+    if (ch === "`") {
+      const next = command[i + 1]
+      if (next !== undefined) {
+        current += ESCAPED_GIT_SEPARATOR_CHARS.get(next) ?? next
+        quoted = quoted || quote !== null
+        i += 1
+      }
+      continue
+    }
+
+    if (quote !== null) {
+      if (ch === quote) {
+        if (command[i + 1] === quote) {
+          current += quote
+          i += 1
+        } else {
+          quote = null
+        }
+      } else {
+        current += ch
+      }
+      continue
+    }
+
+    if (/\s/.test(ch)) {
+      push()
+    } else if (quoted && /[;&|]/.test(ch)) {
+      push()
+      current += ch
+    } else if (ch === '"' || ch === "'") {
+      quoted = true
+      quote = ch
+    } else {
+      current += ch
+    }
+  }
+
+  push()
+  return tokens
+}
+
+function restoreEscapedGitSeparators(text: string): string {
+  let restored = text
+  for (const [separator, placeholder] of ESCAPED_GIT_SEPARATOR_CHARS) {
+    restored = restored.replaceAll(placeholder, separator)
+  }
+  return restored
+}
+
+/** Normalize a command name for comparison: lowercase and strip .exe suffix. */
+function normalizeCommandName(text: string): string {
+  const unquoted = ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))
+    ? text.slice(1, -1)
+    : text
+  const lower = unquoted.toLowerCase()
+  const base = lower.split(/[\\/]/).pop() ?? lower
+  return base.endsWith(".exe") ? base.slice(0, -4) : base
 }
 
 function jsonRecoveryExcluded(name: string): boolean {

@@ -254,6 +254,69 @@ test("event without model uses agent's primary model as failed key (not agent na
   assert.equal(calls[1]?.body.modelID, "fallback-b")
 })
 
+test("second error without model uses state.activeModel as failed key (chain advances)", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // First error: has an explicit model, dispatches fallback-a.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+
+  // Second error: NO model in event. The handler should use state.activeModel
+  // ("hoo/fallback-a") as the just-failed key, not fall back to the primary
+  // chain entry. This advances the chain to fallback-b.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    // No model field — relies on activeModel tracking
+  }))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+})
+
+test("third error without model continues to advance using activeModel", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig({ maxAttempts: 5 })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // First error: explicit model -> fallback-a
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+
+  // Second error: no model -> activeModel (fallback-a) -> fallback-b
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+  }))
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+
+  // Third error: no model -> activeModel (fallback-b) -> chain has only 2
+  // fallbacks (a, b), so this should exhaust with "no-next-model"
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+  }))
+  // Only 2 calls, chain exhausted after fallback-b
+  assert.equal(calls.length, 2)
+})
+
+test("event without model on first error uses primary as failed key", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // No model in event, no prior state => falls back to primary chain entry.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+})
+
 test("idle continuation: does not continue when disabled", async () => {
   const { client, calls } = makeMockClient()
   const idleState = createIdleContinuationState()
@@ -309,4 +372,101 @@ test("idle continuation: session.deleted clears idle state", async () => {
   await handler({ event: { type: "session.deleted", properties: { sessionID: "ses_1" } } })
   assert.equal(idleState.sessionOverrides.has("ses_1"), false)
   assert.equal(idleState.sessionData.has("ses_1"), false)
+})
+
+test("session.deleted calls injected clearSessionIntent", async () => {
+  const { client } = makeMockClient()
+  const cfg = makeConfig()
+  const cleared: string[] = []
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client,
+    clearSessionIntent: (id) => { cleared.push(id) },
+  })
+  await handler({ event: { type: "session.deleted", properties: { sessionID: "ses_clear" } } })
+  assert.deepEqual(cleared, ["ses_clear"])
+})
+
+test("session.idle calls injected clearSessionIntent", async () => {
+  const { client } = makeMockClient()
+  const cfg = makeConfig({ enabled: true })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = false // disabled => handleIdleContinuation is a no-op
+  const cleared: string[] = []
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client,
+    idleState,
+    clearSessionIntent: (id) => { cleared.push(id) },
+  })
+  await handler(makeIdleEvent("ses_idle"))
+  assert.deepEqual(cleared, ["ses_idle"])
+})
+
+test("session.idle preserves fallback state for later session.error", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // First error: primary-model fails -> dispatches fallback-a
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+
+  // session.idle — must NOT delete fallback state
+  await handler(makeIdleEvent("ses_1"))
+
+  // Second error: no model in event — should use activeModel (hoo/fallback-a)
+  // as the failed key and advance to fallback-b, NOT restart from primary.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+})
+
+test("failed dispatch does not advance fallback state", async () => {
+  // Mock client with messages that yield no user parts — dispatchFallbackRetry
+  // returns false because parts.length === 0.
+  const calls: PromptCall[] = []
+  const emptyMessagesResp = { messages: [] }
+  const client: OcmmClient = {
+    session: {
+      async abort() { return undefined },
+      async messages() { return emptyMessagesResp },
+      async prompt(args: { path: { id: string }; body: Record<string, unknown> }) {
+        calls.push({
+          sessionID: args.path.id,
+          body: args.body,
+        })
+        return undefined
+      },
+    },
+  }
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  // First error triggers peek -> dispatch returns false (no user parts)
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  // dispatch was called but returned false, so state was NOT committed
+  // prompt should NOT have been called (dispatch failed before reaching it)
+  assert.equal(calls.length, 0, "prompt should not be called when dispatch returns false")
+
+  // Now give the mock real messages so the second error can dispatch
+  client.session.messages = async () => ({
+    messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+  })
+
+  // Second error: state was not advanced, so it should still peek fallback-a
+  // (the same model as before), not skip to fallback-b
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
 })

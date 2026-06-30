@@ -39,20 +39,35 @@ export function isDispatchInFlight(sessionID: string): boolean {
   return inFlight.has(sessionID)
 }
 
+/**
+ * Extract the latest contiguous block of user messages from a session.
+ *
+ * Scans backward from the end, collecting adjacent user-role messages,
+ * stops at the first non-user message after at least one user is collected,
+ * then reverses to chronological order and concatenates their parts/content.
+ */
 function extractLastUserParts(messagesResp: unknown): unknown[] {
   if (!isRecord(messagesResp)) return []
   const msgs = messagesResp.messages ?? messagesResp.data ?? messagesResp
   if (!Array.isArray(msgs)) return []
+  const collected: unknown[] = []
+  let seenUserBlock = false
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]
     if (!isRecord(m)) continue
     const role = m.role ?? m.type
     if (role === "user") {
+      seenUserBlock = true
       const parts = m.parts ?? m.content
-      if (Array.isArray(parts)) return parts
+      if (Array.isArray(parts)) collected.unshift(...parts)
+      else if (typeof parts === "string") collected.unshift({ type: "text", text: parts })
+    } else {
+      // Stop at first non-user after reaching the latest user block, even if
+      // that block had no retryable parts. Do not cross into an older turn.
+      if (seenUserBlock) break
     }
   }
-  return []
+  return collected
 }
 
 export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean> {

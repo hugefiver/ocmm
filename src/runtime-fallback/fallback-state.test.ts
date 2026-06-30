@@ -7,6 +7,8 @@ import {
   isModelInCooldown,
   markModelFailed,
   modelKey,
+  peekNextFallback,
+  commitFallback,
   prepareFallback,
 } from "./fallback-state.ts"
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
@@ -115,4 +117,91 @@ test("prepareFallback advances to next index on second call", () => {
   if (r.ok) assert.equal(r.entry.model, "fallback-b")
   assert.equal(s.fallbackIndex, 2)
   assert.equal(s.attempts, 2)
+})
+
+test("prepareFallback sets activeModel to the selected entry", () => {
+  const s = createFallbackState("hoo/primary-model")
+  const r = prepareFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+  assert.equal(r.ok, true)
+  assert.equal(s.activeModel, "hoo/fallback-a")
+})
+
+test("prepareFallback updates activeModel on each advance", () => {
+  const s = createFallbackState("hoo/primary-model")
+  prepareFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+  assert.equal(s.activeModel, "hoo/fallback-a")
+  prepareFallback(s, req, "hoo/fallback-a", 3, 60, NOW + 1000)
+  assert.equal(s.activeModel, "hoo/fallback-b")
+})
+
+// ── peekNextFallback + commitFallback (non-mutating peek, explicit commit) ──
+
+test("peekNextFallback does NOT mutate state", () => {
+  const s = createFallbackState("hoo/primary-model")
+  const originalIndex = s.fallbackIndex
+  const originalAttempts = s.attempts
+  const originalActiveModel = s.activeModel
+
+  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+
+  assert.equal(r.ok, true)
+  if (r.ok) {
+    assert.equal(r.entry.model, "fallback-a")
+    assert.equal(r.index, 1)
+    assert.equal(r.nextAttempts, 1)
+  }
+  // State must be unchanged
+  assert.equal(s.fallbackIndex, originalIndex)
+  assert.equal(s.attempts, originalAttempts)
+  assert.equal(s.activeModel, originalActiveModel)
+})
+
+test("commitFallback advances state after peek", () => {
+  const s = createFallbackState("hoo/primary-model")
+
+  const peek = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+  assert.equal(peek.ok, true)
+  if (!peek.ok) return
+
+  commitFallback(s, peek.entry, peek.index)
+
+  assert.equal(s.fallbackIndex, 1)
+  assert.equal(s.attempts, 1)
+  assert.equal(s.activeModel, "hoo/fallback-a")
+})
+
+test("peek then multiple peeks without commit returns same entry", () => {
+  const s = createFallbackState("hoo/primary-model")
+
+  const r1 = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+  const r2 = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+
+  assert.equal(r1.ok, true)
+  assert.equal(r2.ok, true)
+  if (r1.ok && r2.ok) {
+    assert.equal(r1.entry.model, r2.entry.model)
+    assert.equal(r1.index, r2.index)
+  }
+  assert.equal(s.attempts, 0) // still uncommitted
+})
+
+test("peekNextFallback returns max-attempts when attempts exhausted", () => {
+  const s = createFallbackState("hoo/primary-model")
+  s.attempts = 3
+  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.reason, "max-attempts")
+})
+
+test("peekNextFallback returns no-next-model when all in cooldown", () => {
+  const s = createFallbackState("hoo/primary-model")
+  markModelFailed(s, "hoo/fallback-a", NOW)
+  markModelFailed(s, "hoo/fallback-b", NOW)
+  markModelFailed(s, "other/fallback-c", NOW)
+  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW + 1000)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.reason, "no-next-model")
+  // State unchanged even on failure
+  assert.equal(s.attempts, 0)
+  assert.equal(s.fallbackIndex, 0)
 })

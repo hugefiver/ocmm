@@ -15,8 +15,9 @@
 import { defaultConfig, type OcmmConfig } from "./config/schema.ts"
 import { loadConfig } from "./config/load.ts"
 import { createConfigHandler } from "./hooks/config.ts"
+import { createResolutionLedger } from "./routing/ledger.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
-import { createChatMessageHandler, createSystemTransformHandler } from "./hooks/chat-message.ts"
+import { createChatMessageHandler, createSystemTransformHandler, createSessionIntentStore } from "./hooks/chat-message.ts"
 import { createEventHandler } from "./hooks/event.ts"
 import { createDirectoryAgentsInjector } from "./hooks/directory-agents-injector.ts"
 import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
@@ -112,6 +113,8 @@ export function createPlugin(input?: ServerInput): {
   syncIdleEnabled()
   const agentsSessionCache = new Map<string, Set<string>>()
   const sessionAgentMap = new Map<string, string>()
+  const resolutionLedger = createResolutionLedger()
+  const sessionIntentStore = createSessionIntentStore()
   const permissionGuards = createPermissionGuards({
     getConfig,
     projectRoot: cwd,
@@ -133,6 +136,7 @@ export function createPlugin(input?: ServerInput): {
     ...(input?.client !== undefined ? { client: input.client } : {}),
     directory: cwd,
     idleState,
+    clearSessionIntent: (sid) => sessionIntentStore.clearSessionIntent(sid),
   })
   const composedEvent = async (raw: unknown) => {
     await fallbackEventHandler(raw)
@@ -141,12 +145,20 @@ export function createPlugin(input?: ServerInput): {
 
   const pluginInterface: PluginInterface = {
     config: createConfigHandler({ getConfig, cwd }),
-    "chat.params": createChatParamsHandler({ getConfig, sessionAgentMap }),
+    "chat.params": createChatParamsHandler({
+      getConfig,
+      sessionAgentMap,
+      recordResolution: resolutionLedger.recordResolution,
+    }),
     "chat.message": createChatMessageHandler({
       getConfig,
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
+      store: sessionIntentStore,
     }),
-    "experimental.chat.system.transform": createSystemTransformHandler({ getConfig }),
+    "experimental.chat.system.transform": createSystemTransformHandler({
+      getConfig,
+      store: sessionIntentStore,
+    }),
     "tool.execute.before": permissionGuards.before,
     "tool.execute.after": async (hookInput, hookOutput) => {
       for (const handler of toolAfterHandlers) await handler(hookInput, hookOutput)
