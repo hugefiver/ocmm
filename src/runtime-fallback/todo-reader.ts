@@ -7,6 +7,17 @@ type TodoItem = { status?: string }
 function extractTodosFromPart(part: unknown): TodoItem[] | null {
   if (typeof part !== "object" || part === null) return null
   const p = part as Record<string, unknown>
+  const invocation = p.toolInvocation
+  if (typeof invocation === "object" && invocation !== null) {
+    const toolInvocation = invocation as Record<string, unknown>
+    if (toolInvocation.toolName !== "todowrite") return null
+    const args = toolInvocation.args
+    if (typeof args === "object" && args !== null) {
+      const todos = (args as Record<string, unknown>).todos
+      if (Array.isArray(todos)) return todos as TodoItem[]
+    }
+    return null
+  }
   // Check if this is a todowrite tool call/result
   const tool = p.tool ?? p.name
   if (tool !== "todowrite") return null

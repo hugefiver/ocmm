@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
 import type { OcmmClient } from "./dispatcher.ts"
 import { OcmmConfigSchema } from "../config/schema.ts"
-import { createIdleContinuationState } from "./idle-state.ts"
+import { createIdleContinuationState, DEFAULT_CONTINUATION_PROMPT } from "./idle-state.ts"
 
 type PromptCall = {
   sessionID: string
@@ -359,6 +359,50 @@ test("idle continuation: does not continue when maxContinuations reached", async
   const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfgWithMax, client, idleState })
   await handler(makeIdleEvent("ses_1"))
   assert.equal(calls.length, 0)
+})
+
+test("idle continuation: continues for OpenCode todowrite tool-invocation todos", async () => {
+  const calls: PromptCall[] = []
+  const client: OcmmClient = {
+    session: {
+      async abort() { return undefined },
+      async messages() {
+        return {
+          data: [
+            {
+              role: "assistant",
+              parts: [
+                {
+                  type: "tool-invocation",
+                  toolInvocation: {
+                    state: "result",
+                    toolName: "todowrite",
+                    args: { todos: [{ content: "continue", status: "pending" }] },
+                    result: "ok",
+                  },
+                },
+              ],
+            },
+          ],
+        }
+      },
+      async prompt(args: { path: { id: string }; body: Record<string, unknown> }) {
+        calls.push({ sessionID: args.path.id, body: args.body })
+        return undefined
+      },
+    },
+  }
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = makeConfig({ enabled: true })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, idleState })
+
+  await handler(makeIdleEvent("ses_1"))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.sessionID, "ses_1")
+  assert.deepEqual(calls[0]?.body.parts, [{ type: "text", text: DEFAULT_CONTINUATION_PROMPT }])
+  assert.equal(idleState.sessionData.get("ses_1")?.continuationCount, 1)
 })
 
 test("idle continuation: session.deleted clears idle state", async () => {

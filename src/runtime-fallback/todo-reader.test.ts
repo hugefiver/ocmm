@@ -43,6 +43,85 @@ test("returns true when todowrite result has pending items", async () => {
   assert.equal(result, true)
 })
 
+test("returns true for OpenCode tool-invocation todowrite args", async () => {
+  const { client } = makeClient({
+    data: [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-invocation",
+            toolInvocation: {
+              state: "result",
+              toolName: "todowrite",
+              args: {
+                todos: [
+                  { content: "keep going", status: "in_progress" },
+                  { content: "done", status: "completed" },
+                ],
+              },
+              result: "ok",
+            },
+          },
+        ],
+      },
+    ],
+  })
+  const result = await hasUnfinishedTodos(client, "ses_1")
+  assert.equal(result, true)
+})
+
+test("returns false for OpenCode tool-invocation todowrite when all completed", async () => {
+  const { client } = makeClient({
+    data: [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-invocation",
+            toolInvocation: {
+              state: "result",
+              toolName: "todowrite",
+              args: {
+                todos: [
+                  { content: "done-a", status: "completed" },
+                  { content: "done-b", status: "completed" },
+                ],
+              },
+              result: "ok",
+            },
+          },
+        ],
+      },
+    ],
+  })
+  const result = await hasUnfinishedTodos(client, "ses_1")
+  assert.equal(result, false)
+})
+
+test("returns false for OpenCode tool-invocation with non-todowrite tool", async () => {
+  const { client } = makeClient({
+    data: [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-invocation",
+            toolInvocation: {
+              state: "result",
+              toolName: "read",
+              args: { path: "some/file.ts" },
+              result: "file contents",
+            },
+          },
+        ],
+      },
+    ],
+  })
+  const result = await hasUnfinishedTodos(client, "ses_1")
+  assert.equal(result, false)
+})
+
 test("returns false when all todos are completed", async () => {
   const { client } = makeClient({
     data: [
