@@ -1,5 +1,7 @@
 import { isIdleContinuationEnabled, type IdleContinuationState } from "../runtime-fallback/idle-state.ts"
 
+const LOOP_COMMANDS = new Set(["ralph-loop", "audit-loop", "dwloop"])
+
 type CommandExecuteInput = {
   command: string
   arguments?: string
@@ -18,9 +20,15 @@ export type CommandExecuteDeps = {
 
 export function createCommandExecuteHandler(deps: CommandExecuteDeps) {
   return async (input: CommandExecuteInput, output: CommandExecuteOutput): Promise<void> => {
+    const sid = input.sessionID
+
+    if (LOOP_COMMANDS.has(input.command)) {
+      deps.idleState.sessionOverrides.set(sid, true)
+      return
+    }
+
     if (input.command !== "idle-continuation") return
 
-    const sid = input.sessionID
     const arg = (input.arguments ?? "").trim().toLowerCase() || "status"
 
     let message: string

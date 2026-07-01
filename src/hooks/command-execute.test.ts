@@ -88,3 +88,43 @@ test("unknown argument produces usage message", async () => {
   assert.ok(output.parts[0].text?.includes("Unknown"))
   assert.ok(output.parts[0].text?.includes("on|off|status"))
 })
+
+test("ralph-loop enables idle continuation for the session", async () => {
+  const state = createIdleContinuationState()
+  const handler = createCommandExecuteHandler({ idleState: state })
+  const output = makeOutput()
+  await handler(makeInput("ralph-loop", "ship the fix", "ses_1"), output)
+  assert.equal(state.sessionOverrides.get("ses_1"), true)
+  assert.equal(output.parts.length, 0)
+})
+
+test("audit-loop enables idle continuation for the session", async () => {
+  const state = createIdleContinuationState()
+  const handler = createCommandExecuteHandler({ idleState: state })
+  await handler(makeInput("audit-loop", "verify all", "ses_1"), makeOutput())
+  assert.equal(state.sessionOverrides.get("ses_1"), true)
+})
+
+test("dwloop enables idle continuation for the session", async () => {
+  const state = createIdleContinuationState()
+  const handler = createCommandExecuteHandler({ idleState: state })
+  await handler(makeInput("dwloop", "finish task", "ses_1"), makeOutput())
+  assert.equal(state.sessionOverrides.get("ses_1"), true)
+})
+
+test("loop command overrides a prior explicit off", async () => {
+  const state = createIdleContinuationState()
+  state.sessionOverrides.set("ses_1", false)
+  const handler = createCommandExecuteHandler({ idleState: state })
+  await handler(makeInput("ralph-loop", "resume", "ses_1"), makeOutput())
+  assert.equal(state.sessionOverrides.get("ses_1"), true)
+})
+
+test("explicit off after loop overrides the loop-enabled state", async () => {
+  const state = createIdleContinuationState()
+  const handler = createCommandExecuteHandler({ idleState: state })
+  await handler(makeInput("ralph-loop", "start", "ses_1"), makeOutput())
+  assert.equal(state.sessionOverrides.get("ses_1"), true)
+  await handler(makeInput("idle-continuation", "off", "ses_1"), makeOutput())
+  assert.equal(state.sessionOverrides.get("ses_1"), false)
+})
