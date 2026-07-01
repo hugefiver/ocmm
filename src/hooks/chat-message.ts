@@ -206,9 +206,12 @@ const quoteTrimRegex = /^["']|["']$/g
 const COMMIT_GUARD_TEXT = `## Commit Guard
 
 You must not execute git commit, git push, git tag, or any other git write
-command on your own. All version control writes require explicit user
-permission in the conversation. If a task needs committing, state what should
-be committed and ask the user to approve or perform it.`
+command on your own in project or user repositories. All normal version
+control writes require explicit user permission in the conversation. Git writes
+inside disposable git repositories under the OS temp directory are allowed for
+isolated tests, repros, and fixtures. If a task needs committing outside a temp
+repository, state what should be committed and ask the user to approve or
+perform it.`
 
 export function createSystemTransformHandler(opts: {
   getConfig: () => OcmmConfig

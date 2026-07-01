@@ -263,6 +263,7 @@ test("system.transform appends commit guard to array system when enabled", async
   assert.ok(typeof output.system[1] === "string")
   assert.ok((output.system[1] as string).includes("Commit Guard"))
   assert.ok((output.system[1] as string).includes("git commit"))
+  assert.ok((output.system[1] as string).includes("OS temp directory"))
 })
 
 test("system.transform appends commit guard to string system when enabled", async () => {

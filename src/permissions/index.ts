@@ -1,6 +1,7 @@
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { tmpdir } from "node:os"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
@@ -78,7 +79,7 @@ export function createPermissionGuards(args: {
       guardNotepadWrite(config, rawInput, projectRoot)
       guardExistingFileWrite(config, rawInput, readPermissions, projectRoot)
       warnBashFileRead(config, rawInput, rawOutput)
-      guardSubagentGit(config, rawInput, args.sessionAgentMap)
+      guardSubagentGit(config, rawInput, projectRoot, args.sessionAgentMap)
       truncateQuestionLabels(config, rawInput, rawOutput)
       guardTodoRead(config, rawInput, args.taskSystemEnabled)
       await rewriteWebfetchRedirect(config, rawInput, rawOutput, args.redirectResolver)
@@ -235,6 +236,7 @@ function warnBashFileRead(config: OcmmConfig, rawInput: unknown, rawOutput: unkn
 function guardSubagentGit(
   config: OcmmConfig,
   rawInput: unknown,
+  projectRoot: string,
   sessionAgentMap?: Map<string, string>,
 ): void {
   if (hookDisabled(config, "subagent-git-guard", "subagentGitGuard")) return
@@ -243,13 +245,346 @@ function guardSubagentGit(
   const command = stringArg(rawInput, "command")
   if (!command) return
   if (!isGitWriteCommand(command)) return
+  const workdir = bashWorkingDirectory(rawInput, projectRoot)
+  if (gitWritesAllowedInTempRepo(command, workdir, projectRoot)) return
   const sid = sessionId(rawInput)
   const agentName = sessionAgentMap.get(sid)
   if (!agentName) return // unknown session — safe default, don't block
   if (isBuiltinAgentName(agentName)) return // main agent — allow
   throw new Error(
-    `ocmm: subagent sessions are not allowed to run git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The main agent must handle version control. (agent: ${agentName})`,
+      `ocmm: subagent sessions are not allowed to run git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The main agent must handle version control. (agent: ${agentName})`,
   )
+}
+
+function bashWorkingDirectory(rawInput: unknown, projectRoot: string): string {
+  const args = argsRecord(rawInput)
+  for (const key of ["workdir", "cwd", "directory"] as const) {
+    const value = args?.[key] ?? (isRecord(rawInput) ? rawInput[key] : undefined)
+    if (typeof value === "string" && value.length > 0) return absolutize(value, projectRoot)
+  }
+  return projectRoot
+}
+
+function gitWritesAllowedInTempRepo(command: string, baseDir: string, projectRoot: string): boolean {
+  const status = gitWriteTempStatus(tokenizeGitCommand(command), baseDir, projectRoot)
+  return status.foundWrite && status.allowed
+}
+
+function gitWriteTempStatus(
+  tokens: GitCommandToken[],
+  baseDir: string,
+  projectRoot: string,
+  inheritedEnv: { gitDir?: string | null; workTree?: string | null; tempDenied?: boolean } = {},
+  shell: "pwsh" | "cmd" = "pwsh",
+): { foundWrite: boolean; allowed: boolean; gitDir: string | null; workTree: string | null; tempDenied: boolean } {
+  const segments = splitIntoSegmentsGit(splitGitSeparators(tokens))
+  let foundWrite = false
+  let envGitDir: string | null = inheritedEnv.gitDir ?? null
+  let envWorkTree: string | null = inheritedEnv.workTree ?? null
+  let tempDenied = inheritedEnv.tempDenied === true
+
+  for (const segment of segments) {
+    if (segment.length === 0) continue
+    const wrapper = extractWrapperScriptGit(segment)
+    if (wrapper !== null) {
+      const wrapperShell = normalizeCommandName(segment[0]!.text) === "cmd" ? "cmd" : "pwsh"
+      const nested = wrapper[0]?.quoted
+        ? gitWriteTempStatus(tokenizeGitCommand(wrapper[0]!.text), baseDir, projectRoot, { gitDir: envGitDir, workTree: envWorkTree, tempDenied }, wrapperShell)
+        : gitWriteTempStatus(wrapper, baseDir, projectRoot, { gitDir: envGitDir, workTree: envWorkTree, tempDenied }, wrapperShell)
+      tempDenied = tempDenied || nested.tempDenied
+      if (!nested.allowed) return { foundWrite: true, allowed: false, gitDir: envGitDir, workTree: envWorkTree, tempDenied }
+      foundWrite = foundWrite || nested.foundWrite
+      continue
+    }
+
+    if (normalizeCommandName(segment[0]!.text) !== "git") {
+      // Track PowerShell env assignments before the git segment.
+      const env = extractGitEnvAssignment(segment, baseDir, shell)
+      if (env) {
+        if ((env.gitDir !== undefined && !isValidGitDir(env.gitDir, projectRoot))
+            || (env.workTree !== undefined && !isValidTempDirectoryOutsideProject(env.workTree, projectRoot))) {
+          tempDenied = true
+        }
+        if (env.gitDir !== undefined) envGitDir = env.gitDir
+        if (env.workTree !== undefined) envWorkTree = env.workTree
+      }
+      continue
+    }
+
+    const segTexts = segment.map((t) => t.text)
+    const subIdx = findGitSubcommandIndex(segTexts, 1)
+    if (subIdx === -1) continue
+    const context = gitExecutionContext(segTexts, baseDir, subIdx, projectRoot)
+    if (!context) {
+      tempDenied = true
+      continue
+    }
+    if (context.tempDenied) tempDenied = true
+    const subcommand = segTexts[subIdx]
+    if (subcommand === undefined || !GIT_WRITE_SUBCOMMANDS.has(subcommand)) continue
+    if (hasHelpFlag(segTexts, subIdx + 1, subcommand)) continue
+    if (subcommand === "reset" && !hasResetHardFlag(segTexts, subIdx + 1)) continue
+    if (subcommand === "tag" && isTagListOnly(segTexts, subIdx + 1)) continue
+
+    if (!isAllowedTempGitContext(context, envGitDir, envWorkTree, tempDenied || context.tempDenied, projectRoot)) {
+      return { foundWrite: true, allowed: false, gitDir: envGitDir, workTree: envWorkTree, tempDenied }
+    }
+    foundWrite = true
+  }
+
+  return { foundWrite, allowed: true, gitDir: envGitDir, workTree: envWorkTree, tempDenied }
+}
+
+function isAllowedTempGitContext(
+  context: { workingDirectory: string; gitDir: string | null; workTree: string | null },
+  envGitDir: string | null,
+  envWorkTree: string | null,
+  tempDenied: boolean,
+  projectRoot: string,
+): boolean {
+  if (tempDenied) return false
+  if (envGitDir !== null && !isValidGitDir(envGitDir, projectRoot)) return false
+  if (envWorkTree !== null && !isValidTempDirectoryOutsideProject(envWorkTree, projectRoot)) return false
+
+  const effectiveGitDir = context.gitDir ?? envGitDir
+  const effectiveWorkTree = context.workTree ?? envWorkTree
+  if (effectiveGitDir !== null && !isValidGitDir(effectiveGitDir, projectRoot)) return false
+  if (effectiveWorkTree !== null && !isValidTempDirectoryOutsideProject(effectiveWorkTree, projectRoot)) return false
+
+  if (effectiveGitDir !== null && effectiveWorkTree !== null) {
+    return true
+  }
+  if (effectiveGitDir !== null && isStandaloneBareGitDir(effectiveGitDir)) {
+    return true
+  }
+
+  return isTempGitRepositoryContext(context.workingDirectory, projectRoot)
+}
+
+function isValidTempDirectoryOutsideProject(path: string, projectRoot: string): boolean {
+  const tempRoot = canonicalPath(tmpdir())
+  const canonical = canonicalDirectory(path)
+  if (!canonical) return false
+  if (!isInside(tempRoot, canonical)) return false
+  const projectCanonical = canonicalPath(projectRoot)
+  if (isInside(projectCanonical, canonical)) return false
+  // Block paths that are ancestors of projectRoot (would version-control the project tree)
+  if (isInside(canonical, projectCanonical)) return false
+  return true
+}
+
+/** Validate that a path is a real git directory (bare or .git) under temp.
+ *  Must contain at least one git marker: HEAD, or (config + objects), or refs.
+ *  Also requires the path to be an existing directory under temp and outside project.
+ *  Additionally, checks that the effective repo root is disjoint from projectRoot:
+ *  for standard `.git` directories, the repo root is the parent; for bare gitdirs
+ *  not named `.git`, the gitdir itself is the repo root. */
+function isValidGitDir(path: string, projectRoot: string): boolean {
+  if (!isValidTempDirectoryOutsideProject(path, projectRoot)) return false
+  try {
+    const gitDir = canonicalPath(path)
+    if (safeStatFile(join(gitDir, "HEAD"))) return isRepoRootDisjointFromProject(gitDir, projectRoot)
+    if (safeStatFile(join(gitDir, "config")) && safeStatDirectory(join(gitDir, "objects"))) return isRepoRootDisjointFromProject(gitDir, projectRoot)
+    if (safeStatDirectory(join(gitDir, "refs"))) return isRepoRootDisjointFromProject(gitDir, projectRoot)
+    return false
+  } catch {
+    return false
+  }
+}
+
+/** For a standard .git directory, the effective repo root is the parent directory.
+ *  For bare gitdirs (not named .git), the gitdir itself is the repo root.
+ *  Returns true only when the repo root is fully disjoint from projectRoot
+ *  (not inside projectRoot, and not an ancestor containing projectRoot). */
+function isRepoRootDisjointFromProject(gitDir: string, projectRoot: string): boolean {
+  const repoRoot = effectiveRepoRootForGitDir(gitDir)
+  const repoRootCanonical = canonicalPath(repoRoot)
+  const projectCanonical = canonicalPath(projectRoot)
+  if (isInside(projectCanonical, repoRootCanonical)) return false
+  if (isInside(repoRootCanonical, projectCanonical)) return false
+  return true
+}
+
+function isStandaloneBareGitDir(gitDir: string): boolean {
+  const canonical = canonicalPath(gitDir)
+  if (basename(canonical).toLowerCase() === ".git") return false
+  const parent = dirname(canonical)
+  return !(basename(parent).toLowerCase() === "worktrees" && basename(dirname(parent)).toLowerCase() === ".git")
+}
+
+function effectiveRepoRootForGitDir(gitDir: string): string {
+  if (basename(gitDir).toLowerCase() === ".git") return dirname(gitDir)
+
+  const parent = dirname(gitDir)
+  if (basename(parent).toLowerCase() === "worktrees") {
+    const gitMarker = dirname(parent)
+    if (basename(gitMarker).toLowerCase() === ".git") return dirname(gitMarker)
+  }
+
+  return gitDir
+}
+
+function gitExecutionContext(tokens: string[], baseDir: string, subIdx: number, projectRoot: string): {
+  workingDirectory: string
+  gitDir: string | null
+  workTree: string | null
+  tempDenied: boolean
+} | null {
+  let workingDirectory = baseDir
+  let gitDir: string | null = null
+  let workTree: string | null = null
+  let tempDenied = false
+
+  for (let i = 1; i < subIdx; i++) {
+    const token = tokens[i]
+    if (token === undefined) continue
+    if (token === "-C") {
+      const value = tokens[i + 1]
+      if (value === undefined || value.length === 0) { tempDenied = true; return null }
+      workingDirectory = absolutize(value, workingDirectory)
+      if (!isValidTempDirectoryOutsideProject(workingDirectory, projectRoot)) tempDenied = true
+      i += 1
+      continue
+    }
+    if (token === "-c") {
+      const value = tokens[i + 1]
+      if (value === undefined) return null
+      const configuredWorkTree = gitConfigWorkTree(value)
+      if (configuredWorkTree !== null) {
+        if (configuredWorkTree.length === 0) { tempDenied = true; i += 1; continue }
+        workTree = absolutize(configuredWorkTree, workingDirectory)
+        if (!isValidTempDirectoryOutsideProject(workTree, projectRoot)) tempDenied = true
+      }
+      i += 1
+      continue
+    }
+    if (token === "--git-dir") {
+      const value = tokens[i + 1]
+      if (value === undefined || value.length === 0) { tempDenied = true; i += 1; continue }
+      gitDir = absolutize(value, workingDirectory)
+      if (!isValidGitDir(gitDir, projectRoot)) tempDenied = true
+      i += 1
+      continue
+    }
+    if (token.startsWith("--git-dir=")) {
+      const raw = token.slice("--git-dir=".length)
+      if (raw.length === 0) { tempDenied = true; continue }
+      gitDir = absolutize(raw, workingDirectory)
+      if (!isValidGitDir(gitDir, projectRoot)) tempDenied = true
+      continue
+    }
+    if (token === "--work-tree") {
+      const value = tokens[i + 1]
+      if (value === undefined || value.length === 0) { tempDenied = true; i += 1; continue }
+      workTree = absolutize(value, workingDirectory)
+      if (!isValidTempDirectoryOutsideProject(workTree, projectRoot)) tempDenied = true
+      i += 1
+      continue
+    }
+    if (token.startsWith("--work-tree=")) {
+      const raw = token.slice("--work-tree=".length)
+      if (raw.length === 0) { tempDenied = true; continue }
+      workTree = absolutize(raw, workingDirectory)
+      if (!isValidTempDirectoryOutsideProject(workTree, projectRoot)) tempDenied = true
+      continue
+    }
+    if (GIT_VALUE_OPTIONS.has(token)) {
+      i += 1
+    }
+  }
+
+  return { workingDirectory, gitDir, workTree, tempDenied }
+}
+
+function isTempGitRepositoryContext(directory: string, projectRoot: string): boolean {
+  const tempRoot = canonicalPath(tmpdir())
+  const start = canonicalPath(directory)
+  if (!isInside(tempRoot, start)) return false
+  if (isValidGitDir(start, projectRoot) && isStandaloneBareGitDir(start)) return true
+  const root = findTempGitRoot(start, tempRoot, projectRoot)
+  if (root === null) return false
+  const rootCanonical = canonicalPath(root)
+  const projectCanonical = canonicalPath(projectRoot)
+  // Block when temp repo contains projectRoot (ancestor that version-controls the project tree)
+  if (isInside(projectCanonical, rootCanonical)) return false
+  // Block when temp repo is inside projectRoot
+  if (isInside(rootCanonical, projectCanonical)) return false
+  return true
+}
+
+function findTempGitRoot(directory: string, tempRoot: string, projectRoot: string): string | null {
+  let current = directory
+  while (isInside(tempRoot, current)) {
+    const marker = resolve(current, ".git")
+    if (isValidTempGitMarker(marker, tempRoot, projectRoot)) return current
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
+}
+
+/** Validate a .git marker (directory or file) is a genuine valid git directory under temp.
+ *  - .git directory: must be a valid git dir via isValidGitDir (under temp, outside project, contains git markers).
+ *  - .git file (worktree): must start with `gitdir:`, resolve the referenced
+ *    path relative to the .git file's parent, canonicalize, and pass isValidGitDir.
+ *    Malformed or outside-temp gitdir => rejected. */
+function isValidTempGitMarker(marker: string, tempRoot: string, projectRoot: string): boolean {
+  try {
+    const st = statSync(marker)
+    if (st.isDirectory()) {
+      return isValidGitDir(marker, projectRoot)
+    }
+    if (st.isFile()) {
+      return isTempWorktreeGitFile(marker, projectRoot)
+    }
+  } catch {
+    // no .git at all — not a valid marker
+  }
+  return false
+}
+
+/** Parse a .git file (git worktree link), resolve the referenced gitdir,
+ *  and verify it is a valid git dir under tempRoot. Returns false for any
+ *  parse failure or gitdir that is not a valid temp git dir. */
+function isTempWorktreeGitFile(gitFile: string, projectRoot: string): boolean {
+  let content: string
+  try {
+    content = readFileSync(gitFile, "utf8")
+  } catch {
+    return false
+  }
+  const firstLine = content.split(/\r?\n/, 1)[0]?.trimEnd() ?? ""
+  const match = firstLine.match(/^gitdir:\s*(.+?)\s*$/)
+  if (!match || !match[1]) return false
+  const gitdir = match[1]
+  // Resolve relative to the .git file's parent directory
+  const resolved = absolutize(gitdir, dirname(gitFile))
+  return isValidGitDir(resolved, projectRoot)
+}
+
+function gitConfigWorkTree(value: string): string | null {
+  const match = value.match(/^core\.worktree=(.+)$/i)
+  if (match?.[1] !== undefined) return match[1]
+  if (/^core\.worktree=$/i.test(value)) return ""
+  return null
+}
+
+function canonicalDirectory(path: string): string | null {
+  try {
+    if (!statSync(path).isDirectory()) return null
+    return realpathSync(path)
+  } catch {
+    return null
+  }
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
 }
 
 export function isSimpleFileReadCommand(command: string): boolean {
@@ -679,7 +1014,7 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
 
 const BUILTIN_AGENT_ALIASES = new Set(["oracle", "explore"])
 
-type GitCommandToken = { text: string; quoted: boolean }
+type GitCommandToken = { text: string; quoted: boolean; startsQuoted?: boolean }
 
 const ESCAPED_GIT_SEPARATOR_CHARS = new Map<string, string>([
   [";", "\uE000"],
@@ -847,6 +1182,108 @@ function extractWrapperScriptGit(segment: GitCommandToken[]): GitCommandToken[] 
   return null
 }
 
+/** Detect PowerShell-style git environment assignments in a non-git segment.
+ *  Returns extracted values for `$env:GIT_DIR` and `$env:GIT_WORK_TREE`
+ *  (case-insensitive env var name). Values are absolutized against baseDir.
+ *  Returns null if no git env assignment is found. */
+function extractGitEnvAssignment(
+  segment: GitCommandToken[],
+  baseDir: string,
+  shell: "pwsh" | "cmd",
+): { gitDir?: string; workTree?: string } | null {
+  let gitDir: string | undefined
+  let workTree: string | undefined
+  let found = false
+
+  for (let i = 0; i < segment.length; i++) {
+    const t = segment[i]!.text
+    if (shell === "cmd" && i === 0 && normalizeCommandName(t) === "set") {
+      const assignment = segment[i + 1]?.text
+      const cmdEnv = assignment?.match(/^(GIT_DIR|GIT_WORK_TREE)=(.*)$/i)
+      if (cmdEnv) {
+        found = true
+        const varName = cmdEnv[1]!.toUpperCase()
+        const value = cmdEnv[2]!
+        if (varName === "GIT_DIR") {
+          gitDir = value
+        } else if (varName === "GIT_WORK_TREE") {
+          workTree = value
+        }
+      }
+      continue
+    }
+    if (shell !== "pwsh" || i !== 0 || segment[i]!.startsQuoted === true) continue
+    // Match $env:GIT_DIR=value, $env:GIT_WORK_TREE=value (case-insensitive var)
+    // PowerShell separator is ; so we look for assignments before ; or end-of-segment
+    const envMatch = t.match(/^\$env:(GIT_DIR|GIT_WORK_TREE)=(.*)$/i)
+    if (envMatch) {
+      found = true
+      const varName = envMatch[1]!.toUpperCase()
+      let value = envMatch[2]!
+      // $env:GIT_DIR= "value" — = is fused with var name, value is in the next token
+      if (value.length === 0 && segment[i + 1]?.text !== undefined) {
+        value = segment[i + 1]!.text
+        i += 1
+      }
+      // The value might include trailing ; for chained assignments
+      const cleanValue = value.split(";")[0]!
+      if (varName === "GIT_DIR") {
+        gitDir = cleanValue
+      } else if (varName === "GIT_WORK_TREE") {
+        workTree = cleanValue
+      }
+      continue
+    }
+
+    const spacedEnvMatch = t.match(/^\$env:(GIT_DIR|GIT_WORK_TREE)$/i)
+    if (spacedEnvMatch) {
+      const nextToken = segment[i + 1]?.text
+      if (nextToken === "=" && segment[i + 2]?.text !== undefined) {
+        // $env:GIT_DIR = value
+        found = true
+        const varName = spacedEnvMatch[1]!.toUpperCase()
+        const value = segment[i + 2]!.text
+        if (varName === "GIT_DIR") {
+          gitDir = value
+        } else if (varName === "GIT_WORK_TREE") {
+          workTree = value
+        }
+        i += 2
+      } else if (nextToken?.startsWith("=")) {
+        // $env:GIT_DIR ="value" or $env:GIT_DIR =value — = is fused with the value
+        found = true
+        const varName = spacedEnvMatch[1]!.toUpperCase()
+        const value = nextToken.slice(1)
+        if (varName === "GIT_DIR") {
+          gitDir = value
+        } else if (varName === "GIT_WORK_TREE") {
+          workTree = value
+        }
+        i += 1
+      }
+    }
+  }
+
+  if (!found) return null
+  // Strip surrounding quotes from values (e.g. $env:GIT_DIR="C:\path" -> C:\path)
+  const unquote = (v: string | undefined): string | undefined => {
+    if (v === undefined) return undefined
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      return v.slice(1, -1)
+    }
+    return v
+  }
+  const unwrappedGitDir = gitDir !== undefined ? unquote(gitDir) : undefined
+  const unwrappedWorkTree = workTree !== undefined ? unquote(workTree) : undefined
+  // Absolutize env values against baseDir (like explicit --git-dir/--work-tree).
+  // Empty env values are NOT absolutized — they stay empty so directory checks
+  // reject them instead of resolving to baseDir.
+  return {
+    gitDir: unwrappedGitDir !== undefined ? (unwrappedGitDir.length === 0 ? "" : absolutize(unwrappedGitDir, baseDir)) : undefined,
+    workTree: unwrappedWorkTree !== undefined ? (unwrappedWorkTree.length === 0 ? "" : absolutize(unwrappedWorkTree, baseDir)) : undefined,
+  }
+}
+
 /** Find the index of the git subcommand after `start`, skipping global options.
  * Returns -1 for help invocations (`git help`, `git --help`). */
 function findGitSubcommandIndex(tokens: string[], start: number): number {
@@ -1005,6 +1442,14 @@ function safeStatFile(filePath: string): boolean {
   }
 }
 
+function safeStatDirectory(filePath: string): boolean {
+  try {
+    return statSync(filePath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 function absolutize(filePath: string, baseDir: string): string {
   return isAbsolute(filePath) ? resolve(filePath) : resolve(baseDir, filePath)
 }
@@ -1034,12 +1479,14 @@ function tokenizeGitCommand(command: string): GitCommandToken[] {
   const tokens: GitCommandToken[] = []
   let current = ""
   let quoted = false
+  let startsQuoted = false
   let quote: "'" | '"' | null = null
 
   const push = () => {
-    if (current.length > 0 || quoted) tokens.push({ text: current, quoted })
+    if (current.length > 0 || quoted) tokens.push({ text: current, quoted, startsQuoted })
     current = ""
     quoted = false
+    startsQuoted = false
   }
 
   for (let i = 0; i < command.length; i++) {
@@ -1076,6 +1523,7 @@ function tokenizeGitCommand(command: string): GitCommandToken[] {
       push()
       current += ch
     } else if (ch === '"' || ch === "'") {
+      if (current.length === 0 && !quoted) startsQuoted = true
       quoted = true
       quote = ch
     } else {

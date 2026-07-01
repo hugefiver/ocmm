@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
@@ -20,6 +20,26 @@ function tempProject(): string {
 
 function configWithReadme(): ReturnType<typeof defaultConfig> {
   return { ...defaultConfig(), disabledHooks: [] }
+}
+
+/** Create a temp directory with a .git subdirectory containing a minimal HEAD marker. */
+function tempValidGitRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-git-repo-"))
+  mkdirSync(join(repo, ".git"))
+  writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+  return repo
+}
+
+/** Create a temp bare-git-dir-style directory (not a working tree, just a .git dir). */
+function tempBareGitDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ocmm-temp-gitdir-"))
+  writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n")
+  return dir
+}
+
+/** Create a valid .git directory inside an existing temp dir (for repos that need markers). */
+function makeValidGitDir(repo: string): void {
+  writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
 }
 
 test("bash file read detector matches only simple file reads", () => {
@@ -117,6 +137,210 @@ test("redirect resolver timeout returns null instead of hanging", async () => {
     assert.ok(Date.now() - started < 1000)
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+// --- Blocker 1: .git dir/file must be a valid gitdir (not just temp directory) ---
+
+test("subagent .git directory without git markers is blocked even under temp", async () => {
+  const project = process.cwd()
+  const emptyRepo = mkdtempSync(join(tmpdir(), "ocmm-temp-empty-git-"))
+  try {
+    mkdirSync(join(emptyRepo, ".git")) // no HEAD, no config/objects, no refs
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", emptyRepo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(emptyRepo, { recursive: true, force: true })
+  }
+})
+
+test("subagent .git worktree file pointing to temp dir without markers is blocked", async () => {
+  const project = tempProject()
+  const gitdir = mkdtempSync(join(tmpdir(), "ocmm-temp-gitdir-no-markers-"))
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-no-markers-"))
+  try {
+    // gitdir exists from mkdtempSync but has no git markers
+    writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(gitdir, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+// --- Blocker 2: Empty explicit overrides set permanent tempDenied ---
+
+test("subagent empty --work-tree blocks even with valid git-dir", async () => {
+  const project = process.cwd()
+  const gitdir = tempBareGitDir()
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-empty-"))
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git --git-dir "${gitdir}" --work-tree "" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(gitdir, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent empty -C blocks even with valid git-dir and work-tree", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git -C "" --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent empty core.worktree= blocks even with valid git-dir and work-tree", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git -c core.worktree= --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+// --- Blocker 3: Empty env work-tree override bypass ---
+
+test("subagent empty env work-tree blocks even with explicit valid temp overrides", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `$env:GIT_WORK_TREE=""; git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+// Blocker 1: cmd wrapper must not swallow outer command segments
+
+test("cmd quoted wrapper with later project write is blocked", async () => {
+  const project = tempProject()
+  const tempRepo = tempValidGitRepo()
+  try {
+    mkdirSync(join(project, ".git"))
+    const cmd = `cmd /c "git --git-dir ${join(tempRepo, ".git")} --work-tree ${tempRepo} commit -m x" & git -C "${project}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(tempRepo, { recursive: true, force: true })
+  }
+})
+
+test("cmd quoted wrapper no-write with later valid temp write is allowed", async () => {
+  const project = process.cwd()
+  const tempRepo = tempValidGitRepo()
+  try {
+    const cmd = `cmd /c "echo hi" & git --git-dir "${join(tempRepo, ".git")}" --work-tree "${tempRepo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput(cmd, "s1", project), {})
+  } finally {
+    rmSync(tempRepo, { recursive: true, force: true })
+  }
+})
+
+// Blocker 2: explicit --git-dir must be a valid gitdir, not just a temp directory
+
+test("explicit git-dir pointing to temp dir without git markers is blocked", async () => {
+  const project = process.cwd()
+  const tempDir = mkdtempSync(join(tmpdir(), "ocmm-temp-not-gitdir-"))
+  try {
+    // Create a directory that exists but has no git markers
+    const fakeGitDir = join(tempDir, "fake.git")
+    mkdirSync(fakeGitDir)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(
+        gitGuardInput(`git --git-dir "${fakeGitDir}" --work-tree "${tempDir}" commit -m x`, "s1", project),
+        {},
+      ),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
   }
 })
 
@@ -304,6 +528,165 @@ test("event handler is optional and not invoked when absent", () => {
   }
 })
 
+function gitGuardInput(command: string, sessionID = "s1", workdir?: string): Record<string, unknown> {
+  return {
+    tool: "bash",
+    sessionID,
+    args: {
+      command,
+      ...(workdir !== undefined ? { workdir } : {}),
+    },
+  }
+}
+
+function subagentSessionMap(sessionID = "s1", agent = "coding"): Map<string, string> {
+  return new Map([[sessionID, agent]])
+}
+
+test("subagent git writes are allowed inside temp git repositories", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-git-repo-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput("git commit -m x", "s1", repo), {})
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git writes remain blocked for the project repo even when project is under temp", async () => {
+  const project = tempProject()
+  try {
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when temp repo is ancestor containing projectRoot", async () => {
+  const project = tempProject()
+  const projectCanonical = join(project, "project")
+  try {
+    mkdirSync(projectCanonical, { recursive: true })
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: projectCanonical,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    // workdir = ancestor temp repo
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("subagent git -C to ancestor temp repo containing projectRoot is blocked", async () => {
+  const project = tempProject()
+  const projectCanonical = join(project, "project")
+  try {
+    mkdirSync(projectCanonical, { recursive: true })
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: projectCanonical,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    // git -C <ancestorRepo> from projectRoot
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git -C "${project}" commit -m x`, "s1", projectCanonical), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("subagent git -C writes are allowed when target repo is under temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-git-c-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput(`git -C "${repo}" commit -m x`, "s1", project), {})
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git writes still require a temp git repository marker", async () => {
+  const project = tempProject()
+  const notRepo = mkdtempSync(join(tmpdir(), "ocmm-temp-not-repo-"))
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", notRepo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(notRepo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git -C writes remain blocked when target repo is outside temp", async () => {
+  const project = process.cwd()
+  const tempRepo = mkdtempSync(join(tmpdir(), "ocmm-temp-git-block-"))
+  try {
+    mkdirSync(join(tempRepo, ".git"))
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git -C "${project}" commit -m x`, "s1", tempRepo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(tempRepo, { recursive: true, force: true })
+  }
+})
+
 test("directory readme injector does not inject for files outside project root", async () => {
   const root = tempProject()
   const externalDir = mkdtempSync(join(tmpdir(), "ocmm-external-"))
@@ -321,5 +704,882 @@ test("directory readme injector does not inject for files outside project root",
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(externalDir, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when .git is a worktree file pointing outside temp", async () => {
+  const project = tempProject()
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-worktree-"))
+  try {
+    // .git file pointing to the project's .git directory (outside temp via -C canonical)
+    // Use the project's temp dir — since project is under tmpdir(), we need an
+    // outside-temp reference. Use process.cwd()/.git which is a real git dir.
+    const projectGitDir = join(process.cwd(), ".git")
+    writeFileSync(join(worktree, ".git"), `gitdir: ${projectGitDir}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when .git worktree file has gitdir below first line", async () => {
+  const project = tempProject()
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-worktree-bogus-"))
+  const tempGitDir = mkdtempSync(join(tmpdir(), "ocmm-temp-gitdir-bogus-"))
+  try {
+    mkdirSync(join(tempGitDir, ".git"))
+    writeFileSync(join(worktree, ".git"), `bogus\ngitdir: ${tempGitDir}/.git\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+    rmSync(tempGitDir, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when .git worktree file points to missing temp gitdir", async () => {
+  const project = tempProject()
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-worktree-missing-"))
+  try {
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(tmpdir(), "ocmm-missing-gitdir", ".git")}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when PowerShell env override points outside temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const projectRoot = process.cwd()
+    const cmd = `$env:GIT_DIR="${projectGitDir}"; $env:GIT_WORK_TREE="${projectRoot}"; git commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when spaced PowerShell env override points outside temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-spaced-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const cmd = `$env:GIT_DIR = "${projectGitDir}"; git commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when env override before wrapper points outside temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-wrapper-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const cmd = `$env:GIT_DIR="${projectGitDir}"; pwsh -c "git commit -m x"`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent explicit temp git-dir and work-tree write is allowed from project root", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(
+      gitGuardInput(`git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`, "s1", project),
+      {},
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent explicit temp git-dir and work-tree write requires existing gitdir", async () => {
+  const project = process.cwd()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-explicit-missing-"))
+  try {
+    const missingGitDir = join(repo, ".git")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git --git-dir "${missingGitDir}" --work-tree "${repo}" commit -m x`, "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent outside-temp env override stays blocked after temp reassignment", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-taint-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const cmd = `$env:GIT_DIR="${projectGitDir}"; $env:GIT_DIR="${join(repo, ".git")}"; git --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git -c core.worktree outside temp is blocked", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-core-worktree-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const outside = process.cwd()
+    const cmd = `git -C "${repo}" -c core.worktree="${outside}" reset --hard HEAD`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent cmd set git env override outside temp is blocked", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-cmd-env-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const outside = process.cwd()
+    const cmd = `cmd /c set GIT_DIR=${join(outside, ".git")} & set GIT_WORK_TREE=${outside} & git commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent bare set git env spoof is ignored outside cmd wrapper", async () => {
+  const gitdir = tempBareGitDir()
+  try {
+    const cmd = `set GIT_DIR=${gitdir}; git tag v1.0`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: process.cwd(),
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", process.cwd()), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(gitdir, { recursive: true, force: true })
+  }
+})
+
+test("subagent echoed PowerShell git env spoof is ignored", async () => {
+  const repo = tempValidGitRepo()
+  try {
+    const cmd = `echo '$env:GIT_DIR=${join(repo, ".git")}'; git --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: process.cwd(),
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", process.cwd()), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent quoted PowerShell git env string spoof is ignored", async () => {
+  const repo = tempValidGitRepo()
+  try {
+    const cmd = `'$env:GIT_DIR=${join(repo, ".git")}'; git --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: process.cwd(),
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", process.cwd()), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when explicit work-tree targets temp project repo", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-explicit-project-worktree-"))
+  try {
+    mkdirSync(join(project, ".git"))
+    mkdirSync(join(repo, ".git"))
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git -C "${repo}" --work-tree "${project}" commit -m x`, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when explicit git-dir targets temp project repo", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-explicit-project-gitdir-"))
+  try {
+    mkdirSync(join(project, ".git"))
+    mkdirSync(join(repo, ".git"))
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git -C "${repo}" --git-dir "${join(project, ".git")}" commit -m x`, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when explicit temp work-tree is missing", async () => {
+  const project = process.cwd()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-explicit-missing-worktree-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const missingWorkTree = join(tmpdir(), "ocmm-missing-worktree")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(`git -C "${repo}" --work-tree "${missingWorkTree}" commit -m x`, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent cmd set git env override stays blocked after explicit temp git options", async () => {
+  const project = tempProject()
+  const repo = tempValidGitRepo()
+  try {
+    const outside = process.cwd()
+    const cmd = `cmd /c set GIT_DIR=${join(outside, ".git")} & git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write allowed when .git is a worktree file pointing to temp gitdir", async () => {
+  const project = tempProject()
+  const gitdir = mkdtempSync(join(tmpdir(), "ocmm-temp-gitdir-"))
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-"))
+  try {
+    mkdirSync(join(gitdir, ".git"))
+    writeFileSync(join(gitdir, ".git", "HEAD"), "ref: refs/heads/main\n")
+    writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}/.git\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput("git commit -m x", "s1", worktree), {})
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(gitdir, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when temp worktree gitdir points to temp project repo", async () => {
+  const project = tempProject()
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-temp-project-linked-wt-"))
+  try {
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(project, ".git")}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent env project gitdir blocks even when CLI points back to temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-project-taint-"))
+  try {
+    mkdirSync(join(project, ".git"))
+    mkdirSync(join(repo, ".git"))
+    const cmd = `$env:GIT_DIR="${join(project, ".git")}"; git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent missing env gitdir blocks even when CLI points back to temp", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-missing-taint-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const missingGitDir = join(tmpdir(), "ocmm-missing-env-gitdir", ".git")
+    const cmd = `$env:GIT_DIR="${missingGitDir}"; git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent duplicate explicit git-dir blocks when earlier one is missing", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-duplicate-gitdir-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const missingGitDir = join(tmpdir(), "ocmm-missing-explicit-gitdir", ".git")
+    const cmd = `git --git-dir "${missingGitDir}" --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent cmd quoted payload temp git write is allowed", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const cmd = `cmd /c "git --git-dir ${join(repo, ".git")} --work-tree ${repo} commit -m x"`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput(cmd, "s1", project), {})
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when PowerShell env assignment has space before =", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-space-before-eq-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const projectRoot = process.cwd()
+    const cmd = `$env:GIT_DIR ="${projectGitDir}"; $env:GIT_WORK_TREE ="${projectRoot}"; git commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when PowerShell env assignment has space after =", async () => {
+  const project = tempProject()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-env-space-after-eq-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const projectGitDir = join(process.cwd(), ".git")
+    const cmd = `$env:GIT_DIR= "${projectGitDir}"; git commit -m x`
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(cmd, "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when -C points to project root despite valid explicit temp options", async () => {
+  const project = process.cwd()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-c-project-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git -C "${project}" --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`,
+        "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent git write blocked when -C points to missing directory despite valid explicit temp options", async () => {
+  const project = process.cwd()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-c-missing-"))
+  try {
+    mkdirSync(join(repo, ".git"))
+    const missingPath = join(tmpdir(), "ocmm-missing-c-dir")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git -C "${missingPath}" --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`,
+        "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+// --- Blocker 4: Ancestor repo root containing projectRoot ---
+
+/** Create a temp ancestor directory with a .git marker whose parent contains projectRoot. */
+function tempAncestorGitRepo(projectChildName: string): { ancestor: string; project: string } {
+  const ancestor = mkdtempSync(join(tmpdir(), "ocmm-ancestor-"))
+  mkdirSync(join(ancestor, ".git"))
+  writeFileSync(join(ancestor, ".git", "HEAD"), "ref: refs/heads/main\n")
+  const project = join(ancestor, projectChildName)
+  mkdirSync(project, { recursive: true })
+  return { ancestor, project }
+}
+
+test("subagent explicit --git-dir to ancestor .git containing projectRoot is blocked", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const wt = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-"))
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git --git-dir "${join(ancestor, ".git")}" --work-tree "${wt}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(wt, { recursive: true, force: true })
+  }
+})
+
+test("subagent env GIT_DIR to ancestor .git containing projectRoot is blocked and tainted", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const wt = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-"))
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `$env:GIT_DIR="${join(ancestor, ".git")}"; git --work-tree "${wt}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(wt, { recursive: true, force: true })
+  }
+})
+
+test("subagent worktree .git file gitdir pointing to ancestor .git containing projectRoot is blocked", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const worktree = mkdtempSync(join(tmpdir(), "ocmm-temp-wt-linked-"))
+  try {
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(ancestor, ".git")}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", worktree), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(worktree, { recursive: true, force: true })
+  }
+})
+
+test("subagent explicit temp --git-dir <tempRepo>/.git --work-tree <tempRepo> from non-temp project root is allowed when disjoint", async () => {
+  const project = process.cwd()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(
+      gitGuardInput(`git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`, "s1", project),
+      {},
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent worktree admin gitdir under ancestor .git containing projectRoot is blocked", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const linked = mkdtempSync(join(tmpdir(), "ocmm-linked-worktree-admin-"))
+  try {
+    mkdirSync(join(ancestor, ".git", "worktrees", "wt1"), { recursive: true })
+    writeFileSync(join(ancestor, ".git", "worktrees", "wt1", "HEAD"), "ref: refs/heads/main\n")
+    writeFileSync(join(linked, ".git"), `gitdir: ${join(ancestor, ".git", "worktrees", "wt1")}\n`)
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", linked), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(linked, { recursive: true, force: true })
+  }
+})
+
+test("subagent explicit worktree admin gitdir under ancestor .git containing projectRoot is blocked", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const wt = mkdtempSync(join(tmpdir(), "ocmm-admin-wt-"))
+  try {
+    mkdirSync(join(ancestor, ".git", "worktrees", "wt1"), { recursive: true })
+    writeFileSync(join(ancestor, ".git", "worktrees", "wt1", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `git --git-dir "${join(ancestor, ".git", "worktrees", "wt1")}" --work-tree "${wt}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(wt, { recursive: true, force: true })
+  }
+})
+
+test("subagent env worktree admin gitdir under ancestor .git containing projectRoot is blocked", async () => {
+  const { ancestor, project } = tempAncestorGitRepo("project")
+  const wt = mkdtempSync(join(tmpdir(), "ocmm-admin-env-wt-"))
+  try {
+    mkdirSync(join(ancestor, ".git", "worktrees", "wt1"), { recursive: true })
+    writeFileSync(join(ancestor, ".git", "worktrees", "wt1", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(
+        `$env:GIT_DIR="${join(ancestor, ".git", "worktrees", "wt1")}"; git --work-tree "${wt}" commit -m x`, "s1", project,
+      ), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(ancestor, { recursive: true, force: true })
+    rmSync(wt, { recursive: true, force: true })
+  }
+})
+
+test("subagent .git HEAD directory is not treated as a valid git marker", async () => {
+  const project = process.cwd()
+  const repo = mkdtempSync(join(tmpdir(), "ocmm-temp-head-dir-"))
+  try {
+    mkdirSync(join(repo, ".git", "HEAD"), { recursive: true })
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "s1", repo), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent wrapper-local temp env does not leak to later project git write", async () => {
+  const project = tempProject()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+    const command = `pwsh -c '$env:GIT_DIR="${join(repo, ".git")}"; $env:GIT_WORK_TREE="${repo}"; git status'; git commit -m x`
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(command, "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent read-only git segment with invalid -C taints later temp write", async () => {
+  const project = tempProject()
+  const repo = tempValidGitRepo()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+    const command = `git -C "${project}" status; git --git-dir "${join(repo, ".git")}" --work-tree "${repo}" commit -m x`
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput(command, "s1", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("subagent explicit bare temp gitdir write is allowed", async () => {
+  const project = process.cwd()
+  const gitdir = tempBareGitDir()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput(`git --git-dir "${gitdir}" tag v1.0`, "s1", project), {})
+  } finally {
+    rmSync(gitdir, { recursive: true, force: true })
+  }
+})
+
+test("subagent bare temp gitdir workdir write is allowed", async () => {
+  const project = process.cwd()
+  const gitdir = tempBareGitDir()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: subagentSessionMap(),
+    })
+
+    await guards.before(gitGuardInput("git tag v1.0", "s1", gitdir), {})
+  } finally {
+    rmSync(gitdir, { recursive: true, force: true })
   }
 })
