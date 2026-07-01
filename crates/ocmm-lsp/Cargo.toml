@@ -1,6 +1,6 @@
 [package]
 name = "ocmm-lsp"
-version = "0.2.9"
+version = "0.2.10"
 edition = "2021"
 description = "Project-owned Rust stdio MCP server exposing LSP tools for ocmm."
 license = "LicenseRef-AAAPL"
