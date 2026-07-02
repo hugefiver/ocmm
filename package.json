@@ -1,6 +1,6 @@
 {
   "name": "ocmm",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "OpenCode Multi-Model Auto-Router plugin (ocmm). Per-agent model selection, variant -> param translation, intent-keyword mode injection.",
   "type": "module",
   "main": "./dist/index.js",
