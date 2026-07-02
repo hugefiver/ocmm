@@ -55,3 +55,11 @@ prompts/<workflow>/
 - Source checked: local upstream checkout `./omo` at `c6058d5db81851d822106a9df20a34d66313ade3`.
 - Prompt-relevant upstream changes since `f6b9ace452f04fe3fea8025c4356e6343959ee4f`: GLM ultrawork/Atlas prompt registration was already represented locally; Codex ultrawork added TUI visual QA evidence requirements and sharpened command-lens guidance.
 - Local sync: `prompts/omo/deepwork/codex.md` and `prompts/v1/deepwork/codex.md` now include the TUI visual evidence requirement and local OpenCode/PowerShell command guidance instead of upstream-only `script/qa/web-terminal-visual-qa.mjs` / Sparkshell wording.
+
+## v1 Workflow Adjustment (2026-07-02)
+
+- v1 brainstorming: step 2 restructured to ambiguity assessment + conditional `clarifier` consultation; step 7 spec approval made conditional (user delegation OR self-review ambiguity pass); HARD-GATE approval sources expanded to three (user approval / self-review pass / user delegation).
+- v1 writing-plans: added mandatory plan-critic review loop after self-review with three-state verdict (`[REJECT]`/`[OKAY]`/`[OKAY-UNAMBIGUOUS]`); plan approval conditional (user delegation OR `[OKAY-UNAMBIGUOUS]`).
+- v1 plan-critic: expanded binary output to three-state; added ambiguity assessment check; 80% threshold clarified as applying only to `[OKAY]` vs `[REJECT]`.
+- Codex adapter (`prompts/codex/**`): deepwork prompts, orchestrator, and plan-critic mirrored the v1 conditional-approval semantics. Codex plan-critic also gained the three-state verdict.
+- These changes are local v1/Codex workflow adjustments, not upstream omo prompt syncs. `prompts/omo/**` is unaffected.

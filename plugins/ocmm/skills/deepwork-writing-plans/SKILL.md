@@ -7,7 +7,10 @@ description: Use when you have a spec or requirements for a multi-step task, bef
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed executing-plans cross-reference (excluded from v1);
      removed using-git-worktrees reference (not in v1); subagent-driven is the
-     only execution path in v1. See docs/v1-maintenance.md for sync rules. -->
+     only execution path in v1; added mandatory plan-critic review loop with
+     three-state verdict (REJECT/OKAY/OKAY-UNAMBIGUOUS) after self-review;
+     plan approval now conditional (user delegation OR [OKAY-UNAMBIGUOUS]).
+     See docs/v1-maintenance.md for sync rules. -->
 
 # Writing Plans
 
@@ -131,6 +134,41 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
+
+## plan-critic Review Loop
+
+After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. The plan-critic agent reads the plan path or inline plan and returns a three-state verdict.
+
+**Loop procedure:**
+
+1. Submit the plan to the `plan-critic` agent (pass the plan file path, or the inline plan if not yet saved).
+2. Dispatch the plan-critic agent and wait for its verdict.
+3. Branch on the verdict:
+
+   | Verdict | Meaning | Action |
+   |---|---|---|
+   | `[REJECT]` | Critical blockers exist; plan not executable as-is | Apply the blocker fixes (max 3), re-run self-review, resubmit. Loop. |
+   | `[OKAY]` | Plan is executable; residual uncertainty/ambiguity remains | Exit the loop. Proceed to user approval (unless delegation applies). |
+   | `[OKAY-UNAMBIGUOUS]` | Plan is executable AND logically clear with no ambiguity | Exit the loop. Skip user approval. Proceed to Execution Handoff. |
+
+**Loop cap (user delegation "review N 次就下一步"):**
+
+If the user has delegated with "review N 次就下一步" / "review N times then proceed", cap the loop at N iterations. After N iterations:
+- If still `[REJECT]`: record the unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed anyway. Do not block the workflow.
+- If `[OKAY]` or `[OKAY-UNAMBIGUOUS]` reached before N: exit early.
+
+**Plan approval conditionality:**
+
+After the loop exits, determine whether user approval is required:
+
+- **Auto-skip** if ANY of:
+  - The user has delegated approval (any form — see the brainstorming skill's User Delegation Forms table).
+  - The loop exited with `[OKAY-UNAMBIGUOUS]`.
+- **Require user approval** otherwise (loop exited with `[OKAY]`, no delegation). Present the plan:
+
+  > "Plan written to `<path>`. plan-critic verdict: `[OKAY]` (executable, residual uncertainty). Please review and approve before execution, or delegate with '你自己决定' / '无需批准自行继续' to proceed."
+
+  Wait for the user's response. If they request changes, make them, re-run self-review, and re-run the plan-critic loop. Only proceed once the user approves or delegates.
 
 ## Execution Handoff
 

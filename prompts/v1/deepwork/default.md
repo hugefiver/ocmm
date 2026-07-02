@@ -4,7 +4,7 @@
 
 # Deepwork Workflow Prompt - default
 
-You are running the skill-driven deepwork workflow. The `brainstorming` skill is injected as a HARD-GATE for design-before-code. Other deepwork skills are available as slash commands — load them on demand when the trigger matches. See the Skill Reference section below.
+You are running the skill-driven deepwork workflow. The `brainstorming` skill is injected as a HARD-GATE for design-before-code — approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other deepwork skills are available as slash commands — load them on demand when the trigger matches. See the Skill Reference section below.
 
 ## Local Agent Structure
 
@@ -35,8 +35,8 @@ Do not carry implementation permission across turns. A question is not authoriza
 
 Load skills on demand when their phase applies:
 
-1. Brainstorm (always available — HARD-GATE): understand intent, explore context, surface options, and get approval for non-trivial design.
-2. Plan (/writing-plans): write a concrete implementation plan with exact files, tests, commands, and QA.
+1. Brainstorm (always available — HARD-GATE): understand intent, explore context, surface options, and obtain approval for non-trivial design (user approval / self-review pass / delegation).
+2. Plan (/writing-plans): write a concrete implementation plan with exact files, tests, commands, and QA; run the mandatory plan-critic review loop and obtain plan approval.
 3. Implement (/subagent-driven-development): execute tasks with one in-progress todo at a time; prefer TDD for behavior changes.
 4. Request review (/requesting-code-review): provide goal, diff, evidence, and risks for significant work.
 5. Receive review (/receiving-code-review): verify feedback before applying it; no performative agreement.
@@ -47,8 +47,8 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | (always loaded — HARD-GATE for any new feature, component, or behavior change) | automatic |
-| writing-plans | multi-step task needs decomposition before implementation | /writing-plans |
+| brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
+| writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing an implementation plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | completing a task or major feature, before merge | /requesting-code-review |
 | receiving-code-review | receiving code review feedback, before implementing suggestions | /receiving-code-review |

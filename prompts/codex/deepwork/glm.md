@@ -2,12 +2,12 @@
 
 ### Skill Reference (load on demand)
 
-`brainstorming` is the only always-injected skill (HARD-GATE for any new feature, component, or behavior change). Other skills are loaded on demand by name:
+`brainstorming` is the only always-injected skill (HARD-GATE for any new feature, component, or behavior change). Approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other skills are loaded on demand by name:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | (injected into agent profile — HARD-GATE) | automatic |
-| writing-plans | multi-step task needs decomposition | load skill `deepwork-writing-plans` |
+| brainstorming | (injected into agent profile — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
+| writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
 | requesting-code-review | completing a task or major feature | load skill `deepwork-requesting-code-review` |
 | receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |

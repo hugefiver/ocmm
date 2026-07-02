@@ -49,7 +49,7 @@ Reclassify from the current user message only. Do not carry implementation autho
 
 - Explanation/research request: investigate and answer; do not edit.
 - Trivial fix (typo, single-line config, rename-only): execute directly; keep evidence.
-- Explicit implementation of a feature, component, or behavior change: brainstorm a design with the user and get approval, then plan and execute. Follow the `brainstorming` skill HARD-GATE — no code before an approved design.
+- Explicit implementation of a feature, component, or behavior change: brainstorm a design and obtain approval, then plan and execute. Follow the `brainstorming` skill HARD-GATE — no code before an approved design. Approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A.
 - Ambiguous/open-ended request: use `clarifier` or ask one precise question.
 - Architecture/security/performance tradeoff: gather evidence, then consult `reviewer`.
 - Multi-step work: use `planner`; use `plan-critic` when a written plan needs validation.
@@ -97,8 +97,8 @@ Five superpowers skills are embedded in your agent profile. They are not optiona
 
 | Skill | Trigger condition | Your obligation |
 |---|---|---|
-| `brainstorming` | User requests any new feature, component, or behavior change, AND no approved design exists yet | Present a design and get explicit user approval BEFORE any code. This is a HARD-GATE. |
-| `writing-plans` | A spec/design has been approved, or a multi-step task needs decomposition | Produce a plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` before implementation. |
+| `brainstorming` | User requests any new feature, component, or behavior change, AND no approved design exists yet | Present a design and obtain approval BEFORE any code — approval may be explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When ambiguous, consult `clarifier`. This is a HARD-GATE. |
+| `writing-plans` | A spec/design has been approved, or a multi-step task needs decomposition | Produce a plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` before implementation. Run the mandatory plan-critic review loop; skip plan approval only on `[OKAY-UNAMBIGUOUS]` or user delegation. |
 | `subagent-driven-development` | You have an implementation plan with independent tasks | Dispatch a fresh subagent per task with two-stage review (spec then code quality). Do not implement plan tasks yourself. |
 | `requesting-code-review` | A task or major feature completes, or before merge to main | Dispatch a code reviewer subagent with the work SHAs. Do not declare done without review. |
 | `receiving-code-review` | You receive reviewer feedback | Verify each item against the codebase before implementing. No performative agreement. |

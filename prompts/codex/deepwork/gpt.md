@@ -7,7 +7,7 @@ You are running inside Codex. Key differences from OpenCode:
 - Subagent delegation: use `multi_agent_v1.spawn_agent` instead of `task()`
 - Code edits: use `apply_patch` instead of Edit/Write tools
 - Skills: load by name (e.g., `deepwork-writing-plans`), not via slash commands
-- The brainstorming skill is embedded in your profile (HARD-GATE) — no runtime injection needed
+- The brainstorming skill is embedded in your profile (HARD-GATE) — no runtime injection needed. Approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When the requirement is ambiguous, consult the `clarifier` agent for inspiration.
 
 ### Skill Reference (load on demand)
 
@@ -15,8 +15,8 @@ You are running inside Codex. Key differences from OpenCode:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | (injected into agent profile — HARD-GATE) | automatic |
-| writing-plans | multi-step task needs decomposition | load skill `deepwork-writing-plans` |
+| brainstorming | (injected into agent profile — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
+| writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
 | requesting-code-review | completing a task or major feature | load skill `deepwork-requesting-code-review` |
 | receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |
