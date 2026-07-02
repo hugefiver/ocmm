@@ -63,3 +63,15 @@ prompts/<workflow>/
 - v1 plan-critic: expanded binary output to three-state; added ambiguity assessment check; 80% threshold clarified as applying only to `[OKAY]` vs `[REJECT]`.
 - Codex adapter (`prompts/codex/**`): deepwork prompts, orchestrator, and plan-critic mirrored the v1 conditional-approval semantics. Codex plan-critic also gained the three-state verdict.
 - These changes are local v1/Codex workflow adjustments, not upstream omo prompt syncs. `prompts/omo/**` is unaffected.
+
+## Oracle/Reviewer Separation + Acceptance Review Loop (2026-07-02)
+
+- `oracle` promoted from pure `reviewer` alias to independent builtin agent: self-supervision semantics (reviews work the agent itself produced), cross-gen model default (claude-first chain), `promptSource: "reviewer"` (shares reviewer.md), `defaultAlias: "reviewer"` (inherits reviewer model config when user configures neither oracle model nor alias).
+- `reviewer` semantics clarified: external review (code not produced by current agent), flagship model default (same family as main agent).
+- Removed `oracle→reviewer` from `AGENT_ALIASES` (resolver.ts, plugin-generator.ts) and `COMPAT_AGENT_ALIASES` (config.ts) so oracle's cross-gen requirement is reachable; `AGENT_ALIASES` now only maps `explore→code-search`.
+- Added generic `alias` config field to `ShorthandFields` (agent + category entries): inherits another agent's model `requirement` only (not prompt/permission/tools/skills), with cycle detection (hard error).
+- Codex tier table: `reviewer` moved to Flagship, `oracle` added to Cross-gen review (with `plan-critic`).
+- v1 requesting-code-review skill: added Reviewer Selection section (oracle default for simple, both oracle+reviewer for complex/large).
+- v1 subagent-driven-development skill: added Final Acceptance Review stage.
+- v1 + Codex orchestrator/deepwork prompts synced with oracle/reviewer duality and acceptance review guidance.
+- These are local v1/Codex workflow adjustments; `prompts/omo/**` is unaffected.

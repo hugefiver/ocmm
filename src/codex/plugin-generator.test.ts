@@ -141,6 +141,7 @@ test("Codex agents are generated from ocmm prompts and Codex-compatible fallback
   const deep = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-deep`)
   const documenting = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-documenting`)
   const oracle = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle`)
+  const reviewer = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-reviewer`)
   const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
   assert.ok(orchestrator)
@@ -155,6 +156,13 @@ test("Codex agents are generated from ocmm prompts and Codex-compatible fallback
   assert.ok(documenting)
   assert.equal(documenting.model, "gpt-5.5")
   assert.ok(oracle)
+  assert.equal(oracle.sourceName, "oracle")
+  assert.ok(reviewer)
+  assert.equal(reviewer.sourceName, "reviewer")
+  // oracle is now an independent builtin with a cross-gen requirement (claude-first chain),
+  // distinct from reviewer (gpt-first chain). With default config both resolve to a
+  // Codex-compatible model, but they must not be identical objects.
+  assert.notEqual(oracle.model, undefined)
   assert.ok(creative)
 })
 

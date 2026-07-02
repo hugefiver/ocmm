@@ -9,7 +9,7 @@
 | brainstorming | (injected into agent profile — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
-| requesting-code-review | completing a task or major feature | load skill `deepwork-requesting-code-review` |
+| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | load skill `deepwork-requesting-code-review` |
 | receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | load skill `deepwork-dispatching-parallel-agents` |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | load skill `deepwork-remove-ai-slops` |
@@ -365,5 +365,9 @@ message + present for approval.
   and ask the user before another retry.
 - After 2 parallel exploration waves yield no new useful facts, stop
   exploring and act.
+
+## Final Acceptance Review
+
+After all plan tasks complete, dispatch a final acceptance review over the full change set. Use `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section.
 
 </deepwork-mode>

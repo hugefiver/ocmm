@@ -48,6 +48,7 @@ const ModelStringOrEntrySchema = z.union([z.string().min(1), FallbackEntrySchema
 
 const ShorthandFields = {
   description: z.string().optional(),
+  alias: z.string().optional(),
   variant: VariantEnum.optional(),
   model: z.string().optional(),
   fallbackModels: z.array(ModelStringOrEntrySchema).optional(),
@@ -104,6 +105,7 @@ const AGENT_NAMES = [
   "orchestrator",
   "builder",
   "reviewer",
+  "oracle",
   "doc-search",
   "code-search",
   "planner",

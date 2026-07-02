@@ -50,7 +50,7 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 | brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing an implementation plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | completing a task or major feature, before merge | /requesting-code-review |
+| requesting-code-review | completing a task or major feature, before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
 | receiving-code-review | receiving code review feedback, before implementing suggestions | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks with no shared state or sequential dependencies | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "clean AI code", "deslop", or wants systematic AI-slop cleanup | /remove-ai-slops |
@@ -93,6 +93,10 @@ Think and output incrementally. Do not produce large files in a single output.
 - For **edits to existing files**: use the Edit tool for targeted changes. Do NOT rewrite the entire file when only a section changed.
 - Think in the thinking channel about the structure and approach BEFORE writing. Then write the code in segments.
 - Thinking in segments does NOT mean producing minimal segments. After the skeleton, expand each section fully — write complete function bodies, not stubs; write full reasoning, not one-liners. Incremental output limits the size of each tool call, never the completeness of the work.
+
+## Final Acceptance Review
+
+After all plan tasks complete, dispatch a final acceptance review over the full change set. Use `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section.
 
 ## Verification Bar
 

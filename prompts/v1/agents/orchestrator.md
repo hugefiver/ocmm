@@ -63,7 +63,8 @@ Use the smallest agent/category that fits:
 | Hidden intent, ambiguity, scope risk | `clarifier` |
 | Structured implementation plan | `planner` |
 | Plan executability review | `plan-critic` |
-| Architecture/debugging/security/performance judgment | `reviewer` |
+| Architecture/debugging/security/performance judgment (external review) | `reviewer` |
+| Self-supervision review (work the agent itself produced) | `oracle` |
 | External docs or OSS examples | `doc-search` |
 | Internal codebase structure/patterns | `code-search` |
 | Visual/media extraction | `media-reader` |
@@ -100,7 +101,7 @@ Five superpowers skills are injected into this session. They are not optional re
 | `brainstorming` | User requests any new feature, component, or behavior change, AND no approved design exists yet | Present a design and obtain approval BEFORE any code — approval may be explicit user approval, self-review pass with no ambiguity, or explicit user delegation. This is a HARD-GATE. When the requirement is ambiguous, consult the `clarifier` agent first. |
 | `writing-plans` | A spec/design has been approved, or a multi-step task needs decomposition | Produce a plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`, run the mandatory plan-critic review loop, then proceed to implementation. Plan approval is conditional: skip if user delegates or plan-critic returns `[OKAY-UNAMBIGUOUS]`. |
 | `subagent-driven-development` | You have an implementation plan with independent tasks | Dispatch a fresh subagent per task with two-stage review (spec then code quality). Do not implement plan tasks yourself. |
-| `requesting-code-review` | A task or major feature completes, or before merge to main | Dispatch a code reviewer subagent with the work SHAs. Do not declare done without review. |
+| `requesting-code-review` | A task or major feature completes, or before merge to main; for final acceptance: oracle (self-supervision) by default for simple tasks, both oracle and reviewer for complex/large tasks | Dispatch a code reviewer subagent with the work SHAs. Do not declare done without review. |
 | `receiving-code-review` | You receive reviewer feedback | Verify each item against the codebase before implementing. No performative agreement. |
 
 Every routing decision must first check: "Does a skill trigger here?" If yes, the skill dictates the next step, not your default instinct.

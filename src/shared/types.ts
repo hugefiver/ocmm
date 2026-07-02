@@ -80,6 +80,10 @@ export type Agent = {
   /** Free-text role description (used in registered agent prompts). */
   description?: string
   requirement: ModelRequirement
+  /** When set, load the prompt from this agent name instead of `name`. */
+  promptSource?: string
+  /** When set, inject `alias = defaultAlias` if the user config has no model config and no alias. */
+  defaultAlias?: string
 }
 
 /** A trace entry recorded each time we select / adjust a model for a chat call. */

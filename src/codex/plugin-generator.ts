@@ -46,7 +46,6 @@ const CODEX_COMPATIBLE_PROVIDERS = new Set([
 ])
 const CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"])
 const AGENT_ALIASES = new Map([
-  ["oracle", "reviewer"],
   ["explore", "code-search"],
 ])
 
@@ -445,10 +444,10 @@ When spawning a subagent via \`multi_agent_v1.spawn_agent\`, select the model an
 
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
-| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Latest-gen flagship | xhigh |
+| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning, ${CODEX_AGENT_PREFIX}-reviewer | Latest-gen flagship | xhigh |
 | Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Latest-gen mini | high |
-| Cross-gen review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic | Previous-gen flagship | xhigh |
+| Cross-gen review | ${CODEX_AGENT_PREFIX}-oracle, ${CODEX_AGENT_PREFIX}-plan-critic | Previous-gen flagship | xhigh |
 
 ### Model tier definitions
 
@@ -459,7 +458,7 @@ When spawning a subagent via \`multi_agent_v1.spawn_agent\`, select the model an
 
 ### Cross-generation review rule
 
-${CODEX_AGENT_PREFIX}-reviewer and ${CODEX_AGENT_PREFIX}-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. If the main model is the latest flagship, the reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
+${CODEX_AGENT_PREFIX}-oracle and ${CODEX_AGENT_PREFIX}-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. Oracle reviews work the agent itself produced (self-supervision); reviewer reviews code not produced by the current agent (external review). If the main model is the latest flagship, the cross-gen reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
 
 ### Example (gpt-5.x generation — verify against your available models)
 
@@ -505,12 +504,34 @@ function codexAgentInstructions(args: {
 }
 
 function requirementForName(name: string, config: OcmmConfig): ModelRequirement | null {
+  return resolveRequirementForName(name, config, new Set())
+}
+
+function resolveRequirementForName(name: string, config: OcmmConfig, visited: Set<string>): ModelRequirement | null {
+  if (visited.has(name)) return null
   const canonical = AGENT_ALIASES.get(name) ?? name
-  const agentOverride = normalizeShorthand(config.agents?.[name]) ?? normalizeShorthand(config.agents?.[canonical])
+  const rawAgentEntry = config.agents?.[name] ?? config.agents?.[canonical]
+  const agentOverride = normalizeShorthand(rawAgentEntry, {
+    resolveAlias: (target) => normalizeShorthand(config.agents?.[target], {
+      resolveAlias: (t2) => normalizeShorthand(config.agents?.[t2]),
+      visited: new Set([...visited, name]),
+      selfName: name,
+    }),
+    visited: new Set([...visited, name]),
+    selfName: name,
+  })
   if (agentOverride?.disabled) return null
   if (agentOverride?.requirement) return agentOverride.requirement
 
+  // If the user wrote an entry for this agent but didn't specify a model
+  // (no requirement, no alias resolved), fall back to defaultAlias target's
+  // requirement (model-config inheritance only). If there is no user entry,
+  // the builtin requirement stands.
   const builtinAgent = BUILTIN_AGENT_INDEX.get(canonical)
+  if (rawAgentEntry !== undefined && builtinAgent?.defaultAlias) {
+    const aliasTarget = resolveRequirementForName(builtinAgent.defaultAlias, config, new Set([...visited, name]))
+    if (aliasTarget) return aliasTarget
+  }
   if (builtinAgent) return builtinAgent.requirement
 
   const categoryOverride = normalizeShorthand(config.categories?.[name])

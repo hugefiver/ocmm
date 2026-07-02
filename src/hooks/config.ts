@@ -13,7 +13,6 @@ import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord, log } from "../shared/logger.ts"
 
 const COMPAT_AGENT_ALIASES = [
-  { alias: "oracle", target: "reviewer" },
   { alias: "explore", target: "code-search" },
 ] as const
 
@@ -124,7 +123,8 @@ function deepworkPromptForAgent(
 }
 
 function promptForBuiltinAgent(agent: Agent, override: NormalizedShorthand | undefined, workflow: string): string {
-  const rolePrompt = getAgentPrompt(agent.name).trim()
+  const promptName = agent.promptSource ?? agent.name
+  const rolePrompt = getAgentPrompt(promptName).trim()
   const modelPrompt = deepworkPromptForAgent(agent, override, workflow).trim()
   if (!rolePrompt) return modelPrompt
   if (!modelPrompt) return rolePrompt
@@ -179,7 +179,23 @@ export function createConfigHandler(args: {
 
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
-      const norm = normalizeShorthand(cfg.agents?.[a.name])
+      let norm = normalizeShorthand(cfg.agents?.[a.name], {
+        resolveAlias: (target: string) => normalizeShorthand(cfg.agents?.[target]),
+        selfName: a.name,
+      })
+      // Inject builtin defaultAlias when the user wrote an entry for this agent
+      // but didn't specify a model (no requirement) and didn't set an explicit
+      // alias. If there is no user entry at all, the builtin requirement stands.
+      const userEntryForAgent = cfg.agents?.[a.name]
+      if (userEntryForAgent !== undefined && !norm?.requirement?.fallbackChain?.length && a.defaultAlias && !userEntryForAgent.alias) {
+        const aliasNorm = normalizeShorthand(cfg.agents?.[a.defaultAlias], {
+          resolveAlias: (t: string) => normalizeShorthand(cfg.agents?.[t]),
+          selfName: a.defaultAlias,
+        })
+        if (aliasNorm?.requirement?.fallbackChain?.length) {
+          norm = { ...norm, requirement: aliasNorm.requirement }
+        }
+      }
       const prompt = promptForBuiltinAgent(a, norm, cfg.workflow)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"

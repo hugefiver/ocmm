@@ -15,7 +15,7 @@ test("matches an entry in the built-in agent chain", () => {
   assert.equal(r!.source, "agent-default")
 })
 
-test("compatibility aliases route like their local agent targets", () => {
+test("oracle routes to its own cross-gen builtin chain", () => {
   const oracle = resolveModelRouting({
     agentName: "oracle",
     modelID: "gpt-5.5",
@@ -29,16 +29,21 @@ test("compatibility aliases route like their local agent targets", () => {
 
   assert.equal(oracle!.source, "agent-default")
   assert.equal(oracle!.variant, "high")
+  // gpt-5.5 matches the "gpt-5" entry in oracle's cross-gen chain (forward prefix match).
+  assert.equal(oracle!.entry.model, "gpt-5")
   assert.equal(explore!.source, "agent-default")
   assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
 })
 
-test("compatibility alias can use target user override", () => {
+test("oracle inherits reviewer model via defaultAlias when user writes oracle entry without model", () => {
   const r = resolveModelRouting({
     agentName: "oracle",
     modelID: "claude-opus-4-7",
     providerID: "anthropic",
     agentsConfig: {
+      // User wrote an oracle entry but didn't specify a model or alias.
+      // defaultAlias: "reviewer" kicks in to inherit reviewer's user-config model.
+      oracle: { description: "custom oracle description" },
       reviewer: { model: "anthropic/claude-opus-4-7" },
     },
   })

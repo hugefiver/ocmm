@@ -42,7 +42,7 @@ Configured workflow: `codex`
 | dw-hard-reasoning | gpt-5.5 | xhigh | hard-reasoning |
 | dw-media-reader | gpt-5.5 | high | media-reader |
 | dw-normal-task | gpt-5.5 | high | normal-task |
-| dw-oracle | gpt-5.5 | high | oracle |
+| dw-oracle | gpt-5 | high | oracle |
 | dw-orchestrator | gpt-5.5 | high | orchestrator |
 | dw-plan-critic | gpt-5.5 | xhigh | plan-critic |
 | dw-planner | gpt-5.5 | high | planner |
@@ -58,10 +58,10 @@ When spawning a subagent via `multi_agent_v1.spawn_agent`, select the model and 
 
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
-| Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning | Latest-gen flagship | xhigh |
+| Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning, dw-reviewer | Latest-gen flagship | xhigh |
 | Mid | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | dw-quick, dw-code-search, dw-explore | Latest-gen mini | high |
-| Cross-gen review | dw-reviewer, dw-plan-critic | Previous-gen flagship | xhigh |
+| Cross-gen review | dw-oracle, dw-plan-critic | Previous-gen flagship | xhigh |
 
 ### Model tier definitions
 
@@ -72,7 +72,7 @@ When spawning a subagent via `multi_agent_v1.spawn_agent`, select the model and 
 
 ### Cross-generation review rule
 
-dw-reviewer and dw-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. If the main model is the latest flagship, the reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
+dw-oracle and dw-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. Oracle reviews work the agent itself produced (self-supervision); reviewer reviews code not produced by the current agent (external review). If the main model is the latest flagship, the cross-gen reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
 
 ### Example (gpt-5.x generation — verify against your available models)
 

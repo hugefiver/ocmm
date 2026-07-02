@@ -9,7 +9,7 @@
 | brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | completing a task or major feature | /requesting-code-review |
+| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | /remove-ai-slops |
@@ -236,6 +236,8 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 Use a high-rigor reviewer when the task touches 3+ files, changes security/performance/migration behavior, lasts 30+ minutes, or the user asks for strict review.
 
 Reviewer verdict is binding. Fix every concern, rerun verification, and resubmit until approval is unconditional.
+
+For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 ## ZERO TOLERANCE FAILURES
 

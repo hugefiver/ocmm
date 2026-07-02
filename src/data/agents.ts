@@ -4,10 +4,11 @@
  * Names are role-descriptive so users can read a stack trace or a config file
  * and immediately know what an agent does. There is no shared lore.
  *
- * 9 built-in agents:
+ * 10 built-in agents:
  *   orchestrator   - main coordinator; decomposes work + delegates
  *   builder         - primary implementer; handles execution-heavy work
  *   reviewer       - read-only consultant for hard reasoning / debugging
+ *   oracle         - self-supervision reviewer for work the agent itself produced
  *   doc-search     - external library / docs / OSS lookups
  *   code-search    - internal codebase grep
  *   planner        - produces structured work plans
@@ -57,6 +58,22 @@ export const BUILTIN_AGENTS: Agent[] = [
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["zhipu"], model: "glm-5.1" },
+      ],
+    },
+  },
+  {
+    name: "oracle",
+    description:
+      "Self-supervision reviewer for work the agent itself produced. Cross-gen model by default to avoid self-confirmation bias.",
+    promptSource: "reviewer",
+    defaultAlias: "reviewer",
+    requirement: {
+      variant: "high",
+      fallbackChain: [
+        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5", variant: "high" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
     },

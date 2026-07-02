@@ -9,7 +9,7 @@
 | brainstorming | (injected into agent profile — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
-| requesting-code-review | completing a task or major feature | load skill `deepwork-requesting-code-review` |
+| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | load skill `deepwork-requesting-code-review` |
 | receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | load skill `deepwork-dispatching-parallel-agents` |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | load skill `deepwork-remove-ai-slops` |
@@ -293,6 +293,8 @@ If ANY answer is no → GO BACK AND DO IT. Do not claim completion.
 ### REVIEWER GATE (triggered, not optional)
 
 Trigger if user said "엄밀"/"strictly"/"rigorously"/"properly review", or task touches 3+ files OR ran 20+ turns OR 30+ min, or refactor/migration/perf/security. Spawn a high-rigor reviewer via `multi_agent_v1.spawn_agent` with: goal, scenarios, evidence paths, full diff, notepad path. Verdict is BINDING. "looks good but..." = REJECTION. Fix every concern, re-run full scenario QA, capture fresh evidence, resubmit. Loop until UNCONDITIONAL approval.
+
+For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 <MANUAL_QA_MANDATE>
 ### YOU MUST EXECUTE MANUAL QA. THIS IS NOT OPTIONAL. DO NOT SKIP THIS.

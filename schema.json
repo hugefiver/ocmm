@@ -12,6 +12,9 @@
           "description": {
             "type": "string"
           },
+          "alias": {
+            "type": "string"
+          },
           "variant": {
             "type": "string",
             "enum": [
@@ -215,6 +218,9 @@
         "type": "object",
         "properties": {
           "description": {
+            "type": "string"
+          },
+          "alias": {
             "type": "string"
           },
           "variant": {
@@ -493,6 +499,7 @@
               "orchestrator",
               "builder",
               "reviewer",
+              "oracle",
               "doc-search",
               "code-search",
               "planner",
@@ -859,6 +866,9 @@
                 "description": {
                   "type": "string"
                 },
+                "alias": {
+                  "type": "string"
+                },
                 "variant": {
                   "type": "string",
                   "enum": [
@@ -1062,6 +1072,9 @@
               "type": "object",
               "properties": {
                 "description": {
+                  "type": "string"
+                },
+                "alias": {
                   "type": "string"
                 },
                 "variant": {
@@ -1340,6 +1353,7 @@
                     "orchestrator",
                     "builder",
                     "reviewer",
+                    "oracle",
                     "doc-search",
                     "code-search",
                     "planner",

@@ -18,7 +18,7 @@ You are running inside Codex. Key differences from OpenCode:
 | brainstorming | (injected into agent profile — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
-| requesting-code-review | completing a task or major feature | load skill `deepwork-requesting-code-review` |
+| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | load skill `deepwork-requesting-code-review` |
 | receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | load skill `deepwork-dispatching-parallel-agents` |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | load skill `deepwork-remove-ai-slops` |
@@ -212,6 +212,8 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 ## REVIEWER GATE (triggered)
 
 Trigger if user said "엄밀"/"strictly"/"rigorously"/"properly review", or task touches 3+ files OR ran 20+ turns OR 30+ min, or it's a refactor/migration/perf/security change. Spawn a high-rigor reviewer via `multi_agent_v1.spawn_agent` with goal + scenarios + evidence + diff. Reviewer verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.
+
+For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 ## COMPLETION CRITERIA
 

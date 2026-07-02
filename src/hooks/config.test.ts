@@ -150,7 +150,9 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
-  assert.deepEqual(cfg.agent.oracle, cfg.agent.reviewer)
+  // oracle is now an independent builtin with cross-gen requirement (not a reviewer alias).
+  assert.notEqual(cfg.agent.oracle, cfg.agent.reviewer)
+  // explore remains a compatibility alias for code-search.
   assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
   assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
   assert.ok(cfg.agent.quick, "@quick should be available as category-subagent")

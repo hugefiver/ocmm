@@ -132,6 +132,39 @@ Each implementation task follows TDD:
 - Dispatch fix subagent with specific instructions
 - Don't try to fix manually (context pollution)
 
+## Final Acceptance Review
+
+After all plan tasks are marked complete, before declaring the work done, run a final acceptance review over the full change set. This is distinct from the per-task reviews — it evaluates the work as a whole.
+
+**1. Assess complexity:**
+
+| Complexity | Signal | Reviewer(s) |
+|---|---|---|
+| Simple | 1-2 tasks, single module, no architectural change | `oracle` (self-supervision) |
+| Complex | 3+ tasks, cross-module, architectural change, security/performance sensitive, migration | `oracle` + `reviewer` (both, in parallel) |
+
+The orchestrator judges complexity from the plan scope and actual changes. When unsure, upgrade to both.
+
+**2. Dispatch the acceptance review:**
+
+Use the `requesting-code-review` skill. Pass the full change range:
+- `BASE_SHA` = commit before the first task of the plan
+- `HEAD_SHA` = current HEAD (after all tasks)
+- `DESCRIPTION` = summary of the complete feature/work
+- `PLAN_OR_REQUIREMENTS` = the plan file path
+
+For both-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same SHAs and context. Collect both feedback sets before proceeding.
+
+**3. Process feedback:**
+
+- Use the `receiving-code-review` skill to handle feedback with technical rigor.
+- Fix Critical/Important issues, re-review, loop.
+- Only declare the work done when the reviewer(s) approve.
+
+**4. When to skip:**
+
+The final acceptance review is mandatory unless the user explicitly delegates ("你自己决定" / "无需批准自行继续"). For a single trivial task already covered by a per-task review, the orchestrator may judge a separate acceptance pass redundant — state this judgment explicitly.
+
 ## Integration
 
 **Required workflow skills:**

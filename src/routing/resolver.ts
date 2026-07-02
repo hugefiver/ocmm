@@ -32,7 +32,6 @@ const VARIANT_SET = new Set<Variant>([
 ])
 
 const AGENT_ALIASES = new Map([
-  ["oracle", "reviewer"],
   ["explore", "code-search"],
 ])
 
@@ -85,6 +84,39 @@ function userAgentRequirement(entry: AgentEntry | undefined): ModelRequirement |
   const norm = normalizeShorthand(entry)
   if (!norm || norm.disabled) return null
   return norm.requirement ?? null
+}
+
+function userAgentRequirementWithAlias(
+  agentName: string,
+  agentsConfig: Record<string, AgentEntry> | undefined,
+  visited: Set<string> = new Set(),
+): ModelRequirement | null {
+  if (!agentsConfig) return null
+  if (visited.has(agentName)) return null
+  visited.add(agentName)
+  const entry = agentsConfig[agentName]
+  const norm = normalizeShorthand(entry)
+  if (!norm || norm.disabled) return null
+  if (norm.requirement) return norm.requirement
+  // Resolve alias field: user-config alias points to another agent's model config.
+  if (entry?.alias) {
+    return userAgentRequirementWithAlias(entry.alias, agentsConfig, visited)
+  }
+  return null
+}
+
+function defaultAliasRequirement(agentName: string, agentsConfig: Record<string, AgentEntry> | undefined): ModelRequirement | null {
+  const builtin = BUILTIN_AGENT_INDEX.get(agentName)
+  if (!builtin?.defaultAlias) return null
+  // defaultAlias only applies when the user wrote an entry for this agent but
+  // didn't specify a model (no requirement) and didn't set an explicit alias.
+  // If there is no user entry at all, the builtin requirement stands.
+  const userEntry = agentsConfig?.[agentName]
+  if (userEntry === undefined) return null
+  const userNorm = normalizeShorthand(userEntry)
+  if (userNorm?.requirement) return null // user has direct model config
+  if (userEntry.alias) return null // user has explicit alias
+  return userAgentRequirementWithAlias(builtin.defaultAlias, agentsConfig)
 }
 
 function userCategoryRequirement(
@@ -150,6 +182,14 @@ export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
       canonicalUserReq
     if (userReq) {
       const r = resolveAgainstRequirement(userReq, modelID, inputVariant, "user-config")
+      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
+    }
+
+    // Builtin defaultAlias: when the agent has no direct user model config and no
+    // explicit alias, inherit the defaultAlias target's user-configured model.
+    const aliasReq = defaultAliasRequirement(agentName, agentsConfig)
+    if (aliasReq) {
+      const r = resolveAgainstRequirement(aliasReq, modelID, inputVariant, "user-config")
       if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
     }
   }

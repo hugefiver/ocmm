@@ -45,6 +45,11 @@ export type NormalizedShorthand = {
 
 export function normalizeShorthand(
   entry: AgentEntry | CategoryEntry | undefined,
+  options?: {
+    resolveAlias?: (name: string) => NormalizedShorthand | undefined
+    visited?: Set<string>
+    selfName?: string
+  },
 ): NormalizedShorthand | undefined {
   if (!entry) return undefined
   const out: NormalizedShorthand = {}
@@ -73,6 +78,26 @@ export function normalizeShorthand(
     const req: ModelRequirement = { fallbackChain: chain }
     if (entry.variant) req.variant = entry.variant
     out.requirement = req
+    return out
+  }
+
+  // alias resolution (only when no direct model config)
+  if ("alias" in entry && typeof entry.alias === "string" && entry.alias) {
+    const visited = options?.visited ?? new Set<string>()
+    const selfName = options?.selfName ?? entry.alias
+    if (visited.has(entry.alias)) {
+      const path = [...visited, entry.alias].join(" -> ")
+      throw new Error(`circular alias: ${path}`)
+    }
+    // avoid unused var warning - selfName used for context/debugging
+    void selfName
+    const resolveAlias = options?.resolveAlias
+    if (resolveAlias) {
+      const target = resolveAlias(entry.alias)
+      if (target?.requirement) {
+        out.requirement = target.requirement
+      }
+    }
   }
 
   return out
