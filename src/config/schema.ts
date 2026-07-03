@@ -80,6 +80,7 @@ const HOOK_NAMES = [
   "write-existing-file-guard",
   "notepad-write-guard",
   "bash-file-read-guard",
+  "bash-file-write-guard",
   "question-label-truncator",
   "tasks-todowrite-disabler",
   "webfetch-redirect-guard",

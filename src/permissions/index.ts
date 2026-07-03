@@ -77,8 +77,10 @@ export function createPermissionGuards(args: {
       const config = args.getConfig()
       await trackReadPermission(config, rawInput, readPermissions, readmeSessionCache, lastAccess, projectRoot)
       guardNotepadWrite(config, rawInput, projectRoot)
-      guardExistingFileWrite(config, rawInput, readPermissions, projectRoot)
+      guardExistingFileWrite(config, rawInput, projectRoot)
+      guardPatchWithoutRead(config, rawInput, readPermissions, projectRoot)
       warnBashFileRead(config, rawInput, rawOutput)
+      guardBashFileWrite(config, rawInput, projectRoot)
       guardSubagentGit(config, rawInput, projectRoot, args.sessionAgentMap)
       truncateQuestionLabels(config, rawInput, rawOutput)
       guardTodoRead(config, rawInput, args.taskSystemEnabled)
@@ -187,26 +189,55 @@ function touchSession(
 function guardExistingFileWrite(
   config: OcmmConfig,
   rawInput: unknown,
-  readPermissions: Map<string, Set<string>>,
   projectRoot: string,
 ): void {
-  if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
   if (toolName(rawInput) !== WRITE_TOOL) return
   const args = argsRecord(rawInput)
   const filePath = filePathFromArgs(rawInput, projectRoot)
-  if (!filePath || args?.overwrite === true) return
+  if (!filePath) return
 
   const canonical = canonicalExistingFile(filePath, projectRoot)
   if (!canonical || !isInside(projectRoot, canonical) || isUnderSpecialDir(projectRoot, canonical, ".omo")) return
 
-  const session = sessionId(rawInput)
-  const paths = readPermissions.get(session)
-  if (paths?.has(canonical)) {
-    paths.delete(canonical)
-    return
+  const overwrite = args?.overwrite === true
+
+  // Baseline (always on, even when hook disabled): block write without overwrite.
+  if (!overwrite) {
+    throw new Error(
+      "File already exists. Use the edit/multiedit tool to patch the existing file instead of overwriting it with write. " +
+        "Set overwrite: true on the write tool only if intentional full overwrite is required and the write-existing-file-guard hook is disabled.",
+    )
   }
 
-  throw new Error("File already exists. Use Read first, then edit the existing file instead of overwriting it with Write.")
+  // Enhancement (gated): block write even with overwrite when hook is enabled.
+  if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
+  throw new Error(
+    "File already exists. The write-existing-file-guard hook blocks overwriting existing files. " +
+      "Use the edit/multiedit tool to patch the file instead. " +
+      'To disable this guard, add "write-existing-file-guard" to disabledHooks in ocmm.jsonc.',
+  )
+}
+
+function guardPatchWithoutRead(
+  config: OcmmConfig,
+  rawInput: unknown,
+  readPermissions: Map<string, Set<string>>,
+  projectRoot: string,
+): void {
+  if (hookDisabled(config, "write-existing-file-guard", "writeExistingFileGuard")) return
+  const name = toolName(rawInput)
+  if (name !== "edit" && name !== "multiedit") return
+  const filePath = filePathFromArgs(rawInput, projectRoot)
+  if (!filePath) return
+  const canonical = canonicalExistingFile(filePath, projectRoot)
+  if (!canonical || !isInside(projectRoot, canonical) || isUnderSpecialDir(projectRoot, canonical, ".omo")) return
+  const session = sessionId(rawInput)
+  const paths = readPermissions.get(session)
+  if (paths?.has(canonical)) return // read token is persistent, NOT consumed
+  throw new Error(
+    `File already exists but was not read in this session. Read the file first, then use ${name} to patch it. ` +
+      'To disable this guard, add "write-existing-file-guard" to disabledHooks in ocmm.jsonc.',
+  )
 }
 
 function guardNotepadWrite(config: OcmmConfig, rawInput: unknown, projectRoot: string): void {
@@ -231,6 +262,304 @@ function warnBashFileRead(config: OcmmConfig, rawInput: unknown, rawOutput: unkn
   const out = outputRecord(rawOutput)
   if (!out) return
   out.message = "This looks like a simple file read. Prefer the Read tool so line numbers and file metadata stay structured."
+}
+
+const SHELL_FILE_WRITE_COMMANDS = new Set(["tee", "dd", "install", "truncate", "fallocate"])
+const SHELL_INPLACE_EDITORS = new Set(["sed", "perl", "ruby"])
+const SHELL_SUBSHELL_RUNNERS = new Set(["sh", "bash", "zsh", "dash", "ash"])
+const COMMAND_SEPARATORS = new Set(["|", "||", "&&", ";", "|&"])
+
+function guardBashFileWrite(
+  config: OcmmConfig,
+  rawInput: unknown,
+  projectRoot: string,
+): void {
+  if (hookDisabled(config, "bash-file-write-guard", "bashFileWriteGuard")) return
+  if (toolName(rawInput) !== "bash") return
+  const command = stringArg(rawInput, "command")
+  if (!command) return
+  if (!commandWritesExistingFile(command, rawInput, projectRoot)) return
+  throw new Error(
+    "This shell command writes to an existing project file. Use the edit/multiedit tool to patch the file instead of bypassing the file-write guard via shell. " +
+      'To disable this guard, add "bash-file-write-guard" to disabledHooks in ocmm.jsonc.',
+  )
+}
+
+function commandWritesExistingFile(command: string, rawInput: unknown, projectRoot: string): boolean {
+  const workdir = bashWorkingDirectory(rawInput, projectRoot)
+  // Redirect operators are position-independent; scan the whole string once.
+  if (redirectTargetsExistingProjectFile(command, workdir, projectRoot)) return true
+  const tokens = tokenizeCommand(command)
+  if (tokens.length === 0) return false
+  // Subshell runners (sh -c "SCRIPT", bash -c 'SCRIPT', ...) must be scanned
+  // BEFORE splitCommandSegments, because the tokenizer strips quotes and the
+  // segment splitter would then chop the script body at | ; && inside it,
+  // losing the subshell boundary. Walk the raw tokens and recurse into each
+  // -c script body as a full command string.
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const name = normalizeCommandName(tokens[i] ?? "")
+    if (!SHELL_SUBSHELL_RUNNERS.has(name)) continue
+    if (tokens[i + 1] !== "-c") continue
+    const script = tokens[i + 2] ?? ""
+    if (!script) continue
+    if (commandStringWritesExistingFile(script, workdir, projectRoot)) return true
+  }
+  // Command-name-based detectors examine every segment of the pipeline/sequence,
+  // not just tokens[0]. A flat check on tokens[0] misses `echo x | tee file`.
+  for (const segment of splitCommandSegments(tokens)) {
+    if (segment.length === 0) continue
+    const cmdName = normalizeCommandName(segment[0] ?? "")
+    if (segmentWritesExistingFile(cmdName, segment, workdir, projectRoot, command)) return true
+  }
+  return false
+}
+
+/** Recursively scan a sub-command string (e.g. the body of `sh -c "..."`) for
+ *  any write to an existing project file. This mirrors commandWritesExistingFile
+ *  but takes an already-extracted script string, avoiding re-splitting it at
+ *  top-level separators before subshell detection. */
+function commandStringWritesExistingFile(script: string, workdir: string, projectRoot: string): boolean {
+  if (!script) return false
+  if (redirectTargetsExistingProjectFile(script, workdir, projectRoot)) return true
+  const tokens = tokenizeCommand(script)
+  if (tokens.length === 0) return false
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const name = normalizeCommandName(tokens[i] ?? "")
+    if (!SHELL_SUBSHELL_RUNNERS.has(name)) continue
+    if (tokens[i + 1] !== "-c") continue
+    const inner = tokens[i + 2] ?? ""
+    if (inner && commandStringWritesExistingFile(inner, workdir, projectRoot)) return true
+  }
+  for (const segment of splitCommandSegments(tokens)) {
+    if (segment.length === 0) continue
+    const cmdName = normalizeCommandName(segment[0] ?? "")
+    if (segmentWritesExistingFile(cmdName, segment, workdir, projectRoot, script)) return true
+  }
+  return false
+}
+
+/** Split a token stream on shell command separators (|, ||, &&, ;, |&).
+ *  Operates on already-tokenized input, so separators inside quoted strings
+ *  were consumed by the tokenizer as part of a quoted token and will not split.
+ *  The tokenizer's `\S+` pattern can fuse separators onto adjacent tokens
+ *  (e.g. `true;` stays one token), so each token is re-split on operator
+ *  boundaries before segmentation. */
+function splitCommandSegments(tokens: string[]): string[][] {
+  const expanded: string[] = []
+  const operatorRe = /(\|\||\&\&|\|\&|[|;])/g
+  for (const tok of tokens) {
+    if (tok.length === 0) continue
+    let lastIndex = 0
+    let m: RegExpExecArray | null
+    operatorRe.lastIndex = 0
+    while ((m = operatorRe.exec(tok)) !== null) {
+      const before = tok.slice(lastIndex, m.index)
+      if (before.length > 0) expanded.push(before)
+      expanded.push(m[1]!)
+      lastIndex = m.index + m[1]!.length
+    }
+    const tail = tok.slice(lastIndex)
+    if (tail.length > 0) expanded.push(tail)
+  }
+  const segments: string[][] = []
+  let current: string[] = []
+  for (const tok of expanded) {
+    if (COMMAND_SEPARATORS.has(tok)) {
+      if (current.length > 0) segments.push(current)
+      current = []
+    } else {
+      current.push(tok)
+    }
+  }
+  if (current.length > 0) segments.push(current)
+  return segments
+}
+
+/** Dispatch one command segment to the appropriate detector. */
+function segmentWritesExistingFile(
+  cmdName: string,
+  tokens: string[],
+  workdir: string,
+  projectRoot: string,
+  fullCommand: string,
+): boolean {
+  if (SHELL_FILE_WRITE_COMMANDS.has(cmdName)) {
+    return writeCommandSegmentTargetsExistingFile(cmdName, tokens, workdir, projectRoot)
+  }
+  if (SHELL_INPLACE_EDITORS.has(cmdName)) {
+    return inplaceEditSegmentTargetsExistingFile(cmdName, tokens, workdir, projectRoot)
+  }
+  if (cmdName === "cp" || cmdName === "mv") {
+    return copyMoveSegmentTargetsExistingFile(tokens, workdir, projectRoot)
+  }
+  // Subshell runners (sh -c ...) are handled in commandWritesExistingFile /
+  // commandStringWritesExistingFile BEFORE splitCommandSegments, because the
+  // segment splitter would chop the quoted script body at internal | ; &&.
+  // fullCommand is accepted for signature uniformity but not used here.
+  void fullCommand
+  return false
+}
+
+/**
+ * Detect redirect operators (>, >|, >>, 2>, 2>>, &>, &>>, 1>, 1>>) targeting
+ * existing project files. Uses a flat regex scan; heredocs (<<) are excluded
+ * because >>? only matches '>' not '<'.
+ */
+function redirectTargetsExistingProjectFile(command: string, workdir: string, projectRoot: string): boolean {
+  // Match a redirect operator followed by a file target token.
+  // Operators: > >| >> 1> 1>> 2> 2>> &> &>>
+  // Negative lookbehind (?<!<) avoids matching <> read-write open operator.
+  // No \b word-boundary: operators are commonly preceded by whitespace (non-word),
+  // and \b between two non-word chars fails to match (e.g. " > " would not match).
+  // 2>&1 / 1>&2 fd-duplication is not falsely blocked: the capture group grabs
+  // "&1"/"&2", which isExistingProjectFile() rejects as a non-file path.
+  // >| (noclobber clobber) is covered by the optional | after >>?.
+  // The unquoted target class [^\s|;&<>()"`']+ stops at shell operators,
+  // grouping parens/braces, AND all quote characters (" ' `). Excluding
+  // quotes prevents trailing-quote fusion: in `eval "echo x > file"` the
+  // bare-scan sees `> file"` and would otherwise capture `file"` (stat
+  // fails → bypass). Backtick is included so `echo `echo x > file`` does
+  // not fuse `file` with the closing backtick.
+  // Properly-quoted targets (`> "file.txt"`) are handled by the preceding
+  // quoted alternation branch, which is unaffected by the char class.
+  const redirectPattern = /(?<!<)(?:[12]?>>?\|?|&>>?)\s*("[^"]*"|'[^']*'|[^\s|;&<>()"`']+)/g
+  let match: RegExpExecArray | null
+  while ((match = redirectPattern.exec(command)) !== null) {
+    const rawTarget = match[1] ?? ""
+    if (!rawTarget) continue
+    const target = stripQuotes(rawTarget)
+    if (isExistingProjectFile(target, workdir, projectRoot)) return true
+  }
+  return false
+}
+
+/** One segment of a write-command (tee/dd/install/truncate/fallocate).
+ *  tokens[0] is the command name. */
+function writeCommandSegmentTargetsExistingFile(
+  cmdName: string,
+  tokens: string[],
+  workdir: string,
+  projectRoot: string,
+): boolean {
+  if (cmdName === "dd") {
+    // dd of=FILE ...
+    for (const tok of tokens) {
+      if (tok.startsWith("of=")) {
+        const target = stripQuotes(tok.slice(3))
+        if (target && isExistingProjectFile(target, workdir, projectRoot)) return true
+      }
+    }
+    return false
+  }
+
+  if (cmdName === "tee") {
+    // tee [options] FILE... — first non-option token is the target
+    for (let i = 1; i < tokens.length; i += 1) {
+      const tok = tokens[i] ?? ""
+      if (tok.startsWith("-")) continue
+      const target = stripQuotes(tok)
+      if (isExistingProjectFile(target, workdir, projectRoot)) return true
+      // tee can take multiple files; keep scanning
+    }
+    return false
+  }
+
+  if (cmdName === "install") {
+    // install -t DIR SRC... and install --target-directory=DIR SRC... copy INTO a
+    // directory, not over a file — skip (matches cp/mv -t handling).
+    for (const tok of tokens) {
+      if (tok === "-t" || tok.startsWith("--target-directory")) return false
+    }
+    const dest = lastNonOptionOperand(tokens)
+    if (dest && isExistingProjectFile(dest, workdir, projectRoot)) return true
+    return false
+  }
+
+  if (cmdName === "truncate" || cmdName === "fallocate") {
+    const dest = lastNonOptionOperand(tokens)
+    if (dest && isExistingProjectFile(dest, workdir, projectRoot)) return true
+    return false
+  }
+
+  return false
+}
+
+/** One segment of an in-place editor (sed/perl/ruby). tokens[0] is the command name.
+ *  Detects -i in any form: standalone, -iSUFFIX, or combined short flags like -Ei, -pi, -pie. */
+function inplaceEditSegmentTargetsExistingFile(
+  cmdName: string,
+  tokens: string[],
+  workdir: string,
+  projectRoot: string,
+): boolean {
+  let hasInPlace = false
+  let i = 1
+  for (; i < tokens.length; i += 1) {
+    const tok = tokens[i] ?? ""
+    if (tok === "--") break
+    if (tok === "-i" || tok.startsWith("-i")) {
+      // -i, -i.bak, -i'' — in-place (with optional backup suffix)
+      hasInPlace = true
+      break
+    }
+    // Combined short flags: -Ei, -ni, -pi, -pie, etc. The -i is embedded after
+    // other flags. A leading-dash token (not a long option) containing 'i' is an
+    // in-place edit. This catches sed -Ei, perl -pi, perl -pie, ruby -pi.
+    if (/^-[^-].*i/.test(tok)) {
+      hasInPlace = true
+      break
+    }
+    // Other options (e.g. -e, -E, -n, -p, -pe, -ne) — keep scanning.
+  }
+
+  if (!hasInPlace) return false
+
+  const dest = lastNonOptionOperand(tokens)
+  if (dest && isExistingProjectFile(dest, workdir, projectRoot)) return true
+  return false
+}
+
+/** One segment of cp/mv. tokens[0] is the command name.
+ *  install is handled in writeCommandSegmentTargetsExistingFile; do not double-handle. */
+function copyMoveSegmentTargetsExistingFile(tokens: string[], workdir: string, projectRoot: string): boolean {
+  // Skip -t DIR case (destination is a directory, not a file overwrite).
+  for (const tok of tokens) {
+    if (tok === "-t" || tok.startsWith("--target-directory")) return false
+  }
+  const dest = lastNonOptionOperand(tokens)
+  if (dest && isExistingProjectFile(dest, workdir, projectRoot)) return true
+  return false
+}
+
+/** Resolve a shell target token relative to the bash workdir and check if it
+ *  is an existing file inside projectRoot (excluding .omo). */
+function isExistingProjectFile(target: string, workdir: string, projectRoot: string): boolean {
+  if (!target || target === "/dev/null") return false
+  const absolute = absolutize(target, workdir)
+  if (!safeStatFile(absolute)) return false
+  if (!isInside(projectRoot, absolute)) return false
+  if (isUnderSpecialDir(projectRoot, absolute, ".omo")) return false
+  return true
+}
+
+function stripQuotes(token: string): string {
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    return token.slice(1, -1)
+  }
+  return token
+}
+
+/** Return the last token that does not start with '-', or null. Does not
+ *  account for value-consuming options (e.g. -m for install); callers handling
+ *  such commands should parse options explicitly. */
+function lastNonOptionOperand(tokens: string[]): string | null {
+  for (let i = tokens.length - 1; i >= 1; i -= 1) {
+    const tok = tokens[i] ?? ""
+    if (tok === "--") break
+    if (tok.startsWith("-")) continue
+    return stripQuotes(tok)
+  }
+  return null
 }
 
 function guardSubagentGit(

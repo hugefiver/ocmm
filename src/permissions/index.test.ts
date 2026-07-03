@@ -50,20 +50,29 @@ test("bash file read detector matches only simple file reads", () => {
   assert.equal(isSimpleFileReadCommand("cat -n src/index.ts"), false)
 })
 
-test("write existing file guard requires a prior read in the same session", async () => {
+test("write existing file guard blocks overwrite even after a prior read (two-tier)", async () => {
   const root = tempProject()
   try {
     const file = join(root, "existing.txt")
     writeFileSync(file, "old")
     const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
 
+    // Without overwrite: always blocked (baseline), even after read.
+    await assert.rejects(
+      guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {}),
+      /File already exists/,
+    )
+    await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
     await assert.rejects(
       guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {}),
       /File already exists/,
     )
 
-    await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
-    await guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new" } }, {})
+    // With overwrite=true and hook enabled (default): enhancement tier blocks it.
+    await assert.rejects(
+      guards.before({ tool: "write", sessionID: "s1", args: { filePath: file, content: "new", overwrite: true } }, {}),
+      /write-existing-file-guard hook blocks/,
+    )
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -504,8 +513,7 @@ test("event handler cleans up per-session readme cache on session.compacted", as
 test("event handler ignores unknown event types", async () => {
   const root = tempProject()
   try {
-    const file = join(root, "existing.txt")
-    writeFileSync(file, "old")
+    const file = join(root, "newfile.txt")
     const guards = createPermissionGuards({ getConfig: configWithReadme, projectRoot: root })
 
     await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
@@ -1581,5 +1589,391 @@ test("subagent bare temp gitdir workdir write is allowed", async () => {
     await guards.before(gitGuardInput("git tag v1.0", "s1", gitdir), {})
   } finally {
     rmSync(gitdir, { recursive: true, force: true })
+  }
+})
+
+test("edit/multiedit guard requires a prior read in the same session", async () => {
+  const root = tempProject()
+  try {
+    const file = join(root, "existing.txt")
+    writeFileSync(file, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // edit without prior read -> throws
+    await assert.rejects(
+      guards.before({ tool: "edit", sessionID: "s1", args: { filePath: file, content: "new" } }, {}),
+      /was not read in this session/,
+    )
+
+    // read then edit -> passes
+    await guards.before({ tool: "read", sessionID: "s1", args: { filePath: file } }, {})
+    await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: file, content: "new" } }, {})
+
+    // second edit (token persistent, not consumed) -> passes
+    await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: file, content: "newer" } }, {})
+
+    // different session, no read -> throws
+    await assert.rejects(
+      guards.before({ tool: "edit", sessionID: "s2", args: { filePath: file, content: "new" } }, {}),
+      /was not read in this session/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("edit/multiedit guard allows new files, .omo, and outside-project targets", async () => {
+  const root = tempProject()
+  try {
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // new (non-existent) file -> passes
+    await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: join(root, "newfile.txt"), content: "x" } }, {})
+
+    // .omo special dir -> passes
+    mkdirSync(join(root, ".omo"), { recursive: true })
+    const omoFile = join(root, ".omo", "data.txt")
+    writeFileSync(omoFile, "old")
+    await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: omoFile, content: "x" } }, {})
+
+    // outside projectRoot -> passes
+    const outside = tempProject()
+    try {
+      writeFileSync(join(outside, "ext.txt"), "old")
+      await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: join(outside, "ext.txt"), content: "x" } }, {})
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("edit/multiedit guard is disabled when write-existing-file-guard hook is disabled", async () => {
+  const root = tempProject()
+  try {
+    const file = join(root, "existing.txt")
+    writeFileSync(file, "old")
+    const config = { ...defaultConfig(), disabledHooks: ["write-existing-file-guard"] }
+    const guards = createPermissionGuards({ getConfig: () => config, projectRoot: root })
+
+    // no prior read, hook disabled -> passes
+    await guards.before({ tool: "edit", sessionID: "s1", args: { filePath: file, content: "x" } }, {})
+    await guards.before({ tool: "multiedit", sessionID: "s1", args: { filePath: file, edits: [] } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks redirects to existing project files", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const cases: Array<{ cmd: string; pattern?: RegExp }> = [
+      { cmd: `echo x > ${existing}`, pattern: /writes to an existing project file/ },
+      { cmd: `echo x >> ${existing}`, pattern: /writes to an existing project file/ },
+      { cmd: `echo x 2> ${existing}`, pattern: /writes to an existing project file/ },
+      { cmd: `echo x &> ${existing}`, pattern: /writes to an existing project file/ },
+      { cmd: `echo x 1>> ${existing}`, pattern: /writes to an existing project file/ },
+    ]
+    for (const { cmd, pattern } of cases) {
+      await assert.rejects(
+        guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {}),
+        pattern ?? /writes to an existing project file/,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard allows redirects to new files, /dev/null, and outside-project targets", async () => {
+  const root = tempProject()
+  try {
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const cases = [
+      `echo x > ${join(root, "newfile.txt")}`,
+      `echo x > /dev/null`,
+      `echo x >> /dev/null`,
+      `echo x 2> /dev/null`,
+    ]
+    // outside-project existing file
+    const outside = tempProject()
+    try {
+      writeFileSync(join(outside, "ext.txt"), "old")
+      cases.push(`echo x > ${join(outside, "ext.txt")}`)
+      for (const cmd of cases) {
+        await guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {})
+      }
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks tee/dd/install/truncate on existing project files", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const cases = [
+      `tee ${existing} <<< "x"`,
+      `tee -a ${existing} <<< "x"`,
+      `dd of=${existing} bs=1`,
+      `install -m 644 /dev/null ${existing}`,
+      `truncate -s 0 ${existing}`,
+    ]
+    for (const cmd of cases) {
+      await assert.rejects(
+        guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {}),
+        /writes to an existing project file/,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks sed -i / perl -i / ruby -i in-place edits on existing files", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const cases = [
+      `sed -i 's/a/b/g' ${existing}`,
+      `sed -i.bak 's/a/b/g' ${existing}`,
+      `perl -i -pe 's/a/b/g' ${existing}`,
+      `ruby -i -pe 'sub(/a/, "b")' ${existing}`,
+    ]
+    for (const cmd of cases) {
+      await assert.rejects(
+        guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {}),
+        /writes to an existing project file/,
+      )
+    }
+
+    // sed without -i (writes to stdout) -> passes
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `sed 's/a/b/g' ${existing}` } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks cp/mv overwriting existing project files", async () => {
+  const root = tempProject()
+  try {
+    const src = join(root, "src.txt")
+    const dest = join(root, "dest.txt")
+    writeFileSync(src, "src")
+    writeFileSync(dest, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    await assert.rejects(
+      guards.before({ tool: "bash", sessionID: "s1", args: { command: `cp ${src} ${dest}` } }, {}),
+      /writes to an existing project file/,
+    )
+    await assert.rejects(
+      guards.before({ tool: "bash", sessionID: "s1", args: { command: `mv ${src} ${dest}` } }, {}),
+      /writes to an existing project file/,
+    )
+
+    // cp to a new dest (does not exist) -> passes
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `cp ${src} ${join(root, "newdest.txt")}` } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard is disabled when hook is disabled and ignores non-bash tools", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const config = { ...defaultConfig(), disabledHooks: ["bash-file-write-guard"] }
+    const guards = createPermissionGuards({ getConfig: () => config, projectRoot: root })
+
+    // hook disabled -> all shell writes pass
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `echo x > ${existing}` } }, {})
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `tee ${existing} <<< x` } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks write commands across pipelines and sequences", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // Each bypass pattern that targets existing.txt in a non-first segment must be blocked.
+    const cases = [
+      `echo new | tee ${existing}`,
+      `echo new | dd of=${existing}`,
+      `echo x | sed -i 's/a/b/' ${existing}`,
+      `true; tee ${existing} <<< x`,
+      `true && echo y > ${existing}`,
+      `false || cp src.txt ${existing}`,
+    ]
+    for (const cmd of cases) {
+      await assert.rejects(
+        guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {}),
+        /writes to an existing project file/,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks combined short flags with -i (sed -Ei, perl -pi, perl -pie)", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    const cases = [
+      `sed -Ei 's/a/b/g' ${existing}`,
+      `sed -ni 's/a/b/gp' ${existing}`,
+      `perl -pi 's/a/b/g' ${existing}`,
+      `perl -pie 's/a/b/g' ${existing}`,
+      `ruby -pi -e 'sub(/a/, "b")' ${existing}`,
+    ]
+    for (const cmd of cases) {
+      await assert.rejects(
+        guards.before({ tool: "bash", sessionID: "s1", args: { command: cmd } }, {}),
+        /writes to an existing project file/,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks sh -c / bash -c with quoted redirect to existing file", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // Subshell with a quoted script body that redirects to an existing file.
+    await assert.rejects(
+      guards.before({ tool: "bash", sessionID: "s1", args: { command: `sh -c "echo x > ${existing}"` } }, {}),
+      /writes to an existing project file/,
+    )
+    await assert.rejects(
+      guards.before({ tool: "bash", sessionID: "s1", args: { command: `bash -c 'echo x > ${existing}'` } }, {}),
+      /writes to an existing project file/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard allows install -t DIR and cp -t DIR (directory target, not file overwrite)", async () => {
+  const root = tempProject()
+  try {
+    const src = join(root, "src.txt")
+    const subdir = join(root, "subdir")
+    writeFileSync(src, "src")
+    mkdirSync(subdir, { recursive: true })
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // install -t DIR and --target-directory=DIR copy into a directory, not over a file.
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `install -t ${subdir} ${src}` } }, {})
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `install --target-directory=${subdir} ${src}` } }, {})
+    // cp -t DIR likewise.
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `cp -t ${subdir} ${src}` } }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks subshell with pipe/semicolon inside quoted script body", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // The script body contains a separator (| or ;) before the write command.
+    // Regression: splitCommandSegments on the OUTER token stream used to chop
+    // the quoted script body at internal separators, so the subshell detector
+    // never saw the full script. Now subshell -c is scanned before splitting.
+    const cases = [
+      `sh -c "echo x | tee ${existing}"`,
+      `sh -c "echo x; echo y > ${existing}"`,
+      `bash -c 'echo x | tee ${existing}'`,
+      `sh -c "echo a | grep b | tee ${existing}"`,
+      `bash -c 'echo x; tee ${existing} <<< y'`,
+    ]
+    for (const command of cases) {
+      await assert.rejects(
+        () => guards.before({ tool: "bash", sessionID: "s1", args: { command } }, {}),
+        /bash-file-write-guard|File already exists/,
+        `expected block for: ${command}`,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("bash-file-write-guard blocks redirects with trailing punctuation (grouped/sequenced)", async () => {
+  const root = tempProject()
+  try {
+    const existing = join(root, "existing.txt")
+    const newfile = join(root, "new.txt")
+    writeFileSync(existing, "old")
+    const guards = createPermissionGuards({ getConfig: defaultConfig, projectRoot: root })
+
+    // Redirect target must not fuse with trailing shell operators/punctuation.
+    // Regression: \S+ captured `file;` / `file)` / `file; }` as the target,
+    // and isExistingProjectFile rejected the fused name → bypass.
+    const blockCases = [
+      `echo x > ${existing};`,
+      `echo x > ${existing}; echo done`,
+      `(echo x > ${existing})`,
+      `{ echo x > ${existing}; }`,
+      // C6: trailing-quote fusion. `eval "echo x > file"` exposes `> file"`
+      // to the flat scan; \S+ captured `file"` → stat failed → bypass.
+      // The unquoted target char class now excludes `"` and `'`.
+      `eval "echo x > ${existing}"`,
+      `eval 'echo x > ${existing}'`,
+      // C7: backtick fusion. `echo `echo x > file`` fuses `file` with the
+      // closing backtick. The char class now also excludes backtick.
+      `echo \`\echo x > ${existing}\``,
+    ]
+    for (const command of blockCases) {
+      await assert.rejects(
+        () => guards.before({ tool: "bash", sessionID: "s1", args: { command } }, {}),
+        /bash-file-write-guard|File already exists/,
+        `expected block for: ${command}`,
+      )
+    }
+    // New files with trailing punctuation must still be allowed (no false positive).
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `echo x > ${newfile};` } }, {})
+    await guards.before({ tool: "bash", sessionID: "s1", args: { command: `(echo x > ${newfile})` } }, {})
+    // Properly-quoted existing-file target must still block (quoted alternation branch).
+    await assert.rejects(
+      () => guards.before({ tool: "bash", sessionID: "s1", args: { command: `echo x > "${existing}"` } }, {}),
+      /bash-file-write-guard|File already exists/,
+      `expected block for quoted target: echo x > "${existing}"`,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
