@@ -21,7 +21,10 @@ Task tool (general-purpose):
     |----------|------------------|
     | Completeness | TODOs, placeholders, incomplete tasks, missing steps |
     | Spec Alignment | Plan covers spec requirements, no major scope creep |
-    | Task Decomposition | Tasks have clear boundaries, steps are actionable |
+    | Task Decomposition | Tasks have clear boundaries, steps are actionable, each task ends with an independently testable deliverable |
+    | Cross-Task Consistency | Tasks do not contradict each other; Interfaces blocks (Consumes/Produces) match across task boundaries — a Produces signature in Task N must match the Consumes signature in Task N+1 |
+    | Global Constraints | Every task is compatible with the plan's Global Constraints block — no task violates a version floor, dependency limit, naming rule, or platform requirement |
+    | Plan vs Review Rubric | A plan-mandated behavior does not conflict with what a reviewer would flag as a defect — if the plan overrides a default, it must be explicit so the reviewer can adjudicate, not auto-fix |
     | Buildability | Could an engineer follow this plan without getting stuck? |
 
     ## Calibration

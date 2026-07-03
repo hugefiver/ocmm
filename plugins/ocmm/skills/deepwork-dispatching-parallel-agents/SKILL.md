@@ -4,9 +4,10 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 ---
 
 <!-- v1 fork of superpowers/dispatching-parallel-agents.
-     Upstream: obra/superpowers v6.0.3.
-     Adjustments: no adjustments needed — upstream has no references to
-     executing-plans, using-git-worktrees, or omo-specific concepts.
+     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
+     Adjustments: synced upstream platform-agnostic dispatch pseudocode
+     (TS Task() → text Subagent (general-purpose) + parallel/sequential
+     dispatch rule). No references to excluded skills.
      See docs/v1-maintenance.md for sync rules. -->
 
 # Dispatching Parallel Agents
@@ -71,12 +72,13 @@ Each agent gets:
 
 ### 3. Dispatch in Parallel
 
-```typescript
-// In Claude Code / AI environment
-Task("Fix agent-tool-abort.test.ts failures")
-Task("Fix batch-completion-behavior.test.ts failures")
-Task("Fix tool-approval-race-conditions.test.ts failures")
-// All three run concurrently
+Emit all dispatch calls in a single response. Multiple dispatch calls in one response execute concurrently; one dispatch call per response executes sequentially.
+
+```
+Subagent (general-purpose): "Fix agent-tool-abort.test.ts failures — [scope, constraints, expected output]"
+Subagent (general-purpose): "Fix batch-completion-behavior.test.ts failures — [scope, constraints, expected output]"
+Subagent (general-purpose): "Fix tool-approval-race-conditions.test.ts failures — [scope, constraints, expected output]"
+// All three dispatched in one response → run concurrently
 ```
 
 ### 4. Review and Integrate

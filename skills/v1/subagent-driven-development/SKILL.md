@@ -4,11 +4,24 @@ description: Use when executing implementation plans with independent tasks in t
 ---
 
 <!-- v1 fork of superpowers/subagent-driven-development.
-     Upstream: obra/superpowers v6.0.3.
+     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
      Adjustments: removed executing-plans comparison (excluded from v1);
      removed using-git-worktrees and finishing-a-development-branch references
      (not in v1); removed test-driven-development reference (TDD is described
      inline in v1); final code review uses requesting-code-review skill only.
+     Synced v6.1.1+: Model Selection rewrite (explicit model dispatch, turn-count
+     beats token price, tiered guidance); Constructing Reviewer Prompts section
+     (no pre-judging, no open-ended directives, verbatim global constraints, no
+     history pasting, findings handling by severity); Narration discipline rule;
+     task-type analysis hint (prefer dispatching-parallel-agents for independent
+     tasks). Watch-items (not yet decided): two-stage→single task reviewer
+     merge (upstream collapsed spec-reviewer + code-quality-reviewer into one
+     task-reviewer; v1 retains two-stage as deliberate design — spec-first
+     catches wrong-direction code before quality review); ⚠️ Items section
+     (reviewer "Cannot verify from diff" items). Did NOT sync:
+     review-package/task-brief bash scripts (Windows incompatible); progress
+     ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
+     (depend on scripts).
      See docs/v1-maintenance.md for sync rules. -->
 
 # Subagent-Driven Development
@@ -21,11 +34,15 @@ Execute plan by dispatching fresh subagent per task, with two-stage review after
 
 **Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are: BLOCKED status you cannot resolve, ambiguity that genuinely prevents progress, or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
 
+**Narration discipline:** Between tool calls, write at most one line of narration. The todo list and tool results carry the record — do not duplicate progress in prose. Reserve prose for decisions, blockers, and questions to your partner.
+
 ## When to Use
 
 - You have an implementation plan
 - Tasks are mostly independent
 - You are executing in the current session
+
+**Task-type analysis before execution:** Before dispatching the first implementer, assess the plan. If the plan has 2+ independent tasks with no shared state or sequential dependencies, prefer the `dispatching-parallel-agents` skill to execute them concurrently rather than dispatching them one-by-one here. This skill's sequential per-task loop is for tasks with dependencies or shared state.
 
 ## The Process
 
@@ -43,16 +60,19 @@ Execute plan by dispatching fresh subagent per task, with two-stage review after
 
 ## Model Selection
 
-Use the least powerful model that can handle each role to conserve cost and increase speed.
+Use the least powerful model that can handle each role — but **always specify the model explicitly** when dispatching a subagent. Omitting it inherits the session model, which is usually the most expensive.
 
-**Mechanical implementation tasks** (isolated functions, clear specs, 1-2 files): use a fast, cheap model. Most implementation tasks are mechanical when the plan is well-specified.
+**Turn count beats token price.** The cheapest model often takes 2-3× more turns to complete a task; the aggregate cost is frequently higher than a mid-tier model that completes it in one pass. Apply a mid-tier floor to reviewers and prose-heavy implementers.
 
-**Integration and judgment tasks** (multi-file coordination, pattern matching, debugging): use a standard model.
-
-**Architecture, design, and review tasks**: use the most capable available model.
+**Tiered guidance:**
+- **Plan contains complete code → transcription work → cheapest tier.** The implementer is copying and adapting, not designing.
+- **Integration / judgment tasks** (multi-file coordination, pattern matching): standard model.
+- **Reviewers and prose-heavy implementers:** mid-tier floor. Cheap models miss subtle defects and produce vague reviews.
+- **Final whole-branch review:** most capable available model. This is the last gate before merge.
+- **Review tasks scale by diff size / complexity / risk.** A 10-line single-file diff does not need the most capable reviewer; a 500-line cross-module change does.
 
 **Task complexity signals:**
-- Touches 1-2 files with a complete spec → cheap model
+- Touches 1-2 files with a complete spec → cheapest tier
 - Touches multiple files with integration concerns → standard model
 - Requires design judgment or broad codebase understanding → most capable model
 
@@ -131,6 +151,33 @@ Each implementation task follows TDD:
 **If subagent fails task:**
 - Dispatch fix subagent with specific instructions
 - Don't try to fix manually (context pollution)
+
+## Constructing Reviewer Prompts
+
+Reviewer prompts shape what the reviewer finds. A poorly constructed prompt pre-judges findings, bloats context with history, or sends the reviewer on irrelevant tangents.
+
+**Do not pre-judge findings.** If your prompt contains any of these, stop — you are pre-judging:
+- "Do not flag X" / "don't treat Y as a defect"
+- "At most Minor" / "this is expected"
+- "The plan chose this approach"
+
+The reviewer must evaluate the diff on its merits. If you have context the reviewer lacks, state it as context, not as a verdict.
+
+**Do not add open-ended directives** without a task-specific reason. "Check all uses of this function," "run race tests if useful," "verify every edge case" — these send the reviewer on unfocused tangents. Point them at specific concerns instead.
+
+**Do not let reviewers re-run tests** the implementer already ran. The reviewer evaluates the diff and the test results the implementer reported. Re-running wastes time and tokens.
+
+**Global constraints block.** Copy the plan's Global Constraints (or spec constraints) **verbatim** into the reviewer prompt — exact values, formats, relationships. This is the reviewer's attention lens. The reviewer template already contains process rules; you add the task-specific constraints.
+
+**Do not paste accumulated history into dispatch prompts.** Each dispatch gets exactly the context it needs — the task text, the diff, the constraints. A real session once dispatched 42k characters where 99% was pasted conversation history. The reviewer cannot use that; it dilutes focus.
+
+**Dispatch the diff, not a summary.** The reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the commit range, the diff, and the task description — the reviewer prompt templates (`spec-reviewer-prompt.md`, `code-quality-reviewer-prompt.md` for per-task; `code-reviewer.md` via the requesting-code-review skill for final acceptance) already shape this.
+
+**Handling findings:**
+- **Critical + Important** → dispatch a fix subagent. Each fix dispatch must include: the test name that covers the fix, the command to run it, and the expected output.
+- **Minor** → record in the todo list / ledger; the final acceptance review triages them. Do not dispatch per-Minor fix subagents.
+- **Plan-mandated behavior flagged as a defect** → the plan overrode a default. Do not auto-fix. Surface to your human partner for adjudication: "Reviewer flagged X, but the plan mandated Y. Which wins?"
+- **Final review findings** → dispatch ONE fix subagent carrying all findings, not one subagent per finding.
 
 ## Final Acceptance Review
 

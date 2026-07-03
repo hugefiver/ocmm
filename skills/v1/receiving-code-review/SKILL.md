@@ -4,9 +4,11 @@ description: Use when receiving code review feedback, before implementing sugges
 ---
 
 <!-- v1 fork of superpowers/receiving-code-review.
-     Upstream: obra/superpowers v6.0.3.
+     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
      Adjustments: no content changes needed — this skill is already
-     self-contained and does not reference excluded skills.
+     self-contained and does not reference excluded skills. Upstream v6.1.1+
+     changes (de-CLAUDE.md hardcoding, "Circle K" → direct expression) were
+     already absent from this fork's base; no merge required.
      See docs/v1-maintenance.md for sync rules. -->
 
 # Code Review Reception
