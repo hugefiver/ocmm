@@ -19,6 +19,10 @@ export interface PlatformPackageJson {
   version: string
   description: string
   license: "LicenseRef-AAAPL"
+  repository: {
+    type: "git"
+    url: "https://github.com/hugefiver/ocmm"
+  }
   os: readonly NodeJS.Platform[]
   cpu: readonly NodeJS.Architecture[]
   libc?: readonly string[]
@@ -66,6 +70,10 @@ export function platformPackageJson(version: string, platformPackage: OcmmLspPla
     version,
     description: `Native ocmm-lsp binary package for ${platformPackage.target}.`,
     license: "LicenseRef-AAAPL",
+    repository: {
+      type: "git",
+      url: "https://github.com/hugefiver/ocmm",
+    },
     os: [...platformPackage.os],
     cpu: [...platformPackage.cpu],
     ...(platformPackage.libc ? { libc: [...platformPackage.libc] } : {}),
