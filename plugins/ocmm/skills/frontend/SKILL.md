@@ -1,6 +1,6 @@
 ---
 name: frontend
-description: "MUST USE for ANY frontend, web UI, UX, or visual work — building, styling, or redesigning pages/components, React project setup, performance audits, design QA. Routes three rulesets: design (anti-slop taste router over 12 taste skills + 69 brand DESIGN.md refs — Apple, Stripe, Linear, Notion, Vercel, Claude, Nike — plus React dev tooling gate: react-grab, react-scan, react-doctor), perfection (Lighthouse 100 in every category via real Playwright Chromium audits, NEVER the lighthouse CLI, never by weakening UX), ui-ux-db (searchable 50+ styles, 97 palettes, 57 font pairings, 99 UX guidelines). Triggers: frontend, UI, UX, design, redesign, styling, layout, animation, motion, taste, premium, luxury, minimal, brutalist, Awwwards, anti-slop, polish, DESIGN.md, mockup, react setup, react-scan, react-doctor, lighthouse, performance, Core Web Vitals, LCP, CLS, INP, SEO, accessibility, a11y, WCAG, audit my site, make this faster, color palette, font pairing, looks generic, make it pretty, like X brand."
+description: "MUST USE for ANY frontend, web UI, UX, or visual work — building, styling, or redesigning pages/components, React project setup, performance audits, design QA. Routes three rulesets: design (anti-slop taste router over 12 taste skills + 70 brand DESIGN.md refs — Apple, Stripe, Linear, Notion, Vercel, Claude, Nike, Aside — plus React dev tooling gate: react-grab, react-scan, react-doctor), perfection (Lighthouse 100 in every category via real Playwright Chromium audits, NEVER the lighthouse CLI, never by weakening UX), ui-ux-db (searchable 50+ styles, 97 palettes, 57 font pairings, 99 UX guidelines). Triggers: frontend, UI, UX, design, redesign, styling, layout, animation, motion, taste, premium, luxury, minimal, brutalist, Awwwards, anti-slop, polish, DESIGN.md, mockup, react setup, react-scan, react-doctor, lighthouse, performance, Core Web Vitals, LCP, CLS, INP, SEO, accessibility, a11y, WCAG, audit my site, make this faster, color palette, font pairing, looks generic, make it pretty, like X brand, clone site, clone from url."
 ---
 
 # Frontend
@@ -19,7 +19,7 @@ This file is a router, not a rulebook. The rules live in three rulesets under `r
 
 ## Ruleset 1 — design (`references/design/`)
 
-The reference library has one architecture file, 12 taste skills (Layer A — *how to execute*), and 69 brand design systems (Layer B — *what it should look like*). Most non-trivial tasks load **one Layer A + one Layer B**. `README.md` carries the full routing flow, stacking rules, anti-patterns, and the mandatory browser-based Design QA phase; `_INDEX.md` catalogs all 81 files with mood-to-brand mappings — read it whenever routing is not obvious from the tables below.
+The reference library has one architecture file, 12 taste skills (Layer A — *how to execute*), and 70 brand design systems (Layer B — *what it should look like*). Most non-trivial tasks load **one Layer A + one Layer B**. `README.md` carries the full routing flow, stacking rules, anti-patterns, and the mandatory browser-based Design QA phase; `_INDEX.md` catalogs all 83 files with mood-to-brand mappings — read it whenever routing is not obvious from the tables below.
 
 ### Layer 0 — architecture
 
@@ -44,7 +44,7 @@ The reference library has one architecture file, 12 taste skills (Layer A — *h
 
 ### Layer B — brand design systems (orthogonal to Layer A; stack freely)
 
-When the user names a brand or site — "Linear-style", "like Stripe's landing" — load `references/design/<brand>.md` as the token source of truth (palette, type scale, components, do/don'ts). Coverage includes `apple` `stripe` `linear.app` `notion` `vercel` `claude` `figma` `airbnb` `nike` `tesla` `spotify` `raycast` `revolut` and ~56 more; the full list with mood shortcuts is in `_INDEX.md`. Extract the tokens and apply them to the project's own content — never copy logos or trademarked imagery. If the named brand is missing, fall back to a Layer A mood match or the `open-design` skill.
+When the user names a brand or site — "Linear-style", "like Stripe's landing", "Aside-style" — load `references/design/<brand>.md` as the token source of truth (palette, type scale, components, do/don'ts). Coverage includes `apple` `stripe` `linear.app` `notion` `vercel` `claude` `figma` `airbnb` `nike` `tesla` `spotify` `raycast` `revolut` `aside` and ~56 more; the full list with mood shortcuts is in `_INDEX.md`. Extract the tokens and apply them to the project's own content — never copy logos or trademarked imagery. If the named brand is missing, fall back to a Layer A mood match or the `open-design` skill. When the user gives a live URL to clone, load `references/design/clone-from-url.md` for the runtime extraction workflow.
 
 ### React dev tooling
 
@@ -86,6 +86,8 @@ Domains: `product` `style` `typography` `color` `landing` `chart` `ux` `react` `
 | "Build a landing page" (no direction given) | `design/README.md` + `design/taste-skill.md` + `perfection/README.md` |
 | "Linear-style landing page" | `design/README.md` + `design/linear.app.md` + `design/taste-skill.md` + `perfection/README.md` |
 | "Premium SaaS hero like Stripe" | `design/README.md` + `design/stripe.md` + `design/soft-skill.md` + `perfection/README.md` |
+| "Aside-style agent-browser landing" | `design/README.md` + `design/aside.md` + `design/taste-skill.md` + `perfection/README.md` |
+| "Clone this site" / "rebuild `<url>`" | `design/README.md` + `design/clone-from-url.md` + `perfection/README.md` |
 | "Improve this existing dashboard" | `design/README.md` + `design/redesign-skill.md` + `perfection/README.md` |
 | "Audit my site" / "make this page faster" | `perfection/README.md` (+ `perfection/react-perf-tooling.md` if React) |
 | "Mockup image of a fintech app" — no code | `design/imagegen-frontend-mobile.md` (+ a Layer B brand if named) |
@@ -104,7 +106,7 @@ Domains: `product` `style` `typography` `color` `landing` `chart` `ux` `react` `
 
 | Situation | Load |
 |---|---|
-| Brand/style not among the 69 in `references/design/`, or the user says "Open Design" | `open-design` skill — the local nexu-io/open-design library (137+ design skills, 150+ design systems) |
+| Brand/style not among the 70 in `references/design/`, or the user says "Open Design" | `open-design` skill — the local nexu-io/open-design library (137+ design skills, 150+ design systems) |
 | Driving a browser for the Design QA phase | `agent-browser` skill |
 | Pure TypeScript/logic work with zero visual surface | `programming` skill alone — this skill adds nothing there |
 

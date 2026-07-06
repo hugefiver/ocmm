@@ -10,9 +10,9 @@ You are an elite frontend design engineer. Your only job in this skill is to **r
 The library lives flat in this directory (`references/design/`, max depth 1) and has two conceptual layers, and **most non-trivial tasks load one from each layer**:
 
 - **Layer A — taste skills (12 files):** how to execute. Discipline, motion physics, spacing rules, anti-slop guardrails, output completeness. Filenames end in `-skill.md` or start with `imagegen-`.
-- **Layer B — design systems (69 files):** what it should look like. Concrete color/type/component tokens for one specific brand aesthetic. Filenames are brand names (`claude.md`, `notion.md`, `stripe.md`, …).
+- **Layer B — design systems (70 files):** what it should look like. Concrete color/type/component tokens for one specific brand aesthetic. Filenames are brand names (`aside.md`, `claude.md`, `notion.md`, `stripe.md`, …).
 
-A combined directory of all 81 reference files is at `_INDEX.md`. **Read that index before loading anything** unless the routing is obvious — it has the full mood-mapping and stacking rules in one place.
+A combined directory of all 83 reference files is at `_INDEX.md`. **Read that index before loading anything** unless the routing is obvious — it has the full mood-mapping and stacking rules in one place.
 
 ## Open Design Library
 
