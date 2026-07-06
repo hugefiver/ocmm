@@ -238,18 +238,21 @@ jobs:
           for pkg in packages/ocmm-lsp-*; do
             [ -d "$pkg" ] || continue
 
-            npm pack "$pkg" --pack-destination release-assets --json > "$(mktemp)"
-
             name="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.name)' "$pkg/package.json")"
             version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$pkg/package.json")"
+            publish_dir="$RUNNER_TEMP/npm-publish/$name"
+            rm -rf "$publish_dir"
+            mkdir -p "$(dirname "$publish_dir")"
+            cp -a "$pkg" "$publish_dir"
+
+            (
+              cd "$publish_dir"
+              npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets" --json > "$(mktemp)"
+            )
 
             if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "$name@$version is already published to npmjs.org; skipping publish."
             else
-              publish_dir="$RUNNER_TEMP/npm-publish/$name"
-              rm -rf "$publish_dir"
-              mkdir -p "$(dirname "$publish_dir")"
-              cp -a "$pkg" "$publish_dir"
               (
                 cd "$publish_dir"
                 npm publish --registry=https://registry.npmjs.org --access public

@@ -1067,15 +1067,17 @@ lsp-package:
           name="$(node -p "JSON.parse(require('node:fs').readFileSync('$pkg/package.json','utf8')).name")"
           version="$(node -p "JSON.parse(require('node:fs').readFileSync('$pkg/package.json','utf8')).version")"
           cp "$pkg/bin"/ocmm-lsp-* release-assets/
+          publish_dir="$RUNNER_TEMP/npm-publish/$name"
+          rm -rf "$publish_dir"
+          mkdir -p "$(dirname "$publish_dir")"
+          cp -a "$pkg" "$publish_dir"
+          (
+            cd "$publish_dir"
+            npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets" --json
+          )
           if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "$name@$version already exists on npmjs.org; skipping."
-            npm pack "$pkg" --pack-destination release-assets --json
           else
-            npm pack "$pkg" --pack-destination release-assets --json
-            publish_dir="$RUNNER_TEMP/npm-publish/$name"
-            rm -rf "$publish_dir"
-            mkdir -p "$(dirname "$publish_dir")"
-            cp -a "$pkg" "$publish_dir"
             (
               cd "$publish_dir"
               npm publish --registry=https://registry.npmjs.org --access public
