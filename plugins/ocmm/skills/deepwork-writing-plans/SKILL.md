@@ -192,7 +192,7 @@ After the loop exits, determine whether user approval is required:
 After saving the plan, proceed to the subagent-driven-development skill to execute it.
 
 **Execution:**
-- Fresh subagent per task + two-stage review (spec compliance, then code quality)
+- Fresh subagent per task + completion/integration check after each returned agent + final acceptance review once after all tasks
 - Continuous execution — no pause between tasks
 
 ## Codex Compatibility

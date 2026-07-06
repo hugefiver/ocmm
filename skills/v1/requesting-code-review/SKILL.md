@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
+description: Use after all implementation tasks complete, after major features are integrated, or before merging to verify work meets requirements
 ---
 
 <!-- v1 fork of superpowers/requesting-code-review.
@@ -15,19 +15,19 @@ description: Use when completing tasks, implementing major features, or before m
 
 Dispatch a code reviewer subagent to catch issues before they cascade. The reviewer gets precisely crafted context for evaluation — never your session's history. This keeps the reviewer focused on the work product, not your thought process, and preserves your own context for continued work.
 
-**Core principle:** Review early, review often.
+**Core principle:** Review the integrated change set once implementation work is complete. Mid-stream reviews are exceptions for blockers, high-risk uncertainty, or explicit user requests for strict stepwise review.
 
 ## When to Request Review
 
 **Mandatory:**
-- After each task in subagent-driven development
-- After completing major feature
+- After all implementation tasks complete
+- After completing a major feature
 - Before merge to main
 
 **Optional but valuable:**
-- When stuck (fresh perspective)
-- Before refactoring (baseline check)
-- After fixing complex bug
+- When stuck after concrete evidence gathering (fresh perspective)
+- Before high-risk refactoring that changes architecture/security/performance behavior
+- After fixing a complex bug when the fix remains uncertain after local verification
 
 ## How to Request
 
@@ -49,7 +49,7 @@ Use Task tool with `general-purpose` type, fill template at `code-reviewer.md`
 
 **3. Act on feedback:**
 - Fix Critical issues immediately
-- Fix Important issues before proceeding
+- Fix Important issues before declaring done
 - Note Minor issues for later
 - Push back if reviewer is wrong (with reasoning)
 
@@ -80,16 +80,16 @@ Two reviewer agents are available, with distinct semantics:
 ## Example
 
 ```
-[Just completed Task 2: Add verification function]
+[All implementation tasks complete: Add verification and repair workflow]
 
-You: Let me request code review before proceeding.
+You: Let me request final acceptance review before declaring this done.
 
 BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
 HEAD_SHA=$(git rev-parse HEAD)
 
 [Dispatch code reviewer subagent]
   DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
-  PLAN_OR_REQUIREMENTS: Task 2 from docs/superpowers/plans/deployment-plan.md
+  PLAN_OR_REQUIREMENTS: docs/superpowers/plans/deployment-plan.md
   BASE_SHA: a7981ec
   HEAD_SHA: 3df7661
 
@@ -98,10 +98,11 @@ HEAD_SHA=$(git rev-parse HEAD)
   Issues:
     Important: Missing progress indicators
     Minor: Magic number (100) for reporting interval
-  Assessment: Ready to proceed
+  Assessment: Not approved until progress indicators are fixed
 
 You: [Fix progress indicators]
-[Continue to Task 3]
+[Re-run final acceptance review]
+[Declare done only after reviewer approval]
 ```
 
 ## Red Flags
@@ -109,7 +110,7 @@ You: [Fix progress indicators]
 **Never:**
 - Skip review because "it's simple"
 - Ignore Critical issues
-- Proceed with unfixed Important issues
+- Declare done with unfixed Important issues
 - Argue with valid technical feedback
 
 **If reviewer wrong:**

@@ -84,10 +84,13 @@ Subagent (general-purpose): "Fix tool-approval-race-conditions.test.ts failures 
 ### 4. Review and Integrate
 
 When agents return:
-- Read each summary
+- Read each summary and captured evidence
+- Inspect touched files/diff for each agent's scope
 - Verify fixes don't conflict
-- Run full test suite
+- Run targeted tests for each changed area when available, then run the full suite
 - Integrate all changes
+
+This step is a completion/integration check: confirm each agent finished its scope, detect conflicts, and verify the combined result. It is not a prompt to dispatch a full spec-reviewer or code-quality-reviewer for each agent. The final acceptance review over the whole change set happens after all tasks are integrated.
 
 ## Agent Prompt Structure
 
@@ -175,10 +178,13 @@ Agent 3 → Fix tool-approval-race-conditions.test.ts
 ## Verification
 
 After agents return:
-1. **Review each summary** - Understand what changed
-2. **Check for conflicts** - Did agents edit same code?
-3. **Run full suite** - Verify all fixes work together
-4. **Spot check** - Agents can make systematic errors
+1. **Read each summary and evidence** - Understand what changed and what proof the agent captured
+2. **Inspect touched files/diff** - Confirm the changes match each agent's scope
+3. **Check for conflicts** - Did agents edit the same code or make incompatible assumptions?
+4. **Run targeted checks, then full suite** - Verify each changed area when possible, then verify all fixes work together
+5. **Spot check** - Agents can make systematic errors
+
+Treat this as a completion/integration check across the parallel tasks, not as a per-agent full reviewer loop. The parent workflow (e.g., subagent-driven-development) performs the final acceptance review after all tasks are integrated.
 
 ## Real-World Impact
 

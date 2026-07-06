@@ -14,11 +14,9 @@ description: Use when executing implementation plans with independent tasks in t
      (no pre-judging, no open-ended directives, verbatim global constraints, no
      history pasting, findings handling by severity); Narration discipline rule;
      task-type analysis hint (prefer dispatching-parallel-agents for independent
-     tasks). Watch-items (not yet decided): two-stage→single task reviewer
-     merge (upstream collapsed spec-reviewer + code-quality-reviewer into one
-     task-reviewer; v1 retains two-stage as deliberate design — spec-first
-     catches wrong-direction code before quality review); ⚠️ Items section
-     (reviewer "Cannot verify from diff" items). Did NOT sync:
+     tasks). v1 intentionally replaces per-task reviewer loops with
+     completion/integration checks plus one final acceptance review; ⚠️ Items
+     section (reviewer "Cannot verify from diff" items). Did NOT sync:
      review-package/task-brief bash scripts (Windows incompatible); progress
      ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
      (depend on scripts).
@@ -26,11 +24,11 @@ description: Use when executing implementation plans with independent tasks in t
 
 # Subagent-Driven Development
 
-Execute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.
+Execute plan by dispatching a fresh subagent per task, running a completion/integration check after each returned agent, and running one final acceptance review after all tasks are done.
 
 **Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
 
-**Core principle:** Fresh subagent per task + two-stage review (spec then quality) = high quality, fast iteration
+**Core principle:** Fresh subagent per task + per-agent completion/integration check + final acceptance review = high quality without drowning in per-subtask reviews
 
 **Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are: BLOCKED status you cannot resolve, ambiguity that genuinely prevents progress, or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
 
@@ -51,12 +49,10 @@ Execute plan by dispatching fresh subagent per task, with two-stage review after
    a. Dispatch implementer subagent (use implementer-prompt.md template)
    b. If implementer asks questions, answer and re-dispatch
    c. Implementer implements, tests, commits, self-reviews
-   d. Dispatch spec reviewer subagent (use spec-reviewer-prompt.md template)
-   e. If spec reviewer finds gaps, implementer fixes, re-review
-   f. Dispatch code quality reviewer subagent (use code-quality-reviewer-prompt.md template)
-   g. If code quality reviewer finds issues, implementer fixes, re-review
-   h. Mark task complete in TodoWrite
-3. **After all tasks:** Dispatch final code reviewer subagent for entire implementation (use requesting-code-review skill)
+   d. **Completion/Integration check (not a full review):** Read the agent's summary, inspect touched files/diff, run targeted tests or record implementer evidence, verify the task is complete, and check whether the change conflicts with earlier tasks or needs follow-up by the same implementer
+   e. If the completion check finds gaps, re-dispatch the same implementer to fix them
+   f. Mark task complete in TodoWrite
+3. **After all tasks:** Dispatch final code reviewer subagent for the entire implementation (use requesting-code-review skill)
 
 ## Model Selection
 
@@ -80,9 +76,9 @@ Use the least powerful model that can handle each role — but **always specify 
 
 Implementer subagents report one of four statuses. Handle each appropriately:
 
-**DONE:** Proceed to spec compliance review.
+**DONE:** Run the completion/integration check, then continue to the next task. Do not dispatch spec-reviewer or code-quality-reviewer for a clean DONE result.
 
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
+**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, resolve them before continuing. If the concerns indicate high risk or cross-task conflict, consult a reviewer early; otherwise note them and continue after the completion check.
 
 **NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
 
@@ -97,8 +93,8 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 ## Prompt Templates
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
-- `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
-- `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent
+- `./spec-reviewer-prompt.md` - Optional narrow consultation when a completion check reveals a scope/compliance risk
+- `./code-quality-reviewer-prompt.md` - Optional narrow consultation when a completion check reveals a quality/maintainability risk
 
 ## TDD Cycle
 
@@ -116,41 +112,69 @@ Each implementation task follows TDD:
 - Subagent can ask questions (before AND during work)
 - Same session (no handoff)
 - Continuous progress (no waiting)
-- Review checkpoints automatic
+- Completion checkpoints automatic
 - No file reading overhead (controller provides full text)
 - Controller curates exactly what context is needed
 - Questions surfaced before work begins (not after)
+- One final acceptance review covers the whole change instead of repeating full reviews per subtask
 
 ## Red Flags
 
 **Never:**
 - Start implementation on main/master branch without explicit user consent
-- Skip reviews (spec compliance OR code quality)
+- Skip the completion/integration check after an implementer returns
+- Treat a completion/integration check as a substitute for the final acceptance review
+- Dispatch spec-reviewer/code-quality-reviewer automatically after every DONE subtask
 - Proceed with unfixed issues
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Make subagent read plan file (provide full text instead)
 - Skip scene-setting context (subagent needs to understand where task fits)
 - Ignore subagent questions (answer before letting them proceed)
-- Accept "close enough" on spec compliance (spec reviewer found issues = not done)
-- Skip review loops (reviewer found issues = implementer fixes = review again)
-- Let implementer self-review replace actual review (both are needed)
-- Start code quality review before spec compliance is approved (wrong order)
-- Move to next task while either review has open issues
+- Accept "close enough" when the completion check shows the task is not done
+- Let implementer self-review replace the completion check or the final acceptance review
+- Move to next task while the completion check has open issues
+- Confuse early reviewer consultation (DONE_WITH_CONCERNS, BLOCKED, high-risk conflict) with routine per-task review
 
 **If subagent asks questions:**
 - Answer clearly and completely
 - Provide additional context if needed
 - Don't rush them into implementation
 
-**If reviewer finds issues:**
-- Implementer (same subagent) fixes them
-- Reviewer reviews again
-- Repeat until approved
-- Don't skip the re-review
+**If the completion check finds issues:**
+- Re-dispatch the same implementer to fix them
+- Re-run the completion check after fixes
+- Repeat until the task is actually done
+
+**If a reviewer is consulted early (only for DONE_WITH_CONCERNS, BLOCKED, user-requested strict step-by-step review, or obvious high-risk conflict):**
+- Implementer (same subagent) fixes the findings
+- Re-check only the narrow blocker or concern that triggered the consultation
+- Repeat only until that blocker is resolved
 
 **If subagent fails task:**
 - Dispatch fix subagent with specific instructions
 - Don't try to fix manually (context pollution)
+
+## Completion / Integration Check
+
+After each implementer returns, run this check before moving to the next task. It is lightweight and focused on factual verification, not a full reviewer-style audit.
+
+**Read the summary:** What was done, what was not done, what evidence the implementer provides.
+
+**Verify completion:** Does the diff satisfy the task's acceptance criteria? Are the files that should have been created/modified actually present?
+
+**Inspect touched files / diff:** Read the changed files or diff. Look for obvious omissions, scope creep, or unintended edits.
+
+**Run targeted tests or record evidence:** If the task has targeted tests, run them. If not, record the implementer's test output or other evidence in the todo list.
+
+**Check integration / conflicts:** Does this change conflict with earlier tasks (same files, inverted assumptions, duplicated logic)? If yes, resolve before continuing, either by re-dispatching the same implementer or by consulting a reviewer if the conflict is high-risk.
+
+**When to consult a reviewer early:** Early reviewer/oracle consultation is exceptional and reserved for:
+- DONE_WITH_CONCERNS where the concern is about correctness, architecture, or cross-task impact
+- BLOCKED that may indicate a plan or design flaw
+- User explicitly asks for strict step-by-step review
+- Obvious high-risk conflict or regression between tasks
+
+Do not dispatch spec-reviewer or code-quality-reviewer after a clean DONE result. If early consultation is needed, ask for the narrow issue to be evaluated; do not recreate the old routine per-task review loop.
 
 ## Constructing Reviewer Prompts
 
@@ -171,7 +195,7 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
 
 **Do not paste accumulated history into dispatch prompts.** Each dispatch gets exactly the context it needs — the task text, the diff, the constraints. A real session once dispatched 42k characters where 99% was pasted conversation history. The reviewer cannot use that; it dilutes focus.
 
-**Dispatch the diff, not a summary.** The reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the commit range, the diff, and the task description — the reviewer prompt templates (`spec-reviewer-prompt.md`, `code-quality-reviewer-prompt.md` for per-task; `code-reviewer.md` via the requesting-code-review skill for final acceptance) already shape this.
+**Dispatch the diff, not a summary.** When early consultation or final acceptance review is needed, the reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the commit range, the diff, and the task description. The final acceptance review uses `code-reviewer.md` via the requesting-code-review skill; `spec-reviewer-prompt.md` and `code-quality-reviewer-prompt.md` are optional narrow-consult tools only, not routine per-task gates.
 
 **Handling findings:**
 - **Critical + Important** → dispatch a fix subagent. Each fix dispatch must include: the test name that covers the fix, the command to run it, and the expected output.
@@ -181,7 +205,7 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
 
 ## Final Acceptance Review
 
-After all plan tasks are marked complete, before declaring the work done, run a final acceptance review over the full change set. This is distinct from the per-task reviews — it evaluates the work as a whole.
+After all plan tasks are marked complete, before declaring the work done, run a final acceptance review over the full change set. This is distinct from completion/integration checks — it evaluates the work as a whole.
 
 **1. Assess complexity:**
 
@@ -210,7 +234,7 @@ For both-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `
 
 **4. When to skip:**
 
-The final acceptance review is mandatory unless the user explicitly delegates ("你自己决定" / "无需批准自行继续"). For a single trivial task already covered by a per-task review, the orchestrator may judge a separate acceptance pass redundant — state this judgment explicitly.
+The final acceptance review is mandatory unless the user explicitly delegates ("你自己决定" / "无需批准自行继续"). Completion/integration checks do not replace final acceptance review.
 
 ## Integration
 

@@ -9,7 +9,7 @@
 | brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
+| requesting-code-review | all implementation tasks complete, a major feature completes, or before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | /remove-ai-slops |
@@ -74,11 +74,11 @@ a query tweak, copy/constants): plan directly in the notepad; 1-2
 success criteria (happy path + the riskiest edge); one real-surface
 proof of the user-visible deliverable, where auxiliary surfaces are
 first-class for CLI- or data-shaped work; self-review recorded in the
-notepad instead of the reviewer loop.
+notepad as local evidence.
 HEAVY — anything a fact above names: the `planner` agent decides waves;
 3+ success criteria (happy, edge, regression, adversarial risk), each
-with its own channel scenario and both evidence pieces; reviewer loop
-until unconditional approval.
+with its own channel scenario and both evidence pieces; final acceptance
+review after all implementation tasks.
 
 # Manual-QA channels
 Run real-surface proof yourself through the channel that faithfully
@@ -295,26 +295,21 @@ Track background task IDs and continuation session IDs separately. Use `backgrou
 # Subagent-dependent transition barrier
 Do not mark a `todowrite` step `completed` while an active child owns evidence for that step. Do not start dependent implementation until the research, audit, or review result is integrated or explicitly recorded as inconclusive. Do not write the final answer, PR handoff, or completion summary while required child agents remain unresolved.
 
-# Verification gate (TRIGGERED, NOT OPTIONAL)
+# Completion and review cadence
 
-Trigger when ANY apply:
-- Tier is HEAVY.
-- User demanded strict, rigorous, or proper review.
-LIGHT tier records a self-review in the notepad instead: re-read the
-diff, run diagnostics, confirm each criterion's evidence, and state in
-one line why the tier held.
+During implementation, each returned child/subagent result requires a
+completion/integration check: read the summary and evidence, inspect touched
+files/diff, run or record targeted checks, and resolve conflicts before moving
+to dependent work. This check is not a full reviewer loop.
 
-Procedure (NON-NEGOTIABLE):
-1. Ask `reviewer` for review with a self-contained `task(subagent_type="reviewer", ...)` prompt. Pass: goal, success criteria, scenario evidence, full diff, and notepad path. If the review can run while independent root work continues, use `run_in_background=true`; otherwise block for the result.
-2. Treat the reviewer's verdict as binding. There is NO "false
-   positive". Every concern is real. Do not argue. Do not minimise. Do
-   not explain it away.
-3. Fix every issue. Re-run the FULL scenario QA. Capture fresh
-   evidence. Update notepad.
-4. Re-submit to the SAME reviewer. Loop until you receive an
-   UNCONDITIONAL approval ("looks good but..." = REJECTION).
-5. Only on unconditional approval may you declare done. Stopping early
-   IS failure.
+Consult a reviewer/oracle early only for DONE_WITH_CONCERNS, BLOCKED status,
+high-risk conflicts/regressions, or explicit user demands for strict stepwise
+review. Keep early consultation narrow to the blocker or concern.
+
+After all implementation tasks complete, run the single Final Acceptance Review
+section below over the integrated change set. LIGHT work may record local
+self-review evidence, but it does not replace final acceptance review when that
+gate is required.
 
 # Commits
 Atomic, Conventional Commits (`<type>(<scope>): <imperative>` — feat /
@@ -349,15 +344,15 @@ message + present for approval.
 - First line literally: `DEEPWORK MODE ENABLED!`
 - After bootstrap: 1-2 paragraph plan summary + notepad path.
 - During execution: surface only state changes (RED captured, GREEN
-  captured, scenario PASS/FAIL with evidence paths, reviewer verdict).
+  captured, scenario PASS/FAIL with evidence paths, completion check outcome).
 - Final message: outcome + success-criteria checklist with evidence
-  refs + notepad path + reviewer approval (if gate triggered) + commit
+  refs + notepad path + final review approval (if required) + commit
   list (`<sha> <subject>`). No file-by-file changelog unless asked.
 
 # Stop rules
 - Stop ONLY when every scenario PASSES with captured evidence, every
-  cleanup receipt is recorded, notepad is current, and (if gate
-  triggered) reviewer approved unconditionally.
+  cleanup receipt is recorded, notepad is current, and final acceptance
+  review (if required) has approved unconditionally.
 - Leftover QA state (live process, `tmux` session, browser context,
   bound port, temp file / dir) means NOT done. Tear it down, record
   the receipt, then continue.
@@ -368,6 +363,6 @@ message + present for approval.
 
 ## Final Acceptance Review
 
-After all plan tasks complete, dispatch a final acceptance review over the full change set. Use `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section.
+After all plan tasks complete, dispatch a final acceptance review over the full change set. Use `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section. This is the only routine reviewer loop; skip it only on explicit user delegation.
 
 </deepwork-mode>

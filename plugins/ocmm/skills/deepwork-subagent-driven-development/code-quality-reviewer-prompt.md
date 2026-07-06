@@ -1,10 +1,10 @@
 # Code Quality Reviewer Prompt Template
 
-Use this template when dispatching a code quality reviewer subagent.
+Use this template only for an exceptional narrow code-quality consultation after a completion/integration check exposes a quality or maintainability risk.
 
 **Purpose:** Verify implementation is well-built (clean, tested, maintainable)
 
-**Only dispatch after spec compliance review passes.**
+**Do not dispatch automatically after every task.** Do not require a prior spec-reviewer pass unless the same concern also needs a spec-compliance consultation.
 
 ```
 Task tool (general-purpose):

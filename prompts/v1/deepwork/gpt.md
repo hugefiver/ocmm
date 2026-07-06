@@ -9,7 +9,7 @@
 | brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | completing a task or major feature; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
+| requesting-code-review | all implementation tasks complete, a major feature completes, or before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | /remove-ai-slops |
@@ -91,6 +91,8 @@ Do not stop to ask "should I continue?" after every step. Execute the plan unles
 ## BATCH PROCESSING
 
 When a request contains multiple independent edit points (e.g., "fix these 4 issues"), make all edits first, then run tests and review once collectively. Do NOT run a full test+review cycle per edit point. Only split into sequential batches when edit points have ordering dependencies (one must complete before the next is valid).
+
+When executing a plan with multiple subtasks: dispatch a fresh subagent per task, inspect completion/evidence/conflicts when each subagent returns, but do not start a full reviewer loop per subtask. Use the final acceptance review after all implementation tasks. This especially applies to GPT models: avoid the tendency to run spec/code-quality review after every small DONE subtask.
 
 ## AVAILABLE RESOURCES
 

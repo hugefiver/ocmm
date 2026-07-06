@@ -50,7 +50,7 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 | brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
 | writing-plans | multi-step task needs decomposition; includes mandatory plan-critic review loop | /writing-plans |
 | subagent-driven-development | executing an implementation plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | completing a task or major feature, before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
+| requesting-code-review | all implementation tasks complete, a major feature completes, or before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
 | receiving-code-review | receiving code review feedback, before implementing suggestions | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks with no shared state or sequential dependencies | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "clean AI code", "deslop", or wants systematic AI-slop cleanup | /remove-ai-slops |
