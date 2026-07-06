@@ -1,0 +1,15 @@
+{
+  "name": "ocmm-lsp-win32-arm64",
+  "version": "0.3.1",
+  "description": "Native ocmm-lsp binary package for aarch64-pc-windows-msvc.",
+  "license": "LicenseRef-AAAPL",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin"
+  ]
+}

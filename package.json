@@ -41,7 +41,11 @@
     "cli": "node --experimental-strip-types src/cli/profiles.ts",
     "clean": "rimraf dist target",
     "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts",
-    "gen:codex-plugin": "node --experimental-strip-types scripts/gen-codex-plugin.ts"
+    "gen:codex-plugin": "node --experimental-strip-types scripts/gen-codex-plugin.ts",
+    "sync:lsp-packages": "node --experimental-strip-types scripts/sync-lsp-packages.ts",
+    "stage:lsp-packages": "node --experimental-strip-types scripts/stage-lsp-packages.ts",
+    "check:release-version": "node --experimental-strip-types scripts/check-release-version.ts",
+    "normalize:ocmm-package": "node --experimental-strip-types scripts/normalize-ocmm-package.ts"
   },
   "keywords": [
     "opencode",
@@ -54,6 +58,19 @@
   "license": "LicenseRef-AAAPL",
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "optionalDependencies": {
+    "ocmm-lsp-linux-x64-gnu": "workspace:*",
+    "ocmm-lsp-linux-arm64-gnu": "workspace:*",
+    "ocmm-lsp-linux-x64-musl": "workspace:*",
+    "ocmm-lsp-linux-arm64-musl": "workspace:*",
+    "ocmm-lsp-darwin-x64": "workspace:*",
+    "ocmm-lsp-darwin-arm64": "workspace:*",
+    "ocmm-lsp-win32-x64": "workspace:*",
+    "ocmm-lsp-win32-arm64": "workspace:*"
+  },
+  "ocmm": {
+    "lspVersion": "0.3.1"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

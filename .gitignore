@@ -8,4 +8,5 @@ dist/
 target/
 *.log
 .DS_Store
-pnpm-workspace.yaml
+packages/ocmm-lsp-*/bin/
+packages/ocmm-lsp-*/*.tgz

@@ -31,13 +31,37 @@ ocmm supports two workflows, switchable via the `workflow` config field:
 
 ## Install
 
+### From npmjs.org
+
+The main `ocmm` package is published to npmjs.org as `ocmm`. Native LSP binaries are per-platform optional dependencies — npm installs the matching platform package for your system automatically. Use `--omit=optional` to skip native binaries if you only need the plugin logic:
+
+```bash
+pnpm add ocmm
+# or: npm install ocmm
+```
+
+The npm tarball excludes native LSP binaries to keep it platform-agnostic. When installed with default options, the matching `ocmm-lsp-<platform>` optional package is fetched from npmjs.org alongside the main package. Runtime resolution: optional platform package first, then bundled `dist/bin` fallback (GitHub Release/Codex tarballs only), then local build / PATH.
+
+```jsonc
+// opencode.json
+{ "plugin": ["./node_modules/ocmm/dist/index.js"] }
+```
+
+For Codex, add the installed package root as a local marketplace:
+
+```bash
+codex plugin marketplace add ./node_modules/ocmm --json
+codex plugin add ocmm@ocmm-local --json
+```
+
 ### From GitHub Release
 
-Published releases do not require npmjs.org. Each GitHub Release contains:
+Main package releases (`vX.Y.Z`) publish self-contained OpenCode/Codex plugin tarballs and their checksums. Standalone native `ocmm-lsp-*` executables and platform package `.tgz` assets belong to the separate `ocmm-lsp-vA.B.C` release lane.
+
+A main `vX.Y.Z` release contains:
 
 - `ocmm-opencode-plugin-<version>.tgz` — package-manager install package for the OpenCode plugin, CLI wrappers, Codex bundle, and bundled native binaries.
 - `ocmm-codex-plugin-<version>.tgz` — direct Codex plugin package root for local marketplace installation.
-- `ocmm-lsp-*` — standalone native executables for external-program or custom `OCMM_LSP_COMMAND` setups.
 - `SHA256SUMS.txt` — checksums for every release asset.
 
 For OpenCode, install the release tarball asset URL with your package manager:
@@ -62,14 +86,14 @@ codex plugin marketplace add ./node_modules/ocmm --json
 codex plugin add ocmm@ocmm-local --json
 ```
 
-Or install directly from the Codex release package:
+Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/ocmm` and point the marketplace at that directory:
 
 ```bash
 VERSION=0.1.1
 curl -L -o "ocmm-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-codex-plugin-${VERSION}.tgz"
-mkdir -p .codex-plugins
-tar -xzf "ocmm-codex-plugin-${VERSION}.tgz" -C .codex-plugins
-codex plugin marketplace add ".codex-plugins/ocmm-codex-plugin-${VERSION}" --json
+mkdir -p .codex-plugins/ocmm
+tar -xzf "ocmm-codex-plugin-${VERSION}.tgz" -C .codex-plugins/ocmm
+codex plugin marketplace add ".codex-plugins/ocmm" --json
 codex plugin add ocmm@ocmm-local --json
 ```
 
@@ -102,32 +126,42 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 
 ### Native LSP Support
 
-GitHub releases distribute `ocmm-lsp` in three forms:
+ocmm ships the `ocmm-lsp` native binary in multiple forms:
 
-- bundled inside the OpenCode package tarball / GitHub Packages package under `dist/bin/` and `plugins/ocmm/dist/bin/`;
-- bundled inside the Codex release package under `dist/bin/` and `plugins/ocmm/dist/bin/`;
-- standalone release assets named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
+- **npm optional platform packages**: 8 per-platform packages published to npmjs.org (`ocmm-lsp-linux-x64-gnu`, `ocmm-lsp-linux-arm64-gnu`, `ocmm-lsp-linux-x64-musl`, `ocmm-lsp-linux-arm64-musl`, `ocmm-lsp-darwin-x64`, `ocmm-lsp-darwin-arm64`, `ocmm-lsp-win32-x64`, `ocmm-lsp-win32-arm64`). npm installs the matching one automatically based on your OS, CPU, and libc.
+- **bundled inside GitHub Release tarballs** under `dist/bin/` and `plugins/ocmm/dist/bin/`;
+- **standalone release assets** named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
+
+Runtime resolution priority (first match wins):
+
+1. Optional npm platform package (`node_modules/ocmm-lsp-<platform>/bin/ocmm-lsp-<target>`)
+2. Bundled release binary (`dist/bin/ocmm-lsp-<target>`) — GitHub Release tarballs only
+3. Local Cargo release/debug build
+4. `cargo run` from `crates/ocmm-lsp/`
+5. PATH `ocmm-lsp`
+
+Linux builds cover both glibc (GNU) and musl libc targets, so Alpine and other musl-based distributions are now fully supported out of the box.
 
 Native binaries are built for:
 
-| Platform | Asset |
-| --- | --- |
-| Linux x64 glibc | `ocmm-lsp-x86_64-unknown-linux-gnu` |
-| Linux arm64 glibc | `ocmm-lsp-aarch64-unknown-linux-gnu` |
-| Windows x64 | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
-| Windows arm64 | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
-| macOS x64 | `ocmm-lsp-x86_64-apple-darwin` |
-| macOS arm64 | `ocmm-lsp-aarch64-apple-darwin` |
+| Platform | npm package | Asset |
+| --- | --- | --- |
+| Linux x64 glibc | `ocmm-lsp-linux-x64-gnu` | `ocmm-lsp-x86_64-unknown-linux-gnu` |
+| Linux arm64 glibc | `ocmm-lsp-linux-arm64-gnu` | `ocmm-lsp-aarch64-unknown-linux-gnu` |
+| Linux x64 musl | `ocmm-lsp-linux-x64-musl` | `ocmm-lsp-x86_64-unknown-linux-musl` |
+| Linux arm64 musl | `ocmm-lsp-linux-arm64-musl` | `ocmm-lsp-aarch64-unknown-linux-musl` |
+| macOS x64 | `ocmm-lsp-darwin-x64` | `ocmm-lsp-x86_64-apple-darwin` |
+| macOS arm64 | `ocmm-lsp-darwin-arm64` | `ocmm-lsp-aarch64-apple-darwin` |
+| Windows x64 | `ocmm-lsp-win32-x64` | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
+| Windows arm64 | `ocmm-lsp-win32-arm64` | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
 
-Linux musl distributions such as Alpine are not covered by the release binaries; build locally with `pnpm run build:lsp` or set `OCMM_LSP_COMMAND` to a custom command.
+ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocmm-lsp mcp` server by default. Resolution prefers optional npm platform package first, then bundled release binaries in `dist/bin/`, then local Cargo release/debug builds, then `cargo run` from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. Set `OCMM_LSP_COMMAND` to force a custom command, add `disabledMcps:["lsp"]` to disable it, or define `mcp.servers.lsp` to override the built-in.
 
-ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocmm-lsp mcp` server by default. Resolution prefers bundled release binaries in `dist/bin/`, then local Cargo release/debug builds, then `cargo run` from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. Set `OCMM_LSP_COMMAND` to force a custom command, add `disabledMcps:["lsp"]` to disable it, or define `mcp.servers.lsp` to override the built-in.
-
-For direct external-program use, download the matching standalone asset and point `OCMM_LSP_COMMAND` at it:
+For direct external-program use, download the matching standalone asset from the `ocmm-lsp-vA.B.C` release and point `OCMM_LSP_COMMAND` at it:
 
 ```bash
-VERSION=0.1.1
-curl -L -o ~/.local/bin/ocmm-lsp "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-lsp-x86_64-unknown-linux-gnu"
+LSP_VERSION=0.1.1
+curl -L -o ~/.local/bin/ocmm-lsp "https://github.com/<owner>/ocmm/releases/download/ocmm-lsp-v${LSP_VERSION}/ocmm-lsp-x86_64-unknown-linux-gnu"
 chmod +x ~/.local/bin/ocmm-lsp
 OCMM_LSP_COMMAND="$HOME/.local/bin/ocmm-lsp" opencode run "check diagnostics"
 ```
@@ -309,6 +343,33 @@ Both `agents.*` and `categories.*` accept either shape:
 | `requirement`    | full `ModelRequirement` object                                                                   | If present, shorthand fields are ignored. Use this when you need `requiresProvider` / `requiresAnyModel` / `requiresModel`. |
 | `disabled`       | `true`                                                                                           | (Agents only.) Removes the agent from registration.                                                                         |
 | `description`    | string                                                                                           | Overrides the built-in description (used in agent registration).                                                            |
+
+## Hook defaults
+
+`disabledHooks` in config controls which hooks are active. Default: `["directory-readme-injector"]` — only the directory README injector is disabled out of the box; all other hooks are enabled. The full list:
+
+| Hook name | Default | Purpose |
+| --- | --- | --- |
+| `directory-readme-injector` | **Disabled** | Read tool output appends the nearest `README.md` once per directory/session; disabled by default. |
+| `directory-agents-injector` | Enabled | Read tool output appends `AGENTS.md` directory context found upward from the read file, within project root, once per directory/session. |
+| `rules-injector` | Enabled | Appends configured rule blocks to matching Read/Write/Edit tool output when rules are enabled. |
+| `write-existing-file-guard` | Enabled | Tracks Read permissions; blocks `write` overwriting existing files and `edit`/`multiedit`/patch-style edits without prior read where applicable. |
+| `notepad-write-guard` | Enabled | Blocks `write`/`edit`/`multiedit` under `.omo/notepads/` and `.sisyphus/notepads/`. |
+| `bash-file-read-guard` | Enabled | Warns when a Bash command appears to be a simple file read (`cat`, `head`, `tail`); does not block. |
+| `bash-file-write-guard` | Enabled | Blocks Bash commands that write to existing project files through redirects, `tee`/`dd`/`install`/`truncate`, in-place editors, copy/move overwrites, or nested shell scripts. |
+| `question-label-truncator` | Enabled | Truncates ask-user-question option labels over 30 chars. |
+| `tasks-todowrite-disabler` | Enabled | Blocks `todoread` while the task system is active, making `todowrite` the source of truth. |
+| `webfetch-redirect-guard` | Enabled | Resolves HTTP redirects and rewrites the WebFetch URL to the final URL. |
+| `empty-task-response-detector` | Enabled | Replaces empty Task tool output with a warning/notice. |
+| `comment-checker` | Enabled | Warns on AI-attribution comments in `write`/`edit`/`multiedit` content unless a bypass marker is present. |
+| `plan-format-validator` | Enabled | Warns on malformed checklist lines in `.omo/plans/*.md` writes/edits. |
+| `read-image-resizer` | Enabled | Appends a dependency-free build notice for image Read outputs; does not resize. |
+| `json-error-recovery` | Enabled | Appends recovery instructions when tool output contains JSON parse errors. |
+| `fsync-skip-warning` | Enabled | Appends drained fsync skip warnings from the fsync tracker. |
+| `tool-output-truncator` | Enabled | Truncates very large selected tool outputs. |
+| `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
+| `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
+| `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
 
 ## Variant policy
 
@@ -543,15 +604,30 @@ Tests use `node --test --experimental-strip-types` (Node 22+) plus `cargo test` 
 
 ## Release
 
-Releases are GitHub-only. Push a tag that matches `package.json` (`vX.Y.Z`) or run the `Release` workflow manually against an existing tag. The workflow:
+ocmm publishes through two independent release lanes.
 
-1. Runs typecheck and tests.
-2. Builds native `ocmm-lsp` binaries for Linux x64/arm64 glibc, Windows x64/arm64, and macOS x64/arm64.
-3. Builds TypeScript, checks the generated Codex plugin bundle, downloads all native binaries into `dist/bin/`, smoke-tests both `node dist/cli/ocmm-lsp.js mcp` and `node plugins/ocmm/dist/cli/ocmm-lsp.js mcp`, and packs release install packages.
-4. Publishes `ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`, standalone native binaries, and `SHA256SUMS.txt` to GitHub Release assets.
-5. Publishes `@<owner>/ocmm` to GitHub Packages by default for tag releases, without publishing to npmjs.org.
+### ocmm-lsp release
 
-The OpenCode GitHub Release tarball and the GitHub Packages package contain the same runtime payload. The Codex tarball contains a package-root-shaped local marketplace install with the generated plugin and plugin-local bundled `ocmm-lsp` wrapper, which continues to work after Codex copies the plugin into its cache. Standalone `ocmm-lsp-*` assets are provided for users who want to manage the external LSP MCP binary outside the package wrapper.
+1. Bump `crates/ocmm-lsp/Cargo.toml` version.
+2. Tag `ocmm-lsp-vA.B.C` and push.
+3. CI builds 8 native binaries (Linux glibc x64/arm64, Linux musl x64/arm64, macOS x64/arm64, Windows x64/arm64).
+4. CI publishes 8 npm platform packages to npmjs.org (requires `NPM_TOKEN` secret).
+5. CI publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
+
+### ocmm release
+
+1. Set `package.json.version` and `package.json.ocmm.lspVersion` (must match an already-published `ocmm-lsp-vA.B.C` release).
+2. Regenerate the Codex plugin bundle: `pnpm run build:ts && pnpm run gen:codex-plugin`.
+3. Tag `vX.Y.Z` and push.
+4. CI downloads pinned `ocmm-lsp-v<lspVersion>` release assets, bundles them into GitHub Release tarballs.
+5. CI publishes to npmjs.org as `ocmm` (requires `NPM_TOKEN` secret).
+6. On tag pushes, CI also publishes `@<owner>/ocmm` to GitHub Packages (optional for manual dispatch).
+7. CI publishes self-contained tarballs (`ocmm-opencode-plugin-X.Y.Z.tgz`, `ocmm-codex-plugin-X.Y.Z.tgz`) and `SHA256SUMS.txt` to the GitHub Release.
+
+The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs are self-contained with bundled native binaries for all 8 platforms.
+
+Required secrets:
+- `NPM_TOKEN` — npmjs.org publish token for both `ocmm` and `ocmm-lsp-*` platform packages.
 
 ### Live integration test
 

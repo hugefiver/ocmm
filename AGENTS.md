@@ -14,20 +14,73 @@ All three must pass before committing. TypeScript tests use `node --test --exper
 
 ## Release Workflow
 
-The `.github/workflows/release.yml` workflow is GitHub-only: it publishes GitHub Release assets and, on tag releases or explicit manual opt-in, a scoped GitHub Packages package. Do not add npmjs.org publishing unless the user asks for that registry specifically.
+The `.github/workflows/release.yml` workflow has two independent lanes:
 
-Release tags must match `package.json` as `vX.Y.Z`. The Release assets include `ocmm-opencode-plugin-X.Y.Z.tgz`, `ocmm-codex-plugin-X.Y.Z.tgz`, standalone target-triple `ocmm-lsp-*` native binaries, and checksums. The OpenCode tarball and GitHub Packages package both include `dist/bin/ocmm-lsp-*` so the OpenCode `lsp` MCP can use the bundled native binary by default. The Codex tarball is a package-root-shaped local marketplace install and also includes plugin-local `plugins/ocmm/dist/{cli,shared,bin}` for the Codex `lsp` MCP after Codex copies the plugin into its cache. Standalone `ocmm-lsp-*` assets are also published for direct external-program use or custom `OCMM_LSP_COMMAND` setups.
+- **`ocmm-lsp-vA.B.C`** — publishes 8 native `ocmm-lsp` npm platform packages to npmjs.org and GitHub Release assets.
+- **`vX.Y.Z`** — publishes the main `ocmm` package to npmjs.org, GitHub Packages (`@<owner>/ocmm`), and self-contained GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`) plus checksums.
 
-The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. Bundled Linux binaries are glibc/GNU targets; musl users need a local build or `OCMM_LSP_COMMAND`. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
+### ocmm-lsp lane
+
+Tags matching `ocmm-lsp-v*` trigger the LSP-only lane:
+1. Verifies the tag matches `crates/ocmm-lsp/Cargo.toml` version.
+2. Builds 8 native binaries (Linux glibc x64/arm64, Linux musl x64/arm64, macOS x64/arm64, Windows x64/arm64).
+3. Stages platform packages under `packages/ocmm-lsp-*`, generates `package.json` manifests.
+4. Publishes 8 platform packages to npmjs.org (requires `NPM_TOKEN` secret).
+5. Publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
+
+### ocmm lane
+
+Tags matching `v*` (but NOT `ocmm-lsp-v*`) trigger the main package lane:
+1. Verifies the tag matches `package.json` version as `vX.Y.Z`.
+2. Runs typecheck and tests.
+3. Builds TypeScript.
+4. Downloads pinned `ocmm-lsp-v<lspVersion>` release assets from the `package.json.ocmm.lspVersion` release.
+5. Generates the Codex plugin bundle and smoke-tests LSP wrappers.
+6. Normalizes the package (strips native binaries from npmjs package, keeps them in GitHub Release staging).
+7. Publishes to npmjs.org as `ocmm` (requires `NPM_TOKEN` secret).
+8. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
+9. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
+
+The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/ocmm/dist/bin/`.
+
+The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
+
+### npm optional platform packages
+
+The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
+
+- `ocmm-lsp-linux-x64-gnu`
+- `ocmm-lsp-linux-arm64-gnu`
+- `ocmm-lsp-linux-x64-musl`
+- `ocmm-lsp-linux-arm64-musl`
+- `ocmm-lsp-darwin-x64`
+- `ocmm-lsp-darwin-arm64`
+- `ocmm-lsp-win32-x64`
+- `ocmm-lsp-win32-arm64`
+
+npm installs the matching optional package automatically for your OS/CPU/libc unless optional dependencies are omitted (e.g. `--omit=optional`, `npm_config_optional=false`, or the package manager skips optionals). GitHub Release tarballs already include the matching native binary, so the optional package is not needed there.
 
 The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/ocmm/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add ocmm@ocmm-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` and `dw-creative`. `dw-oracle` (self-supervision) defaults to a cross-gen model; `dw-reviewer` (external review) defaults to the same flagship family as the main agent.
 
 ### Publishing a new release
 
 ```bash
-# 1. Bump version in both files (keep them in sync)
-#    package.json: "version": "X.Y.Z" -> "X.Y.W"
-#    crates/ocmm-lsp/Cargo.toml: version = "X.Y.Z" -> "X.Y.W"
+# --- ocmm-lsp release ---
+# 1. Bump crates/ocmm-lsp/Cargo.toml version (can be independent of ocmm version)
+#    crates/ocmm-lsp/Cargo.toml: version = "A.B.C" -> "A.B.W"
+
+# 2. Tag and push
+git tag ocmm-lsp-vA.B.W
+git push origin master
+git push origin ocmm-lsp-vA.B.W
+
+# 3. Monitor the release workflow — builds 8 native binaries,
+#     publishes 8 npm platform packages and GitHub Release assets.
+
+# --- ocmm release ---
+# 1. Bump package.json: "version": "X.Y.Z" -> "X.Y.W"
+#    Set package.json.ocmm.lspVersion to the ocmm-lsp version this release
+#    should bundle (must match an already-published ocmm-lsp-vA.B.C release).
 
 # 2. Regenerate the Codex plugin bundle — the bundle embeds the version number
 #    in plugins/ocmm/.codex-plugin/plugin.json and plugins/ocmm/package.json.
@@ -46,11 +99,40 @@ git push origin vX.Y.W
 # 4. Monitor the release workflow
 #    https://github.com/<owner>/ocmm/actions/workflows/release.yml
 #    The "Verify" job runs typecheck, test, and the Codex bundle check.
-#    Six "Native ocmm-lsp" jobs build platform binaries in parallel.
+#    Eight "Native ocmm-lsp" jobs build platform binaries in parallel (LSP lane only).
 #    On success, "GitHub Release" publishes assets automatically.
 ```
 
 Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's `git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm` check fails if the committed bundle does not match what `gen:codex-plugin` produces from the current `package.json` version.
+
+`package.json.ocmm.lspVersion` pins the default LSP version for the main package release. This must match an already-published `ocmm-lsp-vA.B.C` release — the `stage-pinned-lsp` job downloads the pinned release assets by constructing `ocmm-lsp-v${lspVersion}`. The `ocmm` and `ocmm-lsp` versions are independent and do not need to be equal.
+
+## Hook defaults
+
+`disabledHooks` in config controls which hooks are active. Default: `["directory-readme-injector"]` — only the directory README injector is disabled out of the box; all other hooks are enabled. The full list:
+
+| Hook name | Default | Purpose |
+| --- | --- | --- |
+| `directory-readme-injector` | **Disabled** | Read tool output appends the nearest `README.md` once per directory/session; disabled by default. |
+| `directory-agents-injector` | Enabled | Read tool output appends `AGENTS.md` directory context found upward from the read file, within project root, once per directory/session. |
+| `rules-injector` | Enabled | Appends configured rule blocks to matching Read/Write/Edit tool output when rules are enabled. |
+| `write-existing-file-guard` | Enabled | Tracks Read permissions; blocks `write` overwriting existing files and `edit`/`multiedit`/patch-style edits without prior read where applicable. |
+| `notepad-write-guard` | Enabled | Blocks `write`/`edit`/`multiedit` under `.omo/notepads/` and `.sisyphus/notepads/`. |
+| `bash-file-read-guard` | Enabled | Warns when a Bash command appears to be a simple file read (`cat`, `head`, `tail`); does not block. |
+| `bash-file-write-guard` | Enabled | Blocks Bash commands that write to existing project files through redirects, `tee`/`dd`/`install`/`truncate`, in-place editors, copy/move overwrites, or nested shell scripts. |
+| `question-label-truncator` | Enabled | Truncates ask-user-question option labels over 30 chars. |
+| `tasks-todowrite-disabler` | Enabled | Blocks `todoread` while the task system is active, making `todowrite` the source of truth. |
+| `webfetch-redirect-guard` | Enabled | Resolves HTTP redirects and rewrites the WebFetch URL to the final URL. |
+| `empty-task-response-detector` | Enabled | Replaces empty Task tool output with a warning/notice. |
+| `comment-checker` | Enabled | Warns on AI-attribution comments in `write`/`edit`/`multiedit` content unless a bypass marker is present. |
+| `plan-format-validator` | Enabled | Warns on malformed checklist lines in `.omo/plans/*.md` writes/edits. |
+| `read-image-resizer` | Enabled | Appends a dependency-free build notice for image Read outputs; does not resize. |
+| `json-error-recovery` | Enabled | Appends recovery instructions when tool output contains JSON parse errors. |
+| `fsync-skip-warning` | Enabled | Appends drained fsync skip warnings from the fsync tracker. |
+| `tool-output-truncator` | Enabled | Truncates very large selected tool outputs. |
+| `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
+| `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
+| `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
 
 ## Live Integration Test
 

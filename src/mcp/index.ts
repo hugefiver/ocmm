@@ -5,8 +5,15 @@ import { fileURLToPath } from "node:url"
 
 import type { McpConfig, McpServerConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
-import { ocmmLspBinaryNames } from "../shared/ocmm-lsp-binary.ts"
-export { ocmmLspBinaryNames, ocmmLspReleaseTarget } from "../shared/ocmm-lsp-binary.ts"
+import { ocmmLspBinaryNames, ocmmLspPackageBinaryCandidates } from "../shared/ocmm-lsp-binary.ts"
+export {
+  ocmmLspBinaryNames,
+  ocmmLspPackageBinaryCandidates,
+  ocmmLspPackageName,
+  ocmmLspPlatformPackage,
+  ocmmLspPlatformPackages,
+  ocmmLspReleaseTarget,
+} from "../shared/ocmm-lsp-binary.ts"
 
 export type McpServerMap = Record<string, McpServerConfig>
 
@@ -44,7 +51,7 @@ export interface BuiltinMcpOptions {
 export interface OcmmLspCommandResolution {
   command: string[]
   enabled: boolean
-  source: "env" | "package-bin" | "target-release" | "target-debug" | "path" | "cargo-source" | "missing"
+  source: "env" | "platform-package" | "package-bin" | "target-release" | "target-debug" | "path" | "cargo-source" | "missing"
 }
 
 const OCMM_LSP_PROJECT_CONFIGS = [
@@ -270,6 +277,7 @@ export function resolveOcmmLspCommand(options: BuiltinMcpOptions = {}): OcmmLspC
   if (packageRoot) {
     const packageBinNames = ocmmLspBinaryNames()
     const candidates: Array<{ path: string; source: OcmmLspCommandResolution["source"] }> = [
+      ...ocmmLspPackageBinaryCandidates(packageRoot).map((path) => ({ path, source: "platform-package" as const })),
       ...packageBinNames.map((name) => ({ path: join(packageRoot, "dist", "bin", name), source: "package-bin" as const })),
       ...packageBinNames.map((name) => ({ path: join(packageRoot, "bin", name), source: "package-bin" as const })),
       { path: join(packageRoot, "target", "release", binName), source: "target-release" },

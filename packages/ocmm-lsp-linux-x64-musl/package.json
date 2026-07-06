@@ -1,0 +1,18 @@
+{
+  "name": "ocmm-lsp-linux-x64-musl",
+  "version": "0.3.1",
+  "description": "Native ocmm-lsp binary package for x86_64-unknown-linux-musl.",
+  "license": "LicenseRef-AAAPL",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "musl"
+  ],
+  "files": [
+    "bin"
+  ]
+}

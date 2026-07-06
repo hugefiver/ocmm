@@ -3,11 +3,19 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
+      - "ocmm-lsp-v*"
   workflow_dispatch:
     inputs:
+      release_kind:
+        description: "Release lane to publish"
+        required: true
+        type: choice
+        options:
+          - ocmm
+          - ocmm-lsp
       tag:
-        description: "Existing tag to publish, for example v0.1.1"
+        description: "Existing tag to publish, for example v0.3.1 or ocmm-lsp-v0.3.1"
         required: true
         type: string
       publish_github_package:
@@ -24,19 +32,22 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "11.9.0"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RELEASE_KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.release_kind || (startsWith(github.ref_name, 'ocmm-lsp-v') && 'ocmm-lsp' || (startsWith(github.ref_name, 'v') && 'ocmm' || 'unknown')) }}
 
 jobs:
   verify:
-    name: Verify
+    name: Verify (${{ github.event_name == 'workflow_dispatch' && inputs.release_kind || (startsWith(github.ref_name, 'ocmm-lsp-v') && 'ocmm-lsp' || (startsWith(github.ref_name, 'v') && 'ocmm' || 'unknown')) }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
       - uses: actions/setup-node@v6
         with:
@@ -55,104 +66,147 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate release route
+        run: |
+          case "$RELEASE_TAG" in
+            v*) tag_kind="ocmm" ;;
+            ocmm-lsp-v*) tag_kind="ocmm-lsp" ;;
+            *) echo "Unsupported release tag: $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+
+          if [ "$RELEASE_KIND" != "$tag_kind" ]; then
+            echo "release_kind=$RELEASE_KIND does not match tag $RELEASE_TAG ($tag_kind)" >&2
+            exit 1
+          fi
+
+          pnpm run check:release-version
+
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test
         run: pnpm test
 
+      - name: Build TypeScript for ocmm release
+        if: ${{ env.RELEASE_KIND == 'ocmm' }}
+        run: pnpm run build:ts
+
+      - name: Build TypeScript and native fallback for ocmm-lsp release
+        if: ${{ env.RELEASE_KIND == 'ocmm-lsp' }}
+        run: pnpm run build
+
       - name: Check generated Codex plugin bundle
         run: |
-          pnpm run build
           pnpm run gen:codex-plugin
-          node plugins/ocmm/dist/cli/ocmm-lsp.js --help
-          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/ocmm/dist/cli/ocmm-lsp.js mcp
           git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm
 
   native:
     name: Native ocmm-lsp (${{ matrix.platform }})
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm-lsp') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'ocmm-lsp-v')) }}
     runs-on: ${{ matrix.os }}
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-22.04
-            platform: linux-x64
-            binary: ocmm-lsp-x86_64-unknown-linux-gnu
-            source: target/release/ocmm-lsp
+            platform: linux-x64-gnu
+            rust_target: x86_64-unknown-linux-gnu
+            artifact: ocmm-lsp-x86_64-unknown-linux-gnu
+            source: target/x86_64-unknown-linux-gnu/release/ocmm-lsp
           - os: ubuntu-24.04-arm
-            platform: linux-arm64
-            binary: ocmm-lsp-aarch64-unknown-linux-gnu
-            source: target/release/ocmm-lsp
+            platform: linux-arm64-gnu
+            rust_target: aarch64-unknown-linux-gnu
+            artifact: ocmm-lsp-aarch64-unknown-linux-gnu
+            source: target/aarch64-unknown-linux-gnu/release/ocmm-lsp
+          - os: ubuntu-22.04
+            platform: linux-x64-musl
+            rust_target: x86_64-unknown-linux-musl
+            artifact: ocmm-lsp-x86_64-unknown-linux-musl
+            source: target/x86_64-unknown-linux-musl/release/ocmm-lsp
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64-musl
+            rust_target: aarch64-unknown-linux-musl
+            artifact: ocmm-lsp-aarch64-unknown-linux-musl
+            source: target/aarch64-unknown-linux-musl/release/ocmm-lsp
           - os: windows-latest
             platform: win32-x64
-            binary: ocmm-lsp-x86_64-pc-windows-msvc.exe
-            source: target/release/ocmm-lsp.exe
+            rust_target: x86_64-pc-windows-msvc
+            artifact: ocmm-lsp-x86_64-pc-windows-msvc.exe
+            source: target/x86_64-pc-windows-msvc/release/ocmm-lsp.exe
           - os: windows-11-arm
             platform: win32-arm64
-            binary: ocmm-lsp-aarch64-pc-windows-msvc.exe
-            source: target/release/ocmm-lsp.exe
+            rust_target: aarch64-pc-windows-msvc
+            artifact: ocmm-lsp-aarch64-pc-windows-msvc.exe
+            source: target/aarch64-pc-windows-msvc/release/ocmm-lsp.exe
           - os: macos-15-intel
             platform: darwin-x64
-            binary: ocmm-lsp-x86_64-apple-darwin
-            source: target/release/ocmm-lsp
+            rust_target: x86_64-apple-darwin
+            artifact: ocmm-lsp-x86_64-apple-darwin
+            source: target/x86_64-apple-darwin/release/ocmm-lsp
           - os: macos-14
             platform: darwin-arm64
-            binary: ocmm-lsp-aarch64-apple-darwin
-            source: target/release/ocmm-lsp
+            rust_target: aarch64-apple-darwin
+            artifact: ocmm-lsp-aarch64-apple-darwin
+            source: target/aarch64-apple-darwin/release/ocmm-lsp
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Check runner platform
-        shell: bash
-        run: |
-          node -e 'const actual = process.platform + "-" + process.arch; const expected = "${{ matrix.platform }}"; if (actual !== expected) throw new Error("runner " + actual + " does not match " + expected)'
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+          rustup target add ${{ matrix.rust_target }}
+
+      - name: Install Zig for musl targets
+        if: ${{ contains(matrix.rust_target, 'musl') }}
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Install cargo-zigbuild for musl targets
+        if: ${{ contains(matrix.rust_target, 'musl') }}
+        run: cargo install cargo-zigbuild --locked
 
       - name: Build native binary
-        run: cargo build --release -p ocmm-lsp
+        if: ${{ !contains(matrix.rust_target, 'musl') }}
+        run: cargo build --release -p ocmm-lsp --target ${{ matrix.rust_target }}
+
+      - name: Build musl native binary
+        if: ${{ contains(matrix.rust_target, 'musl') }}
+        run: cargo zigbuild --release -p ocmm-lsp --target ${{ matrix.rust_target }}
 
       - name: Stage native binary
         shell: bash
         run: |
           mkdir -p release-native
-          cp "${{ matrix.source }}" "release-native/${{ matrix.binary }}"
-          if [[ "${{ runner.os }}" != "Windows" ]]; then
-            chmod 755 "release-native/${{ matrix.binary }}"
+          cp "${{ matrix.source }}" "release-native/${{ matrix.artifact }}"
+          if [[ "${{ matrix.artifact }}" != *.exe ]]; then
+            chmod 755 "release-native/${{ matrix.artifact }}"
           fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.binary }}
-          path: release-native/${{ matrix.binary }}
+          name: ocmm-lsp-${{ matrix.platform }}
+          path: release-native/${{ matrix.artifact }}
           if-no-files-found: error
 
-  package:
-    name: Package GitHub artifacts
+  lsp-package:
+    name: Package and publish ocmm-lsp packages
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm-lsp') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'ocmm-lsp-v')) }}
     runs-on: ubuntu-latest
     needs:
       - verify
       - native
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
 
       - name: Enable pnpm
         run: |
@@ -163,11 +217,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check release version
-        run: |
-          node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); const expected = "v" + pkg.version; if (process.env.RELEASE_TAG !== expected) throw new Error("release tag " + process.env.RELEASE_TAG + " does not match package version " + expected)'
-
-      - name: Build TypeScript
-        run: pnpm run build:ts
+        run: pnpm run check:release-version
 
       - uses: actions/download-artifact@v8
         with:
@@ -175,43 +225,36 @@ jobs:
           path: dist/bin
           merge-multiple: true
 
-      - name: Prepare release assets
+      - name: Stage platform packages and release assets
         run: |
-          version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
           mkdir -p release-assets
-          find dist/bin -type f ! -name '*.exe' -exec chmod 755 {} +
-          pnpm run gen:codex-plugin
-          node dist/cli/ocmm-lsp.js --help
-          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
-          node plugins/ocmm/dist/cli/ocmm-lsp.js --help
-          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/ocmm/dist/cli/ocmm-lsp.js mcp
+          find dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
+          pnpm run stage:lsp-packages -- dist/bin
           cp dist/bin/ocmm-lsp-* release-assets/
-          pnpm pack --pack-destination release-assets
-          mv "release-assets/ocmm-${version}.tgz" "release-assets/ocmm-opencode-plugin-${version}.tgz"
 
-          codex_root_name="ocmm-codex-plugin-${version}"
-          codex_root="release-assets/${codex_root_name}"
-          mkdir -p "$codex_root"
-          cp package.json README.md LICENSE LICENSE.zh.md LICENSE.bilingual.md "$codex_root/"
-          cp -R .agents plugins dist "$codex_root/"
-          tar -czf "release-assets/${codex_root_name}.tgz" -C release-assets "$codex_root_name"
-          rm -rf "$codex_root"
+      - name: Pack and publish npmjs.org platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          : "${NODE_AUTH_TOKEN:?NPM_TOKEN secret is required to view and publish npmjs.org packages}"
 
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/dist/index.js"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.agents/plugins/marketplace.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/.codex-plugin/plugin.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/package.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/dist/cli/ocmm-lsp.js"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/dist/bin/ocmm-lsp-"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/plugins/ocmm/dist/bin/ocmm-lsp-"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/.agents/plugins/marketplace.json"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/plugins/ocmm/.codex-plugin/plugin.json"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/plugins/ocmm/package.json"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/dist/cli/ocmm-lsp.js"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -qx "${codex_root_name}/plugins/ocmm/dist/cli/ocmm-lsp.js"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -q "^${codex_root_name}/dist/bin/ocmm-lsp-"
-          tar -tzf "release-assets/${codex_root_name}.tgz" | grep -q "^${codex_root_name}/plugins/ocmm/dist/bin/ocmm-lsp-"
+          for pkg in packages/ocmm-lsp-*; do
+            [ -d "$pkg" ] || continue
 
+            npm pack "$pkg" --pack-destination release-assets --json > "$(mktemp)"
+
+            name="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.name)' "$pkg/package.json")"
+            version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$pkg/package.json")"
+
+            if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+              echo "$name@$version is already published to npmjs.org; skipping publish."
+            else
+              npm publish "$pkg" --registry=https://registry.npmjs.org --access public --provenance
+            fi
+          done
+
+      - name: Generate checksums
+        run: |
           cd release-assets
           shasum -a 256 * > SHA256SUMS.txt
 
@@ -221,39 +264,241 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
-      - name: Publish scoped package to GitHub Packages
-        if: github.event_name == 'push' || inputs.publish_github_package
+  stage-pinned-lsp:
+    name: Download pinned ocmm-lsp binaries
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'v')) }}
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download pinned ocmm-lsp release assets
         env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          printf '@%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$owner" "$NODE_AUTH_TOKEN" > .npmrc
-          OWNER="$owner" node <<'NODE'
+          version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); const version = pkg.ocmm && pkg.ocmm.lspVersion; if (typeof version !== "string") throw new Error("Missing package.json ocmm.lspVersion"); console.log(version)')"
+
+          mkdir -p dist/bin
+          gh release download "ocmm-lsp-v${version}" --pattern 'ocmm-lsp-*' --dir dist/bin --clobber
+          find dist/bin -type f \( -name '*.tgz' -o -name 'SHA256SUMS.txt' \) -delete
+
+          expected=(
+            ocmm-lsp-x86_64-unknown-linux-gnu
+            ocmm-lsp-aarch64-unknown-linux-gnu
+            ocmm-lsp-x86_64-unknown-linux-musl
+            ocmm-lsp-aarch64-unknown-linux-musl
+            ocmm-lsp-x86_64-pc-windows-msvc.exe
+            ocmm-lsp-aarch64-pc-windows-msvc.exe
+            ocmm-lsp-x86_64-apple-darwin
+            ocmm-lsp-aarch64-apple-darwin
+          )
+
+          for binary in "${expected[@]}"; do
+            if [ ! -f "dist/bin/$binary" ]; then
+              echo "Missing pinned ocmm-lsp binary: dist/bin/$binary" >&2
+              exit 1
+            fi
+          done
+
+          find dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pinned-ocmm-lsp-binaries
+          path: dist/bin/*
+          if-no-files-found: error
+
+  ocmm-package:
+    name: Package and publish ocmm
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'v')) }}
+    runs-on: ubuntu-latest
+    needs:
+      - verify
+      - stage-pinned-lsp
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check release version
+        run: pnpm run check:release-version
+
+      - name: Build TypeScript
+        run: pnpm run build:ts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: pinned-ocmm-lsp-binaries
+          path: dist/bin
+
+      - name: Generate Codex bundle and smoke test wrappers
+        run: |
+          find dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
+          pnpm run gen:codex-plugin
+          find plugins/ocmm/dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/ocmm/dist/cli/ocmm-lsp.js mcp
+
+      - name: Normalize ocmm package staging
+        run: pnpm run normalize:ocmm-package -- dist/package
+
+      - name: Pack npmjs.org package and verify it omits bundled binaries
+        run: |
+          npm_pkg="dist/package/ocmm-npm"
+          mkdir -p npm-pack release-assets
+
+          npm pack "$npm_pkg" --dry-run --json > npm-pack/dry-run.json
+          node - "npm-pack/dry-run.json" <<'NODE'
           const fs = require("node:fs")
-          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
+          const [dryRunPath] = process.argv.slice(2)
+          const packed = JSON.parse(fs.readFileSync(dryRunPath, "utf8"))
+          const files = packed.flatMap((entry) => Array.isArray(entry.files) ? entry.files : [])
+          const bundledBinary = files.find((file) => {
+            const path = file.path ?? ""
+            return path.startsWith("dist/bin/ocmm-lsp") || path.startsWith("plugins/ocmm/dist/bin/ocmm-lsp")
+          })
+          if (bundledBinary) throw new Error(`npmjs.org package includes bundled binary ${bundledBinary.path}`)
+          NODE
+
+          npm pack "$npm_pkg" --pack-destination npm-pack --json > npm-pack/pack.json
+          npm_tarball="$(node -e 'const fs = require("node:fs"); const packed = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(packed[0].filename)' npm-pack/pack.json)"
+          npm_tarball="npm-pack/$npm_tarball"
+
+          if tar -tzf "$npm_tarball" | grep -q '^package/dist/bin/ocmm-lsp'; then
+            echo "npmjs.org package unexpectedly contains package/dist/bin/ocmm-lsp*" >&2
+            exit 1
+          fi
+
+          if tar -tzf "$npm_tarball" | grep -q '^package/plugins/ocmm/dist/bin/ocmm-lsp'; then
+            echo "npmjs.org package unexpectedly contains package/plugins/ocmm/dist/bin/ocmm-lsp*" >&2
+            exit 1
+          fi
+
+      - name: Build GitHub Release tarballs
+        run: |
+          github_pkg="dist/package/ocmm-github"
+          codex_pkg="dist/package/codex-github"
+          version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$github_pkg/package.json")"
+          release_dir="$PWD/release-assets"
+          mkdir -p "$release_dir"
+
+          (
+            cd "$github_pkg"
+            pnpm pack --pack-destination "$release_dir"
+          )
+          mv "release-assets/ocmm-${version}.tgz" "release-assets/ocmm-opencode-plugin-${version}.tgz"
+
+          tar -czf "release-assets/ocmm-codex-plugin-${version}.tgz" -C "$codex_pkg" .
+
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/dist/index.js"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.agents/plugins/marketplace.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/.codex-plugin/plugin.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/package.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/dist/cli/ocmm-lsp.js"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/dist/bin/ocmm-lsp-"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/plugins/ocmm/dist/bin/ocmm-lsp-"
+
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?\.agents/plugins/marketplace\.json$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/\.codex-plugin/plugin\.json$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/package\.json$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/cli/ocmm-lsp\.js$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/dist/cli/ocmm-lsp\.js$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/bin/ocmm-lsp-'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/dist/bin/ocmm-lsp-'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?README\.md$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?package\.json$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.zh\.md$'
+          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.bilingual\.md$'
+
+      - name: Publish ocmm to npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          : "${NODE_AUTH_TOKEN:?NPM_TOKEN secret is required to view and publish npmjs.org packages}"
+
+          npm_pkg="dist/package/ocmm-npm"
+          version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$npm_pkg/package.json")"
+
+          if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "ocmm@$version is already published to npmjs.org; skipping publish."
+          else
+            npm publish "$npm_pkg" --registry=https://registry.npmjs.org --provenance
+          fi
+
+      - name: Publish scoped package to GitHub Packages
+        if: ${{ github.event_name == 'push' || inputs.publish_github_package }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          pkg_dir="dist/package/ocmm-github"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+
+          printf '@%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$owner" "$GITHUB_TOKEN" > "$pkg_dir/.npmrc"
+          OWNER="$owner" PKG_DIR="$pkg_dir" node <<'NODE'
+          const fs = require("node:fs")
+          const path = require("node:path")
+          const pkgPath = path.join(process.env.PKG_DIR, "package.json")
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
           pkg.name = `@${process.env.OWNER}/ocmm`
           pkg.repository = {
             type: "git",
             url: `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`,
           }
           pkg.publishConfig = { registry: "https://npm.pkg.github.com" }
-          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`)
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
           NODE
-          version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
-          if npm view "@$owner/ocmm@$version" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
-            echo "@$owner/ocmm@$version is already published to GitHub Packages; skipping."
-            exit 0
-          fi
-          pnpm publish --registry=https://npm.pkg.github.com --no-git-checks
+
+          version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$pkg_dir/package.json")"
+          (
+            cd "$pkg_dir"
+            if npm view "@$owner/ocmm@$version" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+              echo "@$owner/ocmm@$version is already published to GitHub Packages; skipping."
+            else
+              npm publish --registry=https://npm.pkg.github.com
+            fi
+          )
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: github-release-assets
+          path: release-assets/*
+          if-no-files-found: error
 
   github-release:
     name: GitHub Release
+    if: ${{ always() && !failure() && !cancelled() && (needs.lsp-package.result == 'success' || needs.ocmm-package.result == 'success') }}
     runs-on: ubuntu-latest
-    needs: package
+    needs:
+      - lsp-package
+      - ocmm-package
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
     steps:
       - uses: actions/download-artifact@v8
@@ -264,11 +509,21 @@ jobs:
       - name: Publish GitHub Release
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            while IFS= read -r asset; do
+              [ -n "$asset" ] || continue
+              gh release delete-asset "$RELEASE_TAG" "$asset" --yes
+            done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+
+            release_id="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq '.id')"
+            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+              -f name="$RELEASE_TAG" \
+              -F prerelease="$PRERELEASE" >/dev/null
           else
-            release_args=(release create "$RELEASE_TAG" release-assets/* --title "$RELEASE_TAG" --generate-notes --verify-tag)
-            if [[ "$PRERELEASE" == "true" ]]; then
+            release_args=(release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --verify-tag)
+            if [ "$PRERELEASE" = "true" ]; then
               release_args+=(--prerelease)
             fi
             gh "${release_args[@]}"
           fi
+
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber

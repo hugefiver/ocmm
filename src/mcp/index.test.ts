@@ -2,13 +2,17 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   createBuiltinMcps,
   createConfiguredMcpManager,
   loadSkillMcpConfig,
   ocmmLspBinaryNames,
+  ocmmLspPackageBinaryCandidates,
+  ocmmLspPackageName,
+  ocmmLspPlatformPackage,
+  ocmmLspPlatformPackages,
   parseSkillMcpFrontmatter,
   resolveOcmmLspCommand,
   resolveMcpServers,
@@ -57,7 +61,72 @@ test("createBuiltinMcps registers project-owned ocmm-lsp when available", () => 
   }
 })
 
-test("resolveOcmmLspCommand prefers platform-suffixed package binary", () => {
+test("resolveOcmmLspCommand prefers installed platform package binary over bundled dist binary", (t) => {
+  const platformPackage = ocmmLspPlatformPackage()
+  if (!platformPackage) {
+    t.skip("current platform has no ocmm-lsp platform package")
+    return
+  }
+
+  const root = mkdtempSync(join(tmpdir(), "ocmm-lsp-platform-package-"))
+  try {
+    const [bundledBin] = ocmmLspBinaryNames()
+    const [platformPackageBin] = ocmmLspPackageBinaryCandidates(root)
+    assert.equal(typeof platformPackageBin, "string")
+
+    mkdirSync(dirname(platformPackageBin), { recursive: true })
+    writeExecutable(platformPackageBin)
+    mkdirSync(join(root, "dist", "bin"), { recursive: true })
+    writeExecutable(join(root, "dist", "bin", bundledBin))
+    writeFileSync(join(root, "package.json"), "{}")
+
+    const resolved = resolveOcmmLspCommand({ packageRoot: root, pathEnv: "" })
+
+    assert.equal(resolved.enabled, true)
+    assert.equal(resolved.source, "platform-package")
+    assert.deepEqual(resolved.command, [platformPackageBin, "mcp"])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("resolveOcmmLspCommand prefers hoisted platform package binary over bundled dist binary", (t) => {
+  const platformPackage = ocmmLspPlatformPackage()
+  if (!platformPackage) {
+    t.skip("current platform has no ocmm-lsp platform package")
+    return
+  }
+
+  const root = mkdtempSync(join(tmpdir(), "ocmm-lsp-hoisted-platform-package-"))
+  try {
+    const consumer = join(root, "consumer")
+    const ocmmRoot = join(consumer, "node_modules", "ocmm")
+    const [bundledBin] = ocmmLspBinaryNames()
+    const platformPackageBin = join(
+      consumer,
+      "node_modules",
+      platformPackage.packageName,
+      "bin",
+      platformPackage.binaryName,
+    )
+
+    mkdirSync(dirname(platformPackageBin), { recursive: true })
+    writeExecutable(platformPackageBin)
+    mkdirSync(join(ocmmRoot, "dist", "bin"), { recursive: true })
+    writeExecutable(join(ocmmRoot, "dist", "bin", bundledBin))
+    writeFileSync(join(ocmmRoot, "package.json"), "{}")
+
+    const resolved = resolveOcmmLspCommand({ packageRoot: ocmmRoot, pathEnv: "" })
+
+    assert.equal(resolved.enabled, true)
+    assert.equal(resolved.source, "platform-package")
+    assert.deepEqual(resolved.command, [platformPackageBin, "mcp"])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("resolveOcmmLspCommand uses dist/bin platform-suffixed fallback when platform package binary is absent", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-lsp-platform-"))
   try {
     const [platformBin, fallbackBin] = ocmmLspBinaryNames()
@@ -76,14 +145,66 @@ test("resolveOcmmLspCommand prefers platform-suffixed package binary", () => {
   }
 })
 
+test("ocmmLspPackageBinaryCandidates returns nested, sibling, and ancestor package bin paths", () => {
+  const root = join(tmpdir(), "ocmm-lsp-package-candidates")
+  const consumer = join(root, "consumer")
+  const ocmmRoot = join(consumer, "node_modules", "ocmm")
+  const platformPackage = ocmmLspPlatformPackage()
+  const candidates = ocmmLspPackageBinaryCandidates(ocmmRoot)
+
+  if (!platformPackage) {
+    assert.deepEqual(candidates, [])
+    return
+  }
+
+  const nested = join(ocmmRoot, "node_modules", platformPackage.packageName, "bin", platformPackage.binaryName)
+  const sibling = join(consumer, "node_modules", platformPackage.packageName, "bin", platformPackage.binaryName)
+  const ancestor = join(root, "node_modules", platformPackage.packageName, "bin", platformPackage.binaryName)
+
+  assert.deepEqual(candidates.slice(0, 3), [nested, sibling, ancestor])
+  assert.equal(new Set(candidates).size, candidates.length)
+})
+
 test("ocmmLspBinaryNames mirrors release artifact names", () => {
   assert.deepEqual(ocmmLspBinaryNames("linux", "x64", "gnu"), ["ocmm-lsp-x86_64-unknown-linux-gnu", "ocmm-lsp"])
   assert.deepEqual(ocmmLspBinaryNames("linux", "arm64", "gnu"), ["ocmm-lsp-aarch64-unknown-linux-gnu", "ocmm-lsp"])
+  assert.deepEqual(ocmmLspBinaryNames("linux", "x64", "musl"), ["ocmm-lsp-x86_64-unknown-linux-musl", "ocmm-lsp"])
+  assert.deepEqual(ocmmLspBinaryNames("linux", "arm64", "musl"), ["ocmm-lsp-aarch64-unknown-linux-musl", "ocmm-lsp"])
   assert.deepEqual(ocmmLspBinaryNames("darwin", "x64"), ["ocmm-lsp-x86_64-apple-darwin", "ocmm-lsp"])
   assert.deepEqual(ocmmLspBinaryNames("darwin", "arm64"), ["ocmm-lsp-aarch64-apple-darwin", "ocmm-lsp"])
   assert.deepEqual(ocmmLspBinaryNames("win32", "x64"), ["ocmm-lsp-x86_64-pc-windows-msvc.exe", "ocmm-lsp.exe"])
   assert.deepEqual(ocmmLspBinaryNames("win32", "arm64"), ["ocmm-lsp-aarch64-pc-windows-msvc.exe", "ocmm-lsp.exe"])
-  assert.deepEqual(ocmmLspBinaryNames("linux", "x64", "musl"), ["ocmm-lsp"])
+})
+
+test("ocmm-lsp platform manifest covers npm package names and native targets", () => {
+  const platformPackages = ocmmLspPlatformPackages()
+
+  assert.deepEqual(platformPackages.map((platformPackage) => platformPackage.packageName), [
+    "ocmm-lsp-linux-x64-gnu",
+    "ocmm-lsp-linux-arm64-gnu",
+    "ocmm-lsp-linux-x64-musl",
+    "ocmm-lsp-linux-arm64-musl",
+    "ocmm-lsp-darwin-x64",
+    "ocmm-lsp-darwin-arm64",
+    "ocmm-lsp-win32-x64",
+    "ocmm-lsp-win32-arm64",
+  ])
+  assert.deepEqual(platformPackages.map((platformPackage) => platformPackage.target), [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+  ])
+  assert.equal(ocmmLspPackageName("linux", "x64", "musl"), "ocmm-lsp-linux-x64-musl")
+  assert.equal(ocmmLspPackageName("linux", "arm64", "gnu"), "ocmm-lsp-linux-arm64-gnu")
+  assert.equal(ocmmLspPackageName("darwin", "arm64"), "ocmm-lsp-darwin-arm64")
+  assert.equal(ocmmLspPackageName("win32", "x64"), "ocmm-lsp-win32-x64")
+  assert.deepEqual(ocmmLspPlatformPackage("linux", "x64", "gnu")?.libc, ["glibc"])
+  assert.deepEqual(ocmmLspPlatformPackage("linux", "x64", "musl")?.libc, ["musl"])
 })
 
 test("resolveOcmmLspCommand prefers release binary over cargo source fallback", () => {

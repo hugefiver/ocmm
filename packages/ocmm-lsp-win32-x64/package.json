@@ -1,0 +1,15 @@
+{
+  "name": "ocmm-lsp-win32-x64",
+  "version": "0.3.1",
+  "description": "Native ocmm-lsp binary package for x86_64-pc-windows-msvc.",
+  "license": "LicenseRef-AAAPL",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ]
+}

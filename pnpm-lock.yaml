@@ -220,6 +220,47 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+    optionalDependencies:
+      ocmm-lsp-darwin-arm64:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-darwin-arm64
+      ocmm-lsp-darwin-x64:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-darwin-x64
+      ocmm-lsp-linux-arm64-gnu:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-linux-arm64-gnu
+      ocmm-lsp-linux-arm64-musl:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-linux-arm64-musl
+      ocmm-lsp-linux-x64-gnu:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-linux-x64-gnu
+      ocmm-lsp-linux-x64-musl:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-linux-x64-musl
+      ocmm-lsp-win32-arm64:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-win32-arm64
+      ocmm-lsp-win32-x64:
+        specifier: workspace:*
+        version: link:packages/ocmm-lsp-win32-x64
+
+  packages/ocmm-lsp-darwin-arm64: {}
+
+  packages/ocmm-lsp-darwin-x64: {}
+
+  packages/ocmm-lsp-linux-arm64-gnu: {}
+
+  packages/ocmm-lsp-linux-arm64-musl: {}
+
+  packages/ocmm-lsp-linux-x64-gnu: {}
+
+  packages/ocmm-lsp-linux-x64-musl: {}
+
+  packages/ocmm-lsp-win32-arm64: {}
+
+  packages/ocmm-lsp-win32-x64: {}
 
 packages:
 

@@ -77,6 +77,7 @@ const AgentOverrideFields = {
 const HOOK_NAMES = [
   "directory-readme-injector",
   "directory-agents-injector",
+  "rules-injector",
   "write-existing-file-guard",
   "notepad-write-guard",
   "bash-file-read-guard",

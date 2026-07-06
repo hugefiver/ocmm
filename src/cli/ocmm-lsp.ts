@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 
 import { accessSync, constants, existsSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawn } from "node:child_process"
 
-import { ocmmLspBinaryNames, unsupportedOcmmLspPlatformMessage } from "../shared/ocmm-lsp-binary.ts"
+import {
+  ocmmLspBinaryNames,
+  ocmmLspPackageBinaryCandidates,
+  ocmmLspPackageName,
+  unsupportedOcmmLspPlatformMessage,
+} from "../shared/ocmm-lsp-binary.ts"
+
+function packageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
+}
 
 function binaryPaths(): string[] {
-  const binDir = join(dirname(fileURLToPath(import.meta.url)), "..", "bin")
-  return ocmmLspBinaryNames().map((name) => join(binDir, name))
+  const root = packageRoot()
+  return [
+    ...ocmmLspPackageBinaryCandidates(root),
+    ...ocmmLspBinaryNames().map((name) => join(root, "dist", "bin", name)),
+  ]
 }
 
 function canExecute(path: string): boolean {
@@ -27,11 +39,14 @@ const candidates = binaryPaths()
 const bin = candidates.find(canExecute)
 if (!bin) {
   const unsupported = unsupportedOcmmLspPlatformMessage()
+  const expectedPackage = ocmmLspPackageName() ?? "<unsupported platform>"
   console.error([
     "ocmm-lsp binary not found.",
-    "Run pnpm run build:lsp or install a package with bundled GitHub Release binaries.",
+    `Expected optional npm package: ${expectedPackage}`,
+    "Reinstall ocmm without --omit=optional so npm can install the platform package.",
+    "For a source checkout, run pnpm run build:lsp.",
     ...(unsupported ? [unsupported] : []),
-    "Checked:",
+    "Checked candidate paths:",
     ...candidates.map((candidate) => `  ${candidate}`),
   ].join("\n"))
   process.exit(1)
