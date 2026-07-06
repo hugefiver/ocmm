@@ -1072,8 +1072,12 @@ lsp-package:
             npm pack "$pkg" --pack-destination release-assets --json
           else
             npm pack "$pkg" --pack-destination release-assets --json
+            publish_dir="$RUNNER_TEMP/npm-publish/$name"
+            rm -rf "$publish_dir"
+            mkdir -p "$(dirname "$publish_dir")"
+            cp -a "$pkg" "$publish_dir"
             (
-              cd "$pkg"
+              cd "$publish_dir"
               npm publish --registry=https://registry.npmjs.org --access public
             )
           fi
@@ -1204,7 +1208,14 @@ Add npmjs.org publish after tarball creation and before GitHub Packages publish:
     if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
       echo "ocmm@$version is already published to npmjs.org; skipping."
     else
-      npm publish --registry=https://registry.npmjs.org
+      publish_dir="$RUNNER_TEMP/npm-publish/ocmm"
+      rm -rf "$publish_dir"
+      mkdir -p "$(dirname "$publish_dir")"
+      cp -a . "$publish_dir"
+      (
+        cd "$publish_dir"
+        npm publish --registry=https://registry.npmjs.org
+      )
     fi
 ```
 

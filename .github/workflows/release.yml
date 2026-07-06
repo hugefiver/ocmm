@@ -246,8 +246,12 @@ jobs:
             if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "$name@$version is already published to npmjs.org; skipping publish."
             else
+              publish_dir="$RUNNER_TEMP/npm-publish/$name"
+              rm -rf "$publish_dir"
+              mkdir -p "$(dirname "$publish_dir")"
+              cp -a "$pkg" "$publish_dir"
               (
-                cd "$pkg"
+                cd "$publish_dir"
                 npm publish --registry=https://registry.npmjs.org --access public
               )
             fi
@@ -439,8 +443,12 @@ jobs:
           if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "ocmm@$version is already published to npmjs.org; skipping publish."
           else
+            publish_dir="$RUNNER_TEMP/npm-publish/ocmm"
+            rm -rf "$publish_dir"
+            mkdir -p "$(dirname "$publish_dir")"
+            cp -a "$npm_pkg" "$publish_dir"
             (
-              cd "$npm_pkg"
+              cd "$publish_dir"
               npm publish --registry=https://registry.npmjs.org
             )
           fi
