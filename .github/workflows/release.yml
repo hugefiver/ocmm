@@ -207,7 +207,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - name: Enable pnpm
@@ -247,7 +246,10 @@ jobs:
             if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "$name@$version is already published to npmjs.org; skipping publish."
             else
-              npm publish "$pkg" --registry=https://registry.npmjs.org --access public
+              (
+                cd "$pkg"
+                npm publish --registry=https://registry.npmjs.org --access public
+              )
             fi
           done
 
@@ -328,7 +330,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - name: Enable pnpm
@@ -438,7 +439,10 @@ jobs:
           if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "ocmm@$version is already published to npmjs.org; skipping publish."
           else
-            npm publish "$npm_pkg" --registry=https://registry.npmjs.org
+            (
+              cd "$npm_pkg"
+              npm publish --registry=https://registry.npmjs.org
+            )
           fi
 
       - name: Publish scoped package to GitHub Packages
