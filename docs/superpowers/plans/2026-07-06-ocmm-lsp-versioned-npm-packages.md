@@ -910,7 +910,7 @@ env:
   RELEASE_KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.release_kind || (startsWith(github.ref_name, 'ocmm-lsp-v') && 'ocmm-lsp' || 'ocmm') }}
 ```
 
-Update workflow permissions so npm provenance publishing can request an OIDC token:
+Update workflow permissions so npm Trusted Publishing can request an OIDC token:
 
 ```yaml
 permissions:
@@ -1073,7 +1073,7 @@ lsp-package:
             npm pack "$pkg" --pack-destination release-assets --json
           else
             npm pack "$pkg" --pack-destination release-assets --json
-            npm publish "$pkg" --registry=https://registry.npmjs.org --access public --provenance
+            npm publish "$pkg" --registry=https://registry.npmjs.org --access public
           fi
         done
         cd release-assets
@@ -1202,7 +1202,7 @@ Add npmjs.org publish after tarball creation and before GitHub Packages publish:
     if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
       echo "ocmm@$version is already published to npmjs.org; skipping."
     else
-      npm publish . --registry=https://registry.npmjs.org --provenance
+      npm publish . --registry=https://registry.npmjs.org
     fi
 ```
 
