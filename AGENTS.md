@@ -25,7 +25,7 @@ Tags matching `ocmm-lsp-v*` trigger the LSP-only lane:
 1. Verifies the tag matches `crates/ocmm-lsp/Cargo.toml` version.
 2. Builds 8 native binaries (Linux glibc x64/arm64, Linux musl x64/arm64, macOS x64/arm64, Windows x64/arm64).
 3. Stages platform packages under `packages/ocmm-lsp-*`, generates `package.json` manifests.
-4. Publishes 8 platform packages to npmjs.org (requires `NPM_TOKEN` secret).
+4. Publishes 8 platform packages to npmjs.org through npm Trusted Publishing (GitHub Actions OIDC).
 5. Publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
 
 ### ocmm lane
@@ -37,13 +37,15 @@ Tags matching `v*` (but NOT `ocmm-lsp-v*`) trigger the main package lane:
 4. Downloads pinned `ocmm-lsp-v<lspVersion>` release assets from the `package.json.ocmm.lspVersion` release.
 5. Generates the Codex plugin bundle and smoke-tests LSP wrappers.
 6. Normalizes the package (strips native binaries from npmjs package, keeps them in GitHub Release staging).
-7. Publishes to npmjs.org as `ocmm` (requires `NPM_TOKEN` secret).
+7. Publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
 8. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
 9. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
 
 The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/ocmm/dist/bin/`.
 
 The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
+
+Before npmjs.org publishing works without tokens, configure npm Trusted Publishing for `ocmm` and every `ocmm-lsp-*` platform package. Use provider GitHub Actions, repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and allow publish. The release workflow grants `id-token: write`, uses Node/npm versions that support Trusted Publishing, and intentionally does not require `NPM_TOKEN` for npmjs.org. GitHub Packages publishing still uses the GitHub-provided token.
 
 ### npm optional platform packages
 
@@ -55,8 +57,8 @@ The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
 - `ocmm-lsp-linux-arm64-musl`
 - `ocmm-lsp-darwin-x64`
 - `ocmm-lsp-darwin-arm64`
-- `ocmm-lsp-win32-x64`
-- `ocmm-lsp-win32-arm64`
+- `ocmm-lsp-windows-x64`
+- `ocmm-lsp-windows-arm64`
 
 npm installs the matching optional package automatically for your OS/CPU/libc unless optional dependencies are omitted (e.g. `--omit=optional`, `npm_config_optional=false`, or the package manager skips optionals). GitHub Release tarballs already include the matching native binary, so the optional package is not needed there.
 

@@ -239,12 +239,12 @@ importers:
       ocmm-lsp-linux-x64-musl:
         specifier: workspace:*
         version: link:packages/ocmm-lsp-linux-x64-musl
-      ocmm-lsp-win32-arm64:
+      ocmm-lsp-windows-arm64:
         specifier: workspace:*
-        version: link:packages/ocmm-lsp-win32-arm64
-      ocmm-lsp-win32-x64:
+        version: link:packages/ocmm-lsp-windows-arm64
+      ocmm-lsp-windows-x64:
         specifier: workspace:*
-        version: link:packages/ocmm-lsp-win32-x64
+        version: link:packages/ocmm-lsp-windows-x64
 
   packages/ocmm-lsp-darwin-arm64: {}
 
@@ -258,9 +258,9 @@ importers:
 
   packages/ocmm-lsp-linux-x64-musl: {}
 
-  packages/ocmm-lsp-win32-arm64: {}
+  packages/ocmm-lsp-windows-arm64: {}
 
-  packages/ocmm-lsp-win32-x64: {}
+  packages/ocmm-lsp-windows-x64: {}
 
 packages:
 

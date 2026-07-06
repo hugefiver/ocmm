@@ -53,8 +53,8 @@
 - Create: `packages/ocmm-lsp-linux-arm64-musl/package.json`
 - Create: `packages/ocmm-lsp-darwin-x64/package.json`
 - Create: `packages/ocmm-lsp-darwin-arm64/package.json`
-- Create: `packages/ocmm-lsp-win32-x64/package.json`
-- Create: `packages/ocmm-lsp-win32-arm64/package.json`
+- Create: `packages/ocmm-lsp-windows-x64/package.json`
+- Create: `packages/ocmm-lsp-windows-arm64/package.json`
 - Create: `scripts/lsp-package-manifest.ts`
 - Create: `scripts/sync-lsp-packages.ts`
 - Test: `src/mcp/index.test.ts`
@@ -86,8 +86,8 @@ test("ocmm-lsp platform manifest covers npm package names and native targets", (
   assert.equal(ocmmLspPackageName("linux", "arm64", "musl"), "ocmm-lsp-linux-arm64-musl")
   assert.equal(ocmmLspPackageName("darwin", "x64"), "ocmm-lsp-darwin-x64")
   assert.equal(ocmmLspPackageName("darwin", "arm64"), "ocmm-lsp-darwin-arm64")
-  assert.equal(ocmmLspPackageName("win32", "x64"), "ocmm-lsp-win32-x64")
-  assert.equal(ocmmLspPackageName("win32", "arm64"), "ocmm-lsp-win32-arm64")
+  assert.equal(ocmmLspPackageName("win32", "x64"), "ocmm-lsp-windows-x64")
+  assert.equal(ocmmLspPackageName("win32", "arm64"), "ocmm-lsp-windows-arm64")
   assert.deepEqual(
     ocmmLspPlatformPackages().map((item) => item.packageName),
     [
@@ -97,8 +97,8 @@ test("ocmm-lsp platform manifest covers npm package names and native targets", (
       "ocmm-lsp-linux-arm64-musl",
       "ocmm-lsp-darwin-x64",
       "ocmm-lsp-darwin-arm64",
-      "ocmm-lsp-win32-x64",
-      "ocmm-lsp-win32-arm64",
+      "ocmm-lsp-windows-x64",
+      "ocmm-lsp-windows-arm64",
     ],
   )
 })
@@ -147,8 +147,8 @@ const LSP_PLATFORM_PACKAGES: readonly OcmmLspPlatformPackage[] = [
   platformPackage("ocmm-lsp-linux-arm64-musl", "linux", "arm64", "musl", "aarch64-unknown-linux-musl", ["linux"], ["arm64"], ["musl"]),
   platformPackage("ocmm-lsp-darwin-x64", "darwin", "x64", undefined, "x86_64-apple-darwin", ["darwin"], ["x64"]),
   platformPackage("ocmm-lsp-darwin-arm64", "darwin", "arm64", undefined, "aarch64-apple-darwin", ["darwin"], ["arm64"]),
-  platformPackage("ocmm-lsp-win32-x64", "win32", "x64", undefined, "x86_64-pc-windows-msvc", ["win32"], ["x64"]),
-  platformPackage("ocmm-lsp-win32-arm64", "win32", "arm64", undefined, "aarch64-pc-windows-msvc", ["win32"], ["arm64"]),
+  platformPackage("ocmm-lsp-windows-x64", "win32", "x64", undefined, "x86_64-pc-windows-msvc", ["win32"], ["x64"]),
+  platformPackage("ocmm-lsp-windows-arm64", "win32", "arm64", undefined, "aarch64-pc-windows-msvc", ["win32"], ["arm64"]),
 ]
 
 function platformPackage(
@@ -279,8 +279,8 @@ Modify root `package.json`:
     "ocmm-lsp-linux-arm64-musl": "workspace:*",
     "ocmm-lsp-darwin-x64": "workspace:*",
     "ocmm-lsp-darwin-arm64": "workspace:*",
-    "ocmm-lsp-win32-x64": "workspace:*",
-    "ocmm-lsp-win32-arm64": "workspace:*"
+    "ocmm-lsp-windows-x64": "workspace:*",
+    "ocmm-lsp-windows-arm64": "workspace:*"
   },
   "scripts": {
     "sync:lsp-packages": "node --experimental-strip-types scripts/sync-lsp-packages.ts",
@@ -904,7 +904,7 @@ Add env values:
 
 ```yaml
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
   PNPM_VERSION: "11.9.0"
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   RELEASE_KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.release_kind || (startsWith(github.ref_name, 'ocmm-lsp-v') && 'ocmm-lsp' || 'ocmm') }}
@@ -1038,8 +1038,6 @@ lsp-package:
     - verify
     - native
   if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm-lsp' || startsWith(github.ref_name, 'ocmm-lsp-v') }}
-  env:
-    NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   steps:
     - uses: actions/checkout@v7
       with:
@@ -1065,10 +1063,6 @@ lsp-package:
       run: pnpm run stage:lsp-packages -- dist/bin
     - name: Pack and publish platform packages
       run: |
-        if [ -z "$NODE_AUTH_TOKEN" ]; then
-          echo "NPM_TOKEN secret is required to publish ocmm-lsp packages" >&2
-          exit 1
-        fi
         mkdir -p release-assets
         for pkg in packages/ocmm-lsp-*; do
           name="$(node -p "JSON.parse(require('node:fs').readFileSync('$pkg/package.json','utf8')).name")"
@@ -1203,19 +1197,12 @@ Add npmjs.org publish after tarball creation and before GitHub Packages publish:
 - name: Publish ocmm to npmjs.org
   if: github.event_name == 'push' || inputs.release_kind == 'ocmm'
   working-directory: dist/package/ocmm-npm
-  env:
-    NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   run: |
-    if [ -z "$NODE_AUTH_TOKEN" ]; then
-      echo "NPM_TOKEN secret is required to publish ocmm" >&2
-      exit 1
-    fi
-    printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > .npmrc
     version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
     if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
       echo "ocmm@$version is already published to npmjs.org; skipping."
     else
-      pnpm publish --registry=https://registry.npmjs.org --access public --no-git-checks
+      npm publish . --registry=https://registry.npmjs.org --provenance
     fi
 ```
 
@@ -1266,7 +1253,7 @@ Report:
 ```text
 Suggested commit: ci: split ocmm and lsp release publishing
 Files: .github/workflows/release.yml, package.json
-Required secret: NPM_TOKEN with npmjs.org publish rights for ocmm and ocmm-lsp-* packages
+Required npm configuration: Trusted Publishing entries on npmjs.org for `ocmm` and every `ocmm-lsp-*` package, using GitHub Actions repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and publish permission.
 ```
 
 Do not run git write commands.
@@ -1315,8 +1302,8 @@ Linux GNU and musl builds are published for x64 and arm64. The npm platform pack
 - `ocmm-lsp-linux-arm64-musl`
 - `ocmm-lsp-darwin-x64`
 - `ocmm-lsp-darwin-arm64`
-- `ocmm-lsp-win32-x64`
-- `ocmm-lsp-win32-arm64`
+- `ocmm-lsp-windows-x64`
+- `ocmm-lsp-windows-arm64`
 ```
 
 Update the resolution paragraph:

@@ -128,7 +128,7 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 
 ocmm ships the `ocmm-lsp` native binary in multiple forms:
 
-- **npm optional platform packages**: 8 per-platform packages published to npmjs.org (`ocmm-lsp-linux-x64-gnu`, `ocmm-lsp-linux-arm64-gnu`, `ocmm-lsp-linux-x64-musl`, `ocmm-lsp-linux-arm64-musl`, `ocmm-lsp-darwin-x64`, `ocmm-lsp-darwin-arm64`, `ocmm-lsp-win32-x64`, `ocmm-lsp-win32-arm64`). npm installs the matching one automatically based on your OS, CPU, and libc.
+- **npm optional platform packages**: 8 per-platform packages published to npmjs.org (`ocmm-lsp-linux-x64-gnu`, `ocmm-lsp-linux-arm64-gnu`, `ocmm-lsp-linux-x64-musl`, `ocmm-lsp-linux-arm64-musl`, `ocmm-lsp-darwin-x64`, `ocmm-lsp-darwin-arm64`, `ocmm-lsp-windows-x64`, `ocmm-lsp-windows-arm64`). npm installs the matching one automatically based on your OS, CPU, and libc.
 - **bundled inside GitHub Release tarballs** under `dist/bin/` and `plugins/ocmm/dist/bin/`;
 - **standalone release assets** named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
 
@@ -152,8 +152,8 @@ Native binaries are built for:
 | Linux arm64 musl | `ocmm-lsp-linux-arm64-musl` | `ocmm-lsp-aarch64-unknown-linux-musl` |
 | macOS x64 | `ocmm-lsp-darwin-x64` | `ocmm-lsp-x86_64-apple-darwin` |
 | macOS arm64 | `ocmm-lsp-darwin-arm64` | `ocmm-lsp-aarch64-apple-darwin` |
-| Windows x64 | `ocmm-lsp-win32-x64` | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
-| Windows arm64 | `ocmm-lsp-win32-arm64` | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
+| Windows x64 | `ocmm-lsp-windows-x64` | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
+| Windows arm64 | `ocmm-lsp-windows-arm64` | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
 
 ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocmm-lsp mcp` server by default. Resolution prefers optional npm platform package first, then bundled release binaries in `dist/bin/`, then local Cargo release/debug builds, then `cargo run` from `crates/ocmm-lsp/`, then a PATH `ocmm-lsp`. Set `OCMM_LSP_COMMAND` to force a custom command, add `disabledMcps:["lsp"]` to disable it, or define `mcp.servers.lsp` to override the built-in.
 
@@ -611,7 +611,7 @@ ocmm publishes through two independent release lanes.
 1. Bump `crates/ocmm-lsp/Cargo.toml` version.
 2. Tag `ocmm-lsp-vA.B.C` and push.
 3. CI builds 8 native binaries (Linux glibc x64/arm64, Linux musl x64/arm64, macOS x64/arm64, Windows x64/arm64).
-4. CI publishes 8 npm platform packages to npmjs.org (requires `NPM_TOKEN` secret).
+4. CI publishes 8 npm platform packages to npmjs.org through npm Trusted Publishing (GitHub Actions OIDC).
 5. CI publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
 
 ### ocmm release
@@ -620,14 +620,14 @@ ocmm publishes through two independent release lanes.
 2. Regenerate the Codex plugin bundle: `pnpm run build:ts && pnpm run gen:codex-plugin`.
 3. Tag `vX.Y.Z` and push.
 4. CI downloads pinned `ocmm-lsp-v<lspVersion>` release assets, bundles them into GitHub Release tarballs.
-5. CI publishes to npmjs.org as `ocmm` (requires `NPM_TOKEN` secret).
+5. CI publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
 6. On tag pushes, CI also publishes `@<owner>/ocmm` to GitHub Packages (optional for manual dispatch).
 7. CI publishes self-contained tarballs (`ocmm-opencode-plugin-X.Y.Z.tgz`, `ocmm-codex-plugin-X.Y.Z.tgz`) and `SHA256SUMS.txt` to the GitHub Release.
 
 The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs are self-contained with bundled native binaries for all 8 platforms.
 
-Required secrets:
-- `NPM_TOKEN` — npmjs.org publish token for both `ocmm` and `ocmm-lsp-*` platform packages.
+Required npm configuration:
+- Configure npm Trusted Publishing for `ocmm` and each `ocmm-lsp-*` platform package, with GitHub repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and publish permission enabled. The workflow uses GitHub Actions OIDC (`id-token: write`) and does not require an npm token for npmjs.org publishes.
 
 ### Live integration test
 

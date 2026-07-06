@@ -80,7 +80,7 @@ const OCMM_LSP_PLATFORM_PACKAGES: readonly OcmmLspPlatformPackage[] = [
     cpu: ["arm64"],
   },
   {
-    packageName: "ocmm-lsp-win32-x64",
+    packageName: "ocmm-lsp-windows-x64",
     platform: "win32",
     arch: "x64",
     target: "x86_64-pc-windows-msvc",
@@ -89,7 +89,7 @@ const OCMM_LSP_PLATFORM_PACKAGES: readonly OcmmLspPlatformPackage[] = [
     cpu: ["x64"],
   },
   {
-    packageName: "ocmm-lsp-win32-arm64",
+    packageName: "ocmm-lsp-windows-arm64",
     platform: "win32",
     arch: "arm64",
     target: "aarch64-pc-windows-msvc",

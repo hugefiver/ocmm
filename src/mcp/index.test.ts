@@ -186,8 +186,8 @@ test("ocmm-lsp platform manifest covers npm package names and native targets", (
     "ocmm-lsp-linux-arm64-musl",
     "ocmm-lsp-darwin-x64",
     "ocmm-lsp-darwin-arm64",
-    "ocmm-lsp-win32-x64",
-    "ocmm-lsp-win32-arm64",
+    "ocmm-lsp-windows-x64",
+    "ocmm-lsp-windows-arm64",
   ])
   assert.deepEqual(platformPackages.map((platformPackage) => platformPackage.target), [
     "x86_64-unknown-linux-gnu",
@@ -202,7 +202,7 @@ test("ocmm-lsp platform manifest covers npm package names and native targets", (
   assert.equal(ocmmLspPackageName("linux", "x64", "musl"), "ocmm-lsp-linux-x64-musl")
   assert.equal(ocmmLspPackageName("linux", "arm64", "gnu"), "ocmm-lsp-linux-arm64-gnu")
   assert.equal(ocmmLspPackageName("darwin", "arm64"), "ocmm-lsp-darwin-arm64")
-  assert.equal(ocmmLspPackageName("win32", "x64"), "ocmm-lsp-win32-x64")
+  assert.equal(ocmmLspPackageName("win32", "x64"), "ocmm-lsp-windows-x64")
   assert.deepEqual(ocmmLspPlatformPackage("linux", "x64", "gnu")?.libc, ["glibc"])
   assert.deepEqual(ocmmLspPlatformPackage("linux", "x64", "musl")?.libc, ["musl"])
 })

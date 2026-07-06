@@ -56,8 +56,8 @@ It gains `optionalDependencies` for the eight platform packages, all pinned to t
     "ocmm-lsp-linux-arm64-musl": "A.B.C",
     "ocmm-lsp-darwin-x64": "A.B.C",
     "ocmm-lsp-darwin-arm64": "A.B.C",
-    "ocmm-lsp-win32-x64": "A.B.C",
-    "ocmm-lsp-win32-arm64": "A.B.C"
+    "ocmm-lsp-windows-x64": "A.B.C",
+    "ocmm-lsp-windows-arm64": "A.B.C"
   }
 }
 ```
@@ -76,8 +76,8 @@ Each platform package contains exactly one native binary plus minimal package me
 | `ocmm-lsp-linux-arm64-musl` | `os: ["linux"]`, `cpu: ["arm64"]`, `libc: ["musl"]` | `aarch64-unknown-linux-musl` | `ocmm-lsp-aarch64-unknown-linux-musl` |
 | `ocmm-lsp-darwin-x64` | `os: ["darwin"]`, `cpu: ["x64"]` | `x86_64-apple-darwin` | `ocmm-lsp-x86_64-apple-darwin` |
 | `ocmm-lsp-darwin-arm64` | `os: ["darwin"]`, `cpu: ["arm64"]` | `aarch64-apple-darwin` | `ocmm-lsp-aarch64-apple-darwin` |
-| `ocmm-lsp-win32-x64` | `os: ["win32"]`, `cpu: ["x64"]` | `x86_64-pc-windows-msvc` | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
-| `ocmm-lsp-win32-arm64` | `os: ["win32"]`, `cpu: ["arm64"]` | `aarch64-pc-windows-msvc` | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
+| `ocmm-lsp-windows-x64` | `os: ["win32"]`, `cpu: ["x64"]` | `x86_64-pc-windows-msvc` | `ocmm-lsp-x86_64-pc-windows-msvc.exe` |
+| `ocmm-lsp-windows-arm64` | `os: ["win32"]`, `cpu: ["arm64"]` | `aarch64-pc-windows-msvc` | `ocmm-lsp-aarch64-pc-windows-msvc.exe` |
 
 The package payload must put the binary at `bin/<binary-name>`. The JS wrapper must not assume all platform package names exist on disk; npm will skip incompatible optional packages.
 
@@ -118,7 +118,7 @@ For `ocmm-lsp-vA.B.C`:
 3. Build eight native targets, including Linux GNU and musl x64/arm64.
 4. Stage eight npm package directories from a generated template.
 5. `npm pack --dry-run --json` each package to verify contents.
-6. Publish platform packages to npmjs.org with `NODE_AUTH_TOKEN` / `NPM_TOKEN`.
+6. Publish platform packages to npmjs.org through npm Trusted Publishing (GitHub Actions OIDC), without a long-lived npm token.
 7. Upload native binary assets and package tarball/checksum assets to a GitHub Release for that LSP tag.
 
 Reruns must skip already-published package versions after verifying the existing version matches the intended package name/version, so partial CI failures can be safely retried.
@@ -200,7 +200,8 @@ Hook behavior summary to document:
 
 ## Error Handling
 
-- npm publish steps must fail clearly when `NPM_TOKEN`/`NODE_AUTH_TOKEN` is missing on tag releases.
+- npm publish steps must fail clearly when npm Trusted Publishing is not configured for the package/workflow on tag releases.
+- Trusted Publishing setup uses GitHub Actions repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and publish permission for `ocmm` and every `ocmm-lsp-*` package.
 - Package staging must fail if any expected native binary is absent.
 - Release checks must fail if tag version and canonical version source differ.
 - Wrapper diagnostics must distinguish unsupported platform, omitted optional dependency, and missing local build fallback.

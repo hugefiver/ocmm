@@ -66,8 +66,8 @@
     "ocmm-lsp-linux-arm64-musl": "workspace:*",
     "ocmm-lsp-darwin-x64": "workspace:*",
     "ocmm-lsp-darwin-arm64": "workspace:*",
-    "ocmm-lsp-win32-x64": "workspace:*",
-    "ocmm-lsp-win32-arm64": "workspace:*"
+    "ocmm-lsp-windows-x64": "workspace:*",
+    "ocmm-lsp-windows-arm64": "workspace:*"
   },
   "ocmm": {
     "lspVersion": "0.3.1"

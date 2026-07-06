@@ -20,7 +20,7 @@ This document captures ocmm's design rationale, hook flow, and routing pipeline.
 - No team-mode orchestration or Boulder/Atlas runtime — out of scope.
 - No full Ralph/audit idle auto-continuation engine yet — ocmm currently exposes `/ralph-loop`, `/audit-loop`, and `/dwloop` command templates only.
 - No per-agent `runtimeFallback` override — fallback config is global.
-- No npmjs.org publish — releases are GitHub-only unless a user explicitly asks for another registry.
+- No npm long-lived token requirement — npmjs.org releases use npm Trusted Publishing through GitHub Actions OIDC.
 
 ## Two-axis routing matrix
 
