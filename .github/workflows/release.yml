@@ -373,8 +373,15 @@ jobs:
         run: |
           npm_pkg="dist/package/ocmm-npm"
           mkdir -p npm-pack release-assets
+          npm_pack_src="$RUNNER_TEMP/npm-pack/ocmm-npm"
+          rm -rf "$npm_pack_src"
+          mkdir -p "$(dirname "$npm_pack_src")"
+          cp -a "$npm_pkg" "$npm_pack_src"
 
-          npm pack "$npm_pkg" --dry-run --json > npm-pack/dry-run.json
+          (
+            cd "$npm_pack_src"
+            npm pack --dry-run --json > "$GITHUB_WORKSPACE/npm-pack/dry-run.json"
+          )
           node - "npm-pack/dry-run.json" <<'NODE'
           const fs = require("node:fs")
           const [dryRunPath] = process.argv.slice(2)
@@ -387,7 +394,10 @@ jobs:
           if (bundledBinary) throw new Error(`npmjs.org package includes bundled binary ${bundledBinary.path}`)
           NODE
 
-          npm pack "$npm_pkg" --pack-destination npm-pack --json > npm-pack/pack.json
+          (
+            cd "$npm_pack_src"
+            npm pack --pack-destination "$GITHUB_WORKSPACE/npm-pack" --json > "$GITHUB_WORKSPACE/npm-pack/pack.json"
+          )
           npm_tarball="$(node -e 'const fs = require("node:fs"); const packed = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(packed[0].filename)' npm-pack/pack.json)"
           npm_tarball="npm-pack/$npm_tarball"
 

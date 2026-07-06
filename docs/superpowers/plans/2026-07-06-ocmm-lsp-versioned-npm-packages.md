@@ -1185,10 +1185,16 @@ Replace direct root `pnpm pack` with separate npmjs.org and GitHub Release packa
 
 ```yaml
 - name: Verify npmjs.org ocmm package excludes native LSP binaries
-  working-directory: dist/package/ocmm-npm
   run: |
-    npm pack --dry-run --json > ../../ocmm-npm-pack-dry-run.json
-    if grep -q 'dist/bin/ocmm-lsp' ../../ocmm-npm-pack-dry-run.json; then
+    npm_pack_src="$RUNNER_TEMP/npm-pack/ocmm-npm"
+    rm -rf "$npm_pack_src"
+    mkdir -p "$(dirname "$npm_pack_src")"
+    cp -a dist/package/ocmm-npm "$npm_pack_src"
+    (
+      cd "$npm_pack_src"
+      npm pack --dry-run --json > "$GITHUB_WORKSPACE/ocmm-npm-pack-dry-run.json"
+    )
+    if grep -q 'dist/bin/ocmm-lsp' ocmm-npm-pack-dry-run.json; then
       echo "npmjs.org ocmm package must not contain native LSP binaries" >&2
       exit 1
     fi
@@ -1204,16 +1210,16 @@ Add npmjs.org publish after tarball creation and before GitHub Packages publish:
 ```yaml
 - name: Publish ocmm to npmjs.org
   if: github.event_name == 'push' || inputs.release_kind == 'ocmm'
-  working-directory: dist/package/ocmm-npm
   run: |
-    version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+    npm_pkg="dist/package/ocmm-npm"
+    version="$(node -p "JSON.parse(require('node:fs').readFileSync('$npm_pkg/package.json', 'utf8')).version")"
     if npm view "ocmm@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
       echo "ocmm@$version is already published to npmjs.org; skipping."
     else
       publish_dir="$RUNNER_TEMP/npm-publish/ocmm"
       rm -rf "$publish_dir"
       mkdir -p "$(dirname "$publish_dir")"
-      cp -a . "$publish_dir"
+      cp -a "$npm_pkg" "$publish_dir"
       (
         cd "$publish_dir"
         npm publish --registry=https://registry.npmjs.org
