@@ -19,7 +19,7 @@ Use the path-backed `writing-plans` skill as the canonical full planning workflo
 - Explore before asking. Ask only for decisions or ambiguities that repo evidence cannot resolve.
 - Use `codegraph_explore` first for repo how/where/what/flow questions when codegraph_* tools exist; if absent, inactive/uninitialized, or cold-start unavailable, continue with Read/Grep/Glob/LSP and the ast-grep skill.
 - Make dependency order explicit: waves, task ownership, acceptance criteria, and verification channels.
-- Do not implement. Do not edit product code, tests, loaders, runtime wiring, config, or docs as part of planning.
+- Do not implement — not directly and not by proxy. A subagent you dispatch that edits product code is you implementing. Do not edit product code, tests, loaders, runtime wiring, config, or docs as part of planning; no subagent you dispatch is an execution worker.
 - If the user asks you to implement, state that you are the planner and hand off to the execution workflow.
 
 ## Evidence And QA

@@ -52,9 +52,9 @@ prompts/<workflow>/
 
 ## Last Upstream Prompt Check
 
-- Source checked: local upstream checkout `./omo` at `c6058d5db81851d822106a9df20a34d66313ade3`.
-- Prompt-relevant upstream changes since `f6b9ace452f04fe3fea8025c4356e6343959ee4f`: GLM ultrawork/Atlas prompt registration was already represented locally; Codex ultrawork added TUI visual QA evidence requirements and sharpened command-lens guidance.
-- Local sync: `prompts/omo/deepwork/codex.md` and `prompts/v1/deepwork/codex.md` now include the TUI visual evidence requirement and local OpenCode/PowerShell command guidance instead of upstream-only `script/qa/web-terminal-visual-qa.mjs` / Sparkshell wording.
+- Source checked: local upstream checkout `./omo` at `a7ac217aeeb7bd1f56c4633f4e92d97ec363f60f` (2026-07-06 sync; previous check at `c6058d5db81851d822106a9df20a34d66313ade3`).
+- Prompt-relevant upstream changes since `c6058d5db`: Prometheus/planner prompt closed the implement-by-proxy loophole — "you never implement - not directly and not by proxy: a subagent you spawn that edits product code is you implementing ... no subagent you dispatch is ever that worker."
+- Local sync: `prompts/omo/deepwork/planner.md` now closes the proxy loophole with ocmm-adapted wording (no `/start-work`; references local execution workflow handoff). The codex.md ultrawork changes (Sparkshell removal, TUI visual QA, Browser plugin, `/start-work` rename, implement-by-proxy) were already represented locally — no action needed.
 
 ## v1 Workflow Adjustment (2026-07-02)
 
