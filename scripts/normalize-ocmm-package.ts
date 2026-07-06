@@ -106,6 +106,7 @@ function normalizePackageMetadata(packageRoot: string, lspVersion: string): void
 
   packageJson.optionalDependencies = exactLspOptionalDependencies(lspVersion)
   packageJson.ocmm = { ...metadata, lspVersion }
+  delete packageJson.devEngines
   writeJson(join(packageRoot, "package.json"), packageJson)
 }
 
