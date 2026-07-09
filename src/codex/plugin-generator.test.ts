@@ -20,7 +20,7 @@ import {
   stageCodexRuntime,
 } from "./plugin-generator.ts"
 
-test("Codex manifest declares ocmm plugin resources", () => {
+test("Codex manifest declares deepwork plugin resources", () => {
   const manifest = createPluginManifest("1.2.3")
 
   assert.equal(manifest.name, CODEX_PLUGIN_NAME)
@@ -34,19 +34,19 @@ test("Codex manifest declares ocmm plugin resources", () => {
 test("Codex plugin runtime package enables ESM wrappers", () => {
   const manifest = createPluginRuntimePackage("1.2.3")
 
-  assert.equal(manifest.name, "ocmm-codex-plugin-runtime")
+  assert.equal(manifest.name, "deepwork-codex-plugin-runtime")
   assert.equal(manifest.version, "1.2.3")
   assert.equal(manifest.private, true)
   assert.equal(manifest.type, "module")
 })
 
-test("Codex marketplace points at the local plugins/ocmm bundle", () => {
+test("Codex marketplace points at the local plugins/deepwork bundle", () => {
   const marketplace = createMarketplaceManifest()
 
   assert.equal(marketplace.name, CODEX_MARKETPLACE_NAME)
   const plugins = marketplace.plugins as Array<Record<string, unknown>>
   assert.equal(plugins[0]?.name, CODEX_PLUGIN_NAME)
-  assert.deepEqual(plugins[0]?.source, { source: "local", path: "./plugins/ocmm" })
+  assert.deepEqual(plugins[0]?.source, { source: "local", path: "./plugins/deepwork" })
 })
 
 test("Codex MCP manifest uses Codex server shape", () => {
@@ -129,7 +129,7 @@ test("Codex MCP manifest preserves explicit lsp overrides", () => {
   assert.deepEqual(lsp.args, ["mcp"])
 })
 
-test("Codex agents are generated from ocmm prompts and Codex-compatible fallback models", async () => {
+test("Codex agents are generated from Deepwork prompts and Codex-compatible fallback models", async () => {
   const agents = await buildCodexAgents({
     config: defaultConfig(),
     cwd: process.cwd(),
@@ -167,7 +167,7 @@ test("Codex agents are generated from ocmm prompts and Codex-compatible fallback
 })
 
 test("generateCodexPlugin writes a self-contained bundle", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-plugin-"))
+  const root = mkdtempSync(join(tmpdir(), "deepwork-codex-plugin-"))
   try {
     const result = await generateCodexPlugin({
       projectRoot: process.cwd(),
@@ -207,6 +207,8 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /Runtime Model Selection/)
     assert.match(workflowSkill, /Cross-generation review rule/)
     assert.match(workflowSkill, /Tier assignments/)
+    assert.match(workflowSkill, /this plugin bundle's `agents\/` directory/)
+    assert.doesNotMatch(workflowSkill, /plugins\/ocmm\/agents/)
     assert.match(deepworkSkill, /^---\nname: deepwork-writing-plans$/m)
     assert.match(debuggingSkill, /Codex Compatibility/)
     assert.doesNotMatch(gitAgentMetadata, /search_terms/)

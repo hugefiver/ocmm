@@ -1,14 +1,14 @@
 {
-  "name": "ocmm-local",
+  "name": "deepwork-local",
   "interface": {
     "displayName": "Deepwork Local"
   },
   "plugins": [
     {
-      "name": "Deepwork",
+      "name": "deepwork",
       "source": {
         "source": "local",
-        "path": "./plugins/ocmm"
+        "path": "./plugins/deepwork"
       },
       "policy": {
         "installation": "AVAILABLE",

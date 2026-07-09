@@ -24,9 +24,9 @@ import { translateVariant } from "../routing/variant-translator.ts"
 import { isRecord } from "../shared/logger.ts"
 import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
 
-export const CODEX_PLUGIN_NAME = "Deepwork"
-export const CODEX_MARKETPLACE_NAME = "ocmm-local"
-export const CODEX_PLUGIN_DIR = `plugins/ocmm`
+export const CODEX_PLUGIN_NAME = "deepwork"
+export const CODEX_MARKETPLACE_NAME = "deepwork-local"
+export const CODEX_PLUGIN_DIR = `plugins/deepwork`
 export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
 export const CODEX_AGENT_PREFIX = "dw"
 export const CODEX_WORKFLOW_SKILL_NAME = "deepwork"
@@ -276,7 +276,7 @@ export function createPluginManifest(version: string): Record<string, unknown> {
 
 export function createPluginRuntimePackage(version: string): Record<string, unknown> {
   return {
-    name: "ocmm-codex-plugin-runtime",
+    name: "deepwork-codex-plugin-runtime",
     version,
     private: true,
     type: "module",
@@ -419,7 +419,7 @@ This is the Codex adapter skill for deepwork. Use it to apply Deepwork's autonom
 - Use Codex \`multi_agent_v1.spawn_agent\` when delegation is useful and available. Give each subagent a concrete, self-contained task and set \`fork_context=false\` unless the task genuinely needs inherited history.
 - Use Codex MCP tools exposed by this plugin for docs/search/context where available.
 - Use Codex \`apply_patch\` for manual edits; use shell commands for read-only inspection and project verification.
-- Use generated \`${CODEX_AGENT_PREFIX}-*\` agent TOML files under \`plugins/ocmm/agents/\` as installable profiles when you want Deepwork role prompts as Codex agents.
+- Use generated \`${CODEX_AGENT_PREFIX}-*\` agent TOML files from this plugin bundle's \`agents/\` directory as installable profiles when you want Deepwork role prompts as Codex agents. Resolve the directory relative to the installed plugin root, not a source checkout path.
 
 ## Workflow
 

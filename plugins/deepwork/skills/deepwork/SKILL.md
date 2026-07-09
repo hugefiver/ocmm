@@ -13,7 +13,7 @@ This is the Codex adapter skill for deepwork. Use it to apply Deepwork's autonom
 - Use Codex `multi_agent_v1.spawn_agent` when delegation is useful and available. Give each subagent a concrete, self-contained task and set `fork_context=false` unless the task genuinely needs inherited history.
 - Use Codex MCP tools exposed by this plugin for docs/search/context where available.
 - Use Codex `apply_patch` for manual edits; use shell commands for read-only inspection and project verification.
-- Use generated `dw-*` agent TOML files under `plugins/ocmm/agents/` as installable profiles when you want Deepwork role prompts as Codex agents.
+- Use generated `dw-*` agent TOML files from this plugin bundle's `agents/` directory as installable profiles when you want Deepwork role prompts as Codex agents. Resolve the directory relative to the installed plugin root, not a source checkout path.
 
 ## Workflow
 

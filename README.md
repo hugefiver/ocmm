@@ -51,7 +51,7 @@ For Codex, add the installed package root as a local marketplace:
 
 ```bash
 codex plugin marketplace add ./node_modules/ocmm --json
-codex plugin add ocmm@ocmm-local --json
+codex plugin add deepwork@deepwork-local --json
 ```
 
 ### From GitHub Release
@@ -61,7 +61,7 @@ Main package releases (`vX.Y.Z`) publish self-contained OpenCode/Codex plugin ta
 A main `vX.Y.Z` release contains:
 
 - `ocmm-opencode-plugin-<version>.tgz` — package-manager install package for the OpenCode plugin, CLI wrappers, Codex bundle, and bundled native binaries.
-- `ocmm-codex-plugin-<version>.tgz` — direct Codex plugin package root for local marketplace installation.
+- `deepwork-codex-plugin-<version>.tgz` — direct Codex plugin package root for local marketplace installation.
 - `SHA256SUMS.txt` — checksums for every release asset.
 
 For OpenCode, install the release tarball asset URL with your package manager:
@@ -72,7 +72,7 @@ pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-ope
 ```
 
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
-It also includes the Codex marketplace file and a self-contained generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/ocmm/`; the Codex bundle carries its own plugin-local `dist/cli`, `dist/shared`, and `dist/bin` runtime so Codex's plugin cache can run the default `lsp` MCP.
+It also includes the Codex marketplace file and a self-contained generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/deepwork/`; the Codex bundle carries its own plugin-local `dist/cli`, `dist/shared`, and `dist/bin` runtime so Codex's plugin cache can run the default `lsp` MCP.
 
 ```jsonc
 // opencode.json
@@ -83,18 +83,18 @@ For Codex, either add the installed package root as a local marketplace:
 
 ```bash
 codex plugin marketplace add ./node_modules/ocmm --json
-codex plugin add ocmm@ocmm-local --json
+codex plugin add deepwork@deepwork-local --json
 ```
 
-Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/ocmm` and point the marketplace at that directory:
+Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/deepwork` and point the marketplace at that directory:
 
 ```bash
 VERSION=0.1.1
-curl -L -o "ocmm-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-codex-plugin-${VERSION}.tgz"
-mkdir -p .codex-plugins/ocmm
-tar -xzf "ocmm-codex-plugin-${VERSION}.tgz" -C .codex-plugins/ocmm
-codex plugin marketplace add ".codex-plugins/ocmm" --json
-codex plugin add ocmm@ocmm-local --json
+curl -L -o "deepwork-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/deepwork-codex-plugin-${VERSION}.tgz"
+mkdir -p .codex-plugins/deepwork
+tar -xzf "deepwork-codex-plugin-${VERSION}.tgz" -C .codex-plugins/deepwork
+codex plugin marketplace add ".codex-plugins/deepwork" --json
+codex plugin add deepwork@deepwork-local --json
 ```
 
 ### From GitHub Packages
@@ -119,7 +119,7 @@ For Codex, use the scoped package root as the marketplace root:
 
 ```bash
 codex plugin marketplace add ./node_modules/@<owner>/ocmm --json
-codex plugin add ocmm@ocmm-local --json
+codex plugin add deepwork@deepwork-local --json
 ```
 
 In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token when the workflow has package read permission.
@@ -129,7 +129,7 @@ In GitHub Actions, `${GITHUB_TOKEN}` can be used instead of a personal token whe
 ocmm ships the `ocmm-lsp` native binary in multiple forms:
 
 - **npm optional platform packages**: 8 per-platform packages published to npmjs.org (`ocmm-lsp-linux-x64-gnu`, `ocmm-lsp-linux-arm64-gnu`, `ocmm-lsp-linux-x64-musl`, `ocmm-lsp-linux-arm64-musl`, `ocmm-lsp-darwin-x64`, `ocmm-lsp-darwin-arm64`, `ocmm-lsp-windows-x64`, `ocmm-lsp-windows-arm64`). npm installs the matching one automatically based on your OS, CPU, and libc.
-- **bundled inside GitHub Release tarballs** under `dist/bin/` and `plugins/ocmm/dist/bin/`;
+- **bundled inside GitHub Release tarballs** under `dist/bin/` and `plugins/deepwork/dist/bin/`;
 - **standalone release assets** named `ocmm-lsp-*` for direct download or custom `OCMM_LSP_COMMAND` setups.
 
 Runtime resolution priority (first match wins):
@@ -190,7 +190,7 @@ ocmm also ships a Codex plugin bundle generated from the same local workflow dat
 
 ```
 .agents/plugins/marketplace.json
-plugins/ocmm/
+plugins/deepwork/
   .codex-plugin/plugin.json
   .mcp.json
   package.json
@@ -213,7 +213,7 @@ Install into an isolated Codex home for testing:
 $env:CODEX_HOME = "$env:LOCALAPPDATA\Temp\codex\ocmm-test"
 mkdir.exe -p $env:CODEX_HOME
 codex plugin marketplace add . --json
-codex plugin add ocmm@ocmm-local --json
+codex plugin add deepwork@deepwork-local --json
 codex plugin list --available --json
 ```
 
@@ -222,7 +222,7 @@ The Codex plugin exposes:
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
 - a `deepwork` skill that maps ocmm's planning/delegation semantics to Codex tools;
 - plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
-- generated `dw-*` Codex agent TOML files under `plugins/ocmm/agents/` for installers or local agent registration, including functional agents such as `dw-oracle` and `dw-creative`.
+- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle` and `dw-creative`.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 
@@ -622,7 +622,7 @@ ocmm publishes through two independent release lanes.
 4. CI downloads pinned `ocmm-lsp-v<lspVersion>` release assets, bundles them into GitHub Release tarballs.
 5. CI publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
 6. On tag pushes, CI also publishes `@<owner>/ocmm` to GitHub Packages (optional for manual dispatch).
-7. CI publishes self-contained tarballs (`ocmm-opencode-plugin-X.Y.Z.tgz`, `ocmm-codex-plugin-X.Y.Z.tgz`) and `SHA256SUMS.txt` to the GitHub Release.
+7. CI publishes self-contained tarballs (`ocmm-opencode-plugin-X.Y.Z.tgz`, `deepwork-codex-plugin-X.Y.Z.tgz`) and `SHA256SUMS.txt` to the GitHub Release.
 
 The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs are self-contained with bundled native binaries for all 8 platforms.
 

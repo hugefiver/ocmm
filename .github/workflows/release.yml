@@ -99,7 +99,7 @@ jobs:
       - name: Check generated Codex plugin bundle
         run: |
           pnpm run gen:codex-plugin
-          git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm
+          git diff --exit-code -- .agents/plugins/marketplace.json plugins/deepwork
 
   native:
     name: Native ocmm-lsp (${{ matrix.platform }})
@@ -362,9 +362,9 @@ jobs:
         run: |
           find dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
           pnpm run gen:codex-plugin
-          find plugins/ocmm/dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
+          find plugins/deepwork/dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
-          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/ocmm/dist/cli/ocmm-lsp.js mcp
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/deepwork/dist/cli/ocmm-lsp.js mcp
 
       - name: Normalize ocmm package staging
         run: pnpm run normalize:ocmm-package -- dist/package
@@ -389,7 +389,7 @@ jobs:
           const files = packed.flatMap((entry) => Array.isArray(entry.files) ? entry.files : [])
           const bundledBinary = files.find((file) => {
             const path = file.path ?? ""
-            return path.startsWith("dist/bin/ocmm-lsp") || path.startsWith("plugins/ocmm/dist/bin/ocmm-lsp")
+            return path.startsWith("dist/bin/ocmm-lsp") || path.startsWith("plugins/deepwork/dist/bin/ocmm-lsp")
           })
           if (bundledBinary) throw new Error(`npmjs.org package includes bundled binary ${bundledBinary.path}`)
           NODE
@@ -406,8 +406,8 @@ jobs:
             exit 1
           fi
 
-          if tar -tzf "$npm_tarball" | grep -q '^package/plugins/ocmm/dist/bin/ocmm-lsp'; then
-            echo "npmjs.org package unexpectedly contains package/plugins/ocmm/dist/bin/ocmm-lsp*" >&2
+          if tar -tzf "$npm_tarball" | grep -q '^package/plugins/deepwork/dist/bin/ocmm-lsp'; then
+            echo "npmjs.org package unexpectedly contains package/plugins/deepwork/dist/bin/ocmm-lsp*" >&2
             exit 1
           fi
 
@@ -425,28 +425,28 @@ jobs:
           )
           mv "release-assets/ocmm-${version}.tgz" "release-assets/ocmm-opencode-plugin-${version}.tgz"
 
-          tar -czf "release-assets/ocmm-codex-plugin-${version}.tgz" -C "$codex_pkg" .
+          tar -czf "release-assets/deepwork-codex-plugin-${version}.tgz" -C "$codex_pkg" .
 
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/dist/index.js"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.agents/plugins/marketplace.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/.codex-plugin/plugin.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/package.json"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/ocmm/dist/cli/ocmm-lsp.js"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/.codex-plugin/plugin.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/package.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/dist/cli/ocmm-lsp.js"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/dist/bin/ocmm-lsp-"
-          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/plugins/ocmm/dist/bin/ocmm-lsp-"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/plugins/deepwork/dist/bin/ocmm-lsp-"
 
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?\.agents/plugins/marketplace\.json$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/\.codex-plugin/plugin\.json$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/package\.json$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/cli/ocmm-lsp\.js$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/dist/cli/ocmm-lsp\.js$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/bin/ocmm-lsp-'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/ocmm/dist/bin/ocmm-lsp-'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?README\.md$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?package\.json$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.zh\.md$'
-          tar -tzf "release-assets/ocmm-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.bilingual\.md$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?\.agents/plugins/marketplace\.json$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/\.codex-plugin/plugin\.json$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/package\.json$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/cli/ocmm-lsp\.js$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/dist/cli/ocmm-lsp\.js$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/bin/ocmm-lsp-'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/dist/bin/ocmm-lsp-'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?README\.md$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?package\.json$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.zh\.md$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.bilingual\.md$'
 
       - name: Publish ocmm to npmjs.org
         run: |
