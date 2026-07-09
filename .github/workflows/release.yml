@@ -53,6 +53,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+          registry-url: https://registry.npmjs.org
 
       - name: Enable pnpm
         run: |
@@ -213,6 +214,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+          registry-url: https://registry.npmjs.org
 
       - name: Enable pnpm
         run: |
@@ -343,6 +345,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+          registry-url: https://registry.npmjs.org
 
       - name: Enable pnpm
         run: |

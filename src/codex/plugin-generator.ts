@@ -454,13 +454,13 @@ Configured workflow: \`${config.workflow}\`
 
 ## Delegation
 
-When a Deepwork role maps to a generated agent, spawn the exact Codex agent type. Do not simulate the role with a prompt such as "Act as Deepwork plan-critic"; that starts a generic subagent and will not load the generated profile.
+When a Deepwork role maps to a generated agent, spawn the exact Codex agent type or mention the exact subagent link. Do not simulate the role with a prompt such as "Act as Deepwork plan-critic"; that starts a generic subagent and will not load the generated profile.
 
-- Plan review: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-plan-critic", fork_context=false, message="Review the plan at <path>.")\`
-- Code/work review: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
-- Self-supervision: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-oracle", fork_context=false, message="<specific verification task>")\`
+- Plan review: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-plan-critic", fork_context=false, message="Review the plan at <path>.")\`
+- Code/work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
+- Self-supervision: \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-oracle", fork_context=false, message="<specific verification task>")\`
 
-If only Codex built-in agent types are visible, install the generated TOML files from this bundle's \`agents/\` directory into project \`.codex/agents/\` or personal \`~/.codex/agents/\`; Codex discovers custom agents from those locations.
+The \`${CODEX_AGENT_PREFIX}-*\` agent profile is the load-bearing selector. Never replace it with only a model or reasoning override; doing so creates a generic subagent that lacks the Deepwork role prompt. If only Codex built-in agent types are visible, install the generated TOML files from this bundle's \`agents/\` directory into project \`.codex/agents/\` or personal \`~/.codex/agents/\`, then restart or refresh the Codex thread so the custom agent registry is rebuilt.
 
 ## Generated Agents
 
@@ -470,7 +470,7 @@ ${agentRows}
 
 ## Runtime Model Selection
 
-When spawning a subagent via \`multi_agent_v1.spawn_agent\`, select the model and \`reasoning_effort\` based on the agent's tier. The static model in the agent's TOML is a fallback default; override it via the \`model\` and \`reasoning_effort\` parameters of \`spawn_agent\`.
+When spawning a subagent via \`multi_agent_v1.spawn_agent\`, omit \`model\` and \`reasoning_effort\` by default so Codex can apply the selected \`${CODEX_AGENT_PREFIX}-*\` profile. Add model or effort overrides only when you can still set the exact \`agent_type\` and there is a clear task-specific reason.
 
 ### Tier assignments
 

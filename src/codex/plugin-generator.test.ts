@@ -206,6 +206,8 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(projectPlanCritic, /^name = "dw-plan-critic"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
     assert.match(workflowSkill, /agent_type="dw-plan-critic"/)
+    assert.match(workflowSkill, /\[@dw-oracle\]\(subagent:\/\/dw-oracle\)/)
+    assert.match(workflowSkill, /Never replace it with only a model or reasoning override/)
     assert.match(workflowSkill, /Do not simulate the role with a prompt/)
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
