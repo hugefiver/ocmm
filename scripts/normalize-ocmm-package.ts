@@ -12,6 +12,7 @@ import {
 
 const PACKAGE_ROOT_ENTRIES = [
   ".agents",
+  ".codex",
   "dist",
   "plugins",
   "prompts",
@@ -25,6 +26,7 @@ const PACKAGE_ROOT_ENTRIES = [
 
 const CODEX_GITHUB_ENTRIES = [
   ".agents",
+  ".codex",
   "plugins",
   "dist",
   "README.md",
@@ -33,6 +35,8 @@ const CODEX_GITHUB_ENTRIES = [
   "LICENSE.bilingual.md",
   "package.json",
 ] as const
+
+const CODEX_PLUGIN_DIR = join("plugins", "deepwork")
 
 export interface NormalizeOcmmPackageOptions {
   root?: string
@@ -139,7 +143,7 @@ export function normalizeOcmmPackage(options: NormalizeOcmmPackageOptions = {}):
   normalizePackageMetadata(githubPackageDir, lspVersion)
 
   rmSync(join(npmPackageDir, "dist", "bin"), { recursive: true, force: true })
-  rmSync(join(npmPackageDir, "plugins", "ocmm", "dist", "bin"), { recursive: true, force: true })
+  rmSync(join(npmPackageDir, CODEX_PLUGIN_DIR, "dist", "bin"), { recursive: true, force: true })
 
   requireDirectory(
     join(githubPackageDir, "dist", "bin"),
@@ -149,8 +153,8 @@ export function normalizeOcmmPackage(options: NormalizeOcmmPackageOptions = {}):
   copyEntries(githubPackageDir, codexPackageDir, CODEX_GITHUB_ENTRIES)
   normalizePackageMetadata(codexPackageDir, lspVersion)
   requireDirectory(
-    join(codexPackageDir, "plugins", "ocmm", "dist", "bin"),
-    `Codex package staging requires ${join(codexPackageDir, "plugins", "ocmm", "dist", "bin")}`,
+    join(codexPackageDir, CODEX_PLUGIN_DIR, "dist", "bin"),
+    `Codex package staging requires ${join(codexPackageDir, CODEX_PLUGIN_DIR, "dist", "bin")}`,
   )
 
   console.log(`npm-package-dir=${npmPackageDir}`)

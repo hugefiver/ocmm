@@ -23,6 +23,7 @@
   },
   "files": [
     ".agents",
+    ".codex",
     "dist",
     "plugins",
     "prompts",

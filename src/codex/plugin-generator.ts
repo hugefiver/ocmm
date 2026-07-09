@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { basename, join, relative, resolve, sep } from "node:path"
+import { basename, dirname, join, relative, resolve, sep } from "node:path"
 
 import { normalizeShorthand } from "../config/normalize.ts"
 import { type OcmmConfig } from "../config/schema.ts"
@@ -28,6 +28,7 @@ export const CODEX_PLUGIN_NAME = "deepwork"
 export const CODEX_MARKETPLACE_NAME = "deepwork-local"
 export const CODEX_PLUGIN_DIR = `plugins/deepwork`
 export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
+export const CODEX_PROJECT_AGENTS_DIR = ".codex/agents"
 export const CODEX_AGENT_PREFIX = "dw"
 export const CODEX_WORKFLOW_SKILL_NAME = "deepwork"
 const CODEX_LSP_ENTRYPOINT = join("dist", "cli", "ocmm-lsp.js")
@@ -52,6 +53,7 @@ const AGENT_ALIASES = new Map([
 export type CodexPluginGenerationResult = {
   pluginRoot: string
   marketplacePath: string
+  projectAgentsRoot?: string
   configHost: ConfigHost | "provided"
   agentCount: number
   skillCount: number
@@ -81,12 +83,16 @@ export async function generateCodexPlugin(options: {
   projectRoot?: string
   pluginRoot?: string
   marketplacePath?: string
+  projectAgentsRoot?: string | false
   config?: OcmmConfig
   packageVersion?: string
 } = {}): Promise<CodexPluginGenerationResult> {
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
   const pluginRoot = resolve(options.pluginRoot ?? join(projectRoot, CODEX_PLUGIN_DIR))
   const marketplacePath = resolve(options.marketplacePath ?? join(projectRoot, CODEX_MARKETPLACE_FILE))
+  const projectAgentsRoot = options.projectAgentsRoot === false
+    ? null
+    : resolve(options.projectAgentsRoot ?? join(projectRoot, CODEX_PROJECT_AGENTS_DIR))
   const version = options.packageVersion ?? readPackageVersion(projectRoot)
   const loaded = loadAdapterConfig(projectRoot, options.config)
   const skillsRoot = join(projectRoot, "skills")
@@ -104,6 +110,9 @@ export async function generateCodexPlugin(options: {
     skillsRoot,
   })
   writeCodexAgents(pluginRoot, agents)
+  if (projectAgentsRoot) {
+    writeProjectCodexAgents(projectRoot, projectAgentsRoot, agents)
+  }
   const skillCount = writeCodexSkills({
     config: loaded.config,
     projectRoot,
@@ -117,6 +126,7 @@ export async function generateCodexPlugin(options: {
   return {
     pluginRoot,
     marketplacePath,
+    ...(projectAgentsRoot ? { projectAgentsRoot } : {}),
     configHost: loaded.host,
     agentCount: agents.length,
     skillCount,
@@ -301,6 +311,18 @@ export function createMarketplaceManifest(): Record<string, unknown> {
 function writeCodexAgents(pluginRoot: string, agents: readonly CodexAgentSpec[]): void {
   const agentsDir = join(pluginRoot, "agents")
   resetGeneratedDir(agentsDir, pluginRoot)
+  writeAgentFiles(agentsDir, agents)
+}
+
+function writeProjectCodexAgents(projectRoot: string, agentsRoot: string, agents: readonly CodexAgentSpec[]): void {
+  const safetyRoot = resolve(agentsRoot).startsWith(`${resolve(projectRoot)}${sep}`)
+    ? projectRoot
+    : dirname(dirname(agentsRoot))
+  resetGeneratedDir(agentsRoot, safetyRoot)
+  writeAgentFiles(agentsRoot, agents)
+}
+
+function writeAgentFiles(agentsDir: string, agents: readonly CodexAgentSpec[]): void {
   for (const agent of agents) {
     writeFileSync(join(agentsDir, `${agent.name}.toml`), renderAgentToml(agent), "utf8")
   }
@@ -429,6 +451,16 @@ Configured workflow: \`${config.workflow}\`
 2. Select the matching Deepwork role or generated \`${CODEX_AGENT_PREFIX}-*\` Codex agent.
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
+
+## Delegation
+
+When a Deepwork role maps to a generated agent, spawn the exact Codex agent type. Do not simulate the role with a prompt such as "Act as Deepwork plan-critic"; that starts a generic subagent and will not load the generated profile.
+
+- Plan review: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-plan-critic", fork_context=false, message="Review the plan at <path>.")\`
+- Code/work review: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
+- Self-supervision: \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-oracle", fork_context=false, message="<specific verification task>")\`
+
+If only Codex built-in agent types are visible, install the generated TOML files from this bundle's \`agents/\` directory into project \`.codex/agents/\` or personal \`~/.codex/agents/\`; Codex discovers custom agents from those locations.
 
 ## Generated Agents
 

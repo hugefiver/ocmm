@@ -24,6 +24,16 @@ Configured workflow: `codex`
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
+## Delegation
+
+When a Deepwork role maps to a generated agent, spawn the exact Codex agent type. Do not simulate the role with a prompt such as "Act as Deepwork plan-critic"; that starts a generic subagent and will not load the generated profile.
+
+- Plan review: `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", fork_context=false, message="Review the plan at <path>.")`
+- Code/work review: `multi_agent_v1.spawn_agent(agent_type="dw-reviewer", fork_context=false, message="<bounded review task>")`
+- Self-supervision: `multi_agent_v1.spawn_agent(agent_type="dw-oracle", fork_context=false, message="<specific verification task>")`
+
+If only Codex built-in agent types are visible, install the generated TOML files from this bundle's `agents/` directory into project `.codex/agents/` or personal `~/.codex/agents/`; Codex discovers custom agents from those locations.
+
 ## Generated Agents
 
 | Codex agent | Model | Effort | Deepwork source |

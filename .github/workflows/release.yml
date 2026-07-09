@@ -99,7 +99,12 @@ jobs:
       - name: Check generated Codex plugin bundle
         run: |
           pnpm run gen:codex-plugin
-          git diff --exit-code -- .agents/plugins/marketplace.json plugins/deepwork
+          changed="$(git status --short -- .agents/plugins/marketplace.json .codex/agents plugins/deepwork)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git diff -- .agents/plugins/marketplace.json .codex/agents plugins/deepwork
+            exit 1
+          fi
 
   native:
     name: Native ocmm-lsp (${{ matrix.platform }})
@@ -429,6 +434,7 @@ jobs:
 
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/dist/index.js"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.agents/plugins/marketplace.json"
+          tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/.codex/agents/dw-plan-critic.toml"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/.codex-plugin/plugin.json"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/package.json"
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -qx "package/plugins/deepwork/dist/cli/ocmm-lsp.js"
@@ -436,6 +442,7 @@ jobs:
           tar -tzf "release-assets/ocmm-opencode-plugin-${version}.tgz" | grep -q "^package/plugins/deepwork/dist/bin/ocmm-lsp-"
 
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?\.agents/plugins/marketplace\.json$'
+          tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?\.codex/agents/dw-plan-critic\.toml$'
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/\.codex-plugin/plugin\.json$'
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?plugins/deepwork/package\.json$'
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?dist/cli/ocmm-lsp\.js$'

@@ -11,6 +11,7 @@ import {
   CODEX_MARKETPLACE_NAME,
   CODEX_PLUGIN_DIR,
   CODEX_PLUGIN_NAME,
+  CODEX_PROJECT_AGENTS_DIR,
   CODEX_WORKFLOW_SKILL_NAME,
   createCodexMcpManifest,
   createMarketplaceManifest,
@@ -173,6 +174,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
       projectRoot: process.cwd(),
       pluginRoot: join(root, "plugins", "ocmm"),
       marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
       config: defaultConfig(),
       packageVersion: "9.9.9",
     })
@@ -183,6 +185,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const orchestrator = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-orchestrator.toml`), "utf8")
     const oracle = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle.toml`), "utf8")
     const creative = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-creative.toml`), "utf8")
+    const projectPlanCritic = readFileSync(join(root, CODEX_PROJECT_AGENTS_DIR, `${CODEX_AGENT_PREFIX}-plan-critic.toml`), "utf8")
     const workflowSkill = readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8")
     const deepworkSkill = readFileSync(join(result.pluginRoot, "skills", "deepwork-writing-plans", "SKILL.md"), "utf8")
     const debuggingSkill = readFileSync(join(result.pluginRoot, "skills", "debugging", "SKILL.md"), "utf8")
@@ -200,7 +203,10 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(orchestrator, /^name = "dw-orchestrator"$/m)
     assert.match(oracle, /^name = "dw-oracle"$/m)
     assert.match(creative, /^name = "dw-creative"$/m)
+    assert.match(projectPlanCritic, /^name = "dw-plan-critic"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
+    assert.match(workflowSkill, /agent_type="dw-plan-critic"/)
+    assert.match(workflowSkill, /Do not simulate the role with a prompt/)
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
     assert.match(workflowSkill, /\| dw-creative \|/)

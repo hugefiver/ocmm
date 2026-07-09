@@ -41,7 +41,7 @@ Tags matching `v*` (but NOT `ocmm-lsp-v*`) trigger the main package lane:
 8. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
 9. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
 
-The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/ocmm/dist/bin/`.
+The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `deepwork-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/deepwork/dist/bin/`.
 
 The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
 
@@ -62,7 +62,7 @@ The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
 
 npm installs the matching optional package automatically for your OS/CPU/libc unless optional dependencies are omitted (e.g. `--omit=optional`, `npm_config_optional=false`, or the package manager skips optionals). GitHub Release tarballs already include the matching native binary, so the optional package is not needed there.
 
-The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/ocmm/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add ocmm@ocmm-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` and `dw-creative`. `dw-oracle` (self-supervision) defaults to a cross-gen model; `dw-reviewer` (external review) defaults to the same flagship family as the main agent.
+The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/deepwork/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add deepwork@deepwork-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` and `dw-creative`. `dw-oracle` (self-supervision) defaults to a cross-gen model; `dw-reviewer` (external review) defaults to the same flagship family as the main agent.
 
 ### Publishing a new release
 
@@ -85,12 +85,12 @@ git push origin ocmm-lsp-vA.B.W
 #    should bundle (must match an already-published ocmm-lsp-vA.B.C release).
 
 # 2. Regenerate the Codex plugin bundle — the bundle embeds the version number
-#    in plugins/ocmm/.codex-plugin/plugin.json and plugins/ocmm/package.json.
+#    in plugins/deepwork/.codex-plugin/plugin.json and plugins/deepwork/package.json.
 #    If you skip this, the release workflow will fail at the
-#    "Check generated Codex plugin bundle" step (git diff --exit-code).
+#    "Check generated Codex plugin bundle" step.
 pnpm run build:ts
 pnpm run gen:codex-plugin
-git add .agents/plugins/marketplace.json plugins/ocmm
+git add .agents/plugins/marketplace.json .codex/agents plugins/deepwork
 git commit -m "chore: bump version to X.Y.W"
 
 # 3. Tag and push
@@ -105,7 +105,7 @@ git push origin vX.Y.W
 #    On success, "GitHub Release" publishes assets automatically.
 ```
 
-Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's `git diff --exit-code -- .agents/plugins/marketplace.json plugins/ocmm` check fails if the committed bundle does not match what `gen:codex-plugin` produces from the current `package.json` version.
+Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin` produces from the current `package.json` version.
 
 `package.json.ocmm.lspVersion` pins the default LSP version for the main package release. This must match an already-published `ocmm-lsp-vA.B.C` release — the `stage-pinned-lsp` job downloads the pinned release assets by constructing `ocmm-lsp-v${lspVersion}`. The `ocmm` and `ocmm-lsp` versions are independent and do not need to be equal.
 
