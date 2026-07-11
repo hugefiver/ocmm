@@ -438,7 +438,7 @@ This is the Codex adapter skill for deepwork. Use it to apply Deepwork's autonom
 ## Runtime Mapping
 
 - Use Codex \`update_plan\` for TodoWrite-style planning.
-- Use Codex \`multi_agent_v1.spawn_agent\` when delegation is useful and available. Give each subagent a concrete, self-contained task and set \`fork_context=false\` unless the task genuinely needs inherited history.
+- Use the current callable Codex subagent-dispatch tool when delegation is useful and available. Match its actual schema: prefer exact profile selection, then complete model-plus-role composition, then generic/flat dispatch with a self-contained role-and-skills message.
 - Use Codex MCP tools exposed by this plugin for docs/search/context where available.
 - Use Codex \`apply_patch\` for manual edits; use shell commands for read-only inspection and project verification.
 - Use generated \`${CODEX_AGENT_PREFIX}-*\` agent TOML files from this plugin bundle's \`agents/\` directory as installable profiles when you want Deepwork role prompts as Codex agents. Resolve the directory relative to the installed plugin root, not a source checkout path.
@@ -454,13 +454,26 @@ Configured workflow: \`${config.workflow}\`
 
 ## Delegation
 
-When a Deepwork role maps to a generated agent, spawn the exact Codex agent type or mention the exact subagent link. Do not simulate the role with a prompt such as "Act as Deepwork plan-critic"; that starts a generic subagent and will not load the generated profile.
+When a Deepwork role maps to a generated agent, use the exact Codex agent type when the current dispatch tool can select it. A generic or flat subagent does not load the generated profile; when that is the only callable route, follow the generic fallback below and state the role, skills, and task explicitly in its message.
 
 - Plan review: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-plan-critic", fork_context=false, message="Review the plan at <path>.")\`
 - Code/work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
 - Self-supervision: \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-oracle", fork_context=false, message="<specific verification task>")\`
 
-The \`${CODEX_AGENT_PREFIX}-*\` agent profile is the load-bearing selector. Never replace it with only a model or reasoning override; doing so creates a generic subagent that lacks the Deepwork role prompt. If only Codex built-in agent types are visible, install the generated TOML files from this bundle's \`agents/\` directory into project \`.codex/agents/\` or personal \`~/.codex/agents/\`, then restart or refresh the Codex thread so the custom agent registry is rebuilt.
+The \`${CODEX_AGENT_PREFIX}-*\` agent profile is the preferred selector. When a current native dispatch tool can select that profile directly, use it before any generic route.
+
+Do not pass \`${CODEX_AGENT_PREFIX}-*.toml\` files as \`items\`, \`skill\` attachments, or prompt context to a generic subagent. TOML files are installation artifacts for Codex's agent registry, not runtime skills.
+
+The current callable dispatch-tool schema is the only availability signal. MultiAgent V1/V2 names are useful hints but not a contract: use any current or future native dispatch surface only according to the parameters it actually exposes. Do not inspect unrelated or deferred tools for a hidden profile selector. An \`[@${CODEX_AGENT_PREFIX}-*](subagent://${CODEX_AGENT_PREFIX}-*)\` link does not spawn an agent, and a \`task_name\` does not select a profile.
+
+Use the first available native route in this order:
+
+1. **Exact profile** — a tool field such as \`agent_type\`, \`agent_path\`, or \`agent_nickname\` that selects the generated \`${CODEX_AGENT_PREFIX}-*\` profile.
+2. **Direct composition** — a native dispatch tool that can choose the required model and supply the role's actual system or developer instructions plus skills. Select the matching model from the role tier below, supply the selected role's generated developer-instruction content (not its TOML wrapper), and attach or load the workflow skill and task-relevant \`SKILL.md\` artifacts through the fields the tool actually exposes. State that this is a generic fallback, not an exact-profile invocation.
+3. **Generic or flat dispatch** — when a callable subagent tool can only accept a task identity and message (for example \`task_name\`, \`message\`, and \`fork_turns\`), still delegate. Put a self-contained role envelope in \`message\`: the Deepwork role name and purpose, the bounded task, relevant files and constraints, acceptance criteria, and a \`Required skills:\` list naming the workflow skill and task-relevant skills. Use any real skill-loading field only when it is exposed. Do not claim that this loaded the \`${CODEX_AGENT_PREFIX}-*\` profile; the child uses its inherited/default model and follows the role and skill guidance in the message.
+4. **Local execution** — use only when no callable native subagent-dispatch route is available.
+
+If an exact \`${CODEX_AGENT_PREFIX}-*\` invocation returns \`unknown agent_type\`, continue at route 2 when it is complete enough, otherwise use route 3. A tool limited to \`task_name\`, \`message\`, and \`fork_turns\` cannot select a model or load the profile payload, but it is still a valid generic/flat dispatch route. Install the generated TOML files into project \`.codex/agents/\` or personal \`~/.codex/agents/\` and restart or refresh the Codex thread only when restoring exact-profile delegation is itself in scope.
 
 ## Generated Agents
 
@@ -470,37 +483,52 @@ ${agentRows}
 
 ## Runtime Model Selection
 
-When spawning a subagent via \`multi_agent_v1.spawn_agent\`, omit \`model\` and \`reasoning_effort\` by default so Codex can apply the selected \`${CODEX_AGENT_PREFIX}-*\` profile. Add model or effort overrides only when you can still set the exact \`agent_type\` and there is a clear task-specific reason.
+For an exact profile, omit \`model\` and \`reasoning_effort\` by default so Codex can apply the selected \`${CODEX_AGENT_PREFIX}-*\` profile. For direct composition, select the tier model below only when the current tool exposes \`model\`, preserve the profile's existing reasoning effort as the baseline, and load the selected role's developer instructions and required skills. For generic/flat dispatch with no model field, do not invent an override: the child inherits its native/default model while the role and skills are carried in \`message\`. An explicit user-selected model always wins.
+
+### GPT runtime upgrades (only when directly selectable)
+
+Apply this section only when the current dispatch surface exposes a \`model\` field or an exact profile route that also accepts a model override. An explicit user-selected model always wins. Determine availability from the current callable surface or active model catalog; do not assume a model exists from its name. When no GPT-5.6 model is available, omit the override and preserve the generated profile's existing model and reasoning behavior unchanged.
+
+| Role lane | Preferred GPT-5.6 model | Reasoning effort | Roles |
+|---|---|---|---|
+| Flagship | \`gpt-5.6-sol\` | \`high\` by default; \`xhigh\` for deep, architecture, algorithmic, security, or high-risk reasoning | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning |
+| External review | \`gpt-5.6-sol\` | \`high\` for bounded review; \`xhigh\` for complex, cross-module, security, performance, or final-gate review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic |
+| Cross-check | \`gpt-5.6-terra\` | \`high\` for focused self-supervision; \`xhigh\` for complex or high-risk verification | ${CODEX_AGENT_PREFIX}-oracle |
+| Mid | \`gpt-5.6-terra\` | Preserve the profile baseline unless task complexity requires more | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search |
+| Mini | \`gpt-5.6-luna\` | \`high\` | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore |
+
+When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane instead of pinning the 5.6 name: newest flagship for Flagship and External review, and a strong non-identical mid-tier or flagship for Cross-check. Keep the role's high/xhigh complexity rule, never override an explicit user model, and fall back to the generated profile default when availability or capability evidence is absent.
 
 ### Tier assignments
 
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
-| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning, ${CODEX_AGENT_PREFIX}-reviewer | Latest-gen flagship | xhigh |
+| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Latest-gen flagship | high or xhigh by complexity |
+| External review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic | Latest-gen flagship | high or xhigh by review risk |
+| Cross-check | ${CODEX_AGENT_PREFIX}-oracle | Strong non-identical mid-tier or flagship | high or xhigh by verification risk |
 | Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Latest-gen mini | high |
-| Cross-gen review | ${CODEX_AGENT_PREFIX}-oracle, ${CODEX_AGENT_PREFIX}-plan-critic | Previous-gen flagship | xhigh |
 
 ### Model tier definitions
 
 - **Flagship**: the most capable model of the latest generation (e.g., gpt-5.5 in the 5.x gen).
 - **Mid-tier**: a lighter-but-capable model within the latest generation. If the latest gen has no mid-tier, use the flagship at \`high\` effort instead.
 - **Mini**: the smallest/cheapest model of the latest generation (e.g., \`-mini\` variants).
-- **Previous-gen flagship**: the flagship of the previous generation (e.g., gpt-5.4 when gpt-5.5 is current).
+- **Strong non-identical cross-check**: a capable available model that differs from the primary lane when possible; model diversity is useful, but not a reason to bypass the newer-model policy.
 
-### Cross-generation review rule
+### Independent review rule
 
-${CODEX_AGENT_PREFIX}-oracle and ${CODEX_AGENT_PREFIX}-plan-critic should use a **different generation** from the planner/orchestrator to provide independent review perspective. Oracle reviews work the agent itself produced (self-supervision); reviewer reviews code not produced by the current agent (external review). If the main model is the latest flagship, the cross-gen reviewer uses the previous-gen flagship at xhigh. If only one generation is available, use the same flagship at xhigh.
+${CODEX_AGENT_PREFIX}-oracle provides self-supervision and should prefer the Cross-check lane, while ${CODEX_AGENT_PREFIX}-reviewer and ${CODEX_AGENT_PREFIX}-plan-critic provide external review through the External review lane. Preserve an independent review perspective by selecting a non-identical capable model for oracle when available, but prefer the newer-model policy over forced generation downgrades. If only one capable model is available, use it at the lane's complexity-appropriate effort.
 
-### Example (gpt-5.x generation — verify against your available models)
+### Example (GPT-5.6 generation — verify against your available models)
 
 | Tier | Example model | Effort |
 |---|---|---|
-| Flagship | gpt-5.5 | xhigh |
-| Mid (with 5.4 available) | gpt-5.4 | max |
-| Mid (no 5.4) | gpt-5.5 | high |
-| Mini | gpt-5.4-mini | high |
-| Cross-gen review | gpt-5.4 | xhigh |
+| Flagship | gpt-5.6-sol | high or xhigh |
+| External review | gpt-5.6-sol | high or xhigh |
+| Cross-check | gpt-5.6-terra | high or xhigh |
+| Mid | gpt-5.6-terra | high or max |
+| Mini | gpt-5.6-luna | high |
 `
 }
 
@@ -519,11 +547,11 @@ function codexAgentInstructions(args: {
     "",
     "Codex tool compatibility:",
     "- Use update_plan for TodoWrite-style planning.",
-    "- Use multi_agent_v1.spawn_agent for subagent delegation when available; make delegated tasks self-contained.",
+    "- Use the current callable Codex subagent-dispatch tool when available; make delegated tasks self-contained and follow its actual parameter schema.",
     "- Use apply_patch for manual code edits.",
     "- Use shell commands for inspection and verification, preferring rg for text search.",
     "- Treat AGENTS.md as native Codex project guidance.",
-    "- The model and reasoning_effort in your profile are defaults. The main agent may override them via spawn_agent's model and reasoning_effort parameters when spawning you.",
+    "- The model and reasoning_effort in your profile are defaults. The main agent may override them only when its current dispatch tool exposes those parameters.",
     "",
     "## Injected Brainstorming Skill (HARD-GATE)",
     "The following skill is always loaded. It is mandatory for any new feature, component, or behavior change — present a design and get explicit user approval BEFORE any code.",
@@ -532,6 +560,11 @@ function codexAgentInstructions(args: {
     "",
     "Original Deepwork prompt:",
     args.prompt,
+    "",
+    "## Subagent Dispatch Compatibility (HARD-GATE)",
+    "The current callable dispatch-tool schema is authoritative; MultiAgent V1/V2 names and examples elsewhere are lower-priority compatibility examples.",
+    "When delegating, first use an exact profile selector (agent_type, agent_path, or agent_nickname) when exposed. Otherwise use direct composition only when the tool can select the model and carry system/developer instructions plus skills. Otherwise, if a generic or flat dispatch tool is callable, still delegate with a self-contained message containing TASK, ROLE, REQUIRED SKILLS, CONTEXT, CONSTRAINTS, and EXPECTED OUTCOME. Do not claim that a generic message loaded a dw-* profile, and do not pass a dw-*.toml installation artifact as a skill or prompt attachment. Use local execution only when no native dispatch tool is callable.",
+    "When a model override is directly supported, preserve an explicit user model. Otherwise prefer GPT-5.6 Sol for flagship and external-review work, GPT-5.6 Terra for oracle cross-checks, and choose high versus xhigh from task complexity. If GPT-5.6 is absent, keep the profile default; if a newer cataloged GPT model is demonstrably better in the same lane, it may replace the 5.6 preference without changing the role contract.",
   ].join("\n")
 }
 
@@ -623,7 +656,7 @@ function normalizeSkillForCodex(skillDir: string, name?: string): void {
   text = text.replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
   if (name) text = text.replace(/^name:\s*.+$/m, `name: ${name}`)
   if (!text.includes("## Codex Compatibility")) {
-    text = `${text.trimEnd()}\n\n## Codex Compatibility\n\n- When this skill mentions TodoWrite, use Codex \`update_plan\`.\n- When this skill mentions OpenCode \`task(...)\`, use Codex \`multi_agent_v1.spawn_agent\` when available.\n- When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.\n`
+    text = `${text.trimEnd()}\n\n## Codex Compatibility\n\n- When this skill mentions TodoWrite, use Codex \`update_plan\`.\n- When this skill mentions OpenCode \`task(...)\`, use the current callable Codex subagent-dispatch tool and preserve the task contract; prefer an exact profile selector, then complete direct composition, then generic/flat dispatch with role and required skills in the message.\n- When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.\n`
   }
   writeFileSync(
     skillPath,

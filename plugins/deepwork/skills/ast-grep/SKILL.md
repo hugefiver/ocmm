@@ -274,5 +274,5 @@ When summarizing for the user, **always include the count of files affected**, n
 ## Codex Compatibility
 
 - When this skill mentions TodoWrite, use Codex `update_plan`.
-- When this skill mentions OpenCode `task(...)`, use Codex `multi_agent_v1.spawn_agent` when available.
+- When this skill mentions OpenCode `task(...)`, use the current callable Codex subagent-dispatch tool and preserve the task contract; prefer an exact profile selector, then complete direct composition, then generic/flat dispatch with role and required skills in the message.
 - When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.
