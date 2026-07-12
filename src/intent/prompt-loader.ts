@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gemini,glm,codex,planner}.md
+ *     deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
  *
@@ -23,7 +23,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "omo" | "v1" | "codex"
 
-type DeepworkVariant = "default" | "gpt" | "gemini" | "glm" | "codex" | "planner"
+type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gemini" | "glm" | "codex" | "planner"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -37,7 +37,7 @@ type CategoryName =
   | "deep"
   | "documenting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gemini", "glm", "codex", "planner"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -113,6 +113,7 @@ export function pickDeepworkVariantForAgent(opts: {
   preferenceModel: string
 }): DeepworkVariant {
   if (isPlannerAgent(opts.agentName)) return "planner"
+  if (isGpt56Model(opts.preferenceModel)) return "gpt-5.6"
   const family = classifyModelFamily({
     providerID: "",
     modelID: opts.preferenceModel,
@@ -122,6 +123,11 @@ export function pickDeepworkVariantForAgent(opts: {
   if (family === "gemini") return "gemini"
   if (family === "glm") return "glm"
   return "default"
+}
+
+/** GPT-5.6 family, including Sol, Terra, Luna, and provider-versioned aliases. */
+export function isGpt56Model(modelID: string): boolean {
+  return /(?:^|[\/_-])gpt[-.]5[._-]6(?:$|[._-])/i.test(modelID)
 }
 
 export function getDeepworkPrompt(variant: DeepworkVariant): string {

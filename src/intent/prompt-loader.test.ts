@@ -10,6 +10,7 @@ import {
   getAgentPrompt,
   getCategoryPrompt,
   pickDeepworkVariantForAgent,
+  isGpt56Model,
 } from "./prompt-loader.ts"
 
 function makeTempRoot(workflow: "omo" | "v1"): string {
@@ -68,9 +69,11 @@ test("loadAllPrompts loads glm and codex deepwork variants", () => {
   try {
     writeFileSync(join(root, "omo", "deepwork", "glm.md"), "glm-content")
     writeFileSync(join(root, "omo", "deepwork", "codex.md"), "codex-content")
+    writeFileSync(join(root, "omo", "deepwork", "gpt-5.6.md"), "gpt-5.6-content")
     loadAllPrompts(root, "omo")
     assert.equal(getDeepworkPrompt("glm"), "glm-content")
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
+    assert.equal(getDeepworkPrompt("gpt-5.6"), "gpt-5.6-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -97,7 +100,7 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
     for (const name of ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]) {
       assert.match(getAgentPrompt(name), new RegExp(`Agent Role: ${name}`), `${workflow}/${name}`)
     }
-    for (const variant of ["default", "gpt", "gemini", "glm", "codex", "planner"] as const) {
+    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
       const prompt = getDeepworkPrompt(variant)
       assert.ok(prompt.length > 0, `${workflow}/${variant} prompt missing`)
       if (workflow === "v1") {
@@ -138,6 +141,19 @@ test("pickDeepworkVariantForAgent picks gpt variant for gpt model", () => {
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.5" }),
     "gpt",
   )
+})
+
+test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.6-sol" }),
+    "gpt-5.6",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.7-sol" }),
+    "gpt",
+  )
+  assert.equal(isGpt56Model("vercel/openai/gpt-5.6-terra"), true)
+  assert.equal(isGpt56Model("gpt-5.7-sol"), false)
 })
 
 test("pickDeepworkVariantForAgent picks gemini variant for gemini model", () => {

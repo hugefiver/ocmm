@@ -132,7 +132,7 @@ test("Codex MCP manifest preserves explicit lsp overrides", () => {
 
 test("Codex agents are generated from Deepwork prompts and Codex-compatible fallback models", async () => {
   const agents = await buildCodexAgents({
-    config: defaultConfig(),
+    config: { ...defaultConfig(), workflow: "codex" },
     cwd: process.cwd(),
     skillsRoot: join(process.cwd(), "skills"),
   })
@@ -148,8 +148,10 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.ok(orchestrator)
   assert.equal(orchestrator.model, "gpt-5.5")
   assert.equal(orchestrator.reasoningEffort, "high")
-  assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
-  assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
+    assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
+    assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
+    assert.match(orchestrator.developerInstructions, /GPT-5\.6 EXECUTION CALIBRATION/)
+    assert.match(orchestrator.developerInstructions, /Apply this layer only when the selected model is in the GPT-5\.6 family/)
   assert.ok(builder)
   assert.equal(builder.model, "gpt-5.5")
   assert.ok(deep)
@@ -170,12 +172,16 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
 test("generateCodexPlugin writes a self-contained bundle", async () => {
   const root = mkdtempSync(join(tmpdir(), "deepwork-codex-plugin-"))
   try {
+    const config = {
+      ...defaultConfig(),
+      agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
+    }
     const result = await generateCodexPlugin({
       projectRoot: process.cwd(),
       pluginRoot: join(root, "plugins", "ocmm"),
       marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
       projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
-      config: defaultConfig(),
+      config,
       packageVersion: "9.9.9",
     })
 
@@ -202,7 +208,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.equal(isAbsolute(lspEntrypoint), false)
     assert.match(orchestrator, /^name = "dw-orchestrator"$/m)
     assert.match(orchestrator, /Subagent Dispatch Compatibility \(HARD-GATE\)/)
-    assert.match(orchestrator, /TASK, ROLE, REQUIRED SKILLS, CONTEXT, CONSTRAINTS, and EXPECTED OUTCOME/)
+    assert.match(orchestrator, /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/)
     assert.match(orchestrator, /MultiAgent V1\/V2 names and examples elsewhere are lower-priority compatibility examples/)
     assert.match(orchestrator, /GPT-5\.6 Sol for flagship and external-review work/)
     assert.match(orchestrator, /GPT-5\.6 Terra for oracle cross-checks/)
@@ -216,17 +222,24 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /Do not pass `dw-\*\.toml` files as `items`, `skill` attachments, or prompt context/)
     assert.match(workflowSkill, /current callable dispatch-tool schema is the only availability signal/)
     assert.match(workflowSkill, /Exact profile/)
+    assert.match(workflowSkill, /schema or its documentation explicitly guarantees/)
     assert.match(workflowSkill, /Direct composition/)
     assert.match(workflowSkill, /system or developer instructions plus skills/)
     assert.match(workflowSkill, /generated developer-instruction content \(not its TOML wrapper\)/)
     assert.match(workflowSkill, /Generic or flat dispatch/)
-    assert.match(workflowSkill, /Required skills:/)
-    assert.match(workflowSkill, /role envelope in `message`/)
+    assert.match(workflowSkill, /`REQUIRED SKILLS:` <workflow skill and task-relevant skills>/)
+    assert.match(workflowSkill, /self-contained envelope in `message`/)
+    assert.match(workflowSkill, /`TASK:` <imperative, bounded assignment>/)
+    assert.match(workflowSkill, /`DELIVERABLE:` <concrete expected output>/)
+    assert.match(workflowSkill, /`VERIFY:` <test, evidence, or observable result>/)
     assert.match(workflowSkill, /still a valid generic\/flat dispatch route/)
     assert.match(workflowSkill, /no callable native subagent-dispatch route is available/)
     assert.match(workflowSkill, /child inherits its native\/default model while the role and skills are carried in `message`/)
     assert.match(workflowSkill, /a `task_name` does not select a profile/)
     assert.match(workflowSkill, /generic or flat subagent does not load the generated profile/)
+    assert.match(orchestrator, /GPT-5\.6 EXECUTION CALIBRATION/)
+    assert.match(orchestrator, /two independent waves add no useful evidence/)
+    assert.match(orchestrator, /Apply this layer only when the selected model is in the GPT-5\.6 family/)
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
     assert.match(workflowSkill, /\| dw-creative \|/)
@@ -239,6 +252,8 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /When no GPT-5\.6 model is available, omit the override and preserve the generated profile's existing model and reasoning behavior unchanged/)
     assert.match(workflowSkill, /When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane/)
     assert.match(workflowSkill, /Independent review rule/)
+    assert.match(workflowSkill, /Latest available Terra-lane model/)
+    assert.match(workflowSkill, /never downgrade or leave the Terra lane merely to force diversity/)
     assert.doesNotMatch(workflowSkill, /Previous-gen flagship/)
     assert.doesNotMatch(workflowSkill, /should use a \*\*different generation\*\*/)
     assert.match(workflowSkill, /Independent review rule/)

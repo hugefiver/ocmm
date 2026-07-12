@@ -235,6 +235,59 @@ test("config does not clobber an existing user-set model", async () => {
   assert.equal(entry.description, "user-set")
 })
 
+test("config upgrades only catalog-confirmed GPT Sol and Terra lanes", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: {
+      openai: {
+        models: {
+          "gpt-5.6-sol": {},
+          "gpt-5.7-sol": {},
+          "gpt-5.6-terra": {},
+          "gpt-5.7-terra": {},
+        },
+      },
+    },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-5.7-sol")
+  assert.equal((cfg.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.7-sol")
+  assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-5.7-terra")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.7-sol")
+  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.7-terra")
+  assert.equal((cfg.agent["normal-task"] as Record<string, unknown>).model, "openai/gpt-5.7-terra")
+  assert.doesNotMatch(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GPT-5\.6 EXECUTION CALIBRATION/)
+})
+
+test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async () => {
+  const c = {
+    ...defaultConfig(),
+    agents: { builder: { model: "openai/gpt-5.6-sol" } },
+  }
+  const handler = createConfigHandler({ getConfig: () => c })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
+  assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
+  assert.match(prompt, /Outcome-first/)
+})
+
+test("config keeps existing defaults without a matching GPT-5.6 catalog entry", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.5": {} } } },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.5")
+})
+
 test("disabledAgents skips registration", async () => {
   const c = { ...defaultConfig(), disabledAgents: ["reviewer"] }
   const handler = createConfigHandler({ getConfig: () => c })

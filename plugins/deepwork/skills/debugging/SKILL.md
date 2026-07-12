@@ -118,5 +118,6 @@ These are not phases — read them when the situation calls for them:
 ## Codex Compatibility
 
 - When this skill mentions TodoWrite, use Codex `update_plan`.
-- When this skill mentions OpenCode `task(...)`, use the current callable Codex subagent-dispatch tool and preserve the task contract; prefer an exact profile selector, then complete direct composition, then generic/flat dispatch with role and required skills in the message.
+- When this skill mentions OpenCode `task(...)`, use the current callable Codex subagent-dispatch tool and preserve the task contract. Treat an agent_type, agent_path, or agent_nickname field as an exact profile selector only when its current schema or documentation explicitly guarantees that behavior; otherwise prefer complete direct composition, then generic/flat dispatch.
+- A generic/flat child message must be self-contained and labeled `TASK`, `ROLE`, `DELIVERABLE`, `SCOPE`, `VERIFY`, `REQUIRED SKILLS`, `CONTEXT`, and `CONSTRAINTS`; do not claim it loaded a `dw-*` profile.
 - When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.

@@ -31,6 +31,7 @@ prompts/<workflow>/
 |------------|--------------------|-------|
 | `deepwork/default.md` | local ocmm controller + upstream discipline concepts | v1 default is intentionally concise; omo default stays upstream-first |
 | `deepwork/gpt.md` | `packages/prompts-core/prompts/ultrawork/gpt.md` | Upstream-first; local agent/tool names only |
+| `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts` and `packages/omo-codex/.../hephaestus/gpt-5.6.md` | GPT-5.6-only outcome-first, conditional-retrieval, and evidence-first layer; retains local authorization and tiered QA rules |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names only |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline |
 | `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; synced through `./omo@c6058d5` TUI visual QA and command-lens updates |
@@ -52,9 +53,10 @@ prompts/<workflow>/
 
 ## Last Upstream Prompt Check
 
-- Source checked: local upstream checkout `./omo` at `a7ac217aeeb7bd1f56c4633f4e92d97ec363f60f` (2026-07-06 sync; previous check at `c6058d5db81851d822106a9df20a34d66313ade3`).
+- Source checked: local upstream checkout `./omo` at `17104e1` (2026-07-12 sync; v4.16.3 release is `d89f335`, with newer prompt work reviewed at the checked-out head; previous sync was `a7ac217aeeb7bd1f56c4633f4e92d97ec363f60f`).
 - Prompt-relevant upstream changes since `c6058d5db`: Prometheus/planner prompt closed the implement-by-proxy loophole — "you never implement - not directly and not by proxy: a subagent you spawn that edits product code is you implementing ... no subagent you dispatch is ever that worker."
 - Local sync: `prompts/omo/deepwork/planner.md` now closes the proxy loophole with ocmm-adapted wording (no `/start-work`; references local execution workflow handoff). The codex.md ultrawork changes (Sparkshell removal, TUI visual QA, Browser plugin, `/start-work` rename, implement-by-proxy) were already represented locally — no action needed.
+- GPT-5.6 prompt-shape sync (2026-07-12): added `prompts/omo/deepwork/gpt-5.6.md`, selected only for the GPT-5.6 family. It adapts upstream outcome-first context gathering, explicit delegation outcomes, and evidence-first reporting while retaining OpenCode `task(...)`, local role names, tiered authorization, TDD, and QA semantics. The generic `gpt.md` remains unchanged.
 
 ## v1 Workflow Adjustment (2026-07-02)
 

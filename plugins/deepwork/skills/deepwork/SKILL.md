@@ -40,9 +40,20 @@ The current callable dispatch-tool schema is the only availability signal. Multi
 
 Use the first available native route in this order:
 
-1. **Exact profile** — a tool field such as `agent_type`, `agent_path`, or `agent_nickname` that selects the generated `dw-*` profile.
+1. **Exact profile** — a tool field such as `agent_type`, `agent_path`, or `agent_nickname` only when the current tool schema or its documentation explicitly guarantees that it selects the generated `dw-*` profile.
 2. **Direct composition** — a native dispatch tool that can choose the required model and supply the role's actual system or developer instructions plus skills. Select the matching model from the role tier below, supply the selected role's generated developer-instruction content (not its TOML wrapper), and attach or load the workflow skill and task-relevant `SKILL.md` artifacts through the fields the tool actually exposes. State that this is a generic fallback, not an exact-profile invocation.
-3. **Generic or flat dispatch** — when a callable subagent tool can only accept a task identity and message (for example `task_name`, `message`, and `fork_turns`), still delegate. Put a self-contained role envelope in `message`: the Deepwork role name and purpose, the bounded task, relevant files and constraints, acceptance criteria, and a `Required skills:` list naming the workflow skill and task-relevant skills. Use any real skill-loading field only when it is exposed. Do not claim that this loaded the `dw-*` profile; the child uses its inherited/default model and follows the role and skill guidance in the message.
+3. **Generic or flat dispatch** — when a callable subagent tool can only accept a task identity and message (for example `task_name`, `message`, and `fork_turns`), still delegate. Put this self-contained envelope in `message`:
+
+   `TASK:` <imperative, bounded assignment>
+   `ROLE:` <Deepwork role and purpose>
+   `DELIVERABLE:` <concrete expected output>
+   `SCOPE:` <files, context, and boundaries>
+   `VERIFY:` <test, evidence, or observable result>
+   `REQUIRED SKILLS:` <workflow skill and task-relevant skills>
+   `CONTEXT:` <minimal information the child needs>
+   `CONSTRAINTS:` <permissions and non-goals>
+
+   Use any real skill-loading field only when it is exposed. Do not claim that this loaded the `dw-*` profile; the child uses its inherited/default model and follows the role and skill guidance in the message.
 4. **Local execution** — use only when no callable native subagent-dispatch route is available.
 
 If an exact `dw-*` invocation returns `unknown agent_type`, continue at route 2 when it is complete enough, otherwise use route 3. A tool limited to `task_name`, `message`, and `fork_turns` cannot select a model or load the profile payload, but it is still a valid generic/flat dispatch route. Install the generated TOML files into project `.codex/agents/` or personal `~/.codex/agents/` and restart or refresh the Codex thread only when restoring exact-profile delegation is itself in scope.
@@ -97,7 +108,7 @@ When a newer GPT family is explicitly available, select a demonstrably better mo
 |---|---|---|---|
 | Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning | Latest-gen flagship | high or xhigh by complexity |
 | External review | dw-reviewer, dw-plan-critic | Latest-gen flagship | high or xhigh by review risk |
-| Cross-check | dw-oracle | Strong non-identical mid-tier or flagship | high or xhigh by verification risk |
+| Cross-check | dw-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | high or xhigh by verification risk |
 | Mid | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | dw-quick, dw-code-search, dw-explore | Latest-gen mini | high |
 
@@ -110,7 +121,7 @@ When a newer GPT family is explicitly available, select a demonstrably better mo
 
 ### Independent review rule
 
-dw-oracle provides self-supervision and should prefer the Cross-check lane, while dw-reviewer and dw-plan-critic provide external review through the External review lane. Preserve an independent review perspective by selecting a non-identical capable model for oracle when available, but prefer the newer-model policy over forced generation downgrades. If only one capable model is available, use it at the lane's complexity-appropriate effort.
+dw-oracle provides self-supervision and should prefer the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while dw-reviewer and dw-plan-critic provide external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity. If only one capable model is available, use it at the lane's complexity-appropriate effort.
 
 ### Example (GPT-5.6 generation — verify against your available models)
 

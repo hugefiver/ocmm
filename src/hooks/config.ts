@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, isGpt56Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
@@ -27,11 +27,80 @@ function fmtModel(entry: FallbackEntry): string {
   return provider ? `${provider}/${entry.model}` : entry.model
 }
 
+type AgentExtras = {
+  mode?: string
+  prompt?: string
+  promptPrefix?: string
+  /** Catalog-confirmed runtime upgrade; never overrides an explicit user model. */
+  model?: string
+}
+
+const GPT_LANE_BY_AGENT = new Map<string, "sol" | "terra">([
+  ["orchestrator", "sol"],
+  ["builder", "sol"],
+  ["reviewer", "sol"],
+  ["planner", "sol"],
+  ["clarifier", "sol"],
+  ["plan-critic", "sol"],
+  ["oracle", "terra"],
+  ["hard-reasoning", "sol"],
+  ["deep", "sol"],
+  ["complex", "terra"],
+  ["normal-task", "terra"],
+])
+
+type CatalogCandidate = {
+  provider: string
+  model: string
+  version: [number, number, number]
+}
+
+function gptLaneCandidate(provider: string, model: string, lane: "sol" | "terra"): CatalogCandidate | null {
+  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?-(sol|terra)(?:$|[-_.])/)
+  if (!match || match[4] !== lane) return null
+  return {
+    provider,
+    model,
+    version: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)],
+  }
+}
+
+function compareCatalogCandidates(a: CatalogCandidate, b: CatalogCandidate): number {
+  for (let i = 0; i < a.version.length; i += 1) {
+    const delta = b.version[i]! - a.version[i]!
+    if (delta !== 0) return delta
+  }
+  return a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
+}
+
+/**
+ * Upgrade only from an explicit OpenCode provider model catalog. With no catalog
+ * (or no matching Sol/Terra model), preserve the built-in fallback head exactly.
+ */
+function catalogModelForAgent(target: Record<string, unknown>, agentName: string): string | undefined {
+  const lane = GPT_LANE_BY_AGENT.get(agentName)
+  const providers = isRecord(target.provider) ? target.provider : undefined
+  if (!lane || !providers) return undefined
+
+  const candidates: CatalogCandidate[] = []
+  for (const [provider, rawProvider] of Object.entries(providers)) {
+    if (provider !== "openai" && provider !== "github-copilot") continue
+    if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
+    for (const model of Object.keys(rawProvider.models)) {
+      const candidate = gptLaneCandidate(provider, model, lane)
+      if (candidate) candidates.push(candidate)
+    }
+  }
+  candidates.sort(compareCatalogCandidates)
+  const best = candidates[0]
+  return best ? `${best.provider}/${best.model}` : undefined
+}
+
 function applyAgentEntry(
   agentMap: Record<string, unknown>,
   agent: Agent,
   override: NormalizedShorthand | undefined,
-  extras?: { mode?: string; prompt?: string; promptPrefix?: string },
+  extras?: AgentExtras,
 ): void {
   if (override?.disabled) return
 
@@ -43,7 +112,7 @@ function applyAgentEntry(
   }
   if (!chain.length) return
   const head = chain[0]!
-  const modelStr = fmtModel(head)
+  const modelStr = extras?.model ?? fmtModel(head)
 
   const existing = isRecord(agentMap[agent.name])
     ? (agentMap[agent.name] as Record<string, unknown>)
@@ -105,27 +174,42 @@ function deepworkPromptForAgent(
   agent: Agent,
   override: NormalizedShorthand | undefined,
   workflow: string,
+  selectedModel?: string,
 ): string {
-  // For Codex plugin packaging, always use the GPT-specialized variant.
-  if (workflow === "codex") {
-    return getDeepworkPrompt("gpt")
-  }
   const chain =
     override?.requirement?.fallbackChain?.length
       ? override.requirement.fallbackChain
       : agent.requirement.fallbackChain
-  const prefModel = chain[0]?.model ?? ""
+  const prefModel = selectedModel ?? chain[0]?.model ?? ""
+  const gpt56Specialization = isGpt56Model(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
+  // Codex profiles are generated ahead of runtime model overrides. Carry the
+  // separately guarded GPT-5.6 layer in every Codex profile so a later Sol or
+  // Terra override can apply it; non-5.6 models are explicitly told to ignore it.
+  if (workflow === "codex") {
+    const base = getDeepworkPrompt("gpt")
+    const specialization = getDeepworkPrompt("gpt-5.6")
+    return specialization ? `${base}\n\n---\n\n${specialization}` : base
+  }
   const variant = pickDeepworkVariantForAgent({
     agentName: agent.name,
     preferenceModel: prefModel,
   })
-  return getDeepworkPrompt(variant)
+  if (variant === "gpt-5.6") {
+    return `${getDeepworkPrompt("gpt")}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
+  }
+  const base = getDeepworkPrompt(variant)
+  return gpt56Specialization ? `${base}\n\n---\n\n${gpt56Specialization}` : base
 }
 
-function promptForBuiltinAgent(agent: Agent, override: NormalizedShorthand | undefined, workflow: string): string {
+function promptForBuiltinAgent(
+  agent: Agent,
+  override: NormalizedShorthand | undefined,
+  workflow: string,
+  selectedModel?: string,
+): string {
   const promptName = agent.promptSource ?? agent.name
   const rolePrompt = getAgentPrompt(promptName).trim()
-  const modelPrompt = deepworkPromptForAgent(agent, override, workflow).trim()
+  const modelPrompt = deepworkPromptForAgent(agent, override, workflow, selectedModel).trim()
   if (!rolePrompt) return modelPrompt
   if (!modelPrompt) return rolePrompt
   return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
@@ -196,15 +280,19 @@ export function createConfigHandler(args: {
           norm = { ...norm, requirement: aliasNorm.requirement }
         }
       }
-      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow)
+      const catalogModel = !norm?.requirement?.fallbackChain?.length
+        ? catalogModelForAgent(target, a.name)
+        : undefined
+      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, catalogModel)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
         : a.name === "planner"
           ? "all"
           : "subagent"
-      const extras: { prompt?: string; mode?: string; promptPrefix?: string } = {}
+      const extras: AgentExtras = {}
       if (prompt) extras.prompt = prompt
       extras.mode = mode
+      extras.model = catalogModel
       if (mode === "primary" || mode === "all") {
         extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       }
@@ -221,8 +309,11 @@ export function createConfigHandler(args: {
         agentOverride ?? categoryOverride
 
       const prompt = getCategoryPrompt(c.name)
-      const extras: { mode?: string; prompt?: string } = { mode: "subagent" }
+      const extras: AgentExtras = { mode: "subagent" }
       if (prompt) extras.prompt = prompt
+      if (!merged?.requirement?.fallbackChain?.length) {
+        extras.model = catalogModelForAgent(target, c.name)
+      }
       applyAgentEntry(agentMap, baseAgent, merged, extras)
     }
 
