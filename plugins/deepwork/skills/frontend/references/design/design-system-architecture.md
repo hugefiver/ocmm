@@ -15,10 +15,18 @@ Every frontend project MUST have a `DESIGN.md` at its root. This file is the sin
 
 ## DESIGN.md Structure
 
-The file has 7 sections. Every section is mandatory. Skip nothing.
+The file has 8 sections. Every section is mandatory. Skip nothing. Section 0 applies to greenfield UI; existing-project extraction may state that historical research is unavailable instead of inventing it.
 
 ```markdown
 # [Project Name] Design System
+
+## 0. Research Log
+
+For greenfield UI, record the design decision before writing product screens.
+
+- **Candidates considered**: 2-3 relevant local Layer B/design references, with a short reason each fits or does not fit.
+- **Selection**: the chosen Layer A execution skill and Layer B/design reference, with rationale tied to the product and audience.
+- **Evidence (optional)**: a local `ui-ux-db` lookup, user-provided image, or local mockup. If a tool/source is unavailable or not relevant, record the reason instead of forcing network research.
 
 ## 1. Atmosphere & Identity
 
@@ -118,7 +126,7 @@ Document reusable patterns as they emerge. Format:
 - **Structure**: HTML/JSX outline
 - **Variants**: list
 - **Spacing**: which tokens
-- **States**: default, hover, active, focus, disabled, loading, error
+- **States**: default, hover, active, focus, disabled, loading, empty, error
 - **Accessibility**: keyboard, ARIA, contrast
 - **Motion**: entry/exit animations
 
@@ -162,6 +170,20 @@ If borders:
 
 If tonal-shift:
 Surfaces use progressively lighter/darker shades. No borders, no shadows.
+
+## 8. Accessibility Constraints & Accepted Debt
+
+### Constraints
+
+- **WCAG goal**: state the target level and the testable scope.
+- **Contrast**: document text, control, and focus-indicator contrast requirements.
+- **Keyboard and focus**: every interactive primitive has a keyboard path and visible focus treatment.
+- **ARIA**: semantic HTML first; document required names, roles, and live-region behavior for custom controls.
+- **Reduced motion**: respect `prefers-reduced-motion` and identify any essential motion.
+
+### Accepted Debt
+
+Each exception records its location, reason, owner, and exit criteria. An agent may not accept accessibility debt or a constraint exception silently: it requires explicit user authorization.
 ```
 
 ## Creation Workflow
@@ -169,13 +191,15 @@ Surfaces use progressively lighter/darker shades. No borders, no shadows.
 ### For New Projects
 
 1. **Ask or infer the product domain** — SaaS dashboard? Marketing site? Dev tool?
-2. **Write the Atmosphere paragraph** — one chance to establish identity.
-3. **Define palette** — derive from atmosphere. Not random. Not generic.
-4. **Set typography** — match the atmosphere. Editorial = serif. Technical = mono-heavy. Clean = geometric sans.
-5. **Lock spacing** — base-4 system. Customize only the section-level values.
-6. **Document initial components** — only those you are about to build.
-7. **Choose depth strategy** — one. Not "a mix."
-8. **Write it to `DESIGN.md`** at project root.
+2. **Write the Research Log** — consider 2-3 relevant local design candidates, select Layer A + Layer B, and record optional local evidence or why it was unavailable.
+3. **Write the Atmosphere paragraph** — one chance to establish identity.
+4. **Define palette** — derive from atmosphere. Not random. Not generic.
+5. **Set typography** — match the atmosphere. Editorial = serif. Technical = mono-heavy. Clean = geometric sans.
+6. **Lock spacing** — base-4 system. Customize only the section-level values.
+7. **Document initial primitives and their states** — enough to pass the Primitive Showcase Gate before composing a product screen.
+8. **Choose depth strategy** — one. Not "a mix."
+9. **Set accessibility constraints and record no debt without user authorization.**
+10. **Write it to `DESIGN.md`** at project root.
 
 ### For Existing Projects (Extraction)
 
@@ -196,6 +220,8 @@ After every component implementation, check:
 - [ ] Depth treatment matches the chosen strategy from Section 7.
 - [ ] Component reused 2+ times? Documented in Section 5.
 - [ ] Motion follows the timing table. No arbitrary durations.
+- [ ] Greenfield primitives have a showcase (or equivalent state page) covering default, hover, focus, disabled, loading, empty, and error before product-screen composition.
+- [ ] Section 8 constraints were checked; any accepted debt has location, reason, owner, exit criteria, and explicit user authorization.
 
 ## Memory Management
 

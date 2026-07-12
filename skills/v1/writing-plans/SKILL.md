@@ -154,24 +154,26 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## plan-critic Review Loop
 
-After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. The plan-critic agent reads the plan path or inline plan and returns a three-state verdict.
+After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. A review round covers exactly one saved, complete, current plan revision. A current receipt is valid only when that round returns an explicit `[OKAY]` or `[OKAY-UNAMBIGUOUS]`; any plan edit invalidates every earlier receipt.
+
+Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict, or a review of an older/incomplete plan are not approval. Wait for a complete verdict, follow up, or re-dispatch the critic for the current full plan. Dispatch success is not a receipt.
 
 **Loop procedure:**
 
-1. Submit the plan to the `plan-critic` agent (pass the plan file path, or the inline plan if not yet saved).
-2. Dispatch the plan-critic agent and wait for its verdict.
+1. Save the complete plan, then submit that exact plan path to the `plan-critic` agent.
+2. Dispatch the plan-critic agent and wait for one explicit verdict for the current revision.
 3. Branch on the verdict:
 
    | Verdict | Meaning | Action |
    |---|---|---|
-   | `[REJECT]` | Critical blockers exist; plan not executable as-is | Apply the blocker fixes (max 3), re-run self-review, resubmit. Loop. |
+   | `[REJECT]` | Critical blockers exist; plan not executable as-is | Apply the blocker fixes (max 3), re-run self-review, save the updated complete plan, then begin a fresh critic round. |
    | `[OKAY]` | Plan is executable; residual uncertainty/ambiguity remains | Exit the loop. Proceed to user approval (unless delegation applies). |
    | `[OKAY-UNAMBIGUOUS]` | Plan is executable AND logically clear with no ambiguity | Exit the loop. Skip user approval. Proceed to Execution Handoff. |
 
 **Loop cap (user delegation "review N 次就下一步"):**
 
 If the user has delegated with "review N 次就下一步" / "review N times then proceed", cap the loop at N iterations. After N iterations:
-- If still `[REJECT]`: record the unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed anyway. Do not block the workflow.
+- If still `[REJECT]`, or no current receipt exists: record unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed only under the explicit status `delegated-without-plan-approval`. Do not call this approved, passed, or receipted.
 - If `[OKAY]` or `[OKAY-UNAMBIGUOUS]` reached before N: exit early.
 
 **Plan approval conditionality:**
@@ -185,11 +187,13 @@ After the loop exits, determine whether user approval is required:
 
   > "Plan written to `<path>`. plan-critic verdict: `[OKAY]` (executable, residual uncertainty). Please review and approve before execution, or delegate with '你自己决定' / '无需批准自行继续' to proceed."
 
-  Wait for the user's response. If they request changes, make them, re-run self-review, and re-run the plan-critic loop. Only proceed once the user approves or delegates.
+  Wait for the user's response. If they request changes, make them, re-run self-review, and re-run the plan-critic loop for the changed plan. Only proceed once the user approves or delegates.
+
+`oracle` may provide an optional, independent consultation for a high-risk plan, but it never replaces the current `plan-critic` receipt and does not create a mandatory dual-review gate.
 
 ## Execution Handoff
 
-After saving the plan, proceed to the subagent-driven-development skill to execute it.
+Proceed to the subagent-driven-development skill only with a current plan-critic receipt, user approval where required, or an explicitly labeled `delegated-without-plan-approval` exception. Report the current receipt verdict or `waiting for receipt`; never treat a dispatch timeout or acknowledgement as pass.
 
 **Execution:**
 - Fresh subagent per task + completion/integration check after each returned agent + final acceptance review once after all tasks

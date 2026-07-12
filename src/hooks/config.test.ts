@@ -288,6 +288,64 @@ test("config keeps existing defaults without a matching GPT-5.6 catalog entry", 
   assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.5")
 })
 
+test("config upgrades GLM 5.1 fallbacks only from a catalog-confirmed GLM 5.2+ model", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: { zhipu: { models: { "glm-5.1": {}, "glm-5.2": {}, "glm-5.3": {} } } },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "zhipu/glm-5.3")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "zhipu/glm-5.3")
+  assert.notEqual((cfg.agent.builder as Record<string, unknown>).model, "zhipu/glm-5.3")
+  assert.notEqual((cfg.agent.complex as Record<string, unknown>).model, "zhipu/glm-5.3")
+})
+
+test("config keeps GLM 5.1 baseline without a newer GLM catalog entry", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: { zhipu: { models: { "glm-5.1": {} } } },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.5")
+})
+
+test("explicit and existing agent models suppress GLM catalog replacement and prompt specialization", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: { orchestrator: { model: "zhipu/glm-5.1" } },
+  }
+  const handler = createConfigHandler({ getConfig: () => configured })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: { builder: { model: "user/custom-model" } },
+    provider: { zhipu: { models: { "glm-5.2": {} } } },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "zhipu/glm-5.1")
+  assert.equal((cfg.agent.builder as Record<string, unknown>).model, "user/custom-model")
+  assert.doesNotMatch(String((cfg.agent.builder as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
+})
+
+test("GPT catalog lanes take precedence over a GLM 5.2 catalog upgrade", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: {
+      openai: { models: { "gpt-5.6-sol": {} } },
+      zhipu: { models: { "glm-5.2": {} } },
+    },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+})
+
 test("disabledAgents skips registration", async () => {
   const c = { ...defaultConfig(), disabledAgents: ["reviewer"] }
   const handler = createConfigHandler({ getConfig: () => c })

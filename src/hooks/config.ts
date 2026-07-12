@@ -73,27 +73,73 @@ function compareCatalogCandidates(a: CatalogCandidate, b: CatalogCandidate): num
   return a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
 }
 
+function glmCatalogCandidate(provider: string, model: string): CatalogCandidate | null {
+  const match = model.toLowerCase().match(/^glm-(5)\.(\d+)(?:\.(\d+))?(?:$|[-_.])/)
+  if (!match || Number(match[2]) < 2) return null
+  return {
+    provider,
+    model,
+    version: [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)],
+  }
+}
+
 /**
- * Upgrade only from an explicit OpenCode provider model catalog. With no catalog
- * (or no matching Sol/Terra model), preserve the built-in fallback head exactly.
+ * Upgrade only from an explicit OpenCode provider model catalog. GPT Sol/Terra
+ * remains the preferred lane; GLM may advance only when this requirement already
+ * has a GLM 5.1 fallback and the same configured provider explicitly offers 5.2+.
  */
-function catalogModelForAgent(target: Record<string, unknown>, agentName: string): string | undefined {
+function catalogModelForRequirement(
+  target: Record<string, unknown>,
+  agentName: string,
+  requirement: ModelRequirement,
+): string | undefined {
   const lane = GPT_LANE_BY_AGENT.get(agentName)
   const providers = isRecord(target.provider) ? target.provider : undefined
-  if (!lane || !providers) return undefined
+  if (!providers) return undefined
+
+  if (lane) {
+    const candidates: CatalogCandidate[] = []
+    for (const [provider, rawProvider] of Object.entries(providers)) {
+      if (provider !== "openai" && provider !== "github-copilot") continue
+      if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
+      for (const model of Object.keys(rawProvider.models)) {
+        const candidate = gptLaneCandidate(provider, model, lane)
+        if (candidate) candidates.push(candidate)
+      }
+    }
+    candidates.sort(compareCatalogCandidates)
+    const best = candidates[0]
+    if (best) return `${best.provider}/${best.model}`
+  }
+
+  const glmFallback = requirement.fallbackChain.find(
+    (entry) => entry.model.toLowerCase() === "glm-5.1" && entry.providers.includes("zhipu"),
+  )
+  if (!glmFallback) return undefined
 
   const candidates: CatalogCandidate[] = []
-  for (const [provider, rawProvider] of Object.entries(providers)) {
-    if (provider !== "openai" && provider !== "github-copilot") continue
+  for (const provider of glmFallback.providers) {
+    const rawProvider = providers[provider]
     if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
     for (const model of Object.keys(rawProvider.models)) {
-      const candidate = gptLaneCandidate(provider, model, lane)
+      const candidate = glmCatalogCandidate(provider, model)
       if (candidate) candidates.push(candidate)
     }
   }
   candidates.sort(compareCatalogCandidates)
   const best = candidates[0]
   return best ? `${best.provider}/${best.model}` : undefined
+}
+
+function hasExplicitModelSelection(entry: unknown): boolean {
+  if (typeof entry === "string") return true
+  if (!isRecord(entry)) return false
+  return ["model", "fallbackModels", "requirement", "alias"].some((key) => entry[key] !== undefined)
+}
+
+function hasRawAgentModel(agentMap: Record<string, unknown>, name: string): boolean {
+  const entry = agentMap[name]
+  return isRecord(entry) && typeof entry.model === "string"
 }
 
 function applyAgentEntry(
@@ -280,8 +326,8 @@ export function createConfigHandler(args: {
           norm = { ...norm, requirement: aliasNorm.requirement }
         }
       }
-      const catalogModel = !norm?.requirement?.fallbackChain?.length
-        ? catalogModelForAgent(target, a.name)
+      const catalogModel = !hasExplicitModelSelection(userEntryForAgent) && !hasRawAgentModel(agentMap, a.name)
+        ? catalogModelForRequirement(target, a.name, a.requirement)
         : undefined
       const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, catalogModel)
       const mode = a.name === "orchestrator" || a.name === "builder"
@@ -311,8 +357,9 @@ export function createConfigHandler(args: {
       const prompt = getCategoryPrompt(c.name)
       const extras: AgentExtras = { mode: "subagent" }
       if (prompt) extras.prompt = prompt
-      if (!merged?.requirement?.fallbackChain?.length) {
-        extras.model = catalogModelForAgent(target, c.name)
+      const hasUserSelection = hasExplicitModelSelection(cfg.agents?.[c.name]) || hasExplicitModelSelection(cfg.categories?.[c.name])
+      if (!hasUserSelection && !hasRawAgentModel(agentMap, c.name)) {
+        extras.model = catalogModelForRequirement(target, c.name, baseAgent.requirement)
       }
       applyAgentEntry(agentMap, baseAgent, merged, extras)
     }

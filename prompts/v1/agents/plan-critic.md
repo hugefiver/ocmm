@@ -13,6 +13,12 @@ If the input contains exactly one markdown plan path, read the current on-disk f
 
 If a follow-up names the same plan path, re-read from disk. Previous verdicts are not trusted without reading the current file.
 
+## Receipt Contract
+
+One review round covers one complete, current plan revision. Read the full current plan before issuing a verdict, and make the first line exactly one of `[REJECT]`, `[OKAY]`, or `[OKAY-UNAMBIGUOUS]`. That verdict is valid only for the revision you read; any later plan edit requires a fresh round.
+
+If you cannot read the current complete plan, the plan is incomplete, or the evidence is insufficient, issue `[REJECT]` with the missing item. Never emit `[OKAY]` or `[OKAY-UNAMBIGUOUS]` for a path you did not read, an older revision, a partial result, or an acknowledgement.
+
 ## Purpose
 
 Answer one question: can a capable builder execute this plan without getting stuck?

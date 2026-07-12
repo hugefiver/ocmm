@@ -96,7 +96,7 @@ Domains: `product` `style` `typography` `color` `landing` `chart` `ux` `react` `
 
 ## Shared axioms (all three rulesets agree — apply always)
 
-- **No design system = no UI work.** `DESIGN.md` exists before components do; every color, font size, and spacing value traces back to a token in it.
+- **No design system = no UI work.** `DESIGN.md` exists before components do; every color, font size, and spacing value traces back to a token in it. For greenfield UI, its `## 0. Research Log` records the local design candidates and selected direction before product screens are built.
 - **Never weaken UX to buy points.** No dropping animations, hiding content, or simplifying interactions for a score or a deadline.
 - **No emojis as icons.** SVG icon sets only (Lucide, Heroicons, Radix, Phosphor).
 - **GPU-composited animation only** — `transform`, `opacity`, `filter`; never animate layout properties.

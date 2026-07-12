@@ -77,6 +77,8 @@ Two reviewer agents are available, with distinct semantics:
 
 **Default:** `oracle` for simple tasks. Upgrade to both when the orchestrator judges the task complex or large.
 
+`oracle` can also be an optional independent consultation for a high-risk implementation plan. It does not replace the `plan-critic` receipt, does not make dual plan review mandatory, and a timeout or partial response is not a conclusion.
+
 ## Example
 
 ```
