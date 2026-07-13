@@ -461,6 +461,8 @@ When a Deepwork role maps to a generated agent, use the exact Codex agent type w
 - Code/work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
 - Self-supervision: \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-oracle", fork_context=false, message="<specific verification task>")\`
 
+When Codex exposes MultiAgentV2 flat tools, map Deepwork delegation to the available flat tool names instead of forcing V1 syntax: use \`spawn_agent\` to create a bounded agent, \`wait_agent\` to wait for completion, \`followup_task\` to continue an existing agent, \`interrupt_agent\` to stop a runaway agent, and \`fork_turns\` only for explicit branch-style exploration. If those names are not callable in the current thread, fall back to the route order below.
+
 The \`${CODEX_AGENT_PREFIX}-*\` agent profile is the preferred selector. When a current native dispatch tool can select that profile directly, use it before any generic route.
 
 Do not pass \`${CODEX_AGENT_PREFIX}-*.toml\` files as \`items\`, \`skill\` attachments, or prompt context to a generic subagent. TOML files are installation artifacts for Codex's agent registry, not runtime skills.
@@ -495,11 +497,11 @@ Apply this section only when the current dispatch surface exposes a \`model\` fi
 | Flagship | \`gpt-5.6-sol\` | \`high\` by default; \`xhigh\` for deep, architecture, algorithmic, security, or high-risk reasoning | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning |
 | External review | \`gpt-5.6-sol\` | \`xhigh\` minimum; local \`max\` for complex, cross-module, security, performance, high-risk, or final-gate review (mapped to the target maximum) | ${CODEX_AGENT_PREFIX}-reviewer |
 | Plan review | \`gpt-5.6-sol\` | fixed \`xhigh\` | ${CODEX_AGENT_PREFIX}-plan-critic |
-| Cross-check | \`gpt-5.6-terra\` | \`xhigh\` minimum; local \`max\` for complex or high-risk verification (mapped to the target maximum) | ${CODEX_AGENT_PREFIX}-oracle |
+| Cross-check | \`gpt-5.4\`, then \`gpt-5.5\`, then \`gpt-5.6-terra\` | \`xhigh\` minimum; local \`max\` for complex or high-risk verification (mapped to the target maximum) | ${CODEX_AGENT_PREFIX}-oracle |
 | Mid | \`gpt-5.6-terra\` | Preserve the profile baseline unless task complexity requires more | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search |
 | Mini | \`gpt-5.6-luna\` | \`high\` | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore |
 
-When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane instead of pinning the 5.6 name: newest flagship for Flagship and External review, and a strong non-identical mid-tier or flagship for Cross-check. Keep the role's high/xhigh complexity rule, never override an explicit user model, and fall back to the generated profile default when availability or capability evidence is absent.
+When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane instead of pinning the 5.6 name for Flagship and External review. For Cross-check while a GPT-5.6 primary model is in use, prefer a cross-generation GPT-5.4 xhigh oracle first, then GPT-5.5 xhigh, before same-generation GPT-5.6 Terra/Terra successors. Keep the role's high/xhigh complexity rule, never override an explicit user model, and fall back to the generated profile default when availability or capability evidence is absent.
 
 For reviewer and oracle GPT/Codex routes, \`xhigh\` is the minimum reasoning effort. For complex or high-risk review or verification, request local \`max\`; the adapter maps it to the target's maximum supported effort (currently \`xhigh\` for GPT/Codex).
 
@@ -512,7 +514,7 @@ The plan-critic profile remains fixed \`xhigh\`; its receipt-focused plan review
 | Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Latest-gen flagship | high or xhigh by complexity |
 | External review | ${CODEX_AGENT_PREFIX}-reviewer | Latest-gen flagship | xhigh minimum; local max for complex or high-risk review |
 | Plan review | ${CODEX_AGENT_PREFIX}-plan-critic | Latest-gen flagship | fixed xhigh |
-| Cross-check | ${CODEX_AGENT_PREFIX}-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | xhigh minimum; local max for complex or high-risk verification |
+| Cross-check | ${CODEX_AGENT_PREFIX}-oracle | GPT-5.4 xhigh first when available, then GPT-5.5 xhigh, then same-generation GPT-5.6 Terra/Terra successor; otherwise a strong non-identical capable model | xhigh minimum; local max for complex or high-risk verification |
 | Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Latest-gen mini | high |
 
@@ -525,7 +527,7 @@ The plan-critic profile remains fixed \`xhigh\`; its receipt-focused plan review
 
 ### Independent review rule
 
-${CODEX_AGENT_PREFIX}-oracle provides self-supervision through the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while ${CODEX_AGENT_PREFIX}-reviewer provides external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity.
+${CODEX_AGENT_PREFIX}-oracle provides self-supervision through the Cross-check lane, while ${CODEX_AGENT_PREFIX}-reviewer provides external review through the External review lane. When GPT-5.6 Sol is the primary review model, prefer GPT-5.4 xhigh for oracle diversity, then GPT-5.5 xhigh, before same-generation GPT-5.6 Terra. For complex multi-module work where GPT-5.4, GPT-5.5, and GPT-5.6 are all directly available, you may run three-way cross-validation: ${CODEX_AGENT_PREFIX}-reviewer on GPT-5.6 xhigh/local max plus oracle/cross-check passes on GPT-5.4 xhigh and GPT-5.5 xhigh. Do not force this for ordinary work.
 
 ${CODEX_AGENT_PREFIX}-plan-critic provides receipt-focused plan review through the Plan review lane at fixed \`xhigh\`.
 
@@ -537,7 +539,7 @@ If only one capable model is available, keep the reviewer/oracle GPT/Codex \`xhi
 |---|---|---|
 | Flagship | gpt-5.6-sol | high or xhigh |
 | External review | gpt-5.6-sol | xhigh minimum; local max for complex/high-risk work |
-| Cross-check | gpt-5.6-terra | xhigh minimum; local max for complex/high-risk work |
+| Cross-check | gpt-5.4, then gpt-5.5, then gpt-5.6-terra | xhigh minimum; local max for complex/high-risk work |
 | Mid | gpt-5.6-terra | high or max |
 | Mini | gpt-5.6-luna | high |
 `
@@ -575,7 +577,7 @@ function codexAgentInstructions(args: {
     "## Subagent Dispatch Compatibility (HARD-GATE)",
     "The current callable dispatch-tool schema is authoritative; MultiAgent V1/V2 names and examples elsewhere are lower-priority compatibility examples.",
     "When delegating, use agent_type, agent_path, or agent_nickname as an exact profile selector only when the current tool schema or documentation explicitly guarantees that behavior. Otherwise use direct composition only when the tool can select the model and carry system/developer instructions plus skills. Otherwise, if a generic or flat dispatch tool is callable, still delegate with a self-contained message labeled TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS. Do not claim that a generic message loaded a dw-* profile, and do not pass a dw-*.toml installation artifact as a skill or prompt attachment. Use local execution only when no native dispatch tool is callable.",
-    "When a model override is directly supported, preserve an explicit user model. Otherwise prefer GPT-5.6 Sol for flagship and external-review work and GPT-5.6 Terra for oracle cross-checks. Reviewer and oracle GPT/Codex routes use xhigh as their minimum; for complex or high-risk review or verification, request local max so the adapter can map it to the target's maximum supported effort. If GPT-5.6 is absent, keep the profile default; if a newer cataloged GPT model is demonstrably better in the same lane, it may replace the 5.6 preference without changing the role contract.",
+    "When a model override is directly supported, preserve an explicit user model. Otherwise prefer GPT-5.6 Sol for flagship and external-review work. For oracle cross-checks while GPT-5.6 is primary, prefer GPT-5.4 xhigh first, then GPT-5.5 xhigh, before same-generation GPT-5.6 Terra. Reviewer and oracle GPT/Codex routes use xhigh as their minimum; for complex or high-risk review or verification, request local max so the adapter can map it to the target's maximum supported effort. If GPT-5.6 is absent, keep the profile default; if a newer cataloged GPT model is demonstrably better in the same lane, it may replace the 5.6 preference without changing the role contract.",
   ].join("\n")
 }
 

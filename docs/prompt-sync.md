@@ -60,6 +60,25 @@ prompts/<workflow>/
 - Local sync: `prompts/omo/deepwork/planner.md` now closes the proxy loophole with ocmm-adapted wording (no `/start-work`; references local execution workflow handoff). The codex.md ultrawork changes (Sparkshell removal, TUI visual QA, Browser plugin, `/start-work` rename, implement-by-proxy) were already represented locally — no action needed.
 - GPT-5.6 prompt-shape sync (2026-07-12): added `prompts/omo/deepwork/gpt-5.6.md`, selected only for the GPT-5.6 family. It adapts upstream outcome-first context gathering, explicit delegation outcomes, and evidence-first reporting while retaining OpenCode `task(...)`, local role names, tiered authorization, TDD, and QA semantics. The generic `gpt.md` remains unchanged.
 
+## ocmm-Native Workflow Adaptation (2026-07-13)
+
+Local adaptation of upstream omo workflow semantics into ocmm-native wording. Applied to `prompts/omo/**`, `prompts/v1/**`, `prompts/codex/**`, and the v1 skills. Not an upstream sync.
+
+- **Discovery-before-planning**: every deepwork variant and the v1 `brainstorming` skill now require a first discovery wave (read files, search patterns, surface unknowns) before deciding decomposition or whether to invoke a planner.
+- **Planner trigger**: planner/file-plan invocation is no longer step-count-based. Use a planner (and write a file-backed plan) only when the work is relatively complex, has a clear purpose, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination. Clear-boundary work with a single obvious path uses a lightweight contextual plan instead.
+- **Answer-when-answerable**: research/explanation requests must gather enough evidence to answer, then stop and answer. No extra research agents, subagents, or planning cycles once the evidence is sufficient.
+- **Full-request scope**: deliver the full requested outcome by default. Removed default "minimum viable", "MVP", and phase-1 scope reduction language from clarifier prompts and deepwork scope constraints. Scope reduction only happens when the user explicitly asks for it or the work must be split.
+- **Review/QA labels**: review findings are labeled `[product]` (proposed implementation/product change) or `[evidence]` (missing or insufficient proof). An `[evidence]` blocker requires additional evidence, not a product rewrite. Added to the v1 `requesting-code-review` and `subagent-driven-development` skills and to all deepwork variants (except the planner variant, which does not review).
+- **GPT-5.6 restraint preserved**: `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` retains the existing GPT-5.6-specific subagent restraint. The new semantics above are expressed as general rules, not GPT-5.6-only rules.
+- **Shell Adaptation preserved**: existing global Shell Adaptation guidance remains untouched across all variants.
+
+## Observation-Only Upstream Items (2026-07-13)
+
+The following upstream omo prompt/behavior items were reviewed and are intentionally recorded as observation-only. They are not implemented in this change and will only be reconsidered when a concrete trigger appears:
+
+- **Polling/backoff mechanics (item 7)**: no polling/backoff guidance added to prompts or skills. Revisit if a task explicitly involves polling loops, retry/backoff design, or rate-limit handling.
+- **Frontend layout-mechanics (item 8)**: no additional frontend layout mechanics guidance beyond the existing `frontend` skill. Revisit if a task explicitly involves CSS layout engine behavior, breakpoint mechanics, or visual QA beyond the current skill coverage.
+
 ## v1 Workflow Adjustment (2026-07-02)
 
 - v1 brainstorming: step 2 restructured to ambiguity assessment + conditional `clarifier` consultation; step 7 spec approval made conditional (user delegation OR self-review ambiguity pass); HARD-GATE approval sources expanded to three (user approval / self-review pass / user delegation).

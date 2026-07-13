@@ -199,6 +199,8 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
 
 **Handling findings:**
 - **Critical + Important** → dispatch a fix subagent. Each fix dispatch must include: the test name that covers the fix, the command to run it, and the expected output.
+  - If a finding is labeled `[product]`, change the implementation to address it.
+  - If a finding is labeled `[evidence]`, supply the missing evidence/proof; do not change product behavior unless the evidence exposes a real defect.
 - **Minor** → record in the todo list / ledger; the final acceptance review triages them. Do not dispatch per-Minor fix subagents.
 - **Plan-mandated behavior flagged as a defect** → the plan overrode a default. Do not auto-fix. Surface to your human partner for adjudication: "Reviewer flagged X, but the plan mandated Y. Which wins?"
 - **Final review findings** → dispatch ONE fix subagent carrying all findings, not one subagent per finding.

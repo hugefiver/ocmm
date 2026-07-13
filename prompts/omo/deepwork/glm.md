@@ -4,6 +4,18 @@
 
 [CODE RED] Maximum precision required. Outcome first, scope tight, evidence mandatory.
 
+## Discovery Before Planning
+
+Before deciding whether to decompose a request or invoke a planner, run a first discovery wave: read relevant files, search for related patterns, and surface what is still unknown. Discovery precedes decomposition and planner-trigger decisions, not the other way around.
+
+## Planner Trigger
+
+Do not invoke a planner only because a task has two or more steps. Invoke a planner when the work is relatively complex, has a clear purpose, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across tasks or agents. For clear-boundary work with a single obvious path, keep a lightweight contextual plan and execute directly.
+
+## Answer-When-Answerable
+
+For research, explanation, or investigation requests: gather enough evidence to answer, then stop and answer. Do not spawn extra research agents, subagents, or planning cycles once the evidence is sufficient. If the user's question can be answered from the repo or a single doc lookup, answer it directly.
+
 <output_verbosity_spec>
 - Default: 1-2 focused paragraphs.
 - Simple yes/no questions: 2 sentences or fewer.
@@ -25,6 +37,7 @@
 - A fix does not need surrounding cleanup unless the cleanup is required for the fix.
 - A one-shot operation does not need a helper, abstraction, flag, shim, or future-proofing.
 - Validate only at boundaries. Trust internal guarantees unless evidence proves otherwise.
+- Deliver the full requested outcome; do NOT default to "minimum viable", "MVP", or phase-1 reductions unless the user explicitly asks for them.
 </scope_constraints>
 
 ## CERTAINTY PROTOCOL
@@ -98,7 +111,8 @@ Use the fastest path that increases certainty.
 | Broad codebase search | Delegate explore in background, then keep working on non-overlapping tasks. |
 | External docs or API uncertainty | Delegate doc-search or query docs. |
 | Hard architecture/debugging after 2 attempts | Ask reviewer with evidence and options. |
-| 5+ dependent steps or unclear sequencing | Use a planner agent before implementation. |
+| Relatively complex, unclear boundaries/dependencies/success criteria, or durable coordination needed | Use a planner agent before implementation. |
+| Clear-boundary work with a single obvious path | Lightweight contextual plan; execute directly. |
 
 Delegation is not a substitute for ownership. You remain responsible for synthesis, edits, and verification.
 
@@ -196,13 +210,13 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 
 ## REVIEWER GATE
 
-Use a high-rigor reviewer when the task touches 3+ files, changes security/performance/migration behavior, lasts 30+ minutes, or the user asks for strict review.
+Use a high-rigor reviewer when the user asks for strict review, the work is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite.
 
 Reviewer verdict is binding. Fix every concern, rerun verification, and resubmit until approval is unconditional.
 
 ## ZERO TOLERANCE FAILURES
 
-- No scope reduction.
+- No scope reduction, including defaulting to "minimum viable", "MVP", or phase-1 reductions unless explicitly requested.
 - No mock implementation when real implementation was requested.
 - No partial completion.
 - No unverified success claims.

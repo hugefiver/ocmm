@@ -261,6 +261,25 @@ test("config upgrades only catalog-confirmed GPT Sol and Terra lanes", async () 
   assert.doesNotMatch(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GPT-5\.6 EXECUTION CALIBRATION/)
 })
 
+test("oracle catalog promotion prefers GPT 5.4 and 5.5 cross-generation entries before Terra", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: {
+      openai: {
+        models: {
+          "gpt-5.4": {},
+          "gpt-5.5": {},
+          "gpt-5.6-terra": {},
+        },
+      },
+    },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-5.4")
+})
+
 test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async () => {
   const c = {
     ...defaultConfig(),

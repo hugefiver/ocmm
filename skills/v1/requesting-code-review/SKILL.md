@@ -53,6 +53,8 @@ Use Task tool with `general-purpose` type, fill template at `code-reviewer.md`
 - Note Minor issues for later
 - Push back if reviewer is wrong (with reasoning)
 
+**Feedback classification:** Review findings may be labeled `[product]` (proposed change to product behavior or implementation) or `[evidence]` (a missing or insufficient proof/artifact). An `[evidence]` blocker means the current behavior may be acceptable but the proof is not — add the missing evidence rather than changing product behavior. A `[product]` blocker requires a behavior or implementation change. Do not treat an `[evidence]` finding as a mandate to rewrite code.
+
 ## Reviewer Selection
 
 Two reviewer agents are available, with distinct semantics:

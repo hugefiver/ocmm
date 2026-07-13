@@ -50,13 +50,14 @@ The user may delegate approval authority at any point. Delegation is honored for
 You MUST create a task for each of these items and complete them in order:
 
 1. **Explore project context** — check files, docs, recent commits
-2. **Ambiguity assessment + conditional clarifier consultation** — assess the requirement; if purpose/constraints/success criteria are all clear, skip to step 3; otherwise consult the `clarifier` agent and use its Questions for User to drive user Q&A
-3. **Propose 2-3 approaches** — with trade-offs and your recommendation
-4. **Present design** — in sections scaled to their complexity, get user approval after each section
-5. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-7. **Conditional spec approval** — skip user approval if delegation applies OR self-review passed with no ambiguity; otherwise present spec to user for approval
-8. **Transition to implementation** — proceed to the writing-plans skill
+2. **First discovery wave** — before deciding decomposition or whether a planner is needed, gather the facts that let you size the work: read the relevant files, search for related code/patterns, and surface unknowns. Discovery happens *before* decomposition and planner-trigger decisions, not after.
+3. **Ambiguity assessment + conditional clarifier consultation** — assess the requirement; if purpose/constraints/success criteria are all clear, skip to step 4; otherwise consult the `clarifier` agent and use its Questions for User to drive user Q&A
+4. **Propose 2-3 approaches** — with trade-offs and your recommendation
+5. **Present design** — in sections scaled to their complexity, get user approval after each section
+6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
+7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
+8. **Conditional spec approval** — skip user approval if delegation applies OR self-review passed with no ambiguity; otherwise present spec to user for approval
+9. **Transition to implementation** — proceed to the writing-plans skill
 
 ## The Process
 
@@ -65,14 +66,14 @@ You MUST create a task for each of these items and complete them in order:
 - Check out the current project state first (files, docs, recent commits)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems, flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
-- For appropriately-scoped projects, proceed to ambiguity assessment (step 2)
+- For appropriately-scoped projects, proceed to ambiguity assessment (step 3)
 
-**Ambiguity assessment + conditional clarifier consultation (step 2):**
+**Ambiguity assessment + conditional clarifier consultation (step 3):**
 
 1. Assess whether the requirement has ambiguity in purpose, constraints, or success criteria.
-2. If everything is clear, skip step 2 entirely and proceed to step 3.
+2. If everything is clear, skip step 3 entirely and proceed to step 4.
 3. If ambiguity exists, dispatch the `clarifier` agent with the requirement and project context. The clarifier returns: Intent Classification, Pre-Analysis Findings, Questions for User (max 3), Identified Risks, Directives for planner, Recommended Approach.
-4. Use the clarifier's Questions for User to drive user Q&A — one question at a time, multiple choice preferred when possible. If the clarifier returns no questions, proceed to step 3.
+4. Use the clarifier's Questions for User to drive user Q&A — one question at a time, multiple choice preferred when possible. If the clarifier returns no questions, proceed to step 4.
 5. Focus on understanding: purpose, constraints, success criteria
 
 **Exploring approaches:**

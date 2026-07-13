@@ -30,6 +30,46 @@ test("catalog ties follow the compatible fallback provider order", () => {
   assert.equal(selectCatalogModel(target, "reviewer", reviewerRequirement), "openai/gpt-5.6-sol")
 })
 
+test("oracle catalog selection prefers exact cross-generation GPT fallbacks before Terra successors", () => {
+  const oracleRequirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["openai", "github-copilot"], model: "gpt-5.4", variant: "xhigh" },
+      { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
+      { providers: ["openai", "github-copilot"], model: "gpt-5.6-terra", variant: "xhigh" },
+    ],
+  }
+
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.4": {}, "gpt-5.6-terra": {} } } } }, "oracle", oracleRequirement),
+    "openai/gpt-5.4",
+  )
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.5": {}, "gpt-5.7-terra": {} } } } }, "oracle", oracleRequirement),
+    "openai/gpt-5.5",
+  )
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.7-terra": {} } } } }, "oracle", oracleRequirement),
+    "openai/gpt-5.7-terra",
+  )
+})
+
+test("successor matching prefers same GPT lane baseline before cross-generation entries", () => {
+  const oracleRequirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.4", variant: "xhigh", temperature: 0.1 },
+      { providers: ["openai"], model: "gpt-5.5", variant: "xhigh", temperature: 0.2 },
+      { providers: ["openai"], model: "gpt-5.6-terra", variant: "xhigh", temperature: 0.3 },
+    ],
+  }
+
+  assert.deepEqual(matchRequirementSuccessor(oracleRequirement, "openai", "gpt-5.7-terra"), {
+    providers: ["openai"],
+    model: "gpt-5.7-terra",
+    variant: "xhigh",
+    temperature: 0.3,
+  })
+})
+
 test("catalog rejects GPT Sol and Terra models older than 5.6", () => {
   const target = {
     provider: {

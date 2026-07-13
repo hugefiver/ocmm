@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
+import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { resolveModelRouting } from "./resolver.ts"
 
 test("matches an entry in the built-in agent chain", () => {
@@ -29,10 +30,21 @@ test("oracle routes to its own cross-gen builtin chain", () => {
 
   assert.equal(oracle!.source, "agent-default")
   assert.equal(oracle!.variant, "xhigh")
-  // gpt-5.5 matches the "gpt-5" entry in oracle's cross-gen chain (versioned alias match).
-  assert.equal(oracle!.entry.model, "gpt-5")
+  assert.equal(oracle!.entry.model, "gpt-5.5")
   assert.equal(explore!.source, "agent-default")
   assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
+})
+
+test("oracle GPT cross-generation entries prefer 5.4 then 5.5 before same-generation Terra", () => {
+  const chain = BUILTIN_AGENT_INDEX.get("oracle")!.requirement.fallbackChain
+  const gptEntries = chain.filter((entry) => entry.providers.includes("openai") && entry.model.startsWith("gpt-"))
+
+  assert.deepEqual(
+    gptEntries.map((entry) => `${entry.model}:${entry.variant}`),
+    ["gpt-5.4:xhigh", "gpt-5.5:xhigh", "gpt-5.6-terra:xhigh"],
+  )
+  assert.equal(chain[0]!.model, "claude-opus-4-7")
+  assert.equal(chain[1]!.model, "gemini-3.1-pro")
 })
 
 test("oracle inherits reviewer model via defaultAlias when user writes oracle entry without model", () => {

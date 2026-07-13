@@ -24,6 +24,16 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 **Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 
+## When to Write a File-Backed Plan
+
+Do not write a plan just because a task has more than one step. Use a file-backed plan only when the work is **relatively complex and has a clear purpose**, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across multiple tasks or agents. Examples: multi-file cross-module changes, novel behavior, security/perf/migration work, or any task where a downstream builder would need a durable artifact to stay aligned.
+
+For work with clear boundaries and a single obvious path, a contextual lightweight plan in the notepad or todo list is enough. Do not escalate to a file-backed plan + plan-critic review for trivial or low-uncertainty work.
+
+**Planner trigger summary:**
+- Clear scope, single path, low coordination need → lightweight contextual plan.
+- Complex, cross-cutting, ambiguous boundaries/dependencies/success criteria → file-backed plan using this skill, followed by plan-critic review.
+
 ## Scope Check
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.

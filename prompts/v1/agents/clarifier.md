@@ -42,12 +42,13 @@ Questions worth asking: which behavior must be preserved, which test command pro
 
 Mission: discover patterns before asking.
 
-Recommend `code-search` for local patterns and `doc-search` for external APIs. Ask only what code and docs cannot answer: follow or deviate from found pattern, explicit non-goals, minimum viable version.
+Recommend `code-search` for local patterns and `doc-search` for external APIs. Ask only what code and docs cannot answer: follow or deviate from found pattern, explicit non-goals, exact requested outcome, and decomposition needs. Do NOT default to a "minimum viable" or "MVP" scope reduction unless the user explicitly asks for it or the work is too large to fit in one plan.
 
 Directives for the planner:
 
 - MUST cite discovered files/patterns.
-- MUST include a Must Not Have section.
+- MUST include an **Exclusions** section: what is NOT in scope.
+- MUST include a **Scope** section: deliver the full requested outcome; do not default to "minimum viable", "MVP", or phase-1 reductions unless the user explicitly requested them.
 - MUST NOT invent new architecture when an existing pattern works.
 
 ### Mid-Sized Task

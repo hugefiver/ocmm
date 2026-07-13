@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -174,6 +174,21 @@ test("real prompts do not retain hardcoded Bash or PowerShell command-selection 
   }
 })
 
+test("real deepwork prompts do not retain obsolete planner or broad review triggers", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+      const prompt = getDeepworkPrompt(variant)
+      assert.doesNotMatch(prompt, /5\+ steps|Task has 2\+ steps|Implementation required\s*\|\s*MUST call planner agent/i, `${workflow}/${variant} retains raw step-count planner trigger`)
+      assert.doesNotMatch(prompt, /MUST ALWAYS INVOKE THE PLAN AGENT|FAILURE TO CALL PLAN AGENT = INCOMPLETE WORK/i, `${workflow}/${variant} retains unconditional planner requirement`)
+      assert.doesNotMatch(prompt, /Use Plan agent with gathered context to create detailed work breakdown|ALWAYS run both tracks in parallel/i, `${workflow}/${variant} retains unconditional planner or background-agent flow`)
+      assert.doesNotMatch(prompt, /DEFAULT BEHAVIOR:\s*DELEGATE\. DO NOT WORK YOURSELF|OTHERWISE:\s*DELEGATE\. ALWAYS|NEVER skip delegation/i, `${workflow}/${variant} retains unconditional delegation requirement`)
+      assert.doesNotMatch(prompt, /touches 3\+ files|20\+ turns|30\+ min|30\+ minutes/i, `${workflow}/${variant} retains broad review gate trigger`)
+    }
+  }
+})
+
 test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),
@@ -235,4 +250,114 @@ test("pickDeepworkVariantForAgent defaults for unknown families", () => {
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "unknown-model" }),
     "default",
   )
+})
+
+test("real deepwork prompts contain ocmm-native workflow semantics per variant", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+      const prompt = getDeepworkPrompt(variant)
+      const label = `${workflow}/${variant}`
+
+      assert.match(
+        prompt,
+        /discovery.{0,120}(before|precede).{0,80}decomposition|first discovery wave/i,
+        `${label} missing discovery-before-planning semantics`,
+      )
+      assert.match(
+        prompt,
+        /relatively complex|clear purpose|unclear boundaries|lightweight contextual plan/i,
+        `${label} missing planner-trigger semantics`,
+      )
+      if (variant !== "planner") {
+        assert.match(
+          prompt,
+          /answer[- ]when[- ]answerable|answer when you have enough evidence|stop and answer/i,
+          `${label} missing answer-when-answerable semantics`,
+        )
+        assert.match(
+          prompt,
+          /\[product\]/i,
+          `${label} missing [product] review label`,
+        )
+        assert.match(
+          prompt,
+          /\[evidence\]/i,
+          `${label} missing [evidence] review label`,
+        )
+      }
+      assert.match(
+        prompt,
+        /full requested outcome|deliver exactly what was asked|requested outcome/i,
+        `${label} missing full-request scope semantics`,
+      )
+      assert.doesNotMatch(
+        prompt,
+        /(?<!not\s)default\s+(?:to\s+)?(?:a\s+)?(?:minimum viable|MVP|phase-1)/i,
+        `${label} contains default scope reduction language`,
+      )
+      assert.ok(prompt.includes("## Shell Adaptation"), `${label} missing shell adaptation`)
+
+      if (variant === "gpt-5.6") {
+        assert.match(
+          prompt,
+          /GPT-5\.6|speculative nested|subagent depth/i,
+          `${label} missing GPT-5.6 subagent restraint`,
+        )
+      } else {
+        assert.doesNotMatch(
+          prompt,
+          /GPT-5\.6-only|speculative nested delegation|subagent depth limit/i,
+          `${label} incorrectly contains GPT-5.6-only restraint`,
+        )
+      }
+    }
+  }
+})
+
+test("v1 brainstorming skill enforces discovery-before-planning before decomposition", () => {
+  const skill = readFileSync(join(process.cwd(), "skills", "v1", "brainstorming", "SKILL.md"), "utf8")
+  assert.ok(skill.length > 0, "v1 brainstorming skill missing")
+  assert.match(
+    skill,
+    /first discovery wave/i,
+    "v1 brainstorming missing first discovery wave",
+  )
+  assert.match(
+    skill,
+    /before decomposition|precede.{0,80}decomposition|before.{0,80}planner/i,
+    "v1 brainstorming missing discovery-before-decomposition/planner wording",
+  )
+})
+
+test("writing-plans skill describes contextual plan vs file-backed plan trigger", () => {
+  const skill = readFileSync(join(process.cwd(), "skills", "v1", "writing-plans", "SKILL.md"), "utf8")
+  assert.ok(skill.length > 0, "v1 writing-plans skill missing")
+  assert.match(
+    skill,
+    /file-backed plan/i,
+    "writing-plans missing file-backed plan wording",
+  )
+  assert.match(
+    skill,
+    /lightweight contextual plan/i,
+    "writing-plans missing lightweight contextual plan wording",
+  )
+  assert.match(
+    skill,
+    /relatively complex.*clear purpose|unclear boundaries|dependencies|success criteria/i,
+    "writing-plans missing planner-trigger criteria",
+  )
+})
+
+test("requesting-code-review and subagent-driven-development skills include [product]/[evidence] semantics", () => {
+  const req = readFileSync(join(process.cwd(), "skills", "v1", "requesting-code-review", "SKILL.md"), "utf8")
+  const sub = readFileSync(join(process.cwd(), "skills", "v1", "subagent-driven-development", "SKILL.md"), "utf8")
+  assert.match(req, /\[product\]/i, "requesting-code-review missing [product] label")
+  assert.match(req, /\[evidence\]/i, "requesting-code-review missing [evidence] label")
+  assert.match(req, /missing evidence|insufficient proof|add the missing evidence/i, "requesting-code-review missing evidence-only blocker guidance")
+  assert.match(sub, /\[product\]/i, "subagent-driven-development missing [product] label")
+  assert.match(sub, /\[evidence\]/i, "subagent-driven-development missing [evidence] label")
+  assert.match(sub, /supply the missing evidence|do not change product behavior/i, "subagent-driven-development missing evidence-only guidance")
 })

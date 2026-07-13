@@ -84,6 +84,20 @@ function compareCatalogCandidates(a: CatalogCandidate, b: CatalogCandidate): num
   return a.providerIndex - b.providerIndex || a.model.localeCompare(b.model)
 }
 
+function catalogContainsExactModel(
+  providers: Record<string, unknown>,
+  entry: FallbackEntry,
+): string | undefined {
+  for (const provider of entry.providers) {
+    const rawProvider = providers[provider]
+    if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
+    if (isRecord(rawProvider.models) && rawProvider.models[entry.model] !== undefined) {
+      return `${provider}/${entry.model}`
+    }
+  }
+  return undefined
+}
+
 export function selectCatalogModel(
   target: Record<string, unknown>,
   agentName: string,
@@ -94,6 +108,14 @@ export function selectCatalogModel(
 
   const lane = GPT_LANE_BY_AGENT.get(agentName)
   const gptBaseline = compatibleEntry(requirement, undefined, (entry) => parseGptVersion(entry.model) !== null)
+  if (agentName === "oracle") {
+    for (const entry of requirement.fallbackChain) {
+      if (parseGptVersion(entry.model) === null) continue
+      if (parseGptLane(entry.model) !== null) continue
+      const exact = catalogContainsExactModel(providers, entry)
+      if (exact) return exact
+    }
+  }
   if (lane && gptBaseline) {
     const candidates: CatalogCandidate[] = []
     for (const [providerIndex, provider] of gptBaseline.providers.entries()) {
@@ -139,7 +161,11 @@ export function matchRequirementSuccessor(
 ): FallbackEntry | null {
   const gpt = parseGptLane(modelID)
   if (gpt && compareVersion(gpt.version, MIN_GPT_VERSION) >= 0) {
-    const baseline = compatibleEntry(requirement, providerID, (entry) => {
+    const sameLaneBaseline = compatibleEntry(requirement, providerID, (entry) => {
+      const parsed = parseGptLane(entry.model)
+      return parsed !== null && parsed.lane === gpt.lane && compareVersion(gpt.version, parsed.version) >= 0
+    })
+    const baseline = sameLaneBaseline ?? compatibleEntry(requirement, providerID, (entry) => {
       const version = parseGptVersion(entry.model)
       return version !== null && compareVersion(gpt.version, version) >= 0
     })
