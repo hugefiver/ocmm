@@ -300,6 +300,10 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     ],
   },
 
+  "subagent": {
+    "maxDepth": 3
+  },
+
   "idleContinuation": {
     "enabled": false,
     "maxContinuations": 20,
@@ -370,6 +374,7 @@ Both `agents.*` and `categories.*` accept either shape:
 | `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
+| `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed `subagent.maxDepth`; default max depth is 3 subagent layers. |
 
 ## Variant policy
 
@@ -477,7 +482,7 @@ ocmm does not ship a separate `/lsp-setup` command. OpenCode already provides LS
 
 ## Profiles
 
-A **profile** is a named partial overlay on the base config. It can override any top-level field (agents, categories, runtimeFallback, debug, etc.) except `profiles` and `activeProfile` themselves. At load time, after merging user + project configs, the active profile is deep-merged over the result — profile wins over both.
+A **profile** is a named partial overlay on the base config. It can override any top-level field (agents, categories, runtimeFallback, subagent, debug, etc.) except `profiles` and `activeProfile` themselves. At load time, after merging user + project configs, the active profile is deep-merged over the result — profile wins over both.
 
 ### Selecting a profile
 
@@ -504,7 +509,7 @@ If the named profile doesn't exist, it is silently ignored — the base config l
 | Field type                                          | Behavior under profile overlay                 |
 | --------------------------------------------------- | ---------------------------------------------- |
 | Scalars (`debug`, `workflow`, ...)                  | Replaced                                       |
-| Objects (`agents`, `categories`, `runtimeFallback`) | Deep-merged (profile field wins per-key)       |
+| Objects (`agents`, `categories`, `runtimeFallback`, `subagent`) | Deep-merged (profile field wins per-key)       |
 | `fallbackModels`, `disabledAgents`                  | **Replaced** (profile fully owns these arrays) |
 | Other arrays (`retryOnStatusCodes`, ...)            | Replaced                                       |
 

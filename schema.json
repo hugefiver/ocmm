@@ -550,7 +550,8 @@
               "tool-output-truncator",
               "todo-description-override",
               "commit-guard-injector",
-              "subagent-git-guard"
+              "subagent-git-guard",
+              "subagent-depth-guard"
             ]
           },
           {
@@ -851,6 +852,15 @@
               }
             ]
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "subagent": {
+      "type": "object",
+      "properties": {
+        "maxDepth": {
+          "type": "number"
         }
       },
       "additionalProperties": false
@@ -1406,7 +1416,8 @@
                     "tool-output-truncator",
                     "todo-description-override",
                     "commit-guard-injector",
-                    "subagent-git-guard"
+                    "subagent-git-guard",
+                    "subagent-depth-guard"
                   ]
                 },
                 {
@@ -1699,6 +1710,15 @@
                     }
                   ]
                 }
+              }
+            },
+            "additionalProperties": false
+          },
+          "subagent": {
+            "type": "object",
+            "properties": {
+              "maxDepth": {
+                "type": "number"
               }
             },
             "additionalProperties": false

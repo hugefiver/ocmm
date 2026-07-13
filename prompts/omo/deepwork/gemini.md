@@ -4,6 +4,12 @@
 
 [CODE RED] Maximum precision required. Ultrathink before acting.
 
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 <GEMINI_INTENT_GATE>
 ## STEP 0: CLASSIFY INTENT - THIS IS NOT OPTIONAL
 
@@ -277,7 +283,7 @@ Trigger if user said "엄밀"/"strictly"/"rigorously"/"properly review", or task
 
 | If your change... | YOU MUST... |
 |---|---|
-| Adds/modifies a CLI command | Run the command with Bash. Show the output. |
+| Adds/modifies a CLI command | Run the command with the active shell declared by the runtime/tool context. Show the output. |
 | Changes build output | Run the build. Verify output files exist and are correct. |
 | Modifies API behavior | Call the endpoint. Show the response. |
 | Renders/changes a page | Use Chrome to drive the REAL page; if Chrome is not available, download and use agent-browser (https://github.com/vercel-labs/agent-browser). Capture screenshot + action log. |
@@ -293,7 +299,7 @@ Trigger if user said "엄밀"/"strictly"/"rigorously"/"properly review", or task
 - "lsp_diagnostics is clean" - That is a TYPE check, not a FUNCTIONAL check. RUN THE FEATURE.
 - "Tests pass" - Tests cover known cases. Does the ACTUAL feature work? VERIFY IT MANUALLY.
 
-**You have Bash, you have tools. There is ZERO excuse for skipping manual QA.**
+**You have the active shell and configured tools. There is ZERO excuse for skipping manual QA.**
 </MANUAL_QA_MANDATE>
 
 **WITHOUT evidence = NOT verified = NOT done.**

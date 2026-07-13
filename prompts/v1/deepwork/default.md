@@ -70,6 +70,12 @@ Do NOT load a skill unless its trigger matches. Loading unnecessary skills waste
 - Never suppress type errors with `as any`, `@ts-ignore`, or `@ts-expect-error`.
 - Never delete or weaken tests to pass.
 
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 ### Anti-slop checklist (applies to all code you write)
 
 Before writing code, verify you are NOT introducing:

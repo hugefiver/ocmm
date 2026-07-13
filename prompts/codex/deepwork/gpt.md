@@ -211,6 +211,12 @@ Exemptions (all tiers): pure prompt text, formatting, comment-only edits, versio
 If QA starts a server, browser, tmux session, port, temp dir, or background process, clean it up and record the cleanup.
 </MANUAL_QA_MANDATE>
 
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 ## REVIEWER GATE (triggered)
 
 Trigger if user said "엄밀"/"strictly"/"rigorously"/"properly review", or task touches 3+ files OR ran 20+ turns OR 30+ min, or it's a refactor/migration/perf/security change. Spawn a high-rigor reviewer via `multi_agent_v1.spawn_agent` with goal + scenarios + evidence + diff. Reviewer verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.

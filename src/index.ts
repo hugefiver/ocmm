@@ -113,6 +113,7 @@ export function createPlugin(input?: ServerInput): {
   syncIdleEnabled()
   const agentsSessionCache = new Map<string, Set<string>>()
   const sessionAgentMap = new Map<string, string>()
+  const sessionDepthMap = new Map<string, number>()
   const registeredAgentModels = new Map<string, string>()
   const resolutionLedger = createResolutionLedger()
   const sessionIntentStore = createSessionIntentStore()
@@ -121,6 +122,7 @@ export function createPlugin(input?: ServerInput): {
     projectRoot: cwd,
     agentsSessionCache,
     sessionAgentMap,
+    sessionDepthMap,
   })
   const toolAfterHandlers = [
     createHashlineReadEnhancer({ getConfig }),

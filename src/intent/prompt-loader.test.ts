@@ -125,6 +125,55 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
   }
 })
 
+test("real workflows include shell adaptation in every effective prompt path", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+      assert.match(getDeepworkPrompt(variant), /## Shell Adaptation/, `${workflow}/${variant} missing shell adaptation`)
+    }
+    for (const category of [
+      "frontend",
+      "creative",
+      "hard-reasoning",
+      "research",
+      "quick",
+      "coding",
+      "normal-task",
+      "complex",
+      "deep",
+      "documenting",
+    ]) {
+      assert.match(getCategoryPrompt(category), /## Shell Adaptation/, `${workflow}/${category} missing shell adaptation`)
+    }
+  }
+})
+
+test("real prompts do not retain hardcoded Bash or PowerShell command-selection wording", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    const prompts = [
+      ...["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"].map((variant) => getDeepworkPrompt(variant as Parameters<typeof getDeepworkPrompt>[0])),
+      ...[
+        "frontend",
+        "creative",
+        "hard-reasoning",
+        "research",
+        "quick",
+        "coding",
+        "normal-task",
+        "complex",
+        "deep",
+        "documenting",
+      ].map((category) => getCategoryPrompt(category)),
+    ]
+    for (const prompt of prompts) {
+      assert.doesNotMatch(prompt, /PowerShell syntax|Run it with Bash|Run the command with Bash|You have Bash|bash cat\b/)
+    }
+  }
+})
+
 test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),

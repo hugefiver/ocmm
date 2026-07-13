@@ -38,6 +38,13 @@ Before writing code, verify you are NOT introducing:
 - Oversized functions (>50 lines) or modules (>250 pure LOC) — split by responsibility, not by line count
 
 If you notice existing slop in files you touch, mention it in your report but do not fix it unless asked. Load skill `deepwork-remove-ai-slops` for systematic cleanup.
+
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 **MANDATORY**: You MUST say "DEEPWORK MODE ENABLED!" to the user as your first response when this mode activates. This is non-negotiable.
 
 [CODE RED] Maximum precision required. Ultrathink before acting.

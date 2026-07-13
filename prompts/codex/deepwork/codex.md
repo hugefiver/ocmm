@@ -188,8 +188,8 @@ artifact path the moment it happens. Update `## Now` and
 is your durable memory and it OUTLIVES the context window. After any
 compaction or context loss (a `Context compacted` notice, a summarized
 history, or you no longer see your own earlier steps), STOP and re-read
-the WHOLE notepad FIRST — `bash cat "$NOTE"`, or read the path
-directly — before any other action, then resume from `## Now`. Recover
+the WHOLE notepad FIRST — use the file-read tool or an active-shell
+command adapted to the current platform — before any other action, then resume from `## Now`. Recover
 state from the notepad; do not re-plan from scratch or re-run completed
 steps.
 
@@ -223,8 +223,8 @@ serialize only when one output strictly feeds the next.
   inactive/uninitialized, or cold-start unavailable, keep moving with
   Read/Grep/Glob/LSP (via the `lsp` MCP tool) and the ast-grep skill.
 - Repo-wide inspection, CLI smoke tests, git/history, bounded command
-  output → use the harness shell tool with PowerShell syntax when the
-  command itself is the evidence. Use `rg` for content search and `git`
+  output → use the harness shell tool with the active shell's syntax when the
+  command itself is the evidence, honoring the platform declared by the runtime/tool description. Use `rg` for content search and `git`
   for history/status from that shell; prefer dedicated `read`/LSP tools
   for file content and symbols. For terminal UI evidence, capture an
   existing pane; do not launch ordinary commands through a pane capture.
@@ -240,6 +240,12 @@ When discovery needs multiple angles or the module layout is
 unfamiliar, delegate to the `dw-code-search` subagent (read-only codebase
 search, absolute-path results). For research that leaves the repo —
 library/API/docs/web — delegate to the `dw-doc-search` subagent. Spawn them in parallel only when independent root work remains, and keep doing that root work while they run.
+
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
 
 # Execution loop (PIN → RED → GREEN → SURFACE → CLEAN)
 Until every success criterion PASSES with its evidence captured:

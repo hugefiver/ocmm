@@ -536,6 +536,211 @@ test("event handler is optional and not invoked when absent", () => {
   }
 })
 
+function taskInput(sessionID = "s1", agent = "coding"): Record<string, unknown> {
+  return {
+    tool: "task",
+    sessionID,
+    args: {
+      description: "test",
+      subagent_type: agent,
+      prompt: "do work",
+    },
+  }
+}
+
+test("subagent depth guard blocks task when maxDepth=0", async () => {
+  const root = tempProject()
+  try {
+    const config = { ...defaultConfig(), subagent: { maxDepth: 0 } }
+    const guards = createPermissionGuards({
+      getConfig: () => config,
+      projectRoot: root,
+      sessionAgentMap: new Map([["s1", "orchestrator"]]),
+    })
+
+    await assert.rejects(
+      guards.before(taskInput("s1", "orchestrator"), {}),
+      /subagent nesting depth limit reached.*current depth: 0/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard blocks creating depth 4 with default maxDepth=3", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([
+      ["s1", 3],
+    ])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await assert.rejects(
+      guards.before(taskInput("s1"), {}),
+      /subagent nesting depth limit reached.*current depth: 3/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard allows task at depth 2 with default maxDepth=3", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([["s1", 2]])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await guards.before(taskInput("s1"), {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard is disabled when hook is disabled", async () => {
+  const root = tempProject()
+  try {
+    const config = { ...defaultConfig(), disabledHooks: ["subagent-depth-guard"] }
+    const sessionDepthMap = new Map<string, number>([["s1", 10]])
+    const guards = createPermissionGuards({
+      getConfig: () => config,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await guards.before(taskInput("s1"), {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard fail-closes session.created when parent depth is missing", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>()
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await guards.event?.({ type: "session.created", properties: { sessionID: "child", parentID: "parent" } })
+    assert.equal(sessionDepthMap.get("child"), Number.MAX_SAFE_INTEGER)
+    await assert.rejects(
+      guards.before(taskInput("child"), {}),
+      /subagent nesting depth limit reached.*current depth: 9007199254740991/,
+    )
+
+    sessionDepthMap.set("parent", 2)
+    await guards.event?.({ type: "session.created", properties: { sessionID: "child2", parentID: "parent" } })
+    assert.equal(sessionDepthMap.get("child2"), 3)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard tracks depth with alternate parent id casing", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>()
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    sessionDepthMap.set("p", 1)
+    await guards.event?.({ type: "session.created", properties: { sessionID: "c1", parentId: "p" } })
+    assert.equal(sessionDepthMap.get("c1"), 2)
+
+    await guards.event?.({ type: "session.created", properties: { sessionID: "c2", parentSessionID: "p" } })
+    assert.equal(sessionDepthMap.get("c2"), 2)
+
+    await guards.event?.({ type: "session.created", properties: { sessionID: "c3", parentSessionId: "p" } })
+    assert.equal(sessionDepthMap.get("c3"), 2)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard preserves depth on session.compacted and clears on session.deleted", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([["s1", 2]])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await guards.event?.({ type: "session.compacted", properties: { sessionID: "s1" } })
+    assert.equal(sessionDepthMap.get("s1"), 2)
+
+    await guards.event?.({ type: "session.deleted", properties: { sessionID: "s1" } })
+    assert.equal(sessionDepthMap.has("s1"), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard allows unknown/builtin sessions but fail-closes known subagents without depth lineage", async () => {
+  const root = tempProject()
+  try {
+    const sessionAgentMap = new Map<string, string>([
+      ["s1", "orchestrator"],
+      ["s2", "coding"],
+    ])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionAgentMap,
+    })
+
+    // Built-in main agent at depth 0 can still dispatch with default maxDepth=3.
+    await guards.before(taskInput("s1"), {})
+
+    // A session with no agent mapping is treated as main/unknown depth 0.
+    await guards.before(taskInput("s3"), {})
+
+    // A known non-builtin agent without explicit lineage fails closed.
+    await assert.rejects(
+      guards.before(taskInput("s2"), {}),
+      /subagent nesting depth limit reached.*current depth: 3/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard uses config maxDepth from profile override", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([["s1", 4]])
+    const config = { ...defaultConfig(), subagent: { maxDepth: 5 } }
+    const guards = createPermissionGuards({
+      getConfig: () => config,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    // depth 4 < maxDepth 5 -> allowed
+    await guards.before(taskInput("s1"), {})
+
+    // depth 5 >= maxDepth 5 -> blocked
+    sessionDepthMap.set("s1", 5)
+    await assert.rejects(guards.before(taskInput("s1"), {}), /subagent nesting depth limit reached/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 function gitGuardInput(command: string, sessionID = "s1", workdir?: string): Record<string, unknown> {
   return {
     tool: "bash",

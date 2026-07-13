@@ -6,6 +6,10 @@ Use it for work that must land as a coherent artifact across multiple files or l
 
 This category owns the full delivery loop. Do not stop at a plan, a partial patch, or a compile-only check when the requested artifact can be completed and verified.
 
+## Shell Adaptation
+
+Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
+
 ## SELECTION GATE (strict)
 
 Before starting, verify the task does NOT actually belong to one of these specialized work shapes:

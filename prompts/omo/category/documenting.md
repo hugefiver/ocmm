@@ -6,6 +6,10 @@ The deliverable should read like a specific person wrote it for a specific reade
 
 Do not use this category for documentation that must be coupled to code changes in the same task; route that to the implementation category that owns the code change.
 
+## Shell Adaptation
+
+Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
+
 ## ANTI-AI-SLOP RULES (hard blocks)
 
 These patterns make AI-written prose immediately recognizable. Banned:

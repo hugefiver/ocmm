@@ -288,6 +288,23 @@ test("profile can override mcp settings", () => {
   }
 })
 
+test("profile can override subagent.maxDepth", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      subagent: { maxDepth: 3 },
+      profiles: {
+        deep: { subagent: { maxDepth: 5 } },
+      },
+      activeProfile: "deep",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.subagent.maxDepth, 5)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile can override locale", () => {
   const xdg = makeTempXdg()
   try {

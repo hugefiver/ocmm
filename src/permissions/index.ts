@@ -15,6 +15,7 @@ const WEBFETCH_TRUNCATE_LIMIT = 10000
 const MAX_QUESTION_LABEL_LENGTH = 30
 const REDIRECT_TIMEOUT_MS = 3000
 const MAX_TRACKED_SESSIONS = 50
+const UNKNOWN_SUBAGENT_DEPTH = Number.MAX_SAFE_INTEGER
 
 const JSON_ERROR_NOTICE = `[JSON PARSE ERROR - IMMEDIATE ACTION REQUIRED]
 The previous tool output appears to contain a JSON parse failure. Inspect the raw output, identify the invalid JSON fragment, and retry with corrected JSON rather than repeating the same call.`
@@ -66,11 +67,13 @@ export function createPermissionGuards(args: {
   fsyncTracker?: FsyncSkipTracker
   agentsSessionCache?: Map<string, Set<string>>
   sessionAgentMap?: Map<string, string>
+  sessionDepthMap?: Map<string, number>
 }): PermissionGuardHooks {
   const readPermissions = new Map<string, Set<string>>()
   const readmeSessionCache = new Map<string, Set<string>>()
   const lastAccess = new Map<string, number>()
   const projectRoot = resolve(args.projectRoot)
+  const sessionDepthMap = args.sessionDepthMap ?? new Map<string, number>()
 
   return {
     before: async (rawInput, rawOutput) => {
@@ -82,6 +85,7 @@ export function createPermissionGuards(args: {
       warnBashFileRead(config, rawInput, rawOutput)
       guardBashFileWrite(config, rawInput, projectRoot)
       guardSubagentGit(config, rawInput, projectRoot, args.sessionAgentMap)
+      guardSubagentDepth(config, rawInput, sessionDepthMap, args.sessionAgentMap)
       truncateQuestionLabels(config, rawInput, rawOutput)
       guardTodoRead(config, rawInput, args.taskSystemEnabled)
       await rewriteWebfetchRedirect(config, rawInput, rawOutput, args.redirectResolver)
@@ -108,6 +112,7 @@ export function createPermissionGuards(args: {
       readPermissions,
       readmeSessionCache,
       lastAccess,
+      sessionDepthMap,
       ...(args.agentsSessionCache !== undefined ? { agentsSessionCache: args.agentsSessionCache } : {}),
       ...(args.sessionAgentMap !== undefined ? { sessionAgentMap: args.sessionAgentMap } : {}),
     }),
@@ -118,6 +123,7 @@ function createGuardEventHandler(caches: {
   readPermissions: Map<string, Set<string>>
   readmeSessionCache: Map<string, Set<string>>
   lastAccess: Map<string, number>
+  sessionDepthMap: Map<string, number>
   agentsSessionCache?: Map<string, Set<string>>
   sessionAgentMap?: Map<string, string>
 }): (input: unknown) => Promise<void> {
@@ -125,6 +131,29 @@ function createGuardEventHandler(caches: {
     if (!isRecord(raw)) return
     const event = (raw as Record<string, unknown>).event ?? raw
     const eventType = (event as Record<string, unknown>).type
+    if (eventType === "session.created") {
+      const props = (event as Record<string, unknown>).properties ?? event
+      const sid = stringFromRecord(props, "sessionID") ?? stringFromRecord(props, "sessionId")
+      const parentId =
+        stringFromRecord(props, "parentID") ??
+        stringFromRecord(props, "parentId") ??
+        stringFromRecord(props, "parentSessionID") ??
+        stringFromRecord(props, "parentSessionId")
+      if (typeof sid === "string") {
+        if (typeof parentId === "string") {
+          const parentDepth = caches.sessionDepthMap.get(parentId)
+          caches.sessionDepthMap.set(
+            sid,
+            parentDepth === undefined || parentDepth >= UNKNOWN_SUBAGENT_DEPTH
+              ? UNKNOWN_SUBAGENT_DEPTH
+              : parentDepth + 1,
+          )
+        } else {
+          caches.sessionDepthMap.set(sid, 0)
+        }
+      }
+      return
+    }
     if (eventType !== "session.deleted" && eventType !== "session.compacted") return
     const props = (event as Record<string, unknown>).properties ?? event
     const sid = (props as Record<string, unknown>).sessionID ?? (props as Record<string, unknown>).sessionId
@@ -134,6 +163,9 @@ function createGuardEventHandler(caches: {
     caches.lastAccess.delete(sid)
     caches.agentsSessionCache?.delete(sid)
     caches.sessionAgentMap?.delete(sid)
+    if (eventType === "session.deleted") {
+      caches.sessionDepthMap.delete(sid)
+    }
   }
 }
 
@@ -560,6 +592,42 @@ function lastNonOptionOperand(tokens: string[]): string | null {
     return stripQuotes(tok)
   }
   return null
+}
+
+function stringFromRecord(record: unknown, key: string): string | undefined {
+  if (!isRecord(record)) return undefined
+  const value = record[key]
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+function guardSubagentDepth(
+  config: OcmmConfig,
+  rawInput: unknown,
+  sessionDepthMap: Map<string, number>,
+  sessionAgentMap?: Map<string, string>,
+): void {
+  if (hookDisabled(config, "subagent-depth-guard", "subagentDepthGuard")) return
+  if (toolName(rawInput) !== "task") return
+  const sid = sessionId(rawInput)
+  const maxDepth = config.subagent.maxDepth
+  let depth = sessionDepthMap.get(sid)
+  if (depth === undefined) {
+    // Fallback when explicit session.created lineage was missed. Known
+    // non-builtin sessions fail closed so missing ancestry cannot silently
+    // bypass the configured nesting limit.
+    const agentName = sessionAgentMap?.get(sid)
+    if (agentName === undefined || isBuiltinAgentName(agentName)) {
+      depth = 0
+    } else {
+      depth = maxDepth
+    }
+  }
+  if (depth >= maxDepth) {
+    throw new Error(
+      `ocmm: subagent nesting depth limit reached (current depth: ${depth}, maxDepth: ${maxDepth}). ` +
+        `Dispatching further subagents is blocked. Disable the "subagent-depth-guard" hook to allow deeper nesting.`,
+    )
+  }
 }
 
 function guardSubagentGit(

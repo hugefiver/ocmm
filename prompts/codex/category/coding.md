@@ -6,6 +6,10 @@ Use it for bounded code changes that follow an existing local pattern: a bug fix
 
 Do not use this category for unclear requirements, design exploration, autonomous feature delivery, architecture decisions, or bug reports where the root cause is still unknown. Route those to `clarifier`, `research`, `hard-reasoning`, or `deep` as appropriate.
 
+## Shell Adaptation
+
+Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
+
 ## SELECTION GATE (run first)
 
 Before doing the work, mentally check whether the task actually fits one of these work shapes:

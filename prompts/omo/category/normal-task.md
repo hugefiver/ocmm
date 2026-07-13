@@ -6,6 +6,10 @@ Use it for contained non-feature work with known acceptance criteria: small conf
 
 Do not use this category for determined code edits or bug fixes; route those to `coding`. Do not use it for autonomous feature delivery, migrations, or cross-module implementation loops; route those to `deep`. If the task needs coordinated judgment across several areas but the goal is still known, route to `complex`.
 
+## Shell Adaptation
+
+Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
+
 ## CALLER CONTRACT
 
 Your prompt SHOULD give you:

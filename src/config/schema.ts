@@ -95,6 +95,7 @@ const HOOK_NAMES = [
   "todo-description-override",
   "commit-guard-injector",
   "subagent-git-guard",
+  "subagent-depth-guard",
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]
@@ -193,6 +194,10 @@ const defaultMcpConfig = () => ({
   envAllowlist: [],
   websearch: defaultMcpWebsearchConfig(),
   servers: {},
+})
+
+const defaultSubagentConfig = () => ({
+  maxDepth: 3,
 })
 
 export const SkillSourceEntrySchema = z.union([
@@ -349,6 +354,19 @@ export const McpConfigSchema = z
   .strict()
   .default(defaultMcpConfig)
 
+export const SubagentConfigSchema = z
+  .object({
+    maxDepth: z.number().int().min(0).max(20).default(3),
+  })
+  .strict()
+  .default(defaultSubagentConfig)
+
+const ProfileSubagentConfigSchema = z
+  .object({
+    maxDepth: z.number().int().min(0).max(20).optional(),
+  })
+  .strict()
+
 const ProfileMcpConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -410,6 +428,7 @@ export const ProfileEntrySchema = z
     hashline: ProfileHashlineConfigSchema.optional(),
     rules: ProfileRulesConfigSchema.optional(),
     mcp: ProfileMcpConfigSchema.optional(),
+    subagent: ProfileSubagentConfigSchema.optional(),
     registerBuiltinAgents: z.boolean().optional(),
     promptsRoot: z.string().optional(),
     debug: z.boolean().optional(),
@@ -457,6 +476,7 @@ export const OcmmConfigSchema = z
     hashline: HashlineConfigSchema,
     rules: RulesConfigSchema,
     mcp: McpConfigSchema,
+    subagent: SubagentConfigSchema,
     /** Named partial overlays selectable via `activeProfile` or OCMM_PROFILE. */
     profiles: z.record(z.string(), ProfileEntrySchema).default({}),
     /**
@@ -486,6 +506,7 @@ export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
 export type RulesConfig = z.infer<typeof RulesConfigSchema>
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
 export type McpConfig = z.infer<typeof McpConfigSchema>
+export type SubagentConfig = z.infer<typeof SubagentConfigSchema>
 export type ProfileEntry = z.infer<typeof ProfileEntrySchema>
 export type SkillSourceEntry = z.infer<typeof SkillSourceEntrySchema>
 export type SkillsConfig = z.infer<typeof SkillsConfigSchema>

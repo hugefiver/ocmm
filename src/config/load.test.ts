@@ -70,6 +70,11 @@ test("workflow field defaults to v1", () => {
   assert.equal(cfg.workflow, "v1")
 })
 
+test("default config includes subagent.maxDepth === 3", () => {
+  const cfg = defaultConfig()
+  assert.equal(cfg.subagent.maxDepth, 3)
+})
+
 test("deepMerge: workflow scalar replaces (project wins)", () => {
   const user = { workflow: "v1" as const }
   const project = { workflow: "omo" as const }

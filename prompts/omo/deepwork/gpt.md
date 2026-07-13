@@ -151,7 +151,7 @@ lsp_diagnostics catches type errors only. Logic bugs, missing behavior, broken f
 
 | If your change... | YOU MUST... |
 |---|---|
-| Adds/modifies a CLI command | Run it with Bash. Show output. |
+| Adds/modifies a CLI command | Run it with the active shell declared by the runtime/tool description. Show output. |
 | Changes build output | Run build. Verify output files. |
 | Modifies API behavior | Call the endpoint. Show response. |
 | Renders/changes a page | Use Chrome to drive the page; if Chrome is not available, download and use agent-browser (https://github.com/vercel-labs/agent-browser). Screenshot + action log. |
@@ -162,6 +162,12 @@ lsp_diagnostics catches type errors only. Logic bugs, missing behavior, broken f
 
 Name the exact tool + exact invocation per scenario (literal `curl` / `send-keys` / `page.click` + inputs + binary observable). Register every QA-spawned resource teardown as its own todo (scripts, tmux, browser / agent-browser, PIDs, ports, temp dirs), execute it, capture the receipt. "This should work" / "tests pass" / "lsp clean" / a leftover process are NOT done — the surface artifact + clean teardown are.
 </MANUAL_QA_MANDATE>
+
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
 
 ## REVIEWER GATE (triggered)
 

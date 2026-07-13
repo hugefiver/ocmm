@@ -249,7 +249,7 @@ Tests are the FLOOR (always required). Surface artifact is the CEILING (also req
 
 | If your change... | YOU MUST... |
 |---|---|
-| Adds/modifies a CLI command | Run the command with Bash. Show the output. |
+| Adds/modifies a CLI command | Run the command with the active shell declared by the runtime/tool context. Show the output. |
 | Changes build output | Run the build. Verify the output files exist and are correct. |
 | Modifies API behavior | Call the endpoint. Show the response. |
 | Changes UI rendering | Use Chrome to drive the REAL page; if Chrome is not available, download and use agent-browser (https://github.com/vercel-labs/agent-browser). Capture screenshot + action log. |
@@ -264,7 +264,7 @@ Tests are the FLOOR (always required). Surface artifact is the CEILING (also req
 - "lsp_diagnostics is clean" - That's a TYPE check, not a FUNCTIONAL check. RUN IT.
 - "Tests pass" - Tests cover known cases. Does the ACTUAL FEATURE work as the user expects? RUN IT.
 
-**You have Bash, you have tools. There is ZERO excuse for not running manual QA.**
+**You have the active shell and configured tools. There is ZERO excuse for not running manual QA.**
 **Manual QA is the FINAL gate before reporting completion. Skip it and your work is INCOMPLETE.**
 
 **NAME THE EXACT TOOL + EXACT INVOCATION** for every scenario — the literal `curl ...`, `tmux send-keys ...`, `page.click(...)` with concrete inputs and the binary observable. "run it" / "open the page" is not a scenario.
@@ -311,6 +311,12 @@ Procedure (non-negotiable):
 3. Fix every concern. Re-run the FULL scenario QA. Capture fresh evidence. Update notepad.
 4. Re-submit to the SAME reviewer. Loop until UNCONDITIONAL approval. "looks good but..." = REJECTION.
 5. Only on unconditional approval may you declare done.
+
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
 
 ## ZERO TOLERANCE FAILURES
 - **NO Scope Reduction**: Never make "demo", "skeleton", "simplified", "basic" versions - deliver FULL implementation

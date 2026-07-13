@@ -28,6 +28,12 @@ Do NOT load a skill unless its trigger matches. Loading unnecessary skills waste
 - Lead with the result, then the evidence, then any remaining blocker.
 </output_verbosity_spec>
 
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 <scope_constraints>
 - Implement EXACTLY and ONLY what the user requested.
 - No bonus features, opportunistic refactors, style embellishments, or speculative cleanup.

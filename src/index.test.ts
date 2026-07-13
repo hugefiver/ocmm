@@ -123,3 +123,30 @@ test("plugin before and definition hooks expose permission guards", async () => 
     assert.match(definitionOutput.description, /WHERE, HOW, WHY/)
   })
 })
+
+test("plugin tracks subagent depth and blocks task dispatches beyond maxDepth", async () => {
+  await withIsolatedConfig(null, async (cwd) => {
+    const { pluginInterface } = createPlugin({ directory: cwd })
+
+    // Fire session.created events to build depth: main -> d1 -> d2 -> d3.
+    await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "main" } })
+    await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d1", parentID: "main" } })
+    await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d2", parentID: "d1" } })
+    await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d3", parentID: "d2" } })
+
+    // depth 3 == default maxDepth 3 -> blocked.
+    await assert.rejects(
+      pluginInterface["tool.execute.before"]?.(
+        { tool: "task", sessionID: "d3", args: { description: "x", subagent_type: "coding", prompt: "y" } },
+        {},
+      ),
+      /subagent nesting depth limit reached.*current depth: 3/,
+    )
+
+    // depth 2 still allowed
+    await pluginInterface["tool.execute.before"]?.(
+      { tool: "task", sessionID: "d2", args: { description: "x", subagent_type: "coding", prompt: "y" } },
+      {},
+    )
+  })
+})

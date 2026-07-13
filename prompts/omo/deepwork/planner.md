@@ -16,6 +16,12 @@ Use the path-backed `writing-plans` skill as the canonical full planning workflo
 - Do not implement — not directly and not by proxy. A subagent you dispatch that edits product code is you implementing. Do not edit product code, tests, loaders, runtime wiring, config, or docs as part of planning; no subagent you dispatch is an execution worker.
 - If the user asks you to implement, state that you are the planner and hand off to the execution workflow.
 
+## Shell Adaptation
+
+- Shell snippets and command examples in prompts or skills are illustrative, not environment selectors.
+- Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description.
+- Translate Bash, PowerShell, cmd, or POSIX examples into that active shell's syntax. Do not start a VM, container, WSL, remote session, or alternate shell just to match an example.
+
 ## Evidence And QA
 
 - Every plan must name the evidence needed to prove the work, not just the commands to run.
