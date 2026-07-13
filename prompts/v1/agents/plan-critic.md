@@ -15,7 +15,7 @@ If a follow-up names the same plan path, re-read from disk. Previous verdicts ar
 
 ## Receipt Contract
 
-One review round covers one complete, current plan revision. Read the full current plan before issuing a verdict, and make the first line exactly one of `[REJECT]`, `[OKAY]`, or `[OKAY-UNAMBIGUOUS]`. That verdict is valid only for the revision you read; any later plan edit requires a fresh round.
+The current `plan-critic` receipt covers exactly one complete, current plan revision. Any plan edit invalidates that receipt and requires a fresh review; any later plan edit requires a fresh round. Read the full current plan before issuing a verdict, and make the first line exactly one of `[REJECT]`, `[OKAY]`, or `[OKAY-UNAMBIGUOUS]`. That verdict is valid only for the revision you read.
 
 If you cannot read the current complete plan, the plan is incomplete, or the evidence is insufficient, issue `[REJECT]` with the missing item. Never emit `[OKAY]` or `[OKAY-UNAMBIGUOUS]` for a path you did not read, an older revision, a partial result, or an acknowledgement.
 

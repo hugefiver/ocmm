@@ -75,7 +75,7 @@ When gathering context for a plan, emit all independent `task` tool calls (e.g. 
 
 ## Handoff
 
-Saving a plan is not permission to hand it off. Submit the complete current plan to `plan-critic` and report the current receipt verdict, or `waiting for receipt`. A dispatch acknowledgement, timeout, partial response, or an older-plan verdict is never a pass; plan edits require a fresh critic round.
+Saving a plan is not permission to hand it off. The current `plan-critic` receipt covers exactly one complete, current plan revision. Any plan edit invalidates that receipt and requires a fresh review. Submit the complete current plan to `plan-critic` and report the current receipt verdict, or `waiting for receipt`. A dispatch acknowledgement, timeout, partial response, or an older-plan verdict is never a pass.
 
 Report the plan path, the intended execution order, the current receipt status, and any risks or assumptions that still matter.
 

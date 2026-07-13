@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { normalizeShorthand } from "./normalize.ts"
+import { normalizeAgentShorthand, normalizeShorthand } from "./normalize.ts"
 
 test("normalizeShorthand resolves alias target requirement", () => {
   const target = { model: "openai/gpt-5.5", variant: "high" as const }
@@ -46,4 +46,23 @@ test("normalizeShorthand no alias and no model returns undefined requirement", (
   const result = normalizeShorthand({ description: "just a desc" })
   assert.equal(result!.requirement, undefined)
   assert.equal(result!.description, "just a desc")
+})
+
+test("normalizeAgentShorthand resolves arbitrary depth and rejects cycles", () => {
+  const resolved = normalizeAgentShorthand("reviewer", {
+    reviewer: { alias: "policy-a", description: "outer metadata" },
+    "policy-a": { alias: "policy-b" },
+    "policy-b": { alias: "model" },
+    model: { model: "openai/gpt-5.6-sol" },
+  })
+  assert.equal(resolved?.description, "outer metadata")
+  assert.equal(resolved?.requirement?.fallbackChain[0]?.model, "gpt-5.6-sol")
+
+  assert.throws(
+    () => normalizeAgentShorthand("a", {
+      a: { alias: "b" },
+      b: { alias: "a" },
+    }),
+    /circular alias: a -> b -> a/i,
+  )
 })

@@ -15,7 +15,7 @@ Every frontend project MUST have a `DESIGN.md` at its root. This file is the sin
 
 ## DESIGN.md Structure
 
-The file has 8 sections. Every section is mandatory. Skip nothing. Section 0 applies to greenfield UI; existing-project extraction may state that historical research is unavailable instead of inventing it.
+The file has nine sections, numbered 0 through 8. Every section is mandatory. Skip nothing. Section 0 applies to greenfield UI; existing-project extraction may state that historical research is unavailable instead of inventing it.
 
 ```markdown
 # [Project Name] Design System
@@ -120,7 +120,13 @@ All spacing derives from a base of **4px**.
 
 ## 5. Components
 
-Document reusable patterns as they emerge. Format:
+### Planned Showcase Primitives
+
+This is a pre-implementation verification checklist, not reusable component documentation. Before composing a greenfield product screen, list each intended primitive and check its applicable default, hover, focus, disabled, loading, empty, and error states in a component showcase or equivalent state page.
+
+### Implemented Reusable Patterns
+
+Document only implemented reusable patterns used 2+ times. Format:
 
 ### [Component Name]
 - **Structure**: HTML/JSX outline
@@ -130,8 +136,7 @@ Document reusable patterns as they emerge. Format:
 - **Accessibility**: keyboard, ARIA, contrast
 - **Motion**: entry/exit animations
 
-Start with components used 2+ times. Do not pre-document components
-that don't exist yet.
+Do not promote planned primitives or one-off implementations into reusable component documentation.
 
 ## 6. Motion & Interaction
 
@@ -196,7 +201,7 @@ Each exception records its location, reason, owner, and exit criteria. An agent 
 4. **Define palette** — derive from atmosphere. Not random. Not generic.
 5. **Set typography** — match the atmosphere. Editorial = serif. Technical = mono-heavy. Clean = geometric sans.
 6. **Lock spacing** — base-4 system. Customize only the section-level values.
-7. **Document initial primitives and their states** — enough to pass the Primitive Showcase Gate before composing a product screen.
+7. **Fill in Planned Showcase Primitives** — use the pre-implementation verification checklist to cover intended primitives and states before composing a product screen; do not treat it as reusable component documentation.
 8. **Choose depth strategy** — one. Not "a mix."
 9. **Set accessibility constraints and record no debt without user authorization.**
 10. **Write it to `DESIGN.md`** at project root.
@@ -218,9 +223,9 @@ After every component implementation, check:
 - [ ] All spacing values are multiples of `--space-1` (4px). No magic numbers.
 - [ ] Interactive elements have all required states from Section 6.
 - [ ] Depth treatment matches the chosen strategy from Section 7.
-- [ ] Component reused 2+ times? Documented in Section 5.
+- [ ] Implemented reusable pattern used 2+ times? Documented in Section 5.
 - [ ] Motion follows the timing table. No arbitrary durations.
-- [ ] Greenfield primitives have a showcase (or equivalent state page) covering default, hover, focus, disabled, loading, empty, and error before product-screen composition.
+- [ ] `Planned Showcase Primitives` is complete for greenfield UI, with a showcase (or equivalent state page) covering default, hover, focus, disabled, loading, empty, and error before product-screen composition.
 - [ ] Section 8 constraints were checked; any accepted debt has location, reason, owner, exit criteria, and explicit user authorization.
 
 ## Memory Management

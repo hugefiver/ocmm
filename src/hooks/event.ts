@@ -8,6 +8,7 @@ export function createEventHandler(args: {
   directory?: string
   idleState?: IdleContinuationState
   clearSessionIntent?: (sessionID: string) => void
+  registeredAgentModels?: ReadonlyMap<string, string>
 }): (input: unknown) => Promise<void> {
   return createRuntimeFallbackEventHandler({
     getConfig: args.getConfig,
@@ -15,5 +16,6 @@ export function createEventHandler(args: {
     ...(args.directory !== undefined ? { directory: args.directory } : {}),
     ...(args.idleState !== undefined ? { idleState: args.idleState } : {}),
     ...(args.clearSessionIntent !== undefined ? { clearSessionIntent: args.clearSessionIntent } : {}),
+    ...(args.registeredAgentModels !== undefined ? { registeredAgentModels: args.registeredAgentModels } : {}),
   })
 }

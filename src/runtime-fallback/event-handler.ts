@@ -8,11 +8,10 @@ import {
   type FallbackState,
 } from "./fallback-state.ts"
 import { dispatchFallbackRetry, isDispatchInFlight, type OcmmClient } from "./dispatcher.ts"
-import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
-import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
-import { normalizeShorthand } from "../config/normalize.ts"
+import { entryExactlyMatchesModel, entryMatchesModel, resolveEffectiveRequirement } from "../routing/resolver.ts"
+import { matchRequirementSuccessor } from "../routing/model-upgrades.ts"
 import type { OcmmConfig } from "../config/schema.ts"
-import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
+import type { FallbackEntry } from "../shared/types.ts"
 import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-message.ts"
 import {
   isIdleContinuationEnabled,
@@ -67,23 +66,11 @@ function resolveEventModel(props: unknown): { providerID: string; modelID: strin
   return { providerID, modelID }
 }
 
-function getRequirementForAgent(agent: string | undefined, cfg: OcmmConfig): ModelRequirement | null {
-  if (!agent) return null
-  const userEntry = cfg.agents?.[agent]
-  const userNorm = normalizeShorthand(userEntry)
-  if (userNorm?.requirement) return userNorm.requirement
-
-  const userCat = cfg.categories?.[agent]
-  const userCatNorm = normalizeShorthand(userCat)
-  if (userCatNorm?.requirement) return userCatNorm.requirement
-
-  const builtinAgent = BUILTIN_AGENT_INDEX.get(agent)
-  if (builtinAgent) return builtinAgent.requirement
-
-  const builtinCat = BUILTIN_CATEGORY_INDEX.get(agent)
-  if (builtinCat) return builtinCat.requirement
-
-  return null
+function parseRegisteredModel(value: string | undefined): { providerID: string; modelID: string } | null {
+  if (!value) return null
+  const slash = value.indexOf("/")
+  if (slash <= 0 || slash === value.length - 1) return null
+  return { providerID: value.slice(0, slash), modelID: value.slice(slash + 1) }
 }
 
 export type RuntimeFallbackDeps = {
@@ -92,6 +79,7 @@ export type RuntimeFallbackDeps = {
   directory?: string
   idleState?: IdleContinuationState
   clearSessionIntent?: (sessionID: string) => void
+  registeredAgentModels?: ReadonlyMap<string, string>
 }
 
 export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
@@ -164,7 +152,14 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     )
     if (!classification.retryable) return
 
-    const requirement = getRequirementForAgent(agent, cfg)
+    const effective = agent
+      ? resolveEffectiveRequirement({
+          agentName: agent,
+          agentsConfig: cfg.agents,
+          categoriesConfig: cfg.categories,
+        })
+      : null
+    const requirement = effective?.requirement ?? null
     if (!requirement || requirement.fallbackChain.length <= 1) {
       log.info(`no fallback chain configured for agent=${agent ?? "<none>"}; skipping`)
       return
@@ -172,13 +167,37 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
 
     const eventModel = resolveEventModel(props)
 
-    // Retrieve or create session state before resolving the failed-model key so
-    // we can use state.activeModel as the mid-priority source.
+    // Initialize from the actual failed model. Models outside the static chain
+    // start at -1 so chain index 0 remains eligible.
     let state = sessionStates.get(sessionID)
     if (!state) {
-      state = createFallbackState(requirement.fallbackChain[0]
-        ? modelKey(requirement.fallbackChain[0].providers[0] ?? "", requirement.fallbackChain[0].model)
-        : "unknown")
+      const head = requirement.fallbackChain[0]
+      const chainHeadModel = head
+        ? { providerID: head.providers[0] ?? "", modelID: head.model }
+        : null
+      const registeredModel = agent
+        ? parseRegisteredModel(deps.registeredAgentModels?.get(agent))
+        : null
+      const initialModel = eventModel ?? registeredModel ?? chainHeadModel
+      if (!initialModel) {
+        log.info(`could not determine initial model for agent=${agent ?? "<none>"}; skipping`)
+        return
+      }
+      const initialKey = modelKey(initialModel.providerID, initialModel.modelID)
+      state = createFallbackState(initialKey)
+      state.activeModel = initialKey
+      state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
+        entryExactlyMatchesModel(entry, initialModel.providerID, initialModel.modelID),
+      )
+      if (state.fallbackIndex < 0 && !matchRequirementSuccessor(
+        requirement,
+        initialModel.providerID,
+        initialModel.modelID,
+      )) {
+        state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
+          entryMatchesModel(entry, initialModel.providerID, initialModel.modelID),
+        )
+      }
       sessionStates.set(sessionID, state)
     }
 

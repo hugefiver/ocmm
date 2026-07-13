@@ -275,6 +275,93 @@ test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async 
   assert.match(prompt, /Outcome-first/)
 })
 
+test("existing host models drive prompt calibration", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg = {
+    agent: {
+      builder: { model: "openai/gpt-5.6-sol" },
+    },
+  }
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
+  assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
+})
+
+test("description-only oracle inherits the explicit reviewer model before catalog promotion", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: { model: "anthropic/claude-opus-4-7" },
+      oracle: { description: "custom oracle" },
+    },
+  }
+  const registeredAgentModels = new Map<string, string>()
+  const target = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.6-terra": {} } } },
+  }
+  await createConfigHandler({ getConfig: () => configured, registeredAgentModels })(target, undefined)
+
+  assert.equal((target.agent.oracle as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
+  assert.equal(registeredAgentModels.get("oracle"), "anthropic/claude-opus-4-7")
+})
+
+test("multi-hop aliases preserve the effective model and prompt calibration", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: { alias: "review-policy-a" },
+      "review-policy-a": { alias: "review-policy-b" },
+      "review-policy-b": { alias: "review-model" },
+      "review-model": { model: "openai/gpt-5.6-sol", variant: "xhigh" as const },
+      oracle: { description: "custom oracle" },
+    },
+  }
+  const registeredAgentModels = new Map<string, string>()
+  const target = {
+    agent: {},
+    provider: {
+      openai: { models: { "gpt-5.6-sol": {}, "gpt-5.7-sol": {}, "gpt-5.7-terra": {} } },
+    },
+  }
+
+  await createConfigHandler({ getConfig: () => configured, registeredAgentModels })(target, undefined)
+
+  for (const name of ["reviewer", "oracle"]) {
+    const entry = target.agent[name as keyof typeof target.agent] as Record<string, unknown>
+    assert.equal(entry.model, "openai/gpt-5.6-sol")
+    assert.match(String(entry.prompt), /GPT-5\.6 EXECUTION CALIBRATION/)
+    assert.equal(registeredAgentModels.get(name), "openai/gpt-5.6-sol")
+  }
+})
+
+test("registeredAgentModels is rebuilt from final agents and compatibility aliases", async () => {
+  const registeredAgentModels = new Map<string, string>([["stale", "stale/model"]])
+  const handler = createConfigHandler({
+    getConfig: () => defaultConfig(),
+    registeredAgentModels,
+  })
+  const cfg: { agent: Record<string, unknown> } = {
+    agent: { builder: { model: "openai/gpt-5.6-sol" } },
+  }
+  await handler(cfg, undefined)
+
+  assert.equal(registeredAgentModels.has("stale"), false)
+  assert.equal(registeredAgentModels.get("builder"), "openai/gpt-5.6-sol")
+  assert.equal(
+    registeredAgentModels.get("explore"),
+    (cfg.agent.explore as Record<string, unknown>).model,
+  )
+
+  const disabled = { ...defaultConfig(), registerBuiltinAgents: false }
+  await createConfigHandler({
+    getConfig: () => disabled,
+    registeredAgentModels,
+  })({ agent: {} }, undefined)
+  assert.equal(registeredAgentModels.size, 0)
+})
+
 test("config keeps existing defaults without a matching GPT-5.6 catalog entry", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {

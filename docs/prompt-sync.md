@@ -9,7 +9,7 @@ Both workflows use the same prompt layers:
 ```text
 prompts/<workflow>/
   agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
-  deepwork/{default,gpt,gemini,glm,codex,planner}.md
+  deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
   category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
 ```
 

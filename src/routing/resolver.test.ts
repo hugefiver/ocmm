@@ -11,7 +11,7 @@ test("matches an entry in the built-in agent chain", () => {
   })
   assert.ok(r)
   assert.equal(r!.entry.model, "gpt-5.5")
-  assert.equal(r!.variant, "high")
+  assert.equal(r!.variant, "xhigh")
   assert.equal(r!.source, "agent-default")
 })
 
@@ -28,8 +28,8 @@ test("oracle routes to its own cross-gen builtin chain", () => {
   })
 
   assert.equal(oracle!.source, "agent-default")
-  assert.equal(oracle!.variant, "high")
-  // gpt-5.5 matches the "gpt-5" entry in oracle's cross-gen chain (forward prefix match).
+  assert.equal(oracle!.variant, "xhigh")
+  // gpt-5.5 matches the "gpt-5" entry in oracle's cross-gen chain (versioned alias match).
   assert.equal(oracle!.entry.model, "gpt-5")
   assert.equal(explore!.source, "agent-default")
   assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
@@ -164,4 +164,96 @@ test("entryMatches forward-prefix-matches versioned aliases", () => {
   assert.ok(r)
   assert.equal(r!.entry.model, "gpt-5.5")
   assert.equal(r!.source, "agent-default")
+})
+
+test("entryMatches only accepts boundary-delimited version aliases", () => {
+  const agentsConfig = {
+    reviewer: {
+      model: "openai/gpt-5.5",
+      fallbackModels: ["openai/gpt-5.50"],
+    },
+  }
+  const alias = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.5-20260713",
+    providerID: "openai",
+    agentsConfig,
+  })
+  const distinctVersion = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.50",
+    providerID: "openai",
+    agentsConfig,
+  })
+
+  assert.equal(alias!.entry.model, "gpt-5.5")
+  assert.equal(distinctVersion!.entry.model, "gpt-5.50")
+})
+
+test("routes supported GPT and GLM successors through synthesized actual entries", () => {
+  const gpt = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.7-sol",
+    providerID: "openai",
+  })
+  const glm = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "glm-5.2",
+    providerID: "zhipu",
+  })
+
+  assert.deepEqual(gpt, {
+    entry: {
+      providers: ["openai"],
+      model: "gpt-5.7-sol",
+      variant: "xhigh",
+    },
+    variant: "xhigh",
+    source: "agent-default",
+  })
+  assert.deepEqual(glm, {
+    entry: {
+      providers: ["zhipu"],
+      model: "glm-5.2",
+    },
+    variant: "high",
+    source: "agent-default",
+  })
+})
+
+test("oracle routes Terra catalog successors through synthesized actual entries", () => {
+  const result = resolveModelRouting({
+    agentName: "oracle",
+    modelID: "gpt-5.7-terra",
+    providerID: "openai",
+  })
+
+  assert.deepEqual(result, {
+    entry: {
+      providers: ["openai"],
+      model: "gpt-5.7-terra",
+      variant: "xhigh",
+    },
+    variant: "xhigh",
+    source: "agent-default",
+  })
+})
+
+test("multi-hop aliases resolve the same effective requirement as direct config", () => {
+  const result = resolveModelRouting({
+    agentName: "oracle",
+    modelID: "gpt-5.6-sol",
+    providerID: "openai",
+    agentsConfig: {
+      oracle: { alias: "reviewer" },
+      reviewer: { alias: "review-policy-a" },
+      "review-policy-a": { alias: "review-policy-b" },
+      "review-policy-b": { alias: "review-model" },
+      "review-model": { model: "openai/gpt-5.6-sol", variant: "xhigh" },
+    },
+  })
+
+  assert.equal(result?.source, "user-config")
+  assert.equal(result?.entry.model, "gpt-5.6-sol")
+  assert.equal(result?.variant, "xhigh")
 })

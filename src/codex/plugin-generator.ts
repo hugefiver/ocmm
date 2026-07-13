@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 
-import { normalizeShorthand } from "../config/normalize.ts"
+import { normalizeAgentShorthand, normalizeShorthand } from "../config/normalize.ts"
 import { type OcmmConfig } from "../config/schema.ts"
 import { loadConfig, type ConfigHost } from "../config/load.ts"
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
@@ -175,6 +175,7 @@ export async function buildCodexAgents(args: {
     const selected = selectCodexModel(requirement, args.config)
     const model = selected.entry?.model ?? args.config.systemDefaultModel ?? "gpt-5.5"
     const reasoningEffort = codexReasoningEffort({
+      sourceName,
       entry: selected.entry,
       model,
       variant: selected.variant,
@@ -492,20 +493,26 @@ Apply this section only when the current dispatch surface exposes a \`model\` fi
 | Role lane | Preferred GPT-5.6 model | Reasoning effort | Roles |
 |---|---|---|---|
 | Flagship | \`gpt-5.6-sol\` | \`high\` by default; \`xhigh\` for deep, architecture, algorithmic, security, or high-risk reasoning | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning |
-| External review | \`gpt-5.6-sol\` | \`high\` for bounded review; \`xhigh\` for complex, cross-module, security, performance, or final-gate review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic |
-| Cross-check | \`gpt-5.6-terra\` | \`high\` for focused self-supervision; \`xhigh\` for complex or high-risk verification | ${CODEX_AGENT_PREFIX}-oracle |
+| External review | \`gpt-5.6-sol\` | \`xhigh\` minimum; local \`max\` for complex, cross-module, security, performance, high-risk, or final-gate review (mapped to the target maximum) | ${CODEX_AGENT_PREFIX}-reviewer |
+| Plan review | \`gpt-5.6-sol\` | fixed \`xhigh\` | ${CODEX_AGENT_PREFIX}-plan-critic |
+| Cross-check | \`gpt-5.6-terra\` | \`xhigh\` minimum; local \`max\` for complex or high-risk verification (mapped to the target maximum) | ${CODEX_AGENT_PREFIX}-oracle |
 | Mid | \`gpt-5.6-terra\` | Preserve the profile baseline unless task complexity requires more | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search |
 | Mini | \`gpt-5.6-luna\` | \`high\` | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore |
 
 When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane instead of pinning the 5.6 name: newest flagship for Flagship and External review, and a strong non-identical mid-tier or flagship for Cross-check. Keep the role's high/xhigh complexity rule, never override an explicit user model, and fall back to the generated profile default when availability or capability evidence is absent.
+
+For reviewer and oracle GPT/Codex routes, \`xhigh\` is the minimum reasoning effort. For complex or high-risk review or verification, request local \`max\`; the adapter maps it to the target's maximum supported effort (currently \`xhigh\` for GPT/Codex).
+
+The plan-critic profile remains fixed \`xhigh\`; its receipt-focused plan review does not use the reviewer/oracle local-effort escalation policy.
 
 ### Tier assignments
 
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
 | Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Latest-gen flagship | high or xhigh by complexity |
-| External review | ${CODEX_AGENT_PREFIX}-reviewer, ${CODEX_AGENT_PREFIX}-plan-critic | Latest-gen flagship | high or xhigh by review risk |
-| Cross-check | ${CODEX_AGENT_PREFIX}-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | high or xhigh by verification risk |
+| External review | ${CODEX_AGENT_PREFIX}-reviewer | Latest-gen flagship | xhigh minimum; local max for complex or high-risk review |
+| Plan review | ${CODEX_AGENT_PREFIX}-plan-critic | Latest-gen flagship | fixed xhigh |
+| Cross-check | ${CODEX_AGENT_PREFIX}-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | xhigh minimum; local max for complex or high-risk verification |
 | Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Latest-gen mini | high |
 
@@ -518,15 +525,19 @@ When a newer GPT family is explicitly available, select a demonstrably better mo
 
 ### Independent review rule
 
-${CODEX_AGENT_PREFIX}-oracle provides self-supervision and should prefer the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while ${CODEX_AGENT_PREFIX}-reviewer and ${CODEX_AGENT_PREFIX}-plan-critic provide external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity. If only one capable model is available, use it at the lane's complexity-appropriate effort.
+${CODEX_AGENT_PREFIX}-oracle provides self-supervision through the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while ${CODEX_AGENT_PREFIX}-reviewer provides external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity.
+
+${CODEX_AGENT_PREFIX}-plan-critic provides receipt-focused plan review through the Plan review lane at fixed \`xhigh\`.
+
+If only one capable model is available, keep the reviewer/oracle GPT/Codex \`xhigh\` floor and use local \`max\` for complex or high-risk review or verification.
 
 ### Example (GPT-5.6 generation — verify against your available models)
 
 | Tier | Example model | Effort |
 |---|---|---|
 | Flagship | gpt-5.6-sol | high or xhigh |
-| External review | gpt-5.6-sol | high or xhigh |
-| Cross-check | gpt-5.6-terra | high or xhigh |
+| External review | gpt-5.6-sol | xhigh minimum; local max for complex/high-risk work |
+| Cross-check | gpt-5.6-terra | xhigh minimum; local max for complex/high-risk work |
 | Mid | gpt-5.6-terra | high or max |
 | Mini | gpt-5.6-luna | high |
 `
@@ -564,7 +575,7 @@ function codexAgentInstructions(args: {
     "## Subagent Dispatch Compatibility (HARD-GATE)",
     "The current callable dispatch-tool schema is authoritative; MultiAgent V1/V2 names and examples elsewhere are lower-priority compatibility examples.",
     "When delegating, use agent_type, agent_path, or agent_nickname as an exact profile selector only when the current tool schema or documentation explicitly guarantees that behavior. Otherwise use direct composition only when the tool can select the model and carry system/developer instructions plus skills. Otherwise, if a generic or flat dispatch tool is callable, still delegate with a self-contained message labeled TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS. Do not claim that a generic message loaded a dw-* profile, and do not pass a dw-*.toml installation artifact as a skill or prompt attachment. Use local execution only when no native dispatch tool is callable.",
-    "When a model override is directly supported, preserve an explicit user model. Otherwise prefer GPT-5.6 Sol for flagship and external-review work, GPT-5.6 Terra for oracle cross-checks, and choose high versus xhigh from task complexity. If GPT-5.6 is absent, keep the profile default; if a newer cataloged GPT model is demonstrably better in the same lane, it may replace the 5.6 preference without changing the role contract.",
+    "When a model override is directly supported, preserve an explicit user model. Otherwise prefer GPT-5.6 Sol for flagship and external-review work and GPT-5.6 Terra for oracle cross-checks. Reviewer and oracle GPT/Codex routes use xhigh as their minimum; for complex or high-risk review or verification, request local max so the adapter can map it to the target's maximum supported effort. If GPT-5.6 is absent, keep the profile default; if a newer cataloged GPT model is demonstrably better in the same lane, it may replace the 5.6 preference without changing the role contract.",
   ].join("\n")
 }
 
@@ -576,15 +587,8 @@ function resolveRequirementForName(name: string, config: OcmmConfig, visited: Se
   if (visited.has(name)) return null
   const canonical = AGENT_ALIASES.get(name) ?? name
   const rawAgentEntry = config.agents?.[name] ?? config.agents?.[canonical]
-  const agentOverride = normalizeShorthand(rawAgentEntry, {
-    resolveAlias: (target) => normalizeShorthand(config.agents?.[target], {
-      resolveAlias: (t2) => normalizeShorthand(config.agents?.[t2]),
-      visited: new Set([...visited, name]),
-      selfName: name,
-    }),
-    visited: new Set([...visited, name]),
-    selfName: name,
-  })
+  const overrideName = config.agents?.[name] !== undefined ? name : canonical
+  const agentOverride = normalizeAgentShorthand(overrideName, config.agents)
   if (agentOverride?.disabled) return null
   if (agentOverride?.requirement) return agentOverride.requirement
 
@@ -627,6 +631,7 @@ function isCodexCompatibleEntry(entry: FallbackEntry): boolean {
 }
 
 function codexReasoningEffort(args: {
+  sourceName: string
   entry?: FallbackEntry
   model: string
   variant?: Variant
@@ -635,9 +640,23 @@ function codexReasoningEffort(args: {
   const effort = direct ?? (args.variant
     ? translateVariant("codex", args.variant, { modelID: args.model }).reasoningEffort
     : undefined)
-  if (effort === "max") return "xhigh"
-  if (effort && CODEX_REASONING_EFFORTS.has(effort)) return effort
-  return "high"
+  const normalized = effort === "max"
+    ? "xhigh"
+    : effort && CODEX_REASONING_EFFORTS.has(effort)
+      ? effort
+      : "high"
+  const family = classifyModelFamily({
+    providerID: args.entry?.providers[0],
+    modelID: args.model,
+  })
+  if (
+    (args.sourceName === "reviewer" || args.sourceName === "oracle")
+    && (family === "gpt" || family === "codex")
+    && normalized !== "xhigh"
+  ) {
+    return "xhigh"
+  }
+  return normalized
 }
 
 function formatFallbackEntry(entry: FallbackEntry): string {

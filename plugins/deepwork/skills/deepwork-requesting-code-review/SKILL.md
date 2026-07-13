@@ -79,6 +79,8 @@ Two reviewer agents are available, with distinct semantics:
 
 `oracle` can also be an optional independent consultation for a high-risk implementation plan. It does not replace the `plan-critic` receipt, does not make dual plan review mandatory, and a timeout or partial response is not a conclusion.
 
+**GPT/Codex reasoning policy:** `reviewer` and `oracle` use `xhigh` minimum. For complex or high-risk review or verification, request local `max`; the adapter maps it to the target's maximum supported effort (currently `xhigh` for GPT/Codex). `plan-critic` remains `xhigh`.
+
 ## Example
 
 ```

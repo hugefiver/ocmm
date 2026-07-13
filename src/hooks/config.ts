@@ -8,8 +8,9 @@ import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, isGpt56Model, pic
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
-import { normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
+import { normalizeAgentShorthand, normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
+import { selectCatalogModel } from "../routing/model-upgrades.ts"
 import { isRecord, log } from "../shared/logger.ts"
 
 const COMPAT_AGENT_ALIASES = [
@@ -35,111 +36,15 @@ type AgentExtras = {
   model?: string
 }
 
-const GPT_LANE_BY_AGENT = new Map<string, "sol" | "terra">([
-  ["orchestrator", "sol"],
-  ["builder", "sol"],
-  ["reviewer", "sol"],
-  ["planner", "sol"],
-  ["clarifier", "sol"],
-  ["plan-critic", "sol"],
-  ["oracle", "terra"],
-  ["hard-reasoning", "sol"],
-  ["deep", "sol"],
-  ["complex", "terra"],
-  ["normal-task", "terra"],
-])
-
-type CatalogCandidate = {
-  provider: string
-  model: string
-  version: [number, number, number]
-}
-
-function gptLaneCandidate(provider: string, model: string, lane: "sol" | "terra"): CatalogCandidate | null {
-  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?-(sol|terra)(?:$|[-_.])/)
-  if (!match || match[4] !== lane) return null
-  return {
-    provider,
-    model,
-    version: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)],
-  }
-}
-
-function compareCatalogCandidates(a: CatalogCandidate, b: CatalogCandidate): number {
-  for (let i = 0; i < a.version.length; i += 1) {
-    const delta = b.version[i]! - a.version[i]!
-    if (delta !== 0) return delta
-  }
-  return a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
-}
-
-function glmCatalogCandidate(provider: string, model: string): CatalogCandidate | null {
-  const match = model.toLowerCase().match(/^glm-(5)\.(\d+)(?:\.(\d+))?(?:$|[-_.])/)
-  if (!match || Number(match[2]) < 2) return null
-  return {
-    provider,
-    model,
-    version: [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)],
-  }
-}
-
-/**
- * Upgrade only from an explicit OpenCode provider model catalog. GPT Sol/Terra
- * remains the preferred lane; GLM may advance only when this requirement already
- * has a GLM 5.1 fallback and the same configured provider explicitly offers 5.2+.
- */
-function catalogModelForRequirement(
-  target: Record<string, unknown>,
-  agentName: string,
-  requirement: ModelRequirement,
-): string | undefined {
-  const lane = GPT_LANE_BY_AGENT.get(agentName)
-  const providers = isRecord(target.provider) ? target.provider : undefined
-  if (!providers) return undefined
-
-  if (lane) {
-    const candidates: CatalogCandidate[] = []
-    for (const [provider, rawProvider] of Object.entries(providers)) {
-      if (provider !== "openai" && provider !== "github-copilot") continue
-      if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
-      for (const model of Object.keys(rawProvider.models)) {
-        const candidate = gptLaneCandidate(provider, model, lane)
-        if (candidate) candidates.push(candidate)
-      }
-    }
-    candidates.sort(compareCatalogCandidates)
-    const best = candidates[0]
-    if (best) return `${best.provider}/${best.model}`
-  }
-
-  const glmFallback = requirement.fallbackChain.find(
-    (entry) => entry.model.toLowerCase() === "glm-5.1" && entry.providers.includes("zhipu"),
-  )
-  if (!glmFallback) return undefined
-
-  const candidates: CatalogCandidate[] = []
-  for (const provider of glmFallback.providers) {
-    const rawProvider = providers[provider]
-    if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
-    for (const model of Object.keys(rawProvider.models)) {
-      const candidate = glmCatalogCandidate(provider, model)
-      if (candidate) candidates.push(candidate)
-    }
-  }
-  candidates.sort(compareCatalogCandidates)
-  const best = candidates[0]
-  return best ? `${best.provider}/${best.model}` : undefined
-}
-
 function hasExplicitModelSelection(entry: unknown): boolean {
   if (typeof entry === "string") return true
   if (!isRecord(entry)) return false
   return ["model", "fallbackModels", "requirement", "alias"].some((key) => entry[key] !== undefined)
 }
 
-function hasRawAgentModel(agentMap: Record<string, unknown>, name: string): boolean {
+function rawAgentModel(agentMap: Record<string, unknown>, name: string): string | undefined {
   const entry = agentMap[name]
-  return isRecord(entry) && typeof entry.model === "string"
+  return isRecord(entry) && typeof entry.model === "string" ? entry.model : undefined
 }
 
 function applyAgentEntry(
@@ -261,6 +166,19 @@ function promptForBuiltinAgent(
   return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
 }
 
+function promptForBuiltinCategory(
+  categoryName: string,
+  workflow: string,
+  selectedModel: string,
+): string {
+  const rolePrompt = getCategoryPrompt(categoryName).trim()
+  const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel)
+  const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""
+  if (!rolePrompt) return modelPrompt
+  if (!modelPrompt) return rolePrompt
+  return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for GPT-5.6 calibration when it does not conflict with the category role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+}
+
 function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
   return {
     name: c.name,
@@ -273,8 +191,10 @@ export function createConfigHandler(args: {
   getConfig: () => OcmmConfig
   skillsRoot?: string
   cwd?: string
+  registeredAgentModels?: Map<string, string>
 }): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, _output) => {
+    args.registeredAgentModels?.clear()
     const cfg = args.getConfig()
     if (!isRecord(rawInput)) return
 
@@ -309,27 +229,32 @@ export function createConfigHandler(args: {
 
     for (const a of BUILTIN_AGENTS) {
       if (disabled.has(a.name)) continue
-      let norm = normalizeShorthand(cfg.agents?.[a.name], {
-        resolveAlias: (target: string) => normalizeShorthand(cfg.agents?.[target]),
-        selfName: a.name,
-      })
+      let norm = normalizeAgentShorthand(a.name, cfg.agents)
       // Inject builtin defaultAlias when the user wrote an entry for this agent
       // but didn't specify a model (no requirement) and didn't set an explicit
       // alias. If there is no user entry at all, the builtin requirement stands.
       const userEntryForAgent = cfg.agents?.[a.name]
+      let inheritedDefaultAlias = false
       if (userEntryForAgent !== undefined && !norm?.requirement?.fallbackChain?.length && a.defaultAlias && !userEntryForAgent.alias) {
-        const aliasNorm = normalizeShorthand(cfg.agents?.[a.defaultAlias], {
-          resolveAlias: (t: string) => normalizeShorthand(cfg.agents?.[t]),
-          selfName: a.defaultAlias,
-        })
+        const aliasNorm = normalizeAgentShorthand(a.defaultAlias, cfg.agents)
         if (aliasNorm?.requirement?.fallbackChain?.length) {
           norm = { ...norm, requirement: aliasNorm.requirement }
+          inheritedDefaultAlias = true
         }
       }
-      const catalogModel = !hasExplicitModelSelection(userEntryForAgent) && !hasRawAgentModel(agentMap, a.name)
-        ? catalogModelForRequirement(target, a.name, a.requirement)
+      const existingModel = rawAgentModel(agentMap, a.name)
+      const configuredRequirement = norm?.requirement?.fallbackChain?.length
+        ? norm.requirement
         : undefined
-      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, catalogModel)
+      const suppressCatalog = hasExplicitModelSelection(userEntryForAgent) || inheritedDefaultAlias
+      const catalogModel = !existingModel && !suppressCatalog
+        ? selectCatalogModel(target, a.name, a.requirement)
+        : undefined
+      const finalModel = existingModel
+        ?? (configuredRequirement ? fmtModel(configuredRequirement.fallbackChain[0]!) : undefined)
+        ?? catalogModel
+        ?? fmtModel(a.requirement.fallbackChain[0]!)
+      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, finalModel)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
         : a.name === "planner"
@@ -338,7 +263,7 @@ export function createConfigHandler(args: {
       const extras: AgentExtras = {}
       if (prompt) extras.prompt = prompt
       extras.mode = mode
-      extras.model = catalogModel
+      extras.model = finalModel
       if (mode === "primary" || mode === "all") {
         extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       }
@@ -347,29 +272,36 @@ export function createConfigHandler(args: {
 
     for (const c of BUILTIN_CATEGORIES) {
       if (disabled.has(c.name)) continue
-      const agentOverride = normalizeShorthand(cfg.agents?.[c.name])
+      const agentOverride = normalizeAgentShorthand(c.name, cfg.agents)
       const categoryOverride = normalizeShorthand(cfg.categories?.[c.name])
 
       const baseAgent = categoryAsAgent(c, categoryOverride?.requirement)
       const merged: NormalizedShorthand | undefined =
         agentOverride ?? categoryOverride
 
-      const prompt = getCategoryPrompt(c.name)
       const extras: AgentExtras = { mode: "subagent" }
-      if (prompt) extras.prompt = prompt
       const hasUserSelection = hasExplicitModelSelection(cfg.agents?.[c.name]) || hasExplicitModelSelection(cfg.categories?.[c.name])
-      if (!hasUserSelection && !hasRawAgentModel(agentMap, c.name)) {
-        extras.model = catalogModelForRequirement(target, c.name, baseAgent.requirement)
-      }
+      const existingModel = rawAgentModel(agentMap, c.name)
+      const configuredRequirement = agentOverride?.requirement ?? categoryOverride?.requirement
+      const catalogModel = !hasUserSelection && !existingModel
+        ? selectCatalogModel(target, c.name, baseAgent.requirement)
+        : undefined
+      const finalModel = existingModel
+        ?? (configuredRequirement ? fmtModel(configuredRequirement.fallbackChain[0]!) : undefined)
+        ?? catalogModel
+        ?? fmtModel(baseAgent.requirement.fallbackChain[0]!)
+      const prompt = promptForBuiltinCategory(c.name, cfg.workflow, finalModel)
+      if (prompt) extras.prompt = prompt
+      extras.model = finalModel
       applyAgentEntry(agentMap, baseAgent, merged, extras)
     }
 
     if (cfg.agents) {
-      for (const [name, entry] of Object.entries(cfg.agents)) {
+      for (const name of Object.keys(cfg.agents)) {
         if (disabled.has(name)) continue
         if (BUILTIN_AGENTS.some((b) => b.name === name)) continue
         if (BUILTIN_CATEGORIES.some((c) => c.name === name)) continue
-        const norm = normalizeShorthand(entry)
+        const norm = normalizeAgentShorthand(name, cfg.agents)
         if (!norm?.requirement?.fallbackChain?.length) continue
         const synthetic: Agent = {
           name,
@@ -382,6 +314,12 @@ export function createConfigHandler(args: {
 
     registerCompatAgentAliases(agentMap, disabled)
     registerDefaultPermissions(target, agentMap)
+
+    for (const [name, raw] of Object.entries(agentMap)) {
+      if (isRecord(raw) && typeof raw.model === "string") {
+        args.registeredAgentModels?.set(name, raw.model)
+      }
+    }
 
     log.info(
       `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`,

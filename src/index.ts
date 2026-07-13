@@ -113,6 +113,7 @@ export function createPlugin(input?: ServerInput): {
   syncIdleEnabled()
   const agentsSessionCache = new Map<string, Set<string>>()
   const sessionAgentMap = new Map<string, string>()
+  const registeredAgentModels = new Map<string, string>()
   const resolutionLedger = createResolutionLedger()
   const sessionIntentStore = createSessionIntentStore()
   const permissionGuards = createPermissionGuards({
@@ -136,6 +137,7 @@ export function createPlugin(input?: ServerInput): {
     ...(input?.client !== undefined ? { client: input.client } : {}),
     directory: cwd,
     idleState,
+    registeredAgentModels,
     clearSessionIntent: (sid) => sessionIntentStore.clearSessionIntent(sid),
   })
   const composedEvent = async (raw: unknown) => {
@@ -144,7 +146,7 @@ export function createPlugin(input?: ServerInput): {
   }
 
   const pluginInterface: PluginInterface = {
-    config: createConfigHandler({ getConfig, cwd }),
+    config: createConfigHandler({ getConfig, cwd, registeredAgentModels }),
     "chat.params": createChatParamsHandler({
       getConfig,
       sessionAgentMap,

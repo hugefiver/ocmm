@@ -1,6 +1,7 @@
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
-import { normalizeShorthand } from "../config/normalize.ts"
+import { normalizeAgentShorthand, normalizeShorthand } from "../config/normalize.ts"
+import { matchRequirementSuccessor } from "./model-upgrades.ts"
 import type { AgentEntry, CategoryEntry } from "../config/schema.ts"
 import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
 
@@ -51,22 +52,48 @@ function canonicalAgentName(name: string): string {
   return AGENT_ALIASES.get(name) ?? name
 }
 
-function entryMatches(entry: FallbackEntry, modelID: string): boolean {
-  if (entry.model === modelID) return true
-  // Forward prefix match: a chain entry "gpt-5.5" matches an input
-  // "gpt-5.5-20250101" (versioned alias). We intentionally do NOT match the
-  // reverse ("gpt-5" matching "gpt-5.5") because that would let a shorter
-  // chain entry swallow newer model IDs it was never meant to cover.
-  if (modelID.startsWith(entry.model)) return true
-  return false
+export function entryMatchesModel(
+  entry: FallbackEntry,
+  providerID: string | undefined,
+  modelID: string,
+): boolean {
+  if (entryExactlyMatchesModel(entry, providerID, modelID)) return true
+  if (providerID !== undefined && !entry.providers.includes(providerID)) return false
+  if (!modelID.startsWith(entry.model)) return false
+  const boundary = modelID[entry.model.length]
+  return boundary === "-" || boundary === "_" || boundary === "."
+}
+
+export function entryExactlyMatchesModel(
+  entry: FallbackEntry,
+  providerID: string | undefined,
+  modelID: string,
+): boolean {
+  return (providerID === undefined || entry.providers.includes(providerID)) && entry.model === modelID
 }
 
 function pickFromChain(
   req: ModelRequirement,
+  providerID: string | undefined,
   modelID: string,
 ): { entry: FallbackEntry; effectiveVariant?: Variant } | null {
   for (const e of req.fallbackChain) {
-    if (entryMatches(e, modelID)) {
+    if (entryExactlyMatchesModel(e, providerID, modelID)) {
+      const v = (e.variant ?? req.variant) as Variant | undefined
+      const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: e }
+      if (v) out.effectiveVariant = v
+      return out
+    }
+  }
+  const successor = matchRequirementSuccessor(req, providerID, modelID)
+  if (successor) {
+    const v = (successor.variant ?? req.variant) as Variant | undefined
+    const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: successor }
+    if (v) out.effectiveVariant = v
+    return out
+  }
+  for (const e of req.fallbackChain) {
+    if (entryMatchesModel(e, providerID, modelID)) {
       const v = (e.variant ?? req.variant) as Variant | undefined
       const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: e }
       if (v) out.effectiveVariant = v
@@ -80,29 +107,13 @@ function isValidVariant(v: string): v is Variant {
   return VARIANT_SET.has(v as Variant)
 }
 
-function userAgentRequirement(entry: AgentEntry | undefined): ModelRequirement | null {
-  const norm = normalizeShorthand(entry)
-  if (!norm || norm.disabled) return null
-  return norm.requirement ?? null
-}
-
 function userAgentRequirementWithAlias(
   agentName: string,
   agentsConfig: Record<string, AgentEntry> | undefined,
-  visited: Set<string> = new Set(),
 ): ModelRequirement | null {
-  if (!agentsConfig) return null
-  if (visited.has(agentName)) return null
-  visited.add(agentName)
-  const entry = agentsConfig[agentName]
-  const norm = normalizeShorthand(entry)
+  const norm = normalizeAgentShorthand(agentName, agentsConfig)
   if (!norm || norm.disabled) return null
-  if (norm.requirement) return norm.requirement
-  // Resolve alias field: user-config alias points to another agent's model config.
-  if (entry?.alias) {
-    return userAgentRequirementWithAlias(entry.alias, agentsConfig, visited)
-  }
-  return null
+  return norm.requirement ?? null
 }
 
 function defaultAliasRequirement(agentName: string, agentsConfig: Record<string, AgentEntry> | undefined): ModelRequirement | null {
@@ -153,11 +164,12 @@ function applyCategoryVariantPolicy(
 
 function resolveAgainstRequirement(
   req: ModelRequirement,
+  providerID: string | undefined,
   modelID: string,
   inputVariant: string | undefined,
   source: Resolution["source"],
 ): Resolution | null {
-  const matched = pickFromChain(req, modelID)
+  const matched = pickFromChain(req, providerID, modelID)
   if (matched) {
     return buildResolution(matched.entry, matched.effectiveVariant, inputVariant, source)
   }
@@ -169,54 +181,46 @@ function resolveAgainstRequirement(
   return null
 }
 
+export function resolveEffectiveRequirement(opts: {
+  agentName: string
+  agentsConfig?: Record<string, AgentEntry>
+  categoriesConfig?: Record<string, CategoryEntry>
+}): { requirement: ModelRequirement; source: Resolution["source"] } | null {
+  const { agentName, agentsConfig, categoriesConfig } = opts
+  const canonicalName = canonicalAgentName(agentName)
+  const canonicalUserReq = canonicalName !== agentName
+    ? userAgentRequirementWithAlias(canonicalName, agentsConfig)
+    : null
+  const userReq = userAgentRequirementWithAlias(agentName, agentsConfig) ?? canonicalUserReq
+  if (userReq) return { requirement: userReq, source: "user-config" }
+
+  const aliasReq = defaultAliasRequirement(agentName, agentsConfig)
+  if (aliasReq) return { requirement: aliasReq, source: "user-config" }
+
+  const builtin = BUILTIN_AGENT_INDEX.get(canonicalName)
+  if (builtin) return { requirement: builtin.requirement, source: "agent-default" }
+
+  const userCat = userCategoryRequirement(categoriesConfig?.[agentName])
+  if (userCat) return { requirement: userCat, source: "user-config" }
+
+  const builtinCat = BUILTIN_CATEGORY_INDEX.get(agentName)
+  if (builtinCat) return { requirement: builtinCat.requirement, source: "category-default" }
+
+  return null
+}
+
 export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
-  const { agentName, modelID, inputVariant, agentsConfig, categoriesConfig } = opts
-  const canonicalName = agentName ? canonicalAgentName(agentName) : undefined
+  const { agentName, modelID, providerID, inputVariant, agentsConfig, categoriesConfig } = opts
 
   if (agentName) {
-    const canonicalUserReq = canonicalName && canonicalName !== agentName
-      ? userAgentRequirement(agentsConfig?.[canonicalName])
-      : null
-    const userReq =
-      userAgentRequirement(agentsConfig?.[agentName]) ??
-      canonicalUserReq
-    if (userReq) {
-      const r = resolveAgainstRequirement(userReq, modelID, inputVariant, "user-config")
-      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
-    }
-
-    // Builtin defaultAlias: when the agent has no direct user model config and no
-    // explicit alias, inherit the defaultAlias target's user-configured model.
-    const aliasReq = defaultAliasRequirement(agentName, agentsConfig)
-    if (aliasReq) {
-      const r = resolveAgainstRequirement(aliasReq, modelID, inputVariant, "user-config")
-      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
-    }
-  }
-
-  if (canonicalName) {
-    const builtin = BUILTIN_AGENT_INDEX.get(canonicalName)
-    if (builtin) {
+    const effective = resolveEffectiveRequirement({ agentName, agentsConfig, categoriesConfig })
+    if (effective) {
       const r = resolveAgainstRequirement(
-        builtin.requirement,
+        effective.requirement,
+        providerID,
         modelID,
         inputVariant,
-        "agent-default",
-      )
-      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
-    }
-  }
-
-  if (agentName) {
-    const userCat = userCategoryRequirement(categoriesConfig?.[agentName])
-    const builtinCat = BUILTIN_CATEGORY_INDEX.get(agentName)
-    const req = userCat ?? builtinCat?.requirement ?? null
-    if (req) {
-      const r = resolveAgainstRequirement(
-        req,
-        modelID,
-        inputVariant,
-        userCat ? "user-config" : "category-default",
+        effective.source,
       )
       if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
     }

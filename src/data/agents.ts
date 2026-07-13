@@ -55,7 +55,7 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["zhipu"], model: "glm-5.1" },
@@ -73,7 +73,7 @@ export const BUILTIN_AGENTS: Agent[] = [
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5", variant: "high" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5", variant: "xhigh" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
     },

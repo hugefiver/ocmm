@@ -317,6 +317,157 @@ test("event without model on first error uses primary as failed key", async () =
   assert.equal(calls[0]?.body.modelID, "fallback-a")
 })
 
+test("first error from an event model outside the chain dispatches chain index 0", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_event_outside", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "gpt-5.7-sol" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "primary-model")
+})
+
+test("first error from a registered model outside the chain dispatches chain index 0", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registeredAgentModels = new Map([["orchestrator", "hoo/gpt-5.7-sol"]])
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client,
+    registeredAgentModels,
+  })
+
+  await handler(makeErrorEvent("ses_registered_outside", { status: 503 }, {
+    agent: "orchestrator",
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "primary-model")
+})
+
+test("secondary providers match the same static chain entry and are not retried", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      reviewer: {
+        requirement: {
+          fallbackChain: [
+            { providers: ["openai", "github-copilot"], model: "gpt-5.5" },
+            { providers: ["anthropic"], model: "claude-opus-4-7" },
+          ],
+        },
+      },
+    },
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_secondary_provider", { status: 503 }, {
+    agent: "reviewer",
+    model: { providerID: "github-copilot", modelID: "gpt-5.5" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "anthropic")
+  assert.equal(calls[0]?.body.modelID, "claude-opus-4-7")
+})
+
+test("fallback static matching accepts version aliases only at a delimiter boundary", async () => {
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      reviewer: {
+        requirement: {
+          fallbackChain: [
+            { providers: ["openai"], model: "gpt-5.5" },
+            { providers: ["anthropic"], model: "claude-opus-4-7" },
+          ],
+        },
+      },
+    },
+  })
+
+  const aliasMock = makeMockClient()
+  const aliasHandler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: aliasMock.client })
+  await aliasHandler(makeErrorEvent("ses_alias", { status: 503 }, {
+    agent: "reviewer",
+    model: { providerID: "openai", modelID: "gpt-5.5-20260713" },
+  }))
+  assert.equal(aliasMock.calls[0]?.body.modelID, "claude-opus-4-7")
+
+  const distinctMock = makeMockClient()
+  const distinctHandler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: distinctMock.client })
+  await distinctHandler(makeErrorEvent("ses_distinct", { status: 503 }, {
+    agent: "reviewer",
+    model: { providerID: "openai", modelID: "gpt-5.50" },
+  }))
+  assert.equal(distinctMock.calls[0]?.body.modelID, "gpt-5.5")
+})
+
+test("description-only oracle uses the explicit reviewer fallback chain", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      reviewer: {
+        model: "hoo/primary-model",
+        fallbackModels: ["hoo/fallback-a", "hoo/fallback-b"],
+      },
+      oracle: { description: "custom oracle" },
+    },
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_oracle_alias", { status: 503 }, {
+    agent: "oracle",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+})
+
+test("oracle Terra successor restarts fallback from the chain head", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = OcmmConfigSchema.parse({})
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_oracle_terra", { status: 503 }, {
+    agent: "oracle",
+    model: { providerID: "openai", modelID: "gpt-5.7-terra" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "anthropic")
+  assert.equal(calls[0]?.body.modelID, "claude-opus-4-7")
+})
+
+test("multi-hop reviewer aliases provide oracle's inherited fallback chain", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      reviewer: { alias: "review-policy-a" },
+      "review-policy-a": { alias: "review-policy-b" },
+      "review-policy-b": { alias: "review-model" },
+      "review-model": {
+        model: "hoo/primary-model",
+        fallbackModels: ["hoo/fallback-a", "hoo/fallback-b"],
+      },
+      oracle: { description: "custom oracle" },
+    },
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_oracle_multihop", { status: 503 }, {
+    agent: "oracle",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+})
+
 test("idle continuation: does not continue when disabled", async () => {
   const { client, calls } = makeMockClient()
   const idleState = createIdleContinuationState()

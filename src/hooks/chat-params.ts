@@ -16,6 +16,15 @@ import type { Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
 const ABOVE_HIGH_REASONING = new Set(["xhigh", "max", "thinking"])
+const REVIEW_AGENTS = new Set(["reviewer", "oracle"])
+
+function requiresReviewReasoningFloor(agentName: string | undefined, family: string): boolean {
+  return !!agentName && REVIEW_AGENTS.has(agentName) && (family === "gpt" || family === "codex")
+}
+
+function floorReviewVariant(variant: Variant | undefined): Variant {
+  return variant === "xhigh" || variant === "max" ? variant : "xhigh"
+}
 
 function protectedModelHasNoReasoningParam(family: string): boolean {
   return family === "claude-opus-47-plus"
@@ -152,6 +161,11 @@ export function createChatParamsHandler(args: {
           variant: appliedVariant,
         })
       }
+    }
+    if (requiresReviewReasoningFloor(agentName, family)) {
+      appliedVariant = floorReviewVariant(appliedVariant)
+    }
+    if (appliedVariant) {
       const effect = translateVariant(family, appliedVariant, {
         modelID: input.model.modelID,
         respectExplicit: resolution.source === "user-config" || !!input.message.variant,
@@ -191,6 +205,12 @@ export function createChatParamsHandler(args: {
     }
     if (resolution.entry.maxTokens !== undefined && resolution.entry.maxTokens > 0) {
       output.maxOutputTokens = resolution.entry.maxTokens
+    }
+    if (requiresReviewReasoningFloor(agentName, family)) {
+      const finalEffort = output.options.reasoningEffort
+      if (finalEffort !== "xhigh" && finalEffort !== "max") {
+        output.options.reasoningEffort = "xhigh"
+      }
     }
 
     record({

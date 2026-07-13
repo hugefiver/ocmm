@@ -102,3 +102,25 @@ export function normalizeShorthand(
 
   return out
 }
+
+/** Resolve a user agent entry and its alias chain with one cycle-safe policy. */
+export function normalizeAgentShorthand(
+  name: string,
+  entries: Record<string, AgentEntry> | undefined,
+  visited: Set<string> = new Set(),
+): NormalizedShorthand | undefined {
+  const entry = entries?.[name]
+  if (!entry) return undefined
+  if (visited.has(name)) {
+    const path = [...visited, name].join(" -> ")
+    throw new Error(`circular alias: ${path}`)
+  }
+
+  const path = new Set(visited)
+  path.add(name)
+  return normalizeShorthand(entry, {
+    selfName: name,
+    visited: path,
+    resolveAlias: (target) => normalizeAgentShorthand(target, entries, path),
+  })
+}

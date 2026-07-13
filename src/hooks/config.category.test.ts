@@ -4,10 +4,12 @@ import assert from "node:assert/strict"
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { loadAllPrompts } from "../intent/prompt-loader.ts"
+import { getCategoryPrompt, getDeepworkPrompt, loadAllPrompts } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
 
-loadAllPrompts(join(process.cwd(), "prompts"), "omo")
+const PROMPTS_ROOT = join(process.cwd(), "prompts")
+
+loadAllPrompts(PROMPTS_ROOT, "omo")
 
 test("config registers all 10 categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
@@ -64,4 +66,64 @@ test("user category override changes the model without disabling subagent mode",
   const entry = cfg.agent.frontend as Record<string, unknown>
   assert.equal(entry.model, "openai/gpt-5.4-mini")
   assert.equal(entry.mode, "subagent")
+})
+
+test("GPT-5.6 category selections append only the additive calibration after the authoritative role", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "omo")
+  const rolePrompt = getCategoryPrompt("frontend").trim()
+  const specialization = getDeepworkPrompt("gpt-5.6").trim()
+  const genericGptPrompt = getDeepworkPrompt("gpt").trim()
+  const cases = [
+    {
+      label: "host-selected model",
+      config: defaultConfig(),
+      target: { agent: { frontend: { model: "openai/gpt-5.6-terra" } } } as { agent: Record<string, unknown> },
+    },
+    {
+      label: "category override",
+      config: {
+        ...defaultConfig(),
+        categories: { frontend: { model: "openai/gpt-5.6-terra" } },
+      },
+      target: { agent: {} } as { agent: Record<string, unknown> },
+    },
+  ]
+
+  for (const { label, config, target } of cases) {
+    const handler = createConfigHandler({ getConfig: () => config })
+    await handler(target, undefined)
+    const entry = target.agent.frontend as Record<string, unknown>
+    const prompt = entry.prompt as string
+
+    assert.ok(prompt.startsWith(rolePrompt), `${label}: category role must remain first and authoritative`)
+    assert.match(prompt, /<workflow-model-calibration>/, `${label}: missing calibration envelope`)
+    assert.ok(prompt.includes(specialization), `${label}: missing additive GPT-5.6 calibration`)
+    assert.ok(!prompt.includes(genericGptPrompt), `${label}: generic GPT prompt must not be appended`)
+  }
+})
+
+test("Codex generation gives every builtin category the guarded GPT-5.6 calibration", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "codex")
+  try {
+    const handler = createConfigHandler({
+      getConfig: () => ({ ...defaultConfig(), workflow: "codex" }),
+    })
+    const cfg: { agent: Record<string, unknown> } = { agent: {} }
+    await handler(cfg, undefined)
+    const specialization = getDeepworkPrompt("gpt-5.6").trim()
+
+    for (const category of BUILTIN_CATEGORIES) {
+      const entry = cfg.agent[category.name] as Record<string, unknown>
+      const prompt = entry.prompt as string
+      assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
+      assert.ok(prompt.includes(specialization), `${category.name}: missing GPT-5.6 calibration`)
+      assert.match(
+        prompt,
+        /Apply this layer only when the selected model is in the GPT-5\.6 family/,
+        `${category.name}: GPT-5.6 calibration must remain guarded`,
+      )
+    }
+  } finally {
+    loadAllPrompts(PROMPTS_ROOT, "omo")
+  }
 })

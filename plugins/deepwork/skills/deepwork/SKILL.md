@@ -76,13 +76,13 @@ If an exact `dw-*` invocation returns `unknown agent_type`, continue at route 2 
 | dw-hard-reasoning | gpt-5.5 | xhigh | hard-reasoning |
 | dw-media-reader | gpt-5.5 | high | media-reader |
 | dw-normal-task | gpt-5.5 | high | normal-task |
-| dw-oracle | gpt-5 | high | oracle |
+| dw-oracle | gpt-5 | xhigh | oracle |
 | dw-orchestrator | gpt-5.5 | high | orchestrator |
 | dw-plan-critic | gpt-5.5 | xhigh | plan-critic |
 | dw-planner | gpt-5.5 | high | planner |
 | dw-quick | gpt-5.4-mini | high | quick |
 | dw-research | gpt-5.5 | high | research |
-| dw-reviewer | gpt-5.5 | high | reviewer |
+| dw-reviewer | gpt-5.5 | xhigh | reviewer |
 
 ## Runtime Model Selection
 
@@ -95,20 +95,26 @@ Apply this section only when the current dispatch surface exposes a `model` fiel
 | Role lane | Preferred GPT-5.6 model | Reasoning effort | Roles |
 |---|---|---|---|
 | Flagship | `gpt-5.6-sol` | `high` by default; `xhigh` for deep, architecture, algorithmic, security, or high-risk reasoning | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning |
-| External review | `gpt-5.6-sol` | `high` for bounded review; `xhigh` for complex, cross-module, security, performance, or final-gate review | dw-reviewer, dw-plan-critic |
-| Cross-check | `gpt-5.6-terra` | `high` for focused self-supervision; `xhigh` for complex or high-risk verification | dw-oracle |
+| External review | `gpt-5.6-sol` | `xhigh` minimum; local `max` for complex, cross-module, security, performance, high-risk, or final-gate review (mapped to the target maximum) | dw-reviewer |
+| Plan review | `gpt-5.6-sol` | fixed `xhigh` | dw-plan-critic |
+| Cross-check | `gpt-5.6-terra` | `xhigh` minimum; local `max` for complex or high-risk verification (mapped to the target maximum) | dw-oracle |
 | Mid | `gpt-5.6-terra` | Preserve the profile baseline unless task complexity requires more | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search |
 | Mini | `gpt-5.6-luna` | `high` | dw-quick, dw-code-search, dw-explore |
 
 When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane instead of pinning the 5.6 name: newest flagship for Flagship and External review, and a strong non-identical mid-tier or flagship for Cross-check. Keep the role's high/xhigh complexity rule, never override an explicit user model, and fall back to the generated profile default when availability or capability evidence is absent.
+
+For reviewer and oracle GPT/Codex routes, `xhigh` is the minimum reasoning effort. For complex or high-risk review or verification, request local `max`; the adapter maps it to the target's maximum supported effort (currently `xhigh` for GPT/Codex).
+
+The plan-critic profile remains fixed `xhigh`; its receipt-focused plan review does not use the reviewer/oracle local-effort escalation policy.
 
 ### Tier assignments
 
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
 | Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning | Latest-gen flagship | high or xhigh by complexity |
-| External review | dw-reviewer, dw-plan-critic | Latest-gen flagship | high or xhigh by review risk |
-| Cross-check | dw-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | high or xhigh by verification risk |
+| External review | dw-reviewer | Latest-gen flagship | xhigh minimum; local max for complex or high-risk review |
+| Plan review | dw-plan-critic | Latest-gen flagship | fixed xhigh |
+| Cross-check | dw-oracle | Latest available Terra-lane model; otherwise a strong non-identical mid-tier or flagship | xhigh minimum; local max for complex or high-risk verification |
 | Mid | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search | Latest-gen mid-tier at max, else flagship at high | max or high |
 | Mini | dw-quick, dw-code-search, dw-explore | Latest-gen mini | high |
 
@@ -121,14 +127,18 @@ When a newer GPT family is explicitly available, select a demonstrably better mo
 
 ### Independent review rule
 
-dw-oracle provides self-supervision and should prefer the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while dw-reviewer and dw-plan-critic provide external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity. If only one capable model is available, use it at the lane's complexity-appropriate effort.
+dw-oracle provides self-supervision through the Cross-check lane (GPT-5.6 Terra or a newer Terra-lane successor when directly available), while dw-reviewer provides external review through the External review lane. Preserve an independent review perspective with a non-identical capable model when available, but never downgrade or leave the Terra lane merely to force diversity.
+
+dw-plan-critic provides receipt-focused plan review through the Plan review lane at fixed `xhigh`.
+
+If only one capable model is available, keep the reviewer/oracle GPT/Codex `xhigh` floor and use local `max` for complex or high-risk review or verification.
 
 ### Example (GPT-5.6 generation — verify against your available models)
 
 | Tier | Example model | Effort |
 |---|---|---|
 | Flagship | gpt-5.6-sol | high or xhigh |
-| External review | gpt-5.6-sol | high or xhigh |
-| Cross-check | gpt-5.6-terra | high or xhigh |
+| External review | gpt-5.6-sol | xhigh minimum; local max for complex/high-risk work |
+| Cross-check | gpt-5.6-terra | xhigh minimum; local max for complex/high-risk work |
 | Mid | gpt-5.6-terra | high or max |
 | Mini | gpt-5.6-luna | high |

@@ -35,7 +35,7 @@ Before touching any UI code, before routing to any reference, before even thinki
 3. If the project has existing UI code, **extract** the implicit system (colors, fonts, spacing already in use) rather than inventing from scratch.
 4. If the project is greenfield, **ask the user one question**: "What should this feel like?" — or infer from context.
 5. For greenfield UI, start `DESIGN.md` with `## 0. Research Log`: record 2-3 relevant local Layer B/design candidates, the selected Layer A + Layer B and rationale, and any optional evidence from `ui-ux-db`, a user-provided image, or a local mockup. If a source/tool is unavailable or irrelevant, record why; do not force network research.
-6. Write `DESIGN.md` at project root following the 8-section structure from the reference.
+6. Write `DESIGN.md` at project root following the nine-section structure from the reference.
 7. **Do not proceed to any component implementation until `DESIGN.md` exists and is committed to context.**
 
 #### If YES design system exists → READ IT, FOLLOW IT
@@ -49,7 +49,7 @@ Before touching any UI code, before routing to any reference, before even thinki
 
 ### Primitive Showcase Gate (MANDATORY for greenfield product UI)
 
-Before building a product screen, `DESIGN.md` Section 5 must list the intended primitives and states. Verify each relevant primitive in a component showcase or equivalent state page: default, hover, focus, disabled, loading, empty, and error. For runnable UI, retain real-browser validation at 375 / 768 / 1280px; when a runnable surface is unavailable, state exactly which states and breakpoints were not verified rather than claiming the gate passed.
+Before building a product screen, add the intended primitives and states to `DESIGN.md` Section 5 under `Planned Showcase Primitives`. This is a pre-implementation verification checklist, not reusable component documentation. Verify each relevant primitive in a component showcase or equivalent state page: default, hover, focus, disabled, loading, empty, and error. Keep component documentation only for implemented reusable patterns used 2+ times. For runnable UI, retain real-browser validation at 375 / 768 / 1280px; when a runnable surface is unavailable, state exactly which states and breakpoints were not verified rather than claiming the gate passed.
 
 
 ## Phase 0.5 — React Dev Tooling Gate (MANDATORY for React projects)
@@ -185,8 +185,8 @@ Once references are loaded, before writing any UI code:
 6. **Server vs client components (Next.js).** If motion/state/portals are involved, isolate as a `'use client'` leaf component. Don't bleed `'use client'` to the page level.
 7. **Match the project's existing patterns FIRST.** If the codebase already uses CSS Modules, don't introduce Tailwind. If it uses styled-components, don't introduce CSS-in-JS variants. The references guide *style*, not *infrastructure*.
 8. **All tokens trace back to `DESIGN.md`.** No orphan hex codes, no magic px values. If you need a new token, update `DESIGN.md` first.
-9. **New reusable patterns (used 2+ times) get documented back into `DESIGN.md` Section 5.**
-10. **Greenfield product screens passed the Primitive Showcase Gate.** Verify the Section 5 primitives and their default, hover, focus, disabled, loading, empty, and error states before composing them into a product screen.
+9. **Implemented reusable patterns used 2+ times get documented back into `DESIGN.md` Section 5.**
+10. **Greenfield product screens passed the Primitive Showcase Gate.** Complete the Section 5 `Planned Showcase Primitives` pre-implementation verification checklist for default, hover, focus, disabled, loading, empty, and error states before composing them into a product screen; the checklist is not reusable component documentation.
 
 ## Quick lookup table — most common requests
 

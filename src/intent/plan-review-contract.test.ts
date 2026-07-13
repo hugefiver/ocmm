@@ -27,3 +27,59 @@ test("plan review requires a current complete receipt before handoff", () => {
   assert.match(skill, /delegated-without-plan-approval/)
   assert.match(skill, /never replaces the current `plan-critic` receipt/i)
 })
+
+test("maintenance docs preserve prompt layout and plan review receipts", () => {
+  const promptSync = read("docs", "prompt-sync.md")
+  const v1Maintenance = read("docs", "v1-maintenance.md")
+  const plannerPrompt = read("prompts", "v1", "agents", "planner.md")
+  const criticPrompt = read("prompts", "v1", "agents", "plan-critic.md")
+  const sourceRow = (name: string) =>
+    v1Maintenance
+      .split(/\r?\n/)
+      .find((line) => line.startsWith(`| ${name} |`)) ?? ""
+
+  assert.match(promptSync, /deepwork\/\{default,gpt,gpt-5\.6,gemini,glm,codex,planner\}/)
+  assert.match(v1Maintenance, /optional high-risk plan consultation/i)
+  assert.match(v1Maintenance, /current plan revision/i)
+
+  const requestingReviewRow = sourceRow("requesting-code-review")
+  assert.match(requestingReviewRow, /optional high-risk plan consultation/i)
+  assert.match(requestingReviewRow, /`xhigh` minimum/)
+  assert.match(requestingReviewRow, /local `max`/)
+  assert.match(requestingReviewRow, /target's maximum supported effort/)
+
+  for (const source of [plannerPrompt, criticPrompt]) {
+    assert.match(source, /current `?plan-critic`? receipt covers exactly one complete, current plan revision/i)
+    assert.match(source, /any plan edit invalidates that receipt and requires a fresh review/i)
+  }
+
+  for (const rowName of ["agents/planner.md", "agents/plan-critic.md"]) {
+    const row = sourceRow(rowName)
+    assert.match(row, /exactly one complete, current plan revision/i)
+    assert.match(row, /current `plan-critic` receipt/i)
+    assert.match(row, /any plan edit invalidates that receipt and requires a fresh review/i)
+  }
+})
+
+test("frontend DESIGN.md docs separate planned showcase checks from reusable entries", () => {
+  const frontendReadme = read("skills", "frontend", "references", "design", "README.md")
+  const frontendArchitecture = read(
+    "skills",
+    "frontend",
+    "references",
+    "design",
+    "design-system-architecture.md",
+  )
+
+  assert.match(frontendReadme, /nine-section structure/i)
+  assert.match(frontendArchitecture, /nine sections/i)
+  assert.match(frontendArchitecture, /Planned Showcase Primitives/)
+  assert.match(frontendArchitecture, /not reusable component documentation/i)
+
+  for (const source of [frontendReadme, frontendArchitecture]) {
+    assert.match(source, /Planned Showcase Primitives/)
+    assert.match(source, /pre-implementation verification checklist/i)
+    assert.match(source, /not reusable component documentation/i)
+    assert.match(source, /implemented reusable patterns used 2\+ times/i)
+  }
+})
