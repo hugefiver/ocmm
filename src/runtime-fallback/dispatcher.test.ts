@@ -40,6 +40,74 @@ function makeClient(messagesResp: unknown): { client: OcmmClient; calls: PromptC
 
 const entry: FallbackEntry = { providers: ["hoo"], model: "fallback-model" }
 
+test("aborts by default before fetching messages and prompting", async () => {
+  let abortCalls = 0
+  let promptCalls = 0
+  const trace: string[] = []
+  const { client } = makeClient({
+    messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }],
+  })
+  const originalAbort = client.session.abort
+  const originalPrompt = client.session.prompt
+  client.session.abort = async (args) => {
+    abortCalls++
+    trace.push("abort")
+    return originalAbort(args)
+  }
+  const originalMessages = client.session.messages
+  client.session.messages = async (args) => {
+    trace.push("messages")
+    return originalMessages(args)
+  }
+  client.session.prompt = async (args) => {
+    promptCalls++
+    trace.push("prompt")
+    return originalPrompt(args)
+  }
+
+  const ok = await dispatchFallbackRetry({
+    client,
+    sessionID: "ses_abort_default",
+    newEntry: entry,
+    reason: "rate_limit",
+  })
+
+  assert.equal(ok, true)
+  assert.equal(abortCalls, 1)
+  assert.equal(promptCalls, 1)
+  assert.deepEqual(trace, ["abort", "messages", "prompt"])
+})
+
+test("skips abort only when abortBeforeDispatch is explicitly false", async () => {
+  let abortCalls = 0
+  let promptCalls = 0
+  const { client } = makeClient({
+    messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }],
+  })
+  const originalAbort = client.session.abort
+  const originalPrompt = client.session.prompt
+  client.session.abort = async (args) => {
+    abortCalls++
+    return originalAbort(args)
+  }
+  client.session.prompt = async (args) => {
+    promptCalls++
+    return originalPrompt(args)
+  }
+
+  const ok = await dispatchFallbackRetry({
+    client,
+    sessionID: "ses_abort_disabled",
+    newEntry: entry,
+    reason: "rate_limit",
+    abortBeforeDispatch: false,
+  })
+
+  assert.equal(ok, true)
+  assert.equal(abortCalls, 0)
+  assert.equal(promptCalls, 1)
+})
+
 test("extracts single user message parts", async () => {
   const messagesResp = {
     messages: [

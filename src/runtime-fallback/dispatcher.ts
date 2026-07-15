@@ -31,6 +31,7 @@ export type DispatchArgs = {
   agent?: string
   newEntry: FallbackEntry
   reason: string
+  abortBeforeDispatch?: boolean
 }
 
 const inFlight = new Set<string>()
@@ -78,10 +79,12 @@ export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean
   }
   inFlight.add(sessionID)
   try {
-    try {
-      await client.session.abort({ path: { id: sessionID } })
-    } catch (err) {
-      log.debug(`abort failed (best-effort): ${(err as Error).message}`)
+    if (args.abortBeforeDispatch !== false) {
+      try {
+        await client.session.abort({ path: { id: sessionID } })
+      } catch (err) {
+        log.debug(`abort failed (best-effort): ${(err as Error).message}`)
+      }
     }
 
     let parts: unknown[] = []
