@@ -205,3 +205,50 @@ test("peekNextFallback returns no-next-model when all in cooldown", () => {
   assert.equal(s.attempts, 0)
   assert.equal(s.fallbackIndex, 0)
 })
+
+test("peekNextFallback skips provider-blocked candidates without mutating state", () => {
+  const s = createFallbackState("hoo/primary-model")
+  const blocker = (entry: FallbackEntry) => entry.providers[0] === "hoo"
+
+  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW, blocker)
+
+  assert.equal(r.ok, true)
+  if (r.ok) {
+    assert.equal(r.entry.model, "fallback-c")
+    assert.equal(r.index, 3)
+    assert.equal(r.nextAttempts, 1)
+  }
+  assert.equal(s.fallbackIndex, 0)
+  assert.equal(s.attempts, 0)
+  assert.equal(s.activeModel, undefined)
+})
+
+test("peekNextFallback without a candidate blocker retains fallback-a", () => {
+  const s = createFallbackState("hoo/primary-model")
+
+  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
+
+  assert.equal(r.ok, true)
+  if (r.ok) {
+    assert.equal(r.entry.model, "fallback-a")
+    assert.equal(r.index, 1)
+  }
+})
+
+test("prepareFallback skips a provider/model-blocked candidate and commits the next entry", () => {
+  const s = createFallbackState("hoo/primary-model")
+  const blocker = (entry: FallbackEntry) =>
+    entry.providers[0] === "hoo" && entry.model === "fallback-a"
+
+  const r = prepareFallback(s, req, "hoo/primary-model", 3, 60, NOW, blocker)
+
+  assert.equal(r.ok, true)
+  if (r.ok) {
+    assert.equal(r.entry.model, "fallback-b")
+    assert.equal(r.index, 2)
+    assert.equal(r.attempts, 1)
+  }
+  assert.equal(s.fallbackIndex, 2)
+  assert.equal(s.attempts, 1)
+  assert.equal(s.activeModel, "hoo/fallback-b")
+})

@@ -20,6 +20,8 @@ export type FallbackState = {
   activeModel?: string
 }
 
+export type FallbackCandidateBlocker = (entry: FallbackEntry) => boolean
+
 export function createFallbackState(originalModel: string): FallbackState {
   return {
     originalModel,
@@ -65,6 +67,7 @@ export function findNextAvailableFallback(
   cooldownSeconds: number,
   justFailedModelKey: string,
   now: number = Date.now(),
+  isCandidateBlocked: FallbackCandidateBlocker = () => false,
 ): { entry: FallbackEntry; index: number } | null {
   for (let i = state.fallbackIndex + 1; i < chain.length; i++) {
     const entry = chain[i]
@@ -73,6 +76,7 @@ export function findNextAvailableFallback(
     const key = modelKey(providerID, entry.model)
     if (key === justFailedModelKey) continue
     if (isModelInCooldown(key, state, cooldownSeconds, now)) continue
+    if (isCandidateBlocked(entry)) continue
     return { entry, index: i }
   }
   return null
@@ -96,6 +100,7 @@ export function peekNextFallback(
   maxAttempts: number,
   cooldownSeconds: number,
   now: number = Date.now(),
+  isCandidateBlocked: FallbackCandidateBlocker = () => false,
 ): PeekResult {
   if (state.attempts >= maxAttempts) {
     return { ok: false, reason: "max-attempts" }
@@ -110,6 +115,7 @@ export function peekNextFallback(
     cooldownSeconds,
     justFailedModelKey,
     now,
+    isCandidateBlocked,
   )
   if (!next) {
     return { ok: false, reason: "no-next-model" }
@@ -142,6 +148,7 @@ export function prepareFallback(
   maxAttempts: number,
   cooldownSeconds: number,
   now: number = Date.now(),
+  isCandidateBlocked: FallbackCandidateBlocker = () => false,
 ): { ok: true; entry: FallbackEntry; index: number; attempts: number } | { ok: false; reason: string } {
   if (state.attempts >= maxAttempts) {
     return { ok: false, reason: "max-attempts" }
@@ -156,6 +163,7 @@ export function prepareFallback(
     cooldownSeconds,
     justFailedModelKey,
     now,
+    isCandidateBlocked,
   )
   if (!next) {
     return { ok: false, reason: "no-next-model" }
