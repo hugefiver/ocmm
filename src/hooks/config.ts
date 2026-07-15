@@ -337,7 +337,7 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
     if (isRecord(entry)) mergePermission(entry, { task: "allow", question: "allow", "task_*": "allow" }, false)
   }
 
-  for (const name of ["reviewer", "oracle", "doc-search", "code-search", "explore", "media-reader", "clarifier", "plan-critic"]) {
+  for (const name of ["reviewer", "oracle", "oracle-high", "doc-search", "code-search", "explore", "media-reader", "clarifier", "plan-critic"]) {
     const entry = agentMap[name]
     if (isRecord(entry)) mergePermission(entry, { task: "deny" }, false)
   }

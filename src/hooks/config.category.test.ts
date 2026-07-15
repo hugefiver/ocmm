@@ -119,7 +119,7 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.ok(prompt.includes(specialization), `${category.name}: missing GPT-5.6 calibration`)
       assert.match(
         prompt,
-        /Apply this layer only when the selected model is in the GPT-5\.6 family/,
+        /Apply this layer only when the selected model identifies as part of the GPT-5\.6 family/,
         `${category.name}: GPT-5.6 calibration must remain guarded`,
       )
     }

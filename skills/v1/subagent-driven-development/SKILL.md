@@ -11,12 +11,13 @@ description: Use when executing implementation plans with independent tasks in t
      inline in v1); final code review uses requesting-code-review skill only.
      Synced v6.1.1+: Model Selection rewrite (explicit model dispatch, turn-count
      beats token price, tiered guidance); Constructing Reviewer Prompts section
-     (no pre-judging, no open-ended directives, verbatim global constraints, no
-     history pasting, findings handling by severity); Narration discipline rule;
-     task-type analysis hint (prefer dispatching-parallel-agents for independent
-     tasks). v1 intentionally replaces per-task reviewer loops with
-     completion/integration checks plus one final acceptance review; ⚠️ Items
-     section (reviewer "Cannot verify from diff" items). Did NOT sync:
+      (no pre-judging, no open-ended directives, verbatim global constraints, no
+      history pasting, findings handling by severity); Narration discipline rule;
+      task-type analysis hint (prefer dispatching-parallel-agents for independent
+      tasks); Final Acceptance Review stage updated with optional `oracle-high`
+      third reviewer gate. v1 intentionally replaces per-task reviewer loops with
+      completion/integration checks plus one final acceptance review; ⚠️ Items
+      section (reviewer "Cannot verify from diff" items). Did NOT sync:
      review-package/task-brief bash scripts (Windows incompatible); progress
      ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
      (depend on scripts).
@@ -215,8 +216,9 @@ After all plan tasks are marked complete, before declaring the work done, run a 
 |---|---|---|
 | Simple | 1-2 tasks, single module, no architectural change | `oracle` (self-supervision) |
 | Complex | 3+ tasks, cross-module, architectural change, security/performance sensitive, migration | `oracle` + `reviewer` (both, in parallel) |
+| High-risk / very large final gate with explicit triple-review configuration | Complex/large work where `oracle-high` is explicitly configured, available, and not disabled | `oracle` + `reviewer` + `oracle-high` (all three, in parallel) |
 
-The orchestrator judges complexity from the plan scope and actual changes. When unsure, upgrade to both.
+The orchestrator judges complexity from the plan scope and actual changes. When unsure, upgrade to `oracle` + `reviewer`. Add `oracle-high` only when it is explicitly configured by user/profile, available in the current dispatch surface/catalog, and not disabled; built-in or profile existence alone must not force three-review dispatch.
 
 **2. Dispatch the acceptance review:**
 
@@ -226,7 +228,9 @@ Use the `requesting-code-review` skill. Pass the full change range:
 - `DESCRIPTION` = summary of the complete feature/work
 - `PLAN_OR_REQUIREMENTS` = the plan file path
 
-For both-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same SHAs and context. Collect both feedback sets before proceeding.
+For two-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same SHAs and context. Collect both feedback sets before proceeding.
+
+For three-reviewer dispatch: spawn three subagents in parallel (one `oracle`, one `reviewer`, one `oracle-high`) only when `oracle-high` is explicitly configured, available, and not disabled. Collect all feedback sets before proceeding. Do not force a third reviewer merely because the profile exists.
 
 **3. Process feedback:**
 

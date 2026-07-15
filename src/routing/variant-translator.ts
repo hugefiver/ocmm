@@ -14,7 +14,7 @@
  * reasoningEffort/thinking fields are handled by the chat.params hook.
  */
 
-import { isMiniModel, type ModelFamily } from "../intent/model-family.ts"
+import { isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
 import type { ThinkingMode, Variant } from "../shared/types.ts"
 
 export type VariantEffect = {
@@ -31,7 +31,7 @@ const NEUTRAL: VariantEffect = {}
  * Mini models keep the full ladder. Non-mini GPT/Codex built-ins normalize any
  * below-high or no-op request to high before this function is called.
  */
-function gptVariant(variant: Variant): VariantEffect {
+function gptVariant(variant: Variant, modelID = ""): VariantEffect {
   switch (variant) {
     case "none":
       return NEUTRAL
@@ -46,8 +46,9 @@ function gptVariant(variant: Variant): VariantEffect {
     case "thinking":
       return { reasoningEffort: "high" }
     case "xhigh":
-    case "max":
       return { reasoningEffort: "xhigh" }
+    case "max":
+      return { reasoningEffort: supportsNativeGptMaxReasoning(modelID) ? "max" : "xhigh" }
     default:
       return NEUTRAL
   }
@@ -201,6 +202,7 @@ export function normalizeVariantForModel(opts: {
 }): Variant {
   const { family, modelID, variant } = opts
   if ((family === "gpt" || family === "codex") && !isMiniModel(modelID)) {
+    if (variant === "max" && !supportsNativeGptMaxReasoning(modelID)) return "xhigh"
     return atLeastHigh(variant)
   }
   if (family === "claude-opus-47-plus" || family === "glm" || family === "deepseek") {
@@ -220,7 +222,7 @@ export function translateVariant(
   switch (family) {
     case "gpt":
     case "codex":
-      return gptVariant(effectiveVariant)
+      return gptVariant(effectiveVariant, opts?.modelID)
     case "claude-opus-47-plus":
       return NEUTRAL
     case "claude":

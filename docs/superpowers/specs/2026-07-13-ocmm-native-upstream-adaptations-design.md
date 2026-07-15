@@ -2,7 +2,7 @@
 
 ## Goal
 
-Adapt selected upstream `omo` workflow improvements into ocmm's own OpenCode and Codex workflows without wholesale prompt copying. The change should improve planning discipline, answer/research efficiency, scope fidelity, review/QA feedback quality, Codex multi-agent compatibility, and GPT cross-generation review diversity while preserving ocmm's existing approval, shell-adaptation, subagent-depth, and verification contracts.
+Adapt selected upstream `omo` workflow improvements into ocmm's own OpenCode and Codex workflows without wholesale prompt copying. The change should improve planning discipline, answer/research efficiency, scope fidelity, review/QA feedback quality, Codex multi-agent compatibility, and configured review diversity while preserving ocmm's existing approval, shell-adaptation, subagent-depth, and verification contracts.
 
 ## Scope
 
@@ -15,8 +15,8 @@ This design includes:
 - Narrower automatic review gate wording, keeping mandatory review for complex, security/performance, release, or user-requested review cases.
 - `[product]` / `[evidence]` QA and review blocker classification.
 - Codex plugin workflow guidance for MultiAgentV2-compatible tool names while preserving fallback behavior for existing task/subagent tooling.
-- GPT-5.6-primary cross-generation review policy: prefer GPT-5.4 xhigh over GPT-5.6 Terra for oracle/cross-check diversity; use GPT-5.5 xhigh as the next lower cross-generation option; keep other non-GPT cross-generation choices intact.
-- Codex guidance for complex multi-module tasks to allow three-way cross-validation when GPT-5.4, GPT-5.5, and GPT-5.6 are all available.
+- GPT-5.6-primary review policy: preserve oracle/cross-check diversity through configured heterogeneous review lanes, while allowing GPT-5.6 native `max` for the primary review lane.
+- Codex guidance for complex multi-module tasks to allow three-review cross-validation only when the supplemental `oracle-high` review profile is explicitly configured, available in the current catalog/dispatch surface, and not disabled.
 
 This design explicitly excludes:
 
@@ -84,22 +84,21 @@ The generated Codex workflow skill should document both surfaces:
 
 This is prompt compatibility only. It does not add runtime wrappers or attempt to emulate Codex MultiAgentV2 inside OpenCode.
 
-## GPT cross-generation review policy
+## GPT review diversity policy
 
-When GPT-5.6 is the primary model family, using GPT-5.6 Terra as the oracle lane is less diverse because Terra may share training-method blind spots with Sol. The default GPT oracle/cross-check preference should therefore become:
+When GPT-5.6 is the primary model family, the primary review lane can request native `max` directly. The oracle/cross-check lane should remain independent enough to reduce same-model confirmation risk. Its default preference should be described in provider-neutral terms:
 
-1. GPT-5.4 xhigh as the preferred cross-generation GPT oracle/cross-check lane.
-2. GPT-5.5 xhigh as the secondary GPT cross-generation option.
-3. GPT-5.6 Terra only when a same-generation Terra check is explicitly desired or no better cross-generation GPT option is available.
-4. Existing non-GPT cross-generation entries such as Claude, Gemini, and GLM retain their relative purpose unless tests show a conflict.
+1. Prefer explicitly configured heterogeneous oracle/cross-check entries from the available catalog.
+2. Use supplemental same-lane checks only when explicitly configured or when no better heterogeneous/cross-check option is available.
+3. Preserve non-primary review entries that provide independent perspective unless tests show a conflict.
 
-For Codex complex multi-module work, generated workflow guidance should allow three-way cross-validation when the models are available:
+For Codex complex multi-module work, generated workflow guidance should allow three-review cross-validation only when the supplemental review profile is explicitly enabled:
 
-- reviewer on GPT-5.6 xhigh/ultra,
-- oracle/cross-check on GPT-5.4 xhigh,
-- secondary oracle/cross-check on GPT-5.5 xhigh.
+- reviewer on the primary reasoning lane, using GPT-5.6 native `max` when GPT-5.6 is the selected review model and maximum reasoning is requested,
+- oracle/cross-check on the configured heterogeneous review lane,
+- oracle-high on the supplemental high-effort review lane only when explicitly configured by user/profile, available in the current catalog/dispatch surface, and not disabled.
 
-This is expressed in model fallback data and Codex prompt guidance. It should not force three reviewers for every task.
+This is expressed in model fallback data and Codex prompt guidance. Built-in or generated-profile existence alone must not force three reviewers for every task.
 
 ## Observation-only upstream candidates
 
@@ -121,8 +120,8 @@ Tests should prove:
 - Prompt-loader real prompt paths include the new planner/scope/answer/review/QA contracts where applicable.
 - Prompt-loader tests check every effective `deepwork/*` variant per workflow, including `gpt-5.6.md`, rather than relying only on an aggregate prompt string.
 - Clarifier prompts no longer encourage MVP/minimum-viable narrowing by default.
-- Reviewer/oracle fallback chains reflect the requested GPT-5.4/GPT-5.5/GPT-5.6 cross-generation policy.
-- Codex workflow skill includes MultiAgentV2 compatibility wording and three-way cross-validation guidance.
+- Reviewer/oracle fallback chains reflect configured heterogeneous review diversity while preserving GPT-5.6 native `max` for primary review when requested.
+- Codex workflow skill includes MultiAgentV2 compatibility wording and the explicitly configured `oracle-high` three-review gate.
 - Generated Codex bundles are synchronized after prompt/code changes.
 
 Verification should include targeted tests for prompt loader, routing/config/generator behavior, `pnpm run typecheck`, `pnpm test` with local `OCMM_PROFILE` cleared, `pnpm run build:ts`, `pnpm run gen:codex-plugin`, and `git diff --check`.

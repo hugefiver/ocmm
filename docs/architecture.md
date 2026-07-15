@@ -38,7 +38,7 @@ Both axes feed the same 4-tier resolution pipeline (below), producing a variant 
 Priority (highest wins), implemented in `src/routing/resolver.ts`:
 
 1. **User config** — `agents[name]` override from the user's `ocmm.jsonc`. `normalizeShorthand` expands shorthand entries. `disabled: true` causes fall-through to the next tier.
-2. **Agent default** — `BUILTIN_AGENT_INDEX` from `src/data/agents.ts` (9 built-in agents).
+2. **Agent default** — `BUILTIN_AGENT_INDEX` from `src/data/agents.ts` (11 built-in agents).
 3. **Category default** — user `categories[name]` override, else `BUILTIN_CATEGORY_INDEX` from `src/data/categories.ts` (10 built-in categories; categories are also registered as `mode:subagent`).
 4. **Input variant** — synthetic entry composed from the current model + `message.variant` (the variant the user/agent explicitly requested for this turn).
 
@@ -47,10 +47,12 @@ Priority (highest wins), implemented in `src/routing/resolver.ts`:
 ```
 resolveAgainstRequirement(req, modelID, inputVariant, source)
   → pickFromChain(req.fallbackChain, modelID)
-    → first entry where entryMatches(entry, modelID)
+    → exact fallback entry match
+    → catalog-successor match for configured GPT lane successors or GLM 5.2+
+    → boundary-delimited prefix fallback entry match
 ```
 
-`entryMatches`: exact match **or** `modelID` starts with `entry.model` (forward-prefix only). Reverse prefix is intentionally **not** matched, so a shorter chain entry doesn't swallow newer model IDs. If no entry matches, the chain's first entry is used.
+`entryMatches`: exact match **or** `modelID` starts with `entry.model` on a `-`, `_`, or `.` boundary (forward-prefix only). Reverse prefix is intentionally **not** matched, so a shorter chain entry doesn't swallow newer model IDs. If no exact, successor, or prefix entry matches, the chain's first entry is used.
 
 Effective variant comes from the matched entry's `variant`, or `req.variant`. `inputVariant` overrides the **variant** but not the **model**.
 
@@ -66,21 +68,21 @@ Effective variant comes from the matched entry's `variant`, or `req.variant`. `i
 
 Per model family (implemented in `src/routing/variant-translator.ts` + `src/intent/model-family.ts`):
 
-| Variant | GPT / Codex | Claude | Gemini | Temperature |
+| Variant | GPT-like / Codex-like | Claude | Gemini | Temperature |
 |---|---|---|---|---|
 | `none` | no-op | no-op | no-op | — |
 | `minimal` | reasoningEffort=minimal | thinking disabled | reasoningEffort=minimal | 0.0 |
-| `low` | reasoningEffort=low | thinking 4k | reasoningEffort=low | 0.2 |
-| `medium` / `auto` | reasoningEffort=medium | thinking 12k | reasoningEffort=medium | 0.5 |
-| `high` / `thinking` | reasoningEffort=high | thinking 24k | reasoningEffort=high + provider thinking | 0.7 |
-| `xhigh` | reasoningEffort=high | thinking 49k | reasoningEffort=high + provider thinking | 0.85 |
-| `max` | reasoningEffort=high | thinking 65k | reasoningEffort=high + provider thinking | 1.0 |
+| `low` | reasoningEffort=low | thinking 2k | reasoningEffort=low | 0.2 |
+| `medium` / `auto` | reasoningEffort=medium | thinking 6k | reasoningEffort=medium | 0.5 |
+| `high` / `thinking` | reasoningEffort=high | thinking 12k | reasoningEffort=high + provider thinking | 0.7 |
+| `xhigh` | reasoningEffort=xhigh | thinking 16k | reasoningEffort=high + provider thinking | 0.85 |
+| `max` | reasoningEffort=max on GPT-5.6; xhigh otherwise | thinking 24k | reasoningEffort=high + provider thinking | 1.0 |
 
 **Family policy notes:**
-- Explicit user config is always respected.
+- Explicit user config is respected except that review/plan-review agents are raised to an xhigh-equivalent floor when the selected model family exposes supported high-effort controls.
 - GPT/Codex non-mini defaults never drop below `high`.
 - GPT/Codex mini keeps the full ladder including `minimal`/`low`/`none`.
-- Claude Opus 4.7+ / Fable: no ocmm-owned thinking budget.
+- Claude Opus 4.7+ / Fable: no ocmm-owned thinking budget for built-in defaults; review/plan-review agents still receive the xhigh-equivalent floor when explicitly configured with lower effort.
 - Older Claude uses Anthropic thinking budgets per the table.
 - GLM / DeepSeek normalize local variants.
 - Categories `coding` and above resolve to `max` at runtime; `quick` stays lightweight.
@@ -145,7 +147,7 @@ Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-ha
 3. Load runtime prompts from `prompts/{workflow}/`.
 4. Register shared skill paths under `config.skills.paths`; in v1 workflow, also register `skills/v1` so injected deepwork skills resolve as native slash skills.
 5. Register slash commands under `config.command`: shared skills, v1 deepwork skills when `workflow:"v1"` is active, and loop protocol commands.
-6. Register **9 agents** (from `src/data/agents.ts`); `orchestrator` is `primary`, `builder` and `planner` are `all`, the rest are `subagent`.
+6. Register **11 agents** (from `src/data/agents.ts`); `orchestrator` and `builder` are `primary`, `planner` is `all`, the rest are `subagent`.
 7. Register **10 categories as `mode:subagent`** (from `src/data/categories.ts`), using each category's first chain entry as the model and `prompts/{workflow}/category/<name>.md` as the system prompt.
 8. Apply user overrides: `agents.<name>` pins model/shorthand/disabled; `categories.<name>` same minus `disabled`.
 

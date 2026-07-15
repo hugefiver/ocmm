@@ -9,6 +9,9 @@ test("non-mini gpt family clamps below-high variants to high", () => {
   assert.deepEqual(translateVariant("gpt", "minimal", { modelID: "gpt-5.5" }), { reasoningEffort: "high" })
   assert.deepEqual(translateVariant("gpt", "none", { modelID: "gpt-5.5" }), { reasoningEffort: "high" })
   assert.deepEqual(translateVariant("gpt", "xhigh", { modelID: "gpt-5.5" }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.5" }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.6-sol" }), { reasoningEffort: "max" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.7-sol" }), { reasoningEffort: "xhigh" })
 })
 
 test("mini gpt and codex models keep the full reasoning ladder", () => {
@@ -20,6 +23,7 @@ test("mini gpt and codex models keep the full reasoning ladder", () => {
 test("codex non-mini models clamp below-high variants to high", () => {
   assert.deepEqual(translateVariant("codex", "low", { modelID: "codex-1" }), { reasoningEffort: "high" })
   assert.deepEqual(translateVariant("codex", "max", { modelID: "codex-1" }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateVariant("codex", "max", { modelID: "gpt-5.6-codex" }), { reasoningEffort: "max" })
 })
 
 test("claude opus 4.7+ emits no thinking budget", () => {

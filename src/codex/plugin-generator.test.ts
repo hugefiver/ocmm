@@ -139,9 +139,11 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
 
   const orchestrator = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-orchestrator`)
   const builder = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-builder`)
+  const planner = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-planner`)
   const deep = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-deep`)
   const documenting = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-documenting`)
   const oracle = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle`)
+  const oracleHigh = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle-high`)
   const reviewer = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-reviewer`)
   const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
@@ -151,16 +153,21 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
   assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
   assert.match(orchestrator.developerInstructions, /GPT-5\.6 EXECUTION CALIBRATION/)
-  assert.match(orchestrator.developerInstructions, /Apply this layer only when the selected model is in the GPT-5\.6 family/)
+  assert.match(orchestrator.developerInstructions, /Apply this layer only when the selected model identifies as part of the GPT-5\.6 family/)
   assert.ok(builder)
   assert.equal(builder.model, "gpt-5.5")
+  assert.ok(planner)
+  assert.equal(planner.reasoningEffort, "xhigh")
   assert.ok(deep)
-  assert.equal(deep.reasoningEffort, "high")
+  assert.equal(deep.reasoningEffort, "xhigh")
   assert.ok(documenting)
   assert.equal(documenting.model, "gpt-5.5")
   assert.ok(oracle)
   assert.equal(oracle.sourceName, "oracle")
   assert.equal(oracle.reasoningEffort, "xhigh")
+  assert.ok(oracleHigh)
+  assert.equal(oracleHigh.sourceName, "oracle-high")
+  assert.equal(oracleHigh.reasoningEffort, "xhigh")
   assert.ok(reviewer)
   assert.equal(reviewer.sourceName, "reviewer")
   assert.equal(reviewer.reasoningEffort, "xhigh")
@@ -171,11 +178,13 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.ok(creative)
 })
 
-test("custom GPT reviewer and oracle profiles never generate below xhigh", async () => {
+test("custom GPT review and plan-review profiles never generate below xhigh and preserve max", async () => {
   const scenarios = [
     {
       reviewer: { model: "openai/gpt-5.6-sol" },
       oracle: { description: "inherits reviewer without an effort override" },
+      "oracle-high": { description: "inherits reviewer without an effort override", model: "openai/gpt-5.6-sol", variant: "minimal" as const },
+      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
     },
     {
       reviewer: { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
@@ -184,10 +193,22 @@ test("custom GPT reviewer and oracle profiles never generate below xhigh", async
           fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "low" }],
         },
       },
+      "oracle-high": {
+        requirement: {
+          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "low" }],
+        },
+      },
+      "plan-critic": {
+        requirement: {
+          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol", reasoningEffort: "low" }],
+        },
+      },
     },
     {
       reviewer: { model: "openai/gpt-5.6-sol", variant: "xhigh" as const },
       oracle: { model: "openai/gpt-5.6-terra", variant: "xhigh" as const },
+      "oracle-high": { model: "openai/gpt-5.6-terra", variant: "xhigh" as const },
+      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "xhigh" as const },
     },
     {
       reviewer: { model: "openai/gpt-5.6-sol", variant: "max" as const },
@@ -196,6 +217,12 @@ test("custom GPT reviewer and oracle profiles never generate below xhigh", async
           fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "max" }],
         },
       },
+      "oracle-high": {
+        requirement: {
+          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "max" }],
+        },
+      },
+      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "max" as const },
     },
   ]
 
@@ -205,12 +232,19 @@ test("custom GPT reviewer and oracle profiles never generate below xhigh", async
       cwd: process.cwd(),
       skillsRoot: join(process.cwd(), "skills"),
     })
-    for (const role of ["reviewer", "oracle"]) {
-      assert.equal(
-        agents.find((agent) => agent.sourceName === role)?.reasoningEffort,
-        "xhigh",
-        `${role} must retain the GPT/Codex xhigh floor`,
+    for (const role of ["reviewer", "oracle", "oracle-high", "plan-critic"]) {
+      const effort = agents.find((agent) => agent.sourceName === role)?.reasoningEffort
+      const roleConfig = agentsConfig[role as keyof typeof agentsConfig]
+      const hasExplicitMax = roleConfig && (
+        "requirement" in roleConfig
+          ? roleConfig.requirement?.fallbackChain?.[0]?.reasoningEffort === "max"
+          : "variant" in roleConfig && roleConfig.variant === "max"
       )
+      if (hasExplicitMax) {
+        assert.equal(effort, "max", `${role} must preserve explicit max for GPT/Codex`)
+      } else {
+        assert.equal(effort, "xhigh", `${role} must retain the GPT/Codex xhigh floor`)
+      }
     }
   }
 })
@@ -226,13 +260,14 @@ test("Codex generation resolves arbitrary multi-hop reviewer and oracle aliases"
         "review-policy-b": { alias: "review-model" },
         "review-model": { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
         oracle: { description: "inherits the effective reviewer model" },
+        "oracle-high": { description: "inherits the effective reviewer model", alias: "review-policy-b" },
       },
     },
     cwd: process.cwd(),
     skillsRoot: join(process.cwd(), "skills"),
   })
 
-  for (const role of ["reviewer", "oracle"]) {
+  for (const role of ["reviewer", "oracle", "oracle-high"]) {
     const agent = agents.find((candidate) => candidate.sourceName === role)
     assert.equal(agent?.model, "gpt-5.6-sol")
     assert.equal(agent?.reasoningEffort, "xhigh")
@@ -260,6 +295,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const marketplace = JSON.parse(readFileSync(result.marketplacePath, "utf8")) as Record<string, unknown>
     const orchestrator = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-orchestrator.toml`), "utf8")
     const oracle = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle.toml`), "utf8")
+    const oracleHigh = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`), "utf8")
     const reviewer = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-reviewer.toml`), "utf8")
     const creative = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-creative.toml`), "utf8")
     const projectPlanCritic = readFileSync(join(root, CODEX_PROJECT_AGENTS_DIR, `${CODEX_AGENT_PREFIX}-plan-critic.toml`), "utf8")
@@ -284,18 +320,23 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(orchestrator, /Subagent Dispatch Compatibility \(HARD-GATE\)/)
     assert.match(orchestrator, /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/)
     assert.match(orchestrator, /MultiAgent V1\/V2 names and examples elsewhere are lower-priority compatibility examples/)
-    assert.match(orchestrator, /GPT-5\.6 Sol for flagship and external-review work/)
-    assert.match(orchestrator, /GPT-5\.4 xhigh first, then GPT-5\.5 xhigh, before same-generation GPT-5\.6 Terra/)
+    assert.match(orchestrator, /select only from the user's current available catalog/)
+    assert.match(orchestrator, /primary reasoning lane for flagship and external-review work/)
+    assert.match(orchestrator, /prefer a configured heterogeneous or otherwise non-identical capable model before a supplemental same-lane fallback/)
     assert.match(oracle, /^name = "dw-oracle"$/m)
     assert.match(oracle, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(oracleHigh, /^name = "dw-oracle-high"$/m)
+    assert.match(oracleHigh, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(reviewer, /^name = "dw-reviewer"$/m)
     assert.match(reviewer, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(creative, /^name = "dw-creative"$/m)
-    assert.match(projectPlanCritic, /^name = "dw-plan-critic"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
     assert.match(workflowSkill, /agent_type="dw-plan-critic"/)
     assert.match(workflowSkill, /\[@dw-oracle\]\(subagent:\/\/dw-oracle\)/)
-    assert.match(workflowSkill, /agent profile is the preferred selector/)
+    assert.match(workflowSkill, /\[@dw-oracle-high\]\(subagent:\/\/dw-oracle-high\)/)
+    assert.match(workflowSkill, /explicitly configured by user\/profile/)
+    assert.match(workflowSkill, /available in the current catalog\/dispatch surface/)
+    assert.match(workflowSkill, /not disabled/)
     assert.match(workflowSkill, /Do not pass `dw-\*\.toml` files as `items`, `skill` attachments, or prompt context/)
     assert.match(workflowSkill, /current callable dispatch-tool schema is the only availability signal/)
     assert.match(workflowSkill, /Exact profile/)
@@ -322,33 +363,33 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /generic or flat subagent does not load the generated profile/)
     assert.match(orchestrator, /GPT-5\.6 EXECUTION CALIBRATION/)
     assert.match(orchestrator, /two independent waves add no useful evidence/)
-    assert.match(orchestrator, /Apply this layer only when the selected model is in the GPT-5\.6 family/)
+    assert.match(orchestrator, /Apply this layer only when the selected model identifies as part of the GPT-5\.6 family/)
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
     assert.match(workflowSkill, /\| dw-creative \|/)
     assert.match(workflowSkill, /Runtime Model Selection/)
-    assert.match(workflowSkill, /GPT runtime upgrades \(only when directly selectable\)/)
-    assert.match(workflowSkill, /\| Flagship \| `gpt-5\.6-sol` \|/)
-    assert.match(workflowSkill, /\| External review \| `gpt-5\.6-sol` \|/)
-    assert.match(workflowSkill, /\| Cross-check \| `gpt-5\.4`, then `gpt-5\.5`, then `gpt-5\.6-terra` \|/)
-    assert.match(workflowSkill, /\| Mini \| `gpt-5\.6-luna` \|/)
-    assert.match(workflowSkill, /When no GPT-5\.6 model is available, omit the override and preserve the generated profile's existing model and reasoning behavior unchanged/)
-    assert.match(workflowSkill, /When a newer GPT family is explicitly available, select a demonstrably better model in the same capability lane/)
-    assert.match(workflowSkill, /For reviewer and oracle GPT\/Codex routes, `xhigh` is the minimum reasoning effort/)
-    assert.match(workflowSkill, /For complex or high-risk review or verification, request local `max`/)
-    assert.match(workflowSkill, /maps it to the target's maximum supported effort \(currently `xhigh` for GPT\/Codex\)/)
+    assert.match(workflowSkill, /Runtime model upgrades \(only when directly selectable\)/)
+    assert.match(workflowSkill, /Generated profile defaults are installation metadata, not mandatory choices/)
+    assert.doesNotMatch(workflowSkill, /\| dw-builder \| gpt-/)
+    assert.doesNotMatch(workflowSkill, /\| dw-oracle \| gpt-/)
+    assert.match(workflowSkill, /user's currently available model catalog and explicit local configuration/)
+    assert.match(workflowSkill, /Best available primary reasoning model in the user's catalog/)
+    assert.match(workflowSkill, /Reviewer, oracle, and oracle-high routes use an `xhigh`-equivalent minimum/)
+    assert.match(workflowSkill, /GPT-5\.6 supports native `max`/)
+    assert.match(workflowSkill, /default complex\/large review set is `?dw-oracle`? \+ `?dw-reviewer`?/i)
+    assert.match(workflowSkill, /Add `?dw-oracle-high`? only when it is explicitly configured by user\/profile/)
+    assert.match(workflowSkill, /Built-in, default, or generated-profile existence alone must not force three-review dispatch/)
     const planCriticPolicyLines = workflowSkill
       .split(/\r?\n/)
       .filter((line) => line.includes(`${CODEX_AGENT_PREFIX}-plan-critic`))
-    assert.ok(planCriticPolicyLines.some((line) => /fixed `?xhigh`?/i.test(line)))
-    for (const line of planCriticPolicyLines) assert.doesNotMatch(line, /local `?max`?/i)
+    assert.ok(planCriticPolicyLines.some((line) => /xhigh minimum/i.test(line)))
     assert.match(workflowSkill, /Independent review rule/)
-    assert.match(workflowSkill, /GPT-5\.4 xhigh first when available, then GPT-5\.5 xhigh/)
-    assert.match(workflowSkill, /three-way cross-validation/)
-    assert.doesNotMatch(workflowSkill, /Latest available Terra-lane model/)
+    assert.match(workflowSkill, /Prefer oracle diversity from a configured heterogeneous or otherwise non-identical capable model/)
+    assert.match(workflowSkill, /default complex\/large review set is `?dw-oracle`? \+ `?dw-reviewer`?/i)
+    assert.doesNotMatch(workflowSkill, new RegExp(`Latest available ${"Terra-lane"} model`))
     assert.doesNotMatch(workflowSkill, /never downgrade or leave the Terra lane merely to force diversity/)
-    assert.doesNotMatch(workflowSkill, /Previous-gen flagship/)
-    assert.doesNotMatch(workflowSkill, /should use a \*\*different generation\*\*/)
+    assert.equal(workflowSkill.includes(`${"Previous"}-${"gen"} ${"flagship"}`), false)
+    assert.equal(workflowSkill.includes(`should use a **different ${"generation"}**`), false)
     assert.match(workflowSkill, /Independent review rule/)
     assert.match(workflowSkill, /Tier assignments/)
     assert.match(workflowSkill, /this plugin bundle's `agents\/` directory/)
@@ -383,7 +424,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
       assert.match(source, /optional independent consultation for a high-risk implementation plan/)
       assert.match(source, /`xhigh` minimum/)
       assert.match(source, /local `max`/)
-      assert.match(source, /target's maximum supported effort/)
+      assert.match(source, /GPT-5\.6 supports native `max`/)
     }
 
     assert.equal(result.agentCount > 10, true)

@@ -53,6 +53,23 @@ test("oracle catalog selection prefers exact cross-generation GPT fallbacks befo
   )
 })
 
+test("oracle-high catalog selection uses Sol lane", () => {
+  const oracleHighRequirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
+    ],
+  }
+
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.6-sol": {} } } } }, "oracle-high", oracleHighRequirement),
+    "openai/gpt-5.6-sol",
+  )
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.7-terra": {} } } } }, "oracle-high", oracleHighRequirement),
+    undefined,
+  )
+})
+
 test("successor matching prefers same GPT lane baseline before cross-generation entries", () => {
   const oracleRequirement: ModelRequirement = {
     fallbackChain: [

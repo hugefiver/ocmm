@@ -21,6 +21,8 @@ prompts/<workflow>/
 |-------------|------------------------|------------------|
 | `orchestrator` | Sisyphus dynamic prompt (`packages/omo-opencode/src/agents/sisyphus-*`) | Local role-descriptive names, category dispatch, and upstream-style intent verbalization before routing |
 | `reviewer` | Oracle (`packages/omo-opencode/src/agents/oracle.ts`) | Read-only advisor contract, local `reviewer` name, no Oracle branding in model-facing local role prompt |
+| `oracle` | (derived from reviewer prompt) | Independent built-in agent for self-supervision; shares `reviewer` prompt via `promptSource: "reviewer"`; configured cross-check / heterogeneous review default; not merely a `reviewer` alias |
+| `oracle-high` | (derived from reviewer prompt) | Independent built-in agent for optional supplemental high-effort review; shares `reviewer` prompt via `promptSource: "reviewer"`; no `defaultAlias`; included as third reviewer only when explicitly configured, available, and not disabled |
 | `planner` | Prometheus (`packages/omo-opencode/src/agents/prometheus/*`, `packages/prompts-core/prompts/prometheus/default.md`) | Local docs/superpowers plan path and writing-plans skill contract |
 | `clarifier` | Metis (`packages/omo-opencode/src/agents/metis.ts`) | Local `clarifier` name, directives feed local planner instead of Prometheus |
 | `plan-critic` | Momus (`packages/omo-opencode/src/agents/momus.ts`) | Local `plan-critic` name and inline-or-file plan review, blocker-focused only |
@@ -45,8 +47,8 @@ prompts/<workflow>/
 4. Agent and category prompts should remain strongly aligned between `prompts/omo/` and `prompts/v1/`; the skill-driven workflow gets its distinct behavior from the deepwork layer and injected skills.
 5. Category prompts must describe the work shape each category handles. Avoid routing language based on model strength, weak/strong labels, or vague difficulty tiers; say what kind of deliverable belongs in the category.
    Local mapping for upstream categories: `hard-reasoning` is the ultrabrain-style decision category; `deep` is autonomous system development and feature delivery; `coding` is determined code editing and bug fixing. `normal-task` absorbs bounded fallback work with known acceptance criteria; `complex` absorbs coordinated cross-cutting fallback work that remains below autonomous feature delivery.
-6. Built-in defaults for categories at or above `coding` should use the highest supported reasoning level (`max` in the local variant vocabulary). `quick` remains the lightweight mechanical-edit category. Explicit user model/variant/parameter declarations are respected as written.
-7. Compatibility aliases are intentional: upstream-style `@oracle` maps to local `reviewer`, and `@explore` maps to local `code-search`. Category names such as `@deep` and `@quick` are exposed directly as category-subagents.
+6. Built-in defaults for categories at or above `coding` should use `max` in the local variant vocabulary. GPT-5.6 supports native `max`; other families use `max` only when their selected model exposes a maximum-effort control. `quick` remains the lightweight mechanical-edit category. Explicit user model/variant/parameter declarations are respected as written except for review/plan-review floors, and concrete model names in prompts or docs are examples rather than requirements.
+7. Compatibility aliases are intentional: upstream-style `@explore` maps to local `code-search`; `@oracle` selects the independent local `oracle` built-in instead of aliasing `reviewer`. `oracle-high` is an independent optional supplemental reviewer. Category names such as `@deep` and `@quick` are exposed directly as category-subagents.
 8. Keep compatibility labels such as `workflow: "omo"` and `workflow: "v1"` unchanged unless a separate migration explicitly changes config semantics.
 9. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
 10. When syncing from upstream, compare against the local upstream checkout at `./omo` or a fresh checkout of the same repository, then re-apply local naming and OpenCode/ocmm tool semantics.
@@ -58,7 +60,7 @@ prompts/<workflow>/
 - Source checked: local upstream checkout `./omo` at `17104e1` (2026-07-12 sync; v4.16.3 release is `d89f335`, with newer prompt work reviewed at the checked-out head; previous sync was `a7ac217aeeb7bd1f56c4633f4e92d97ec363f60f`).
 - Prompt-relevant upstream changes since `c6058d5db`: Prometheus/planner prompt closed the implement-by-proxy loophole — "you never implement - not directly and not by proxy: a subagent you spawn that edits product code is you implementing ... no subagent you dispatch is ever that worker."
 - Local sync: `prompts/omo/deepwork/planner.md` now closes the proxy loophole with ocmm-adapted wording (no `/start-work`; references local execution workflow handoff). The codex.md ultrawork changes (Sparkshell removal, TUI visual QA, Browser plugin, `/start-work` rename, implement-by-proxy) were already represented locally — no action needed.
-- GPT-5.6 prompt-shape sync (2026-07-12): added `prompts/omo/deepwork/gpt-5.6.md`, selected only for the GPT-5.6 family. It adapts upstream outcome-first context gathering, explicit delegation outcomes, and evidence-first reporting while retaining OpenCode `task(...)`, local role names, tiered authorization, TDD, and QA semantics. The generic `gpt.md` remains unchanged.
+- GPT-5.6 prompt-shape sync (2026-07-12): added `prompts/omo/deepwork/gpt-5.6.md`, selected only for the GPT-5.6 family. It adapts upstream outcome-first context gathering, explicit delegation outcomes, and evidence-first reporting while retaining OpenCode `task(...)`, local role names, tiered authorization, TDD, and QA semantics. The generic `gpt.md` remains unchanged. 2026-07-14 adjustments: the layer now states that concrete model or lane names are references only; user configuration and the currently available catalog decide the actual model; GPT-5.6 supports native `max` reasoning effort, so local `max` is not an `xhigh` alias for GPT-5.6.
 
 ## ocmm-Native Workflow Adaptation (2026-07-13)
 
@@ -87,14 +89,15 @@ The following upstream omo prompt/behavior items were reviewed and are intention
 - Codex adapter (`prompts/codex/**`): deepwork prompts, orchestrator, and plan-critic mirrored the v1 conditional-approval semantics. Codex plan-critic also gained the three-state verdict.
 - These changes are local v1/Codex workflow adjustments, not upstream omo prompt syncs. `prompts/omo/**` is unaffected.
 
-## Oracle/Reviewer Separation + Acceptance Review Loop (2026-07-02)
+## Oracle/Reviewer Separation + Acceptance Review Loop (2026-07-02; updated 2026-07-14 for oracle-high)
 
-- `oracle` promoted from pure `reviewer` alias to independent builtin agent: self-supervision semantics (reviews work the agent itself produced), cross-gen model default (claude-first chain), `promptSource: "reviewer"` (shares reviewer.md), `defaultAlias: "reviewer"` (inherits reviewer model config when user configures neither oracle model nor alias).
-- `reviewer` semantics clarified: external review (code not produced by current agent), flagship model default (same family as main agent).
-- Removed `oracle→reviewer` from `AGENT_ALIASES` (resolver.ts, plugin-generator.ts) and `COMPAT_AGENT_ALIASES` (config.ts) so oracle's cross-gen requirement is reachable; `AGENT_ALIASES` now only maps `explore→code-search`.
+- `oracle` promoted from pure `reviewer` alias to independent builtin agent: self-supervision semantics (reviews work the agent itself produced), configured cross-check / heterogeneous review default, `promptSource: "reviewer"` (shares reviewer.md), `defaultAlias: "reviewer"` (inherits reviewer model config when user configures neither oracle model nor alias).
+- `oracle-high` added as independent builtin agent: supplemental high-effort review semantics, `promptSource: "reviewer"` (shares reviewer.md), no `defaultAlias` (explicit config should not silently inherit `reviewer`), `variant: "max"` default, included as third reviewer only when explicitly configured, available, and not disabled.
+- `reviewer` semantics clarified: external review (code not produced by current agent), primary reasoning lane chosen from explicit configuration and the available catalog.
+- Removed `oracle→reviewer` from `AGENT_ALIASES` (resolver.ts, plugin-generator.ts) and `COMPAT_AGENT_ALIASES` (config.ts) so oracle's configured cross-check requirement is reachable; `AGENT_ALIASES` now only maps `explore→code-search`.
 - Added generic `alias` config field to `ShorthandFields` (agent + category entries): inherits another agent's model `requirement` only (not prompt/permission/tools/skills), with cycle detection (hard error).
-- Codex tier table: `reviewer` moved to Flagship, `oracle` added to Cross-gen review (with `plan-critic`).
-- v1 requesting-code-review skill: added Reviewer Selection section (oracle default for simple, both oracle+reviewer for complex/large).
-- v1 subagent-driven-development skill: added Final Acceptance Review stage.
-- v1 + Codex orchestrator/deepwork prompts synced with oracle/reviewer duality and acceptance review guidance.
+- Codex tier table: `reviewer` uses the primary reasoning lane, `oracle` uses the configured cross-check / heterogeneous review lane, `plan-critic` remains the plan-review lane, and `oracle-high` is optional supplemental high-effort review.
+- v1 requesting-code-review skill: updated Reviewer Selection section (oracle default for simple, oracle+reviewer for complex/large, optional oracle-high triple review only when explicitly configured, available, and not disabled).
+- v1 subagent-driven-development skill: updated Final Acceptance Review stage with optional oracle-high third reviewer gate.
+- v1 + Codex orchestrator/deepwork prompts synced with oracle/reviewer/oracle-high semantics and acceptance review guidance.
 - These are local v1/Codex workflow adjustments; `prompts/omo/**` is unaffected.

@@ -22,6 +22,11 @@ test("oracle routes to its own cross-gen builtin chain", () => {
     modelID: "gpt-5.5",
     providerID: "openai",
   })
+  const oracleHigh = resolveModelRouting({
+    agentName: "oracle-high",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+  })
   const explore = resolveModelRouting({
     agentName: "explore",
     modelID: "gpt-5.4-mini-fast",
@@ -31,6 +36,9 @@ test("oracle routes to its own cross-gen builtin chain", () => {
   assert.equal(oracle!.source, "agent-default")
   assert.equal(oracle!.variant, "xhigh")
   assert.equal(oracle!.entry.model, "gpt-5.5")
+  assert.equal(oracleHigh!.source, "agent-default")
+  assert.equal(oracleHigh!.variant, "max")
+  assert.equal(oracleHigh!.entry.model, "gpt-5.5")
   assert.equal(explore!.source, "agent-default")
   assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
 })
@@ -227,8 +235,9 @@ test("routes supported GPT and GLM successors through synthesized actual entries
     entry: {
       providers: ["zhipu"],
       model: "glm-5.2",
+      variant: "xhigh",
     },
-    variant: "high",
+    variant: "xhigh",
     source: "agent-default",
   })
 })

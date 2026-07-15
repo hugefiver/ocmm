@@ -8,7 +8,7 @@ Concepts (model tiering, per-model specialized prompts, intent gating, proactive
 
 | Hook                                 | What ocmm does                                                                                                                                                                                                                                                                                |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config`                             | Registers 9 agents + 10 category-subagents with their preferred provider/model, shared skill paths, and slash commands. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
+| `config`                             | Registers 11 agents + 10 category-subagents with their preferred provider/model, shared skill paths, and slash commands. Attaches functional agent prompts plus workflow/model-family deepwork prompts to built-in agents, and category prompts to category subagents. User config can add, override, or disable any of them. |
 | `chat.params`                        | Resolves the variant for the active agent/model (4-tier priority: user-config -> agent-default -> category-default -> input-variant), respects explicit user choices, and applies only the model-family parameters ocmm supports for that model. Built-in defaults normalize category work to model-appropriate high/max reasoning where supported and avoid implicit Opus 4.7+ thinking budgets.                  |
 | `chat.message`                       | v1 workflow: queues superpowers skills content on the first message per session. Also expands bare ocmm slash commands in noninteractive `opencode run` input so `/ralph-loop ...` and shared-skill commands get command context even when the TUI slash parser is bypassed. |
 | `experimental.chat.system.transform` | Prepends queued v1 skill content and one-shot slash command context to `output.system`. omo workflow only uses this hook when a bare slash command was expanded by `chat.message`.                                                                                                               |
@@ -222,7 +222,7 @@ The Codex plugin exposes:
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
 - a `deepwork` skill that maps ocmm's planning/delegation semantics to Codex tools;
 - plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
-- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle` and `dw-creative`.
+- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle`, `dw-oracle-high`, and `dw-creative`.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 
@@ -252,23 +252,23 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 
   "agents": {
     "reviewer": {
-      "model": "anthropic/claude-opus-4-7",
+      "model": "<provider>/<primary-reasoning-model>",
       "variant": "max",
     },
     "orchestrator": {
-      "model": "anthropic/claude-opus-4-7",
+      "model": "<provider>/<primary-reasoning-model>",
       "variant": "max",
       "fallbackModels": [
-        "openai/gpt-5.5",
-        { "providers": ["zhipu"], "model": "glm-5.1" },
+        "<provider>/<fallback-reasoning-model>",
+        { "providers": ["<provider>"], "model": "<fallback-model>", "variant": "high" },
       ],
     },
     "builder": {
       "requirement": {
         "variant": "high",
-        "requiresProvider": ["openai"],
+        "requiresProvider": ["<provider>"],
         "fallbackChain": [
-          { "providers": ["openai"], "model": "gpt-5.5", "variant": "high" },
+          { "providers": ["<provider>"], "model": "<implementation-model>", "variant": "high" },
         ],
       },
     },
@@ -276,7 +276,7 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 
   "categories": {
     "hard-reasoning": {
-      "model": "openai/gpt-5.5",
+      "model": "<provider>/<primary-reasoning-model>",
       "variant": "xhigh",
     },
   },
@@ -382,48 +382,50 @@ Both `agents.*` and `categories.*` accept either shape:
 
 | Model family | ocmm behavior |
 | ------------ | ------------- |
-| Explicit user config or request | Respected as written. ocmm does not silently rewrite user-declared `model`, `variant`, `reasoningEffort`, or `thinking` values. |
-| GPT/Codex non-mini built-in defaults | Built-in defaults never request below `high`; category defaults from `coding` upward resolve to `max`, which currently translates to the GPT/Codex `xhigh` reasoning effort. |
-| GPT/Codex mini | Keeps the full OpenAI reasoning ladder, including `minimal`, `low`, and no-op `none`. |
-| Claude Opus 4.7+ / Fable | Built-in defaults do not emit an ocmm-owned `thinking` budget or `reasoningEffort`; explicit user config is passed through as written. |
+| Explicit user config or request | Respected as written except for review/plan-review floors: `reviewer`, `oracle`, `oracle-high`, and `plan-critic` are raised to the model family's xhigh-equivalent/highest-supported review effort when possible. |
+| GPT-like non-mini built-in defaults | Built-in defaults never request below `high`; category defaults from `coding` upward resolve to `max`. GPT-5.6 supports native `reasoningEffort=max`; other GPT-like/Codex-like families use their catalog-supported maximum effort. |
+| GPT-like mini | Keeps the provider's full low-effort ladder, including `minimal`, `low`, and no-op `none` when supported. |
+| Claude Opus 4.7+ / Fable | Built-in defaults do not emit an ocmm-owned `thinking` budget or `reasoningEffort`; explicit non-review user config is passed through as written, while review/plan-review agents still receive the xhigh-equivalent floor when possible. |
 | Older Claude | Uses Anthropic `thinking` budgets for non-`none` variants. |
 | Gemini | Uses `reasoningEffort`; high and above also enable provider thinking. |
-| Latest GLM / DeepSeek | Built-in defaults normalize low/medium-style local variants to canonical high/max controls where the provider family supports them; explicit user config or request variants are left as written. |
+| Latest GLM / DeepSeek | Built-in defaults normalize low/medium-style local variants to canonical high/max controls where the provider family supports them; non-review explicit user config or request variants are left as written. |
 | Category defaults | `quick` stays lightweight. Built-in category defaults from `coding` upward resolve to `max`; explicit user category config or input variants are respected as written. |
 | Kimi / MiniMax / unknown | Uses the existing temperature shaping fallback when no better family-specific knob exists. |
 
 ## Built-in agents
 
 ```
-orchestrator    anthropic/claude-opus-4-7      variant=max     main coordinator
-builder         openai/gpt-5.5                  variant=high    autonomous implementer
-reviewer        openai/gpt-5.5                  variant=high    read-only consultant
-doc-search      openai/gpt-5.4-mini-fast       (none)          external docs / OSS lookup
-code-search     openai/gpt-5.4-mini-fast       (none)          internal codebase grep
-planner         anthropic/claude-opus-4-7      variant=max     work-plan author
-clarifier       anthropic/claude-sonnet-4-6    (none)          pre-plan analysis
-plan-critic     openai/gpt-5.5                 variant=xhigh   plan QA
-media-reader    openai/gpt-5.5                 variant=high    multimodal analysis
+orchestrator    primary reasoning lane          variant=max     main coordinator
+builder         implementation lane             variant=high    autonomous implementer
+reviewer        primary review lane             xhigh floor     read-only consultant
+oracle          cross-check lane                xhigh floor     self-supervision reviewer (heterogeneous when configured/available)
+oracle-high     supplemental high-effort review variant=max     optional third reviewer (explicit config only)
+doc-search      lightweight lookup lane         (none)          external docs / OSS lookup
+code-search     lightweight lookup lane         (none)          internal codebase grep
+planner         primary reasoning lane          variant=max     work-plan author
+clarifier       analysis lane                    (none)          pre-plan analysis
+plan-critic     primary review lane             variant=xhigh   plan QA
+media-reader    multimodal-capable lane         variant=high    multimodal analysis
 ```
 
 ## Built-in categories (also registered as subagents)
 
 ```
-frontend        google/gemini-3.1-pro       variant=high    UI/UX, layout, styling, visual QA
-creative        google/gemini-3.1-pro       variant=high    concepts, naming, narrative, framing
-hard-reasoning  openai/gpt-5.5              variant=xhigh   ultrabrain-style decisions and tradeoffs
-research        openai/gpt-5.5              variant=high    missing-fact investigation and evidence gathering
-quick           openai/gpt-5.4-mini         (none)          fully specified mechanical edits
-coding          anthropic/claude-sonnet-4-6  (none)          determined code edits and bug fixes
-normal-task     anthropic/claude-sonnet-4-6  (none)          ordinary bounded tasks
-complex         openai/gpt-5.5              variant=high    coordinated multi-step ordinary tasks
-deep            openai/gpt-5.5              (none)          autonomous system development and delivery
-documenting     kimi-for-coding/k2p5        (none)          standalone documentation and prose
+frontend        UI/multimodal-capable lane   variant=high    UI/UX, layout, styling, visual QA
+creative        creative-capable lane        variant=high    concepts, naming, narrative, framing
+hard-reasoning  primary reasoning lane       variant=xhigh   ultrabrain-style decisions and tradeoffs
+research        research-capable lane        variant=high    missing-fact investigation and evidence gathering
+quick           lightweight lane             (none)          fully specified mechanical edits
+coding          implementation lane          (none)          determined code edits and bug fixes
+normal-task     implementation lane          (none)          ordinary bounded tasks
+complex         coordinated-work lane        variant=high    coordinated multi-step ordinary tasks
+deep            primary reasoning lane       variant=max     autonomous system development and delivery
+documenting     prose-capable lane           (none)          standalone documentation and prose
 ```
 
-Variants shown are the **raw source values** from `src/data/categories.ts`. At runtime the variant policy normalizes categories from `coding` upward to model-appropriate `max` (which translates to the GPT/Codex `xhigh` reasoning effort for GPT-class models) unless the user explicitly overrides them; see the variant policy table above. Entries marked `(none)` carry no built-in variant and rely on this normalization.
+Rows above describe built-in selection lanes, not required provider channels or model IDs. Example model names elsewhere in the repository are references only; explicit user configuration and the currently available model catalog decide the actual model. Agent rows show source defaults or enforced review floors; category rows show the **raw source values** from `src/data/categories.ts`. At runtime the variant policy normalizes categories from `coding` upward to model-appropriate `max` unless the user explicitly overrides them; see the variant policy table above. Entries marked `(none)` carry no built-in variant and rely on this normalization.
 
-The primary structure is `orchestrator` plus four functional agents: `reviewer`, `planner`, `clarifier`, and `plan-critic`. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` and `planner` are registered with `mode:"all"` so they can be selected directly and used as delegated task agents. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. Compatibility aliases `@oracle` and `@explore` are registered for upstream omo-style delegation and map to local `reviewer` and `code-search`.
+The primary structure is `orchestrator` plus six functional agents: `reviewer`, `oracle`, `oracle-high`, `planner`, `clarifier`, and `plan-critic`. `oracle` is an independent built-in agent for self-supervision with a configured cross-check / heterogeneous review default, and it shares the reviewer prompt via `promptSource: "reviewer"`. `oracle-high` reuses the reviewer prompt but is not a `reviewer` alias; it is an optional supplemental high-effort reviewer used only when explicitly configured, available, and not disabled. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` is registered with `mode:"primary"`; `planner` is registered with `mode:"all"` so it can be selected directly and used as a delegated task agent. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. The upstream-style compatibility alias `@explore` maps to local `code-search`; `@oracle` selects the independent local `oracle` agent rather than aliasing `reviewer`.
 
 ## Prompt architecture
 
@@ -432,11 +434,11 @@ Prompts are organized by workflow:
 ```
 prompts/
   omo/                              # upstream omo prompts
-    deepwork/{default,gpt,gemini,glm,codex,planner}.md
+    deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (10 files)
   v1/                               # superpowers-style prompts
-    deepwork/{default,gpt,gemini,glm,codex,planner}.md
+    deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (10 files)
 skills/
@@ -462,7 +464,7 @@ Model-family variant selection (`pickDeepworkVariantForAgent`):
 - Codex family -> `codex.md`
 - others (Claude/Kimi/Minimax/unknown) -> `default.md`
 
-Variant is selected at config time using the agent's `fallbackChain[0].model` + `classifyModelFamily`. For built-in functional agents, ocmm composes `agents/<name>.md` with the selected `deepwork/<variant>.md`; the role prompt is authoritative for that agent's scope and the deepwork prompt supplies workflow/model calibration. Categories receive only their category prompt. No runtime keyword detection — prompts are attached declaratively.
+Variant is selected at config time using the final selected agent model after explicit user configuration, inherited aliases, and catalog-confirmed upgrades are considered. For built-in functional agents, ocmm composes `agents/<name>.md` with the selected `deepwork/<variant>.md`; the role prompt is authoritative for that agent's scope and the deepwork prompt supplies workflow/model calibration. Categories receive only their category prompt. No runtime keyword detection — prompts are attached declaratively.
 
 For v1 workflow, superpowers skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). For omo workflow, prompts are attached declaratively at config time; `chat.message` and `system.transform` only participate when a bare noninteractive slash command needs compatibility expansion.
 

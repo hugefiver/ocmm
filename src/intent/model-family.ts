@@ -15,6 +15,18 @@ export function isGptModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("gpt")
 }
 
+export function parseGptVersion(modelID: string): [number, number, number] | null {
+  const name = extractModelName(modelID).toLowerCase()
+  const match = name.match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|[-_.])/)
+  if (!match) return null
+  return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)]
+}
+
+export function supportsNativeGptMaxReasoning(modelID: string): boolean {
+  const version = parseGptVersion(modelID)
+  return version !== null && version[0] === 5 && version[1] === 6
+}
+
 export function isCodexModel(modelID: string, providerID?: string): boolean {
   const lc = modelID.toLowerCase()
   const provider = providerID?.toLowerCase() ?? ""

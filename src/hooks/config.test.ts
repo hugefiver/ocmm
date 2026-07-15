@@ -152,6 +152,14 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
 
   // oracle is now an independent builtin with cross-gen requirement (not a reviewer alias).
   assert.notEqual(cfg.agent.oracle, cfg.agent.reviewer)
+  assert.ok(cfg.agent["oracle-high"], "oracle-high should be registered as subagent")
+  assert.equal(
+    ((cfg.agent["oracle-high"] as Record<string, unknown>).permission as Record<string, unknown>).task,
+    "deny",
+    "oracle-high should be read-only by default",
+  )
+  // oracle-high reuses reviewer prompt/calibration.
+  assert.match(String((cfg.agent["oracle-high"] as Record<string, unknown>).prompt), /Agent Role: reviewer|READ-ONLY REVIEWER/)
   // explore remains a compatibility alias for code-search.
   assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
   assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
@@ -168,6 +176,7 @@ test("config applies default auto-approve permissions", async () => {
   assert.equal(((cfg.agent.builder as Record<string, unknown>).permission as Record<string, unknown>).question, "allow")
   assert.equal(((cfg.agent.planner as Record<string, unknown>).permission as Record<string, unknown>)["task_*"], "allow")
   assert.equal(((cfg.agent.reviewer as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
+  assert.equal(((cfg.agent["oracle-high"] as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
   assert.equal(((cfg.agent["doc-search"] as Record<string, unknown>).permission as Record<string, unknown>)["grep_app_*"], "allow")
 })
 
@@ -194,7 +203,7 @@ test("config preserves explicit permission overrides", async () => {
 })
 
 test("disabledAgents skips OMO-compatible aliases", async () => {
-  const c = { ...defaultConfig(), disabledAgents: ["oracle", "explore", "deep"] }
+  const c = { ...defaultConfig(), disabledAgents: ["oracle", "oracle-high", "explore", "deep"] }
   const handler = createConfigHandler({ getConfig: () => c })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
@@ -202,6 +211,7 @@ test("disabledAgents skips OMO-compatible aliases", async () => {
   assert.ok(cfg.agent.reviewer)
   assert.ok(cfg.agent["code-search"])
   assert.equal(cfg.agent.oracle, undefined)
+  assert.equal(cfg.agent["oracle-high"], undefined)
   assert.equal(cfg.agent.explore, undefined)
   assert.equal(cfg.agent.deep, undefined)
 })

@@ -109,6 +109,7 @@ const AGENT_NAMES = [
   "builder",
   "reviewer",
   "oracle",
+  "oracle-high",
   "doc-search",
   "code-search",
   "planner",

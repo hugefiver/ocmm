@@ -2,7 +2,7 @@
 
 # GPT-5.6 EXECUTION CALIBRATION
 
-Apply this layer only when the selected model is in the GPT-5.6 family (`gpt-5.6`, Sol, Terra, or Luna). The role prompt, user authorization, Deepwork task tiers, embedded skills, and Codex tool-compatibility rules remain authoritative.
+Apply this layer only when the selected model identifies as part of the GPT-5.6 family. Concrete model or lane names are references only; the user's explicit configuration and currently available model catalog decide the actual model. GPT-5.6 supports native `max` reasoning effort; treat local `max` as a real GPT-5.6 effort level, not an alias for `xhigh`, when explicit configuration or role policy requests maximum reasoning. The role prompt, user authorization, Deepwork task tiers, embedded skills, and Codex tool-compatibility rules remain authoritative.
 
 ## Shell Adaptation
 

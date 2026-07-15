@@ -18,8 +18,8 @@ both `omo` and `v1` workflows:
    queue + `system.transform` mechanism. Skills are NOT registered via
    OpenCode's skill loader (no inlined skills metadata).
 3. **Model-family specialization preserved** — both workflows keep omo's
-   model-family variant pattern (default/gpt/gemini/glm/codex/planner), selected at config time
-   based on the agent's declared preference model.
+   model-family variant pattern (default/gpt/gpt-5.6/gemini/glm/codex/planner), selected at config time
+   from the final selected agent model after explicit config, alias inheritance, and catalog upgrades.
 4. **v1 = superpowers 5-phase chain** — v1 prompts reference 5 superpowers
    skills (brainstorming, writing-plans, subagent-driven-development,
    requesting-code-review, receiving-code-review) forked into `skills/v1/`.
@@ -48,7 +48,7 @@ OpenCode's skill loader, not inlined metadata).
 ## Non-Goals
 
 - Changing the routing resolver or variant translator (unchanged)
-- Changing the agent definitions (same 10 built-in agents, same categories)
+- Changing the agent-definition mechanism (the concrete built-in agent set may evolve; categories keep the same mechanism)
 - Changing the runtime fallback system (unchanged)
 - Auto-selecting workflow based on agent or model (explicit config only)
 - Migrating omo prompts to v1 or vice versa (both kept as-is)
@@ -284,21 +284,21 @@ At config time, built-in functional agents compose `agents/<name>.md` with the s
 `src/hooks/config.ts` `createConfigHandler`:
 
 For **both** omo and v1:
-- Register 10 built-in agents + 10 categories
+- Register built-in agents + 10 categories
 - Each built-in agent gets a `prompt` field set to the deepwork variant
-  appropriate for its `requirement.fallbackChain[0].model` (model-family
-  classification at config time)
+  appropriate for the final selected model after explicit config, alias inheritance,
+  and catalog-confirmed upgrades (model-family classification at config time)
 - Categories get `mode:'subagent'` + `prompt` from the workflow's category
   prompts
 
 Model-family classification at config time (reuses existing
 `classifyModelFamily`):
 ```ts
-function pickDeepworkVariantForAgent(agent: BuiltinAgent): DeepworkVariant {
+function pickDeepworkVariantForAgent(agent: BuiltinAgent, selectedModel: string): DeepworkVariant {
   if (agent.name === 'planner' || agent.name === 'plan') return 'planner';
-  const model = agent.requirement?.fallbackChain?.[0]?.model ?? '';
-  const family = classifyModelFamily({ providerID: '', modelID: model });
+  const family = classifyModelFamily({ providerID: '', modelID: selectedModel });
   if (family === 'codex') return 'codex';
+  if (isGpt56Model(selectedModel)) return 'gpt-5.6';
   if (family === 'gpt') return 'gpt';
   if (family === 'gemini') return 'gemini';
   if (family === 'glm') return 'glm';
@@ -536,7 +536,7 @@ omo prompts (`prompts/omo/`) are not tracked in this doc.
 3. **Config merge test**: user `workflow:'v1'` + project `workflow:'omo'` ->
    project wins
 4. **Config hook test (both)**: built-in functional agents get role prompt plus
-   deepwork variant based on `fallbackChain[0].model`; categories get category
+   deepwork variant based on the final selected model; categories get category
    prompts; compatibility aliases expose `@oracle` and `@explore`
 5. **Config hook variant selection**: planner agent -> `planner.md`; gpt family
    model -> `gpt.md`; gemini family -> `gemini.md`; glm family -> `glm.md`;
@@ -627,9 +627,9 @@ None at design time.
    requires runtime phase detection, which conflicts with the no-keyword
    design). Acceptable trade-off: inject all skills, let model ignore
    irrelevant ones.
-5. **Model-family mismatch**: `pickDeepworkVariantForAgent` uses
-   `fallbackChain[0].model` which may not match the actual runtime model.
-   Acceptable — prompt is a hint, still functional if mismatched.
+5. **Model-family mismatch**: `pickDeepworkVariantForAgent` uses the final selected
+   model from config/catalog resolution at startup. If a later runtime fallback uses
+   a different family, the prompt remains a reliability hint rather than a hard model contract.
 6. **omo `mode/` removal**: verify no other code references `modePrompts`
    or `ModeVariant` before removing.
 7. **Detectors removal**: verify `stripSystemReminders` is not needed

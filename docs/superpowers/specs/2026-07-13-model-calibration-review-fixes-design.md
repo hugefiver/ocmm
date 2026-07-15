@@ -2,7 +2,7 @@
 
 ## Goal
 
-Repair the confirmed `v0.5.0..v0.5.1` review findings without changing explicit model choice semantics, and make one effective runtime model drive prompt calibration, parameter routing, and fallback behavior. GPT-family `reviewer` and `oracle` work must use at least `xhigh` reasoning; complex or high-risk work may retain the local `max` task variant, translated to the highest effort accepted by the target GPT/Codex surface.
+Repair the confirmed `v0.5.0..v0.5.1` review findings without changing explicit model choice semantics, and make one effective runtime model drive prompt calibration, parameter routing, and fallback behavior. GPT-family `reviewer` and `oracle` work must use at least `xhigh` reasoning; complex or high-risk work may retain the local `max` task variant. GPT-5.6-capable GPT/Codex targets preserve native `reasoningEffort: "max"`; older or unknown GPT/Codex targets gate local `max` to `xhigh`.
 
 ## Confirmed Findings
 
@@ -10,7 +10,7 @@ The combined reports are technically valid:
 
 - A description-only `oracle` entry can lose its inherited `reviewer` requirement when catalog promotion runs afterward.
 - Equal-version catalog candidates use alphabetical provider order instead of the requirement's priority order.
-- Catalog promotion accepts pre-5.6 Sol/Terra names even though the policy requires preserving defaults without GPT-5.6 or newer.
+- Catalog promotion accepts older lane-specific names even though the policy requires preserving defaults without a compatible newer catalog successor.
 - A catalog successor is registered outside the static fallback chain, so runtime routing can use the wrong entry and fallback traversal can skip the chain head.
 - Existing host `agent.<name>.model` values are preserved but not used for GPT-5.6 prompt selection.
 - Category agents and generated Codex category profiles do not receive the guarded GPT-5.6 calibration.
@@ -39,7 +39,7 @@ Materialize catalog models into `cfg.agents` so existing runtime code sees them.
 
 `src/routing/model-upgrades.ts` will expose pure helpers:
 
-- select a catalog model only when a matching GPT Sol/Terra model is at least 5.6, or a matching GLM successor is at least 5.2;
+- select a catalog model only when a matching GPT lane successor is at least 5.6, or a matching GLM successor is at least 5.2;
 - preserve provider order from the compatible fallback entry;
 - synthesize a runtime `FallbackEntry` for a supported successor while retaining the baseline entry's variant and inference controls.
 
@@ -58,16 +58,16 @@ The same final model will select prompt calibration and populate a shared `regis
 
 `resolveModelRouting` will expose one alias-aware effective-requirement resolver shared with runtime fallback, and will treat compatible GPT/GLM successors as matches instead of falling back to an unrelated chain head. Runtime fallback state will start at the actual failed model's exact chain index; matching checks every provider in an entry, not only `providers[0]`. An actual catalog/raw model outside the static chain starts at `-1`, so fallback index 0 remains eligible.
 
-### Reviewer/oracle reasoning policy
+### Review and plan-review reasoning policy
 
-For GPT and Codex families:
+For `reviewer`, `oracle`, `oracle-high`, and `plan-critic`:
 
-- `reviewer` and `oracle` default GPT entries use variant `xhigh`;
-- chat parameter routing raises absent or lower variants/efforts to `xhigh` after all overrides;
-- local `max` remains `max` in routing/ledger semantics and translates to the highest provider-supported GPT effort (`xhigh` for the current GPT/Codex translator);
-- an explicit `reasoningEffort: "max"` remains `max` rather than being lowered.
+- static review defaults use at least an xhigh-equivalent local effort;
+- chat parameter routing raises absent or lower variants/efforts after all overrides when the selected model family exposes high-effort controls;
+- local `max` remains semantic `max` in routing/ledger inputs, but GPT-like/Codex-like outputs emit native `reasoningEffort: "max"` only for GPT-5.6-capable selected models and gate unsupported/unknown GPT-like models to `xhigh`;
+- non-GPT families use their family-specific xhigh-equivalent or maximum supported review controls.
 
-Model choice remains user-controlled; only the reasoning floor for these review roles is enforced.
+Model choice remains user-controlled; only the reasoning floor for these review and plan-review roles is enforced.
 
 ### Prompt and generated artifacts
 
@@ -102,4 +102,4 @@ The generator remains the source of truth for `.codex/agents` and `plugins/deepw
 - Placeholder scan: no placeholders or deferred decisions.
 - Internal consistency: one effective model drives all four runtime surfaces; no schema mutation is proposed.
 - Scope: limited to confirmed 0.5.1 review findings and the requested reviewer/oracle reasoning policy.
-- Ambiguity: `max` is explicitly defined as a task-level variant that maps to the highest effort supported by the GPT/Codex target, resolving the xhigh/max wording without inventing an unsupported API value.
+- Ambiguity: `max` is explicitly defined as a task-level variant that maps to native `reasoningEffort: "max"` for GPT-5.6-capable GPT/Codex targets; other targets use their highest supported effort.

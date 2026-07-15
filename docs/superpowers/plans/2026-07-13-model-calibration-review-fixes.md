@@ -42,10 +42,10 @@
 Cover:
 
 ```ts
-assert.equal(selectCatalogModel(targetWithBothProviders, "reviewer", reviewerRequirement), "openai/gpt-5.6-sol")
-assert.equal(selectCatalogModel(targetWithOnlyGpt49Sol, "reviewer", reviewerRequirement), undefined)
-assert.equal(matchRequirementSuccessor(reviewerRequirement, "openai", "gpt-5.7-sol")?.model, "gpt-5.7-sol")
-assert.equal(matchRequirementSuccessor(oracleRequirement, "zhipu", "glm-5.3")?.model, "glm-5.3")
+assert.equal(selectCatalogModel(targetWithPrimaryLane, "reviewer", reviewerRequirement), "configured-primary-successor-model")
+assert.equal(selectCatalogModel(targetWithOnlyOlderPrimaryLane, "reviewer", reviewerRequirement), undefined)
+assert.equal(matchRequirementSuccessor(reviewerRequirement, "configured-provider", "configured-primary-successor-model")?.model, "configured-primary-successor-model")
+assert.equal(matchRequirementSuccessor(oracleRequirement, "configured-provider", "configured-cross-check-successor-model")?.model, "configured-cross-check-successor-model")
 ```
 
 Add config-hook regressions for reviewer model inheritance plus `oracle: { description: "..." }`, existing host GPT-5.6 model calibration, and provider priority.
@@ -56,18 +56,18 @@ Use this exact alias fixture and assertions:
 const configured = {
   ...defaultConfig(),
   agents: {
-    reviewer: { model: "anthropic/claude-opus-4-7" },
+    reviewer: { model: "configured-primary-review-model" },
     oracle: { description: "custom oracle" },
   },
 }
 const registeredAgentModels = new Map<string, string>()
 const target = {
   agent: {},
-  provider: { openai: { models: { "gpt-5.6-terra": {} } } },
+  provider: { configured: { models: { "configured-cross-check-successor-model": {} } } },
 }
 await createConfigHandler({ getConfig: () => configured, registeredAgentModels })(target, undefined)
-assert.equal((target.agent.oracle as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
-assert.equal(registeredAgentModels.get("oracle"), "anthropic/claude-opus-4-7")
+assert.equal((target.agent.oracle as Record<string, unknown>).model, "configured-primary-review-model")
+assert.equal(registeredAgentModels.get("oracle"), "configured-primary-review-model")
 ```
 
 - [ ] **Step 2: Run targeted tests and capture RED**
@@ -145,8 +145,8 @@ Expected: all Task 1 tests pass and existing explicit-model tests remain green.
 Add assertions that:
 
 ```ts
-resolveModelRouting({ agentName: "reviewer", providerID: "openai", modelID: "gpt-5.7-sol" })
-// returns entry.model === "gpt-5.7-sol", source === "agent-default", variant === "xhigh"
+resolveModelRouting({ agentName: "reviewer", providerID: "configured-provider", modelID: "configured-primary-successor" })
+// returns the configured primary successor, source === "agent-default", variant === "xhigh"
 
 // chat.params reviewer/oracle with GPT and no/lower variant
 // emits reasoningEffort === "xhigh"
@@ -160,12 +160,12 @@ Add two exact fallback regressions:
 
 ```ts
 // A secondary provider is still the same static chain layer.
-// requirement entry: providers ["openai", "github-copilot"], model "gpt-5.5"
-// failed event model: github-copilot/gpt-5.5
+// requirement entry: configured primary and secondary providers for model "configured-primary-review-model"
+// failed event model: secondary configured provider with the same configured model
 // expected: do not dispatch that same entry again.
 
 // Versioned-alias boundaries are explicit.
-// gpt-5.5-20260713 matches gpt-5.5; gpt-5.50 does not match gpt-5.5.
+// model-a-20260713 matches model-a; model-a2 does not match model-a.
 
 // A description-only oracle inherits the reviewer user chain.
 // reviewer: primary + fallback-a + fallback-b; oracle: { description: "custom" }
@@ -191,13 +191,13 @@ assert.equal(mediumOutput.options.reasoningEffort, "xhigh")
 Add distinct cases for both roles and all override boundaries:
 
 ```ts
-for (const agentName of ["reviewer", "oracle"]) {
+for (const agentName of ["reviewer", "oracle", "oracle-high", "plan-critic"]) {
   // absent variant -> xhigh
   // explicit minimal -> xhigh
   // explicit xhigh -> xhigh
-  // explicit max -> applied variant max, reasoning effort xhigh
+  // explicit max -> applied variant max and native max only on max-capable targets; older GPT-like targets gate to xhigh
   // direct reasoningEffort "low" -> final xhigh
-  // direct reasoningEffort "max" -> final max
+  // direct reasoningEffort "max" -> native max only on GPT-5.6-capable targets; older/unknown GPT-like targets gate to xhigh
 }
 ```
 
@@ -254,23 +254,24 @@ state.fallbackIndex = requirement.fallbackChain.findIndex(
 
 The handler must retain the parsed `{ providerID, modelID }` used to build `initialKey`; do not recover it by splitting an opaque string. The registered map value may be parsed at its first `/`, matching the repository's canonical provider/model format.
 
-Use the same boundary-aware exact/versioned-alias predicate in resolver and fallback code. Do not use raw `startsWith`; it must not treat `gpt-5.50` as a version of `gpt-5.5`.
+Use the same boundary-aware exact/versioned-alias predicate in resolver and fallback code. Do not use raw `startsWith`; it must not treat unrelated model IDs that merely share a prefix as the same fallback layer.
 
-- [ ] **Step 4: Enforce GPT review reasoning floor**
+- [ ] **Step 4: Enforce review and plan-review reasoning floor**
 
-Change reviewer/oracle GPT fallback entries to `xhigh`. In chat params, floor their GPT/Codex applied variant and final direct reasoning effort after all overrides:
+Change review and plan-review fallback entries to at least xhigh-equivalent effort. In chat params, floor applied variant and final direct reasoning controls after all overrides:
 
 ```ts
-const REVIEW_AGENTS = new Set(["reviewer", "oracle"])
-// below xhigh or missing -> xhigh; max remains max
+const REVIEW_AGENTS = new Set(["reviewer", "oracle", "oracle-high", "plan-critic"])
+// below xhigh or missing -> xhigh-equivalent; GPT-5.6-capable max remains native max;
+// older/unknown GPT-like max gates to xhigh
 ```
 
 Apply the floor twice in the existing ordering:
 
-1. Before `translateVariant`, replace absent/below-`xhigh` `appliedVariant` with `xhigh`; preserve `max`.
-2. After direct `resolution.entry.reasoningEffort` and all other entry controls are applied, replace an absent/below-`xhigh` final effort with `xhigh`; preserve exact `xhigh` and `max`.
+1. Before `translateVariant`, replace absent/below-`xhigh` `appliedVariant` with `xhigh`; preserve local `max` as a semantic request.
+2. After direct `resolution.entry.reasoningEffort` and all other entry controls are applied, replace absent/below-`xhigh` final effort with the family-specific xhigh-equivalent; preserve native `max` only for GPT-5.6-capable GPT-like/Codex-like targets and other max-capable families.
 
-The floor activates only when `agentName` is `reviewer` or `oracle` and `family` is `gpt` or `codex`. Other agents retain existing explicit-variant semantics.
+The floor activates only for review and plan-review agents. Other agents retain existing explicit-variant semantics.
 
 - [ ] **Step 5: Re-run targeted tests**
 
@@ -292,7 +293,7 @@ Expected: successor entries, fallback order, and xhigh/max policy all pass.
 
 - [ ] **Step 1: Add failing prompt/generator assertions**
 
-Assert all ten category profiles contain `GPT-5.6 EXECUTION CALIBRATION`, host category GPT-5.6 selections receive the layer, and generated reviewer/oracle TOML contains `model_reasoning_effort = "xhigh"`.
+Assert all ten category profiles contain the guarded model-family execution calibration, host category selections for that family receive the layer, and generated reviewer/oracle TOML contains the expected review effort floor.
 
 Use `buildCodexAgents(...)` to iterate the exact category names from `BUILTIN_CATEGORIES` and assert every corresponding `developerInstructions` contains the calibration. In the self-contained bundle test, read `dw-reviewer.toml` and assert both reviewer and oracle contain `model_reasoning_effort = "xhigh"`.
 
@@ -304,7 +305,7 @@ node --test --experimental-strip-types src/hooks/config.category.test.ts src/cod
 
 - [ ] **Step 3: Compose category calibration and update policy copy**
 
-Keep `getCategoryPrompt(c.name)` authoritative. Append only the GPT-5.6 layer inside the existing workflow-calibration envelope when the selected OpenCode model is GPT-5.6; always carry the guarded layer for Codex packaging. Update generated deepwork tables and instructions to say GPT reviewer/oracle use `xhigh` minimum and complex/high-risk work may use local `max`/the target maximum.
+Keep `getCategoryPrompt(c.name)` authoritative. Append only the matching family calibration layer inside the existing workflow-calibration envelope when the final selected OpenCode model matches that family; always carry the guarded layer for Codex packaging. Update generated deepwork tables and instructions to say review agents use an xhigh-equivalent floor and max-capable selected models can use native `max` when requested.
 
 - [ ] **Step 4: Update the v1 skill and source-mapping row together**
 

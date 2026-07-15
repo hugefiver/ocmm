@@ -111,7 +111,7 @@ Expected: PASS.
 
 **Interfaces:**
 - Consumes: user-approved observation-only status for polling/background backoff and frontend layout-mechanics; `BUILTIN_AGENTS` model requirements and `resolveModelRouting()` fallback resolution.
-- Produces: sync documentation that records observation-only candidates without implementation; reviewer/oracle fallback chains that prefer GPT-5.4 xhigh and GPT-5.5 xhigh for GPT-5.6-primary cross-generation review while preserving other cross-generation entries.
+- Produces: sync documentation that records observation-only candidates without implementation; reviewer/oracle fallback guidance that preserves configured heterogeneous or cross-generation review entries while allowing GPT-5.6 native max on the primary review lane when selected/requested.
 
 - [ ] **Step 0: Record observation-only upstream candidates**
 
@@ -126,11 +126,12 @@ Do not edit frontend skill rules or implement backoff behavior in this task.
 
 - [ ] **Step 1: Add failing fallback-chain tests**
 
-In `src/routing/resolver.test.ts`, add assertions that the oracle/reviewer relevant GPT entries appear in this order for cross-generation review:
+In `src/routing/resolver.test.ts`, add assertions that oracle/cross-check routing preserves configured heterogeneous or cross-generation review entries while primary review can use GPT-5.6 native max when selected:
 
 ```ts
-// Expected GPT oracle/cross-check sequence when GPT alternatives are available:
-// gpt-5.4 xhigh before gpt-5.5 xhigh before gpt-5.6-terra same-generation check.
+// Expected oracle/cross-check behavior:
+// prefer configured heterogeneous or otherwise non-identical entries before same-lane fallback;
+// primary reviewer may use GPT-5.6 native max when selected/requested.
 ```
 
 Use existing resolver helpers and direct `BUILTIN_AGENTS` inspection if that is the current pattern.
@@ -143,22 +144,21 @@ Run:
 node --test --experimental-strip-types src/routing/resolver.test.ts
 ```
 
-Expected: FAIL because current oracle/reviewer chains do not encode GPT-5.4 xhigh before GPT-5.5 xhigh / GPT-5.6 Terra.
+Expected: FAIL if oracle/cross-check routing does not preserve configured heterogeneous diversity or if primary review cannot use GPT-5.6 native max when selected.
 
 - [ ] **Step 3: Update model fallback chains**
 
-Edit `src/data/agents.ts` so GPT cross-generation review entries include:
+Edit `src/data/agents.ts` so review entries preserve configured cross-check diversity and primary-review max semantics:
 
 ```ts
-{ family: "gpt", model: "gpt-5.4", variant: "xhigh", providers: ["openai", "github-copilot"] }
-{ family: "gpt", model: "gpt-5.5", variant: "xhigh", providers: ["openai", "github-copilot"] }
+{ model: "configured-primary-review-model", variant: "max", providers: ["configured-provider"] }
 ```
 
-Place GPT-5.4 before GPT-5.5 for oracle/cross-check routing. Do not delete existing Claude/Gemini/GLM entries unless a test proves they conflict.
+Keep oracle/cross-check heterogeneous entries ahead of same-model fallback where configured. Do not delete existing Claude/Gemini/GLM entries unless a test proves they conflict.
 
 - [ ] **Step 4: Guard catalog promotion semantics if needed**
 
-Inspect `selectCatalogModel()` tests. If oracle catalog promotion would always choose GPT-5.6 Terra despite a GPT-5.4/5.5 cross-gen fallback entry, add a test describing intended behavior and adjust only the oracle/cross-check path. Preserve existing Sol/Terra catalog successor behavior for primary agents/categories.
+Inspect `selectCatalogModel()` tests. If oracle catalog promotion would always choose a same-generation supplemental lane despite a configured heterogeneous/cross-generation fallback entry, add a test describing intended behavior and adjust only the oracle/cross-check path. Preserve existing primary-lane/catalog successor behavior for primary agents/categories.
 
 - [ ] **Step 5: Re-run routing/config tests**
 
@@ -181,7 +181,7 @@ Expected: PASS.
 
 **Interfaces:**
 - Consumes: generated Codex workflow skill text from `renderWorkflowSkill()` and generated agent profile instructions.
-- Produces: Codex plugin guidance for MultiAgentV2 flat tools and complex multi-module three-way cross-validation.
+- Produces: Codex plugin guidance for MultiAgentV2 flat tools and explicitly configured complex multi-module three-review cross-validation.
 
 - [ ] **Step 1: Add failing generator tests**
 
@@ -192,9 +192,9 @@ assert.match(skillText, /MultiAgentV2/i)
 assert.match(skillText, /spawn_agent/i)
 assert.match(skillText, /wait_agent/i)
 assert.match(skillText, /followup_task/i)
-assert.match(skillText, /GPT-5\.4 xhigh/i)
-assert.match(skillText, /GPT-5\.5 xhigh/i)
-assert.match(skillText, /three-way cross-validation|three way cross-validation/i)
+assert.match(skillText, /oracle-high/i)
+assert.match(skillText, /explicitly configured/i)
+assert.match(skillText, /available.*not disabled|not disabled.*available/i)
 ```
 
 - [ ] **Step 2: Run the failing generator tests**
@@ -205,15 +205,15 @@ Run:
 node --test --experimental-strip-types src/codex/plugin-generator.test.ts
 ```
 
-Expected: FAIL because current workflow skill prefers GPT-5.6 Terra for oracle and lacks explicit MultiAgentV2 tool mapping.
+Expected: FAIL if the current workflow skill hardcodes a same-generation oracle lane or lacks explicit MultiAgentV2 tool mapping.
 
 - [ ] **Step 3: Update generated workflow text**
 
 Edit `renderWorkflowSkill()` / `codexAgentInstructions()` in `src/codex/plugin-generator.ts`:
 
 - Add MultiAgentV2 tool mapping wording: `spawn_agent`, `wait_agent`, `followup_task`, `interrupt_agent`, `fork_turns` when available; otherwise use existing task/subagent compatibility.
-- Update runtime model selection: reviewer can use GPT-5.6 xhigh/ultra; oracle/cross-check should prefer GPT-5.4 xhigh, then GPT-5.5 xhigh, before same-generation GPT-5.6 Terra.
-- For complex multi-module tasks, allow three-way cross-validation only when all three model generations are available and the task risk justifies it.
+- Update runtime model selection: reviewer can use GPT-5.6 native `max`; oracle/cross-check should preserve cross-generation or heterogeneous diversity according to the configured catalog.
+- For complex multi-module tasks, allow three-review cross-validation only when `oracle-high` is explicitly configured by user/profile, available in the current catalog/dispatch surface, and not disabled.
 
 - [ ] **Step 4: Re-run generator tests**
 
@@ -257,7 +257,7 @@ Run after the full build so the Codex bundle copies fresh runtime assets:
 pnpm run gen:codex-plugin
 ```
 
-Expected: generator writes 21 agents, 14 skills, 4 MCP servers, `.codex/agents`, and `.agents/plugins/marketplace.json`.
+Expected: generator writes 22 agents, 14 skills, 4 MCP servers, `.codex/agents`, and `.agents/plugins/marketplace.json`.
 
 - [ ] **Step 3: Run targeted tests**
 

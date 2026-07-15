@@ -21,6 +21,7 @@ const GPT_LANE_BY_AGENT = new Map<string, "sol" | "terra">([
   ["clarifier", "sol"],
   ["plan-critic", "sol"],
   ["oracle", "terra"],
+  ["oracle-high", "sol"],
   ["hard-reasoning", "sol"],
   ["deep", "sol"],
   ["complex", "terra"],

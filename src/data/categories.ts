@@ -123,8 +123,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     description:
       "Autonomous system development and feature implementation: explore, plan, implement, verify, and continue the loop until a complete deliverable works.",
     requirement: {
+      variant: "max",
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },

@@ -46,7 +46,7 @@ test("maintenance docs preserve prompt layout and plan review receipts", () => {
   assert.match(requestingReviewRow, /optional high-risk plan consultation/i)
   assert.match(requestingReviewRow, /`xhigh` minimum/)
   assert.match(requestingReviewRow, /local `max`/)
-  assert.match(requestingReviewRow, /target's maximum supported effort/)
+  assert.match(requestingReviewRow, /GPT-5\.6 supports native `max`/)
 
   for (const source of [plannerPrompt, criticPrompt]) {
     assert.match(source, /current `?plan-critic`? receipt covers exactly one complete, current plan revision/i)

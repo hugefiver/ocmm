@@ -7,8 +7,9 @@ description: Use after all implementation tasks complete, after major features a
      Upstream: obra/superpowers v6.0.3.
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); added
-     Reviewer Selection section for oracle/reviewer duality (oracle =
-     self-supervision, reviewer = external review). See docs/v1-maintenance.md
+     Reviewer Selection section for oracle/reviewer/oracle-high semantics
+     (oracle = self-supervision, reviewer = external review, oracle-high =
+     optional supplemental high-effort reviewer). See docs/v1-maintenance.md
      for sync rules. -->
 
 # Requesting Code Review
@@ -57,31 +58,34 @@ Use Task tool with `general-purpose` type, fill template at `code-reviewer.md`
 
 ## Reviewer Selection
 
-Two reviewer agents are available, with distinct semantics:
+Reviewer agents are available, with distinct semantics:
 
 | Agent | Role | Model default |
 |---|---|---|
-| `oracle` | Self-supervision — review work the current agent itself produced | Cross-gen (different generation from main, to avoid self-confirmation bias) |
-| `reviewer` | External review — review code not produced by the current agent | Flagship (same family as main) |
+| `oracle` | Self-supervision — review work the current agent itself produced | Cross-check / heterogeneous lane chosen from explicit configuration and the available catalog to avoid self-confirmation bias |
+| `reviewer` | External review — review code not produced by the current agent | Primary reasoning lane from explicit configuration and the available catalog |
+| `oracle-high` | Optional supplemental high-effort reviewer — for complex/high-risk triple review only when explicitly configured, available, and not disabled | Primary reasoning lane at native `max` for GPT-5.6 or another max-capable selected model |
 
 **Selection by task complexity:**
 
 | Task shape | Reviewer(s) | Rationale |
 |---|---|---|
 | Simple / single-stage (1-2 tasks, one module, no architectural change) | `oracle` (default) | plan-critic already reviewed the plan; self-supervision suffices |
-| Complex / large (3+ tasks, cross-module, architectural change, security/performance sensitive) | `oracle` + `reviewer` (both, in parallel) | cross-gen self-supervision AND external review catch orthogonal issues |
+| Complex / large (3+ tasks, cross-module, architectural change, security/performance sensitive) | `oracle` + `reviewer` (both, in parallel) | heterogeneous self-supervision AND external review catch orthogonal issues |
+| High-risk / very large / final gate with explicit triple-review configuration | `oracle` + `reviewer` + `oracle-high` (all three, in parallel) | adds a supplemental high-effort pass only when `oracle-high` is explicitly configured, available, and not disabled |
 | User habit override | user-specified | user may prefer reviewer for all cases, or oracle for all cases |
 
 **How to dispatch:**
 
-- Single reviewer: dispatch one subagent with the chosen reviewer agent type (`oracle` or `reviewer`), passing the work SHAs and context via the `code-reviewer.md` template.
-- Both reviewers: dispatch two subagents in parallel (one `oracle`, one `reviewer`), each with the same SHAs and context. Collect both feedback sets before acting.
+- Single reviewer: dispatch one subagent with the chosen reviewer agent type (`oracle`, `reviewer`, or `oracle-high`), passing the work SHAs and context via the `code-reviewer.md` template.
+- Two reviewers: dispatch two subagents in parallel (`oracle` + `reviewer`), each with the same SHAs and context. Collect both feedback sets before acting.
+- Three reviewers: dispatch three subagents in parallel (`oracle` + `reviewer` + `oracle-high`) only when `oracle-high` is explicitly configured, available in the current dispatch surface/catalog, and not disabled. Collect all feedback sets before acting.
 
-**Default:** `oracle` for simple tasks. Upgrade to both when the orchestrator judges the task complex or large.
+**Default:** `oracle` for simple tasks. Upgrade to `oracle` + `reviewer` when the orchestrator judges the task complex or large. Add `oracle-high` only when the user/profile explicitly enables it, the profile/model is available, and it is not disabled; built-in or profile existence alone must not force three-review dispatch.
 
 `oracle` can also be an optional independent consultation for a high-risk implementation plan. It does not replace the `plan-critic` receipt, does not make dual plan review mandatory, and a timeout or partial response is not a conclusion.
 
-**GPT/Codex reasoning policy:** `reviewer` and `oracle` use `xhigh` minimum. For complex or high-risk review or verification, request local `max`; the adapter maps it to the target's maximum supported effort (currently `xhigh` for GPT/Codex). `plan-critic` remains `xhigh`.
+**Reasoning policy:** `reviewer`, `oracle`, and `oracle-high` use an `xhigh`-equivalent minimum when the selected model family exposes that control; otherwise use the highest supported review effort for that family. GPT-5.6 supports native `max`, so complex or high-risk review/verification on GPT-5.6 can request `max` directly; other model families use `max` only when their cataloged controls expose a maximum-effort level. `oracle-high` preserves local `max` for GPT-5.6 and other max-capable models. `plan-critic` uses `xhigh` minimum and may be raised by explicit local configuration. Example model names are references only; explicit user configuration and currently available models decide the actual selection.
 
 ## Example
 

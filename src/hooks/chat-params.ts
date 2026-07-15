@@ -9,21 +9,88 @@
 import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
-import { classifyModelFamily, isMiniModel } from "../intent/model-family.ts"
+import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
-const ABOVE_HIGH_REASONING = new Set(["xhigh", "max", "thinking"])
-const REVIEW_AGENTS = new Set(["reviewer", "oracle"])
+const REVIEW_AGENTS = new Set(["reviewer", "oracle", "oracle-high", "plan-critic"])
+const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
+  "gpt",
+  "codex",
+  "claude",
+  "claude-opus-47-plus",
+  "gemini",
+  "glm",
+  "deepseek",
+])
 
-function requiresReviewReasoningFloor(agentName: string | undefined, family: string): boolean {
-  return !!agentName && REVIEW_AGENTS.has(agentName) && (family === "gpt" || family === "codex")
+function requiresReviewVariantFloor(agentName: string | undefined, family: string): boolean {
+  return !!agentName && REVIEW_AGENTS.has(agentName) && REVIEW_VARIANT_FLOOR_FAMILIES.has(family)
 }
 
 function floorReviewVariant(variant: Variant | undefined): Variant {
   return variant === "xhigh" || variant === "max" ? variant : "xhigh"
+}
+
+function capUnsupportedNativeMaxVariant(family: string, modelID: string, variant: Variant | undefined): Variant | undefined {
+  if ((family === "gpt" || family === "codex") && variant === "max" && !supportsNativeGptMaxReasoning(modelID)) {
+    return "xhigh"
+  }
+  return variant
+}
+
+function thinkingBudget(value: unknown): number | undefined {
+  return isRecord(value) && typeof value.budgetTokens === "number" ? value.budgetTokens : undefined
+}
+
+function thinkingEnabled(value: unknown): boolean {
+  return isRecord(value) && value.type === "enabled"
+}
+
+function applyReviewOutputFloor(args: {
+  agentName: string | undefined
+  family: string
+  modelID: string
+  appliedVariant: Variant | undefined
+  outputOptions: Record<string, unknown>
+}): void {
+  if (!requiresReviewVariantFloor(args.agentName, args.family)) return
+
+  const floorVariant = floorReviewVariant(args.appliedVariant)
+  const directEffort = args.outputOptions.reasoningEffort
+  const gptMaxSupported = supportsNativeGptMaxReasoning(args.modelID)
+  const directMaxSupported = directEffort === "max" && (args.family !== "gpt" && args.family !== "codex" || gptMaxSupported)
+  const effortFloor = floorVariant === "max" && (args.family !== "gpt" && args.family !== "codex" || gptMaxSupported)
+    ? "max"
+    : "xhigh"
+
+  if (args.family === "gpt" || args.family === "codex" || args.family === "deepseek") {
+    if (directEffort !== "xhigh" && directEffort !== "max") args.outputOptions.reasoningEffort = effortFloor
+    else if (directEffort === "max" && !directMaxSupported) args.outputOptions.reasoningEffort = "xhigh"
+    return
+  }
+
+  if (args.family === "glm") {
+    if (directEffort !== "xhigh" && directEffort !== "max") args.outputOptions.reasoningEffort = effortFloor
+    if (!thinkingEnabled(args.outputOptions.thinking)) args.outputOptions.thinking = { type: "enabled" }
+    return
+  }
+
+  if (args.family === "gemini") {
+    args.outputOptions.reasoningEffort = "high"
+    if (!thinkingEnabled(args.outputOptions.thinking)) args.outputOptions.thinking = { type: "enabled" }
+    return
+  }
+
+  if (args.family === "claude" || args.family === "claude-opus-47-plus") {
+    const minBudget = floorVariant === "max" || directEffort === "max" ? 24_576 : 16_384
+    if (!thinkingEnabled(args.outputOptions.thinking) || (thinkingBudget(args.outputOptions.thinking) ?? 0) < minBudget) {
+      args.outputOptions.thinking = { type: "enabled", budgetTokens: minBudget }
+    }
+    delete args.outputOptions.reasoningEffort
+  }
 }
 
 function protectedModelHasNoReasoningParam(family: string): boolean {
@@ -36,11 +103,14 @@ function normalizeReasoningEffortForModel(args: {
   reasoningEffort: string
   explicit: boolean
 }): string | undefined {
-  if (args.explicit) return args.reasoningEffort
   const effort = args.reasoningEffort.toLowerCase()
+  if ((args.family === "gpt" || args.family === "codex") && effort === "max" && !supportsNativeGptMaxReasoning(args.modelID)) {
+    return "xhigh"
+  }
+  if (args.explicit) return args.reasoningEffort
   if (protectedModelHasNoReasoningParam(args.family)) return undefined
   if ((args.family === "gpt" || args.family === "codex") && !isMiniModel(args.modelID)) {
-    return BELOW_HIGH_REASONING.has(effort) || ABOVE_HIGH_REASONING.has(effort)
+    return BELOW_HIGH_REASONING.has(effort)
       ? "high"
       : args.reasoningEffort
   }
@@ -162,9 +232,10 @@ export function createChatParamsHandler(args: {
         })
       }
     }
-    if (requiresReviewReasoningFloor(agentName, family)) {
+    if (requiresReviewVariantFloor(agentName, family)) {
       appliedVariant = floorReviewVariant(appliedVariant)
     }
+    appliedVariant = capUnsupportedNativeMaxVariant(family, input.model.modelID, appliedVariant)
     if (appliedVariant) {
       const effect = translateVariant(family, appliedVariant, {
         modelID: input.model.modelID,
@@ -206,12 +277,7 @@ export function createChatParamsHandler(args: {
     if (resolution.entry.maxTokens !== undefined && resolution.entry.maxTokens > 0) {
       output.maxOutputTokens = resolution.entry.maxTokens
     }
-    if (requiresReviewReasoningFloor(agentName, family)) {
-      const finalEffort = output.options.reasoningEffort
-      if (finalEffort !== "xhigh" && finalEffort !== "max") {
-        output.options.reasoningEffort = "xhigh"
-      }
-    }
+    applyReviewOutputFloor({ agentName, family, modelID: input.model.modelID, appliedVariant, outputOptions: output.options })
 
     record({
       ts: Date.now(),

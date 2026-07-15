@@ -104,9 +104,9 @@ export function loadAllPrompts(
 }
 
 /**
- * Config-time variant selection based on agent name + declared preference model.
- * Unlike the old runtime `pickDeepworkVariant`, this does NOT inspect the
- * actual chat model — it uses the agent's fallbackChain[0].model.
+ * Config-time variant selection based on agent name + final selected model.
+ * Unlike the old runtime `pickDeepworkVariant`, this uses the resolved model
+ * after explicit user configuration, alias inheritance, and catalog upgrades.
  */
 export function pickDeepworkVariantForAgent(opts: {
   agentName: string

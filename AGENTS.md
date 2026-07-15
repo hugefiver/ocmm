@@ -62,7 +62,7 @@ The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
 
 npm installs the matching optional package automatically for your OS/CPU/libc unless optional dependencies are omitted (e.g. `--omit=optional`, `npm_config_optional=false`, or the package manager skips optionals). GitHub Release tarballs already include the matching native binary, so the optional package is not needed there.
 
-The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/deepwork/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add deepwork@deepwork-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` and `dw-creative`. `dw-oracle` (self-supervision) defaults to a cross-gen model; `dw-reviewer` (external review) defaults to the same flagship family as the main agent.
+The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/deepwork/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add deepwork@deepwork-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle`, `dw-oracle-high`, and `dw-creative`. `dw-oracle` (self-supervision) defaults to a configured heterogeneous review lane; `dw-reviewer` (external review) defaults to the primary reasoning lane chosen from explicit configuration and the available catalog. `dw-oracle-high` is an optional supplemental high-effort review profile; include it as a third reviewer only when explicitly configured by user/profile, available in the current catalog/dispatch surface, and not disabled.
 
 ### Publishing a new release
 
@@ -203,7 +203,7 @@ Write this to `$testDir\opencode.json`.
 
 ### 4. Write an ocmm config mapping agents to your provider's models
 
-Create `$testDir\.opencode\ocmm.jsonc`. The built-in agents reference models like `claude-opus-4-7` and `gpt-5.5` which your provider may not serve, so you must override them. Set `workflow` to `"v1"` or `"omo"` (default) to choose the prompt set:
+Create `$testDir\.opencode\ocmm.jsonc`. Built-in defaults are examples and may reference models your provider does not serve, so map agents to models from your configured provider/catalog. Set `workflow` to `"v1"` or `"omo"` (default) to choose the prompt set:
 
 ```jsonc
 {
@@ -234,7 +234,7 @@ opencode debug config --print-logs --log-level DEBUG 2>&1 | rg "ocmm"
 Expected lines:
 ```
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
-[ocmm] loaded prompts: workflow=v1 deepwork=6/6, agents=5/5, category=10/10
+[ocmm] loaded prompts: workflow=v1 deepwork=7/7, agents=5/5, category=10/10
 [ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
 [ocmm] config: registered N agents (built-in + categories + user), N skills, N commands, N MCPs
 ```
@@ -318,7 +318,7 @@ Prompt files are model-facing behavior and must stay synchronized with upstream 
 
 - `v1` exists only as the version label for the deepwork workflow: `workflow: "v1"`, `prompts/v1/`, `skills/v1/`, and `docs/v1-maintenance.md` are config/path/version labels, not model-facing names. Model-facing prompt text under `prompts/v1/**` must use `deepwork` or omit the workflow name entirely; never describe the workflow to the model as `v1`.
 - `prompts/v1/deepwork/default.md` is intentionally concise and local to this project. Do not blindly replace it with the upstream long default prompt.
-- `prompts/v1/deepwork/{gpt,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
+- `prompts/v1/deepwork/{gpt,gpt-5.6,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
 - `prompts/v1/agents/*.md` and `prompts/v1/category/*.md` should stay strongly aligned with `prompts/omo/agents/*.md` and `prompts/omo/category/*.md`. Deepwork mechanics come from the deepwork layer and injected skills, not from shortened agent/category prompts.
 - Changes under `prompts/v1/` MUST update `docs/v1-maintenance.md` in the same commit. Changes under `prompts/omo/` MUST update `docs/prompt-sync.md` in the same commit. Changes that affect both workflows update both docs.
 - The repository ignores the root upstream checkout as `/omo/`; `prompts/omo/**` is tracked. If intended prompt files under `prompts/omo/**` ever appear ignored, tighten `.gitignore` rather than leaving them untracked.

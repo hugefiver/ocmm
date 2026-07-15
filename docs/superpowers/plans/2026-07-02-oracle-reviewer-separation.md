@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use the subagent-driven-development skill to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Separate oracle (self-supervision, cross-gen) from reviewer (external review, flagship) via a generic `alias` config field, and add a final acceptance review loop to the v1 workflow.
+**Goal:** Separate oracle (self-supervision, configured cross-check review) from reviewer (external review, primary reasoning lane) via a generic `alias` config field, and add a final acceptance review loop to the v1 workflow.
 
 **Architecture:** Oracle promoted to independent builtin agent with `promptSource: 'reviewer'` and `defaultAlias: 'reviewer'`. Generic `alias` field on agent/category entries inherits requirement only. Acceptance review loop dispatches oracle (simple default) or oracle+reviewer (complex) after task completion.
 
@@ -46,7 +46,7 @@ git commit -m "refactor(types): add promptSource/defaultAlias to Agent type"
 
 ---
 
-## Task 2: Add oracle builtin agent with cross-gen requirement
+## Task 2: Add oracle builtin agent with configured cross-check requirement
 
 **Files:**
 - Modify: `src/data/agents.ts:21-143`
@@ -69,26 +69,24 @@ Insert after the `reviewer` entry (after line 63), before `doc-search`:
   {
     name: "oracle",
     description:
-      "Self-supervision reviewer for work the agent itself produced. Cross-gen model by default to avoid self-confirmation bias.",
+      "Self-supervision reviewer for work the agent itself produced. Uses a configured heterogeneous review lane by default to avoid self-confirmation bias.",
     promptSource: "reviewer",
     defaultAlias: "reviewer",
     requirement: {
       variant: "high",
       fallbackChain: [
-        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
-        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5", variant: "high" },
-        { providers: ["zhipu"], model: "glm-5.1" },
+        // configured heterogeneous/cross-check entries from the available catalog
+        // primary review remains separate to avoid same-model confirmation bias
       ],
     },
   },
 ```
 
-Rationale for chain order: cross-gen = different families from reviewer's gpt-first chain. Lead with claude (reviewer has gpt first), so default auto-selection picks a different family.
+Rationale for chain order: cross-check = a configured lane that is intentionally non-identical to the primary reviewer lane, so default auto-selection reduces same-model confirmation bias.
 
 - [ ] **Step 3: Remove oracle from AGENT_ALIASES in resolver.ts**
 
-Critical: if `oracle→reviewer` stays in `AGENT_ALIASES`, then `canonicalAgentName("oracle")` returns `"reviewer"`, and `BUILTIN_AGENT_INDEX.get("reviewer")` is used instead of oracle's own builtin entry — making oracle's cross-gen requirement dead code.
+Critical: if `oracle→reviewer` stays in `AGENT_ALIASES`, then `canonicalAgentName("oracle")` returns `"reviewer"`, and `BUILTIN_AGENT_INDEX.get("reviewer")` is used instead of oracle's own builtin entry — making oracle's configured cross-check requirement dead code.
 
 ```typescript
 const AGENT_ALIASES = new Map([
@@ -190,21 +188,24 @@ import assert from "node:assert/strict"
 import { normalizeShorthand } from "./normalize.ts"
 
 test("normalizeShorthand resolves alias target requirement", () => {
-  const target = { model: "openai/gpt-5.5", variant: "high" as const }
+  const primaryReviewModel = "configured-primary-review-model"
+  const target = { model: primaryReviewModel, variant: "high" as const }
   const aliasEntry = { alias: "reviewer" }
   const resolveAlias = (name: string) =>
     name === "reviewer" ? normalizeShorthand(target) : undefined
   const result = normalizeShorthand(aliasEntry, { resolveAlias, selfName: "oracle" })
   assert.ok(result?.requirement)
-  assert.equal(result.requirement!.fallbackChain[0]!.model, "gpt-5.5")
+  assert.equal(result.requirement!.fallbackChain[0]!.model, primaryReviewModel)
 })
 
 test("normalizeShorthand direct config overrides alias", () => {
-  const aliasEntry = { alias: "reviewer", model: "zhipu/glm-5.1" }
+  const primaryReviewModel = "configured-primary-review-model"
+  const crossCheckModel = "configured-cross-check-model"
+  const aliasEntry = { alias: "reviewer", model: crossCheckModel }
   const resolveAlias = (name: string) =>
-    name === "reviewer" ? normalizeShorthand({ model: "openai/gpt-5.5" }) : undefined
+    name === "reviewer" ? normalizeShorthand({ model: primaryReviewModel }) : undefined
   const result = normalizeShorthand(aliasEntry, { resolveAlias, selfName: "oracle" })
-  assert.equal(result!.requirement!.fallbackChain[0]!.model, "glm-5.1")
+  assert.equal(result!.requirement!.fallbackChain[0]!.model, crossCheckModel)
 })
 
 test("normalizeShorthand detects circular alias", () => {
@@ -222,11 +223,11 @@ test("normalizeShorthand transitive alias A->B->C", () => {
   const resolveAlias = (name: string) => {
     if (name === "a") return normalizeShorthand({ alias: "b" }, { resolveAlias, selfName: "a", visited: new Set(["self", "a"]) })
     if (name === "b") return normalizeShorthand({ alias: "c" }, { resolveAlias, selfName: "b", visited: new Set(["self", "a", "b"]) })
-    if (name === "c") return normalizeShorthand({ model: "zhipu/glm-5.1" })
+    if (name === "c") return normalizeShorthand({ model: "configured-cross-check-model" })
     return undefined
   }
   const result = normalizeShorthand({ alias: "a" }, { resolveAlias, selfName: "self", visited: new Set(["self"]) })
-  assert.equal(result!.requirement!.fallbackChain[0]!.model, "glm-5.1")
+  assert.equal(result!.requirement!.fallbackChain[0]!.model, "cross-check-model")
 })
 
 test("normalizeShorthand no alias and no model returns undefined requirement", () => {
@@ -410,10 +411,10 @@ Oracle is now a builtin, registered in the main loop. `registerCompatAgentAliase
 In `src/hooks/config.test.ts`, find tests that assert `cfg.agent.oracle === cfg.agent.reviewer` (L153) and update:
 
 ```typescript
-// oracle is now an independent builtin with cross-gen requirement
+// oracle is now an independent builtin with configured cross-check requirement
 assert.notEqual(cfg.agent.oracle, cfg.agent.reviewer)
-assert.equal(cfg.agent.oracle?.model, "anthropic/claude-opus-4-7") // cross-gen head
-assert.equal(cfg.agent.reviewer?.model, "openai/gpt-5.5") // flagship head
+assert.equal(cfg.agent.oracle?.model, "configured-cross-check-model") // configured cross-check head
+assert.equal(cfg.agent.reviewer?.model, "configured-primary-review-model") // configured primary review head
 ```
 
 Find any test that disables oracle and verify it still works (disabling oracle no longer affects reviewer).
@@ -424,12 +425,12 @@ Find any test that disables oracle and verify it still works (disabling oracle n
 test("user agent with alias inherits target requirement", () => {
   const cfg = parseConfig({
     agents: {
-      reviewer: { model: "openai/gpt-5.5", variant: "high" },
+      reviewer: { model: "configured-primary-review-model", variant: "high" },
       "my-reviewer": { alias: "reviewer" },
     },
   })
   const handler = createConfigHandler({ getConfig: () => cfg })
-  // ... invoke handler, assert my-reviewer.model === "openai/gpt-5.5"
+  // ... invoke handler, assert my-reviewer.model === "configured-primary-review-model"
 })
 ```
 
@@ -507,17 +508,17 @@ At L144-155, pass `agentsConfig` as the second arg:
 ```typescript
 test("resolveModelRouting resolves alias target", () => {
   const agentsConfig = {
-    reviewer: { model: "openai/gpt-5.5", variant: "high" },
+    reviewer: { model: "configured-primary-review-model", variant: "high" },
     oracle: { alias: "reviewer" },
   }
   const r = resolveModelRouting({
     agentName: "oracle",
-    modelID: "gpt-5.5",
-    providerID: "openai",
+    modelID: "primary-review-model",
+    providerID: "configured-provider",
     agentsConfig,
   })
   assert.ok(r)
-  assert.equal(r!.entry.model, "gpt-5.5")
+  assert.equal(r!.entry.model, "configured-primary-review-model")
 })
 ```
 
@@ -542,19 +543,19 @@ git commit -m "feat(resolver): resolve alias field in user agent config"
 - Modify: `src/codex/plugin-generator.ts:507-520` (requirementForName)
 - Modify: `src/codex/plugin-generator.test.ts`
 
-- [ ] **Step 1: Update tier table — reviewer to Flagship, oracle to Cross-gen**
+- [ ] **Step 1: Update tier table — reviewer to primary review, oracle to cross-check**
 
 L448 Flagship row: add `${CODEX_AGENT_PREFIX}-reviewer`.
-L451 Cross-gen review row: replace `${CODEX_AGENT_PREFIX}-reviewer` with `${CODEX_AGENT_PREFIX}-oracle`.
+L451 cross-check / plan-review row: add `${CODEX_AGENT_PREFIX}-oracle` and keep plan-review separate from external review.
 
 ```typescript
-| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning, ${CODEX_AGENT_PREFIX}-reviewer | Latest-gen flagship | xhigh |
+| Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning, ${CODEX_AGENT_PREFIX}-reviewer | Primary reasoning lane from explicit configuration and available catalog | xhigh-equivalent minimum; native max on max-capable selected models when requested |
 | Mid | ... | ... |
 | Mini | ... | ... |
-| Cross-gen review | ${CODEX_AGENT_PREFIX}-oracle, ${CODEX_AGENT_PREFIX}-plan-critic | Previous-gen flagship | xhigh |
+| Cross-check / plan review | ${CODEX_AGENT_PREFIX}-oracle, ${CODEX_AGENT_PREFIX}-plan-critic | Configured cross-check lane for oracle; primary reasoning lane for plan review | xhigh-equivalent minimum |
 ```
 
-- [ ] **Step 2: Update cross-gen rule text (L462)**
+- [ ] **Step 2: Update independent review rule text (L462)**
 
 Replace `${CODEX_AGENT_PREFIX}-reviewer and ${CODEX_AGENT_PREFIX}-plan-critic` with `${CODEX_AGENT_PREFIX}-oracle and ${CODEX_AGENT_PREFIX}-plan-critic`.
 
@@ -621,7 +622,7 @@ test("oracle and reviewer select different Codex models by default", async () =>
   assert.ok(oracle, "oracle agent should be generated")
   assert.ok(reviewer, "reviewer agent should be generated")
   assert.notEqual(oracle!.model, reviewer!.model,
-    "oracle (cross-gen) and reviewer (flagship) must differ by default")
+    "oracle cross-check lane and reviewer primary lane must differ by default")
 })
 ```
 
@@ -636,7 +637,7 @@ Expected: PASS
 
 ```bash
 git add src/codex/plugin-generator.ts src/codex/plugin-generator.test.ts
-git commit -m "feat(codex): oracle cross-gen tier + alias resolution"
+git commit -m "feat(codex): oracle cross-check tier + alias resolution"
 ```
 
 ---
@@ -659,7 +660,7 @@ Dispatch the code reviewer subagent(s) based on task complexity:
 | Task shape | Reviewer(s) | Rationale |
 |---|---|---|
 | Simple / single-stage (1-2 tasks, single module, no architectural change) | `oracle` | Self-supervision; plan-critic already reviewed the plan |
-| Complex / large (3+ tasks, cross-module, architectural change, security/perf sensitive) | `oracle` + `reviewer` (both, in parallel) | Cross-gen self-supervision + external review |
+| Complex / large (3+ tasks, cross-module, architectural change, security/perf sensitive) | `oracle` + `reviewer` (both, in parallel) | Heterogeneous self-supervision + external review |
 | User habit override | user-specified | User may prefer reviewer for all cases |
 
 **Default:** `oracle` for simple tasks. When in doubt, dispatch both.
@@ -778,7 +779,7 @@ Add oracle/reviewer duality:
 
 Use a high-rigor reviewer when the task touches 3+ files, changes
 security/performance/migration behavior, lasts 30+ minutes, or the user asks
-for strict review. For final acceptance: `oracle` (self-supervision, cross-gen)
+for strict review. For final acceptance: `oracle` (self-supervision, configured cross-check review)
 by default for simple tasks; both `oracle` and `reviewer` for complex/large
 tasks. Reviewer verdict is binding. Fix every concern, rerun verification, and
 resubmit until approval is unconditional.
@@ -799,12 +800,12 @@ git commit -m "feat(prompts): oracle/reviewer semantic split + acceptance review
 - Modify: `docs/v1-maintenance.md`
 - Modify: `docs/prompt-sync.md`
 - Modify: `AGENTS.md`
-- Regenerate: `plugins/ocmm/**`, `.agents/plugins/marketplace.json`
+- Regenerate: `plugins/deepwork/**`, `.agents/plugins/marketplace.json`
 
 - [ ] **Step 1: Update v1-maintenance.md**
 
 Add entries for:
-- oracle promoted to independent builtin (promptSource=reviewer, defaultAlias=reviewer, cross-gen requirement)
+- oracle promoted to independent builtin (promptSource=reviewer, defaultAlias=reviewer, configured cross-check requirement)
 - alias field added to ShorthandFields schema
 - requesting-code-review extended with reviewer selection
 - subagent-driven-development: Final Acceptance Review stage added
@@ -813,7 +814,7 @@ Add entries for:
 - [ ] **Step 2: Update prompt-sync.md**
 
 Add section "Oracle/Reviewer Separation (2026-07-02)":
-- Codex tier: reviewer→Flagship, oracle→Cross-gen
+- Codex tier: reviewer→primary reasoning lane, oracle→configured cross-check lane
 - requirementForName resolves alias field
 - Acceptance review loop synced to codex prompts
 
@@ -821,18 +822,18 @@ Add section "Oracle/Reviewer Separation (2026-07-02)":
 
 In the "Codex bundle should expose" section, add note:
 ```
-The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` (cross-gen default, separate from `dw-reviewer` which is flagship default) and `dw-creative`.
+The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle` (configured cross-check default, separate from `dw-reviewer` on the primary reasoning lane) and `dw-creative`.
 ```
 
 - [ ] **Step 4: Build TS and regenerate Codex bundle**
 
 Run: `pnpm run build:ts && pnpm run gen:codex-plugin`
-Expected: `wrote plugins/ocmm (22 agents, 13 skills, 4 MCP servers; config=opencode)` — agent count increases from 21 to 22 (oracle added).
+Expected: `wrote plugins/deepwork (22 agents, 13 skills, 4 MCP servers; config=opencode)` — agent count increases from 21 to 22 (oracle added).
 
 - [ ] **Step 5: Verify dw-oracle.toml differs from dw-reviewer.toml**
 
-Run: `git diff plugins/ocmm/agents/dw-oracle.toml plugins/ocmm/agents/dw-reviewer.toml`
-Expected: different model values (oracle = claude/gemini cross-gen, reviewer = gpt flagship).
+Run: `git diff plugins/deepwork/agents/dw-oracle.toml plugins/deepwork/agents/dw-reviewer.toml`
+Expected: different configured model values (oracle = cross-check lane, reviewer = primary reasoning lane).
 
 - [ ] **Step 6: Verify bundle idempotency**
 
@@ -842,7 +843,7 @@ Expected: no diff (idempotent).
 - [ ] **Step 7: Commit**
 
 ```bash
-git add docs/ AGENTS.md plugins/ocmm/ .agents/plugins/marketplace.json
+git add docs/ AGENTS.md plugins/deepwork/ .agents/plugins/marketplace.json
 git commit -m "docs+chore: sync oracle/reviewer separation + regenerate codex bundle"
 ```
 
@@ -872,12 +873,12 @@ Expected: no diff
 
 - [ ] **Step 5: Manual spot-check**
 
-Inspect `plugins/ocmm/agents/dw-oracle.toml` and confirm:
-- `model` is a cross-gen model (e.g., `claude-opus-4-7` or `gemini-3.1-pro`), NOT `gpt-5.5`
+Inspect `plugins/deepwork/agents/dw-oracle.toml` and confirm:
+- `model` comes from the configured heterogeneous/cross-check lane, not from the primary reviewer lane by accident
 - `developer_instructions` contains reviewer.md prompt text (promptSource=reviewer)
 
-Inspect `plugins/ocmm/agents/dw-reviewer.toml` and confirm:
-- `model` is `gpt-5.5` (flagship)
+Inspect `plugins/deepwork/agents/dw-reviewer.toml` and confirm:
+- `model` comes from the configured primary reasoning lane
 - `developer_instructions` contains reviewer.md prompt text
 
 - [ ] **Step 6: No commit needed if all green**
