@@ -55,6 +55,19 @@ The controller owns only child-session 429 state and scheduling. It reuses callb
 
 The controller must not absorb generic fallback state. Existing `FallbackState` continues to own chain index, model-switch attempts, failed-model cooldowns, and the active model.
 
+The dedicated flow calls `dispatchFallbackRetry` with a new optional `abortBeforeDispatch: false` argument. The dispatcher defaults this option to `true`, preserving every existing generic fallback caller. Dedicated retries wait for the 429-owned idle before dispatch, so aborting that already-settled request is unnecessary and would create an additional ambiguous idle event.
+
+### Runtime event contract
+
+OpenCode publishes a provider error before setting the session idle, invokes plugin event hooks without awaiting their returned promises, and exposes no request or attempt ID on these events. A synchronous `client.session.prompt()` call may therefore still be pending when the prompt's idle or error event reaches the controller.
+
+The controller must establish event ownership rather than infer it from session ID alone:
+
+- every handled 429 creates a prior-error-idle barrier;
+- the next dispatch can start only after both its retry delay and that barrier are satisfied;
+- dedicated dispatches skip the dispatcher's pre-abort, so an idle observed during dispatch belongs to the current prompt rather than a synthetic abort;
+- the first provider outcome queued for the current dispatch generation takes precedence over an idle observed for that generation.
+
 ### Child-session activation and lifecycle
 
 Use the same child-session lineage fields already supported by the subagent depth guard: `parentID`, `parentId`, `parentSessionID`, and `parentSessionId` on `session.created`.
@@ -66,11 +79,11 @@ For each session, the controller tracks whether the initial request is still pen
 3. An initial non-429 error consumes the pending marker and continues through generic fallback.
 4. A `session.idle` with no active 429 flow consumes the pending marker, identifying an initial request that completed without activating the feature.
 5. A later 429 that did not originate from an initial 429 flow uses existing generic fallback behavior.
-6. `session.deleted` always cancels dedicated timers and state. During an active flow, an idle event following a known 429 must not cancel its scheduled retry; an idle event that completes a dispatched retry with no intervening error ends the dedicated flow successfully.
+6. `session.deleted` always cancels dedicated timers and state. During an active flow, the idle following a known 429 satisfies that error's barrier without cancelling its scheduled retry. An idle owned by a dispatched retry is recorded against that dispatch generation and ends the dedicated flow after the dispatch settles if no 429 was queued.
 
 Track the active attempt phase so idle can be interpreted without clearing work scheduled by the preceding error. This dedicated phase tracking does not alter the established generic fallback lifecycle; in particular, idle still preserves `FallbackState`.
 
-Once activated, the dedicated flow remains active across retries and fallback-model dispatches until success, deletion, a non-429 error, or an unrecoverable dispatch/fallback failure.
+Once activated, the dedicated flow remains active across retries and fallback-model dispatches until success, deletion, a non-429 error handoff, or an unrecoverable dispatch/fallback failure. A non-429 received while no dedicated dispatch is active exits immediately to generic fallback. A non-429 received during a dedicated dispatch is queued for that generation and handed off exactly once after the current dispatch settles and releases its in-flight guard.
 
 ### Per-session state
 
@@ -80,6 +93,9 @@ Dedicated state is keyed by session ID and contains:
 - blocked-until deadlines keyed by the configured scope;
 - the last parsed recovery delay for the active scope;
 - the active attempt phase and whether its outcome has already produced a 429;
+- whether the current error-owned idle barrier and retry delay are satisfied;
+- whether the active dispatch generation has observed idle;
+- at most one queued provider outcome for the active dispatch: either an explicit 429 or a non-429 generic-fallback handoff;
 - at most one pending timer;
 - a timer generation used to invalidate stale callbacks.
 
@@ -109,7 +125,8 @@ For an active child-session 429 flow, process each 429 in this order:
 3. If `recoveryDelayMs` is greater than 10 minutes, enqueue an immediate same-model probe with a zero-delay timer.
 4. If `recoveryDelayMs` is at most 10 minutes, enqueue the same model after the full recovery delay without jitter.
 5. If no recovery hint exists, use equal-jitter exponential backoff: the raw delay is `min(30 seconds, 1 second * 2^retriesUsed)`, and the actual delay is uniformly chosen from the upper half of that interval.
-6. Increment the scope's retry count only after `dispatchFallbackRetry` returns `true`. A `false` result stops the dedicated flow without consuming another retry.
+6. Mark the delay ready when its timer fires, but do not dispatch until the prior-error-idle barrier is also satisfied.
+7. Increment the scope's retry count after `dispatchFallbackRetry` returns `true`. If a provider error for that dispatch was queued before a `false` return, the queued event proves the request ran and takes precedence: count the retry exactly once, then either process the queued 429 or execute the queued non-429 generic handoff. A `false` result with no queued provider outcome stops the dedicated flow without consuming another retry.
 
 Long recovery hints therefore cause up to `maxRetries` immediate probes. If every probe still reports more than 10 minutes, the final failed probe exhausts the budget and switches models. If any probe reports 10 minutes or less, the next retry waits that full duration. Missing recovery hints follow the exponential schedule. Any continuing 429 switches models after the same budget is exhausted.
 
@@ -130,13 +147,17 @@ Extend fallback candidate lookup with an optional blocking predicate whose defau
 
 With model scope, another model from the same provider remains eligible. With provider scope, all models from the blocked provider are skipped. When a new fallback model is dispatched successfully, its distinct scope begins with a fresh `maxRetries` budget and follows the same algorithm.
 
-If no candidate remains, the existing model-switch limit is exhausted, or dispatch fails, stop the dedicated flow, cancel pending work, log the reason, and allow the current error to remain visible. Do not create a retry loop around internal dispatch failures.
+Prepare a model switch without advancing `FallbackState`, then dispatch the prepared target. Commit its fallback index and attempt exactly once when dispatch succeeds or when a current-generation queued provider outcome proves the target request ran. If dispatch returns `false` with no queued provider outcome, do not commit the switch. A queued non-429 handoff therefore starts generic fallback from the committed switch target, including when the error event omits model identity.
+
+If no candidate remains, the existing model-switch limit is exhausted, or dispatch fails without a queued provider outcome, stop the dedicated flow, cancel pending work, log the reason, and allow the current error to remain visible. Do not create a retry loop around internal dispatch failures.
 
 ### Concurrency, observe-only mode, and logging
 
 - Schedule both delayed retries and immediate probes through an injected scheduler so event handling never sleeps and tests use a fake clock.
 - Inject clock and random sources for deterministic deadline and jitter tests.
-- Every scheduled callback captures a generation and exits if idle, deletion, cancellation, or a newer schedule has invalidated it.
+- Every scheduled callback captures a generation and exits if deletion, cancellation, or a newer schedule has invalidated it. Idle satisfies an ownership barrier; it does not invalidate scheduled work.
+- A scheduled dispatch is gated by two independent signals: delay ready and prior error idle observed. Either signal may arrive first.
+- During dispatch, record the first provider outcome and idle for that generation. On settlement, resolve outcomes in this order: queued provider outcome, observed idle, then awaiting a later result event. A queued explicit 429 remains in the dedicated flow; a queued non-429 stops dedicated state and invokes generic fallback only after the dedicated dispatch promise has settled.
 - Keep at most one timer per session. Continue relying on the dispatcher's existing in-flight session guard as a second line of defense.
 - With `runtimeFallback.dispatch: false`, classify and log the decision but do not schedule, increment counters, or switch models.
 - Log session ID, provider/model, retry ordinal, selected delay, scope, and switch reason. Do not log the complete provider error payload.
@@ -147,9 +168,9 @@ If no candidate remains, the existing model-switch limit is exhausted, or dispat
 - Extend `src/runtime-fallback/error-classifier.ts` and tests with recovery-time extraction.
 - Integrate lineage and controller handling in `src/runtime-fallback/event-handler.ts` and its tests.
 - Add an optional candidate-blocking predicate to `src/runtime-fallback/fallback-state.ts` and test backward-compatible lookup.
+- Add the default-preserving `abortBeforeDispatch` option to `src/runtime-fallback/dispatcher.ts` and test both default abort and dedicated no-abort dispatch.
 - Extend `src/config/schema.ts`, its profile overlay, schema tests, and generated `schema.json`.
 - Update `README.md`, `docs/architecture.md`, and `examples/ocmm.example.jsonc`.
-- Reuse `src/runtime-fallback/dispatcher.ts` without changing its public behavior.
 
 ## Verification
 
@@ -164,9 +185,10 @@ Automated tests must prove:
 7. Model scope permits another model on the same provider; provider scope skips all models on that provider.
 8. Two child sessions maintain independent counts, deadlines, and timers.
 9. Root sessions, initial non-429 child errors, later non-activated 429 errors, regex-only retry matches, and disabled configuration preserve current behavior.
-10. Idle after a known 429 does not cancel its scheduled retry, while a retry that reaches idle without an intervening error completes the dedicated flow. Deletion, non-429 errors, failed dispatches, and exhausted chains cancel stale timers without clearing generic fallback state incorrectly.
-11. Recovery parsing covers supported headers, fields, durations, dates, messages, invalid inputs, and multiple-candidate selection.
-12. Configuration parsing covers defaults, `maxRetries: 0`, invalid scopes, and profile overlays.
+10. Error-owned idle and delay-ready may arrive in either order and dispatch exactly once. Dedicated dispatch skips pre-abort. A single success idle observed before prompt resolution completes the flow after settlement, while a queued provider outcome beats idle and is processed once. Deletion, exhausted chains, and failed dispatches without queued outcomes cancel stale work without clearing generic fallback state incorrectly.
+11. Same-model retry and prepared switch each account exactly once for `true + queued`, `false + queued`, and both `queued → idle → settlement` and `queued → settlement → idle` orders. Bare `false` does not account. A non-429 queued during dispatch performs one post-settlement generic handoff from the active target; deletion or session recreation cancels it.
+12. Recovery parsing covers supported headers, fields, durations, dates, messages, invalid inputs, and multiple-candidate selection.
+13. Configuration parsing covers defaults, `maxRetries: 0`, invalid scopes, and profile overlays.
 
 Run the repository quality gates:
 
