@@ -705,6 +705,28 @@
           "items": {
             "type": "string"
           }
+        },
+        "subagent429": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRetries": {
+              "type": "number"
+            },
+            "providerScopes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "model",
+                  "provider"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1564,6 +1586,28 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "subagent429": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "maxRetries": {
+                    "type": "number"
+                  },
+                  "providerScopes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": [
+                        "model",
+                        "provider"
+                      ]
+                    }
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false

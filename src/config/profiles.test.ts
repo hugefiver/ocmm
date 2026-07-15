@@ -305,6 +305,38 @@ test("profile can override subagent.maxDepth", () => {
   }
 })
 
+test("profile can partially override runtimeFallback.subagent429 settings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      runtimeFallback: {
+        subagent429: {
+          enabled: true,
+          maxRetries: 5,
+          providerScopes: { openai: "model" },
+        },
+      },
+      profiles: {
+        strict: {
+          runtimeFallback: {
+            subagent429: {
+              maxRetries: 0,
+              providerScopes: { openai: "provider" },
+            },
+          },
+        },
+      },
+      activeProfile: "strict",
+    })
+    const { config } = loadWithXdg(xdg)
+    assert.equal(config.runtimeFallback.subagent429.enabled, true)
+    assert.equal(config.runtimeFallback.subagent429.maxRetries, 0)
+    assert.deepEqual(config.runtimeFallback.subagent429.providerScopes, { openai: "provider" })
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile can override locale", () => {
   const xdg = makeTempXdg()
   try {

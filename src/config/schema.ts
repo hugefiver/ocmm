@@ -153,6 +153,14 @@ const defaultSkillsConfig = () => ({
   disable: [],
 })
 
+const Subagent429ScopeSchema = z.enum(["model", "provider"])
+
+const defaultSubagent429Config = () => ({
+  enabled: true,
+  maxRetries: 5,
+  providerScopes: {},
+})
+
 const defaultRuntimeFallbackConfig = () => ({
   enabled: true,
   dispatch: true,
@@ -170,6 +178,7 @@ const defaultRuntimeFallbackConfig = () => ({
     "capacity",
     "try again",
   ],
+  subagent429: defaultSubagent429Config(),
 })
 
 const defaultIdleContinuationConfig = () => ({
@@ -248,6 +257,23 @@ export const AgentEntrySchema = z
  *
  * `dispatch: false` makes the hook observe-only (classify + log, no retry).
  */
+export const Subagent429ConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    maxRetries: z.number().int().min(0).default(5),
+    providerScopes: z.record(z.string(), Subagent429ScopeSchema).default({}),
+  })
+  .strict()
+  .default(defaultSubagent429Config)
+
+const ProfileSubagent429ConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    maxRetries: z.number().int().min(0).optional(),
+    providerScopes: z.record(z.string(), Subagent429ScopeSchema).optional(),
+  })
+  .strict()
+
 export const RuntimeFallbackConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -275,6 +301,7 @@ export const RuntimeFallbackConfigSchema = z
         "capacity",
         "try again",
       ]),
+    subagent429: Subagent429ConfigSchema,
   })
   .default(defaultRuntimeFallbackConfig)
 
@@ -417,6 +444,7 @@ export const ProfileEntrySchema = z
         cooldownSeconds: z.number().int().positive().optional(),
         retryOnStatusCodes: z.array(z.number().int()).optional(),
         retryOnPatterns: z.array(z.string()).optional(),
+        subagent429: ProfileSubagent429ConfigSchema.optional(),
       })
       .optional(),
     idleContinuation: z
@@ -502,6 +530,7 @@ export type CategoryEntry = z.infer<typeof CategoryEntrySchema>
 export type FallbackEntryConfig = z.infer<typeof FallbackEntrySchema>
 export type ModelRequirementConfig = z.infer<typeof ModelRequirementSchema>
 export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
+export type Subagent429Config = z.infer<typeof Subagent429ConfigSchema>
 export type IdleContinuationConfig = z.infer<typeof IdleContinuationConfigSchema>
 export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
 export type RulesConfig = z.infer<typeof RulesConfigSchema>
