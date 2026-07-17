@@ -189,6 +189,29 @@ test("real deepwork prompts do not retain obsolete planner or broad review trigg
   }
 })
 
+test("planner and GPT-5.6 prompts keep delegation and review ownership flat", () => {
+  const root = join(process.cwd(), "prompts")
+  try {
+    for (const workflow of ["omo", "v1", "codex"] as const) {
+      loadAllPrompts(root, workflow)
+      const planner = getAgentPrompt("planner")
+      assert.match(planner, /Use direct tools first/)
+      assert.match(planner, /Return the completed plan to the orchestrator/)
+      assert.match(planner, /Do not dispatch `plan-critic`, `reviewer`, `oracle`, or `oracle-high`/)
+      assert.doesNotMatch(planner, /Use `reviewer`|Consult `reviewer`|Submit the complete current plan to `plan-critic`/)
+
+      const gpt56 = getDeepworkPrompt("gpt-5.6")
+      assert.match(gpt56, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
+      assert.match(gpt56, /Utility leaf agents never dispatch/)
+      assert.match(gpt56, /Read-only workflow agents never call `quick`/)
+      assert.match(gpt56, /Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review remain orchestrator-owned/)
+      assert.doesNotMatch(gpt56, /Nested subagent calls require a distinct deliverable/)
+    }
+  } finally {
+    loadAllPrompts(root, "omo")
+  }
+})
+
 test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),
@@ -360,4 +383,62 @@ test("requesting-code-review and subagent-driven-development skills include [pro
   assert.match(sub, /\[product\]/i, "subagent-driven-development missing [product] label")
   assert.match(sub, /\[evidence\]/i, "subagent-driven-development missing [evidence] label")
   assert.match(sub, /supply the missing evidence|do not change product behavior/i, "subagent-driven-development missing evidence-only guidance")
+})
+
+test("v1 implementer template and maintenance docs record flat workflow ownership", () => {
+  const skill = readFileSync(
+    join(process.cwd(), "skills", "v1", "subagent-driven-development", "SKILL.md"),
+    "utf8",
+  )
+  assert.match(skill, /Subagents do not commit, stage, push, or run any Git write command/)
+  assert.match(skill, /return changed files and a suggested commit message to the orchestrator/i)
+  assert.match(skill, /working-tree\/staged diff/i)
+  assert.match(skill, /Do not require implementation subagents to commit/i)
+  assert.match(skill, /review input, the diff, and the task description/i)
+  assert.doesNotMatch(skill, /c\. Implementer implements, tests, commits, self-reviews/)
+  assert.doesNotMatch(skill, /Pass the full change range:\s*- `BASE_SHA`/s)
+  assert.doesNotMatch(skill, /Structure the dispatch with the commit range, the diff, and the task description/)
+
+  const implementer = readFileSync(
+    join(process.cwd(), "skills", "v1", "subagent-driven-development", "implementer-prompt.md"),
+    "utf8",
+  )
+  assert.match(implementer, /## Delegation Boundary/)
+  assert.match(implementer, /`quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`/)
+  assert.match(implementer, /Do not launch `planner`, `plan-critic`, `reviewer`, `oracle`, or `oracle-high`/)
+  assert.match(implementer, /orchestrator owns formal plan review and final acceptance review/i)
+  assert.doesNotMatch(implementer, /Commit your work/)
+
+  const requestingReview = readFileSync(
+    join(process.cwd(), "skills", "v1", "requesting-code-review", "SKILL.md"),
+    "utf8",
+  )
+  const reviewerTemplate = readFileSync(
+    join(process.cwd(), "skills", "v1", "requesting-code-review", "code-reviewer.md"),
+    "utf8",
+  )
+  assert.match(requestingReview, /Working-tree diff review/i)
+  assert.match(requestingReview, /git diff --stat\s+git diff/s)
+  assert.match(requestingReview, /Do not require implementation subagents to commit/i)
+  assert.match(reviewerTemplate, /Git Range or Working-Tree Diff to Review/)
+  assert.match(reviewerTemplate, /git diff --stat\s+git diff/s)
+
+  const v1Maintenance = readFileSync(join(process.cwd(), "docs", "v1-maintenance.md"), "utf8")
+  const promptSync = readFileSync(join(process.cwd(), "docs", "prompt-sync.md"), "utf8")
+  for (const source of [v1Maintenance, promptSync]) {
+    assert.match(source, /Flat Workflow Subagent Policy \(2026-07-17\)/)
+    assert.match(source, /read-only workflow agents exclude `quick`/i)
+    assert.match(source, /formal plan review and final acceptance review remain orchestrator-owned/)
+  }
+})
+
+test("orchestrator prompts describe code review as review-input based", () => {
+  for (const workflow of ["v1", "codex"] as const) {
+    const prompt = readFileSync(
+      join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"),
+      "utf8",
+    )
+    assert.match(prompt, /committed range or working-tree\/staged diff/i, `${workflow} orchestrator missing review-input wording`)
+    assert.doesNotMatch(prompt, /work SHAs/i, `${workflow} orchestrator still assumes SHA-only review input`)
+  }
 })

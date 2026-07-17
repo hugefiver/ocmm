@@ -11,6 +11,30 @@ const PROMPTS_ROOT = join(process.cwd(), "prompts")
 
 loadAllPrompts(PROMPTS_ROOT, "omo")
 
+const UTILITY_TASK_RULES = {
+  "*": "deny",
+  quick: "allow",
+  "code-search": "allow",
+  explore: "allow",
+  "doc-search": "allow",
+  research: "allow",
+  "media-reader": "allow",
+} as const
+
+const LOCAL_COORDINATOR_TASK_RULES = {
+  ...UTILITY_TASK_RULES,
+  coding: "allow",
+  frontend: "allow",
+  "hard-reasoning": "allow",
+  creative: "allow",
+  documenting: "allow",
+} as const
+
+function assertExactTaskRules(actual: unknown, expected: Record<string, string>, label: string): void {
+  assert.ok(actual && typeof actual === "object" && !Array.isArray(actual), `${label} task rules must be granular`)
+  assert.deepEqual(Object.entries(actual as Record<string, unknown>), Object.entries(expected), `${label} task rule order`)
+}
+
 test("config registers all 10 categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
@@ -126,4 +150,46 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "omo")
   }
+})
+
+test("category task permissions distinguish leaves, workflow roles, and local coordinators", async () => {
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(cfg, undefined)
+
+  const taskFor = (name: string): unknown => {
+    const entry = cfg.agent[name] as Record<string, unknown>
+    const permission = entry.permission as Record<string, unknown> | undefined
+    return permission?.task
+  }
+
+  assert.equal(taskFor("quick"), "deny")
+  assert.equal(taskFor("research"), "deny")
+  assertExactTaskRules(taskFor("frontend"), UTILITY_TASK_RULES, "frontend")
+  assertExactTaskRules(taskFor("normal-task"), UTILITY_TASK_RULES, "normal-task")
+  assertExactTaskRules(taskFor("deep"), LOCAL_COORDINATOR_TASK_RULES, "deep")
+  assertExactTaskRules(taskFor("complex"), LOCAL_COORDINATOR_TASK_RULES, "complex")
+})
+
+test("category prompts receive role-specific terminal delegation contracts", async () => {
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
+
+  const contractFor = (name: string): string => {
+    const prompt = String((cfg.agent[name] as Record<string, unknown>).prompt)
+    const match = prompt.match(/<ocmm-delegation-contract>([\s\S]*?)<\/ocmm-delegation-contract>/)
+    assert.ok(match, `missing delegation contract for ${name}`)
+    assert.match(prompt, /<\/ocmm-delegation-contract>\s*$/)
+    return match[1]!
+  }
+
+  assert.match(contractFor("quick"), /utility leaf agent/i)
+  assert.match(
+    contractFor("coding"),
+    /Allowed utility targets: `quick`, `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./,
+  )
+  const deep = contractFor("deep")
+  assert.match(deep, /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`\./)
+  assert.match(deep, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
+  assert.match(deep, /Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, `reviewer`, `oracle`, `oracle-high`, `normal-task`, `deep`, or `complex`/)
 })

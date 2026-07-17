@@ -17,6 +17,59 @@ const COMPAT_AGENT_ALIASES = [
   { alias: "explore", target: "code-search" },
 ] as const
 
+type PermissionAction = "ask" | "allow" | "deny"
+type GranularPermission = Record<string, PermissionAction>
+type PermissionDefault = PermissionAction | GranularPermission
+type PermissionDefaults = Record<string, PermissionDefault>
+
+const PRIMARY_COORDINATORS = ["orchestrator", "builder"] as const
+const UTILITY_LEAF_AGENTS = [
+  "quick",
+  "code-search",
+  "explore",
+  "doc-search",
+  "research",
+  "media-reader",
+] as const
+const READ_ONLY_UTILITY_AGENTS = [
+  "code-search",
+  "explore",
+  "doc-search",
+  "research",
+  "media-reader",
+] as const
+const STANDARD_WORKFLOW_SUBAGENTS = [
+  "coding",
+  "normal-task",
+  "frontend",
+  "creative",
+  "hard-reasoning",
+  "documenting",
+] as const
+const READ_ONLY_WORKFLOW_AGENTS = [
+  "planner",
+  "reviewer",
+  "oracle",
+  "oracle-high",
+  "clarifier",
+  "plan-critic",
+] as const
+const LOCAL_COORDINATORS = ["deep", "complex"] as const
+const SPECIALIST_EXECUTION_AGENTS = [
+  "coding",
+  "frontend",
+  "hard-reasoning",
+  "creative",
+  "documenting",
+] as const
+const QUESTION_ENABLED_WORKFLOW_AGENTS = ["planner", "deep", "complex", "coding", "normal-task"] as const
+
+function taskAllowlist(allowed: readonly string[]): GranularPermission {
+  const rules: GranularPermission = { "*": "deny" }
+  for (const name of allowed) rules[name] = "allow"
+  return rules
+}
+
 const LOCALE_GUIDANCE_TAG = "ocmm-locale-guidance"
 const LOCALE_GUIDANCE_BLOCK = new RegExp(
   `<${LOCALE_GUIDANCE_TAG}>[\\s\\S]*?<\\/${LOCALE_GUIDANCE_TAG}>\\s*(?:---\\s*)?`,
@@ -32,6 +85,7 @@ type AgentExtras = {
   mode?: string
   prompt?: string
   promptPrefix?: string
+  promptSuffix?: string
   /** Catalog-confirmed runtime upgrade; never overrides an explicit user model. */
   model?: string
 }
@@ -78,6 +132,10 @@ function applyAgentEntry(
   if (extras?.promptPrefix && typeof existing.prompt === "string") {
     existing.prompt = prependPromptPrefix(existing.prompt, extras.promptPrefix)
   }
+  if (extras?.promptSuffix) {
+    const basePrompt = typeof existing.prompt === "string" ? existing.prompt : ""
+    existing.prompt = appendPromptSuffix(basePrompt, extras.promptSuffix)
+  }
   if (override?.permission) mergePermission(existing, override.permission, true)
 
   agentMap[agent.name] = existing
@@ -112,9 +170,80 @@ function prependPromptPrefix(prompt: string, prefix: string): string {
   return body ? `${cleanPrefix}\n\n---\n\n${body}` : cleanPrefix
 }
 
-function mergePermission(entry: Record<string, unknown>, permission: Record<string, string>, overwrite: boolean): void {
+const DELEGATION_CONTRACT_TAG = "ocmm-delegation-contract"
+const DELEGATION_CONTRACT_BLOCK = new RegExp(
+  `(?:\\n\\n---\\n\\n)?<${DELEGATION_CONTRACT_TAG}>[\\s\\S]*?<\\/${DELEGATION_CONTRACT_TAG}>\\s*`,
+  "g",
+)
+
+function appendPromptSuffix(prompt: string, suffix: string): string {
+  const body = prompt.replace(DELEGATION_CONTRACT_BLOCK, "").trim()
+  const cleanSuffix = suffix.trim()
+  return body ? `${body}\n\n---\n\n${cleanSuffix}` : cleanSuffix
+}
+
+const UTILITY_LEAF_AGENT_SET: ReadonlySet<string> = new Set(UTILITY_LEAF_AGENTS)
+const STANDARD_WORKFLOW_SUBAGENT_SET: ReadonlySet<string> = new Set(STANDARD_WORKFLOW_SUBAGENTS)
+const READ_ONLY_WORKFLOW_AGENT_SET: ReadonlySet<string> = new Set(READ_ONLY_WORKFLOW_AGENTS)
+const LOCAL_COORDINATOR_SET: ReadonlySet<string> = new Set(LOCAL_COORDINATORS)
+
+function formatTargets(names: readonly string[]): string {
+  return names.map((name) => `\`${name}\``).join(", ")
+}
+
+function wrapDelegationContract(lines: readonly string[]): string {
+  return [
+    `<${DELEGATION_CONTRACT_TAG}>`,
+    "## Delegation Contract (Authoritative)",
+    ...lines,
+    "This contract overrides any skill, model calibration, generated-adapter compatibility text, or other prompt layer that suggests broader delegation.",
+    `</${DELEGATION_CONTRACT_TAG}>`,
+  ].join("\n")
+}
+
+function delegationContractFor(name: string): string {
+  if (UTILITY_LEAF_AGENT_SET.has(name)) {
+    return wrapDelegationContract([
+      "This role is a utility leaf agent. Do not dispatch any subagent.",
+      "Complete the bounded assignment with direct tools and return the result to the caller.",
+    ])
+  }
+
+  if (READ_ONLY_WORKFLOW_AGENT_SET.has(name)) {
+    return wrapDelegationContract([
+      "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
+      `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
+      "`quick` is forbidden because this read-only role must not modify work by proxy. Planning, review, coordination, and implementation workflow agents are also forbidden.",
+      "Return the completed plan or findings to the caller. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
+    ])
+  }
+
+  if (STANDARD_WORKFLOW_SUBAGENT_SET.has(name)) {
+    return wrapDelegationContract([
+      "Use direct tools first. Delegate only when direct tools are insufficient or a separate bounded utility result materially improves completion.",
+      `Allowed utility targets: ${formatTargets(UTILITY_LEAF_AGENTS)}.`,
+      "Do not dispatch planning, review, coordination, or implementation workflow agents.",
+      "After local verification, return status and evidence to the caller. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
+    ])
+  }
+
+  if (LOCAL_COORDINATOR_SET.has(name)) {
+    return wrapDelegationContract([
+      "Use direct tools first. Delegate only when the child owns a distinct bounded deliverable that materially improves completion.",
+      "Multiple steps, routine confirmation, or wanting another opinion are not sufficient.",
+      `Allowed utility targets: ${formatTargets(UTILITY_LEAF_AGENTS)}.`,
+      `Allowed specialist targets: ${formatTargets(SPECIALIST_EXECUTION_AGENTS)}.`,
+      "Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, `reviewer`, `oracle`, `oracle-high`, `normal-task`, `deep`, or `complex`.",
+      "Integrate and verify child results, then return to the parent. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
+    ])
+  }
+
+  return ""
+}
+
+function mergePermission(entry: Record<string, unknown>, permission: PermissionDefaults, overwrite: boolean): void {
   const existing = isRecord(entry.permission) ? entry.permission : {}
-  const merged = { ...existing }
+  const merged: Record<string, unknown> = { ...existing }
   for (const [name, value] of Object.entries(permission)) {
     if (overwrite || merged[name] === undefined) merged[name] = value
   }
@@ -267,6 +396,8 @@ export function createConfigHandler(args: {
       if (mode === "primary" || mode === "all") {
         extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       }
+      const contract = delegationContractFor(a.name)
+      if (contract) extras.promptSuffix = contract
       applyAgentEntry(agentMap, a, norm, extras)
     }
 
@@ -293,6 +424,8 @@ export function createConfigHandler(args: {
       const prompt = promptForBuiltinCategory(c.name, cfg.workflow, finalModel)
       if (prompt) extras.prompt = prompt
       extras.model = finalModel
+      const contract = delegationContractFor(c.name)
+      if (contract) extras.promptSuffix = contract
       applyAgentEntry(agentMap, baseAgent, merged, extras)
     }
 
@@ -332,14 +465,38 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
   target.permission = topLevel
   mergePermission(target, { webfetch: "allow", external_directory: "allow", task: "deny" }, false)
 
-  for (const name of ["orchestrator", "builder", "planner", "deep", "complex", "coding", "normal-task"]) {
+  for (const name of PRIMARY_COORDINATORS) {
     const entry = agentMap[name]
     if (isRecord(entry)) mergePermission(entry, { task: "allow", question: "allow", "task_*": "allow" }, false)
   }
 
-  for (const name of ["reviewer", "oracle", "oracle-high", "doc-search", "code-search", "explore", "media-reader", "clarifier", "plan-critic"]) {
+  for (const name of STANDARD_WORKFLOW_SUBAGENTS) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(UTILITY_LEAF_AGENTS) }, false)
+  }
+
+  for (const name of READ_ONLY_WORKFLOW_AGENTS) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(READ_ONLY_UTILITY_AGENTS) }, false)
+  }
+
+  for (const name of LOCAL_COORDINATORS) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) {
+      mergePermission(entry, {
+        task: taskAllowlist([...UTILITY_LEAF_AGENTS, ...SPECIALIST_EXECUTION_AGENTS]),
+      }, false)
+    }
+  }
+
+  for (const name of UTILITY_LEAF_AGENTS) {
     const entry = agentMap[name]
     if (isRecord(entry)) mergePermission(entry, { task: "deny" }, false)
+  }
+
+  for (const name of QUESTION_ENABLED_WORKFLOW_AGENTS) {
+    const entry = agentMap[name]
+    if (isRecord(entry)) mergePermission(entry, { question: "allow" }, false)
   }
 
   const docSearch = agentMap["doc-search"]
@@ -359,6 +516,11 @@ function registerCompatAgentAliases(
     const aliasEntry = { ...source, ...existing }
     if (typeof aliasEntry.description !== "string") {
       aliasEntry.description = `Compatibility alias for @${target}.`
+    }
+    const contract = delegationContractFor(alias)
+    if (contract) {
+      const basePrompt = typeof aliasEntry.prompt === "string" ? aliasEntry.prompt : ""
+      aliasEntry.prompt = appendPromptSuffix(basePrompt, contract)
     }
     agentMap[alias] = aliasEntry
   }

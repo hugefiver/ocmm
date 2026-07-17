@@ -11,6 +11,53 @@ import { loadAllPrompts } from "../intent/prompt-loader.ts"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
+const UTILITY_TASK_RULES = {
+  "*": "deny",
+  quick: "allow",
+  "code-search": "allow",
+  explore: "allow",
+  "doc-search": "allow",
+  research: "allow",
+  "media-reader": "allow",
+} as const
+
+const READ_ONLY_TASK_RULES = {
+  "*": "deny",
+  "code-search": "allow",
+  explore: "allow",
+  "doc-search": "allow",
+  research: "allow",
+  "media-reader": "allow",
+} as const
+
+const LOCAL_COORDINATOR_TASK_RULES = {
+  ...UTILITY_TASK_RULES,
+  coding: "allow",
+  frontend: "allow",
+  "hard-reasoning": "allow",
+  creative: "allow",
+  documenting: "allow",
+} as const
+
+function agentPermission(agentMap: Record<string, unknown>, name: string): Record<string, unknown> {
+  const entry = agentMap[name] as Record<string, unknown>
+  const permission = entry.permission
+  assert.ok(permission && typeof permission === "object" && !Array.isArray(permission), `missing permission for ${name}`)
+  return permission as Record<string, unknown>
+}
+
+function assertExactTaskRules(actual: unknown, expected: Record<string, string>, label: string): void {
+  assert.ok(actual && typeof actual === "object" && !Array.isArray(actual), `${label} task rules must be granular`)
+  assert.deepEqual(Object.entries(actual as Record<string, unknown>), Object.entries(expected), `${label} task rule order`)
+}
+
+function delegationContract(agentMap: Record<string, unknown>, name: string): string {
+  const prompt = String((agentMap[name] as Record<string, unknown>).prompt)
+  const match = prompt.match(/<ocmm-delegation-contract>([\s\S]*?)<\/ocmm-delegation-contract>/)
+  assert.ok(match, `missing delegation contract for ${name}`)
+  return match[1]!
+}
+
 test("config registers all built-in agents with provider/model strings", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; default_agent?: string } = { agent: {} }
@@ -153,10 +200,10 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
   // oracle is now an independent builtin with cross-gen requirement (not a reviewer alias).
   assert.notEqual(cfg.agent.oracle, cfg.agent.reviewer)
   assert.ok(cfg.agent["oracle-high"], "oracle-high should be registered as subagent")
-  assert.equal(
+  assertExactTaskRules(
     ((cfg.agent["oracle-high"] as Record<string, unknown>).permission as Record<string, unknown>).task,
-    "deny",
-    "oracle-high should be read-only by default",
+    READ_ONLY_TASK_RULES,
+    "oracle-high read-only task rules",
   )
   // oracle-high reuses reviewer prompt/calibration.
   assert.match(String((cfg.agent["oracle-high"] as Record<string, unknown>).prompt), /Agent Role: reviewer|READ-ONLY REVIEWER/)
@@ -166,40 +213,96 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
   assert.ok(cfg.agent.quick, "@quick should be available as category-subagent")
 })
 
-test("config applies default auto-approve permissions", async () => {
+test("config applies the exact flat-workflow task permission graph", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; permission?: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
   assert.deepEqual(cfg.permission, { webfetch: "allow", external_directory: "allow", task: "deny" })
-  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).task, "allow")
-  assert.equal(((cfg.agent.builder as Record<string, unknown>).permission as Record<string, unknown>).question, "allow")
-  assert.equal(((cfg.agent.planner as Record<string, unknown>).permission as Record<string, unknown>)["task_*"], "allow")
-  assert.equal(((cfg.agent.reviewer as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
-  assert.equal(((cfg.agent["oracle-high"] as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
-  assert.equal(((cfg.agent["doc-search"] as Record<string, unknown>).permission as Record<string, unknown>)["grep_app_*"], "allow")
+  for (const name of ["orchestrator", "builder"]) {
+    assert.equal(agentPermission(cfg.agent, name).task, "allow", `${name} must remain primary-capable`)
+  }
+  for (const name of ["quick", "code-search", "explore", "doc-search", "research", "media-reader"]) {
+    assert.equal(agentPermission(cfg.agent, name).task, "deny", `${name} must be a terminal leaf`)
+  }
+  for (const name of ["coding", "normal-task", "frontend", "creative", "hard-reasoning", "documenting"]) {
+    assertExactTaskRules(agentPermission(cfg.agent, name).task, UTILITY_TASK_RULES, `${name} utility allowlist`)
+  }
+  for (const name of ["planner", "reviewer", "oracle", "oracle-high", "clarifier", "plan-critic"]) {
+    assertExactTaskRules(agentPermission(cfg.agent, name).task, READ_ONLY_TASK_RULES, `${name} read-only allowlist`)
+    assert.equal(agentPermission(cfg.agent, name)["task_*"], undefined, `${name} must not retain a broad task wildcard`)
+  }
+  for (const name of ["deep", "complex"]) {
+    assertExactTaskRules(agentPermission(cfg.agent, name).task, LOCAL_COORDINATOR_TASK_RULES, `${name} local-coordinator allowlist`)
+  }
+  assert.equal(agentPermission(cfg.agent, "doc-search")["grep_app_*"], "allow")
 })
 
-test("config preserves explicit permission overrides", async () => {
-  const c = {
+test("config preserves scalar and granular explicit permission overrides", async () => {
+  const configured = {
     ...defaultConfig(),
     agents: {
       orchestrator: { permission: { task: "deny" as const, custom: "allow" as const } },
       reviewer: { tools: { task: true } },
     },
   }
-  const handler = createConfigHandler({ getConfig: () => c })
+  const hostTaskOverride = { "*": "allow" as const, planner: "allow" as const }
+  const handler = createConfigHandler({ getConfig: () => configured })
   const cfg: { agent: Record<string, unknown>; permission?: Record<string, unknown> } = {
-    agent: {},
+    agent: { coding: { permission: { task: hostTaskOverride } } },
     permission: { webfetch: "deny" },
   }
   await handler(cfg, undefined)
 
   assert.equal(cfg.permission?.webfetch, "deny")
   assert.equal(cfg.permission?.external_directory, "allow")
-  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).task, "deny")
-  assert.equal(((cfg.agent.orchestrator as Record<string, unknown>).permission as Record<string, unknown>).custom, "allow")
-  assert.equal(((cfg.agent.reviewer as Record<string, unknown>).permission as Record<string, unknown>).task, "allow")
+  assert.equal(agentPermission(cfg.agent, "orchestrator").task, "deny")
+  assert.equal(agentPermission(cfg.agent, "orchestrator").custom, "allow")
+  assert.equal(agentPermission(cfg.agent, "reviewer").task, "allow")
+  assertExactTaskRules(agentPermission(cfg.agent, "coding").task, hostTaskOverride, "host granular override")
+})
+
+test("config does not impose built-in task defaults on custom agents", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: { "custom-worker": { model: "openai/gpt-5.5" } },
+  }
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(cfg, undefined)
+
+  assert.ok(cfg.agent["custom-worker"])
+  assert.equal((cfg.agent["custom-worker"] as Record<string, unknown>).permission, undefined)
+})
+
+test("config appends authoritative contracts to non-primary builtin agents", async () => {
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  await handler(cfg, undefined)
+
+  for (const name of ["orchestrator", "builder"]) {
+    assert.doesNotMatch(String((cfg.agent[name] as Record<string, unknown>).prompt), /ocmm-delegation-contract/)
+  }
+
+  assert.match(delegationContract(cfg.agent, "code-search"), /utility leaf agent/i)
+  assert.match(delegationContract(cfg.agent, "code-search"), /Do not dispatch any subagent/)
+
+  const planner = delegationContract(cfg.agent, "planner")
+  assert.match(planner, /Allowed utility targets: `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./)
+  assert.match(planner, /`quick` is forbidden/)
+  assert.match(planner, /Return the completed plan or findings to the caller/)
+  assert.match(planner, /plan-critic.*orchestrator-owned/i)
+})
+
+test("config appends one terminal contract to an existing host prompt", async () => {
+  const cfg = { agent: { planner: { prompt: "Host planner prompt." } } }
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+  await handler(cfg, undefined)
+  await handler(cfg, undefined)
+
+  const prompt = String((cfg.agent.planner as Record<string, unknown>).prompt)
+  assert.match(prompt, /Host planner prompt\./)
+  assert.equal(prompt.match(/<ocmm-delegation-contract>/g)?.length, 1)
+  assert.match(prompt, /<\/ocmm-delegation-contract>\s*$/)
 })
 
 test("disabledAgents skips OMO-compatible aliases", async () => {

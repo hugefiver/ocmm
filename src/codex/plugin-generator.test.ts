@@ -21,6 +21,12 @@ import {
   stageCodexRuntime,
 } from "./plugin-generator.ts"
 
+function extractDelegationContract(instructions: string): string {
+  const match = instructions.match(/<ocmm-delegation-contract>([\s\S]*?)<\/ocmm-delegation-contract>/)
+  assert.ok(match, "generated instructions are missing the delegation contract")
+  return match[1]!
+}
+
 test("Codex manifest declares deepwork plugin resources", () => {
   const manifest = createPluginManifest("1.2.3")
 
@@ -176,6 +182,30 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   // Codex-compatible model, but they must not be identical objects.
   assert.notEqual(oracle.model, undefined)
   assert.ok(creative)
+
+  const coding = agents.find((agent) => agent.sourceName === "coding")
+  const quick = agents.find((agent) => agent.sourceName === "quick")
+  const planCritic = agents.find((agent) => agent.sourceName === "plan-critic")
+
+  assert.ok(coding)
+  assert.ok(quick)
+  assert.ok(planCritic)
+  assert.doesNotMatch(orchestrator.developerInstructions, /ocmm-delegation-contract/)
+  assert.match(extractDelegationContract(quick.developerInstructions), /Do not dispatch any subagent/)
+  assert.match(
+    extractDelegationContract(coding.developerInstructions),
+    /Allowed utility targets: `quick`, `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./,
+  )
+  assert.match(extractDelegationContract(planner.developerInstructions), /`quick` is forbidden/)
+  assert.match(extractDelegationContract(planCritic.developerInstructions), /plan-critic.*orchestrator-owned/i)
+  assert.match(
+    deep.developerInstructions,
+    /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`\./,
+  )
+  assert.match(
+    planner.developerInstructions,
+    /Compatibility routing applies only after the effective delegation contract permits delegation/,
+  )
 })
 
 test("custom GPT review and plan-review profiles never generate below xhigh and preserve max", async () => {
@@ -298,6 +328,10 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const oracleHigh = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`), "utf8")
     const reviewer = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-reviewer.toml`), "utf8")
     const creative = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-creative.toml`), "utf8")
+    const planner = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-planner.toml`), "utf8")
+    const coding = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-coding.toml`), "utf8")
+    const quick = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-quick.toml`), "utf8")
+    const deep = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-deep.toml`), "utf8")
     const projectPlanCritic = readFileSync(join(root, CODEX_PROJECT_AGENTS_DIR, `${CODEX_AGENT_PREFIX}-plan-critic.toml`), "utf8")
     const workflowSkill = readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8")
     const deepworkSkill = readFileSync(join(result.pluginRoot, "skills", "deepwork-writing-plans", "SKILL.md"), "utf8")
@@ -429,6 +463,14 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
 
     assert.equal(result.agentCount > 10, true)
     assert.equal(result.skillCount >= 6, true)
+
+    assert.match(planner, /ocmm-delegation-contract/)
+    assert.match(planner, /`quick` is forbidden/)
+    assert.match(planner, /Return the completed plan to the orchestrator/)
+    assert.match(coding, /Allowed utility targets: `quick`, `code-search`, `explore`, `doc-search`, `research`, `media-reader`/)
+    assert.match(quick, /Do not dispatch any subagent/)
+    assert.match(deep, /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`/)
+    assert.match(planner, /Compatibility routing applies only after the effective delegation contract permits delegation/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

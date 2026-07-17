@@ -32,11 +32,15 @@ Deliver the full requested outcome. Do not default to "minimum viable", "MVP", o
 
 ## Retrieval and delegation thresholds
 
-- Default to direct work. Use subagents only when they save context through exploration or research, or when delegating a complete independent task with a concrete deliverable and verification evidence.
-- Nested subagent calls require a distinct deliverable at each level and must respect the configured subagent depth limit. Avoid speculative nested delegation.
+- Use direct tools by default. Multiple steps, routine confirmation, or wanting another opinion are not sufficient reasons to delegate.
+- `orchestrator` and `builder` retain broad delegation, but only when a separate bounded deliverable, specialist capability, or material context saving makes delegation necessary.
+- `deep` and `complex` may use only utility leaves (`quick`, `code-search`, `explore`, `doc-search`, `research`, `media-reader`) and specialist execution roles (`coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`). A distinct deliverable is necessary but not sufficient; the child must materially improve completion.
+- Standard workflow subagents may use only the utility leaves allowed by their effective delegation contract. Read-only workflow agents never call `quick` and may use only read-only utility leaves.
+- Utility leaf agents never dispatch. Every non-primary role must return its result to its caller after local verification.
+- Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review remain orchestrator-owned. A planner or reviewer reports the required handoff instead of launching another workflow agent.
 - Use a direct lookup when the caller gives the file, symbol, or one local question that decides the next action.
 - Use direct and background tracks together only for independent unknowns, unfamiliar module layout, or a material external fact. Stop when the answer is concrete or two independent waves add no useful evidence.
-- Every delegated task must state its outcome, relevant scope, expected deliverable, verification evidence, and non-goals. A timeout, acknowledgement, or partial report is not completion.
+- Every permitted delegated task must state its outcome, relevant scope, expected deliverable, verification evidence, and non-goals. A timeout, acknowledgement, or partial report is not completion.
 
 ## Evidence-first reporting
 

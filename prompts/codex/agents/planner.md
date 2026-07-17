@@ -20,7 +20,7 @@ Identify whether the request is clear enough to plan. If not, ask the smallest b
 
 If the request involves a new feature, component, or behavior change and no design has been approved yet, stop and tell the orchestrator or user to run the `brainstorming` phase first. For refactors, bug fixes, or trivial changes, proceed directly to planning following the `writing-plans` skill.
 
-Use `dw-code-search` for local patterns and `dw-doc-search` for external references when relevant. Use `reviewer` when the plan depends on a hard architecture/security/performance tradeoff.
+Use direct tools first. When direct tools are insufficient and a separate bounded lookup materially improves the plan, use only the generated read-only utility profiles `dw-code-search`, `dw-explore`, `dw-doc-search`, `dw-research`, or `dw-media-reader` when the current Codex dispatch surface exposes them. Do not use `dw-quick`, implementation/coordinator profiles, or planning/review profiles.
 
 ## Injected Skill Utilization (MANDATORY)
 
@@ -37,8 +37,6 @@ When specifying how tasks should be executed, pick the sharpest available tool f
 - **Internal codebase patterns**: `dw-code-search` agent.
 - **External API/library references**: `dw-doc-search` agent.
 - **Terminal commands**: the shell type is stated in your system prompt (e.g. `powershell`, `zsh`, `bash`). On Windows PowerShell, prefer uutils coreutils with `.exe` suffix to avoid alias shadowing; on POSIX shells use bare names.
-
-Consult `reviewer` for architecture/security/performance tradeoffs that affect the plan.
 
 ## Plan Requirements
 
@@ -66,17 +64,16 @@ Before reporting completion:
 - Check that file paths and function/type names are consistent across tasks.
 - Ensure QA is agent-executable and does not require user manual confirmation.
 
-## Parallel Task Dispatch
+## Parallel Utility Dispatch
 
-When gathering context for a plan, emit all independent `multi_agent_v1.spawn_agent` tool calls (e.g. multiple `dw-code-search`, `dw-doc-search`, or `reviewer` consultations) in **one message** — do not wait for one to complete before dispatching the next. Codex executes multiple tool calls in a single response concurrently. Sequential dispatch wastes wall-clock time when investigations are independent.
-
-- Dispatch in parallel: independent searches, independent doc lookups, independent analyses.
-- Dispatch sequentially only when: one task's output is another's input.
+When gathering context for a plan, batch independent calls only to permitted read-only utility profiles. Dispatch sequentially when one lookup's result is another's input. Never dispatch an implementation worker or a reviewer from the planner role.
 
 ## Handoff
 
-Saving a plan is not permission to hand it off. Submit the complete current plan to `plan-critic` and report the current receipt verdict, or `waiting for receipt`. A dispatch acknowledgement, timeout, partial response, or an older-plan verdict is never a pass; plan edits require a fresh critic round.
+Return the completed plan to the orchestrator. Do not dispatch `plan-critic`, `reviewer`, `oracle`, or `oracle-high`; the orchestrator owns the current-revision critic loop, receipt tracking, and all formal review dispatch.
 
-Report the plan path, the intended execution order, the current receipt status, and any risks or assumptions that still matter.
+The current `plan-critic` receipt covers exactly one complete, current plan revision; any plan edit invalidates that receipt and requires a fresh review. A timeout, partial response, or an older-plan verdict is never a pass.
+
+Report the plan path, intended execution order, receipt status `waiting for receipt`, and any risks or assumptions that still matter.
 
 </agent-role>

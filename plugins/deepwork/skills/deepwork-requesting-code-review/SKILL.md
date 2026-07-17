@@ -32,11 +32,27 @@ Dispatch a code reviewer subagent to catch issues before they cascade. The revie
 
 ## How to Request
 
-**1. Get git SHAs:**
+**1. Choose the review input:**
+
+Use a committed range only when an orchestrator-owned, user-authorized commit already exists:
+
 ```bash
 BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
 HEAD_SHA=$(git rev-parse HEAD)
+git diff --stat $BASE_SHA..$HEAD_SHA
+git diff $BASE_SHA..$HEAD_SHA
 ```
+
+Working-tree diff review (use this when implementation subagents returned uncommitted changes):
+
+```bash
+git diff --stat
+git diff
+git diff --cached --stat
+git diff --cached
+```
+
+Do not require implementation subagents to commit, stage, or push merely to create a review range. The orchestrator owns any Git write and performs it only after explicit user authorization.
 
 **2. Dispatch code reviewer subagent:**
 
@@ -45,8 +61,7 @@ Use Task tool with `general-purpose` type, fill template at `code-reviewer.md`
 **Placeholders:**
 - `{DESCRIPTION}` - Brief summary of what you built
 - `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{BASE_SHA}` - Starting commit
-- `{HEAD_SHA}` - Ending commit
+- `{REVIEW_INPUT}` - Commit range plus commands, or working-tree/staged diff commands and output
 
 **3. Act on feedback:**
 - Fix Critical issues immediately
@@ -77,8 +92,8 @@ Reviewer agents are available, with distinct semantics:
 
 **How to dispatch:**
 
-- Single reviewer: dispatch one subagent with the chosen reviewer agent type (`oracle`, `reviewer`, or `oracle-high`), passing the work SHAs and context via the `code-reviewer.md` template.
-- Two reviewers: dispatch two subagents in parallel (`oracle` + `reviewer`), each with the same SHAs and context. Collect both feedback sets before acting.
+- Single reviewer: dispatch one subagent with the chosen reviewer agent type (`oracle`, `reviewer`, or `oracle-high`), passing the actual diff context and command output via the `code-reviewer.md` template, not necessarily SHAs.
+- Two reviewers: dispatch two subagents in parallel (`oracle` + `reviewer`), each with the same review input and context. Collect both feedback sets before acting.
 - Three reviewers: dispatch three subagents in parallel (`oracle` + `reviewer` + `oracle-high`) only when `oracle-high` is explicitly configured, available in the current dispatch surface/catalog, and not disabled. Collect all feedback sets before acting.
 
 **Default:** `oracle` for simple tasks. Upgrade to `oracle` + `reviewer` when the orchestrator judges the task complex or large. Add `oracle-high` only when the user/profile explicitly enables it, the profile/model is available, and it is not disabled; built-in or profile existence alone must not force three-review dispatch.
@@ -94,14 +109,16 @@ Reviewer agents are available, with distinct semantics:
 
 You: Let me request final acceptance review before declaring this done.
 
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
+[Implementation subagents returned uncommitted changes, so review the working tree:]
+git diff --stat
+git diff
+git diff --cached --stat
+git diff --cached
 
 [Dispatch code reviewer subagent]
   DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
   PLAN_OR_REQUIREMENTS: docs/superpowers/plans/deployment-plan.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
+  REVIEW_INPUT: working-tree diff commands and output above
 
 [Subagent returns]:
   Strengths: Clean architecture, real tests

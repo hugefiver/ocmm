@@ -23,7 +23,7 @@ prompts/<workflow>/
 | `reviewer` | Oracle (`packages/omo-opencode/src/agents/oracle.ts`) | Read-only advisor contract, local `reviewer` name, no Oracle branding in model-facing local role prompt |
 | `oracle` | (derived from reviewer prompt) | Independent built-in agent for self-supervision; shares `reviewer` prompt via `promptSource: "reviewer"`; configured cross-check / heterogeneous review default; not merely a `reviewer` alias |
 | `oracle-high` | (derived from reviewer prompt) | Independent built-in agent for optional supplemental high-effort review; shares `reviewer` prompt via `promptSource: "reviewer"`; no `defaultAlias`; included as third reviewer only when explicitly configured, available, and not disabled |
-| `planner` | Prometheus (`packages/omo-opencode/src/agents/prometheus/*`, `packages/prompts-core/prompts/prometheus/default.md`) | Local docs/superpowers plan path and writing-plans skill contract |
+| `planner` | Prometheus (`packages/omo-opencode/src/agents/prometheus/*`, `packages/prompts-core/prompts/prometheus/default.md`) | Local docs/superpowers plan path and writing-plans skill contract; **2026-07-17 flat-workflow adjustment:** planner returns completed plans to the orchestrator and no longer dispatches reviewers or plan-critic |
 | `clarifier` | Metis (`packages/omo-opencode/src/agents/metis.ts`) | Local `clarifier` name, directives feed local planner instead of Prometheus |
 | `plan-critic` | Momus (`packages/omo-opencode/src/agents/momus.ts`) | Local `plan-critic` name and inline-or-file plan review, blocker-focused only |
 
@@ -33,7 +33,7 @@ prompts/<workflow>/
 |------------|--------------------|-------|
 | `deepwork/default.md` | local ocmm controller + upstream discipline concepts | v1 default is intentionally concise; omo default stays upstream-first; all workflows add shell-adaptation guidance so examples are translated to the active runtime shell |
 | `deepwork/gpt.md` | `packages/prompts-core/prompts/ultrawork/gpt.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
-| `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts` and `packages/omo-codex/.../hephaestus/gpt-5.6.md` | GPT-5.6-only outcome-first, conditional-retrieval, evidence-first, and subagent-restraint layer; retains local authorization and tiered QA rules; also carries the global shell-adaptation guidance |
+| `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts` and `packages/omo-codex/.../hephaestus/gpt-5.6.md` | GPT-5.6-only outcome-first, conditional-retrieval, evidence-first, and subagent-restraint layer; retains local authorization and tiered QA rules; also carries the global shell-adaptation guidance; **2026-07-17 flat-workflow adjustment:** replaced distinct-deliverable nesting with role-aware utility/specialist allowlists and a strict necessity threshold |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline plus shell-adaptation guidance |
 | `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates |
@@ -73,6 +73,17 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - **Review/QA labels**: review findings are labeled `[product]` (proposed implementation/product change) or `[evidence]` (missing or insufficient proof). An `[evidence]` blocker requires additional evidence, not a product rewrite. Added to the v1 `requesting-code-review` and `subagent-driven-development` skills and to all deepwork variants (except the planner variant, which does not review).
 - **GPT-5.6 restraint preserved**: `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` retains the existing GPT-5.6-specific subagent restraint. The new semantics above are expressed as general rules, not GPT-5.6-only rules.
 - **Shell Adaptation preserved**: existing global Shell Adaptation guidance remains untouched across all variants.
+
+## Flat Workflow Subagent Policy (2026-07-17)
+
+- The utility-leaf set is `quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`; utility leaves never dispatch.
+- Standard workflow agents may call only utility leaves. Read-only workflow agents exclude `quick` and may call only `code-search`, `explore`, `doc-search`, `research`, and `media-reader`.
+- Local coordinators `deep` and `complex` may additionally call only `coding`, `frontend`, `hard-reasoning`, `creative`, and `documenting`, and only for materially useful bounded deliverables.
+- `prompts/{omo,v1,codex}/agents/planner.md` return completed plans to the orchestrator rather than launching reviewers or plan-critic.
+- `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` use the same role-aware necessity threshold and no longer authorize arbitrary distinct-deliverable nesting.
+- Effective config prompt contracts override broader skill/model/adapter wording. Formal planner dispatch, the plan-critic loop, formal plan review and final acceptance review remain orchestrator-owned.
+- Final review may consume either a committed range or a working-tree/staged diff; implementation subagents report changes and do not create commits merely to create review SHAs.
+- Orchestrator requesting-code-review wording must describe committed ranges or working-tree/staged diff review input, never SHA-only review input.
 
 ## Observation-Only Upstream Items (2026-07-13)
 

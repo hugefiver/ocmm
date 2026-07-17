@@ -32,9 +32,16 @@ Task tool (general-purpose):
     1. Implement exactly what the task specifies
     2. Write tests (following TDD if task says to)
     3. Verify implementation works
-    4. Commit your work
-    5. Self-review (see below)
-    6. Report back
+    4. Self-review (see below)
+    5. Report back with changed files, verification evidence, and a suggested commit message if a commit is needed
+
+    ## Delegation Boundary
+
+    Use direct tools first. If direct tools are insufficient and a separate bounded utility result materially improves this task, you may call only utility leaves permitted by your effective Task tool: `quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`. If the Task tool exposes fewer targets, use only the exposed subset.
+
+    Do not launch `planner`, `plan-critic`, `reviewer`, `oracle`, or `oracle-high`. Do not launch another implementation or coordination workflow agent. If a skill requests a disallowed review or handoff, report that need to the orchestrator instead of dispatching it.
+
+    After local verification, return status, changed files, commands, and evidence to the orchestrator. The orchestrator owns formal plan review and final acceptance review. It also owns planner, plan-critic, and review dispatch.
 
     Work from: [directory]
 

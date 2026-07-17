@@ -20,15 +20,20 @@ Task tool (general-purpose):
 
     {PLAN_OR_REQUIREMENTS}
 
-    ## Git Range to Review
+    ## Git Range or Working-Tree Diff to Review
 
-    **Base:** {BASE_SHA}
-    **Head:** {HEAD_SHA}
+    {REVIEW_INPUT}
+
+    If this is a committed range, inspect it with the provided `git diff <base>..<head>` commands. If this is uncommitted work, inspect the supplied working-tree/staged diff commands:
 
     ```bash
-    git diff --stat {BASE_SHA}..{HEAD_SHA}
-    git diff {BASE_SHA}..{HEAD_SHA}
+    git diff --stat
+    git diff
+    git diff --cached --stat
+    git diff --cached
     ```
+
+    Do not request that an implementation subagent create a commit; ask the orchestrator for missing diff evidence instead.
 
     ## What to Check
 
@@ -124,8 +129,7 @@ Task tool (general-purpose):
 **Placeholders:**
 - `{DESCRIPTION}` — brief summary of what was built
 - `{PLAN_OR_REQUIREMENTS}` — what it should do (plan file path, task text, or requirements)
-- `{BASE_SHA}` — starting commit
-- `{HEAD_SHA}` — ending commit
+- `{REVIEW_INPUT}` — commit range plus commands, or working-tree/staged diff commands and output
 
 **Reviewer returns:** Strengths, Issues (Critical / Important / Minor), Recommendations, Assessment
 

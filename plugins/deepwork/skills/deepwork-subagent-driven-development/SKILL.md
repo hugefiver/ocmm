@@ -49,11 +49,13 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
 2. **Per task:**
    a. Dispatch implementer subagent (use implementer-prompt.md template)
    b. If implementer asks questions, answer and re-dispatch
-   c. Implementer implements, tests, commits, self-reviews
+   c. Implementer implements, tests, self-reviews, and reports changed files plus a suggested commit message. Subagents do not commit, stage, push, or run any Git write command.
    d. **Completion/Integration check (not a full review):** Read the agent's summary, inspect touched files/diff, run targeted tests or record implementer evidence, verify the task is complete, and check whether the change conflicts with earlier tasks or needs follow-up by the same implementer
    e. If the completion check finds gaps, re-dispatch the same implementer to fix them
    f. Mark task complete in TodoWrite
 3. **After all tasks:** Dispatch final code reviewer subagent for the entire implementation (use requesting-code-review skill)
+
+**Git ownership:** Subagents do not commit, stage, push, or run any Git write command. They return changed files and a suggested commit message to the orchestrator, along with verification evidence. The orchestrator performs any Git write only after explicit user authorization.
 
 ## Model Selection
 
@@ -77,7 +79,7 @@ Use the least powerful model that can handle each role — but **always specify 
 
 Implementer subagents report one of four statuses. Handle each appropriately:
 
-**DONE:** Run the completion/integration check, then continue to the next task. Do not dispatch spec-reviewer or code-quality-reviewer for a clean DONE result.
+**DONE:** Run the completion/integration check, then continue to the next task. Do not dispatch spec-reviewer or code-quality-reviewer for a clean DONE result. If the work needs a commit, the implementer reports the intended files and message; the orchestrator handles any Git write only after explicit user authorization.
 
 **DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, resolve them before continuing. If the concerns indicate high risk or cross-task conflict, consult a reviewer early; otherwise note them and continue after the completion check.
 
@@ -152,7 +154,7 @@ Each implementation task follows TDD:
 - Repeat only until that blocker is resolved
 
 **If subagent fails task:**
-- Dispatch fix subagent with specific instructions
+- Dispatch a fix subagent with specific instructions; the fix subagent also reports changes instead of committing.
 - Don't try to fix manually (context pollution)
 
 ## Completion / Integration Check
@@ -196,7 +198,7 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
 
 **Do not paste accumulated history into dispatch prompts.** Each dispatch gets exactly the context it needs — the task text, the diff, the constraints. A real session once dispatched 42k characters where 99% was pasted conversation history. The reviewer cannot use that; it dilutes focus.
 
-**Dispatch the diff, not a summary.** When early consultation or final acceptance review is needed, the reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the commit range, the diff, and the task description. The final acceptance review uses `code-reviewer.md` via the requesting-code-review skill; `spec-reviewer-prompt.md` and `code-quality-reviewer-prompt.md` are optional narrow-consult tools only, not routine per-task gates.
+**Dispatch the diff, not a summary.** When early consultation or final acceptance review is needed, the reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the review input, the diff, and the task description; the review input may be a committed range or a working-tree/staged diff. The final acceptance review uses `code-reviewer.md` via the requesting-code-review skill; `spec-reviewer-prompt.md` and `code-quality-reviewer-prompt.md` are optional narrow-consult tools only, not routine per-task gates.
 
 **Handling findings:**
 - **Critical + Important** → dispatch a fix subagent. Each fix dispatch must include: the test name that covers the fix, the command to run it, and the expected output.
@@ -222,13 +224,13 @@ The orchestrator judges complexity from the plan scope and actual changes. When 
 
 **2. Dispatch the acceptance review:**
 
-Use the `requesting-code-review` skill. Pass the full change range:
-- `BASE_SHA` = commit before the first task of the plan
-- `HEAD_SHA` = current HEAD (after all tasks)
-- `DESCRIPTION` = summary of the complete feature/work
-- `PLAN_OR_REQUIREMENTS` = the plan file path
+Use the `requesting-code-review` skill. Pass either a committed range or an uncommitted working-tree/staged diff:
+- committed range: `BASE_SHA`, `HEAD_SHA`, `DESCRIPTION`, and `PLAN_OR_REQUIREMENTS` when the orchestrator has already created a user-authorized commit;
+- working-tree/staged diff: `git diff --stat`, `git diff`, `git diff --cached --stat`, `git diff --cached`, `DESCRIPTION`, and `PLAN_OR_REQUIREMENTS` when implementation subagents returned uncommitted changes.
 
-For two-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same SHAs and context. Collect both feedback sets before proceeding.
+Do not require implementation subagents to commit, stage, or push merely to create review SHAs. The orchestrator owns any Git write and performs it only after explicit user authorization.
+
+For two-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same review input and context. Collect both feedback sets before proceeding.
 
 For three-reviewer dispatch: spawn three subagents in parallel (one `oracle`, one `reviewer`, one `oracle-high`) only when `oracle-high` is explicitly configured, available, and not disabled. Collect all feedback sets before proceeding. Do not force a third reviewer merely because the profile exists.
 
