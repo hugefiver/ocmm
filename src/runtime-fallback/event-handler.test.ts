@@ -1476,3 +1476,40 @@ test("real event handler: deleting one child does not cancel another child's pen
   await flushHandler()
   assert.deepEqual(dispatchedModels(mock.calls), ["provider-a/primary"])
 })
+
+test("real event handler: single pre-resolution success idle clears dedicated tracking before a later 429", async () => {
+  const retryPrompt = deferred<unknown>()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient([retryPrompt.promise])
+  const cfg = makeHandlerConfig(standardHandlerChain())
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    clock: () => 1_000,
+    random: () => 0,
+  })
+
+  await handler(makeCreatedEvent("single-pre-resolution-idle", { parentID: "root" }))
+  await handler(makeErrorEvent("single-pre-resolution-idle", { status: 429 }, {
+    agent: "worker",
+    model: modelFor("primary"),
+  }))
+  await handler(makeIdleEvent("single-pre-resolution-idle"))
+  await scheduler.run(0)
+  await flushHandler()
+  assert.deepEqual(dispatchedModels(mock.calls), ["provider-a/primary"])
+
+  await handler(makeIdleEvent("single-pre-resolution-idle"))
+  const schedulerTaskCount = scheduler.tasks.length
+  retryPrompt.resolve(undefined)
+  await flushHandler()
+
+  await handler(makeErrorEvent("single-pre-resolution-idle", { status: 429 }, {
+    agent: "worker",
+    model: modelFor("primary"),
+  }))
+  assert.equal(scheduler.tasks.length, schedulerTaskCount, "the later 429 must not create a dedicated retry gate")
+  assert.deepEqual(dispatchedModels(mock.calls), ["provider-a/primary", "provider-b/fallback-a"])
+  assert.equal(mock.aborts, 1, "the later 429 uses generic fallback's default abort")
+})
