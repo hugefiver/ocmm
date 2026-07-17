@@ -100,15 +100,15 @@ Flow: `input.agent` + `input.model` → 4-tier resolve → `classifyModelFamily`
 
 Code: `src/hooks/chat-params.ts`, `src/routing/{resolver,variant-translator}.ts`.
 
-### Reactive layer — `event` (session.error)
+### Reactive layer — generic `event` fallback
 
-Runs when a session errors. Pipeline:
+Runs when a session error is not handled by the dedicated subagent-429 controller. Pipeline:
 
-1. **Classify** — `classifyError(error, cfg) → {retryable, reason, statusCode?, message}`. Retryable if `status ∈ retryOnStatusCodes` OR `message` matches `retryOnPatterns` regex. Status takes priority. Invalid user regexes are silently skipped.
+1. **Classify** — `classifyError(error, cfg) → {retryable, reason, statusCode?, message, recoveryDelayMs?}`. Retryable if `status ∈ retryOnStatusCodes` OR `message` matches `retryOnPatterns` regex. Status takes priority; `recoveryDelayMs` is present only for explicit 429s. Invalid user regexes are silently skipped.
 2. **Resolve requirement** — user `agents[name]` → user `categories[name]` → builtin agents → builtin categories.
 3. **Mark failed** — `markModelFailed` records a timestamp for the current model.
 4. **Find next** — from `fallbackIndex + 1`, skipping failed models and those still in cooldown.
-5. **Dispatch** — `client.session.prompt` reusing the last user message's parts. Best-effort `client.session.abort` first. Dedup via a module-level `Set<sessionID>` to prevent concurrent retries.
+5. **Dispatch** — `client.session.prompt` reusing the latest contiguous user-message block. Best-effort `client.session.abort` first. Dedup via a module-level `Set<sessionID>` to prevent concurrent retries.
 6. **Stop conditions** — `maxAttempts` reached, chain exhausted, or no next model.
 
 **Never retried:** `AbortError`, `MessageAbortedError`, `DOMException` with `isAbort: true`.
@@ -117,11 +117,45 @@ Runs when a session errors. Pipeline:
 
 **`FallbackState`** (in `event-handler.ts` closure, `Map<sessionId, FallbackState>`):
 ```
-{ originalModel: string, fallbackIndex: number, attempts: number, failedModels: Map<string, number> }
+{
+  originalModel: string,
+  fallbackIndex: number,
+  attempts: number,       // committed model-switch attempts only
+  activeModel?: string,
+  failedModels: Map<string, number> // generic cooldown timestamps
+}
 ```
-Cleaned on `session.created` / `session.deleted` / `session.idle`.
+It owns fallback position, committed model-switch attempts, the active model, and generic cooldown state. Idle never clears `FallbackState`; lifecycle cleanup occurs on session recreation or deletion.
 
 Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-handler}.ts`, `src/hooks/event.ts`.
+
+### Dedicated subagent 429 fallback
+
+The shared controller creates state only for a newly created child session. Child detection accepts the four OpenCode parent fields `parentID`, `parentId`, `parentSessionID`, and `parentSessionId`. It starts dedicated handling only for a retryable error with an explicit `statusCode === 429`; root sessions, untracked sessions, disabled dedicated handling, and regex-only matches use generic fallback instead. An initial idle without a dedicated 429 removes the child-session state.
+
+The dedicated path has a two-signal gate: the recovery-delay timer and the idle event emitted for the 429 error. It sends its retry or switch prompt without aborting the child; generic dispatch retains best-effort abort behavior. A recovery hint strictly greater than 10 minutes is a zero-delay probe; a hint at or below 10 minutes waits in full. Without a hint, delay is equal-jitter exponential backoff with a 1-second base and a 30-second cap.
+
+`subagent429.maxRetries` defaults to 5. `0` prepares a model switch immediately, but the two-signal gate still applies. Retry counts use model scope unless `providerScopes` declares a provider scope; exhausting a provider scope blocks every candidate from that provider in the current child session. Each newly selected model receives a fresh scoped retry budget. Dedicated retries do not consume `runtimeFallback.maxAttempts`; only a committed model switch increments that generic counter.
+
+```text
+session.error(429) -> prepare retry/switch gate
+timer -> delayReady
+error-owned session.idle -> errorIdleObserved
+both true -> no-abort dedicated dispatch generation
+  first queued provider outcome -> Queued429 | QueuedOtherError
+  idle after Queued429 -> Queued429.errorIdleObserved
+  idle without queue -> ActiveDispatch.idleObserved
+dispatch settlement -> QueuedOutcome > idleObserved > awaiting-result
+Queued429 -> account/commit once -> process queued target serially
+QueuedOtherError -> account/commit once -> stop dedicated -> generic handoff once
+session.deleted -> invalidate lifecycle/timer/dispatch generations
+non-429 outside active dispatch -> stop dedicated -> generic fallback
+non-429 during active dispatch -> queue first outcome -> post-settlement generic handoff
+```
+
+During an active dedicated dispatch, the first queued provider outcome takes precedence over idle. A queued 429 is processed serially against the dispatched target after settlement. A queued non-429 completes accounting once, stops the dedicated controller, and hands off to generic fallback once. A bare `false` dispatch result with no queued outcome stops the dedicated flow. `runtimeFallback.dispatch: false` is observe-only: it records the classification but schedules and dispatches nothing.
+
+`FallbackState` and the controller have separate ownership. `FallbackState` owns `fallbackIndex`, committed model-switch `attempts`, `activeModel`, and generic cooldowns. At the controller layer, each child-session state owns its initial marker, scoped retry counts, blocked deadlines, pending two-signal gate, active-dispatch idle state, queued outcome plus generic-handoff state, one timer, and lifecycle/timer/dispatch generations. No child-session state crosses session boundaries, and idle never clears `FallbackState`.
 
 ### Config
 
@@ -133,7 +167,15 @@ Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-ha
     "maxAttempts": 3,
     "cooldownSeconds": 60,
     "retryOnStatusCodes": [429, 500, 502, 503, 504],
-    "retryOnPatterns": [/* 9 patterns */]
+    "retryOnPatterns": [/* 9 patterns */],
+    "subagent429": {
+      "enabled": true,
+      "maxRetries": 5,
+      "providerScopes": {
+        "anthropic": "provider",
+        "openai": "model"
+      }
+    }
   }
 }
 ```
@@ -194,9 +236,10 @@ Reads `input.sessionID` and prepends queued persistent v1 skill content plus any
 Input shape: `{event: {type, properties}}` (Phase-1 code read `input.type` directly — fixed in Phase 3).
 
 Delegated to `createRuntimeFallbackEventHandler`:
-- `session.created` — clear state.
-- `session.deleted` / `session.idle` — clear intent + fallback state.
-- `session.error` — skip if disabled / no sessionID / abort / in-flight; else classify → resolve requirement → skip if chain ≤ 1 → markFailed → prepareFallback → observe-only check → dispatch.
+- `session.created` — reset generic state and create dedicated 429 state only when one of the supported parent-session fields marks the session as a child.
+- `session.deleted` — clear generic state and invalidate the dedicated controller's lifecycle, timer, and dispatch generations.
+- `session.idle` — report the event to the dedicated controller; it is suppressed while a dedicated gate, dispatch, or queued 429 is active. It never clears generic `FallbackState`.
+- `session.error` — explicit 429 errors for tracked children first enter the dedicated controller. Generic errors, regex-only matches, roots, and untracked children use the generic classifier → resolve requirement → mark failed → prepare fallback → observe-only check → dispatch pipeline. Non-429 outcomes received during dedicated work invalidate or hand off through the controller's guarded lifecycle.
 
 ## Config schema
 

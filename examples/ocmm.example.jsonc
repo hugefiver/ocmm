@@ -66,7 +66,7 @@
   "runtimeFallback": {
     "enabled": true,            // master switch (false = event hook no-ops)
     "dispatch": true,           // false = observe-only (classify + log, no retry)
-    "maxAttempts": 3,           // cap per session
+    "maxAttempts": 3,           // cap committed model switches per session
     "cooldownSeconds": 60,      // skip a failed model for this long
     "retryOnStatusCodes": [429, 500, 502, 503, 504],
     "retryOnPatterns": [
@@ -79,7 +79,15 @@
       "bad gateway",
       "capacity",
       "try again"
-    ]
+    ],
+    "subagent429": {
+      "enabled": true,
+      "maxRetries": 5,
+      "providerScopes": {
+        "anthropic": "provider",
+        "openai": "model"
+      }
+    }
   },
 
   "intent": {
@@ -96,7 +104,10 @@
         "orchestrator": { "model": "openai/gpt-5.5", "variant": "high" },
         "worker": { "model": "openai/gpt-5.5", "variant": "high" }
       },
-      "runtimeFallback": { "maxAttempts": 5 }
+      "runtimeFallback": {
+        "maxAttempts": 5,
+        "subagent429": { "maxRetries": 2 }
+      }
     },
     "claude": {
       "agents": {

@@ -298,6 +298,14 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
       "capacity",
       "try again",
     ],
+    "subagent429": {
+      "enabled": true,
+      "maxRetries": 5,
+      "providerScopes": {
+        "anthropic": "provider",
+        "openai": "model"
+      }
+    }
   },
 
   "subagent": {
@@ -578,13 +586,23 @@ The CLI reads/writes the **user** config file at `~/.config/opencode/ocmm.json[c
 
 ## Runtime fallback
 
-When a model call fails with a retryable error (HTTP 429/5xx, or a message matching `retryOnPatterns`), ocmm:
+When a model call falls through to generic runtime fallback (HTTP 429/5xx, or a message matching `retryOnPatterns`), ocmm:
 
 1. Resolves the failing agent's `ModelRequirement` (user config -> built-in defaults).
 2. Marks the just-failed model as failed with a timestamp.
 3. Finds the next entry in the fallback chain that is not in cooldown (default 60s).
-4. Dispatches a new `client.session.prompt` call with the next model, reusing the last user message's parts.
+4. Dispatches a new `client.session.prompt` call with the next model, reusing the latest contiguous user-message block.
 5. Aborts the original session first (best-effort).
+
+### Subagent 429 recovery
+
+New child sessions have a dedicated recovery path only for retryable errors with an explicit HTTP status of `429`. It recognizes the OpenCode parent-session fields `parentID`, `parentId`, `parentSessionID`, and `parentSessionId` when the child is created; root sessions, untracked sessions, and regex-only matches remain on generic fallback. A non-429 error before the child enters the dedicated path leaves it on the generic path.
+
+Each dedicated 429 waits for two signals before retrying or switching: its delay timer and the idle event owned by that error. Dedicated dispatches do **not** abort the child session; generic fallback continues to use a best-effort abort. Recovery hints longer than 10 minutes become a zero-delay probe, while hints of 10 minutes or less wait in full. With no hint, the wait uses capped equal-jitter exponential backoff (1-second base, 30-second cap).
+
+`subagent429.maxRetries` defaults to 5 and is scoped to a model by default. Set it to 0 to prepare a switch immediately (the two signals still gate dispatch). A configured provider scope blocks every model of that provider, but only in the current child session. Every newly selected model starts with a fresh retry budget; `runtimeFallback.maxAttempts` counts only committed model switches, not same-model dedicated retries.
+
+While a dedicated dispatch is active, the first queued provider outcome takes priority over idle. A queued 429 continues the dedicated flow after the active dispatch settles; a queued non-429 error hands off to generic fallback after settlement; and a bare `false` dispatch result with no queued outcome stops the dedicated flow. With `runtimeFallback.dispatch: false`, ocmm is observe-only and dispatches neither dedicated retries nor generic fallback. Dedicated state is never shared between child sessions.
 
 ```jsonc
 "runtimeFallback": {
@@ -593,7 +611,15 @@ When a model call fails with a retryable error (HTTP 429/5xx, or a message match
   "maxAttempts": 3,
   "cooldownSeconds": 60,
   "retryOnStatusCodes": [429, 500, 502, 503, 504],
-  "retryOnPatterns": ["rate limit", "overloaded", "..."]
+  "retryOnPatterns": ["rate limit", "overloaded", "..."],
+  "subagent429": {
+    "enabled": true,
+    "maxRetries": 5,
+    "providerScopes": {
+      "anthropic": "provider",
+      "openai": "model"
+    }
+  }
 }
 ```
 
