@@ -1,6 +1,5 @@
 import { classifyError, type ErrorClassification } from "./error-classifier.ts"
 import {
-  createFallbackState,
   markModelFailed,
   modelKey,
   peekNextFallback,
@@ -8,10 +7,9 @@ import {
   type FallbackState,
 } from "./fallback-state.ts"
 import { dispatchFallbackRetry, isDispatchInFlight, type OcmmClient } from "./dispatcher.ts"
-import { entryExactlyMatchesModel, entryMatchesModel, resolveEffectiveRequirement } from "../routing/resolver.ts"
-import { matchRequirementSuccessor } from "../routing/model-upgrades.ts"
-import type { OcmmConfig } from "../config/schema.ts"
-import type { FallbackEntry } from "../shared/types.ts"
+import { resolveEffectiveRequirement } from "../routing/resolver.ts"
+import type { OcmmConfig, RuntimeFallbackConfig } from "../config/schema.ts"
+import type { ModelRequirement } from "../shared/types.ts"
 import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-message.ts"
 import {
   isIdleContinuationEnabled,
@@ -23,55 +21,24 @@ import {
 } from "./idle-state.ts"
 import { hasUnfinishedTodos } from "./todo-reader.ts"
 import { isRecord, log } from "../shared/logger.ts"
-
-const ABORT_NAMES = new Set([
-  "AbortError",
-  "MessageAbortedError",
-  "DOMException",
-])
-
-function isAbortError(error: unknown): boolean {
-  if (!isRecord(error)) return false
-  const name = typeof error.name === "string" ? error.name : ""
-  if (ABORT_NAMES.has(name)) return true
-  if (error.isAbort === true) return true
-  return false
-}
-
-function resolveSessionID(props: unknown): string {
-  if (!isRecord(props)) return ""
-  if (typeof props.sessionID === "string") return props.sessionID
-  if (isRecord(props.session) && typeof props.session.id === "string") {
-    return props.session.id
-  }
-  return ""
-}
-
-function resolveAgent(props: unknown): string | undefined {
-  if (!isRecord(props)) return undefined
-  if (typeof props.agent === "string") return props.agent
-  if (isRecord(props.agent) && typeof props.agent.name === "string") {
-    return props.agent.name
-  }
-  return undefined
-}
-
-function resolveEventModel(props: unknown): { providerID: string; modelID: string } | null {
-  if (!isRecord(props)) return null
-  const model = props.model
-  if (!isRecord(model)) return null
-  const providerID = typeof model.providerID === "string" ? model.providerID : ""
-  const modelID = typeof model.modelID === "string" ? model.modelID : ""
-  if (!providerID || !modelID) return null
-  return { providerID, modelID }
-}
-
-function parseRegisteredModel(value: string | undefined): { providerID: string; modelID: string } | null {
-  if (!value) return null
-  const slash = value.indexOf("/")
-  if (slash <= 0 || slash === value.length - 1) return null
-  return { providerID: value.slice(0, slash), modelID: value.slice(slash + 1) }
-}
+import {
+  createSubagent429Controller,
+  type Subagent429Scheduler,
+  type Subagent429Target,
+} from "./subagent-429-controller.ts"
+import {
+  applyRequirementDefaults,
+  chainHeadIdentity,
+  createRuntimeFallbackSessionLifecycle,
+  getOrCreateFallbackState,
+  isRuntimeFallbackAbort,
+  parseModelIdentity,
+  resolveParentSessionID,
+  resolveEventModelIdentity,
+  resolveRuntimeFallbackAgent,
+  resolveRuntimeFallbackSessionID,
+  resolveRetryTarget,
+} from "./event-handler-support.ts"
 
 export type RuntimeFallbackDeps = {
   getConfig: () => OcmmConfig
@@ -80,12 +47,117 @@ export type RuntimeFallbackDeps = {
   idleState?: IdleContinuationState
   clearSessionIntent?: (sessionID: string) => void
   registeredAgentModels?: ReadonlyMap<string, string>
+  scheduler?: Subagent429Scheduler
+  clock?: () => number
+  random?: () => number
+}
+
+type GenericFallbackInput = {
+  sessionID: string
+  generation: number
+  agent?: string
+  classification: ErrorClassification
+  requirement: ModelRequirement | null
+  state?: FallbackState
+  failedTarget?: Subagent429Target
+  runtimeConfig: RuntimeFallbackConfig
 }
 
 export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
   input: unknown,
 ) => Promise<void> {
   const sessionStates = new Map<string, FallbackState>()
+  const clock = deps.clock ?? Date.now
+  const lifecycle = createRuntimeFallbackSessionLifecycle(deps.client)
+  const controller = createSubagent429Controller({
+    ...(deps.scheduler === undefined ? {} : { scheduler: deps.scheduler }),
+    clock,
+    ...(deps.random === undefined ? {} : { random: deps.random }),
+    logger: log,
+    ...(deps.client === undefined
+      ? {}
+        : {
+          dispatchRetry: async ({ sessionID, agent, target, reason }) => {
+            const generation = lifecycle.currentGeneration(sessionID)
+            await lifecycle.waitForStaleDispatches(sessionID, generation)
+            if (!lifecycle.isCurrent(sessionID, generation)) return false
+            return lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
+              client: lifecycle.guardedClient(sessionID, generation),
+              sessionID,
+              ...(deps.directory === undefined ? {} : { directory: deps.directory }),
+              ...(agent === undefined ? {} : { agent }),
+              newEntry: target.entry,
+              reason,
+              abortBeforeDispatch: false,
+            }))
+          },
+        }),
+  })
+
+  const runGenericFallback = async ({
+    sessionID,
+    generation,
+    agent,
+    classification,
+    requirement,
+    state,
+    failedTarget,
+    runtimeConfig,
+  }: GenericFallbackInput): Promise<void> => {
+    if (!lifecycle.isCurrent(sessionID, generation)) return
+    if (!classification.retryable) return
+    if (!requirement || requirement.fallbackChain.length <= 1) {
+      log.info(`no fallback chain configured for agent=${agent ?? "<none>"}; skipping`)
+      return
+    }
+    if (!state || !failedTarget) {
+      log.info(`could not determine failed model for agent=${agent ?? "<none>"}; skipping`)
+      return
+    }
+
+    const justFailedKey = modelKey(failedTarget.providerID, failedTarget.modelID)
+    markModelFailed(state, justFailedKey, clock())
+    const peek = peekNextFallback(
+      state,
+      requirement,
+      justFailedKey,
+      runtimeConfig.maxAttempts,
+      runtimeConfig.cooldownSeconds,
+      clock(),
+    )
+    if (!peek.ok) {
+      log.warn(`fallback exhausted: ${peek.reason} (session=${sessionID.slice(0, 16)}…)`)
+      return
+    }
+
+    const entry = applyRequirementDefaults(requirement, peek.entry)
+    log.info(
+      `fallback attempt ${peek.nextAttempts}/${runtimeConfig.maxAttempts}: ` +
+        `model=${entry.providers[0] ?? ""}/${entry.model}`,
+    )
+    if (!runtimeConfig.dispatch) {
+      log.info("dispatch disabled; observe-only")
+      return
+    }
+    if (!deps.client) {
+      log.warn("no client available; cannot dispatch (observe-only)")
+      return
+    }
+
+    await lifecycle.waitForStaleDispatches(sessionID, generation)
+    if (!lifecycle.isCurrent(sessionID, generation)) return
+    const dispatched = await lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
+      client: lifecycle.guardedClient(sessionID, generation),
+      sessionID,
+      ...(deps.directory === undefined ? {} : { directory: deps.directory }),
+      ...(agent === undefined ? {} : { agent }),
+      newEntry: entry,
+      reason: classification.reason,
+    }))
+    if (dispatched && lifecycle.isCurrent(sessionID, generation)) {
+      commitFallback(state, entry, peek.index)
+    }
+  }
 
   return async (raw) => {
     if (!isRecord(raw)) return
@@ -94,15 +166,21 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     if (!eventType) return
 
     const props = isRecord(event.properties) ? event.properties : event
-    const sessionID = resolveSessionID(props)
+    const sessionID = resolveRuntimeFallbackSessionID(props)
 
     if (eventType === "session.created") {
-      if (sessionID) sessionStates.delete(sessionID)
+      if (sessionID) {
+        lifecycle.beginSession(sessionID)
+        sessionStates.delete(sessionID)
+        controller.onSessionCreated(sessionID, resolveParentSessionID(props) !== undefined)
+      }
       return
     }
 
     if (eventType === "session.deleted") {
       if (sessionID) {
+        lifecycle.invalidateSession(sessionID)
+        controller.onDeleted(sessionID);
         (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         sessionStates.delete(sessionID)
         if (deps.idleState) clearSession(deps.idleState, sessionID)
@@ -112,12 +190,15 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
 
     if (eventType === "session.idle") {
       if (sessionID) {
+        const idleResult = controller.onIdle(sessionID);
         (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         // Do NOT delete sessionStates here — the session may still be live
         // and a later session.error must continue from existing fallback
         // state (fallbackIndex, activeModel, attempts). Only session.deleted
         // and session.created reset fallback state.
-        await handleIdleContinuation(deps, sessionID)
+        if (!idleResult.suppressIdleContinuation) {
+          await handleIdleContinuation(deps, sessionID)
+        }
       }
       return
     }
@@ -132,26 +213,19 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     }
 
     const error = props.error
-    if (isAbortError(error)) {
+    if (isRuntimeFallbackAbort(error)) {
       if (deps.idleState) {
         markSessionAborted(deps.idleState, sessionID)
       }
       log.debug(`session.error abort (likely our own); skipping`)
       return
     }
-    if (isDispatchInFlight(sessionID)) {
-      log.debug(`session.error while retry in flight; skipping`)
-      return
-    }
-
-    const classification: ErrorClassification = classifyError(error, cfg.runtimeFallback)
-    const agent = resolveAgent(props)
+    const classification: ErrorClassification = classifyError(error, cfg.runtimeFallback, clock())
+    const agent = resolveRuntimeFallbackAgent(props)
     log.info(
       `session.error: session=${sessionID.slice(0, 16)}… agent=${agent ?? "<none>"} ` +
         `retryable=${classification.retryable} reason=${classification.reason}`,
     )
-    if (!classification.retryable) return
-
     const effective = agent
       ? resolveEffectiveRequirement({
           agentName: agent,
@@ -160,105 +234,109 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
         })
       : null
     const requirement = effective?.requirement ?? null
-    if (!requirement || requirement.fallbackChain.length <= 1) {
-      log.info(`no fallback chain configured for agent=${agent ?? "<none>"}; skipping`)
-      return
+    const eventModel = resolveEventModelIdentity(props)
+    const inFlight = isDispatchInFlight(sessionID)
+    const activeDispatchTarget = !eventModel && inFlight
+      ? controller.getActiveDispatchTarget(sessionID)
+      : undefined
+    const registeredModel = agent
+      ? parseModelIdentity(deps.registeredAgentModels?.get(agent))
+      : null
+    const headModel = chainHeadIdentity(requirement)
+    let state = sessionStates.get(sessionID)
+    if (!state && classification.retryable && requirement && requirement.fallbackChain.length > 0) {
+      const initialModel = eventModel
+        ?? (activeDispatchTarget ? { providerID: activeDispatchTarget.providerID, modelID: activeDispatchTarget.modelID } : null)
+        ?? registeredModel
+        ?? headModel
+      if (initialModel) state = getOrCreateFallbackState(sessionStates, sessionID, requirement, initialModel)
     }
 
-    const eventModel = resolveEventModel(props)
+    const stateModel = parseModelIdentity(state?.activeModel)
+    const failedTarget = activeDispatchTarget
+      ?? (eventModel ? resolveRetryTarget(requirement, eventModel) : undefined)
+      ?? (stateModel ? resolveRetryTarget(requirement, stateModel) : undefined)
+      ?? (headModel ? resolveRetryTarget(requirement, headModel) : undefined)
+    const genericInput = (target = failedTarget): GenericFallbackInput => ({
+      sessionID,
+      generation: lifecycle.currentGeneration(sessionID),
+      ...(agent === undefined ? {} : { agent }),
+      classification,
+      requirement,
+      ...(state === undefined ? {} : { state }),
+      ...(target === undefined ? {} : { failedTarget: target }),
+      runtimeConfig: cfg.runtimeFallback,
+    })
+    const dedicated429 = classification.retryable && classification.statusCode === 429
 
-    // Initialize from the actual failed model. Models outside the static chain
-    // start at -1 so chain index 0 remains eligible.
-    let state = sessionStates.get(sessionID)
-    if (!state) {
-      const head = requirement.fallbackChain[0]
-      const chainHeadModel = head
-        ? { providerID: head.providers[0] ?? "", modelID: head.model }
-        : null
-      const registeredModel = agent
-        ? parseRegisteredModel(deps.registeredAgentModels?.get(agent))
-        : null
-      const initialModel = eventModel ?? registeredModel ?? chainHeadModel
-      if (!initialModel) {
-        log.info(`could not determine initial model for agent=${agent ?? "<none>"}; skipping`)
+    if (!dedicated429) {
+      const decision = controller.onOtherError({
+        sessionID,
+        runGenericFallback: async (activeTarget) => runGenericFallback(genericInput(activeTarget)),
+      })
+      if (decision.handled) return
+      if (inFlight) {
+        log.debug("session.error while generic retry is in flight; skipping")
         return
       }
-      const initialKey = modelKey(initialModel.providerID, initialModel.modelID)
-      state = createFallbackState(initialKey)
-      state.activeModel = initialKey
-      state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
-        entryExactlyMatchesModel(entry, initialModel.providerID, initialModel.modelID),
-      )
-      if (state.fallbackIndex < 0 && !matchRequirementSuccessor(
-        requirement,
-        initialModel.providerID,
-        initialModel.modelID,
-      )) {
-        state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
-          entryMatchesModel(entry, initialModel.providerID, initialModel.modelID),
-        )
-      }
-      sessionStates.set(sessionID, state)
-    }
-
-    // Priority order for the failed-model key:
-    // 1. Explicit model from the event payload.
-    // 2. The state's activeModel (previously dispatched fallback model).
-    // 3. The agent's primary fallback-chain entry (first entry).
-    let justFailedKey: string | null = null
-    if (eventModel) {
-      justFailedKey = modelKey(eventModel.providerID, eventModel.modelID)
-    } else if (state.activeModel) {
-      justFailedKey = state.activeModel
-    } else if (requirement.fallbackChain[0]) {
-      const primary: FallbackEntry = requirement.fallbackChain[0]
-      const primaryProvider = primary.providers[0] ?? ""
-      justFailedKey = modelKey(primaryProvider, primary.model)
-    }
-    if (!justFailedKey) {
-      log.info(`could not determine failed model for agent=${agent ?? "<none>"}; skipping`)
+      await runGenericFallback(genericInput())
       return
     }
 
-    markModelFailed(state, justFailedKey)
-
-    const peek = peekNextFallback(
-      state,
-      requirement,
-      justFailedKey,
-      cfg.runtimeFallback.maxAttempts,
-      cfg.runtimeFallback.cooldownSeconds,
-    )
-    if (!peek.ok) {
-      log.warn(`fallback exhausted: ${peek.reason} (session=${sessionID.slice(0, 16)}…)`)
+    // Dedicated retries are meaningful even with a one-entry chain because
+    // they re-dispatch that exact model. They only need a non-empty chain to
+    // establish a target and later prepare a switch.
+    if (!requirement || requirement.fallbackChain.length === 0 || !state || !failedTarget) {
+      controller.onDeleted(sessionID)
       return
     }
 
-    log.info(
-      `fallback attempt ${peek.nextAttempts}/${cfg.runtimeFallback.maxAttempts}: ` +
-        `model=${peek.entry.providers[0] ?? ""}/${peek.entry.model}`,
-    )
-
-    if (!cfg.runtimeFallback.dispatch) {
-      log.info(`dispatch disabled; observe-only`)
-      return
-    }
-    if (!deps.client) {
-      log.warn(`no client available; cannot dispatch (observe-only)`)
-      return
-    }
-
-    const dispatched = await dispatchFallbackRetry({
-      client: deps.client,
+    const decision = controller.on429({
       sessionID,
-      ...(deps.directory !== undefined ? { directory: deps.directory } : {}),
-      ...(agent !== undefined ? { agent } : {}),
-      newEntry: peek.entry,
-      reason: classification.reason,
+      ...(agent === undefined ? {} : { agent }),
+      target: failedTarget,
+      classification: {
+        reason: classification.reason,
+        ...(classification.recoveryDelayMs === undefined ? {} : { recoveryDelayMs: classification.recoveryDelayMs }),
+      },
+      runtimeConfig: cfg.runtimeFallback,
+      prepareSwitch: (failed, isCandidateBlocked) => {
+        const failedKey = modelKey(failed.providerID, failed.modelID)
+        markModelFailed(state, failedKey, clock())
+        const peek = peekNextFallback(
+          state,
+          requirement,
+          failedKey,
+          cfg.runtimeFallback.maxAttempts,
+          cfg.runtimeFallback.cooldownSeconds,
+          clock(),
+          isCandidateBlocked,
+        )
+        if (!peek.ok) return { ok: false, reason: peek.reason }
+
+        const providerID = peek.entry.providers[0] ?? ""
+        const entry = { ...applyRequirementDefaults(requirement, peek.entry), providers: [providerID] }
+        let committed = false
+        return {
+          ok: true,
+          prepared: {
+            target: { providerID, modelID: entry.model, entry },
+            attempt: peek.nextAttempts,
+            commit: () => {
+              if (committed) return
+              committed = true
+              commitFallback(state!, entry, peek.index)
+            },
+          },
+        }
+      },
     })
-    if (dispatched) {
-      commitFallback(state, peek.entry, peek.index)
+    if (decision.handled) return
+    if (inFlight) {
+      log.debug("session.error while retry in flight; dedicated controller did not handle")
+      return
     }
+    await runGenericFallback(genericInput())
   }
 }
 
