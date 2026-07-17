@@ -269,13 +269,24 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
     })
     const dedicated429 = classification.retryable && classification.statusCode === 429
 
+    // A stale in-flight dispatch from an older generation may still hold the
+    // global sessionID lock. Let it settle, confirm this generation is still
+    // current, then re-read the lock; only a genuine in-flight dispatch skips.
+    const skipBecauseInFlight = async (): Promise<boolean> => {
+      if (!inFlight) return false
+      const generation = lifecycle.currentGeneration(sessionID)
+      await lifecycle.waitForStaleDispatches(sessionID, generation)
+      if (!lifecycle.isCurrent(sessionID, generation)) return true
+      return isDispatchInFlight(sessionID)
+    }
+
     if (!dedicated429) {
       const decision = controller.onOtherError({
         sessionID,
         runGenericFallback: async (activeTarget) => runGenericFallback(genericInput(activeTarget)),
       })
       if (decision.handled) return
-      if (inFlight) {
+      if (await skipBecauseInFlight()) {
         log.debug("session.error while generic retry is in flight; skipping")
         return
       }
@@ -332,7 +343,7 @@ export function createRuntimeFallbackEventHandler(deps: RuntimeFallbackDeps): (
       },
     })
     if (decision.handled) return
-    if (inFlight) {
+    if (await skipBecauseInFlight()) {
       log.debug("session.error while retry in flight; dedicated controller did not handle")
       return
     }

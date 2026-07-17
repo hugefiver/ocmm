@@ -150,7 +150,7 @@ export class Session429State {
         prepared: prepared.prepared,
       }
       this.installGate(dispatch, 0, errorIdleObserved)
-      this.deps.logger.info("subagent429 switch gated", { ...this.logTarget(dispatch.target), attempt: prepared.prepared.attempt, delayMs: 0, scope: scope.scope })
+      this.deps.logger.info("subagent429 switch gated", { ...this.logTarget(dispatch.target), attempt: prepared.prepared.attempt, delayMs: 0, scope: scope.scope, reason: dispatch.reason })
       return { handled: true, action: "switch-gated", attempt: prepared.prepared.attempt, target: dispatch.target }
     }
     const delayMs = scheduleDelay(retriesUsed, input.classification.recoveryDelayMs, this.deps.random)
@@ -165,7 +165,7 @@ export class Session429State {
       retryOrdinal: retriesUsed + 1,
     }
     this.installGate(dispatch, delayMs, errorIdleObserved)
-    this.deps.logger.info("subagent429 retry gated", { ...this.logTarget(dispatch.target), retryOrdinal: dispatch.retryOrdinal, delayMs, scope: dispatch.scope })
+    this.deps.logger.info("subagent429 retry gated", { ...this.logTarget(dispatch.target), retryOrdinal: dispatch.retryOrdinal, delayMs, scope: dispatch.scope, reason: dispatch.reason })
     return { handled: true, action: "retry-gated", delayMs, retryOrdinal: dispatch.retryOrdinal, scope: dispatch.scope }
   }
 

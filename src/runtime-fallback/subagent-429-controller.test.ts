@@ -667,3 +667,137 @@ test("outside an active dispatch, other errors stop dedicated state and remain u
   })
   assert.equal(scheduler.tasks[0]?.cancelled, true)
 })
+
+test("keeps the full bounded hint after a zero-delay probe and tracks exact missing-hint delays across eight retries", async () => {
+  const probe = createHarness({ dispatchRetry: async () => true })
+  probe.controller.onSessionCreated("probe", true)
+  probe.controller.on429(errorInput("probe", { recoveryDelayMs: 900_000 }))
+  assert.equal(probe.scheduler.tasks[0]?.delayMs, 0, "900_000ms hint triggers a zero-delay probe")
+  probe.controller.onIdle("probe")
+  await probe.scheduler.run(0)
+  await flush()
+  assert.equal(probe.dispatches.length, 1, "the zero-delay probe actually completed a request")
+
+  probe.controller.on429(errorInput("probe", { recoveryDelayMs: 600_000 }))
+  assert.equal(
+    probe.scheduler.tasks[1]?.delayMs,
+    600_000,
+    "a 600_000ms hint is not above the probe threshold and must be waited in full",
+  )
+
+  const seq = createHarness({ random: 0.5, dispatchRetry: async () => true })
+  const seqConfig = runtimeConfig({ subagent429: { enabled: true, maxRetries: 8, providerScopes: {} } })
+  seq.controller.onSessionCreated("seq", true)
+  const expected = [750, 1_500, 3_000, 6_000, 12_000, 22_500, 22_500, 22_500]
+  for (let i = 0; i < 8; i++) {
+    const decision = seq.controller.on429(errorInput("seq", { config: seqConfig }))
+    assert.equal(decision.handled, true, `retry ${i} must be handled`)
+    if (i === 0) {
+      if (!decision.handled || decision.action !== "retry-gated") {
+        assert.fail(`retry 0 was not retry-gated`)
+        return
+      }
+      assert.equal(decision.delayMs, expected[0], "retry 0 delay")
+      assert.equal(decision.retryOrdinal, 1, "retry 0 ordinal starts at 1")
+    }
+    seq.controller.onIdle("seq")
+    await seq.scheduler.run(i)
+    await flush()
+    assert.equal(seq.dispatches.length, i + 1, `retry ${i} completed a request`)
+    assert.equal(seq.scheduler.tasks[i]?.delayMs, expected[i], `retry ${i} gate delay`)
+  }
+  // Delay is a pure function of retriesUsed (= ordinal - 1), so the full
+  // delay sequence also proves the ordinal advanced 1 through 8.
+  assert.deepEqual(
+    seq.scheduler.tasks.slice(0, 8).map((t) => t.delayMs),
+    expected,
+  )
+})
+
+test("table-driven: retry|switch × dispatch true|false × queued-idle-settle|queued-settle-idle accounts and dispatches exactly once", async () => {
+  for (const type of ["retry", "switch"] as const) {
+    for (const dispatchResult of [true, false] as const) {
+      for (const order of ["queued-idle-settle", "queued-settle-idle"] as const) {
+        const result = deferred<boolean>()
+        let firstCommits = 0
+        let prepareCalls = 0
+        const fallback = target("provider-b", "model-b")
+        const successor = target("provider-c", "model-c")
+        const config = type === "switch"
+          ? runtimeConfig({ subagent429: { enabled: true, maxRetries: 0, providerScopes: {} } })
+          : runtimeConfig({ subagent429: { enabled: true, maxRetries: 5, providerScopes: {} } })
+        const { controller, scheduler, dispatches } = createHarness({
+          dispatchRetry: async () => result.promise,
+        })
+        controller.onSessionCreated("child", true)
+
+        controller.on429(errorInput("child", {
+          config,
+          prepareSwitch: type === "switch"
+            ? () => {
+              prepareCalls++
+              return {
+                ok: true,
+                prepared: {
+                  target: prepareCalls === 1 ? fallback : successor,
+                  attempt: prepareCalls,
+                  commit: () => { if (prepareCalls === 1) firstCommits++ },
+                },
+              }
+            }
+            : undefined,
+        }))
+        controller.onIdle("child")
+        await scheduler.run(0)
+        assert.equal(dispatches.length, 1, `[${type}/${dispatchResult}/${order}] first request started`)
+
+        // Queue a 429 while the first dispatch is still in flight.
+        const queued = controller.on429(errorInput("child", {
+          config,
+          ...(type === "switch"
+            ? {
+              prepareSwitch: () => {
+                prepareCalls++
+                return {
+                  ok: true,
+                  prepared: {
+                    target: successor,
+                    attempt: prepareCalls,
+                    commit: () => { if (prepareCalls === 1) firstCommits++ },
+                  },
+                }
+              },
+            }
+            : {}),
+        }))
+        assert.equal(queued.handled, true, `[${type}/${dispatchResult}/${order}] queued 429 handled`)
+
+        if (order === "queued-idle-settle") {
+          controller.onIdle("child")
+          result.resolve(dispatchResult)
+          await flush()
+        } else {
+          result.resolve(dispatchResult)
+          await flush()
+          controller.onIdle("child")
+        }
+
+        assert.equal(dispatches.length, 1, `[${type}/${dispatchResult}/${order}] no extra request before next gate runs`)
+
+        if (type === "retry") {
+          // delay 1000 (not 2000) proves the retry was accounted exactly once.
+          assert.equal(scheduler.tasks[1]?.delayMs, 1_000, `[retry/${dispatchResult}/${order}] next gate ordinal 2 / 1000ms`)
+        } else {
+          assert.equal(firstCommits, 1, `[switch/${dispatchResult}/${order}] first prepared commit exactly once`)
+        }
+
+        // No extra idle here: the queued/settled idle already satisfied the
+        // next gate's error-idle barrier, so running the timer alone must
+        // dispatch exactly one next request.
+        await scheduler.run(1)
+        await flush()
+        assert.equal(dispatches.length, 2, `[${type}/${dispatchResult}/${order}] only one next request starts`)
+      }
+    }
+  }
+})

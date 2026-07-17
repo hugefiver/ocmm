@@ -974,6 +974,24 @@ test("real event handler: switched models get a fresh dedicated budget and only 
     "provider-b/fallback-a",
     "provider-b/fallback-a",
   ])
+
+  // fallback-a's dedicated budget is now exhausted (retry ordinal reached
+  // maxRetries). The next 429 would try to switch, but maxAttempts:1 has
+  // already been consumed by the fallback-a switch - so the second switch
+  // must be blocked, leaving the model sequence unchanged and starting no
+  // new scheduler task or prompt call.
+  const schedulerTaskCount = scheduler.tasks.length
+  const promptCallCount = mock.calls.length
+  await handler(makeErrorEvent("fresh-budget", { status: 429 }, { agent: "worker" }))
+  await handler(makeIdleEvent("fresh-budget"))
+  await flushHandler()
+  assert.equal(scheduler.tasks.length, schedulerTaskCount, "maxAttempts:1 must block the second switch gate")
+  assert.equal(mock.calls.length, promptCallCount, "maxAttempts:1 must not dispatch another prompt")
+  assert.deepEqual(dispatchedModels(mock.calls), [
+    "provider-a/primary",
+    "provider-b/fallback-a",
+    "provider-b/fallback-a",
+  ], "model sequence stays primary retry -> fallback-a switch -> fallback-a retry")
 })
 
 test("real event handler: model scope allows a same-provider switch while provider scope skips it", async () => {
@@ -1512,4 +1530,46 @@ test("real event handler: single pre-resolution success idle clears dedicated tr
   assert.equal(scheduler.tasks.length, schedulerTaskCount, "the later 429 must not create a dedicated retry gate")
   assert.deepEqual(dispatchedModels(mock.calls), ["provider-a/primary", "provider-b/fallback-a"])
   assert.equal(mock.aborts, 1, "the later 429 uses generic fallback's default abort")
+})
+
+test("real event handler: replacement generic error is not swallowed by a stale in-flight lock from the old generation", async () => {
+  const stalePrompt = deferred<unknown>()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient([stalePrompt.promise])
+  const cfg = makeHandlerConfig(standardHandlerChain())
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    clock: () => 1_000,
+    random: () => 0,
+  })
+
+  // Old child session has a dedicated 429 dispatch in flight (blocked in
+  // prompt), holding the global inFlight lock on this sessionID.
+  await handler(makeCreatedEvent("replaced-child", { parentID: "old-root" }))
+  await handler(makeErrorEvent("replaced-child", { status: 429 }, { agent: "worker", model: modelFor("primary") }))
+  await handler(makeIdleEvent("replaced-child"))
+  await scheduler.run(0)
+  await flushHandler()
+  assert.equal(mock.calls.length, 1, "old dedicated dispatch started")
+  assert.equal(mock.calls[0]?.body.modelID, "primary")
+
+  // Fire-and-forget (no await between calls) so the stale in-flight lock is
+  // still held when the replacement error arrives.
+  void handler({ event: { type: "session.deleted", properties: { sessionID: "replaced-child" } } })
+  void handler(makeCreatedEvent("replaced-child", { parentID: "new-root" }))
+  const replacement = handler(makeErrorEvent("replaced-child", { status: 503 }, {
+    agent: "worker",
+    model: modelFor("primary"),
+  }))
+
+  await replacement
+  await flushHandler()
+
+  assert.deepEqual(
+    dispatchedModels(mock.calls),
+    ["provider-a/primary", "provider-b/fallback-a"],
+    "replacement generic fallback must run after the stale dispatch settles",
+  )
 })

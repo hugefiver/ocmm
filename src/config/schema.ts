@@ -279,7 +279,7 @@ export const RuntimeFallbackConfigSchema = z
     enabled: z.boolean().default(true),
     /** When false, only classify + log; never call ctx.client.session.prompt. */
     dispatch: z.boolean().default(true),
-    /** Max retries per session before giving up. */
+    /** Max committed fallback model switches per session. Same-model retries do not count. */
     maxAttempts: z.number().int().positive().default(3),
     /** Per-model cooldown window in seconds. */
     cooldownSeconds: z.number().int().positive().default(60),

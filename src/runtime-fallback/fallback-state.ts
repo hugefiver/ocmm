@@ -11,7 +11,7 @@ export type FallbackState = {
   originalModel: string
   /** Index into the fallback chain we're currently on (0 = primary). */
   fallbackIndex: number
-  /** Count of fallback attempts dispatched this session. */
+  /** Count of committed model switches this session (same-model retries do not count). */
   attempts: number
   /** Map of "providerID/modelID" -> epoch-ms of last failure. */
   failedModels: Map<string, number>
