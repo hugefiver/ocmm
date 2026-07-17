@@ -53,7 +53,10 @@ export function resolveParentSessionID(props: unknown): string | undefined {
   return undefined
 }
 
-function matchingEntry(requirement: ModelRequirement | null | undefined, identity: ModelIdentity): FallbackEntry | undefined {
+function matchingEntry(
+  requirement: ModelRequirement | null | undefined,
+  identity: ModelIdentity,
+): FallbackEntry | undefined {
   if (!requirement) return undefined
   return requirement.fallbackChain.find((entry) =>
     entryExactlyMatchesModel(entry, identity.providerID, identity.modelID),
@@ -129,7 +132,17 @@ export function getOrCreateFallbackState(
  * unblocks stale abort/messages/prompt calls and lets a replacement lifecycle
  * wait for that stale dispatcher ownership to leave its session-ID lock.
  */
-export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undefined) {
+export type RuntimeFallbackSessionLifecycle = {
+  beginSession: (sessionID: string) => number
+  invalidateSession: (sessionID: string) => void
+  currentGeneration: (sessionID: string) => number
+  isCurrent: (sessionID: string, generation: number) => boolean
+  trackDispatch: <T>(sessionID: string, generation: number, promise: Promise<T>) => Promise<T>
+  waitForStaleDispatches: (sessionID: string, generation: number) => Promise<void>
+  guardedClient: (sessionID: string, generation: number) => OcmmClient
+}
+
+export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undefined): RuntimeFallbackSessionLifecycle {
   const sessionGenerations = new Map<string, number>()
   const cancellationSignals = new Map<number, { promise: Promise<void>; cancel: () => void }>()
   const activeDispatches = new Map<string, Map<number, Set<Promise<unknown>>>>()

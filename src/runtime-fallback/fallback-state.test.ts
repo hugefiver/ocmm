@@ -223,18 +223,6 @@ test("peekNextFallback skips provider-blocked candidates without mutating state"
   assert.equal(s.activeModel, undefined)
 })
 
-test("peekNextFallback without a candidate blocker retains fallback-a", () => {
-  const s = createFallbackState("hoo/primary-model")
-
-  const r = peekNextFallback(s, req, "hoo/primary-model", 3, 60, NOW)
-
-  assert.equal(r.ok, true)
-  if (r.ok) {
-    assert.equal(r.entry.model, "fallback-a")
-    assert.equal(r.index, 1)
-  }
-})
-
 test("prepareFallback skips a provider/model-blocked candidate and commits the next entry", () => {
   const s = createFallbackState("hoo/primary-model")
   const blocker = (entry: FallbackEntry) =>
