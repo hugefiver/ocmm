@@ -9,10 +9,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
-import { defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
+import { z } from "zod"
+import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
+import { tolerantParse, tolerantParseLayers, type TolerantParseLayer } from "./tolerant-parse.ts"
 import { log } from "../shared/logger.ts"
 
 const FILE_BASENAMES = ["ocmm.jsonc", "ocmm.json"]
+const ProfileSelectionSchema = z.object({
+  activeProfile: z.string().optional(),
+})
 
 export type ConfigHost = "opencode" | "codex"
 
@@ -213,21 +218,25 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
   const userPath = opts.includeUser === false ? null : locateFile(userConfigDir(host))
   const projectPath = locateFile(projectConfigDir(cwd, host))
 
-  let merged: unknown = {}
+  const baseLayers: TolerantParseLayer[] = []
   if (userPath) {
     const data = readJsoncFile(userPath)
     if (data !== null) {
-      merged = deepMerge(merged, data)
+      baseLayers.push({ value: cleanAgentEntries(data) })
       sources.user = userPath
     }
   }
   if (projectPath) {
     const data = readJsoncFile(projectPath)
     if (data !== null) {
-      merged = deepMerge(merged, stripProjectOnlyFields(data))
+      baseLayers.push({ value: cleanAgentEntries(stripProjectOnlyFields(data)) })
       sources.project = projectPath
     }
   }
+
+  const profileSelection = tolerantParseLayers(ProfileSelectionSchema, baseLayers, mergeConfigLayers)
+  const selectedBaseLayers = profileSelection.success ? profileSelection.layers : baseLayers
+  const selection = profileSelection.success ? profileSelection.data : {}
 
   // Profile selection: OCMM_PROFILE env var wins over config's activeProfile.
   // Empty string is treated as unset so `OCMM_PROFILE= opencode ...` falls
@@ -235,43 +244,34 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
   // OCMM_NO_PROFILE=1 disables profile loading entirely (overrides everything).
   const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
   const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
-  const mergedRecord = isPlainObject(merged) ? (merged as Record<string, unknown>) : {}
-  const activeProfileRaw = noProfile ? undefined : (envProfile ?? mergedRecord.activeProfile)
+  const activeProfileRaw = noProfile ? undefined : (envProfile ?? selection.activeProfile)
   const activeProfile =
     typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
       ? activeProfileRaw
       : undefined
 
-  // Collect profiles from inline + user dir + project dir.
-  // Directory shadows inline; project shadows user.
-  const inlineProfiles = isPlainObject(mergedRecord.profiles) ? mergedRecord.profiles : {}
+  // Directory profiles shadow all inline profiles: project wins over user.
   const userDirProfiles = loadProfilesFromDir(join(userConfigDir(host), "ocmm-profiles"))
   const projectDirProfiles = host === "opencode"
     ? loadProfilesFromDir(join(projectConfigDir(cwd, host), "ocmm-profiles"))
     : {}
-  const allProfiles: Record<string, unknown> = {
-    ...inlineProfiles,
-    ...userDirProfiles,
-    ...projectDirProfiles,
+
+  // Inline profile sources retain per-layer provenance. They are merged as a
+  // group before replacing base config so their normal array merge policy is
+  // preserved while profiles still own arrays over the base configuration.
+  const profileLayers = activeProfile
+    ? selectedProfileLayers(activeProfile, selectedBaseLayers, userDirProfiles, projectDirProfiles)
+    : []
+  if (activeProfile && profileLayers.length === 0) {
+    log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
   }
 
-  // If an active profile is named, deep-merge it over the base. A missing
-  // profile is silently ignored so a stale activeProfile/OCMM_PROFILE value
-  // never breaks the plugin — base config loads unchanged.
-  if (activeProfile && isPlainObject(allProfiles)) {
-    const profile = allProfiles[activeProfile]
-    if (isPlainObject(profile)) {
-      merged = deepMerge(merged, profile, undefined, { profileOverlay: true })
-    } else {
-      log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
-    }
-  }
-
-  const parsed = OcmmConfigSchema.safeParse(merged)
+  const layers = [...selectedBaseLayers, ...profileLayers]
+  const parsed = tolerantParseLayers(OcmmConfigSchema, layers, mergeConfigLayers)
   if (!parsed.success) {
     log.warn(
       `ocmm config validation failed; using defaults. issues:`,
-      parsed.error.issues.slice(0, 5),
+      parsed.issues.slice(0, 5),
     )
     return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
   }
@@ -284,4 +284,75 @@ function stripProjectOnlyFields(value: unknown): unknown {
   const mcp = { ...value.mcp }
   delete mcp.envAllowlist
   return { ...value, mcp }
+}
+
+function mergeConfigLayers(layers: readonly TolerantParseLayer[]): unknown {
+  let base: unknown = {}
+  let profile: unknown = {}
+  let hasProfile = false
+  for (const layer of layers) {
+    if (layer.profileOverlay) {
+      profile = deepMerge(profile, layer.value)
+      hasProfile = true
+    } else {
+      base = deepMerge(base, layer.value)
+    }
+  }
+  return hasProfile ? deepMerge(base, profile, undefined, { profileOverlay: true }) : base
+}
+
+function selectedProfileLayers(
+  activeProfile: string,
+  baseLayers: readonly TolerantParseLayer[],
+  userDirProfiles: Record<string, unknown>,
+  projectDirProfiles: Record<string, unknown>,
+): TolerantParseLayer[] {
+  if (Object.hasOwn(projectDirProfiles, activeProfile)) {
+    return [{ value: cleanAgentEntries(projectDirProfiles[activeProfile]), profileOverlay: true }]
+  }
+  if (Object.hasOwn(userDirProfiles, activeProfile)) {
+    return [{ value: cleanAgentEntries(userDirProfiles[activeProfile]), profileOverlay: true }]
+  }
+
+  const layers: TolerantParseLayer[] = []
+  for (const layer of baseLayers) {
+    const profile = inlineProfile(layer.value, activeProfile)
+    if (profile.found) layers.push({ value: cleanAgentEntries(profile.value), profileOverlay: true })
+  }
+  return layers
+}
+
+function inlineProfile(value: unknown, name: string): { found: boolean; value?: unknown } {
+  if (!isPlainObject(value) || !isPlainObject(value.profiles) || !Object.hasOwn(value.profiles, name)) {
+    return { found: false }
+  }
+  return { found: true, value: value.profiles[name] }
+}
+
+function cleanAgentEntries(value: unknown): unknown {
+  if (!isPlainObject(value)) return value
+  const cleaned = { ...value }
+  cleanAgentMap(cleaned)
+  if (!isPlainObject(cleaned.profiles)) return cleaned
+
+  const profiles: Record<string, unknown> = { ...cleaned.profiles }
+  for (const [name, profile] of Object.entries(profiles)) {
+    if (!isPlainObject(profile)) continue
+    const profileCopy = { ...profile }
+    cleanAgentMap(profileCopy)
+    profiles[name] = profileCopy
+  }
+  cleaned.profiles = profiles
+  return cleaned
+}
+
+function cleanAgentMap(value: Record<string, unknown>): void {
+  if (!isPlainObject(value.agents)) return
+  const agents: Record<string, unknown> = { ...value.agents }
+  for (const [name, entry] of Object.entries(agents)) {
+    const parsed = tolerantParse(AgentEntrySchema, entry)
+    if (parsed.success) agents[name] = parsed.data
+    else delete agents[name]
+  }
+  value.agents = agents
 }

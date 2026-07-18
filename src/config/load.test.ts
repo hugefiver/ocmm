@@ -197,6 +197,183 @@ test("includeUser=false ignores user config while keeping project config", () =>
   }
 })
 
+function withProjectConfig(value: unknown, run: (config: ReturnType<typeof loadConfig>["config"]) => void): void {
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-tolerant-config-"))
+  try {
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify(value))
+    run(loadConfig({ cwd, includeUser: false }).config)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+}
+
+function withUserAndProjectConfigs(
+  user: unknown,
+  project: unknown,
+  run: (config: ReturnType<typeof loadConfig>["config"]) => void,
+): void {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-tolerant-user-xdg-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-tolerant-user-project-"))
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    mkdirSync(join(xdg, "opencode"), { recursive: true })
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify(user))
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify(project))
+    run(loadConfig({ cwd }).config)
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+}
+
+test("loadConfig restores a default for an invalid top-level field and preserves siblings", () => {
+  withProjectConfig({ workflow: "unsupported", debug: true }, (config) => {
+    assert.equal(config.workflow, "v1")
+    assert.equal(config.debug, true)
+  })
+})
+
+test("loadConfig restores nested defaults after dropping invalid fields", () => {
+  withProjectConfig({ mcp: { enabled: false, websearch: { provider: "unsupported" } } }, (config) => {
+    assert.equal(config.mcp.enabled, false)
+    assert.equal(config.mcp.websearch.provider, "exa")
+  })
+})
+
+test("loadConfig drops only invalid record entries with unrecoverable required fields", () => {
+  withProjectConfig({
+    mcp: {
+      servers: {
+        valid: { type: "local", command: "echo" },
+        invalidValue: "not-an-object",
+        missingCommand: { type: "local" },
+      },
+    },
+  }, (config) => {
+    assert.equal(config.mcp.servers.valid?.type, "local")
+    assert.equal(config.mcp.servers.invalidValue, undefined)
+    assert.equal(config.mcp.servers.missingCommand, undefined)
+  })
+})
+
+test("loadConfig drops invalid array elements and preserves valid values", () => {
+  withProjectConfig({
+    runtimeFallback: {
+      enabled: false,
+      retryOnStatusCodes: [418, "invalid", 503],
+    },
+  }, (config) => {
+    assert.equal(config.runtimeFallback.enabled, false)
+    assert.deepEqual(config.runtimeFallback.retryOnStatusCodes, [418, 503])
+  })
+})
+
+test("loadConfig treats an invalid project override as absent while preserving project siblings", () => {
+  withUserAndProjectConfigs(
+    { workflow: "omo", debug: true },
+    { workflow: "unsupported", debug: false },
+    (config) => {
+      assert.equal(config.workflow, "omo")
+      assert.equal(config.debug, false)
+    },
+  )
+})
+
+test("loadConfig treats an invalid active profile override as absent while preserving profile siblings", () => {
+  withProjectConfig({
+    mcp: { enabled: false, websearch: { provider: "tavily" } },
+    profiles: {
+      selected: {
+        mcp: { enabled: true, websearch: { provider: "unsupported" } },
+      },
+    },
+    activeProfile: "selected",
+  }, (config) => {
+    assert.equal(config.mcp.websearch.provider, "tavily")
+    assert.equal(config.mcp.enabled, true)
+  })
+})
+
+test("loadConfig restores a lower-priority agent field after dropping an invalid override", () => {
+  withUserAndProjectConfigs(
+    { agents: { orchestrator: { model: "x", temperature: 0.5 } } },
+    { agents: { orchestrator: { description: "project", temperature: 3 } } },
+    (config) => {
+      assert.equal(config.agents?.orchestrator?.model, "x")
+      assert.equal(config.agents?.orchestrator?.temperature, 0.5)
+      assert.equal(config.agents?.orchestrator?.description, "project")
+    },
+  )
+})
+
+test("loadConfig restores profile selection and inline profile provenance", () => {
+  withUserAndProjectConfigs(
+    {
+      debug: false,
+      profiles: { selected: { debug: true } },
+      activeProfile: "selected",
+    },
+    {
+      profiles: "invalid",
+      activeProfile: 42,
+    },
+    (config) => {
+      assert.equal(config.debug, true)
+    },
+  )
+
+  for (const project of [42, [], ["invalid-root"]]) {
+    withUserAndProjectConfigs(
+      {
+        workflow: "omo",
+        debug: true,
+        profiles: { selected: { locale: "zh-CN" } },
+        activeProfile: "selected",
+      },
+      project,
+      (config) => {
+        assert.equal(config.workflow, "omo")
+        assert.equal(config.debug, true)
+        assert.equal(config.locale, "zh-CN")
+      },
+    )
+  }
+
+  withUserAndProjectConfigs(
+    {
+      debug: false,
+      profiles: { selected: { mcp: { websearch: { provider: "tavily" } } } },
+      activeProfile: "selected",
+    },
+    {
+      profiles: { selected: { mcp: { websearch: { provider: "bad" } }, debug: true } },
+    },
+    (config) => {
+      assert.equal(config.mcp.websearch.provider, "tavily")
+      assert.equal(config.debug, true)
+      assert.equal(config.profiles.selected?.mcp?.websearch?.provider, "tavily")
+      assert.equal(config.profiles.selected?.debug, true)
+    },
+  )
+
+  withUserAndProjectConfigs(
+    {
+      profiles: { selected: { mcp: { websearch: { provider: "tavily" } } } },
+      activeProfile: "selected",
+    },
+    { profiles: { selected: "invalid" } },
+    (config) => {
+      assert.equal(config.mcp.websearch.provider, "tavily")
+      assert.equal(config.profiles.selected?.mcp?.websearch?.provider, "tavily")
+    },
+  )
+})
+
 // --- loadProfilesFromDir tests ---
 
 test("loadProfilesFromDir returns {} for missing dir", () => {

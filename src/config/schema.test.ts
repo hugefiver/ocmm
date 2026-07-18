@@ -1,7 +1,15 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { defaultConfig, OcmmConfigSchema, Subagent429ConfigSchema } from "./schema.ts"
+import {
+  AgentEntrySchema,
+  defaultConfig,
+  OcmmConfigSchema,
+  ReviewVariantOverrideSchema,
+  SkillSourceEntrySchema,
+  Subagent429ConfigSchema,
+} from "./schema.ts"
+import { tolerantParse } from "./tolerant-parse.ts"
 
 test("Subagent429ConfigSchema applies defaults", () => {
   assert.deepEqual(Subagent429ConfigSchema.parse({}), {
@@ -39,18 +47,59 @@ test("Subagent429ConfigSchema accepts zero retries and model/provider scopes", (
   )
 })
 
-test("Subagent429ConfigSchema rejects invalid values and unknown fields", () => {
+test("Subagent429ConfigSchema rejects invalid declared values", () => {
   for (const input of [
     { maxRetries: -1 },
     { maxRetries: 1.5 },
     { providerScopes: { openai: "account" } },
-    { recoveryThresholdMinutes: 10 },
   ]) {
     assert.throws(() => Subagent429ConfigSchema.parse(input))
   }
 })
 
-test("review variants accept native strings and non-empty strict objects", () => {
+test("runtime object schemas strip unknown leaf fields", () => {
+  const parsed = Subagent429ConfigSchema.parse({
+    maxRetries: 1,
+    recoveryThresholdMinutes: 10,
+  } as Record<string, unknown>)
+  assert.deepEqual(parsed, {
+    enabled: true,
+    maxRetries: 1,
+    providerScopes: {},
+  })
+  assert.ok(!("recoveryThresholdMinutes" in parsed))
+})
+
+test("tolerantParse preserves a skill source when an invalid union branch field can use a default", () => {
+  const result = tolerantParse(SkillSourceEntrySchema, {
+    path: "./kept",
+    recursive: "bad",
+  })
+  assert.equal(result.success, true)
+  assert.deepEqual(result.success && result.data, {
+    path: "./kept",
+    recursive: true,
+  })
+})
+
+test("tolerantParse preserves a review variant model when its union variant is invalid", () => {
+  const result = tolerantParse(ReviewVariantOverrideSchema, {
+    model: "override/model",
+    variant: "bad",
+  })
+  assert.equal(result.success, true)
+  assert.deepEqual(result.success && result.data, { model: "override/model" })
+})
+
+test("tolerantParse preserves an agent fallback entry when its union object has an invalid field", () => {
+  const result = tolerantParse(AgentEntrySchema, {
+    fallbackModels: [{ providers: ["openai"], model: "gpt-5.6", temperature: "bad" }],
+  })
+  assert.equal(result.success, true)
+  assert.deepEqual(result.success && result.data.fallbackModels, [{ providers: ["openai"], model: "gpt-5.6" }])
+})
+
+test("review variants accept native strings and non-empty objects", () => {
   const parsed = OcmmConfigSchema.parse({
     agents: {
       oracle: {
@@ -67,7 +116,7 @@ test("review variants accept native strings and non-empty strict objects", () =>
   assert.equal(parsed.agents?.oracle?.variants?.max && typeof parsed.agents.oracle.variants.max, "object")
 })
 
-test("review variants: invalid variant entries are dropped (tolerant) but non-review variants are stripped", () => {
+test("review variants: invalid fields are dropped while canonical agents remain", () => {
   // variants on non-review agents (e.g. planner) is stripped, entry kept.
   const nonReviewResult = OcmmConfigSchema.safeParse({
     agents: { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
@@ -75,18 +124,35 @@ test("review variants: invalid variant entries are dropped (tolerant) but non-re
   assert.equal(nonReviewResult.success, true, "planner entry kept, variants stripped")
   assert.equal(nonReviewResult.success && nonReviewResult.data.agents?.planner?.variants, undefined)
 
-  // Invalid variant overrides (empty object, normal tier, unknown keys) cause
-  // the entire owning entry to be dropped (per-entry isolation), but the
-  // overall config parse still succeeds.
-  for (const agents of [
-    { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } },
-    { oracle: { model: "openai/gpt-5.6-terra", variants: { normal: "high" } } },
-    { oracle: { model: "openai/gpt-5.6-terra", variants: { high: { model: "x/y", extra: true } } } },
+  // Invalid variant overrides (empty object, unsupported tier) lose only the
+  // invalid field. Unknown keys are stripped by the runtime object schema.
+  for (const { agents, expectedHigh } of [
+    { agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } }, expectedHigh: undefined },
+    { agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { normal: "high" } } }, expectedHigh: undefined },
+    {
+      agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { high: { model: "x/y", extra: true } } } },
+      expectedHigh: { model: "x/y" },
+    },
   ]) {
     const result = OcmmConfigSchema.safeParse({ agents })
     assert.equal(result.success, true, `parse succeeds: ${JSON.stringify(agents)}`)
-    assert.equal(result.success && result.data.agents?.oracle, undefined, `oracle dropped: ${JSON.stringify(agents)}`)
+    assert.equal(result.success && result.data.agents?.oracle?.model, "openai/gpt-5.6-terra", `oracle kept: ${JSON.stringify(agents)}`)
+    assert.deepEqual(result.success && result.data.agents?.oracle?.variants?.high, expectedHigh, `field recovered: ${JSON.stringify(agents)}`)
   }
+})
+
+test("invalid optional agent fields are dropped while the entry remains", () => {
+  const result = OcmmConfigSchema.safeParse({
+    agents: {
+      orchestrator: {
+        model: "openai/gpt-5.6-terra",
+        temperature: 3,
+      },
+    },
+  })
+  assert.equal(result.success, true)
+  assert.equal(result.success && result.data.agents?.orchestrator?.model, "openai/gpt-5.6-terra")
+  assert.equal(result.success && result.data.agents?.orchestrator?.temperature, undefined)
 })
 
 test("reserved review namespace drops non-canonical config keys but parse succeeds", () => {

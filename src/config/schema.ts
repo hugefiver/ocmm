@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { isReservedReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
 import { log } from "../shared/logger.ts"
+import { tolerantParse } from "./tolerant-parse.ts"
 
 export const VariantEnum = z.enum([
   "low",
@@ -228,8 +229,7 @@ export const SkillSourceEntrySchema = z.union([
       path: z.string().min(1),
       recursive: z.boolean().default(true),
       glob: z.string().optional(),
-    })
-    .strict(),
+    }),
 ])
 
 export const SkillsConfigSchema = z
@@ -238,7 +238,6 @@ export const SkillsConfigSchema = z
     enable: z.array(z.string()).default([]),
     disable: z.array(z.string()).default([]),
   })
-  .strict()
   .default(defaultSkillsConfig)
 
 const ProfileSkillsConfigSchema = z
@@ -247,7 +246,6 @@ const ProfileSkillsConfigSchema = z
     enable: z.array(z.string()).optional(),
     disable: z.array(z.string()).optional(),
   })
-  .strict()
 
 export const CategoryEntrySchema = z.object(ShorthandFields)
 
@@ -265,7 +263,6 @@ export const ReviewVariantOverrideSchema = z.union([
       model: z.string().min(1).optional(),
       variant: VariantEnum.optional(),
     })
-    .strict()
     .refine((value) => value.model !== undefined || value.variant !== undefined, {
       message: "review variant object must contain model and/or variant",
     }),
@@ -277,7 +274,6 @@ export const ReviewVariantsSchema = z
     high: ReviewVariantOverrideSchema.optional(),
     max: ReviewVariantOverrideSchema.optional(),
   })
-  .strict()
 
 export type ReviewVariantOverride = z.infer<typeof ReviewVariantOverrideSchema>
 export type ReviewVariants = z.infer<typeof ReviewVariantsSchema>
@@ -338,10 +334,9 @@ export const AgentsConfigSchemaForJsonSchema = z.record(z.string(), AgentEntrySc
  * dropped with a warning. Later Oracle slots that do not resolve a normal
  * model requirement are dropped with a warning.
  *
- * Per-entry isolation: each agent entry is parsed independently. A single
- * entry with type errors is dropped (with a warning) rather than failing
- * the entire `agents` map. Unknown keys on entries are silently stripped
- * (Zod default).
+ * Per-entry isolation: each agent entry is parsed independently. Invalid
+ * fields are dropped before retrying; only structurally unrecoverable entries
+ * are skipped rather than failing the entire `agents` map.
  */
 const AgentsConfigSchema = z
   .record(z.string(), z.unknown())
@@ -359,11 +354,11 @@ const AgentsConfigSchema = z
         continue
       }
 
-      const parsedEntry = AgentEntrySchema.safeParse(raw)
+      const parsedEntry = tolerantParse(AgentEntrySchema, raw)
       if (!parsedEntry.success) {
         log.warn(
           `ocmm config: dropping agents.${name} due to validation errors:`,
-          parsedEntry.error.issues.slice(0, 3),
+          parsedEntry.issues.slice(0, 3),
         )
         continue
       }
@@ -411,7 +406,6 @@ export const Subagent429ConfigSchema = z
     maxRetries: z.number().int().min(0).default(5),
     providerScopes: z.record(z.string(), Subagent429ScopeSchema).default({}),
   })
-  .strict()
   .default(defaultSubagent429Config)
 
 const ProfileSubagent429ConfigSchema = z
@@ -420,7 +414,6 @@ const ProfileSubagent429ConfigSchema = z
     maxRetries: z.number().int().min(0).optional(),
     providerScopes: z.record(z.string(), Subagent429ScopeSchema).optional(),
   })
-  .strict()
 
 export const RuntimeFallbackConfigSchema = z
   .object({
@@ -465,21 +458,18 @@ export const HashlineConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
   })
-  .strict()
   .default(defaultHashlineConfig)
 
 const ProfileHashlineConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
   })
-  .strict()
 
 export const RulesConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
     skipClaudeUserRules: z.boolean().default(false),
   })
-  .strict()
   .default(defaultRulesConfig)
 
 const ProfileRulesConfigSchema = z
@@ -487,7 +477,6 @@ const ProfileRulesConfigSchema = z
     enabled: z.boolean().optional(),
     skipClaudeUserRules: z.boolean().optional(),
   })
-  .strict()
 
 const McpLocalServerConfigSchema = z
   .object({
@@ -498,7 +487,6 @@ const McpLocalServerConfigSchema = z
     environment: z.record(z.string(), z.string()).optional(),
     enabled: z.boolean().default(true),
   })
-  .strict()
 
 const McpRemoteServerConfigSchema = z
   .object({
@@ -508,7 +496,6 @@ const McpRemoteServerConfigSchema = z
     oauth: z.boolean().optional(),
     enabled: z.boolean().default(true),
   })
-  .strict()
 
 export const McpServerConfigSchema = z.discriminatedUnion("type", [
   McpLocalServerConfigSchema,
@@ -523,25 +510,21 @@ export const McpConfigSchema = z
       .object({
         provider: z.enum(["exa", "tavily"]).default("exa"),
       })
-      .strict()
       .default(defaultMcpWebsearchConfig),
     servers: z.record(z.string(), McpServerConfigSchema).default({}),
   })
-  .strict()
   .default(defaultMcpConfig)
 
 export const SubagentConfigSchema = z
   .object({
     maxDepth: z.number().int().min(0).max(20).default(3),
   })
-  .strict()
   .default(defaultSubagentConfig)
 
 const ProfileSubagentConfigSchema = z
   .object({
     maxDepth: z.number().int().min(0).max(20).optional(),
   })
-  .strict()
 
 const ProfileMcpConfigSchema = z
   .object({
@@ -551,11 +534,9 @@ const ProfileMcpConfigSchema = z
       .object({
         provider: z.enum(["exa", "tavily"]).optional(),
       })
-      .strict()
       .optional(),
     servers: z.record(z.string(), McpServerConfigSchema).optional(),
   })
-  .strict()
 
 /**
  * A profile is a partial config overlay. It may carry any top-level field
@@ -623,7 +604,6 @@ export const ShimConfigSchema = z
     noProviders: z.boolean().optional(),
     noPlugins: z.boolean().optional(),
   })
-  .strict()
 
 export type IsolationMode = z.infer<typeof IsolationModeSchema>
 export type ShimConfig = z.infer<typeof ShimConfigSchema>
