@@ -151,16 +151,16 @@ test("add creates a new profile from JSON file", () => {
   }
 })
 
-test("add validates profile schema and rejects invalid", () => {
+test("add tolerates (strips) nested profiles/activeProfile in source (tolerant)", () => {
   const xdg = makeTempXdg()
   const jsonFile = join(xdg, "bad.json")
   try {
     writeConfig(xdg, {})
-    // Invalid: profiles and activeProfile are not allowed in a profile entry.
-    writeFileSync(jsonFile, JSON.stringify({ profiles: { nested: {} }, activeProfile: "nested" }))
-    const { exitCode, stderr } = runCli(xdg, ["add", "bad", jsonFile])
-    assert.notEqual(exitCode, 0)
-    assert.ok(stderr.includes("profile JSON invalid"))
+    // Tolerated: profiles and activeProfile are stripped from a profile entry.
+    writeFileSync(jsonFile, JSON.stringify({ profiles: { nested: {} }, activeProfile: "nested", debug: true }))
+    const { exitCode } = runCli(xdg, ["add", "bad", jsonFile])
+    assert.equal(exitCode, 0)
+    assert.ok(existsSync(join(xdg, "opencode", "ocmm-profiles", "bad.jsonc")), "profile file created")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -330,14 +330,14 @@ test("add rejects invalid JSONC source", () => {
   }
 })
 
-test("add rejects schema-violating source (nested profiles)", () => {
+test("add tolerates (strips) nested profiles in source (tolerant)", () => {
   const xdg = makeTempXdg()
   const srcFile = join(xdg, "bad-schema.jsonc")
-  writeFileSync(srcFile, JSON.stringify({ profiles: { nested: {} } }))
+  writeFileSync(srcFile, JSON.stringify({ profiles: { nested: {} }, debug: true }))
   try {
-    const { exitCode, stderr } = runCli(xdg, ["add", "co", srcFile])
-    assert.notEqual(exitCode, 0)
-    assert.ok(stderr.includes("profile JSON invalid"))
+    const { exitCode } = runCli(xdg, ["add", "co", srcFile])
+    assert.equal(exitCode, 0)
+    assert.ok(existsSync(join(xdg, "opencode", "ocmm-profiles", "co.jsonc")), "profile created despite nested profiles key")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }

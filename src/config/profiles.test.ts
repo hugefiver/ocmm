@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { loadConfig } from "./load.ts"
-import { OcmmConfigSchema } from "./schema.ts"
+import { OcmmConfigSchema, defaultConfig } from "./schema.ts"
 
 function makeTempXdg(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-profile-test-"))
@@ -425,7 +425,7 @@ test("OCMM_NO_PROFILE disables all profile loading", () => {
   }
 })
 
-test("ProfileEntrySchema rejects nested profiles/activeProfile fields", () => {
+test("ProfileEntrySchema strips nested profiles/activeProfile fields (tolerant)", () => {
   const result = OcmmConfigSchema.safeParse({
     profiles: {
       bad: {
@@ -434,12 +434,11 @@ test("ProfileEntrySchema rejects nested profiles/activeProfile fields", () => {
       },
     },
   })
-  assert.equal(result.success, false)
-  const issuePaths = result.error!.issues.map((i) => i.path.join("."))
-  assert.ok(
-    issuePaths.some((p) => p === "profiles.bad"),
-    `expected an issue at profiles.bad, got: ${JSON.stringify(issuePaths)}`,
-  )
+  assert.equal(result.success, true)
+  const badProfile = result.data?.profiles?.bad as Record<string, unknown> | undefined
+  assert.ok(badProfile, "profile entry kept")
+  assert.ok(!("profiles" in (badProfile ?? {})), "nested profiles stripped")
+  assert.ok(!("activeProfile" in (badProfile ?? {})), "nested activeProfile stripped")
 })
 
 test("ProfileEntrySchema accepts valid partial config fields", () => {
@@ -481,4 +480,78 @@ test("ProfileEntrySchema accepts valid partial config fields", () => {
     },
   })
   assert.equal(result.success, true)
+})
+
+test("loader migrates legacy base config before schema validation", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, { agents: { "oracle-high": { model: "openai/gpt-5.5" } } })
+    const loaded = loadWithXdg(xdg)
+    assert.equal(loaded.config.agents?.["oracle-high"], undefined)
+    assert.equal(loaded.config.agents?.["oracle-2nd"]?.model, "openai/gpt-5.5")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loader logs an active base-profile spelling conflict and returns defaults", () => {
+  const xdg = makeTempXdg()
+  const previousDebug = process.env.OCMM_DEBUG
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  process.env.OCMM_DEBUG = "1"
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+  try {
+    writeConfig(xdg, {
+      agents: { "oracle-2nd": { model: "openai/gpt-5.5" } },
+      profiles: { selected: { agents: { "oracle-second": { model: "anthropic/claude-opus-4-7" } } } },
+      activeProfile: "selected",
+    })
+    const loaded = loadWithXdg(xdg)
+    assert.deepEqual(loaded.config, defaultConfig())
+    assert.match(warnings.join("\n"), /config conflict.*using defaults.*oracle-2nd.*oracle-second/is)
+  } finally {
+    console.warn = originalWarn
+    if (previousDebug === undefined) delete process.env.OCMM_DEBUG
+    else process.env.OCMM_DEBUG = previousDebug
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("inactive inline profiles are canonicalized and remain schema-valid", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { "oracle-2nd": { model: "openai/gpt-5.5" } },
+      profiles: { inactive: { agents: { "oracle-high": { model: "anthropic/claude-opus-4-7" } } } },
+    })
+    const loaded = loadWithXdg(xdg)
+    assert.equal(loaded.config.agents?.["oracle-2nd"]?.model, "openai/gpt-5.5")
+    assert.equal(loaded.config.profiles.inactive?.agents?.["oracle-high"], undefined)
+    assert.equal(loaded.config.profiles.inactive?.agents?.["oracle-2nd"]?.model, "anthropic/claude-opus-4-7")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("project directory profile shadows a conflicting lower inline spelling", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-review-profile-project-"))
+  try {
+    writeConfig(xdg, {
+      agents: { "oracle-2nd": { model: "openai/gpt-5.5" } },
+      profiles: { selected: { agents: { "oracle-high": { model: "google/gemini-3.1-pro" } } } },
+      activeProfile: "selected",
+    })
+    const directory = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, "selected.jsonc"), JSON.stringify({
+      agents: { "oracle-2nd": { model: "anthropic/claude-opus-4-7" } },
+    }))
+    const loaded = loadWithXdg(xdg, project)
+    assert.equal(loaded.config.agents?.["oracle-2nd"]?.model, "anthropic/claude-opus-4-7")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
 })

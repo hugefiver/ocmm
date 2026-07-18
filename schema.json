@@ -482,6 +482,135 @@
               "max"
             ]
           },
+          "variants": {
+            "type": "object",
+            "properties": {
+              "low": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max",
+                      "minimal",
+                      "none",
+                      "auto",
+                      "thinking"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "high": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max",
+                      "minimal",
+                      "none",
+                      "auto",
+                      "thinking"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "max": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max",
+                      "minimal",
+                      "none",
+                      "auto",
+                      "thinking"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
           "disabled": {
             "type": "boolean"
           }
@@ -500,7 +629,14 @@
               "builder",
               "reviewer",
               "oracle",
-              "oracle-high",
+              "oracle-2nd",
+              "oracle-3rd",
+              "oracle-4th",
+              "oracle-5th",
+              "oracle-6th",
+              "oracle-7th",
+              "oracle-8th",
+              "oracle-9th",
               "doc-search",
               "code-search",
               "planner",
@@ -552,7 +688,8 @@
               "todo-description-override",
               "commit-guard-injector",
               "subagent-git-guard",
-              "subagent-depth-guard"
+              "subagent-depth-guard",
+              "subagent-interruption-recovery"
             ]
           },
           {
@@ -1371,6 +1508,135 @@
                     "max"
                   ]
                 },
+                "variants": {
+                  "type": "object",
+                  "properties": {
+                    "low": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "minimal",
+                            "none",
+                            "auto",
+                            "thinking"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string"
+                            },
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "high": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "minimal",
+                            "none",
+                            "auto",
+                            "thinking"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string"
+                            },
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "max": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "minimal",
+                            "none",
+                            "auto",
+                            "thinking"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string"
+                            },
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "disabled": {
                   "type": "boolean"
                 }
@@ -1389,7 +1655,14 @@
                     "builder",
                     "reviewer",
                     "oracle",
-                    "oracle-high",
+                    "oracle-2nd",
+                    "oracle-3rd",
+                    "oracle-4th",
+                    "oracle-5th",
+                    "oracle-6th",
+                    "oracle-7th",
+                    "oracle-8th",
+                    "oracle-9th",
                     "doc-search",
                     "code-search",
                     "planner",
@@ -1441,7 +1714,8 @@
                     "todo-description-override",
                     "commit-guard-injector",
                     "subagent-git-guard",
-                    "subagent-depth-guard"
+                    "subagent-depth-guard",
+                    "subagent-interruption-recovery"
                   ]
                 },
                 {

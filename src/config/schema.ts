@@ -1,6 +1,9 @@
 import { z } from "zod"
 
-const VariantEnum = z.enum([
+import { isReservedReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
+import { log } from "../shared/logger.ts"
+
+export const VariantEnum = z.enum([
   "low",
   "medium",
   "high",
@@ -96,6 +99,7 @@ const HOOK_NAMES = [
   "commit-guard-injector",
   "subagent-git-guard",
   "subagent-depth-guard",
+  "subagent-interruption-recovery",
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]
@@ -109,7 +113,14 @@ const AGENT_NAMES = [
   "builder",
   "reviewer",
   "oracle",
-  "oracle-high",
+  "oracle-2nd",
+  "oracle-3rd",
+  "oracle-4th",
+  "oracle-5th",
+  "oracle-6th",
+  "oracle-7th",
+  "oracle-8th",
+  "oracle-9th",
   "doc-search",
   "code-search",
   "planner",
@@ -238,15 +249,152 @@ const ProfileSkillsConfigSchema = z
   })
   .strict()
 
-export const CategoryEntrySchema = z.object(ShorthandFields).strict()
+export const CategoryEntrySchema = z.object(ShorthandFields)
 
-export const AgentEntrySchema = z
+/**
+ * Logical review-tier override for a canonical Oracle/Reviewer normal slot.
+ *
+ * - A string materializes the native variant for that tier.
+ * - An object may override `model` and/or `variant`; at least one is required.
+ *   `normal` is not a tier key (the unsuffixed slot IS normal).
+ */
+export const ReviewVariantOverrideSchema = z.union([
+  VariantEnum,
+  z
+    .object({
+      model: z.string().min(1).optional(),
+      variant: VariantEnum.optional(),
+    })
+    .strict()
+    .refine((value) => value.model !== undefined || value.variant !== undefined, {
+      message: "review variant object must contain model and/or variant",
+    }),
+])
+
+export const ReviewVariantsSchema = z
   .object({
-    ...ShorthandFields,
-    ...AgentOverrideFields,
-    disabled: z.boolean().optional(),
+    low: ReviewVariantOverrideSchema.optional(),
+    high: ReviewVariantOverrideSchema.optional(),
+    max: ReviewVariantOverrideSchema.optional(),
   })
   .strict()
+
+export type ReviewVariantOverride = z.infer<typeof ReviewVariantOverrideSchema>
+export type ReviewVariants = z.infer<typeof ReviewVariantsSchema>
+
+export const AgentEntrySchema = z.object({
+  ...ShorthandFields,
+  ...AgentOverrideFields,
+  variants: ReviewVariantsSchema.optional(),
+  disabled: z.boolean().optional(),
+})
+
+const LATER_ORACLE_SLOT_NAMES = new Set([
+  "oracle-3rd",
+  "oracle-4th",
+  "oracle-5th",
+  "oracle-6th",
+  "oracle-7th",
+  "oracle-8th",
+  "oracle-9th",
+])
+
+function hasDirectNormalRequirement(entry: z.infer<typeof AgentEntrySchema>): boolean {
+  return entry.requirement !== undefined
+    || (typeof entry.model === "string" && entry.model.trim().length > 0)
+    || (Array.isArray(entry.fallbackModels) && entry.fallbackModels.length > 0)
+}
+
+function resolvesNormalRequirement(
+  name: string,
+  agents: Record<string, z.infer<typeof AgentEntrySchema>>,
+  visited: ReadonlySet<string> = new Set(),
+): boolean {
+  if (visited.has(name)) return false
+  const entry = agents[name]
+  if (!entry) return false
+  if (hasDirectNormalRequirement(entry)) return true
+  const alias = entry.alias?.trim()
+  if (!alias) return false
+  return resolvesNormalRequirement(alias, agents, new Set([...visited, name]))
+}
+
+/**
+ * Declarative `agents` map schema used only for JSON-schema generation
+ * (`scripts/gen-schema.ts`). Mirrors the shape of {@link AgentsConfigSchema}
+ * so IDEs and config consumers get full field-level autocomplete on each
+ * agent entry. Runtime validation uses {@link AgentsConfigSchema}, which
+ * tolerates per-entry errors by dropping offending entries instead of
+ * failing the whole config.
+ */
+export const AgentsConfigSchemaForJsonSchema = z.record(z.string(), AgentEntrySchema)
+
+/**
+ * Validated `agents` map. Reserved review-agent keys must be canonical
+ * unsuffixed normal slots (`oracle`, `oracle-2nd` ... `oracle-9th`, or
+ * `reviewer`); legacy/tier/alias spellings are dropped with a warning so
+ * they no longer fail the whole config. `variants` is allowed only on
+ * canonical Oracle/Reviewer normal-slot entries; on other entries it is
+ * dropped with a warning. Later Oracle slots that do not resolve a normal
+ * model requirement are dropped with a warning.
+ *
+ * Per-entry isolation: each agent entry is parsed independently. A single
+ * entry with type errors is dropped (with a warning) rather than failing
+ * the entire `agents` map. Unknown keys on entries are silently stripped
+ * (Zod default).
+ */
+const AgentsConfigSchema = z
+  .record(z.string(), z.unknown())
+  .transform((agents): Record<string, z.infer<typeof AgentEntrySchema>> => {
+    const cleaned: Record<string, z.infer<typeof AgentEntrySchema>> = {}
+    for (const [name, raw] of Object.entries(agents)) {
+      // First filter reserved-but-not-canonical keys before even parsing the
+      // entry - the review-name grammar reserves `reviewer-*` and `oracle-*-<tier>`.
+      const identity = parseReviewAgentName(name)
+      const canonicalNormal = identity?.logicalTier === "normal" && identity.canonicalName === name
+      if (isReservedReviewAgentName(name) && !canonicalNormal) {
+        log.warn(
+          `ocmm config: dropping agents.${name} - review-agent config keys must be canonical unsuffixed slots (oracle, oracle-2nd through oracle-9th, or reviewer). Use agents.${identity?.canonicalSlot ?? "reviewer"}.variants.${identity?.logicalTier ?? "high"} for tier overrides.`,
+        )
+        continue
+      }
+
+      const parsedEntry = AgentEntrySchema.safeParse(raw)
+      if (!parsedEntry.success) {
+        log.warn(
+          `ocmm config: dropping agents.${name} due to validation errors:`,
+          parsedEntry.error.issues.slice(0, 3),
+        )
+        continue
+      }
+      const entry = parsedEntry.data
+
+      // `variants` only on canonical Oracle/Reviewer normal-slot entries.
+      if (entry.variants !== undefined && !canonicalNormal) {
+        log.warn(
+          `ocmm config: stripping agents.${name}.variants - variants is allowed only on canonical Oracle or Reviewer normal-slot entries.`,
+        )
+        const { variants: _variants, ...rest } = entry
+        cleaned[name] = { ...rest }
+        continue
+      }
+
+      cleaned[name] = entry
+    }
+
+    // Later Oracle slots must resolve a normal requirement. Check after the
+    // cleaned map is built so alias chains across surviving entries work.
+    for (const name of Object.keys(cleaned)) {
+      if (LATER_ORACLE_SLOT_NAMES.has(name) && !resolvesNormalRequirement(name, cleaned)) {
+        log.warn(
+          `ocmm config: dropping agents.${name} - later Oracle slots must resolve a normal model requirement through model, fallbackModels, requirement, or alias.`,
+        )
+        delete cleaned[name]
+      }
+    }
+
+    return cleaned
+  })
 
 /**
  * Reactive runtime-fallback config.
@@ -420,7 +568,7 @@ const ProfileMcpConfigSchema = z
 export const ProfileEntrySchema = z
   .object({
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
-    agents: z.record(z.string(), AgentEntrySchema).optional(),
+    agents: AgentsConfigSchema.optional(),
     disabledAgents: z.array(z.union([AgentNameSchema, z.string()])).optional(),
     ...FeatureGateArrayFields,
     skills: ProfileSkillsConfigSchema.optional(),
@@ -462,7 +610,6 @@ export const ProfileEntrySchema = z
     promptsRoot: z.string().optional(),
     debug: z.boolean().optional(),
   })
-  .strict()
 
 export const IsolationModeSchema = z.enum(["none", "inline", "config-file", "config-dir", "xdg"])
 
@@ -485,7 +632,7 @@ export const OcmmConfigSchema = z
   .object({
     $schema: z.string().optional(),
     categories: z.record(z.string(), CategoryEntrySchema).optional(),
-    agents: z.record(z.string(), AgentEntrySchema).optional(),
+    agents: AgentsConfigSchema.optional(),
     disabledAgents: z.array(z.union([AgentNameSchema, z.string()])).optional(),
     ...FeatureGateArrayFields,
     skills: SkillsConfigSchema,
@@ -522,7 +669,6 @@ export const OcmmConfigSchema = z
     /** Defaults for the `ocmm` shim binary. CLI flags override these. */
     shim: ShimConfigSchema.optional(),
   })
-  .strict()
 
 export type OcmmConfig = z.infer<typeof OcmmConfigSchema>
 export type AgentEntry = z.infer<typeof AgentEntrySchema>
