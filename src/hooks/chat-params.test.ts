@@ -1,9 +1,27 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { createChatParamsHandler } from "./chat-params.ts"
+import { createChatParamsHandler as createProductionChatParamsHandler } from "./chat-params.ts"
 import { defaultConfig, OcmmConfigSchema } from "../config/schema.ts"
 import { clearResolutions, recentResolutions } from "../routing/ledger.ts"
+import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
+import type { EffectiveModelRoute } from "../shared/types.ts"
+
+function createChatParamsHandler(
+  args: Omit<Parameters<typeof createProductionChatParamsHandler>[0], "routeRegistry"> & {
+    routeRegistry?: EffectiveRouteRegistry
+  },
+) {
+  return createProductionChatParamsHandler({
+    ...args,
+    routeRegistry: args.routeRegistry ?? createEffectiveRouteRegistry(),
+  })
+}
+
+function publishRoutes(registry: EffectiveRouteRegistry, routes: ReadonlyMap<string, EffectiveModelRoute>): void {
+  const generation = registry.beginBuild()
+  assert.equal(registry.publish(generation, routes), true)
+}
 
 function makeInput(overrides?: Partial<{
   sessionID: string
@@ -35,6 +53,172 @@ test("chat.params applies reviewer's xhigh floor on gpt-5.5", async () => {
   assert.ok(log.length >= 1)
   const last = log[log.length - 1]!
   assert.equal(last.applied.variant, "xhigh")
+})
+
+test("chat.params uses raw config while its route registry has never published", async () => {
+  clearResolutions()
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      builder: { model: "openai/gpt-5.4-mini", variant: "low" },
+    },
+  })
+  const handler = createChatParamsHandler({
+    getConfig: () => cfg,
+    routeRegistry: createEffectiveRouteRegistry(),
+  })
+  const output: Record<string, unknown> = { options: {} }
+
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini" }), output)
+
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "low")
+  assert.equal(recentResolutions().at(-1)!.source, "user-config")
+})
+
+test("chat.params uses a published route rather than contradictory raw config", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini",
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini", variant: "high" }],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+  }]]))
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      builder: { model: "openai/gpt-5.4-mini", variant: "low" },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg, routeRegistry: registry })
+  const output: Record<string, unknown> = { options: {} }
+
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini" }), output)
+
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "high")
+  assert.equal(recentResolutions().at(-1)!.source, "agent-default")
+})
+
+test("chat.params retains the last published route until a later config publication replaces it", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  const cfg = OcmmConfigSchema.parse({
+    agents: { builder: { model: "openai/gpt-5.4-mini", variant: "low" } },
+  })
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini-fast",
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini-fast", variant: "high" }],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+  }]]))
+  const handler = createChatParamsHandler({ getConfig: () => cfg, routeRegistry: registry })
+
+  const initial = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini-fast" }), initial)
+  assert.equal(initial.options.reasoningEffort, "high")
+
+  const unchanged = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini-fast" }), unchanged)
+  assert.equal(unchanged.options.reasoningEffort, "high")
+
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini-v2-fast",
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini-v2-fast", variant: "low" }],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+  }]]))
+  const replaced = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini-v2-fast" }), replaced)
+  assert.equal(replaced.options.reasoningEffort, "low")
+})
+
+test("chat.params treats a published user requirement as explicit regardless of primary provenance", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.5",
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.5", variant: "minimal" }],
+    },
+    requirementSource: "user-config",
+    primarySource: "existing-model",
+  }]]))
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      builder: { model: "openai/gpt-5.5", variant: "max" },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg, routeRegistry: registry })
+  const output: Record<string, unknown> = { options: {} }
+
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.5" }), output)
+
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "minimal")
+  assert.equal(recentResolutions().at(-1)!.source, "user-config")
+})
+
+test("chat.params treats a published missing route as authoritative absence", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map())
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      builder: { model: "openai/gpt-5.5", variant: "high" },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg, routeRegistry: registry })
+  const output: Record<string, unknown> = { options: {} }
+
+  await handler(makeInput({ agentName: "builder" }), output)
+
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, undefined)
+  assert.equal(recentResolutions().at(-1)!.source, "no-op")
+})
+
+test("chat.params applies an unmanaged request-local variant after a published route miss", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map())
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+  const output: Record<string, unknown> = { options: {} }
+
+  await handler(makeInput({ agentName: "unmanaged", modelID: "gpt-5.4-mini", variant: "low" }), output)
+
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "low")
+  assert.equal(recentResolutions().at(-1)!.source, "input-variant")
+})
+
+test("chat.params matches published fast, original, and later fallback controls against input.model", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini-fast",
+    requirement: {
+      fallbackChain: [
+        { providers: ["openai"], model: "gpt-5.4-mini-fast", reasoningEffort: "low" },
+        { providers: ["openai"], model: "gpt-5.4-mini", reasoningEffort: "medium" },
+        { providers: ["openai"], model: "gpt-5.4-mini-later", reasoningEffort: "high" },
+      ],
+    },
+    requirementSource: "agent-default",
+    primarySource: "existing-model",
+  }]]))
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  for (const [modelID, reasoningEffort] of [
+    ["gpt-5.4-mini-fast", "low"],
+    ["gpt-5.4-mini", "medium"],
+    ["gpt-5.4-mini-later", "high"],
+  ] as const) {
+    const output: Record<string, unknown> = { options: {} }
+    await handler(makeInput({ agentName: "builder", modelID }), output)
+    assert.equal((output.options as Record<string, unknown>).reasoningEffort, reasoningEffort, modelID)
+    assert.equal(recentResolutions().at(-1)!.source, "agent-default", modelID)
+  }
 })
 
 test("chat.params raises explicit reviewer input.variant on non-mini GPT", async () => {

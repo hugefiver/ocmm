@@ -10,17 +10,24 @@ export type Subagent429Target = { providerID: string; modelID: string; entry: Fa
 export type Subagent429Scheduler = { schedule(delayMs: number, run: () => Promise<void>): () => void }
 export type Subagent429DispatchInput = {
   sessionID: string
+  snapshotId: number
   agent?: string
   target: Subagent429Target
   reason: string
 }
-export type Subagent429PreparedSwitch = { target: Subagent429Target; attempt: number; commit: () => void }
+export type Subagent429PreparedSwitch = {
+  target: Subagent429Target
+  attempt: number
+  snapshotId: number
+  commit: () => void
+}
 export type Subagent429PrepareFailure = Extract<PeekResult, { ok: false }>["reason"] | "dispatch-failed"
 export type Subagent429PrepareResult =
   | { ok: true; prepared: Subagent429PreparedSwitch }
   | { ok: false; reason: Subagent429PrepareFailure }
 export type Subagent429ErrorInput = {
   sessionID: string
+  snapshotId: number
   agent?: string
   target: Subagent429Target
   classification: { reason: string; recoveryDelayMs?: number }
@@ -33,16 +40,19 @@ export type Subagent429ErrorInput = {
 export type Subagent429GenericHandoff = (activeTarget: Subagent429Target) => Promise<void>
 export type Subagent429OtherErrorInput = {
   sessionID: string
+  snapshotId: number
   runGenericFallback: Subagent429GenericHandoff
 }
 export type Queued429 = {
   kind: "429"
+  snapshotId: number
   dispatchGeneration: number
   input: Subagent429ErrorInput
   errorIdleObserved: boolean
 }
 export type QueuedOtherError = {
   kind: "other"
+  snapshotId: number
   dispatchGeneration: number
   runGenericFallback: Subagent429GenericHandoff
 }
@@ -107,12 +117,12 @@ export type SubagentCorrelationLookup = {
 }
 
 export type Subagent429Controller = {
-  onSessionCreated(sessionID: string, isChild: boolean): void
+  onSessionCreated(sessionID: string, isChild: boolean, snapshotId: number): void
   on429(input: Subagent429ErrorInput): Subagent429Decision
   onOtherError(input: Subagent429OtherErrorInput): Subagent429OtherErrorDecision
-  onIdle(sessionID: string): Subagent429IdleResult
+  onIdle(sessionID: string, snapshotId: number): Subagent429IdleResult
   onDeleted(sessionID: string): void
-  getActiveDispatchTarget(sessionID: string): Subagent429Target | undefined
+  getActiveDispatchTarget(sessionID: string, snapshotId: number): Subagent429Target | undefined
   recordSessionLineage(input: SubagentSessionLineageInput): "recorded" | "untracked"
   recordTaskPart(input: SubagentTaskPartEvidence): "recorded" | "duplicate" | "untracked"
   markRetryableChildError(childSessionID: string): void
@@ -121,6 +131,7 @@ export type Subagent429Controller = {
   claimInterruptionNotice(input: SubagentCorrelationLookup): boolean
 }
 export type Subagent429ControllerDeps = {
+  isCurrentSnapshot: (snapshotId: number) => boolean
   scheduler?: Subagent429Scheduler
   clock?: () => number
   random?: () => number
@@ -154,6 +165,7 @@ export function createSubagent429Controller(deps: Subagent429ControllerDeps): Su
     scheduler: deps.scheduler ?? defaultScheduler,
     clock,
     random: deps.random ?? Math.random,
+    isCurrentSnapshot: deps.isCurrentSnapshot,
     ...(deps.dispatchRetry === undefined ? {} : { dispatchRetry: deps.dispatchRetry }),
     logger: deps.logger ?? defaultLog,
   }
@@ -181,10 +193,11 @@ export function createSubagent429Controller(deps: Subagent429ControllerDeps): Su
     }
   }
 
-  function createRetryState(sessionID: string, record: DurableChildRecord): Session429State {
+  function createRetryState(sessionID: string, record: DurableChildRecord, snapshotId: number): Session429State {
     let retry!: Session429State
     retry = new Session429State(
       sessionID,
+      snapshotId,
       stateDeps,
       () => {
         const current = sessions.get(sessionID)
@@ -210,37 +223,70 @@ export function createSubagent429Controller(deps: Subagent429ControllerDeps): Su
   }
 
   return {
-    onSessionCreated(sessionID, isChild) {
+    onSessionCreated(sessionID, isChild, snapshotId) {
       pruneInactiveRecords()
       // OpenCode can replay session.created while the child remains active.
       // Preserve its retry state and durable correlation in that case. A
       // session.deleted call removes the record, so delete→recreate still
       // starts a fresh lifecycle below.
-      if (sessions.has(sessionID)) return
+      const existing = sessions.get(sessionID)
+      if (existing) {
+        const retry = existing.retry
+        if (retry && (!retry.matchesSnapshot(snapshotId) || !deps.isCurrentSnapshot(snapshotId))) {
+          retry.stop()
+          if (isChild && deps.isCurrentSnapshot(snapshotId)) {
+            existing.retry = createRetryState(sessionID, existing, snapshotId)
+          }
+        }
+        return
+      }
       if (!isChild) return
       const record: DurableChildRecord = {
         seenParentParts: new Set(),
         parentEvidenceIDs: new Set(),
         claimedNotices: new Set(),
       }
-      record.retry = createRetryState(sessionID, record)
+      record.retry = createRetryState(sessionID, record, snapshotId)
       sessions.set(sessionID, record)
     },
     on429(input) {
       pruneInactiveRecords()
-      const decision = sessions.get(input.sessionID)?.retry?.on429(input) ?? { handled: false }
+      const record = sessions.get(input.sessionID)
+      const previousRetry = record?.retry
+      let retry = previousRetry
+      if (retry && (!retry.matchesSnapshot(input.snapshotId) || !deps.isCurrentSnapshot(input.snapshotId))) {
+        retry.stop()
+        retry = undefined
+      }
+      if (!retry && previousRetry && record && deps.isCurrentSnapshot(input.snapshotId)) {
+        retry = createRetryState(input.sessionID, record, input.snapshotId)
+        record.retry = retry
+      }
+      const decision = retry?.on429(input) ?? { handled: false }
       pruneInactiveRecords()
       return decision
     },
     onOtherError(input) {
       pruneInactiveRecords()
-      const decision = sessions.get(input.sessionID)?.retry?.onOtherError(input) ?? { handled: false }
+      const retry = sessions.get(input.sessionID)?.retry
+      if (retry && (!retry.matchesSnapshot(input.snapshotId) || !deps.isCurrentSnapshot(input.snapshotId))) {
+        retry.stop()
+        pruneInactiveRecords()
+        return { handled: false }
+      }
+      const decision = retry?.onOtherError(input) ?? { handled: false }
       pruneInactiveRecords()
       return decision
     },
-    onIdle(sessionID) {
+    onIdle(sessionID, snapshotId) {
       pruneInactiveRecords()
-      const result = sessions.get(sessionID)?.retry?.onIdle() ?? { kind: "untracked", suppressIdleContinuation: false }
+      const retry = sessions.get(sessionID)?.retry
+      if (retry && (!retry.matchesSnapshot(snapshotId) || !deps.isCurrentSnapshot(snapshotId))) {
+        retry.stop()
+        pruneInactiveRecords()
+        return { kind: "untracked", suppressIdleContinuation: false }
+      }
+      const result = retry?.onIdle() ?? { kind: "untracked", suppressIdleContinuation: false }
       pruneInactiveRecords()
       return result
     },
@@ -250,9 +296,16 @@ export function createSubagent429Controller(deps: Subagent429ControllerDeps): Su
       record?.retry?.stop()
       sessions.delete(sessionID)
     },
-    getActiveDispatchTarget(sessionID) {
+    getActiveDispatchTarget(sessionID, snapshotId) {
       pruneInactiveRecords()
-      return sessions.get(sessionID)?.retry?.activeTarget()
+      const retry = sessions.get(sessionID)?.retry
+      if (!retry) return undefined
+      if (!retry.matchesSnapshot(snapshotId) || !deps.isCurrentSnapshot(snapshotId)) {
+        retry.stop()
+        pruneInactiveRecords()
+        return undefined
+      }
+      return retry.activeTarget()
     },
     recordSessionLineage(input) {
       pruneInactiveRecords()

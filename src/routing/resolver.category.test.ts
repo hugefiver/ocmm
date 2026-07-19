@@ -26,6 +26,27 @@ test("category-default: hard-reasoning + gpt-5.5 -> max variant", () => {
   assert.equal(r!.variant, "max")
 })
 
+test("published category-default route retains the category max-variant policy", () => {
+  const r = resolveModelRouting({
+    agentName: "hard-reasoning",
+    modelID: "gpt-5.4-mini",
+    providerID: "openai",
+    effectiveRequirement: {
+      requirement: {
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini", variant: "low" }],
+      },
+      source: "category-default",
+    },
+    categoriesConfig: {
+      "hard-reasoning": { model: "openai/gpt-5.4-mini", variant: "minimal" },
+    },
+  })
+
+  assert.ok(r)
+  assert.equal(r.source, "category-default")
+  assert.equal(r.variant, "max")
+})
+
 test("category-default: documenting uses max variant for complex-task policy", () => {
   const r = resolveModelRouting({
     agentName: "documenting",

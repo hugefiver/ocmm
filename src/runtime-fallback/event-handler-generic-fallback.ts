@@ -16,6 +16,7 @@ import { log } from "../shared/logger.ts"
 export type GenericFallbackInput = {
   sessionID: string
   generation: number
+  snapshotId: number
   agent?: string
   classification: ErrorClassification
   requirement: ModelRequirement | null
@@ -26,6 +27,7 @@ export type GenericFallbackInput = {
 
 export type GenericFallbackContext = {
   lifecycle: RuntimeFallbackSessionLifecycle
+  isCurrentSnapshot: (snapshotId: number) => boolean
   client?: OcmmClient
   directory?: string
   clock: () => number
@@ -35,10 +37,12 @@ export async function runGenericFallback(
   ctx: GenericFallbackContext,
   input: GenericFallbackInput,
 ): Promise<void> {
-  const { lifecycle, client, directory, clock } = ctx
-  const { sessionID, generation, agent, classification, requirement, state, failedTarget, runtimeConfig } = input
+  const { lifecycle, client, directory, clock, isCurrentSnapshot } = ctx
+  const { sessionID, generation, snapshotId, agent, classification, requirement, state, failedTarget, runtimeConfig } = input
+  const isCurrent = (): boolean =>
+    lifecycle.isCurrent(sessionID, generation) && isCurrentSnapshot(snapshotId)
 
-  if (!lifecycle.isCurrent(sessionID, generation)) return
+  if (!isCurrent()) return
   if (!classification.retryable) return
   if (!requirement || requirement.fallbackChain.length <= 1) {
     log.info(`no fallback chain configured for agent=${agent ?? "<none>"}; skipping`)
@@ -79,16 +83,16 @@ export async function runGenericFallback(
   }
 
   await lifecycle.waitForStaleDispatches(sessionID, generation)
-  if (!lifecycle.isCurrent(sessionID, generation)) return
+  if (!isCurrent()) return
   const dispatched = await lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
-    client: lifecycle.guardedClient(sessionID, generation),
+    client: lifecycle.guardedClient(sessionID, generation, () => isCurrentSnapshot(snapshotId)),
     sessionID,
     ...(directory === undefined ? {} : { directory }),
     ...(agent === undefined ? {} : { agent }),
     newEntry: entry,
     reason: classification.reason,
   }))
-  if (dispatched && lifecycle.isCurrent(sessionID, generation)) {
+  if (dispatched && isCurrent()) {
     commitFallback(state, entry, peek.index)
   }
 }

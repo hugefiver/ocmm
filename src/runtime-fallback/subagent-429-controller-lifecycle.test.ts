@@ -71,3 +71,40 @@ test("outside an active dispatch, other errors stop dedicated state and remain u
   })
   assert.equal(scheduler.tasks[0]?.cancelled, true)
 })
+
+test("snapshot changes discard queued 429 and other outcomes after a deferred dispatch", async () => {
+  for (const kind of ["429", "other"] as const) {
+    const dispatchResult = deferred<boolean>()
+    const handoffs: Subagent429Target[] = []
+    let prepares = 0
+    const h = createHarness({ dispatchRetry: async () => dispatchResult.promise })
+    h.controller.onSessionCreated(`queued-${kind}`, true, 0)
+    h.controller.on429(errorInput(`queued-${kind}`, { snapshotId: 0 }))
+    h.controller.onIdle(`queued-${kind}`, 0)
+    await h.scheduler.run(0)
+
+    if (kind === "429") {
+      h.controller.on429(errorInput(`queued-${kind}`, {
+        snapshotId: 0,
+        prepareSwitch: () => {
+          prepares++
+          return { ok: false, reason: "no-next-model" }
+        },
+      }))
+    } else {
+      h.controller.onOtherError({
+        sessionID: `queued-${kind}`,
+        snapshotId: 0,
+        runGenericFallback: async (active) => { handoffs.push(active) },
+      })
+    }
+
+    h.currentSnapshotId = 1
+    dispatchResult.resolve(false)
+    await flush()
+    assert.equal(h.dispatches.length, 1, `${kind}: no second dispatch`)
+    assert.equal(prepares, 0, `${kind}: no stale prepare`)
+    assert.deepEqual(handoffs, [], `${kind}: no stale generic handoff`)
+    assert.deepEqual(h.controller.onIdle(`queued-${kind}`, 1), idle("untracked", false))
+  }
+})

@@ -250,6 +250,14 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     "disable": []
   },
 
+  // Opt in per provider before --fast / OCMM_FAST can promote a route.
+  "fastModels": {
+    "providers": ["openai"],
+    "mappings": {
+      "openai/<original-model>": "<provider-local-fast-model>"
+    }
+  },
+
   "agents": {
     "reviewer": {
       "model": "<provider>/<primary-reasoning-model>",
@@ -558,9 +566,10 @@ A **profile** is a named partial overlay on the base config. It can override any
 
 ### Selecting a profile
 
-Two ways, in priority order:
+Ambient selection remains, in priority order: `OCMM_NO_PROFILE`, then `OCMM_PROFILE`, then config `activeProfile`.
 
-1. **`OCMM_PROFILE` env var** (highest priority, per-shell, not persisted):
+1. **`OCMM_NO_PROFILE=1` or `OCMM_NO_PROFILE=true`** disables profile selection for that process.
+2. **`OCMM_PROFILE` env var** selects a profile for the shell without persisting it:
 
    ```bash
    OCMM_PROFILE=gpu opencode run "..."
@@ -568,13 +577,35 @@ Two ways, in priority order:
 
    Empty string is treated as unset — falls back to the config's `activeProfile`.
 
-2. **`activeProfile` in the config file** (persisted):
+3. **`activeProfile` in the config file** is the persisted fallback:
 
    ```jsonc
    { "activeProfile": "gpu" }
    ```
 
-If the named profile doesn't exist, it is silently ignored — the base config loads unchanged.
+If the named profile doesn't exist, the OpenCode plugin facade warns and preserves the base config.
+
+### OpenCode plugin profile facade and qualified aliases
+
+Directory profile descriptors and qualified aliases are an **OpenCode plugin facade** feature. Only `loadOpenCodePluginConfig` materializes them; ordinary programmatic `loadConfig` calls — including `loadConfig({ host: "opencode" })` — and the Codex adapter remain non-materializing.
+
+For each profile name, descriptor precedence is inline `profiles.<name>` < user `ocmm-profiles/` directory < project `.opencode/ocmm-profiles/` directory. When both extensions exist for one basename, `.jsonc` wins **before parsing**. An invalid inactive descriptor is inert. An invalid selected descriptor at higher precedence makes the plugin atomically use defaults; it does not fall through to a lower-precedence descriptor.
+
+An alias containing a colon uses first-colon grammar, `<profile>:<agent>`. For example, a base agent can import the `reviewer` requirement from the `precision` profile while retaining its own behavior:
+
+```jsonc
+{
+  "agents": {
+    "oracle": {
+      "alias": "precision:reviewer",
+      "description": "Local Oracle behavior remains local",
+      "promptAppend": "Use this role's local review instructions."
+    }
+  }
+}
+```
+
+The import is requirement-only: it copies the normalized `ModelRequirement` — `fallbackChain`; its requirement-level native `variant`; each fallback entry's `providers`, `model`, native `variant`, and model-control metadata; and `requiresModel`, `requiresAnyModel`, and `requiresProvider`. Agent-level logical review `variants` remain local and are not imported. Permissions, prompts, tools, description, other agent controls, and profile-wide fields also stay on the source agent.
 
 ### Profile merge semantics
 
@@ -587,6 +618,20 @@ If the named profile doesn't exist, it is silently ignored — the base config l
 
 `fallbackModels` and `disabledAgents` are unioned across user and project configs (NOT profiles). Profiles are the one layer that replaces.
 
+### Fast model routing
+
+Fast routing is opt-in and applies only to **OCMM-managed routes**. It never mutates unmanaged OpenCode agents or provider catalogs. Use the OpenCode shim:
+
+```bash
+ocmm --fast run "Review this change"
+```
+
+Before an explicit `--` separator, the shim consumes `--fast`; `ocmm -- --fast` instead passes `--fast` to OpenCode verbatim. The shim sets `OCMM_FAST=1` in its child environment only when it consumes that flag; otherwise it clears any inherited child value. For direct plugin activation, only the exact ambient values `OCMM_FAST=1` and `OCMM_FAST=true` enable fast routing; every other value is false.
+
+`fastModels.providers` is an explicit, case-sensitive provider allowlist. Omitting it or leaving it empty disables promotion. For an allowlisted selected model, `fastModels.mappings` looks up the qualified original key `provider/model`; its value is a provider-local model ID (it may itself contain `/`), and the already-selected provider is retained. An explicitly owned mapping key is authoritative, including a self-map no-op.
+
+Without an explicit mapping, ocmm tries `${modelID}-fast` only when that exact model exists in the selected provider's catalog. A selected model already ending in `-fast` is not promoted again.
+
 ## `ocmm` shim
 
 The `ocmm` binary launches opencode with configurable config isolation. It merges providers from your global `opencode.json`, adds the ocmm plugin, and optionally strips the `oh-my-openagent` plugin to avoid collision.
@@ -594,6 +639,7 @@ The `ocmm` binary launches opencode with configurable config isolation. It merge
 ```bash
 ocmm                              # start opencode (no isolation by default)
 ocmm -p work run "hello"          # select profile + run
+ocmm --fast run "Review this change" # opt into fast model routing
 ocmm --mode xdg run "hello"       # full config isolation
 ocmm --mode config-file -c run x  # config-file mode + continue
 ocmm --help
@@ -603,6 +649,7 @@ ocmm --help
 
 ```
 -p, --profile <name>     Select ocmm profile (sets OCMM_PROFILE)
+    --fast               Enable opt-in fast model routing
     --mode <m>            Isolation: none|inline|config-file|config-dir|xdg (default: none)
     --no-providers        Don't merge providers from global config
     --no-plugins          Don't merge plugins from global config
@@ -616,7 +663,7 @@ ocmm --help
 --                        Separator; everything after passes to opencode verbatim
 ```
 
-All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass through to opencode.
+All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass through to opencode. Before the explicit `--` separator, `--fast` is an ocmm shim flag; after it, `ocmm -- --fast` passes that token through to OpenCode.
 
 ### Isolation modes
 

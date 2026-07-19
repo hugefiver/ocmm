@@ -101,25 +101,18 @@ export function getOrCreateFallbackState(
   sessionID: string,
   requirement: ModelRequirement,
   identity: ModelIdentity,
+  snapshotId: number,
 ): FallbackState {
   const existing = sessionStates.get(sessionID)
-  if (existing) return existing
+  if (existing?.snapshotId === snapshotId) return existing
 
   const initialKey = modelKey(identity.providerID, identity.modelID)
-  const state = createFallbackState(initialKey)
+  const state = createFallbackState(initialKey, snapshotId)
   state.activeModel = initialKey
-  state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
-    entryExactlyMatchesModel(entry, identity.providerID, identity.modelID),
-  )
-  if (state.fallbackIndex < 0 && !matchRequirementSuccessor(
-    requirement,
-    identity.providerID,
-    identity.modelID,
-  )) {
-    state.fallbackIndex = requirement.fallbackChain.findIndex((entry) =>
-      entryMatchesModel(entry, identity.providerID, identity.modelID),
-    )
-  }
+  const matched = matchingEntry(requirement, identity)
+  // A synthesized successor is deliberately not an in-chain entry, so indexOf
+  // preserves -1 and starts the next fallback at the effective chain head.
+  state.fallbackIndex = matched ? requirement.fallbackChain.indexOf(matched) : -1
   sessionStates.set(sessionID, state)
   return state
 }
@@ -137,7 +130,7 @@ export type RuntimeFallbackSessionLifecycle = {
   isCurrent: (sessionID: string, generation: number) => boolean
   trackDispatch: <T>(sessionID: string, generation: number, promise: Promise<T>) => Promise<T>
   waitForStaleDispatches: (sessionID: string, generation: number) => Promise<void>
-  guardedClient: (sessionID: string, generation: number) => OcmmClient
+  guardedClient: (sessionID: string, generation: number, isOperationCurrent?: () => boolean) => OcmmClient
 }
 
 export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undefined): RuntimeFallbackSessionLifecycle {
@@ -205,28 +198,37 @@ export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undef
       .flatMap(([, dispatches]) => [...dispatches])
     if (stale.length > 0) await Promise.allSettled(stale)
   }
-  const guardedClient = (sessionID: string, generation: number): OcmmClient => ({
-    session: {
-      async abort(args) {
-        if (!isCurrent(sessionID, generation) || !client) return undefined
-        const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
-        return Promise.race([client.session.abort(args), cancelled])
+  const guardedClient = (
+    sessionID: string,
+    generation: number,
+    isOperationCurrent: (() => boolean) | undefined = undefined,
+  ): OcmmClient => {
+    const operationIsCurrent = (): boolean =>
+      isCurrent(sessionID, generation) && (isOperationCurrent?.() ?? true)
+    return {
+      session: {
+        async abort(args) {
+          if (!operationIsCurrent() || !client) return undefined
+          const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
+          const response = await Promise.race([client.session.abort(args), cancelled])
+          return operationIsCurrent() ? response : undefined
+        },
+        async messages(args) {
+          if (!operationIsCurrent() || !client) return { messages: [] }
+          const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
+          const response = await Promise.race([client.session.messages(args), cancelled])
+          return operationIsCurrent() ? response : { messages: [] }
+        },
+        async prompt(args) {
+          if (!operationIsCurrent() || !client) throw new Error("runtime fallback session is stale")
+          const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
+          const response = await Promise.race([client.session.prompt(args), cancelled])
+          if (!operationIsCurrent()) throw new Error("runtime fallback session became stale")
+          return response
+        },
       },
-      async messages(args) {
-        if (!isCurrent(sessionID, generation) || !client) return { messages: [] }
-        const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
-        const response = await Promise.race([client.session.messages(args), cancelled])
-        return isCurrent(sessionID, generation) ? response : { messages: [] }
-      },
-      async prompt(args) {
-        if (!isCurrent(sessionID, generation) || !client) throw new Error("runtime fallback session is stale")
-        const cancelled = cancellationSignals.get(generation)?.promise ?? Promise.resolve()
-        const response = await Promise.race([client.session.prompt(args), cancelled])
-        if (!isCurrent(sessionID, generation)) throw new Error("runtime fallback session became stale")
-        return response
-      },
-    },
-  })
+    }
+  }
 
   return {
     beginSession,

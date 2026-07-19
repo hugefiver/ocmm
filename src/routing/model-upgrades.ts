@@ -11,6 +11,11 @@ type CatalogCandidate = {
   providerIndex: number
 }
 
+export type RequirementSuccessorMatch = {
+  entry: FallbackEntry
+  baselineIndex: number
+}
+
 const MIN_GPT_VERSION: Version = [5, 6, 0]
 const MIN_GLM_VERSION: Version = [5, 2, 0]
 
@@ -81,14 +86,25 @@ function parseGlmSuccessor(model: string): Version | null {
   return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]
 }
 
+function compatibleEntryWithIndex(
+  requirement: ModelRequirement,
+  providerID: string | undefined,
+  predicate: (entry: FallbackEntry) => boolean,
+): { entry: FallbackEntry; baselineIndex: number } | undefined {
+  for (const [baselineIndex, entry] of requirement.fallbackChain.entries()) {
+    if (predicate(entry) && (providerID === undefined || entry.providers.includes(providerID))) {
+      return { entry, baselineIndex }
+    }
+  }
+  return undefined
+}
+
 function compatibleEntry(
   requirement: ModelRequirement,
   providerID: string | undefined,
   predicate: (entry: FallbackEntry) => boolean,
 ): FallbackEntry | undefined {
-  return requirement.fallbackChain.find(
-    (entry) => predicate(entry) && (providerID === undefined || entry.providers.includes(providerID)),
-  )
+  return compatibleEntryWithIndex(requirement, providerID, predicate)?.entry
 }
 
 function synthesizeSuccessor(
@@ -181,33 +197,51 @@ export function selectCatalogModel(
   return best ? `${best.provider}/${best.model}` : undefined
 }
 
+export function matchRequirementSuccessorWithIndex(
+  requirement: ModelRequirement,
+  providerID: string | undefined,
+  modelID: string,
+): RequirementSuccessorMatch | null {
+  const gpt = parseGptLane(modelID)
+  if (gpt && compareVersion(gpt.version, MIN_GPT_VERSION) >= 0) {
+    const sameLaneBaseline = compatibleEntryWithIndex(requirement, providerID, (entry) => {
+      const parsed = parseGptLane(entry.model)
+      return parsed !== null && parsed.lane === gpt.lane && compareVersion(gpt.version, parsed.version) >= 0
+    })
+    const baseline = sameLaneBaseline ?? compatibleEntryWithIndex(requirement, providerID, (entry) => {
+      const version = parseGptVersion(entry.model)
+      return version !== null && compareVersion(gpt.version, version) >= 0
+    })
+    if (baseline) {
+      return {
+        entry: synthesizeSuccessor(baseline.entry, providerID, modelID),
+        baselineIndex: baseline.baselineIndex,
+      }
+    }
+  }
+
+  const glm = parseGlmSuccessor(modelID)
+  if (glm && compareVersion(glm, MIN_GLM_VERSION) >= 0) {
+    const baseline = compatibleEntryWithIndex(
+      requirement,
+      providerID,
+      (entry) => entry.model.toLowerCase() === "glm-5.1",
+    )
+    if (baseline) {
+      return {
+        entry: synthesizeSuccessor(baseline.entry, providerID, modelID),
+        baselineIndex: baseline.baselineIndex,
+      }
+    }
+  }
+
+  return null
+}
+
 export function matchRequirementSuccessor(
   requirement: ModelRequirement,
   providerID: string | undefined,
   modelID: string,
 ): FallbackEntry | null {
-  const gpt = parseGptLane(modelID)
-  if (gpt && compareVersion(gpt.version, MIN_GPT_VERSION) >= 0) {
-    const sameLaneBaseline = compatibleEntry(requirement, providerID, (entry) => {
-      const parsed = parseGptLane(entry.model)
-      return parsed !== null && parsed.lane === gpt.lane && compareVersion(gpt.version, parsed.version) >= 0
-    })
-    const baseline = sameLaneBaseline ?? compatibleEntry(requirement, providerID, (entry) => {
-      const version = parseGptVersion(entry.model)
-      return version !== null && compareVersion(gpt.version, version) >= 0
-    })
-    if (baseline) return synthesizeSuccessor(baseline, providerID, modelID)
-  }
-
-  const glm = parseGlmSuccessor(modelID)
-  if (glm && compareVersion(glm, MIN_GLM_VERSION) >= 0) {
-    const baseline = compatibleEntry(
-      requirement,
-      providerID,
-      (entry) => entry.model.toLowerCase() === "glm-5.1",
-    )
-    if (baseline) return synthesizeSuccessor(baseline, providerID, modelID)
-  }
-
-  return null
+  return matchRequirementSuccessorWithIndex(requirement, providerID, modelID)?.entry ?? null
 }

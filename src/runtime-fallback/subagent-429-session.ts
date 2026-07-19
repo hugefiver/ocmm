@@ -5,14 +5,16 @@ export type Session429Deps = {
   scheduler: Subagent429Scheduler
   clock: () => number
   random: () => number
+  isCurrentSnapshot: (snapshotId: number) => boolean
   dispatchRetry?: (input: Subagent429DispatchInput) => Promise<boolean>
   logger: { debug(...args: unknown[]): void; info(...args: unknown[]): void; warn(...args: unknown[]): void }
 }
-type RetryDispatch = { kind: "retry"; target: Subagent429Target; agent?: string; reason: string; scope: Subagent429Scope; scopeKey: string; retriesUsed: number; retryOrdinal: number }
-type SwitchDispatch = { kind: "switch"; target: Subagent429Target; agent?: string; reason: string; prepared: Subagent429PreparedSwitch }
+type RetryDispatch = { kind: "retry"; snapshotId: number; target: Subagent429Target; agent?: string; reason: string; scope: Subagent429Scope; scopeKey: string; retriesUsed: number; retryOrdinal: number }
+type SwitchDispatch = { kind: "switch"; snapshotId: number; target: Subagent429Target; agent?: string; reason: string; prepared: Subagent429PreparedSwitch }
 type PreparedDispatch = RetryDispatch | SwitchDispatch
 type PendingGate = {
   generation: number
+  snapshotId: number
   delayReady: boolean
   errorIdleObserved: boolean
   started: boolean
@@ -22,6 +24,7 @@ type PendingGate = {
 type ActiveDispatch = {
   generation: number
   lifecycleGeneration: number
+  snapshotId: number
   dispatch: PreparedDispatch
   idleObserved: boolean
   queuedOutcome?: QueuedOutcome
@@ -40,16 +43,26 @@ export class Session429State {
   private readonly blocked = new Map<string, number>()
   private readonly lastRecoveryDeadlines = new Map<string, number>()
   private readonly sessionID: string
+  readonly snapshotId: number
   private readonly deps: Session429Deps
   private readonly isLive: () => boolean
   private readonly remove: () => void
 
-  constructor(sessionID: string, deps: Session429Deps, isLive: () => boolean, remove: () => void) {
+  constructor(
+    sessionID: string,
+    snapshotId: number,
+    deps: Session429Deps,
+    isLive: () => boolean,
+    remove: () => void,
+  ) {
     this.sessionID = sessionID
+    this.snapshotId = snapshotId
     this.deps = deps
     this.isLive = isLive
     this.remove = remove
   }
+
+  matchesSnapshot(snapshotId: number): boolean { return this.snapshotId === snapshotId }
 
   activeTarget(): Subagent429Target | undefined { return this.active?.dispatch.target }
 
@@ -65,6 +78,7 @@ export class Session429State {
   }
 
   on429(input: Subagent429ErrorInput): Subagent429Decision {
+    if (!this.matchesSnapshot(input.snapshotId) || this.stopIfSnapshotStale()) return { handled: false }
     const restricted = this.restriction(input)
     if (restricted) return restricted
     if (this.active) return this.queue429(input, this.active)
@@ -73,18 +87,25 @@ export class Session429State {
   }
 
   onOtherError(input: Subagent429OtherErrorInput): Subagent429OtherErrorDecision {
+    if (!this.matchesSnapshot(input.snapshotId) || this.stopIfSnapshotStale()) return { handled: false }
     const active = this.active
     if (!active) {
       this.stop()
       return { handled: false }
     }
     if (active.queuedOutcome) return { handled: true, action: "duplicate-outcome", dispatchGeneration: active.generation }
-    active.queuedOutcome = { kind: "other", dispatchGeneration: active.generation, runGenericFallback: input.runGenericFallback }
+    active.queuedOutcome = {
+      kind: "other",
+      snapshotId: input.snapshotId,
+      dispatchGeneration: active.generation,
+      runGenericFallback: input.runGenericFallback,
+    }
     if (active.settled) this.processQueued(active)
     return { handled: true, action: "queued-other-error", dispatchGeneration: active.generation }
   }
 
   onIdle(): Subagent429IdleResult {
+    if (this.stopIfSnapshotStale()) return { kind: "untracked", suppressIdleContinuation: false }
     if (this.initialPending) {
       this.stop()
       return { kind: "initial-succeeded", suppressIdleContinuation: false }
@@ -97,6 +118,10 @@ export class Session429State {
     const active = this.active
     if (!active) return { kind: "untracked", suppressIdleContinuation: false }
     if (active.queuedOutcome?.kind === "429") {
+      if (active.queuedOutcome.snapshotId !== this.snapshotId) {
+        this.stop()
+        return { kind: "untracked", suppressIdleContinuation: false }
+      }
       active.queuedOutcome.errorIdleObserved = true
       return { kind: "queued-error-idle-observed", suppressIdleContinuation: true }
     }
@@ -126,6 +151,7 @@ export class Session429State {
   }
 
   private process429(input: Subagent429ErrorInput, errorIdleObserved: boolean): Subagent429Decision {
+    if (!this.matchesSnapshot(input.snapshotId) || this.stopIfSnapshotStale()) return { handled: false }
     const restricted = this.restriction(input)
     if (restricted) return restricted
     this.initialPending = false
@@ -142,8 +168,13 @@ export class Session429State {
         this.stop()
         return { handled: true, action: "stopped", reason: prepared.reason }
       }
+      if (prepared.prepared.snapshotId !== input.snapshotId) {
+        this.stop()
+        return { handled: false }
+      }
       const dispatch: SwitchDispatch = {
         kind: "switch",
+        snapshotId: prepared.prepared.snapshotId,
         target: prepared.prepared.target,
         ...(input.agent === undefined ? {} : { agent: input.agent }),
         reason: input.classification.reason,
@@ -156,6 +187,7 @@ export class Session429State {
     const delayMs = scheduleDelay(retriesUsed, input.classification.recoveryDelayMs, this.deps.random)
     const dispatch: RetryDispatch = {
       kind: "retry",
+      snapshotId: input.snapshotId,
       target: input.target,
       ...(input.agent === undefined ? {} : { agent: input.agent }),
       reason: input.classification.reason,
@@ -171,18 +203,33 @@ export class Session429State {
 
   private queue429(input: Subagent429ErrorInput, active: ActiveDispatch): Subagent429Decision {
     if (active.queuedOutcome) return { handled: true, action: "duplicate-outcome", dispatchGeneration: active.generation }
-    active.queuedOutcome = { kind: "429", dispatchGeneration: active.generation, input, errorIdleObserved: false }
+    active.queuedOutcome = {
+      kind: "429",
+      snapshotId: input.snapshotId,
+      dispatchGeneration: active.generation,
+      input,
+      errorIdleObserved: false,
+    }
     if (active.settled) this.processQueued(active)
     return { handled: true, action: "queued-429", dispatchGeneration: active.generation }
   }
 
   private installGate(dispatch: PreparedDispatch, delayMs: number, errorIdleObserved: boolean): void {
+    if (!this.matchesSnapshot(dispatch.snapshotId) || this.stopIfSnapshotStale()) return
     this.pending?.cancel?.()
     const generation = ++this.timerGeneration
-    const gate: PendingGate = { generation, delayReady: false, errorIdleObserved, started: false, dispatch }
+    const gate: PendingGate = {
+      generation,
+      snapshotId: dispatch.snapshotId,
+      delayReady: false,
+      errorIdleObserved,
+      started: false,
+      dispatch,
+    }
     this.pending = gate
     gate.cancel = this.deps.scheduler.schedule(delayMs, async () => {
-      if (!this.isLive() || this.pending !== gate || this.timerGeneration !== generation) return
+      if (this.stopIfSnapshotStale()) return
+      if (this.pending !== gate || this.timerGeneration !== generation || gate.snapshotId !== this.snapshotId) return
       gate.delayReady = true
       this.maybeStart(gate)
     })
@@ -190,13 +237,15 @@ export class Session429State {
   }
 
   private maybeStart(gate: PendingGate): void {
-    if (!this.isLive() || this.pending !== gate || gate.started || !gate.delayReady || !gate.errorIdleObserved) return
+    if (this.stopIfSnapshotStale()) return
+    if (this.pending !== gate || gate.snapshotId !== this.snapshotId || gate.started || !gate.delayReady || !gate.errorIdleObserved) return
     gate.started = true
     gate.cancel?.()
     this.pending = undefined
     const active: ActiveDispatch = {
       generation: ++this.nextDispatchGeneration,
       lifecycleGeneration: this.lifecycleGeneration,
+      snapshotId: gate.snapshotId,
       dispatch: gate.dispatch,
       idleObserved: false,
       settled: false,
@@ -207,10 +256,15 @@ export class Session429State {
   }
 
   private async settle(active: ActiveDispatch): Promise<void> {
+    if (!this.isCurrent(active)) {
+      this.stop()
+      return
+    }
     let dispatched = false
     try {
       dispatched = await this.deps.dispatchRetry!({
         sessionID: this.sessionID,
+        snapshotId: active.snapshotId,
         ...(active.dispatch.agent === undefined ? {} : { agent: active.dispatch.agent }),
         target: active.dispatch.target,
         reason: active.dispatch.reason,
@@ -218,10 +272,13 @@ export class Session429State {
     } catch {
       dispatched = false
     }
-    if (!this.isCurrent(active)) return
+    if (!this.isCurrent(active)) {
+      this.stop()
+      return
+    }
     active.settled = true
     const requestProven = dispatched || active.queuedOutcome !== undefined
-    if (requestProven && !active.accounted) this.account(active)
+    if (requestProven && !active.accounted && !this.account(active)) return
     if (active.queuedOutcome) return this.processQueued(active)
     if (active.idleObserved) return this.stop()
     if (!dispatched) {
@@ -231,8 +288,12 @@ export class Session429State {
   }
 
   private processQueued(active: ActiveDispatch): void {
-    if (!this.isCurrent(active) || !active.queuedOutcome) return
+    if (!active.queuedOutcome) return
     const outcome = active.queuedOutcome
+    if (!this.isCurrent(active) || outcome.snapshotId !== active.snapshotId) {
+      this.stop()
+      return
+    }
     this.active = undefined
     if (outcome.kind === "other") {
       this.stop()
@@ -241,17 +302,40 @@ export class Session429State {
       })
       return
     }
-    this.process429({ ...outcome.input, target: active.dispatch.target }, outcome.errorIdleObserved)
+    this.process429({
+      ...outcome.input,
+      snapshotId: outcome.snapshotId,
+      target: active.dispatch.target,
+    }, outcome.errorIdleObserved)
   }
 
-  private account(active: ActiveDispatch): void {
+  private account(active: ActiveDispatch): boolean {
+    if (!this.isCurrent(active)) {
+      this.stop()
+      return false
+    }
     active.accounted = true
     if (active.dispatch.kind === "retry") this.retryCounts.set(active.dispatch.scopeKey, active.dispatch.retriesUsed + 1)
     else active.dispatch.prepared.commit()
+    return true
   }
 
   private isCurrent(active: ActiveDispatch): boolean {
-    return this.isLive() && this.active === active && this.lifecycleGeneration === active.lifecycleGeneration
+    return this.isSnapshotCurrent()
+      && this.active === active
+      && this.lifecycleGeneration === active.lifecycleGeneration
+      && active.snapshotId === this.snapshotId
+      && active.dispatch.snapshotId === this.snapshotId
+  }
+
+  private isSnapshotCurrent(): boolean {
+    return this.isLive() && this.deps.isCurrentSnapshot(this.snapshotId)
+  }
+
+  private stopIfSnapshotStale(): boolean {
+    if (this.isSnapshotCurrent()) return false
+    this.stop()
+    return true
   }
 
   private logTarget(target: Subagent429Target): { sessionID: string; providerID: string; modelID: string } {

@@ -8,6 +8,7 @@ import {
   defaultConfig,
   OcmmConfigSchema,
   ReviewVariantOverrideSchema,
+  ShimConfigSchema,
   SkillSourceEntrySchema,
   Subagent429ConfigSchema,
 } from "./schema.ts"
@@ -27,6 +28,112 @@ test("defaultConfig applies subagent429 defaults", () => {
     maxRetries: 5,
     providerScopes: {},
   })
+})
+
+test("fast model policy applies root defaults", async () => {
+  const mod = await import("./schema.ts")
+  assert.equal(typeof mod.FastModelsConfigSchema?.parse, "function")
+  assert.deepEqual(mod.FastModelsConfigSchema.parse({}), {
+    providers: [],
+    mappings: {},
+  })
+  assert.deepEqual(defaultConfig().fastModels, {
+    providers: [],
+    mappings: {},
+  })
+  assert.deepEqual(OcmmConfigSchema.parse({}).fastModels, {
+    providers: [],
+    mappings: {},
+  })
+})
+
+test("fast model policy validates root provider mappings", () => {
+  assert.deepEqual(
+    OcmmConfigSchema.parse({
+      fastModels: {
+        providers: ["openai"],
+        mappings: {
+          "openai/gpt-5.6-sol": "gpt-5.6-sol-fast",
+          "openai/gpt-5.6-codex": "openai/gpt-5.6-codex-fast",
+        },
+      },
+    }).fastModels,
+    {
+      providers: ["openai"],
+      mappings: {
+        "openai/gpt-5.6-sol": "gpt-5.6-sol-fast",
+        "openai/gpt-5.6-codex": "openai/gpt-5.6-codex-fast",
+      },
+    },
+  )
+
+  for (const fastModels of [
+    { providers: [""] },
+    { mappings: { openai: "openai/gpt-5.6-flash" } },
+    { mappings: { "/gpt-5.6-sol": "openai/gpt-5.6-flash" } },
+    { mappings: { "openai/gpt-5.6-sol": "" } },
+    { mappings: { "openai/gpt-5.6-sol": "   " } },
+    { providers: [], mappings: {}, extra: true },
+  ]) {
+    assert.equal(OcmmConfigSchema.safeParse({ fastModels }).success, false, JSON.stringify(fastModels))
+  }
+})
+
+test("fast model policy profile form is strict and partial without child defaults", () => {
+  const parsed = OcmmConfigSchema.parse({
+    profiles: {
+      fast: {
+        fastModels: {
+          mappings: {
+            "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
+          },
+        },
+      },
+      empty: {},
+    },
+  })
+
+  assert.deepEqual(parsed.profiles.fast?.fastModels, {
+    mappings: {
+      "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
+    },
+  })
+  assert.equal("providers" in (parsed.profiles.fast?.fastModels ?? {}), false)
+  assert.equal("fastModels" in (parsed.profiles.empty ?? {}), false)
+  assert.deepEqual(parsed.profiles.fast?.disabledHooks, ["directory-readme-injector"])
+
+  assert.equal(
+    OcmmConfigSchema.safeParse({
+      profiles: {
+        bad: {
+          fastModels: {
+            providers: [],
+            mappings: {},
+            extra: true,
+          },
+        },
+      },
+    }).success,
+    false,
+  )
+
+  assert.equal(
+    OcmmConfigSchema.safeParse({
+      profiles: {
+        bad: {
+          fastModels: {
+            providers: [""],
+          },
+        },
+      },
+    }).success,
+    false,
+  )
+})
+
+test("shim config strips fast instead of treating it as a persistent default", () => {
+  const parsed = ShimConfigSchema.parse({ fast: true } as Record<string, unknown>)
+  assert.equal("fast" in parsed, false)
 })
 
 test("Subagent429ConfigSchema accepts zero retries and model/provider scopes", () => {
@@ -226,6 +333,44 @@ test("direct schema rejects later Oracle slots without a resolved normal require
   assert.equal(OcmmConfigSchema.safeParse({
     agents: { oracle: {}, "oracle-2nd": {}, reviewer: {} },
   }).success, true, "builtin review slots keep their default normal requirements")
+})
+
+test("direct schema defers valid qualified aliases for later Oracle slots", () => {
+  const result = OcmmConfigSchema.safeParse({
+    agents: {
+      "oracle-3rd": { alias: "precision:reviewer" },
+    },
+    profiles: {
+      precision: {
+        agents: {
+          reviewer: { model: "openai/TARGET" },
+        },
+      },
+    },
+  })
+
+  assert.equal(result.success, true)
+})
+
+test("direct schema treats colon aliases as opaque and defers them for later Oracle slots", () => {
+  for (const alias of [
+    ":reviewer",
+    "precision:",
+    "precision :reviewer",
+    "precision!:reviewer",
+    "precision/reviewer:target",
+    "\tprecision:reviewer",
+  ]) {
+    const result = OcmmConfigSchema.safeParse({ agents: { source: { alias } } })
+    assert.equal(result.success, true, alias)
+    assert.equal(result.success && result.data.agents?.source?.alias, alias)
+  }
+
+  const laterOracle = OcmmConfigSchema.safeParse({
+    agents: { "oracle-3rd": { alias: "precision:" } },
+  })
+  assert.equal(laterOracle.success, true)
+  assert.equal(laterOracle.success && laterOracle.data.agents?.["oracle-3rd"]?.alias, "precision:")
 })
 
 test("direct schema rejects invalid review-agent entries in profiles", () => {

@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
+import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 import {
   FakeHandlerScheduler,
   deferred,
@@ -14,7 +15,62 @@ import {
   makeIdleEvent,
   modelFor,
   dispatchedModels,
+  publishWorkerRouteSnapshot,
 } from "./event-handler-test-fixtures.ts"
+
+test("real event handler: route replacement before a dedicated gate dispatches no stale retry", async () => {
+  const registry = createEffectiveRouteRegistry()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient()
+  const cfg = makeHandlerConfig(standardHandlerChain())
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    routeRegistry: registry,
+    clock: () => 1_000,
+  })
+
+  await handler(makeCreatedEvent("stale-gate", { parentID: "root" }))
+  await handler(makeErrorEvent("stale-gate", { status: 429 }, { agent: "worker", model: modelFor("primary") }))
+  assert.equal(scheduler.tasks.length, 1)
+  publishWorkerRouteSnapshot(registry)
+  await handler(makeIdleEvent("stale-gate"))
+  assert.equal(scheduler.tasks[0]?.cancelled, true)
+  await scheduler.run(0)
+  assert.deepEqual(dispatchedModels(mock.calls), [])
+})
+
+test("real event handler: publishing snapshot two while snapshot one messages wait leaves the old switch unprompted", async () => {
+  const registry = createEffectiveRouteRegistry()
+  const snapshotOne = publishWorkerRouteSnapshot(registry)
+  assert.equal(snapshotOne, 1)
+  const messages = deferred<unknown>()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient([], { messagesResults: [messages.promise] })
+  const cfg = makeHandlerConfig(standardHandlerChain(), { subagent429: { maxRetries: 0 } })
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    routeRegistry: registry,
+    clock: () => 1_000,
+  })
+
+  await handler(makeCreatedEvent("stale-messages", { parentID: "root" }))
+  await handler(makeErrorEvent("stale-messages", { status: 429 }, { agent: "worker", model: modelFor("primary") }))
+  await handler(makeIdleEvent("stale-messages"))
+  await scheduler.run(0)
+  await flushHandler()
+  assert.equal(mock.messages, 1)
+  publishWorkerRouteSnapshot(registry)
+  messages.resolve({ messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }] })
+  await flushHandler()
+  await flushHandler()
+
+  assert.deepEqual(dispatchedModels(mock.calls), [])
+  assert.equal(mock.aborts, 0)
+})
 
 test("real event handler: non-429 during a waiting gate falls back immediately and delete/recreate prevents stale handoff", async () => {
   const waitingScheduler = new FakeHandlerScheduler()

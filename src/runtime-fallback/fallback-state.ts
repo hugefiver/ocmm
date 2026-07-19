@@ -9,6 +9,8 @@ import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 export type FallbackState = {
   /** The model that originally failed (providerID/modelID). */
   originalModel: string
+  /** Effective-route snapshot that selected this state machine. */
+  snapshotId: number
   /** Index into the fallback chain we're currently on (0 = primary). */
   fallbackIndex: number
   /** Count of committed model switches this session (same-model retries do not count). */
@@ -22,9 +24,10 @@ export type FallbackState = {
 
 export type FallbackCandidateBlocker = (entry: FallbackEntry) => boolean
 
-export function createFallbackState(originalModel: string): FallbackState {
+export function createFallbackState(originalModel: string, snapshotId: number): FallbackState {
   return {
     originalModel,
+    snapshotId,
     fallbackIndex: 0,
     attempts: 0,
     failedModels: new Map(),

@@ -7,7 +7,7 @@
  * global opencode.json so you don't redefine providers.
  *
  * USAGE:
- *   ocmm [-p <name>] [-n] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+ *   ocmm [-p <name>] [-n] [--fast] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
  *        [--config-dir <path>] [--opencode <path-or-name>]
  *        [--keep-omo] [--reset] [-- <opencode args...>]
  *   ocmm --help
@@ -20,7 +20,7 @@
  *   config-dir   OPENCODE_CONFIG_DIR env var (redirects config dir, uses --config-dir)
  *   xdg          XDG_CONFIG_HOME env var (full isolation, uses --config-dir, can strip plugins)
  *
- * All flags except -p/--profile, --reset, and --help can also be set in
+ * All flags except -p/--profile, --fast, --reset, and --help can also be set in
  * the \`shim\` section of ocmm.json[c]. CLI flags override config values.
  */
 
@@ -37,6 +37,7 @@ import type { ShimConfig, IsolationMode } from "../config/schema.ts"
 interface ShimArgs {
   profile?: string
   noProfile: boolean
+  fast: boolean
   mode?: IsolationMode
   noProviders: boolean
   noPlugins: boolean
@@ -206,6 +207,7 @@ export function parseArgs(argv: string[]): ShimArgs {
     noProviders: false,
     noPlugins: false,
     noProfile: false,
+    fast: false,
     keepOmo: false,
     reset: false,
     help: false,
@@ -244,6 +246,9 @@ export function parseArgs(argv: string[]): ShimArgs {
       case "--no-profile":
       case "-n":
         args.noProfile = true
+        break
+      case "--fast":
+        args.fast = true
         break
       case "--no-providers":
         args.noProviders = true
@@ -310,11 +315,29 @@ export function parseArgs(argv: string[]): ShimArgs {
   return args
 }
 
+export function buildChildEnv(parent: NodeJS.ProcessEnv, args: ShimArgs): NodeJS.ProcessEnv {
+  const env = { ...parent }
+
+  if (args.profile) {
+    env.OCMM_PROFILE = args.profile
+  }
+  if (args.noProfile) {
+    env.OCMM_NO_PROFILE = "1"
+  }
+  if (args.fast) {
+    env.OCMM_FAST = "1"
+  } else {
+    delete env.OCMM_FAST
+  }
+
+  return env
+}
+
 function printHelp(): void {
   console.log(`ocmm — launch opencode with isolated config
 
 USAGE:
-  ocmm [-p <name>] [-n] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+  ocmm [-p <name>] [-n] [--fast] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
         [--config-dir <path>] [--opencode <path-or-name>]
         [--keep-omo] [--reset] [-- <opencode args...>]
   ocmm --help
@@ -322,6 +345,7 @@ USAGE:
 OCMM FLAGS:
   -p, --profile <name>  Select ocmm profile at startup (sets OCMM_PROFILE)
   -n, --no-profile      Start without loading any profile (overrides activeProfile)
+      --fast            Enable fast model routing (requires an allowlisted provider)
       --mode <m>         Isolation method: none|inline|config-file|config-dir|xdg
                          (default: none, or 'shim.mode' in ocmm.jsonc)
       --no-providers     Don't merge providers from global opencode config
@@ -357,7 +381,7 @@ PASSTHROUGH:
     ocmm --mode inline run "hello"      # inline config injection
     ocmm --mode config-file -c run "x"  # config-file mode + continue
 
-All flags except -p/--profile, --reset, and --help can also be set in the \`shim\`
+All flags except -p/--profile, --fast, --reset, and --help can also be set in the \`shim\`
 section of ocmm.json[c]. CLI flags override config values.`)
 }
 
@@ -405,14 +429,7 @@ function main(): void {
     keepOmo,
   })
 
-  const env = { ...process.env }
-
-  if (args.profile) {
-    env.OCMM_PROFILE = args.profile
-  }
-  if (args.noProfile) {
-    env.OCMM_NO_PROFILE = "1"
-  }
+  const env = buildChildEnv(process.env, args)
 
   switch (mode) {
     case "none": {

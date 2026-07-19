@@ -5,13 +5,19 @@ import { matchRequirementSuccessor } from "./model-upgrades.ts"
 import { expandedReviewAgentMap } from "../review-agents/expand.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import type { AgentEntry, CategoryEntry } from "../config/schema.ts"
-import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
+import type { FallbackEntry, ModelRequirement, RequirementSource, Variant } from "../shared/types.ts"
+
+export type EffectiveRequirementOverride = {
+  requirement: ModelRequirement
+  source: RequirementSource
+}
 
 export type ResolveOpts = {
   agentName?: string | undefined
   modelID: string
   providerID?: string | undefined
   inputVariant?: string | undefined
+  effectiveRequirement?: EffectiveRequirementOverride | null
   agentsConfig?: Record<string, AgentEntry>
   categoriesConfig?: Record<string, CategoryEntry>
   disabledAgents?: readonly string[]
@@ -228,20 +234,25 @@ export function resolveEffectiveRequirement(opts: {
 }
 
 export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
-  const { agentName, modelID, providerID, inputVariant, agentsConfig, categoriesConfig, disabledAgents } = opts
+  const { agentName, modelID, providerID, inputVariant } = opts
 
-  if (agentName) {
-    const effective = resolveEffectiveRequirement({ agentName, agentsConfig, categoriesConfig, disabledAgents })
-    if (effective) {
-      const r = resolveAgainstRequirement(
-        effective.requirement,
-        providerID,
-        modelID,
-        inputVariant,
-        effective.source,
-      )
-      if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
-    }
+  const effective = opts.effectiveRequirement === undefined
+    ? (opts.agentName ? resolveEffectiveRequirement({
+        agentName: opts.agentName,
+        agentsConfig: opts.agentsConfig,
+        categoriesConfig: opts.categoriesConfig,
+        disabledAgents: opts.disabledAgents,
+      }) : null)
+    : opts.effectiveRequirement
+  if (effective) {
+    const r = resolveAgainstRequirement(
+      effective.requirement,
+      providerID,
+      modelID,
+      inputVariant,
+      effective.source,
+    )
+    if (r) return applyCategoryVariantPolicy(r, agentName, inputVariant)
   }
 
   if (inputVariant && isValidVariant(inputVariant)) {

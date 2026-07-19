@@ -3,6 +3,8 @@ import assert from "node:assert/strict"
 import type { OcmmClient } from "./dispatcher.ts"
 import type { Subagent429Scheduler } from "./subagent-429-controller.ts"
 import { OcmmConfigSchema } from "../config/schema.ts"
+import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
+import type { EffectiveModelRoute } from "../shared/types.ts"
 
 export type PromptCall = {
   sessionID: string
@@ -128,16 +130,51 @@ export function standardHandlerChain() {
   ]
 }
 
-export function makeControlledClient(promptResults: Array<Promise<unknown>> = []) {
+export function publishWorkerRouteSnapshot(
+  registry: EffectiveRouteRegistry,
+  chain: EffectiveModelRoute["requirement"]["fallbackChain"] = standardHandlerChain(),
+): number {
+  const generation = registry.beginBuild()
+  const routes = new Map<string, EffectiveModelRoute>([
+    ["worker", {
+      model: "provider-a/primary",
+      requirement: { fallbackChain: chain },
+      requirementSource: "user-config",
+      primarySource: "user-requirement",
+    }],
+  ])
+  assert.equal(registry.publish(generation, routes), true)
+  return registry.snapshot().snapshotId
+}
+
+export type ControlledClientPhases = {
+  abortResults?: Array<Promise<unknown>>
+  messagesResults?: Array<Promise<unknown>>
+  onMessagesResolved?: () => void
+}
+
+export function makeControlledClient(
+  promptResults: Array<Promise<unknown>> = [],
+  phases: ControlledClientPhases = {},
+) {
   const calls: PromptCall[] = []
   let aborts = 0
+  let messages = 0
   let messagesResp: unknown = {
     messages: [{ role: "user", parts: [{ type: "text", text: "retry this" }] }],
   }
   const client: OcmmClient = {
     session: {
-      async abort() { aborts++ },
-      async messages() { return messagesResp },
+      async abort() {
+        aborts++
+        return phases.abortResults?.shift() ?? undefined
+      },
+      async messages() {
+        messages++
+        const response = await (phases.messagesResults?.shift() ?? Promise.resolve(messagesResp))
+        phases.onMessagesResolved?.()
+        return response
+      },
       async prompt(args: { path: { id: string }; body: Record<string, unknown>; query?: { directory?: string } }) {
         calls.push({ sessionID: args.path.id, body: args.body })
         return promptResults.shift() ?? Promise.resolve()
@@ -148,6 +185,7 @@ export function makeControlledClient(promptResults: Array<Promise<unknown>> = []
     client,
     calls,
     get aborts() { return aborts },
+    get messages() { return messages },
     setMessages(response: unknown) { messagesResp = response },
   }
 }

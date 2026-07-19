@@ -8,6 +8,7 @@ import {
 } from "./fallback-state.ts"
 import { dispatchFallbackRetry, isDispatchInFlight, type OcmmClient } from "./dispatcher.ts"
 import { resolveEffectiveRequirement } from "../routing/resolver.ts"
+import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-message.ts"
 import { markSessionAborted, clearSession, type IdleContinuationState } from "./idle-state.ts"
@@ -45,7 +46,7 @@ export type RuntimeFallbackDeps = {
   directory?: string
   idleState?: IdleContinuationState
   clearSessionIntent?: (sessionID: string) => void
-  registeredAgentModels?: ReadonlyMap<string, string>
+  routeRegistry?: EffectiveRouteRegistry
   scheduler?: Subagent429Scheduler
   clock?: () => number
   random?: () => number
@@ -62,6 +63,7 @@ export const MAX_SUPPRESSION_TOMBSTONES = 256
 export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): RuntimeFallbackRuntime {
   const sessionStates = new Map<string, FallbackState>()
   const clock = deps.clock ?? Date.now
+  const routeRegistry = deps.routeRegistry ?? createEffectiveRouteRegistry()
   // The subagent-interruption-recovery hook gates only the durable correlation
   // calls (recordSessionLineage, recordTaskPart, markExplicitAbort). It never
   // gates the existing 429/generic fallback/lifecycle/idle behavior.
@@ -105,17 +107,23 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
   const controller = createSubagent429Controller({
     ...(deps.scheduler === undefined ? {} : { scheduler: deps.scheduler }),
     clock,
+    isCurrentSnapshot: routeRegistry.isCurrentSnapshot,
     ...(deps.random === undefined ? {} : { random: deps.random }),
     logger: log,
     ...(deps.client === undefined
       ? {}
         : {
-          dispatchRetry: async ({ sessionID, agent, target, reason }) => {
+          dispatchRetry: async ({ sessionID, snapshotId, agent, target, reason }) => {
+            if (!routeRegistry.isCurrentSnapshot(snapshotId)) return false
             const generation = lifecycle.currentGeneration(sessionID)
             await lifecycle.waitForStaleDispatches(sessionID, generation)
-            if (!lifecycle.isCurrent(sessionID, generation)) return false
+            if (!lifecycle.isCurrent(sessionID, generation) || !routeRegistry.isCurrentSnapshot(snapshotId)) return false
             return lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
-              client: lifecycle.guardedClient(sessionID, generation),
+              client: lifecycle.guardedClient(
+                sessionID,
+                generation,
+                () => routeRegistry.isCurrentSnapshot(snapshotId),
+              ),
               sessionID,
               ...(deps.directory === undefined ? {} : { directory: deps.directory }),
               ...(agent === undefined ? {} : { agent }),
@@ -129,6 +137,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
 
   const genericFallbackCtx = {
     lifecycle,
+    isCurrentSnapshot: routeRegistry.isCurrentSnapshot,
     ...(deps.client === undefined ? {} : { client: deps.client }),
     ...(deps.directory === undefined ? {} : { directory: deps.directory }),
     clock,
@@ -142,6 +151,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
 
     const props = isRecord(event.properties) ? event.properties : event
     const sessionID = resolveRuntimeFallbackSessionID(props)
+    const routeSnapshot = routeRegistry.snapshot()
 
     if (eventType === "session.created") {
       // Decode lineage via the shared decoder so runtime fallback, permissions,
@@ -159,9 +169,11 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
           clearSuppression(childSessionID)
           lifecycle.beginSession(childSessionID)
           sessionStates.delete(childSessionID)
-          // Preserve the unchanged onSessionCreated signature; pass isChild based
-          // on whether the shared decoder resolved a parent session ID.
-          controller.onSessionCreated(childSessionID, lineage.parentSessionID !== undefined)
+          controller.onSessionCreated(
+            childSessionID,
+            lineage.parentSessionID !== undefined,
+            routeSnapshot.snapshotId,
+          )
           // When interruption recovery is enabled and a parent exists, record
           // the durable lineage. This does NOT dispatch and is additive.
           if (interruptionRecoveryEnabled() && lineage.parentSessionID !== undefined) {
@@ -178,7 +190,11 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
           clearSuppression(sessionID)
           lifecycle.beginSession(sessionID)
           sessionStates.delete(sessionID)
-          controller.onSessionCreated(sessionID, resolveParentSessionID(props) !== undefined)
+          controller.onSessionCreated(
+            sessionID,
+            resolveParentSessionID(props) !== undefined,
+            routeSnapshot.snapshotId,
+          )
         }
       }
       return
@@ -203,7 +219,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
 
     if (eventType === "session.idle") {
       if (sessionID) {
-        const idleResult = controller.onIdle(sessionID);
+        const idleResult = controller.onIdle(sessionID, routeSnapshot.snapshotId);
         (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         // Do NOT delete sessionStates here - the session may still be live
         // and a later session.error must continue from existing fallback
@@ -294,7 +310,10 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       `session.error: session=${sessionID.slice(0, 16)}… agent=${agent ?? "<none>"} ` +
         `retryable=${classification.retryable} reason=${classification.reason}`,
     )
-    const effective = agent
+    const publishedRoute = routeSnapshot.published && agent
+      ? routeSnapshot.routes.get(agent)
+      : undefined
+    const effective = !routeSnapshot.published && agent
       ? resolveEffectiveRequirement({
           agentName: agent,
           agentsConfig: cfg.agents,
@@ -302,7 +321,10 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
           disabledAgents: cfg.disabledAgents,
         })
       : null
-    const requirement = effective?.requirement ?? null
+    const requirement = routeSnapshot.published
+      ? publishedRoute?.requirement ?? null
+      : effective?.requirement ?? null
+    const routeModel = routeSnapshot.published ? parseModelIdentity(publishedRoute?.model) : null
     // Once the classification is retryable and a known effective agent
     // requirement exists, record durable retryable-child-error evidence. This
     // does NOT dispatch - the existing on429()/generic fallback paths below
@@ -315,19 +337,26 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
     const eventModel = resolveEventModelIdentity(props)
     const inFlight = isDispatchInFlight(sessionID)
     const activeDispatchTarget = !eventModel && inFlight
-      ? controller.getActiveDispatchTarget(sessionID)
+      ? controller.getActiveDispatchTarget(sessionID, routeSnapshot.snapshotId)
       : undefined
-    const registeredModel = agent ? parseModelIdentity(deps.registeredAgentModels?.get(agent)) : null
     const headModel = chainHeadIdentity(requirement)
     let state = sessionStates.get(sessionID)
-    if (!state && classification.retryable && requirement && requirement.fallbackChain.length > 0) {
+    if (classification.retryable && requirement && requirement.fallbackChain.length > 0) {
       const initialModel = eventModel
         ?? (activeDispatchTarget
           ? { providerID: activeDispatchTarget.providerID, modelID: activeDispatchTarget.modelID }
           : null)
-        ?? registeredModel
+        ?? routeModel
         ?? headModel
-      if (initialModel) state = getOrCreateFallbackState(sessionStates, sessionID, requirement, initialModel)
+      if (initialModel) {
+        state = getOrCreateFallbackState(
+          sessionStates,
+          sessionID,
+          requirement,
+          initialModel,
+          routeSnapshot.snapshotId,
+        )
+      }
     }
 
     const stateModel = parseModelIdentity(state?.activeModel)
@@ -343,6 +372,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       requirement,
       ...(state === undefined ? {} : { state }),
       ...(target === undefined ? {} : { failedTarget: target }),
+      snapshotId: routeSnapshot.snapshotId,
       runtimeConfig: cfg.runtimeFallback,
     })
     const dedicated429 = classification.retryable && classification.statusCode === 429
@@ -361,7 +391,11 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
     if (!dedicated429) {
       const decision = controller.onOtherError({
         sessionID,
-        runGenericFallback: async (activeTarget) => runGenericFallback(genericFallbackCtx, genericInput(activeTarget)),
+        snapshotId: routeSnapshot.snapshotId,
+        runGenericFallback: async (activeTarget) => {
+          if (!routeRegistry.isCurrentSnapshot(routeSnapshot.snapshotId)) return
+          await runGenericFallback(genericFallbackCtx, genericInput(activeTarget))
+        },
       })
       if (decision.handled) return
       if (await skipBecauseInFlight()) {
@@ -382,6 +416,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
 
     const decision = controller.on429({
       sessionID,
+      snapshotId: routeSnapshot.snapshotId,
       ...(agent === undefined ? {} : { agent }),
       target: failedTarget,
       classification: {
@@ -411,8 +446,9 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
           prepared: {
             target: { providerID, modelID: entry.model, entry },
             attempt: peek.nextAttempts,
+            snapshotId: routeSnapshot.snapshotId,
             commit: () => {
-              if (committed) return
+              if (committed || !routeRegistry.isCurrentSnapshot(routeSnapshot.snapshotId)) return
               committed = true
               commitFallback(state!, entry, peek.index)
             },

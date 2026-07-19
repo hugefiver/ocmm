@@ -8,6 +8,7 @@ import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
+import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "omo")
 
@@ -61,6 +62,15 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
   const match = prompt.match(/<ocmm-delegation-contract>([\s\S]*?)<\/ocmm-delegation-contract>/)
   assert.ok(match, `missing delegation contract for ${name}`)
   return match[1]!
+}
+
+function publishedRoute(
+  registry: ReturnType<typeof createEffectiveRouteRegistry>,
+  name: string,
+) {
+  const route = registry.snapshot().routes.get(name)
+  assert.ok(route, `missing published route for ${name}`)
+  return route
 }
 
 test("config registers all built-in agents with provider/model strings", async () => {
@@ -817,6 +827,535 @@ test("config registers MCP servers and preserves user-disabled entries", async (
   assert.equal(cfg.mcp.grep_app, undefined)
   assert.deepEqual(cfg.mcp.context7, { enabled: false })
   assert.equal((cfg.mcp.local_docs as Record<string, unknown>).type, "remote")
+})
+
+test("registry-managed registration publishes orthogonal route provenance for selected primaries", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: { model: "openai/user-reviewer" },
+      builder: { model: "openai/user-builder" },
+    },
+  }
+  const target = {
+    agent: {
+      reviewer: { model: "openai/host-reviewer" },
+      orchestrator: { model: "openai/host-orchestrator" },
+    },
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const snapshot = routeRegistry.snapshot()
+  assert.equal(snapshot.published, true)
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "reviewer").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "reviewer").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "existing-model" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "builder").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "builder").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "orchestrator").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "orchestrator").primarySource,
+    },
+    { requirementSource: "agent-default", primarySource: "existing-model" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "planner").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "planner").primarySource,
+    },
+    { requirementSource: "agent-default", primarySource: "catalog-upgrade" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "doc-search").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "doc-search").primarySource,
+    },
+    { requirementSource: "agent-default", primarySource: "builtin-requirement" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "hard-reasoning").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "hard-reasoning").primarySource,
+    },
+    { requirementSource: "category-default", primarySource: "catalog-upgrade" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "quick").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "quick").primarySource,
+    },
+    { requirementSource: "category-default", primarySource: "builtin-requirement" },
+  )
+  for (const route of snapshot.routes.values()) {
+    assert.notEqual(route.requirementSource, "input-variant")
+    assert.notEqual(route.requirementSource, "no-op")
+    assert.notEqual(route.requirementSource, "host-profile-floor")
+  }
+})
+
+test("registry-managed registration covers managed surfaces, preserves unmanaged entries, and honors agent precedence", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    fastModels: {
+      providers: ["openai"],
+      mappings: { "openai/custom-agent": "custom-agent-fast" },
+    },
+    agents: {
+      "custom-agent": { model: "openai/custom-agent" },
+      collision: { model: "openai/agent-wins" },
+    },
+    categories: {
+      "custom-category": { model: "openai/custom-category" },
+      collision: { model: "openai/category-loses" },
+    },
+  }
+  const unrelated = { model: "unrelated/model", permission: { task: "deny" }, nested: { untouched: true } }
+  const target = {
+    agent: { unrelated: structuredClone(unrelated) },
+    provider: { openai: { models: {} } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => true,
+  })(target, undefined)
+
+  for (const name of ["reviewer", "custom-agent", "quick", "custom-category", "collision"]) {
+    const route = publishedRoute(routeRegistry, name)
+    assert.equal((target.agent[name as keyof typeof target.agent] as Record<string, unknown>).model, route.model)
+  }
+  assert.equal(publishedRoute(routeRegistry, "custom-agent").model, "openai/custom-agent-fast")
+  assert.equal(publishedRoute(routeRegistry, "custom-category").model, "openai/custom-category")
+  assert.equal(publishedRoute(routeRegistry, "collision").model, "openai/agent-wins")
+  assert.equal(publishedRoute(routeRegistry, "collision").requirement.fallbackChain[0]?.model, "agent-wins")
+  assert.deepEqual(target.agent.unrelated, unrelated)
+  assert.equal(routeRegistry.snapshot().routes.has("unrelated"), false)
+})
+
+test("registry-managed automatic fast promotion needs the selected provider catalog and an allowlist", async () => {
+  const automaticConfig = {
+    ...defaultConfig(),
+    fastModels: { providers: ["openai"], mappings: {} },
+    agents: { "automatic-worker": { model: "openai/automatic" } },
+  }
+  const registryWithoutCandidate = createEffectiveRouteRegistry()
+  await createConfigHandler({
+    getConfig: () => automaticConfig,
+    routeRegistry: registryWithoutCandidate,
+    getFastMode: () => true,
+  })({
+    agent: {},
+    provider: {
+      openai: { models: {} },
+      anthropic: { models: { "automatic-fast": {} } },
+    },
+  }, undefined)
+  assert.equal(publishedRoute(registryWithoutCandidate, "automatic-worker").model, "openai/automatic")
+
+  const registryWithCandidate = createEffectiveRouteRegistry()
+  await createConfigHandler({
+    getConfig: () => automaticConfig,
+    routeRegistry: registryWithCandidate,
+    getFastMode: () => true,
+  })({
+    agent: {},
+    provider: { openai: { models: { "automatic-fast": {} } } },
+  }, undefined)
+  assert.equal(publishedRoute(registryWithCandidate, "automatic-worker").model, "openai/automatic-fast")
+
+  const noAllowlistConfig = {
+    ...automaticConfig,
+    fastModels: { providers: [], mappings: { "openai/automatic": "automatic-fast" } },
+  }
+  const noAllowlistRegistry = createEffectiveRouteRegistry()
+  await createConfigHandler({
+    getConfig: () => noAllowlistConfig,
+    routeRegistry: noAllowlistRegistry,
+    getFastMode: () => true,
+  })({
+    agent: {},
+    provider: { openai: { models: { "automatic-fast": {} } } },
+  }, undefined)
+  const originalRoute = publishedRoute(noAllowlistRegistry, "automatic-worker")
+  assert.equal(originalRoute.model, "openai/automatic")
+  assert.equal(originalRoute.requirement.fallbackChain[0]?.model, "automatic")
+})
+
+test("registry-managed registration samples fast activation once for each config hook", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  let fastModeReads = 0
+  const handler = createConfigHandler({
+    getConfig: () => ({
+      ...defaultConfig(),
+      fastModels: { providers: ["openai"], mappings: {} },
+      agents: { worker: { model: "openai/gpt-5.4-mini" } },
+    }),
+    routeRegistry,
+    getFastMode: () => {
+      fastModeReads++
+      return fastModeReads === 1
+    },
+  })
+  const target = () => ({ agent: {}, provider: { openai: { models: { "gpt-5.4-mini-fast": {} } } } })
+
+  await handler(target(), undefined)
+  assert.equal(publishedRoute(routeRegistry, "worker").model, "openai/gpt-5.4-mini-fast")
+  await handler(target(), undefined)
+  assert.equal(publishedRoute(routeRegistry, "worker").model, "openai/gpt-5.4-mini")
+  assert.equal(fastModeReads, 2)
+})
+
+test("registry rebuilds atomically, materializes selected primaries, and retains a prior snapshot on failure", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  let config = {
+    ...defaultConfig(),
+    agents: { "deleted-worker": { model: "openai/deleted-worker" } },
+  }
+  const handler = createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })
+  const target = {
+    agent: { reviewer: { model: "openai/host-reviewer" } },
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await handler(target, undefined)
+  assert.equal(publishedRoute(routeRegistry, "deleted-worker").requirement.fallbackChain[0]?.model, "deleted-worker")
+  assert.equal(publishedRoute(routeRegistry, "reviewer").requirement.fallbackChain[0]?.model, "host-reviewer")
+  assert.equal(publishedRoute(routeRegistry, "planner").requirement.fallbackChain[0]?.model, "gpt-5.7-sol")
+
+  config = defaultConfig()
+  await handler(target, undefined)
+  const rebuiltSnapshot = routeRegistry.snapshot()
+  assert.equal(rebuiltSnapshot.routes.has("deleted-worker"), false)
+
+  const failedHandler = createConfigHandler({
+    getConfig: () => {
+      throw new Error("registration failed")
+    },
+    routeRegistry,
+    getFastMode: () => false,
+  })
+  await assert.rejects(failedHandler({ agent: {} }, undefined), /registration failed/)
+  assert.equal(routeRegistry.snapshot(), rebuiltSnapshot)
+
+  await handler(null, undefined)
+  assert.equal(routeRegistry.snapshot(), rebuiltSnapshot)
+})
+
+test("registry mode publishes an intentional empty route map when builtin agents are disabled", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = { ...defaultConfig(), registerBuiltinAgents: false }
+  const target: { agent: Record<string, unknown>; command?: Record<string, unknown> } = { agent: {} }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.equal(routeRegistry.snapshot().published, true)
+  assert.equal(routeRegistry.snapshot().routes.size, 0)
+  assert.ok(target.command?.["ralph-loop"])
+})
+
+test("compatibility mode stays non-fast and rebuilds only registeredAgentModels", async () => {
+  const registeredAgentModels = new Map<string, string>([["stale", "stale/model"]])
+  const config = {
+    ...defaultConfig(),
+    fastModels: {
+      providers: ["openai"],
+      mappings: { "openai/compat-worker": "compat-worker-fast" },
+    },
+    agents: { "compat-worker": { model: "openai/compat-worker" } },
+  }
+  const target = { agent: {}, provider: { openai: { models: {} } } }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    registeredAgentModels,
+  })(target, undefined)
+
+  assert.equal((target.agent["compat-worker"] as Record<string, unknown>).model, "openai/compat-worker")
+  assert.equal(registeredAgentModels.has("stale"), false)
+  assert.equal(registeredAgentModels.get("compat-worker"), "openai/compat-worker")
+})
+
+test("compatibility mode registers a same-name custom agent over its category", async () => {
+  const registeredAgentModels = new Map<string, string>()
+  const config = {
+    ...defaultConfig(),
+    fastModels: {
+      providers: ["openai"],
+      mappings: { "openai/agent-wins": "agent-wins-fast" },
+    },
+    agents: { collision: { model: "openai/agent-wins" } },
+    categories: { collision: { model: "openai/category-loses" } },
+  }
+  const target = { agent: {}, provider: { openai: { models: { "agent-wins-fast": {} } } } }
+
+  await createConfigHandler({ getConfig: () => config, registeredAgentModels })(target, undefined)
+
+  assert.equal((target.agent.collision as Record<string, unknown>).model, "openai/agent-wins")
+  assert.equal(registeredAgentModels.get("collision"), "openai/agent-wins")
+})
+
+test("registry mode omits routes when disabled overrides skip registration", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      builder: { disabled: true },
+      frontend: { disabled: true },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.equal(target.agent.builder, undefined)
+  assert.equal(target.agent.frontend, undefined)
+  assert.equal(routeRegistry.snapshot().routes.has("builder"), false)
+  assert.equal(routeRegistry.snapshot().routes.has("frontend"), false)
+})
+
+test("registry mode keeps host-disabled builtin agents unregistered and unpublished", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const target = {
+    agent: {
+      builder: {
+        model: "host/model",
+        disable: true,
+        permission: { custom: "allow" },
+      },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: defaultConfig,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const builder = target.agent.builder
+  assert.equal(builder.disable, true)
+  assert.equal(builder.model, "host/model")
+  assert.deepEqual(builder.permission, { custom: "allow", task: "allow", question: "allow", "task_*": "allow" })
+  assert.equal("mode" in builder, false)
+  assert.equal("prompt" in builder, false)
+  assert.equal(routeRegistry.snapshot().routes.has("builder"), false)
+})
+
+test("compatibility mode suppresses catalog upgrades for unresolved qualified aliases", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: { reviewer: { alias: "precision:reviewer" } },
+  }
+  const target = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+
+  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.5")
+})
+
+test("compatibility mode suppresses category catalog upgrades for unresolved qualified aliases", async () => {
+  const config = {
+    ...defaultConfig(),
+    categories: { "hard-reasoning": { alias: "precision:hard-reasoning" } },
+  }
+  const target = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+
+  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-5.5")
+})
+
+test("a malformed registry-managed invocation invalidates an older in-progress generation", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  let invalidateWithMalformedInput = false
+  let handler: ReturnType<typeof createConfigHandler>
+  const config = defaultConfig()
+  handler = createConfigHandler({
+    getConfig: () => {
+      if (invalidateWithMalformedInput) {
+        invalidateWithMalformedInput = false
+        void handler(null, undefined)
+      }
+      return config
+    },
+    routeRegistry,
+    getFastMode: () => false,
+  })
+
+  const target = {
+    agent: {
+      host: { model: "host/model", nested: { preserved: true } },
+    },
+  }
+  await handler(target, undefined)
+  const published = routeRegistry.snapshot()
+  assert.equal(published.published, true)
+  const priorAgentMap = target.agent
+  const priorAgentContents = structuredClone(priorAgentMap)
+
+  invalidateWithMalformedInput = true
+  await handler(target, undefined)
+  assert.equal(routeRegistry.snapshot(), published)
+  assert.equal(target.agent, priorAgentMap)
+  assert.deepEqual(target.agent, priorAgentContents)
+
+  await handler(target, undefined)
+  assert.notEqual(routeRegistry.snapshot(), published)
+  assert.notEqual(target.agent, priorAgentMap)
+  assert.deepEqual(target.agent.host, priorAgentContents.host)
+})
+
+test("compatibility aliases receive independently materialized final routes", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    fastModels: { providers: ["openai"], mappings: {} },
+    agents: { "code-search": { model: "openai/code-search-original" } },
+  }
+  const target = {
+    agent: { explore: { model: "openai/explore-original" } },
+    provider: {
+      openai: {
+        models: {
+          "code-search-original-fast": {},
+          "explore-original-fast": {},
+        },
+      },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => true,
+  })(target, undefined)
+
+  const codeSearch = publishedRoute(routeRegistry, "code-search")
+  const explore = publishedRoute(routeRegistry, "explore")
+  assert.notEqual(explore, codeSearch)
+  assert.notEqual(explore.requirement, codeSearch.requirement)
+  assert.deepEqual(explore.requirement.fallbackChain.slice(0, 2).map((entry) => entry.model), [
+    "explore-original-fast",
+    "explore-original",
+  ])
+  assert.deepEqual(codeSearch.requirement.fallbackChain.slice(0, 2).map((entry) => entry.model), [
+    "code-search-original-fast",
+    "code-search-original",
+  ])
+  assert.equal((target.agent.explore as Record<string, unknown>).model, explore.model)
+  assert.equal((target.agent["code-search"] as Record<string, unknown>).model, codeSearch.model)
+})
+
+test("registry mode does not resurrect a compatibility alias disabled in agents config", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: { explore: { disabled: true } },
+  }
+  const target = {
+    agent: {
+      explore: { model: "host/stale-explore" },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.ok(target.agent["code-search"])
+  assert.equal(target.agent.explore, undefined)
+  assert.equal(routeRegistry.snapshot().routes.has("explore"), false)
+})
+
+test("registry mode does not resurrect a compatibility alias when its target is disabled in agents config", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: { "code-search": { disabled: true } },
+  }
+  const target = {
+    agent: {
+      "code-search": { model: "host/code-search", permission: { custom: "allow" } },
+      explore: { model: "host/stale-explore" },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.deepEqual(target.agent["code-search"], {
+    model: "host/code-search",
+    permission: { custom: "allow", task: "deny" },
+  })
+  assert.equal(target.agent.explore, undefined)
+  assert.equal(routeRegistry.snapshot().routes.has("code-search"), false)
+  assert.equal(routeRegistry.snapshot().routes.has("explore"), false)
+})
+
+test("registry mode removes a stale compatibility alias when its host target is disabled", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const target = {
+    agent: {
+      "code-search": { model: "host/code-search", disable: true, permission: { custom: "allow" } },
+      explore: { model: "host/stale-explore" },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: defaultConfig,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.deepEqual(target.agent["code-search"], {
+    model: "host/code-search",
+    disable: true,
+    permission: { custom: "allow", task: "deny" },
+  })
+  assert.equal(target.agent.explore, undefined)
+  assert.equal(routeRegistry.snapshot().routes.has("code-search"), false)
+  assert.equal(routeRegistry.snapshot().routes.has("explore"), false)
 })
 
 function writeSkill(root: string, dir: string, name: string): void {

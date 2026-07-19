@@ -3,14 +3,118 @@ import assert from "node:assert/strict"
 
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
 import type { OcmmClient } from "./dispatcher.ts"
+import { runGenericFallback } from "./event-handler-generic-fallback.ts"
+import { createRuntimeFallbackSessionLifecycle } from "./event-handler-support.ts"
+import { createFallbackState } from "./fallback-state.ts"
 import { OcmmConfigSchema } from "../config/schema.ts"
 import {
+  deferred,
+  flushHandler,
+  makeControlledClient,
   makeMockClient,
   makeConfig,
   makeErrorEvent,
   makeCreatedEvent,
   type PromptCall,
 } from "./event-handler-test-fixtures.ts"
+import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
+import type { EffectiveModelRoute, ModelRequirement } from "../shared/types.ts"
+
+function publishRoute(
+  registry: EffectiveRouteRegistry,
+  agent: string,
+  model: string,
+  fallbackChain: ModelRequirement["fallbackChain"],
+): void {
+  const generation = registry.beginBuild()
+  registry.publish(generation, new Map<string, EffectiveModelRoute>([[agent, {
+    model,
+    requirement: { fallbackChain },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+  }]]))
+}
+
+const snapshotChain = [
+  { providers: ["provider"], model: "snapshot-primary" },
+  { providers: ["provider"], model: "snapshot-next" },
+]
+
+test("generic fallback does no client work when its snapshot is stale before dispatch", async () => {
+  const mock = makeControlledClient()
+  const cfg = OcmmConfigSchema.parse({ runtimeFallback: { enabled: true } })
+  const lifecycle = createRuntimeFallbackSessionLifecycle(mock.client)
+  const state = createFallbackState("provider/snapshot-primary", 1)
+  state.activeModel = "provider/snapshot-primary"
+  const generation = lifecycle.beginSession("ses_stale_before_dispatch")
+
+  await runGenericFallback({
+    lifecycle,
+    client: mock.client,
+    clock: () => 1_000,
+    isCurrentSnapshot: () => false,
+  }, {
+    sessionID: "ses_stale_before_dispatch",
+    generation,
+    snapshotId: 1,
+    agent: "worker",
+    classification: { retryable: true, reason: "test", message: "test" },
+    requirement: { fallbackChain: snapshotChain },
+    state,
+    failedTarget: {
+      providerID: "provider",
+      modelID: "snapshot-primary",
+      entry: snapshotChain[0]!,
+    },
+    runtimeConfig: cfg.runtimeFallback,
+  })
+
+  assert.equal(mock.aborts, 0)
+  assert.equal(mock.messages, 0)
+  assert.equal(mock.calls.length, 0)
+  assert.equal(state.attempts, 0)
+})
+
+test("snapshot change while messages are pending prevents stale prompt and commit", async () => {
+  const pendingMessages = deferred<unknown>()
+  const mock = makeControlledClient([], { messagesResults: [pendingMessages.promise] })
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/snapshot-primary", snapshotChain)
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, routeRegistry: registry })
+
+  const pending = handler(makeErrorEvent("ses_pending_messages", { status: 503 }, { agent: "orchestrator" }))
+  await flushHandler()
+  assert.equal(mock.aborts, 1)
+  assert.equal(mock.messages, 1)
+  publishRoute(registry, "orchestrator", "provider/replacement-primary", [
+    { providers: ["provider"], model: "replacement-primary" },
+    { providers: ["provider"], model: "replacement-next" },
+  ])
+  pendingMessages.resolve({ messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }] })
+  await pending
+
+  assert.equal(mock.calls.length, 0)
+})
+
+test("snapshot change after messages before prompt prevents stale prompt and commit", async () => {
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/snapshot-primary", snapshotChain)
+  const mock = makeControlledClient([], {
+    onMessagesResolved: () => publishRoute(registry, "orchestrator", "provider/replacement-primary", [
+      { providers: ["provider"], model: "replacement-primary" },
+      { providers: ["provider"], model: "replacement-next" },
+    ]),
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_after_messages", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(mock.aborts, 1)
+  assert.equal(mock.messages, 1)
+  assert.equal(mock.calls.length, 0)
+})
 
 test("dispatches fallback on retryable 503 error", async () => {
   const { client, calls } = makeMockClient()

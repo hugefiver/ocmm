@@ -43,6 +43,24 @@ export type NormalizedShorthand = {
   permission?: Record<string, PermissionValue>
 }
 
+export function normalizeDirectRequirement(
+  entry: AgentEntry | CategoryEntry | undefined,
+): ModelRequirement | undefined {
+  if (!entry) return undefined
+  if (entry.requirement) return normalizeRequirementConfig(entry.requirement)
+
+  const chain: FallbackEntry[] = []
+  if (entry.model) chain.push(parseModelString(entry.model, entry.variant))
+  if (entry.fallbackModels) {
+    for (const model of entry.fallbackModels) chain.push(normalizeFallbackEntryConfig(model))
+  }
+  if (chain.length === 0) return undefined
+
+  const requirement: ModelRequirement = { fallbackChain: chain }
+  if (entry.variant) requirement.variant = entry.variant
+  return requirement
+}
+
 export function normalizeShorthand(
   entry: AgentEntry | CategoryEntry | undefined,
   options?: {
@@ -64,20 +82,9 @@ export function normalizeShorthand(
     out.permission = { ...(out.permission ?? {}), ...entry.permission }
   }
 
-  if (entry.requirement) {
-    out.requirement = normalizeRequirementConfig(entry.requirement)
-    return out
-  }
-
-  const chain: FallbackEntry[] = []
-  if (entry.model) chain.push(parseModelString(entry.model, entry.variant))
-  if (entry.fallbackModels) {
-    for (const m of entry.fallbackModels) chain.push(normalizeFallbackEntryConfig(m))
-  }
-  if (chain.length > 0) {
-    const req: ModelRequirement = { fallbackChain: chain }
-    if (entry.variant) req.variant = entry.variant
-    out.requirement = req
+  const directRequirement = normalizeDirectRequirement(entry)
+  if (directRequirement) {
+    out.requirement = directRequirement
     return out
   }
 

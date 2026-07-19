@@ -4,8 +4,54 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { deepMerge, loadConfig, loadProfileEntriesFromDir, loadProfilesFromDir, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
+import {
+  deepMerge,
+  loadConfig,
+  loadProfileDescriptorsFromDir,
+  loadProfileEntriesFromDir,
+  loadProfilesFromDir,
+  stripJsoncCommentsAndTrailingCommas,
+} from "./load.ts"
 import { defaultConfig } from "./schema.ts"
+
+test("generic OpenCode loading preserves qualified aliases without materializing or validating targets", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-qualified-generic-"))
+  const saved = new Map<string, string | undefined>()
+  for (const key of ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST", "OPENCODE_CONFIG_CONTENT"]) {
+    saved.set(key, process.env[key])
+    delete process.env[key]
+  }
+  try {
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({
+      agents: {
+        valid: { alias: "precision:reviewer" },
+        missing: { alias: "missing:reviewer" },
+        malformed: { alias: "precision:" },
+        "oracle-3rd": { alias: "precision:reviewer" },
+        "oracle-4th": { alias: "precision:" },
+      },
+    }))
+
+    const loaded = loadConfig({ cwd, host: "opencode", includeUser: false })
+    assert.equal(loaded.config.agents?.valid?.alias, "precision:reviewer")
+    assert.equal(loaded.config.agents?.valid?.requirement, undefined)
+    assert.equal(loaded.config.agents?.missing?.alias, "missing:reviewer")
+    assert.equal(loaded.config.agents?.missing?.requirement, undefined)
+    assert.equal(loaded.config.agents?.malformed?.alias, "precision:")
+    assert.equal(loaded.config.agents?.malformed?.requirement, undefined)
+    assert.equal(loaded.config.agents?.["oracle-3rd"]?.alias, "precision:reviewer")
+    assert.equal(loaded.config.agents?.["oracle-3rd"]?.requirement, undefined)
+    assert.equal(loaded.config.agents?.["oracle-4th"]?.alias, "precision:")
+    assert.equal(loaded.config.agents?.["oracle-4th"]?.requirement, undefined)
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
 
 test("stripJsoncCommentsAndTrailingCommas keeps strings intact", () => {
   const src = `{
@@ -616,6 +662,53 @@ test("loadProfileEntriesFromDir retains the winning profile source path", () => 
     const loaded = loadProfileEntriesFromDir(root)
     assert.equal(loaded.focused?.source, join(root, "focused.jsonc"))
     assert.deepEqual(loaded.focused?.value, { debug: true })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadProfileDescriptorsFromDir keeps preferred invalid jsonc descriptor without falling through", () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-profile-descriptor-prefer-"))
+  try {
+    writeFileSync(join(root, "precision.json"), JSON.stringify({ debug: true }))
+    writeFileSync(join(root, "precision.jsonc"), `{ this is not valid jsonc`)
+
+    const loaded = loadProfileDescriptorsFromDir(root, "project-directory")
+    const precision = loaded.get("precision")
+
+    assert.ok(precision)
+    assert.equal(precision.name, "precision")
+    assert.equal(precision.source, "project-directory")
+    assert.equal(precision.path, join(root, "precision.jsonc"))
+    assert.equal(precision.error?.kind, "parse")
+    assert.equal(precision.value, undefined)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadProfileDescriptorsFromDir records shape errors with parsed values", () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-profile-descriptor-shape-"))
+  try {
+    writeFileSync(join(root, "array.jsonc"), JSON.stringify(["not", "object"]))
+    const invalidProfile = { agents: { "reviewer-high": { model: "openai/gpt-5.5" } } }
+    writeFileSync(join(root, "invalid-agent.jsonc"), JSON.stringify(invalidProfile))
+
+    const loaded = loadProfileDescriptorsFromDir(root, "user-directory")
+    const arrayDescriptor = loaded.get("array")
+    const invalidAgentDescriptor = loaded.get("invalid-agent")
+
+    assert.ok(arrayDescriptor)
+    assert.equal(arrayDescriptor.source, "user-directory")
+    assert.equal(arrayDescriptor.path, join(root, "array.jsonc"))
+    assert.equal(arrayDescriptor.error?.kind, "shape")
+    assert.deepEqual(arrayDescriptor.value, ["not", "object"])
+
+    assert.ok(invalidAgentDescriptor)
+    assert.equal(invalidAgentDescriptor.source, "user-directory")
+    assert.equal(invalidAgentDescriptor.path, join(root, "invalid-agent.jsonc"))
+    assert.equal(invalidAgentDescriptor.error?.kind, "shape")
+    assert.deepEqual(invalidAgentDescriptor.value, invalidProfile)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

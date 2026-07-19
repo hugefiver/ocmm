@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
+import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 import {
   FakeHandlerScheduler,
   deferred,
@@ -14,7 +15,44 @@ import {
   makeIdleEvent,
   modelFor,
   dispatchedModels,
+  publishWorkerRouteSnapshot,
 } from "./event-handler-test-fixtures.ts"
+
+test("real event handler: a stale prepared switch neither commits nor accounts before the current route handles the next error", async () => {
+  const registry = createEffectiveRouteRegistry()
+  publishWorkerRouteSnapshot(registry)
+  const firstPrompt = deferred<unknown>()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient([firstPrompt.promise])
+  const cfg = makeHandlerConfig(standardHandlerChain(), { subagent429: { maxRetries: 0 } })
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    routeRegistry: registry,
+    clock: () => 1_000,
+  })
+
+  await handler(makeCreatedEvent("stale-prepared", { parentID: "root" }))
+  await handler(makeErrorEvent("stale-prepared", { status: 429 }, { agent: "worker", model: modelFor("primary") }))
+  await handler(makeIdleEvent("stale-prepared"))
+  await scheduler.run(0)
+  await flushHandler()
+  assert.deepEqual(dispatchedModels(mock.calls), ["provider-b/fallback-a"])
+
+  const currentChain = [
+    { providers: ["provider-a"], model: "primary" },
+    { providers: ["provider-d"], model: "current-fallback" },
+  ]
+  publishWorkerRouteSnapshot(registry, currentChain)
+  firstPrompt.resolve(undefined)
+  await flushHandler()
+  await flushHandler()
+
+  await handler(makeErrorEvent("stale-prepared", { status: 503 }, { agent: "worker", model: modelFor("primary") }))
+  await flushHandler()
+  assert.deepEqual(dispatchedModels(mock.calls), ["provider-b/fallback-a", "provider-d/current-fallback"])
+})
 
 test("real event handler: model scope allows a same-provider switch while provider scope skips it", async () => {
   const chain = [

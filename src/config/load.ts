@@ -19,9 +19,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { z } from "zod"
-import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
+import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, ProfileEntrySchema, type OcmmConfig } from "./schema.ts"
 import { tolerantParse, tolerantParseLayers, type TolerantParseLayer } from "./tolerant-parse.ts"
 import { log } from "../shared/logger.ts"
+import { deepMerge, isPlainObject } from "./merge.ts"
+import { materializeQualifiedAgentAliases } from "./profile-aliases.ts"
+import type { ProfileDescriptor, ProfileDescriptorError, ProfileDescriptorMap, ProfileSource } from "./profile-types.ts"
 import {
   assertSelectedReviewProfileCompatible,
   prepareConfigLayers,
@@ -30,12 +33,16 @@ import {
   type PreparedReviewProfile,
 } from "./review-agent-migration.ts"
 
+export { deepMerge } from "./merge.ts"
+
 const FILE_BASENAMES = ["ocmm.jsonc", "ocmm.json"]
+const rawDirectoryProfileValues = new WeakMap<ProfileDescriptor, unknown>()
 const ProfileSelectionSchema = z.object({
   activeProfile: z.string().optional(),
 })
 
 export type ConfigHost = "opencode" | "codex"
+export type LoadConfigOptions = { cwd?: string; host?: ConfigHost; includeUser?: boolean }
 
 function userConfigDir(host: ConfigHost): string {
   if (host === "codex") return process.env.CODEX_HOME ?? join(homedir(), ".codex")
@@ -106,10 +113,6 @@ function locateFile(dir: string): string | null {
     if (existsSync(p)) return p
   }
   return null
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v)
 }
 
 /**
@@ -188,51 +191,80 @@ export function loadProfilesFromDir(dir: string): Record<string, unknown> {
   return out
 }
 
-/**
- * Deep-merge two plain-object trees.
- *
- * Default array policy: REPLACE (override wins) for predictable override
- * semantics. Model fallback and feature-disable arrays are UNIONED de-duped
- * instead - these accumulate across user+project layers so global/project
- * gates compose predictably.
- *
- * Pass `{ profileOverlay: true }` to force ALL arrays to replace (use when
- * overlaying a profile that should fully own a field rather than accumulate).
- */
-export function deepMerge(
-  base: unknown,
-  override: unknown,
-  parentKey?: string,
-  opts?: { profileOverlay?: boolean },
-): unknown {
-  if (override === undefined) return base
-  if (Array.isArray(base) && Array.isArray(override)) {
-    if (opts?.profileOverlay) return override
-    if (parentKey && ACCUMULATING_ARRAY_KEYS.has(parentKey)) {
-      const set = new Set<string>([...base, ...override].map((x) => String(x)))
-      return Array.from(set)
-    }
-    return override
+export function loadProfileDescriptorsFromDir(
+  dir: string,
+  source: Exclude<ProfileSource, "inline">,
+): Map<string, ProfileDescriptor> {
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return new Map()
   }
-  if (isPlainObject(base) && isPlainObject(override)) {
-    const out: Record<string, unknown> = { ...base }
-    for (const [k, v] of Object.entries(override)) {
-      out[k] = deepMerge(base[k], v, k, opts)
-    }
-    return out
+
+  const grouped = new Map<string, { json?: string; jsonc?: string }>()
+  for (const fileName of entries) {
+    if (!fileName.endsWith(".jsonc") && !fileName.endsWith(".json")) continue
+    const baseName = fileName.replace(/\.(jsonc|json)$/, "")
+    const files = grouped.get(baseName) ?? {}
+    if (fileName.endsWith(".jsonc")) files.jsonc = fileName
+    else files.json = fileName
+    grouped.set(baseName, files)
   }
-  return override
+
+  const descriptors = new Map<string, ProfileDescriptor>()
+  for (const [name, files] of [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const fileName = files.jsonc ?? files.json
+    if (!fileName) continue
+    const path = resolve(join(dir, fileName))
+    const descriptor: ProfileDescriptor = { name, source, path }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(stripJsoncCommentsAndTrailingCommas(readFileSync(path, "utf8")))
+      descriptor.value = parsed
+    } catch (err) {
+      descriptor.error = { kind: "parse", message: (err as Error).message }
+      descriptors.set(name, descriptor)
+      continue
+    }
+
+    const prepared = prepareProfileDescriptorValue(name, path, parsed)
+    descriptor.value = prepared.value
+    if (prepared.error) descriptor.error = prepared.error
+    else rawDirectoryProfileValues.set(descriptor, parsed)
+    descriptors.set(name, descriptor)
+  }
+  return descriptors
 }
 
-const ACCUMULATING_ARRAY_KEYS = new Set([
-  "fallbackModels",
-  "disabledAgents",
-  "disabledHooks",
-  "disabledTools",
-  "disabledSkills",
-  "disabledCommands",
-  "disabledMcps",
-])
+function prepareProfileDescriptorValue(
+  name: string,
+  source: string,
+  value: unknown,
+): { value: unknown; error?: ProfileDescriptorError } {
+  if (!isPlainObject(value)) {
+    return { value, error: { kind: "shape", message: `profile ${name} in ${source} is not a JSON object` } }
+  }
+  if ("profiles" in value || "activeProfile" in value) {
+    return {
+      value,
+      error: { kind: "shape", message: `profile ${name} in ${source} cannot contain profiles or activeProfile` },
+    }
+  }
+  let prepared: PreparedReviewProfile
+  try {
+    prepared = prepareReviewProfile({ name, source, value }, () => {})
+  } catch (err) {
+    return { value, error: { kind: "shape", message: (err as Error).message } }
+  }
+  const result = ProfileEntrySchema.safeParse(prepared.value)
+  if (result.success) return { value: prepared.value }
+  return { value, error: { kind: "shape", message: result.error.issues.map((issue) => issue.message).join("; ") } }
+}
+
+function profileDescriptorShapeError(name: string, source: string, value: unknown): ProfileDescriptorError | undefined {
+  return prepareProfileDescriptorValue(name, source, value).error
+}
 
 export type LoadedConfig = {
   config: OcmmConfig
@@ -245,16 +277,26 @@ function reviewWarn(message: string): void {
   log.warn(message)
 }
 
-export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?: boolean } = {}): LoadedConfig {
+type ConfigSources = LoadedConfig["sources"]
+type RawConfigLayer = { source: string; value: unknown }
+type LocatedConfigLayers = {
+  cwd: string
+  host: ConfigHost
+  includeUser: boolean
+  sources: ConfigSources
+  rawLayers: RawConfigLayer[]
+}
+
+function locateConfigLayers(opts: LoadConfigOptions = {}): LocatedConfigLayers {
   const cwd = resolve(opts.cwd ?? process.cwd())
   const host = opts.host ?? "opencode"
-  const sources: { user?: string; project?: string } = {}
+  const sources: ConfigSources = {}
 
   const userPath = opts.includeUser === false ? null : locateFile(userConfigDir(host))
   const projectPath = locateFile(projectConfigDir(cwd, host))
 
   // Build the raw layer list. Apply stripProjectOnlyFields to project first.
-  const rawLayers: { source: string; value: unknown }[] = []
+  const rawLayers: RawConfigLayer[] = []
   if (userPath) {
     const data = readJsoncFile(userPath)
     if (data !== null) {
@@ -269,6 +311,30 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
       sources.project = projectPath
     }
   }
+  return { cwd, host, includeUser: opts.includeUser !== false, sources, rawLayers }
+}
+
+function selectActiveProfile(selection: { activeProfile?: unknown }): string | undefined {
+  const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
+  const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
+  const activeProfileRaw = noProfile ? undefined : (envProfile ?? selection.activeProfile)
+  return typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
+    ? activeProfileRaw
+    : undefined
+}
+
+function deriveActiveProfileFromRawLayers(rawLayers: readonly RawConfigLayer[]): string | undefined {
+  let mergedRaw: Record<string, unknown> = {}
+  for (const layer of rawLayers) {
+    if (isPlainObject(layer.value)) {
+      mergedRaw = deepMerge(mergedRaw, layer.value) as Record<string, unknown>
+    }
+  }
+  return selectActiveProfile(mergedRaw)
+}
+
+export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
+  const { cwd, host, sources, rawLayers } = locateConfigLayers(opts)
 
   try {
     const emittedReviewWarnings = new Set<string>()
@@ -286,13 +352,7 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
     const selectedBaseLayers = profileSelection.success ? profileSelection.layers : baseLayers
     const selection = profileSelection.success ? profileSelection.data : {}
 
-    const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
-    const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
-    const activeProfileRaw = noProfile ? undefined : (envProfile ?? selection.activeProfile)
-    const activeProfile =
-      typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
-        ? activeProfileRaw
-        : undefined
+    const activeProfile = selectActiveProfile(selection)
 
     const userDirEntries = loadProfileEntriesFromDir(join(userConfigDir(host), "ocmm-profiles"))
     const projectDirEntries = host === "opencode"
@@ -353,23 +413,159 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
       log.warn(`ocmm review-agent config conflict; using defaults: ${err.message}`)
       // Re-derive activeProfile from the raw layers without re-running migration,
       // so callers see what would have been selected.
-      let mergedRaw: Record<string, unknown> = {}
-      for (const layer of rawLayers) {
-        if (isPlainObject(layer.value)) {
-          mergedRaw = deepMerge(mergedRaw, layer.value) as Record<string, unknown>
-        }
-      }
-      const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
-      const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
-      const activeProfileRaw = noProfile ? undefined : (envProfile ?? mergedRaw.activeProfile)
-      const activeProfile =
-        typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
-          ? activeProfileRaw
-          : undefined
+      const activeProfile = deriveActiveProfileFromRawLayers(rawLayers)
       return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
     }
     throw err
   }
+}
+
+class PluginProfilePipelineError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PluginProfilePipelineError"
+  }
+}
+
+export function loadOpenCodePluginConfig(
+  options: Omit<LoadConfigOptions, "host"> = {},
+): LoadedConfig {
+  const located = locateConfigLayers({ ...options, host: "opencode" })
+  try {
+    return loadOpenCodePluginConfigStrict(located)
+  } catch (err) {
+    if (!(err instanceof PluginProfilePipelineError) && !(err instanceof ReviewConfigConflictError)) {
+      throw err
+    }
+    const activeProfile = deriveActiveProfileFromRawLayers(located.rawLayers)
+    log.warn(`ocmm opencode plugin config validation failed; using defaults: ${(err as Error).message}`)
+    return { config: defaultConfig(), sources: located.sources, ...(activeProfile ? { activeProfile } : {}) }
+  }
+}
+
+function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedConfig {
+  const emittedReviewWarnings = new Set<string>()
+  const warnReviewOnce = (message: string): void => {
+    if (emittedReviewWarnings.has(message)) return
+    emittedReviewWarnings.add(message)
+    reviewWarn(message)
+  }
+
+  const prepared = prepareConfigLayers(located.rawLayers, warnReviewOnce)
+  const baseLayers: TolerantParseLayer[] = prepared.layers.map((layer) => ({ value: layer.value }))
+  const rawBase = mergeConfigLayers(baseLayers)
+  const baseParsed = OcmmConfigSchema.safeParse(rawBase)
+  if (!baseParsed.success) {
+    throw new PluginProfilePipelineError(`base config validation failed: ${formatZodIssues(baseParsed.error.issues)}`)
+  }
+
+  const descriptors = composeProfileDescriptors(
+    inlineProfileDescriptorsFromRoot(rawBase),
+    located.includeUser
+      ? loadProfileDescriptorsFromDir(join(userConfigDir("opencode"), "ocmm-profiles"), "user-directory")
+      : new Map(),
+    loadProfileDescriptorsFromDir(join(projectConfigDir(located.cwd, "opencode"), "ocmm-profiles"), "project-directory"),
+  )
+  const activeProfile = selectActiveProfile({ activeProfile: baseParsed.data.activeProfile })
+  let config = baseParsed.data
+
+  if (activeProfile) {
+    const descriptor = descriptors.get(activeProfile)
+    if (!descriptor) {
+      log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
+    } else if (descriptor.error) {
+      throw new PluginProfilePipelineError(
+        `active profile "${activeProfile}" from ${profileDescriptorLocation(descriptor)} is invalid (${descriptor.error.kind}): ${descriptor.error.message}`,
+      )
+    } else if (descriptor.value === undefined) {
+      throw new PluginProfilePipelineError(
+        `active profile "${activeProfile}" from ${profileDescriptorLocation(descriptor)} has no materialized value`,
+      )
+    } else {
+      const selectedContributions = selectedPluginProfileContributions(activeProfile, descriptor, prepared, warnReviewOnce)
+      assertSelectedReviewProfileCompatible(prepared.baseOrigins, selectedContributions)
+      const finalRaw = mergeConfigLayers([{ value: rawBase }, ...selectedProfileLayers(selectedContributions)])
+      const finalParsed = OcmmConfigSchema.safeParse(finalRaw)
+      if (!finalParsed.success) {
+        throw new PluginProfilePipelineError(`profiled config validation failed: ${formatZodIssues(finalParsed.error.issues)}`)
+      }
+      config = finalParsed.data
+    }
+  }
+
+  let materialized: OcmmConfig
+  try {
+    materialized = materializeQualifiedAgentAliases({
+      config,
+      baseAgents: baseParsed.data.agents ?? {},
+      profiles: descriptors,
+    })
+  } catch (err) {
+    throw new PluginProfilePipelineError(`qualified alias materialization failed: ${(err as Error).message}`)
+  }
+  const materializedParsed = OcmmConfigSchema.safeParse(materialized)
+  if (!materializedParsed.success) {
+    throw new PluginProfilePipelineError(
+      `materialized config validation failed: ${formatZodIssues(materializedParsed.error.issues)}`,
+    )
+  }
+
+  return { config: materializedParsed.data, sources: located.sources, ...(activeProfile ? { activeProfile } : {}) }
+}
+
+function composeProfileDescriptors(
+  inlineDescriptors: ProfileDescriptorMap,
+  userDescriptors: ProfileDescriptorMap,
+  projectDescriptors: ProfileDescriptorMap,
+): Map<string, ProfileDescriptor> {
+  const out = new Map<string, ProfileDescriptor>()
+  for (const descriptors of [inlineDescriptors, userDescriptors, projectDescriptors]) {
+    for (const [name, descriptor] of descriptors) out.set(name, descriptor)
+  }
+  return out
+}
+
+function inlineProfileDescriptorsFromRoot(root: unknown): Map<string, ProfileDescriptor> {
+  const descriptors = new Map<string, ProfileDescriptor>()
+  if (!isPlainObject(root) || !isPlainObject(root.profiles)) return descriptors
+  for (const [name, value] of Object.entries(root.profiles)) {
+    const descriptor: ProfileDescriptor = { name, source: "inline", value }
+    const shapeError = profileDescriptorShapeError(name, "inline profile", value)
+    if (shapeError) descriptor.error = shapeError
+    descriptors.set(name, descriptor)
+  }
+  return descriptors
+}
+
+function selectedPluginProfileContributions(
+  name: string,
+  descriptor: ProfileDescriptor,
+  prepared: ReturnType<typeof prepareConfigLayers>,
+  warn: (message: string) => void,
+): readonly PreparedReviewProfile[] {
+  if (descriptor.source === "inline") return prepared.inlineProfiles.get(name) ?? []
+  if (rawDirectoryProfileValues.has(descriptor)) {
+    return [prepareReviewProfile({
+      name,
+      source: descriptor.path ?? descriptor.source,
+      value: rawDirectoryProfileValues.get(descriptor),
+    }, warn)]
+  }
+  return [prepareReviewProfile({ name, source: descriptor.path ?? descriptor.source, value: descriptor.value }, warn)]
+}
+
+function profileDescriptorLocation(descriptor: ProfileDescriptor): string {
+  return descriptor.path ?? descriptor.source
+}
+
+function formatZodIssues(issues: readonly { path: readonly PropertyKey[]; message: string }[]): string {
+  return issues
+    .slice(0, 5)
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.map(String).join(".") : "<root>"
+      return `${path}: ${issue.message}`
+    })
+    .join("; ")
 }
 
 function stripProjectOnlyFields(value: unknown): unknown {

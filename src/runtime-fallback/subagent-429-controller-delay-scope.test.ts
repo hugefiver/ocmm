@@ -81,15 +81,16 @@ test("uses cooldown when an exhausted retry deadline has already elapsed", async
   const scheduler = new FakeScheduler()
   const first = deferred<boolean>()
   const controller = createSubagent429Controller({
+    isCurrentSnapshot: () => true,
     scheduler,
     clock: () => clock,
     random: () => 0,
     dispatchRetry: async () => first.promise,
   })
   const config = runtimeConfig({ subagent429: { enabled: true, maxRetries: 1, providerScopes: {} } })
-  controller.onSessionCreated("child", true)
+  controller.onSessionCreated("child", true, 0)
   controller.on429(errorInput("child", { config, recoveryDelayMs: 100 }))
-  controller.onIdle("child")
+  controller.onIdle("child", 0)
   await scheduler.run(0)
   first.resolve(true)
   await flush()
@@ -111,6 +112,7 @@ test("keeps the real long-hint deadline when blocking an exhausted provider scop
   const scheduler = new FakeScheduler()
   const first = deferred<boolean>()
   const controller = createSubagent429Controller({
+    isCurrentSnapshot: () => true,
     scheduler,
     clock: () => clock,
     random: () => 0,
@@ -120,10 +122,10 @@ test("keeps the real long-hint deadline when blocking an exhausted provider scop
     cooldownSeconds: 60,
     subagent429: { enabled: true, maxRetries: 1, providerScopes: { "provider-a": "provider" } },
   })
-  controller.onSessionCreated("child", true)
+  controller.onSessionCreated("child", true, 0)
   controller.on429(errorInput("child", { config, recoveryDelayMs: 900_000 }))
   assert.equal(scheduler.tasks[0]?.delayMs, 0)
-  controller.onIdle("child")
+  controller.onIdle("child", 0)
   await scheduler.run(0)
   first.resolve(true)
   await flush()

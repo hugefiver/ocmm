@@ -44,6 +44,28 @@ test("requires both timer-first and idle-first gate signals, then dispatches exa
   await flush()
 })
 
+test("snapshot changes cancel timer-first and idle-first gates without suppressing the current idle", async () => {
+  const timerFirst = createHarness({ dispatchRetry: async () => true })
+  timerFirst.controller.onSessionCreated("timer-first-stale", true, 0)
+  timerFirst.controller.on429(errorInput("timer-first-stale", { recoveryDelayMs: 100, snapshotId: 0 }))
+  await timerFirst.scheduler.run(0)
+  timerFirst.currentSnapshotId = 1
+  assert.deepEqual(
+    timerFirst.controller.onIdle("timer-first-stale", 1),
+    idle("untracked", false),
+  )
+  assert.equal(timerFirst.dispatches.length, 0)
+
+  const idleFirst = createHarness({ dispatchRetry: async () => true })
+  idleFirst.controller.onSessionCreated("idle-first-stale", true, 0)
+  idleFirst.controller.on429(errorInput("idle-first-stale", { recoveryDelayMs: 100, snapshotId: 0 }))
+  assert.deepEqual(idleFirst.controller.onIdle("idle-first-stale", 0), idle("error-idle-observed", true))
+  idleFirst.currentSnapshotId = 1
+  await idleFirst.scheduler.run(0, true)
+  assert.equal(idleFirst.dispatches.length, 0)
+  assert.deepEqual(idleFirst.controller.onIdle("idle-first-stale", 1), idle("untracked", false))
+})
+
 test("stops when dispatch is unavailable and observes only when runtime dispatch is disabled", () => {
   const unavailable = createHarness()
   unavailable.controller.onSessionCreated("unavailable", true)
@@ -64,10 +86,10 @@ test("stops when dispatch is unavailable and observes only when runtime dispatch
 })
 
 test("constructs with production defaults without scheduler, clock, or logger", () => {
-  const controller = createSubagent429Controller({})
-  controller.onSessionCreated("child", true)
+  const controller = createSubagent429Controller({ isCurrentSnapshot: () => true })
+  controller.onSessionCreated("child", true, 0)
   controller.onDeleted("child")
-  assert.deepEqual(controller.onIdle("child"), idle("untracked", false))
+  assert.deepEqual(controller.onIdle("child", 0), idle("untracked", false))
 })
 
 test("disabled subagent and runtime fallback stop state and remain unhandled", () => {

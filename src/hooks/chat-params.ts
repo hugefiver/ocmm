@@ -13,6 +13,7 @@ import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from 
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
+import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import type { Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
@@ -235,6 +236,7 @@ function ensureOutput(raw: unknown): ChatParamsOutput | null {
 
 export function createChatParamsHandler(args: {
   getConfig: () => OcmmConfig
+  routeRegistry: EffectiveRouteRegistry
   sessionAgentMap?: Map<string, string>
   recordResolution?: (entry: ResolutionEntry) => void
 }): (input: unknown, output: unknown) => Promise<void> {
@@ -247,6 +249,11 @@ export function createChatParamsHandler(args: {
 
     const cfg = args.getConfig()
     const agentName = typeof input.agent === "string" ? input.agent : input.agent.name
+    const snapshot = args.routeRegistry.snapshot()
+    const route = agentName ? snapshot.routes.get(agentName) : undefined
+    const effectiveRequirement = snapshot.published
+      ? (route ? { requirement: route.requirement, source: route.requirementSource } : null)
+      : undefined
 
     if (args.sessionAgentMap && input.sessionID) {
       args.sessionAgentMap.set(input.sessionID, agentName ?? "")
@@ -257,9 +264,14 @@ export function createChatParamsHandler(args: {
       modelID: input.model.modelID,
       providerID: input.model.providerID,
       inputVariant: input.message.variant,
-      agentsConfig: cfg.agents,
-      categoriesConfig: cfg.categories,
-      disabledAgents: cfg.disabledAgents,
+      effectiveRequirement,
+      ...(effectiveRequirement === undefined
+        ? {
+            agentsConfig: cfg.agents,
+            categoriesConfig: cfg.categories,
+            disabledAgents: cfg.disabledAgents,
+          }
+        : {}),
     })
 
     if (!resolution) {

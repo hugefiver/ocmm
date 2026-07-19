@@ -3,7 +3,11 @@ import { test } from "node:test"
 
 import type { ModelRequirement } from "../shared/types.ts"
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
-import { matchRequirementSuccessor, selectCatalogModel } from "./model-upgrades.ts"
+import {
+  matchRequirementSuccessor,
+  matchRequirementSuccessorWithIndex,
+  selectCatalogModel,
+} from "./model-upgrades.ts"
 
 const reviewerRequirement: ModelRequirement = {
   fallbackChain: [
@@ -131,4 +135,21 @@ test("successor matching synthesizes GPT and GLM entries with baseline controls"
     providers: ["zhipu"],
     model: "glm-5.3",
   })
+})
+
+test("successor matching exposes the chosen baseline index while preserving the legacy wrapper", () => {
+  const requirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.4", temperature: 0.1 },
+      { providers: ["openai"], model: "gpt-5.5", temperature: 0.2 },
+      { providers: ["openai"], model: "gpt-5.6-terra", temperature: 0.3 },
+    ],
+  }
+
+  const match = matchRequirementSuccessorWithIndex(requirement, "openai", "gpt-5.7-terra")
+  assert.deepEqual(match, {
+    baselineIndex: 2,
+    entry: { providers: ["openai"], model: "gpt-5.7-terra", temperature: 0.3 },
+  })
+  assert.deepEqual(matchRequirementSuccessor(requirement, "openai", "gpt-5.7-terra"), match?.entry)
 })

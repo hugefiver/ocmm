@@ -87,7 +87,7 @@ test("review routing resolves generated tiers and runtime alias from one expansi
   assert.equal(second?.source, "agent-default")
 })
 
-test("disabled review profile does not resolve", () => {
+test("raw pre-publication resolution passes disabledAgents and suppresses disabled review profiles", () => {
   assert.equal(resolveModelRouting({
     agentName: "oracle-high",
     providerID: "openai",
@@ -95,6 +95,62 @@ test("disabled review profile does not resolve", () => {
     agentsConfig: { oracle: { variants: { high: "max" } } },
     disabledAgents: ["oracle-high"],
   }), null)
+})
+
+test("published effective requirement overrides contradictory raw agent and category config", () => {
+  const r = resolveModelRouting({
+    agentName: "builder",
+    modelID: "gpt-5.4-mini",
+    providerID: "openai",
+    effectiveRequirement: {
+      requirement: {
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini", variant: "high" }],
+      },
+      source: "agent-default",
+    },
+    agentsConfig: {
+      builder: { model: "openai/gpt-5.4-mini", variant: "low" },
+    },
+    categoriesConfig: {
+      builder: { model: "openai/gpt-5.4-mini", variant: "minimal" },
+    },
+  })
+
+  assert.ok(r)
+  assert.equal(r.source, "agent-default")
+  assert.equal(r.variant, "high")
+})
+
+test("published absence with no valid input variant returns null", () => {
+  const r = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+    effectiveRequirement: null,
+    agentsConfig: {
+      reviewer: { model: "openai/gpt-5.5", variant: "xhigh" },
+    },
+  })
+
+  assert.equal(r, null)
+})
+
+test("published absence retains a valid request-local input variant", () => {
+  const r = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.4-mini",
+    providerID: "openai",
+    inputVariant: "low",
+    effectiveRequirement: null,
+    agentsConfig: {
+      reviewer: { model: "openai/gpt-5.4-mini", variant: "xhigh" },
+    },
+  })
+
+  assert.ok(r)
+  assert.equal(r.source, "input-variant")
+  assert.equal(r.variant, "low")
+  assert.equal(r.entry.model, "gpt-5.4-mini")
 })
 
 test("oracle GPT cross-generation entries prefer 5.4 then 5.5 before same-generation Terra", () => {

@@ -220,6 +220,32 @@ const defaultSubagentConfig = () => ({
   maxDepth: 3,
 })
 
+const defaultFastModelsConfig = () => ({
+  providers: [],
+  mappings: {},
+})
+
+const FastModelMappingKeySchema = z.string().regex(/^[^/]+\/.+$/)
+
+const FastModelMappingValueSchema = z.string().refine((value) => /\S/.test(value), {
+  message: "Fast model mapping values must contain non-whitespace text.",
+})
+
+export const FastModelsConfigSchema = z
+  .object({
+    providers: z.array(z.string().min(1)).default([]),
+    mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).default({}),
+  })
+  .strict()
+  .default(defaultFastModelsConfig)
+
+const ProfileFastModelsConfigSchema = z
+  .object({
+    providers: z.array(z.string().min(1)).optional(),
+    mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).optional(),
+  })
+  .strict()
+
 export const SkillSourceEntrySchema = z.union([
   z.string().min(1),
   z
@@ -350,7 +376,9 @@ export const AgentsConfigSchema = z.record(z.string(), AgentEntrySchema).superRe
   }
 
   for (const name of Object.keys(agents)) {
-    if (LATER_ORACLE_SLOT_NAMES.has(name) && !resolvesNormalRequirement(name, agents)) {
+    const entry = agents[name]
+    const hasDeferredQualifiedRequirement = entry?.alias?.includes(":") === true
+    if (LATER_ORACLE_SLOT_NAMES.has(name) && !hasDeferredQualifiedRequirement && !resolvesNormalRequirement(name, agents)) {
       ctx.addIssue({
         code: "custom",
         path: [name],
@@ -556,6 +584,7 @@ export const ProfileEntrySchema = z
     rules: ProfileRulesConfigSchema.optional(),
     mcp: ProfileMcpConfigSchema.optional(),
     subagent: ProfileSubagentConfigSchema.optional(),
+    fastModels: ProfileFastModelsConfigSchema.optional(),
     registerBuiltinAgents: z.boolean().optional(),
     promptsRoot: z.string().optional(),
     debug: z.boolean().optional(),
@@ -602,6 +631,7 @@ export const OcmmConfigSchema = z
     rules: RulesConfigSchema,
     mcp: McpConfigSchema,
     subagent: SubagentConfigSchema,
+    fastModels: FastModelsConfigSchema,
     /** Named partial overlays selectable via `activeProfile` or OCMM_PROFILE. */
     profiles: z.record(z.string(), ProfileEntrySchema).default({}),
     /**
@@ -632,6 +662,7 @@ export type RulesConfig = z.infer<typeof RulesConfigSchema>
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
 export type McpConfig = z.infer<typeof McpConfigSchema>
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>
+export type FastModelsConfig = z.infer<typeof FastModelsConfigSchema>
 export type ProfileEntry = z.infer<typeof ProfileEntrySchema>
 export type SkillSourceEntry = z.infer<typeof SkillSourceEntrySchema>
 export type SkillsConfig = z.infer<typeof SkillsConfigSchema>

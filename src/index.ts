@@ -13,8 +13,10 @@
  */
 
 import { defaultConfig, type OcmmConfig } from "./config/schema.ts"
-import { loadConfig } from "./config/load.ts"
+import { loadOpenCodePluginConfig } from "./config/load.ts"
 import { createConfigHandler } from "./hooks/config.ts"
+import { createEffectiveRouteRegistry } from "./routing/route-registry.ts"
+import { parseFastModeValue } from "./routing/effective-route.ts"
 import { createResolutionLedger } from "./routing/ledger.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler, createSessionIntentStore } from "./hooks/chat-message.ts"
@@ -67,12 +69,13 @@ export function createPlugin(input?: ServerInput): {
   const cwd = input?.directory ?? input?.cwd ?? process.cwd()
   const idleState = createIdleContinuationState()
   let config: OcmmConfig
+  let fastMode = parseFastModeValue(process.env.OCMM_FAST)
   let promptsLoaded = false
   let v1SkillsCache: string | null = null
 
   function loadOrDefault(): OcmmConfig {
     try {
-      const { config: c, sources, activeProfile } = loadConfig({ cwd })
+      const { config: c, sources, activeProfile } = loadOpenCodePluginConfig({ cwd })
       log.info(
         `config loaded: project=${sources.project ?? "<none>"}, user=${sources.user ?? "<none>"}${
           activeProfile ? `, profile=${activeProfile}` : ""
@@ -114,9 +117,10 @@ export function createPlugin(input?: ServerInput): {
   const agentsSessionCache = new Map<string, Set<string>>()
   const sessionAgentMap = new Map<string, string>()
   const sessionDepthMap = new Map<string, number>()
-  const registeredAgentModels = new Map<string, string>()
+  const routeRegistry = createEffectiveRouteRegistry()
   const resolutionLedger = createResolutionLedger()
   const sessionIntentStore = createSessionIntentStore()
+  const getFastMode = (): boolean => fastMode
   const permissionGuards = createPermissionGuards({
     getConfig,
     projectRoot: cwd,
@@ -129,7 +133,7 @@ export function createPlugin(input?: ServerInput): {
     ...(input?.client !== undefined ? { client: input.client } : {}),
     directory: cwd,
     idleState,
-    registeredAgentModels,
+    routeRegistry,
     clearSessionIntent: (sid) => sessionIntentStore.clearSessionIntent(sid),
   })
   const toolAfterHandlers = [
@@ -149,9 +153,10 @@ export function createPlugin(input?: ServerInput): {
   }
 
   const pluginInterface: PluginInterface = {
-    config: createConfigHandler({ getConfig, cwd, registeredAgentModels }),
+    config: createConfigHandler({ getConfig, cwd, routeRegistry, getFastMode }),
     "chat.params": createChatParamsHandler({
       getConfig,
+      routeRegistry,
       sessionAgentMap,
       recordResolution: resolutionLedger.recordResolution,
     }),
@@ -193,6 +198,7 @@ export function createPlugin(input?: ServerInput): {
     getConfig,
     reload(): OcmmConfig {
       config = loadOrDefault()
+      fastMode = parseFastModeValue(process.env.OCMM_FAST)
       promptsLoaded = false
       v1SkillsCache = null
       ensurePromptsLoaded()

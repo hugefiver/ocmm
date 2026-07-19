@@ -7,10 +7,20 @@ import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin
 import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, isGpt56Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
-import type { Agent, Category, FallbackEntry, ModelRequirement } from "../shared/types.ts"
+import type {
+  Agent,
+  Category,
+  FallbackEntry,
+  ModelRequirement,
+  PrimarySource,
+  RequirementSource,
+} from "../shared/types.ts"
 import { normalizeAgentShorthand, normalizeShorthand, type NormalizedShorthand } from "../config/normalize.ts"
 import type { OcmmConfig } from "../config/schema.ts"
+import { buildEffectiveModelRoute } from "../routing/effective-route.ts"
 import { selectCatalogModel } from "../routing/model-upgrades.ts"
+import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
+import { resolveEffectiveRequirement } from "../routing/resolver.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import { expandReviewAgents, isExpandedReviewAgentDisabled, type ReviewAgentRegistrationOverrides } from "../review-agents/expand.ts"
 import { isReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
@@ -87,25 +97,16 @@ type AgentExtras = {
   model?: string
 }
 
-function hasExplicitModelSelection(entry: unknown): boolean {
-  if (typeof entry === "string") return true
-  if (!isRecord(entry)) return false
-  return ["model", "fallbackModels", "requirement", "alias"].some((key) => entry[key] !== undefined)
-}
-
-function rawAgentModel(agentMap: Record<string, unknown>, name: string): string | undefined {
-  const entry = agentMap[name]
-  return isRecord(entry) && typeof entry.model === "string" ? entry.model : undefined
-}
-
 function applyAgentEntry(
   agentMap: Record<string, unknown>,
   agent: Agent,
   override: NormalizedShorthand | undefined,
   extras?: AgentExtras,
   registration?: ReviewAgentRegistrationOverrides,
-): void {
-  if (override?.disabled) return
+): boolean {
+  const current = agentMap[agent.name]
+  if (isRecord(current) && current.disable === true) return false
+  if (override?.disabled) return false
 
   let chain: FallbackEntry[] = agent.requirement.fallbackChain
   const description = override?.description ?? agent.description
@@ -113,12 +114,12 @@ function applyAgentEntry(
   if (override?.requirement?.fallbackChain?.length) {
     chain = override.requirement.fallbackChain
   }
-  if (!chain.length) return
+  if (!chain.length) return false
   const head = chain[0]!
   const modelStr = extras?.model ?? fmtModel(head)
 
-  const existing = isRecord(agentMap[agent.name])
-    ? (agentMap[agent.name] as Record<string, unknown>)
+  const existing = isRecord(current)
+    ? current
     : {}
 
   if (typeof existing.model !== "string") existing.model = modelStr
@@ -158,6 +159,7 @@ function applyAgentEntry(
   }
 
   agentMap[agent.name] = existing
+  return true
 }
 
 function buildLocaleGuidance(locale?: string): string {
@@ -346,28 +348,188 @@ function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {
   }
 }
 
-export function createConfigHandler(args: {
+export type ConfigHandlerBaseArgs = {
   getConfig: () => OcmmConfig
   skillsRoot?: string
   cwd?: string
-  registeredAgentModels?: Map<string, string>
-}): (input: unknown, output: unknown) => Promise<void> {
+}
+
+export type ConfigHandlerRouteMode =
+  | {
+      routeRegistry: EffectiveRouteRegistry
+      getFastMode: () => boolean
+      registeredAgentModels?: never
+    }
+  | {
+      routeRegistry?: undefined
+      getFastMode?: undefined
+      registeredAgentModels?: Map<string, string>
+    }
+
+type ConfigHandlerArgs = ConfigHandlerBaseArgs & ConfigHandlerRouteMode
+
+type RouteBuild = {
+  fastMode: boolean
+  nextRoutes: Map<string, ReturnType<typeof buildEffectiveModelRoute>>
+}
+
+type PrimarySelection = {
+  model: string
+  source: PrimarySource
+}
+
+function hasRouteRegistry(
+  args: ConfigHandlerArgs,
+): args is ConfigHandlerBaseArgs & Extract<ConfigHandlerRouteMode, { routeRegistry: EffectiveRouteRegistry }> {
+  return args.routeRegistry !== undefined
+}
+
+function requirementSourceForRoute(source: string): RequirementSource {
+  if (source === "user-config" || source === "agent-default" || source === "category-default") {
+    return source
+  }
+  throw new Error(`unsupported route requirement source: ${source}`)
+}
+
+function resolveRouteRequirement(cfg: OcmmConfig, agentName: string): {
+  requirement: ModelRequirement
+  source: RequirementSource
+} | null {
+  const resolved = resolveEffectiveRequirement({
+    agentName,
+    agentsConfig: cfg.agents,
+    categoriesConfig: cfg.categories,
+    disabledAgents: cfg.disabledAgents,
+  })
+  if (!resolved) return null
+  return {
+    requirement: resolved.requirement,
+    source: requirementSourceForRoute(resolved.source),
+  }
+}
+
+function selectRoutePrimary(args: {
+  target: Record<string, unknown>
+  agentName: string
+  requirement: ModelRequirement
+  requirementSource: RequirementSource
+  existingModel?: string
+  allowCatalogUpgrade: boolean
+}): PrimarySelection {
+  if (args.existingModel) return { model: args.existingModel, source: "existing-model" }
+  if (args.requirementSource === "user-config") {
+    return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "user-requirement" }
+  }
+  const catalogModel = args.allowCatalogUpgrade
+    ? selectCatalogModel(args.target, args.agentName, args.requirement)
+    : undefined
+  if (catalogModel) return { model: catalogModel, source: "catalog-upgrade" }
+  return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "builtin-requirement" }
+}
+
+function hasExplicitRouteSelection(cfg: OcmmConfig, name: string): boolean {
+  return [cfg.agents?.[name], cfg.categories?.[name]].some((entry) =>
+    entry !== undefined && ["model", "fallbackModels", "requirement", "alias"].some((field) =>
+      Object.prototype.hasOwnProperty.call(entry, field)
+    )
+  )
+}
+
+function hasOwnAgentEntry(cfg: OcmmConfig, name: string): boolean {
+  return cfg.agents !== undefined && Object.prototype.hasOwnProperty.call(cfg.agents, name)
+}
+
+function isCompatAliasDisabled(alias: string, target: string, agents: OcmmConfig["agents"]): boolean {
+  return [alias, target].some((name) =>
+    agents?.[name]?.disabled === true || normalizeAgentShorthand(name, agents)?.disabled === true
+  )
+}
+
+function cloneAgentMap(agentMap: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(agentMap)
+}
+
+function allowCatalogUpgrade(args: {
+  registryManaged: boolean
+  cfg: OcmmConfig
+  agentName: string
+  requested: boolean
+}): boolean {
+  if (!args.requested) return false
+  return args.registryManaged || !hasExplicitRouteSelection(args.cfg, args.agentName)
+}
+
+function selectedProviderCatalogModels(
+  target: Record<string, unknown>,
+  selectedModel: string,
+): ReadonlySet<string> | undefined {
+  const separator = selectedModel.indexOf("/")
+  if (separator <= 0 || separator === selectedModel.length - 1) return undefined
+  const providers = isRecord(target.provider) ? target.provider : undefined
+  const provider = providers?.[selectedModel.slice(0, separator)]
+  if (!isRecord(provider) || !isRecord(provider.models)) return undefined
+  return new Set(Object.keys(provider.models))
+}
+
+function registerEffectiveRoute(args: {
+  build?: RouteBuild
+  agentMap: Record<string, unknown>
+  target: Record<string, unknown>
+  cfg: OcmmConfig
+  name: string
+  requirement: ModelRequirement
+  requirementSource: RequirementSource
+  primary: PrimarySelection
+}): void {
+  if (!args.build) return
+  const route = buildEffectiveModelRoute({
+    selectedModel: args.primary.model,
+    requirement: args.requirement,
+    requirementSource: args.requirementSource,
+    primarySource: args.primary.source,
+    fastMode: args.build.fastMode,
+    fastModels: args.cfg.fastModels,
+    catalogModels: selectedProviderCatalogModels(args.target, args.primary.model),
+  })
+  args.build.nextRoutes.set(args.name, route)
+  const entry = args.agentMap[args.name]
+  if (isRecord(entry)) entry.model = route.model
+}
+
+export function createConfigHandler(
+  args: ConfigHandlerArgs,
+): (input: unknown, output: unknown) => Promise<void> {
   return async (rawInput, _output) => {
-    args.registeredAgentModels?.clear()
-    const cfg = args.getConfig()
+    const registryManaged = hasRouteRegistry(args)
+    if (!registryManaged) args.registeredAgentModels?.clear()
+    const compatibilityConfig = registryManaged ? undefined : args.getConfig()
+    const generation = registryManaged ? args.routeRegistry.beginBuild() : undefined
     if (!isRecord(rawInput)) return
 
     const target = isRecord(rawInput.config) ? rawInput.config : rawInput
+    const routeBuild = registryManaged
+      ? { fastMode: args.getFastMode(), nextRoutes: new Map<string, ReturnType<typeof buildEffectiveModelRoute>>() }
+      : undefined
+    const cfg = compatibilityConfig ?? args.getConfig()
     const registered = registerSkillsAndCommands(target, cfg, args.skillsRoot)
     const registeredMcps = registerMcps(target, cfg, args.cwd)
 
     if (!cfg.registerBuiltinAgents) {
       log.info(`config: registered ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`)
+      if (registryManaged && routeBuild && generation !== undefined) {
+        args.routeRegistry.publish(generation, routeBuild.nextRoutes)
+      }
       return
     }
 
-    if (!isRecord(target.agent)) target.agent = {}
-    const agentMap = target.agent as Record<string, unknown>
+    if (!registryManaged && !isRecord(target.agent)) target.agent = {}
+    const agentMap = registryManaged
+      ? cloneAgentMap(isRecord(target.agent) ? target.agent : {})
+      : target.agent as Record<string, unknown>
+    const existingModels = new Map<string, string>()
+    for (const [name, raw] of Object.entries(agentMap)) {
+      if (isRecord(raw) && typeof raw.model === "string") existingModels.set(name, raw.model)
+    }
 
     const disabled = new Set(cfg.disabledAgents ?? [])
 
@@ -402,27 +564,28 @@ export function createConfigHandler(args: {
       // but didn't specify a model (no requirement) and didn't set an explicit
       // alias. If there is no user entry at all, the builtin requirement stands.
       const userEntryForAgent = cfg.agents?.[a.name]
-      let inheritedDefaultAlias = false
       if (userEntryForAgent !== undefined && !norm?.requirement?.fallbackChain?.length && a.defaultAlias && !userEntryForAgent.alias) {
         const aliasNorm = normalizeAgentShorthand(a.defaultAlias, cfg.agents)
         if (aliasNorm?.requirement?.fallbackChain?.length) {
           norm = { ...norm, requirement: aliasNorm.requirement }
-          inheritedDefaultAlias = true
         }
       }
-      const existingModel = rawAgentModel(agentMap, a.name)
-      const configuredRequirement = norm?.requirement?.fallbackChain?.length
-        ? norm.requirement
-        : undefined
-      const suppressCatalog = hasExplicitModelSelection(userEntryForAgent) || inheritedDefaultAlias
-      const catalogModel = !existingModel && !suppressCatalog
-        ? selectCatalogModel(target, a.name, a.requirement)
-        : undefined
-      const finalModel = existingModel
-        ?? (configuredRequirement ? fmtModel(configuredRequirement.fallbackChain[0]!) : undefined)
-        ?? catalogModel
-        ?? fmtModel(a.requirement.fallbackChain[0]!)
-      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, finalModel)
+      const effective = resolveRouteRequirement(cfg, a.name)
+      if (!effective) continue
+      const primary = selectRoutePrimary({
+        target,
+        agentName: a.name,
+        requirement: effective.requirement,
+        requirementSource: effective.source,
+        existingModel: existingModels.get(a.name),
+        allowCatalogUpgrade: allowCatalogUpgrade({
+          registryManaged,
+          cfg,
+          agentName: a.name,
+          requested: true,
+        }),
+      })
+      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, primary.model)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
         : a.name === "planner"
@@ -431,13 +594,24 @@ export function createConfigHandler(args: {
       const extras: AgentExtras = {}
       if (prompt) extras.prompt = prompt
       extras.mode = mode
-      extras.model = finalModel
+      extras.model = primary.model
       if (mode === "primary" || mode === "all") {
         extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       }
       const contract = delegationContractFor(a.name)
       if (contract) extras.promptSuffix = contract
-      applyAgentEntry(agentMap, a, norm, extras)
+      if (applyAgentEntry(agentMap, a, norm, extras)) {
+        registerEffectiveRoute({
+          build: routeBuild,
+          agentMap,
+          target,
+          cfg,
+          name: a.name,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          primary,
+        })
+      }
     }
 
     for (const profile of expandReviewAgents({ agents: cfg.agents, disabledAgents: cfg.disabledAgents })) {
@@ -447,50 +621,90 @@ export function createConfigHandler(args: {
         requirement: profile.requirement,
         promptSource: profile.promptSource,
       }
-      const existingModel = rawAgentModel(agentMap, profile.name)
-      const catalogModel = !existingModel && !profile.suppressCatalogUpgrade
-        ? selectCatalogModel(target, profile.name, profile.requirement)
-        : undefined
-      const finalModel = existingModel ?? catalogModel ?? fmtModel(profile.requirement.fallbackChain[0]!)
-      let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, finalModel)
+      const effective = resolveRouteRequirement(cfg, profile.name) ?? {
+        requirement: profile.requirement,
+        source: "agent-default" as const,
+      }
+      const primary = selectRoutePrimary({
+        target,
+        agentName: profile.name,
+        requirement: effective.requirement,
+        requirementSource: effective.source,
+        existingModel: existingModels.get(profile.name),
+        allowCatalogUpgrade: allowCatalogUpgrade({
+          registryManaged,
+          cfg,
+          agentName: profile.name,
+          requested: !profile.suppressCatalogUpgrade,
+        }),
+      })
+      let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, primary.model)
       if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
-      const extras: AgentExtras = { mode: "subagent", model: finalModel }
+      const extras: AgentExtras = { mode: "subagent", model: primary.model }
       if (prompt) extras.prompt = prompt
       const contract = delegationContractFor(profile.name)
       if (contract) extras.promptSuffix = contract
-      applyAgentEntry(agentMap, synthetic, {
+      if (applyAgentEntry(agentMap, synthetic, {
         ...(profile.registration.description ? { description: profile.registration.description } : {}),
         requirement: profile.requirement,
         ...(profile.registration.permission ? { permission: profile.registration.permission } : {}),
-      }, extras, profile.registration)
+      }, extras, profile.registration)) {
+        registerEffectiveRoute({
+          build: routeBuild,
+          agentMap,
+          target,
+          cfg,
+          name: profile.name,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          primary,
+        })
+      }
     }
 
     for (const c of BUILTIN_CATEGORIES) {
       if (disabled.has(c.name)) continue
       const agentOverride = normalizeAgentShorthand(c.name, cfg.agents)
+      if (registryManaged && hasOwnAgentEntry(cfg, c.name) && !agentOverride?.requirement?.fallbackChain?.length) {
+        continue
+      }
       const categoryOverride = normalizeShorthand(cfg.categories?.[c.name])
-
-      const baseAgent = categoryAsAgent(c, categoryOverride?.requirement)
+      const effective = resolveRouteRequirement(cfg, c.name)
+      if (!effective) continue
+      const baseAgent = categoryAsAgent(c, effective.requirement)
       const merged: NormalizedShorthand | undefined =
         agentOverride ?? categoryOverride
-
+      const primary = selectRoutePrimary({
+        target,
+        agentName: c.name,
+        requirement: effective.requirement,
+        requirementSource: effective.source,
+        existingModel: existingModels.get(c.name),
+        allowCatalogUpgrade: allowCatalogUpgrade({
+          registryManaged,
+          cfg,
+          agentName: c.name,
+          requested: true,
+        }),
+      })
       const extras: AgentExtras = { mode: "subagent" }
-      const hasUserSelection = hasExplicitModelSelection(cfg.agents?.[c.name]) || hasExplicitModelSelection(cfg.categories?.[c.name])
-      const existingModel = rawAgentModel(agentMap, c.name)
-      const configuredRequirement = agentOverride?.requirement ?? categoryOverride?.requirement
-      const catalogModel = !hasUserSelection && !existingModel
-        ? selectCatalogModel(target, c.name, baseAgent.requirement)
-        : undefined
-      const finalModel = existingModel
-        ?? (configuredRequirement ? fmtModel(configuredRequirement.fallbackChain[0]!) : undefined)
-        ?? catalogModel
-        ?? fmtModel(baseAgent.requirement.fallbackChain[0]!)
-      const prompt = promptForBuiltinCategory(c.name, cfg.workflow, finalModel)
+      const prompt = promptForBuiltinCategory(c.name, cfg.workflow, primary.model)
       if (prompt) extras.prompt = prompt
-      extras.model = finalModel
+      extras.model = primary.model
       const contract = delegationContractFor(c.name)
       if (contract) extras.promptSuffix = contract
-      applyAgentEntry(agentMap, baseAgent, merged, extras)
+      if (applyAgentEntry(agentMap, baseAgent, merged, extras)) {
+        registerEffectiveRoute({
+          build: routeBuild,
+          agentMap,
+          target,
+          cfg,
+          name: c.name,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          primary,
+        })
+      }
     }
 
     if (cfg.agents) {
@@ -501,27 +715,130 @@ export function createConfigHandler(args: {
         if (parseReviewAgentName(name)) continue
         const norm = normalizeAgentShorthand(name, cfg.agents)
         if (!norm?.requirement?.fallbackChain?.length) continue
+        const effective = resolveRouteRequirement(cfg, name)
+        if (!effective) continue
+        const primary = selectRoutePrimary({
+          target,
+          agentName: name,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          existingModel: existingModels.get(name),
+          allowCatalogUpgrade: false,
+        })
         const synthetic: Agent = {
           name,
           ...(norm.description ? { description: norm.description } : {}),
           requirement: norm.requirement,
         }
-        applyAgentEntry(agentMap, synthetic, norm)
+        const registeredAgent = applyAgentEntry(agentMap, synthetic, norm, { model: primary.model })
+        if (registeredAgent && !COMPAT_AGENT_ALIASES.some((entry) => entry.alias === name)) {
+          registerEffectiveRoute({
+            build: routeBuild,
+            agentMap,
+            target,
+            cfg,
+            name,
+            requirement: effective.requirement,
+            requirementSource: effective.source,
+            primary,
+          })
+        }
       }
     }
 
-    registerCompatAgentAliases(agentMap, disabled)
+    if (registryManaged && cfg.categories) {
+      for (const name of Object.keys(cfg.categories)) {
+        if (disabled.has(name)) continue
+        if (BUILTIN_AGENTS.some((a) => a.name === name)) continue
+        if (BUILTIN_CATEGORIES.some((c) => c.name === name)) continue
+        if (hasOwnAgentEntry(cfg, name)) continue
+        const agentOverride = normalizeAgentShorthand(name, cfg.agents)
+        const categoryOverride = normalizeShorthand(cfg.categories[name])
+        if (!agentOverride?.requirement?.fallbackChain?.length && !categoryOverride?.requirement?.fallbackChain?.length) {
+          continue
+        }
+        const effective = resolveRouteRequirement(cfg, name)
+        if (!effective) continue
+        const primary = selectRoutePrimary({
+          target,
+          agentName: name,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          existingModel: existingModels.get(name),
+          allowCatalogUpgrade: false,
+        })
+        const synthetic: Agent = {
+          name,
+          ...(agentOverride?.description ?? categoryOverride?.description
+            ? { description: agentOverride?.description ?? categoryOverride?.description }
+            : {}),
+          requirement: effective.requirement,
+        }
+        const merged = agentOverride?.requirement ? agentOverride : categoryOverride
+        if (applyAgentEntry(agentMap, synthetic, merged, { mode: "subagent", model: primary.model })) {
+          registerEffectiveRoute({
+            build: routeBuild,
+            agentMap,
+            target,
+            cfg,
+            name,
+            requirement: effective.requirement,
+            requirementSource: effective.source,
+            primary,
+          })
+        }
+      }
+    }
+
+    registerCompatAgentAliases(agentMap, disabled, cfg.agents, registryManaged)
     registerDefaultPermissions(target, agentMap)
 
-    for (const [name, raw] of Object.entries(agentMap)) {
-      if (isRecord(raw) && typeof raw.model === "string") {
-        args.registeredAgentModels?.set(name, raw.model)
+    for (const { alias, target: compatTarget } of COMPAT_AGENT_ALIASES) {
+      if (!routeBuild || disabled.has(alias) || disabled.has(compatTarget) || isCompatAliasDisabled(alias, compatTarget, cfg.agents)) continue
+      const currentTarget = agentMap[compatTarget]
+      const aliasEntry = agentMap[alias]
+      const targetRoute = routeBuild.nextRoutes.get(compatTarget)
+      const effective = resolveRouteRequirement(cfg, alias)
+      if (
+        !isRecord(currentTarget)
+        || currentTarget.disable === true
+        || !isRecord(aliasEntry)
+        || aliasEntry.disable === true
+        || typeof aliasEntry.model !== "string"
+        || !effective
+      ) continue
+      const explicitAliasRequirement = normalizeAgentShorthand(alias, cfg.agents)?.requirement
+      const primary: PrimarySelection = existingModels.has(alias)
+        ? { model: aliasEntry.model, source: "existing-model" }
+        : explicitAliasRequirement
+          ? { model: aliasEntry.model, source: "user-requirement" }
+          : { model: aliasEntry.model, source: targetRoute?.primarySource ?? "builtin-requirement" }
+      registerEffectiveRoute({
+        build: routeBuild,
+        agentMap,
+        target,
+        cfg,
+        name: alias,
+        requirement: effective.requirement,
+        requirementSource: effective.source,
+        primary,
+      })
+    }
+
+    if (!registryManaged) {
+      for (const [name, raw] of Object.entries(agentMap)) {
+        if (isRecord(raw) && typeof raw.model === "string") {
+          args.registeredAgentModels?.set(name, raw.model)
+        }
       }
     }
 
     log.info(
       `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`,
     )
+    if (registryManaged && routeBuild && generation !== undefined && args.routeRegistry.publish(generation, routeBuild.nextRoutes)) {
+      target.agent = agentMap
+    }
   }
 }
 
@@ -582,13 +899,22 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
 function registerCompatAgentAliases(
   agentMap: Record<string, unknown>,
   disabled: Set<string>,
+  agents: OcmmConfig["agents"],
+  registryManaged: boolean,
 ): void {
   for (const { alias, target } of COMPAT_AGENT_ALIASES) {
-    if (disabled.has(alias) || disabled.has(target)) continue
+    if (disabled.has(alias) || disabled.has(target) || isCompatAliasDisabled(alias, target, agents)) {
+      if (registryManaged) delete agentMap[alias]
+      continue
+    }
     const source = agentMap[target]
-    if (!isRecord(source)) continue
+    if (!isRecord(source) || source.disable === true) {
+      if (registryManaged) delete agentMap[alias]
+      continue
+    }
 
     const existing = isRecord(agentMap[alias]) ? (agentMap[alias] as Record<string, unknown>) : {}
+    if (existing.disable === true) continue
     const aliasEntry = { ...source, ...existing }
     if (typeof aliasEntry.description !== "string") {
       aliasEntry.description = `Compatibility alias for @${target}.`

@@ -1,8 +1,7 @@
 // Sample ocmm config. Drop this at:
 //   <project>/.opencode/ocmm.jsonc
-//   ~/.config/opencode/ocmm.jsonc          (Linux/macOS)
-//   $XDG_CONFIG_HOME/opencode/ocmm.jsonc   (if XDG_CONFIG_HOME is set)
-//   %APPDATA%\opencode\ocmm.jsonc          (Windows, when XDG_CONFIG_HOME is unset)
+//   ~/.config/opencode/ocmm.jsonc          (default on Linux, macOS, and Windows)
+//   $XDG_CONFIG_HOME/opencode/ocmm.jsonc   (when XDG_CONFIG_HOME is set)
 //
 // Project config wins over user config on conflicts.
 // `disabledAgents` and `fallbackModels` are unioned across both.
@@ -13,12 +12,31 @@
   // "zh", "zh-Hans", "zh-CN", "en-US". Omit to follow the user's language.
   // "locale": "zh-CN",
 
+  // Fast routing is opt-in. Provider names are case-sensitive; omitted/empty
+  // providers disable promotion. Mapping keys are qualified original models.
+  "fastModels": {
+    "providers": ["openai"],
+    "mappings": {
+      "openai/gpt-5.5": "gpt-5.5-fast"
+    }
+  },
+
   // Agents accept shorthand or full ModelRequirement form.
   "agents": {
     // Shorthand: pin a single model + optional variant.
     "reviewer": {
       "model": "anthropic/claude-opus-4-7",
       "variant": "max"
+    },
+
+    // A qualified alias imports only the target requirement. These behavior
+    // fields remain local to oracle; `precision` is defined below.
+    "oracle": {
+      "alias": "precision:reviewer",
+      "description": "Local Oracle review behavior",
+      "tools": { "task": false },
+      "permission": { "question": "allow" },
+      "promptAppend": "Keep Oracle-specific review guidance local."
     },
 
     // Shorthand with a fallback list. Strings are parsed as "provider/model";
@@ -155,8 +173,31 @@
 
   // Named partial overlays. At load time, the active profile is deep-merged
   // over the base config (profile wins). Select via `activeProfile` here or
-  // the OCMM_PROFILE env var (env wins). Missing profile = silently ignored.
+  // the OCMM_PROFILE env var (env wins). Missing profile warns and preserves the base config.
   "profiles": {
+    "precision": {
+      // A profile `providers` array replaces the base allowlist, while
+      // `mappings` deep-merges by qualified original-model key.
+      "fastModels": {
+        "providers": ["openai"],
+        "mappings": {
+          "openai/gpt-5.5": "gpt-5.5-fast"
+        }
+      },
+      "agents": {
+        // Complete requirement imported by agents.oracle's qualified alias.
+        "reviewer": {
+          "requirement": {
+            "variant": "max",
+            "requiresProvider": ["openai"],
+            "fallbackChain": [
+              { "providers": ["openai"], "model": "gpt-5.5", "variant": "max" },
+              { "providers": ["anthropic"], "model": "claude-opus-4-7", "variant": "high" }
+            ]
+          }
+        }
+      }
+    },
     "gpu": {
       "agents": {
         "orchestrator": { "model": "openai/gpt-5.5", "variant": "high" },

@@ -4,8 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { loadConfig } from "./load.ts"
+import { loadConfig, loadOpenCodePluginConfig } from "./load.ts"
 import { OcmmConfigSchema, defaultConfig } from "./schema.ts"
+
+const PLUGIN_ENV_KEYS = ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST", "OPENCODE_CONFIG_CONTENT"] as const
+type PluginEnvKey = (typeof PLUGIN_ENV_KEYS)[number]
 
 function makeTempXdg(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-profile-test-"))
@@ -27,6 +30,497 @@ function loadWithXdg(xdg: string, cwd?: string) {
     else process.env.XDG_CONFIG_HOME = prev
   }
 }
+
+function withPluginEnv<T>(overrides: Partial<Record<PluginEnvKey, string | undefined>>, run: () => T): T {
+  const previous = new Map<PluginEnvKey, string | undefined>()
+  for (const key of PLUGIN_ENV_KEYS) {
+    previous.set(key, process.env[key])
+    delete process.env[key]
+  }
+  for (const [key, value] of Object.entries(overrides) as [PluginEnvKey, string | undefined][]) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  try {
+    return run()
+  } finally {
+    for (const key of PLUGIN_ENV_KEYS) {
+      const value = previous.get(key)
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
+function loadPluginWithXdg(
+  xdg: string,
+  cwd?: string,
+  env: Partial<Record<PluginEnvKey, string | undefined>> = {},
+) {
+  const prev = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    return withPluginEnv(env, () => loadOpenCodePluginConfig({ cwd: cwd ?? xdg }))
+  } finally {
+    if (prev === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prev
+  }
+}
+
+test("loadOpenCodePluginConfig profile descriptors preserve inline < user dir < project dir precedence", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-profile-project-"))
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "BASE" } },
+      profiles: {
+        precision: { agents: { orchestrator: { model: "INLINE" } } },
+      },
+      activeProfile: "precision",
+    })
+    const userDir = join(xdg, "opencode", "ocmm-profiles")
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(userDir, "precision.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "USER" } } }))
+    writeFileSync(join(projectDir, "precision.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "PROJECT" } } }))
+
+    const loaded = loadPluginWithXdg(xdg, project)
+
+    assert.equal(loaded.activeProfile, "precision")
+    assert.equal(loaded.config.agents?.orchestrator?.model, "PROJECT")
+    assert.equal(loaded.config.profiles.precision?.agents?.orchestrator?.model, "INLINE")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig invalid active project descriptor shadows lower profiles and returns defaults", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-invalid-active-"))
+  try {
+    writeConfig(xdg, {
+      agents: { "invalid-config": { model: "BASE" } },
+      fastModels: { providers: ["base-provider"] },
+      profiles: {
+        precision: {
+          agents: { "invalid-config": { model: "INLINE" } },
+          fastModels: { providers: ["inline-provider"] },
+        },
+      },
+      activeProfile: "precision",
+    })
+    const userDir = join(xdg, "opencode", "ocmm-profiles")
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(userDir, "precision.jsonc"), JSON.stringify({ fastModels: { providers: ["user-provider"] } }))
+    writeFileSync(join(projectDir, "precision.jsonc"), JSON.stringify({ activeProfile: "nested" }))
+
+    const loaded = loadPluginWithXdg(xdg, project)
+
+    assert.equal(loaded.activeProfile, "precision")
+    assert.deepEqual(loaded.config.fastModels.providers, [])
+    assert.equal(loaded.config.agents?.["invalid-config"], undefined)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig ignores invalid unreferenced directory descriptors and does not insert inactive directory profiles", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-inert-directory-"))
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "BASE" } },
+      profiles: {
+        active: { agents: { orchestrator: { model: "INLINE-ACTIVE" } } },
+      },
+      activeProfile: "active",
+    })
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, "active.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "PROJECT-ACTIVE" } } }))
+    writeFileSync(join(projectDir, "unused.jsonc"), JSON.stringify({ agents: { "reviewer-high": { model: "BAD" } } }))
+
+    const loaded = loadPluginWithXdg(xdg, project)
+
+    assert.equal(loaded.activeProfile, "active")
+    assert.equal(loaded.config.agents?.orchestrator?.model, "PROJECT-ACTIVE")
+    assert.equal(loaded.config.profiles.unused, undefined)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig uses exact ambient profile selection", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "BASE" } },
+      profiles: {
+        configured: { agents: { orchestrator: { model: "CONFIGURED" } } },
+        env: { agents: { orchestrator: { model: "ENV" } } },
+      },
+      activeProfile: "configured",
+    })
+
+    const envWins = loadPluginWithXdg(xdg, undefined, { OCMM_PROFILE: "env", OCMM_NO_PROFILE: "false" })
+    assert.equal(envWins.activeProfile, "env")
+    assert.equal(envWins.config.agents?.orchestrator?.model, "ENV")
+
+    const nonDisableValue = loadPluginWithXdg(xdg, undefined, { OCMM_PROFILE: "env", OCMM_NO_PROFILE: "yes" })
+    assert.equal(nonDisableValue.activeProfile, "env")
+    assert.equal(nonDisableValue.config.agents?.orchestrator?.model, "ENV")
+
+    const disabledByTrue = loadPluginWithXdg(xdg, undefined, { OCMM_PROFILE: "env", OCMM_NO_PROFILE: "true" })
+    assert.equal(disabledByTrue.activeProfile, undefined)
+    assert.equal(disabledByTrue.config.agents?.orchestrator?.model, "BASE")
+
+    const disabledByOne = loadPluginWithXdg(xdg, undefined, { OCMM_PROFILE: "env", OCMM_NO_PROFILE: "1" })
+    assert.equal(disabledByOne.activeProfile, undefined)
+    assert.equal(disabledByOne.config.agents?.orchestrator?.model, "BASE")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig missing active descriptor warns and preserves base config", () => {
+  const xdg = makeTempXdg()
+  const previousDebug = process.env.OCMM_DEBUG
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  process.env.OCMM_DEBUG = "1"
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "BASE" } },
+      fastModels: { providers: ["base-provider"] },
+      activeProfile: "missing",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.equal(loaded.activeProfile, "missing")
+    assert.equal(loaded.config.agents?.orchestrator?.model, "BASE")
+    assert.deepEqual(loaded.config.fastModels.providers, ["base-provider"])
+    assert.match(warnings.join("\n"), /active profile "missing" not found/i)
+  } finally {
+    console.warn = originalWarn
+    if (previousDebug === undefined) delete process.env.OCMM_DEBUG
+    else process.env.OCMM_DEBUG = previousDebug
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig profile overlay replaces fast providers and deep-merges mappings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      fastModels: {
+        providers: ["base-provider"],
+        mappings: {
+          "openai/gpt-5": "openai/gpt-5-mini",
+          "anthropic/claude-opus": "anthropic/claude-haiku",
+        },
+      },
+      profiles: {
+        fast: {
+          fastModels: {
+            providers: ["profile-provider"],
+            mappings: {
+              "openai/gpt-5": "openai/gpt-5-nano",
+              "google/gemini-pro": "google/gemini-flash",
+            },
+          },
+        },
+      },
+      activeProfile: "fast",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.deepEqual(loaded.config.fastModels.providers, ["profile-provider"])
+    assert.deepEqual(loaded.config.fastModels.mappings, {
+      "openai/gpt-5": "openai/gpt-5-nano",
+      "anthropic/claude-opus": "anthropic/claude-haiku",
+      "google/gemini-pro": "google/gemini-flash",
+    })
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig materializes qualified aliases using project descriptor precedence", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-qualified-precedence-"))
+  try {
+    writeConfig(xdg, {
+      agents: { source: { alias: "precision:reviewer" } },
+      profiles: { precision: { agents: { reviewer: { model: "openai/INLINE" } } } },
+    })
+    const userDir = join(xdg, "opencode", "ocmm-profiles")
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(userDir, "precision.jsonc"), JSON.stringify({ agents: { reviewer: { model: "openai/USER" } } }))
+    writeFileSync(join(projectDir, "precision.jsonc"), JSON.stringify({ agents: { reviewer: { model: "openai/PROJECT" } } }))
+
+    const loaded = loadPluginWithXdg(xdg, project)
+    assert.equal(loaded.config.agents?.source?.alias, "precision:reviewer")
+    assert.equal(loaded.config.agents?.source?.requirement?.fallbackChain[0]?.model, "PROJECT")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig materializes a later Oracle qualified alias", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: {
+        "oracle-3rd": {
+          alias: "precision:reviewer",
+          description: "Local third Oracle behavior",
+          tools: { task: false },
+        },
+      },
+      profiles: {
+        precision: {
+          agents: {
+            reviewer: { model: "openai/TARGET" },
+          },
+        },
+      },
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+    const oracle = loaded.config.agents?.["oracle-3rd"]
+
+    assert.equal(oracle?.alias, "precision:reviewer")
+    assert.equal(oracle?.description, "Local third Oracle behavior")
+    assert.deepEqual(oracle?.tools, { task: false })
+    assert.equal(oracle?.requirement?.fallbackChain[0]?.model, "TARGET")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig materializes qualified aliases from canonicalized inactive directory profiles", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { source: { alias: "precision:oracle-2nd" } },
+    })
+    const profileDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, "precision.jsonc"), JSON.stringify({
+      agents: { "oracle-high": { model: "openai/LEGACY" } },
+    }))
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.equal(loaded.activeProfile, undefined)
+    assert.equal(loaded.config.agents?.source?.requirement?.fallbackChain[0]?.model, "LEGACY")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig preserves active directory review-spelling conflict detection", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { "oracle-2nd": { model: "openai/BASE" } },
+      activeProfile: "precision",
+    })
+    const profileDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, "precision.jsonc"), JSON.stringify({
+      agents: { "oracle-high": { model: "openai/LEGACY" } },
+    }))
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.deepEqual(loaded.config, defaultConfig())
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig returns defaults for referenced qualified-alias failures", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-qualified-failures-"))
+  try {
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(projectDir, { recursive: true })
+    const cases = [
+      { name: "invalid grammar", alias: "precision:", profile: { agents: { reviewer: { model: "TARGET" } } } },
+      { name: "missing profile", alias: "missing:reviewer", profile: undefined },
+      { name: "missing target", alias: "precision:reviewer", profile: { agents: {} } },
+      { name: "no requirement", alias: "precision:reviewer", profile: { agents: { reviewer: { description: "only" } } } },
+    ]
+    for (const scenario of cases) {
+      rmSync(projectDir, { recursive: true, force: true })
+      mkdirSync(projectDir, { recursive: true })
+      if (scenario.profile !== undefined) {
+        writeFileSync(join(projectDir, "precision.jsonc"), JSON.stringify(scenario.profile))
+      }
+      writeConfig(xdg, { agents: { source: { alias: scenario.alias } } })
+
+      const loaded = loadPluginWithXdg(xdg, project)
+      assert.deepEqual(loaded.config, defaultConfig(), scenario.name)
+    }
+
+    writeConfig(xdg, {
+      agents: { source: { alias: "precision:reviewer" } },
+      profiles: { precision: { agents: { reviewer: { model: "INLINE" } } } },
+    })
+    writeFileSync(join(projectDir, "precision.jsonc"), "{ invalid")
+    const invalidShadow = loadPluginWithXdg(xdg, project)
+    assert.deepEqual(invalidShadow.config, defaultConfig(), "referenced invalid project shadow")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig scopes malformed qualified aliases, including later Oracle slots", () => {
+  const xdg = makeTempXdg()
+  const previousDebug = process.env.OCMM_DEBUG
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  process.env.OCMM_DEBUG = "1"
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+  try {
+    for (const [name, expectedScope] of [
+      ["source", "active:source"],
+      ["oracle-3rd", "active:oracle-3rd"],
+    ] as const) {
+      writeConfig(xdg, { agents: { [name]: { alias: "precision:" } } })
+
+      const loaded = loadPluginWithXdg(xdg)
+      assert.deepEqual(loaded.config, defaultConfig(), name)
+      assert.match(warnings.at(-1) ?? "", new RegExp(`invalid-qualified-alias: precision:: ${expectedScope}`))
+    }
+  } finally {
+    console.warn = originalWarn
+    if (previousDebug === undefined) delete process.env.OCMM_DEBUG
+    else process.env.OCMM_DEBUG = previousDebug
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig returns defaults for later Oracle qualified-alias failures", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-qualified-later-oracle-failures-"))
+  try {
+    const projectDir = join(project, ".opencode", "ocmm-profiles")
+    const cases = [
+      { name: "missing profile" },
+      { name: "missing target", profiles: { precision: { agents: {} } } },
+      {
+        name: "target with no requirement",
+        profiles: { precision: { agents: { reviewer: { description: "metadata only" } } } },
+      },
+      {
+        name: "qualified cycle",
+        profiles: { precision: { agents: { reviewer: { alias: "precision:reviewer" } } } },
+      },
+      {
+        name: "invalid descriptor",
+        profiles: { precision: { agents: { reviewer: { model: "INLINE" } } } },
+        descriptor: "{ invalid",
+      },
+    ]
+    for (const scenario of cases) {
+      rmSync(projectDir, { recursive: true, force: true })
+      mkdirSync(projectDir, { recursive: true })
+      if (scenario.descriptor) writeFileSync(join(projectDir, "precision.jsonc"), scenario.descriptor)
+      writeConfig(xdg, {
+        agents: { "oracle-3rd": { alias: "precision:reviewer" } },
+        ...(scenario.profiles ? { profiles: scenario.profiles } : {}),
+      })
+
+      const loaded = loadPluginWithXdg(xdg, project)
+      assert.deepEqual(loaded.config, defaultConfig(), scenario.name)
+    }
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig logs the complete scoped path for qualified-alias cycles", () => {
+  const xdg = makeTempXdg()
+  const previousDebug = process.env.OCMM_DEBUG
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  process.env.OCMM_DEBUG = "1"
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+  try {
+    writeConfig(xdg, {
+      agents: { source: { alias: "first:same" } },
+      profiles: {
+        first: { agents: { same: { alias: "second:same" } } },
+        second: { agents: { same: { alias: "first:same" } } },
+      },
+    })
+    const loaded = loadPluginWithXdg(xdg)
+    assert.deepEqual(loaded.config, defaultConfig())
+    assert.match(
+      warnings.join("\n"),
+      /active:source -> profile:first:same -> profile:second:same -> profile:first:same/i,
+    )
+  } finally {
+    console.warn = originalWarn
+    if (previousDebug === undefined) delete process.env.OCMM_DEBUG
+    else process.env.OCMM_DEBUG = previousDebug
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("qualified aliases leave target profile root controls inactive and ignore invalid unreferenced profiles", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: {
+        source: { alias: "precision:reviewer" },
+        reviewer: { model: "BASE" },
+      },
+      runtimeFallback: { enabled: false },
+      fastModels: { providers: ["base-provider"] },
+      disabledAgents: ["base-disabled"],
+      profiles: {
+        active: { agents: { reviewer: { model: "ACTIVE" } } },
+        precision: {
+          agents: { reviewer: { model: "openai/TARGET" } },
+          runtimeFallback: { enabled: true },
+          fastModels: { providers: ["target-provider"] },
+          disabledAgents: ["target-disabled"],
+        },
+      },
+      activeProfile: "active",
+    })
+    const profileDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, "invalid.jsonc"), JSON.stringify({
+      agents: { "reviewer-high": { model: "openai/BAD" } },
+    }))
+
+    const loaded = loadPluginWithXdg(xdg)
+    assert.equal(loaded.config.agents?.source?.requirement?.fallbackChain[0]?.model, "TARGET")
+    assert.equal(loaded.config.runtimeFallback.enabled, false)
+    assert.deepEqual(loaded.config.fastModels.providers, ["base-provider"])
+    assert.deepEqual(loaded.config.disabledAgents, ["base-disabled"])
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
 
 test("profile overlay applies agent override from activeProfile", () => {
   const xdg = makeTempXdg()

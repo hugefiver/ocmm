@@ -1103,6 +1103,24 @@
       },
       "additionalProperties": false
     },
+    "fastModels": {
+      "type": "object",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mappings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "profiles": {
       "type": "object",
       "additionalProperties": {
@@ -2195,6 +2213,24 @@
             "properties": {
               "maxDepth": {
                 "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "fastModels": {
+            "type": "object",
+            "properties": {
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mappings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "additionalProperties": false

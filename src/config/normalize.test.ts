@@ -1,6 +1,55 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { normalizeAgentShorthand, normalizeShorthand } from "./normalize.ts"
+import { normalizeAgentShorthand, normalizeDirectRequirement, normalizeShorthand } from "./normalize.ts"
+
+test("normalizeDirectRequirement gives requirement precedence over shorthand models", () => {
+  const requirement = {
+    fallbackChain: [{ providers: ["openai"], model: "gpt-5.6", temperature: 0.2 }],
+    variant: "max" as const,
+    requiresProvider: ["openai"],
+  }
+  const entry = {
+    requirement,
+    model: "anthropic/claude-opus",
+    fallbackModels: ["google/gemini-pro"],
+  }
+
+  assert.equal(normalizeDirectRequirement(entry), requirement)
+  assert.equal(normalizeShorthand(entry)?.requirement, requirement)
+})
+
+test("normalizeDirectRequirement creates the existing model and fallback chain", () => {
+  const direct = normalizeDirectRequirement({
+    model: "openai/gpt-5.6",
+    variant: "high" as const,
+    fallbackModels: [{
+      providers: ["anthropic"],
+      model: "claude-opus",
+      reasoningEffort: "max",
+      temperature: 0.1,
+      topP: 0.8,
+      maxTokens: 8_000,
+      thinking: { type: "enabled" as const, budgetTokens: 4_096 },
+    }],
+  })
+
+  assert.deepEqual(direct, {
+    variant: "high",
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6", variant: "high" },
+      {
+        providers: ["anthropic"],
+        model: "claude-opus",
+        reasoningEffort: "max",
+        temperature: 0.1,
+        topP: 0.8,
+        maxTokens: 8_000,
+        thinking: { type: "enabled", budgetTokens: 4_096 },
+      },
+    ],
+  })
+  assert.equal(normalizeDirectRequirement({ alias: "reviewer" }), undefined)
+})
 
 test("normalizeShorthand resolves alias target requirement", () => {
   const target = { model: "openai/gpt-5.5", variant: "high" as const }

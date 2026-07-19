@@ -54,6 +54,24 @@ The fallback path uses a single 429 controller for both dedicated child-session 
 
 Canonical review slots are unsuffixed names such as `oracle` and `oracle-2nd`; logical tier profiles (`-low`, `-high`, `-max`) are derived from configured `variants` on those slots rather than independent capability-ranked lanes.
 
+## OpenCode plugin configuration and profile aliases
+
+`createPlugin()` uses `loadOpenCodePluginConfig()` at its initial load and on `reload()`. This is a deliberate OpenCode-only boundary: ordinary `loadConfig()` stays non-materializing, even when called with `host: "opencode"`; the Codex adapter does not materialize qualified aliases either.
+
+The plugin loader validates the merged base config, then composes profile descriptors in this order: inline profile < user `ocmm-profiles/` descriptor < project `.opencode/ocmm-profiles/` descriptor. For one basename, a `.jsonc` descriptor wins over `.json` before either is parsed. Ambient profile selection is unchanged: `OCMM_NO_PROFILE`, then `OCMM_PROFILE`, then `activeProfile`. Invalid inactive descriptors do nothing. If the selected highest-precedence descriptor is invalid, plugin loading atomically falls back to defaults rather than using a lower-precedence descriptor.
+
+The selected descriptor plus the validated base-agent map form the qualified-alias pipeline. The first colon in `<profile>:<agent>` selects a profile descriptor and target agent. Alias materialization imports only the normalized `ModelRequirement`: `fallbackChain`; its requirement-level native `variant`; each fallback entry's `providers`, `model`, native `variant`, and model-control metadata; and `requiresModel`, `requiresAnyModel`, and `requiresProvider`. Agent-level logical review `variants` remain local and are not imported. The source agent keeps local permissions, prompts, tools, description, other agent controls, and every profile-wide field.
+
+## Effective routes and publication
+
+The config hook constructs an `EffectiveModelRoute` for every OCMM-managed registration. Its fields are `{ model, requirement, requirementSource, primarySource }`. `requirementSource` reports where the requirement came from (`user-config`, `agent-default`, or `category-default`); `primarySource` independently reports why the final primary won (`existing-model`, `user-requirement`, `catalog-upgrade`, or `builtin-requirement`).
+
+Final-primary precedence is: an existing same-name host model, then an explicit user requirement head, then a catalog upgrade when that registration permits one, then the requirement head. The selected primary `O` is always materialized into the fallback chain. When fast routing chooses a distinct fast primary `F`, it prepends it, yielding `F → O → remainder`; without a fast candidate the chain begins `O → remainder`.
+
+An `EffectiveRouteRegistry` publishes immutable, generation-safe snapshots. A config invocation first begins a generation, writes final agent models, and publishes the complete route map once; a stale generation cannot publish. Before any publication, runtime fallback may use raw compatibility resolution. After publication, an empty map or a missing agent route is authoritative absence, not permission to recompute raw routes. Config, `chat.params`, and runtime fallback read the same immutable snapshot. `registeredAgentModels` exists only in the unchanged generic/Codex compatibility branch, never in registry-managed OpenCode routing.
+
+Reload replaces the captured config and fast-mode value, but keeps the last successful route snapshot until a later successful `config` publication. A failed or stale config build therefore cannot expose partial new routes.
+
 ## 4-tier variant resolution
 
 Priority (highest wins), implemented in `src/routing/resolver.ts`:
@@ -132,7 +150,7 @@ Runs when a session error is not handled by the dedicated subagent-429 controlle
 5. **Dispatch** — `client.session.prompt` reusing the latest contiguous user-message block. Best-effort `client.session.abort` first. Dedup via a module-level `Set<sessionID>` to prevent concurrent retries.
 6. **Stop conditions** — `maxAttempts` reached, chain exhausted, or no next model.
 
-**Never retried:** `AbortError`, `MessageAbortedError`, `DOMException` with `isAbort: true`.
+**Plugin-owned aborts are never retried:** `AbortError` and `DOMException` are treated as aborts under the existing plugin-owned abort rule. `MessageAbortedError` is an explicit abort only when `isAbort: true`; a name-only `MessageAbortedError` remains eligible for configured retry classification, such as transport-disconnect patterns.
 
 **Observe-only mode:** `runtimeFallback.dispatch: false` — classifies and logs but does not dispatch.
 
@@ -140,6 +158,7 @@ Runs when a session error is not handled by the dedicated subagent-429 controlle
 ```
 {
   originalModel: string,
+  snapshotId: number,
   fallbackIndex: number,
   attempts: number,       // committed model-switch attempts only
   activeModel?: string,
@@ -147,6 +166,8 @@ Runs when a session error is not handled by the dedicated subagent-429 controlle
 }
 ```
 It owns fallback position, committed model-switch attempts, the active model, and generic cooldown state. Idle never clears `FallbackState`; lifecycle cleanup occurs on session recreation or deletion.
+
+Generic fallback binds every `FallbackState` to its route `snapshotId`. Lifecycle and snapshot validity are checked before and after every generic I/O, commit, and handoff boundary. A stale snapshot therefore cannot commit a model switch after routes have been republished.
 
 Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-handler}.ts`, `src/hooks/event.ts`.
 
@@ -177,6 +198,8 @@ non-429 during active dispatch -> queue first outcome -> post-settlement generic
 During an active dedicated dispatch, the first queued provider outcome takes precedence over idle. A queued 429 is processed serially against the dispatched target after settlement. A queued non-429 completes accounting once, stops the dedicated controller, and hands off to generic fallback once. A bare `false` dispatch result with no queued outcome stops the dedicated flow. `runtimeFallback.dispatch: false` is observe-only: it records the classification but schedules and dispatches nothing.
 
 `FallbackState` and the controller have separate ownership. `FallbackState` owns `fallbackIndex`, committed model-switch `attempts`, `activeModel`, and generic cooldowns. At the controller layer, each child-session state owns its initial marker, scoped retry counts, blocked deadlines, pending two-signal gate, active-dispatch idle state, queued outcome plus generic-handoff state, one timer, and lifecycle/timer/dispatch generations. No child-session state crosses session boundaries, and idle never clears `FallbackState`.
+
+Dedicated 429 recovery carries the route snapshot ID through timers, pending gates, active dispatches, queued outcomes, and prepared switches. Snapshot and lifecycle checks surround dispatch, accounting, commit, and generic handoff; a stale snapshot has zero dispatch, accounting, commit, or handoff side effects.
 
 ### Interruption recovery (correlation + output adapter)
 
@@ -215,8 +238,8 @@ Interruption recovery is a documentation-level name for the `subagent-interrupti
 
 ### `config(input, output)`
 
-1. Load user config (project > user; `disabledAgents` / `fallbackModels` unioned across sources).
-2. Apply profile overlay: `OCMM_PROFILE` env > `activeProfile`. `deepMerge` with `profileOverlay: true` replaces ALL arrays (unlike user+project union). Missing profile is silently ignored + warning.
+1. Load the OpenCode-plugin config through `loadOpenCodePluginConfig` (project > user; `disabledAgents` / `fallbackModels` unioned across sources).
+2. Resolve profile descriptors and apply the selected overlay: `OCMM_NO_PROFILE` > `OCMM_PROFILE` > `activeProfile`. `deepMerge` with `profileOverlay: true` replaces ALL arrays (unlike user+project union). A missing selected profile is ignored with a warning; an invalid selected descriptor atomically defaults the plugin config.
 3. Load runtime prompts from `prompts/{workflow}/`.
 4. Register shared skill paths under `config.skills.paths`; in v1 workflow, also register `skills/v1` so injected deepwork skills resolve as native slash skills.
 5. Register slash commands under `config.command`: shared skills, v1 deepwork skills when `workflow:"v1"` is active, and loop protocol commands.
@@ -274,7 +297,7 @@ Delegated to `createRuntimeFallbackEventHandler`:
 
 ## Config schema
 
-Zod-validated (`src/config/schema.ts`), `unknown keys` rejected. 26 top-level fields (see [`schema.json`](../schema.json) for the full JSON Schema).
+Zod-validated (`src/config/schema.ts`), `unknown keys` rejected (see [`schema.json`](../schema.json) for the full JSON Schema).
 
 Key shapes:
 - **Variant enum:** `[low, medium, high, xhigh, max, minimal, none, auto, thinking]`
@@ -284,11 +307,12 @@ Key shapes:
 - **AgentEntry:** extends `CategoryEntry` + `disabled` + override fields (`tools`, `permission`, `skills`, `promptAppend`, `temperature`, `topP`, `maxTokens`, `thinking`, `reasoningEffort`). `.strict()`.
 - **RuntimeFallbackConfig:** `.default({})`.
 - **ProfileEntry:** partial overlay, `.strict()`, excludes `profiles` / `activeProfile`.
+- **FastModelsConfig:** root `{providers, mappings}` defaults to empty allowlist/map; profile `fastModels` fields are optional so an overlay changes only the fields it provides.
 - **SkillsConfig:** `{sources, enable, disable}`. Top-level `disabledSkills` and `disabledCommands` further gate skill loading and command registration.
 
 ### Profiles
 
-Named partial overlay applied **after** user+project merge. Selection: `OCMM_PROFILE` env > `activeProfile` > none. `deepMerge` with `profileOverlay: true` replaces ALL arrays (vs user+project union for `disabledAgents`/`fallbackModels`). Missing profile: silently ignored + warning.
+Named partial overlay applied **after** user+project merge. Selection: `OCMM_NO_PROFILE` > `OCMM_PROFILE` env > `activeProfile` > none. `deepMerge` with `profileOverlay: true` replaces ALL arrays (vs user+project union for `disabledAgents`/`fallbackModels`). Missing profile: silently ignored + warning.
 
 CLI: `ocmm-profiles` (`list`/`use`/`show`/`add`/`rm`/`clear`/`current`) manages the user config file. No comment preservation. `loadConfig` returns `{config, sources, activeProfile?}`.
 
@@ -304,7 +328,7 @@ CLI: `ocmm-profiles` (`list`/`use`/`show`/`add`/`rm`/`clear`/`current`) manages 
 src/
 ├── cli/                  # CLI entry (shim.ts, profiles.ts, ocmm-lsp.ts)
 ├── commands/             # built-in slash command templates
-├── config/               # schema.ts, load.ts, normalize.ts, profiles.ts
+├── config/               # schema.ts, load.ts, normalize.ts, profiles.ts, profile-aliases.ts
 ├── data/                 # agents.ts, categories.ts (authoritative built-in definitions)
 ├── hashline/             # hashline line-hashing subsystem (16 files)
 ├── hooks/                # config.ts, chat-params.ts, chat-message.ts, system-transform.ts, event.ts
@@ -312,7 +336,7 @@ src/
 ├── intent/               # model-family.ts, skill-loader.ts, prompt-loader.ts
 ├── mcp/                  # MCP server registration and native LSP command resolution
 ├── permissions/         # permission rules
-├── routing/              # resolver.ts, variant-translator.ts
+├── routing/              # resolver.ts, effective-route.ts, route-registry.ts, variant-translator.ts
 ├── rules/                # rule definitions
 ├── runtime-fallback/     # error-classifier, fallback-state, dispatcher, event-handler
 ├── shared/               # shared types/utilities

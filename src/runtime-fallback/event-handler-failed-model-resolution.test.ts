@@ -4,6 +4,170 @@ import assert from "node:assert/strict"
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
 import { OcmmConfigSchema } from "../config/schema.ts"
 import { makeMockClient, makeConfig, makeErrorEvent } from "./event-handler-test-fixtures.ts"
+import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
+import type { EffectiveModelRoute, ModelRequirement } from "../shared/types.ts"
+
+function publishRoute(
+  registry: EffectiveRouteRegistry,
+  agent: string,
+  model: string,
+  fallbackChain: ModelRequirement["fallbackChain"],
+): void {
+  const generation = registry.beginBuild()
+  registry.publish(generation, new Map<string, EffectiveModelRoute>([[agent, {
+    model,
+    requirement: { fallbackChain },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+  }]]))
+}
+
+test("published route supplies an omitted event model", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/route-fast", [
+    { providers: ["provider"], model: "route-fast" },
+    { providers: ["provider"], model: "route-original" },
+    { providers: ["provider"], model: "route-later" },
+  ])
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_published_omitted", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "provider")
+  assert.equal(calls[0]?.body.modelID, "route-original")
+})
+
+test("published route requirement wins contradictory raw configuration", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/route-primary", [
+    { providers: ["provider"], model: "route-primary" },
+    { providers: ["provider"], model: "route-winner" },
+  ])
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_published_wins", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "route-winner")
+})
+
+test("published snapshot missing an agent does not recompute raw configuration", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  const generation = registry.beginBuild()
+  registry.publish(generation, new Map())
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_published_missing", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 0)
+})
+
+test("never-published registry preserves raw fallback resolution", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client,
+    routeRegistry: createEffectiveRouteRegistry(),
+  })
+
+  await handler(makeErrorEvent("ses_unpublished", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+})
+
+test("runtime consumes exactly one effective-route snapshot for each session.error", async () => {
+  const { client } = makeMockClient()
+  const cfg = makeConfig()
+  const actual = createEffectiveRouteRegistry()
+  publishRoute(actual, "orchestrator", "provider/route-primary", [
+    { providers: ["provider"], model: "route-primary" },
+    { providers: ["provider"], model: "route-next" },
+  ])
+  let snapshotCalls = 0
+  const registry: EffectiveRouteRegistry = {
+    beginBuild: actual.beginBuild,
+    publish: actual.publish,
+    snapshot: () => {
+      snapshotCalls++
+      return actual.snapshot()
+    },
+    isCurrentSnapshot: actual.isCurrentSnapshot,
+  }
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_one_snapshot", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(snapshotCalls, 1)
+})
+
+test("successful new route snapshot restarts same-session fallback attempts", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig({ maxAttempts: 1 })
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/first-primary", [
+    { providers: ["provider"], model: "first-primary" },
+    { providers: ["provider"], model: "first-next" },
+  ])
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_snapshot_restart", { status: 503 }, { agent: "orchestrator" }))
+  publishRoute(registry, "orchestrator", "provider/second-primary", [
+    { providers: ["provider"], model: "second-primary" },
+    { providers: ["provider"], model: "second-next" },
+  ])
+  await handler(makeErrorEvent("ses_snapshot_restart", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.deepEqual(calls.map((call) => call.body.modelID), ["first-next", "second-next"])
+})
+
+test("runtime surface: A-fast retryable failure dispatches original A", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/A-fast", [
+    { providers: ["provider"], model: "A-fast" },
+    { providers: ["provider"], model: "A" },
+    { providers: ["provider"], model: "later" },
+  ])
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_fast_failure", { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "provider")
+  assert.equal(calls[0]?.body.modelID, "A")
+})
+
+test("published route preserves an explicit event model as the failed chain entry", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/A-fast", [
+    { providers: ["provider"], model: "A-fast" },
+    { providers: ["provider"], model: "A" },
+    { providers: ["provider"], model: "B" },
+    { providers: ["provider"], model: "later" },
+  ])
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_explicit_route_entry", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "provider", modelID: "B" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "provider")
+  assert.equal(calls[0]?.body.modelID, "later")
+})
 
 test("event without model uses agent's primary model as failed key (not agent name)", async () => {
   const { client, calls } = makeMockClient()
@@ -103,17 +267,22 @@ test("first error from an event model outside the chain dispatches chain index 0
   assert.equal(calls[0]?.body.modelID, "primary-model")
 })
 
-test("first error from a registered model outside the chain dispatches chain index 0", async () => {
+test("first error from a published route model outside the original chain dispatches chain index 0", async () => {
   const { client, calls } = makeMockClient()
   const cfg = makeConfig()
-  const registeredAgentModels = new Map([["orchestrator", "hoo/gpt-5.7-sol"]])
+  const routeRegistry = createEffectiveRouteRegistry()
+  publishRoute(routeRegistry, "orchestrator", "hoo/gpt-5.7-sol", [
+    { providers: ["hoo"], model: "primary-model" },
+    { providers: ["hoo"], model: "fallback-a" },
+    { providers: ["hoo"], model: "fallback-b" },
+  ])
   const handler = createRuntimeFallbackEventHandler({
     getConfig: () => cfg,
     client,
-    registeredAgentModels,
+    routeRegistry,
   })
 
-  await handler(makeErrorEvent("ses_registered_outside", { status: 503 }, {
+  await handler(makeErrorEvent("ses_published_outside", { status: 503 }, {
     agent: "orchestrator",
   }))
 

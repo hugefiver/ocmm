@@ -11,6 +11,7 @@ import {
   commitFallback,
   prepareFallback,
 } from "./fallback-state.ts"
+import { getOrCreateFallbackState } from "./event-handler-support.ts"
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 
 const chain: FallbackEntry[] = [
@@ -30,7 +31,8 @@ test("modelKey joins provider and model with slash", () => {
 })
 
 test("createFallbackState starts at index 0 with 0 attempts", () => {
-  const s = createFallbackState("hoo/primary-model")
+  const s = createFallbackState("hoo/primary-model", 7)
+  assert.equal(s.snapshotId, 7)
   assert.equal(s.fallbackIndex, 0)
   assert.equal(s.attempts, 0)
   assert.equal(s.failedModels.size, 0)
@@ -239,4 +241,40 @@ test("prepareFallback skips a provider/model-blocked candidate and commits the n
   assert.equal(s.fallbackIndex, 2)
   assert.equal(s.attempts, 1)
   assert.equal(s.activeModel, "hoo/fallback-b")
+})
+
+test("getOrCreateFallbackState replaces state when the route snapshot changes", () => {
+  const states = new Map()
+  const first = getOrCreateFallbackState(
+    states,
+    "ses_snapshot",
+    req,
+    { providerID: "hoo", modelID: "primary-model" },
+    1,
+  )
+  first.attempts = 2
+  markModelFailed(first, "hoo/primary-model", NOW)
+
+  const sameSnapshot = getOrCreateFallbackState(
+    states,
+    "ses_snapshot",
+    req,
+    { providerID: "hoo", modelID: "primary-model" },
+    1,
+  )
+  const replacement = getOrCreateFallbackState(
+    states,
+    "ses_snapshot",
+    req,
+    { providerID: "hoo", modelID: "primary-model" },
+    2,
+  )
+
+  assert.equal(first.snapshotId, 1)
+  assert.equal(sameSnapshot, first)
+  assert.notEqual(replacement, first)
+  assert.equal(replacement.snapshotId, 2)
+  assert.equal(replacement.fallbackIndex, 0)
+  assert.equal(replacement.attempts, 0)
+  assert.equal(replacement.failedModels.size, 0)
 })

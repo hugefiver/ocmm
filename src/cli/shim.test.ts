@@ -40,6 +40,18 @@ describe("shim parseArgs", () => {
     assert.equal(args.noProfile, true)
   })
 
+  it("parses --fast before the passthrough separator", () => {
+    const args = parseArgs(["--fast", "run", "hello"])
+    assert.equal(args.fast, true)
+    assert.deepEqual(args.passthrough, ["run", "hello"])
+  })
+
+  it("passes --fast through after the passthrough separator", () => {
+    const args = parseArgs(["--", "--fast", "run", "hello"])
+    assert.equal(args.fast, false)
+    assert.deepEqual(args.passthrough, ["--fast", "run", "hello"])
+  })
+
   it("parses -n as shorthand for --no-profile", () => {
     const args = parseArgs(["-n"])
     assert.equal(args.noProfile, true)
@@ -133,8 +145,66 @@ describe("shim parseArgs", () => {
     const args = parseArgs([])
     assert.equal(args.profile, undefined)
     assert.equal(args.mode, undefined)
+    assert.equal(args.fast, false)
     assert.equal(args.noProviders, false)
     assert.deepEqual(args.passthrough, [])
+  })
+})
+
+describe("shim buildChildEnv", () => {
+  it("sets profile, no-profile, and fast values only on the child env", async () => {
+    const mod = await import("./shim.ts")
+    assert.equal(typeof mod.buildChildEnv, "function")
+
+    const parent = {
+      PATH: "parent-path",
+      OCMM_PROFILE: "parent-profile",
+      OCMM_NO_PROFILE: "parent-no-profile",
+    }
+    const originalParent = { ...parent }
+    const args = parseArgs(["--profile", "work", "--no-profile", "--fast"])
+
+    const child = mod.buildChildEnv(parent, args)
+
+    assert.notEqual(child, parent)
+    assert.deepEqual(parent, originalParent)
+    assert.equal(child.PATH, "parent-path")
+    assert.equal(child.OCMM_PROFILE, "work")
+    assert.equal(child.OCMM_NO_PROFILE, "1")
+    assert.equal(child.OCMM_FAST, "1")
+  })
+
+  it("does not add OCMM_FAST when fast mode is disabled and parent lacks it", async () => {
+    const mod = await import("./shim.ts")
+    assert.equal(typeof mod.buildChildEnv, "function")
+
+    const parent = {
+      PATH: "parent-path",
+    }
+    const originalParent = { ...parent }
+
+    const child = mod.buildChildEnv(parent, parseArgs([]))
+
+    assert.deepEqual(parent, originalParent)
+    assert.equal(child.OCMM_FAST, undefined)
+    assert.equal("OCMM_FAST" in child, false)
+  })
+
+  it("removes inherited OCMM_FAST when no consumed fast flag is present", async () => {
+    const mod = await import("./shim.ts")
+    assert.equal(typeof mod.buildChildEnv, "function")
+
+    const parent = {
+      PATH: "parent-path",
+      OCMM_FAST: "true",
+    }
+    const originalParent = { ...parent }
+
+    const child = mod.buildChildEnv(parent, parseArgs([]))
+
+    assert.deepEqual(parent, originalParent)
+    assert.equal(child.OCMM_FAST, undefined)
+    assert.equal("OCMM_FAST" in child, false)
   })
 })
 

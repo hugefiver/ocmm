@@ -68,6 +68,20 @@ export type ModelRequirement = {
   requiresProvider?: string[]
 }
 
+/** Where the route requirement was selected, before request-local overrides. */
+export type RequirementSource = "user-config" | "agent-default" | "category-default"
+
+/** Which final-primary selection branch won during route construction. */
+export type PrimarySource = "existing-model" | "user-requirement" | "catalog-upgrade" | "builtin-requirement"
+
+/** Immutable route snapshot materialized for one registered OpenCode agent. */
+export type EffectiveModelRoute = {
+  readonly model: string
+  readonly requirement: ModelRequirement
+  readonly requirementSource: RequirementSource
+  readonly primarySource: PrimarySource
+}
+
 /** Lightweight category descriptor used for documentation + delegate-task hints. */
 export type Category = {
   name: string

@@ -248,8 +248,8 @@ test("claimInterruptionNotice rejects explicit abort", () => {
 
 test("inactive interruption correlations retain a refreshed grace window, then expire", () => {
   let now = 0
-  const controller = createSubagent429Controller({ clock: () => now })
-  controller.onSessionCreated("child", true)
+  const controller = createSubagent429Controller({ clock: () => now, isCurrentSnapshot: () => true })
+  controller.onSessionCreated("child", true, 0)
   controller.recordSessionLineage({ childSessionID: "child", parentSessionID: "parent" })
   const taskEvidence = {
     childSessionID: "child",
@@ -259,7 +259,7 @@ test("inactive interruption correlations retain a refreshed grace window, then e
     terminalTaskErrorObserved: true as const,
   }
   assert.equal(controller.recordTaskPart(taskEvidence), "recorded")
-  controller.onIdle("child")
+  controller.onIdle("child", 0)
 
   assert.equal(controller.claimInterruptionNotice({
     childSessionID: "child", parentSessionID: "parent", parentPartID: "part", taskID: "task-child",
@@ -281,17 +281,17 @@ test("inactive interruption correlations retain a refreshed grace window, then e
 
 test("lazy pruning keeps active records and caps inactive records", () => {
   let now = 0
-  const controller = createSubagent429Controller({ clock: () => now })
-  controller.onSessionCreated("active", true)
+  const controller = createSubagent429Controller({ clock: () => now, isCurrentSnapshot: () => true })
+  controller.onSessionCreated("active", true, 0)
   controller.recordSessionLineage({ childSessionID: "active", parentSessionID: "parent" })
   now = 24 * 60 * 60_000
   assert.ok(controller.getInterruptionCorrelation({ childSessionID: "active" }), "active retry state is never expiry-pruned")
 
   for (let index = 0; index < 257; index++) {
     const childSessionID = `inactive-${index}`
-    controller.onSessionCreated(childSessionID, true)
+    controller.onSessionCreated(childSessionID, true, 0)
     controller.recordSessionLineage({ childSessionID, parentSessionID: "parent" })
-    controller.onIdle(childSessionID)
+    controller.onIdle(childSessionID, 0)
   }
   assert.equal(controller.getInterruptionCorrelation({ childSessionID: "inactive-0" }), undefined)
   assert.ok(controller.getInterruptionCorrelation({ childSessionID: "inactive-256" }))

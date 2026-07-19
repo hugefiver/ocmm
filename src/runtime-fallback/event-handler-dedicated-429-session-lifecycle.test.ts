@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
+import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 import type { OcmmClient } from "./dispatcher.ts"
 import {
   FakeHandlerScheduler,
@@ -16,7 +17,32 @@ import {
   modelFor,
   dispatchedModels,
   type PromptCall,
+  publishWorkerRouteSnapshot,
 } from "./event-handler-test-fixtures.ts"
+
+test("real event handler: route invalidation clears dedicated tracking without a delete or recreate", async () => {
+  const registry = createEffectiveRouteRegistry()
+  const scheduler = new FakeHandlerScheduler()
+  const mock = makeControlledClient()
+  const cfg = makeHandlerConfig(standardHandlerChain())
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client: mock.client,
+    scheduler,
+    routeRegistry: registry,
+    clock: () => 1_000,
+  })
+
+  await handler(makeCreatedEvent("route-invalidated", { parentID: "root" }))
+  await handler(makeErrorEvent("route-invalidated", { status: 429 }, { agent: "worker", model: modelFor("primary") }))
+  publishWorkerRouteSnapshot(registry)
+  await handler(makeIdleEvent("route-invalidated"))
+  await scheduler.run(0)
+  assert.deepEqual(dispatchedModels(mock.calls), [])
+
+  await handler(makeErrorEvent("route-invalidated", { status: 503 }, { agent: "worker", model: modelFor("primary") }))
+  assert.deepEqual(dispatchedModels(mock.calls), ["provider-b/fallback-a"])
+})
 
 test("real event handler: delete/recreate cancels a generic handoff in abort without blocking the replacement lifecycle", async () => {
   const dedicatedPrompt = deferred<unknown>()

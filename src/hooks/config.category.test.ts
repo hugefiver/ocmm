@@ -6,6 +6,7 @@ import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getCategoryPrompt, getDeepworkPrompt, loadAllPrompts } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
+import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
 const PROMPTS_ROOT = join(process.cwd(), "prompts")
 
@@ -33,6 +34,15 @@ const LOCAL_COORDINATOR_TASK_RULES = {
 function assertExactTaskRules(actual: unknown, expected: Record<string, string>, label: string): void {
   assert.ok(actual && typeof actual === "object" && !Array.isArray(actual), `${label} task rules must be granular`)
   assert.deepEqual(Object.entries(actual as Record<string, unknown>), Object.entries(expected), `${label} task rule order`)
+}
+
+function publishedCategoryRoute(
+  registry: ReturnType<typeof createEffectiveRouteRegistry>,
+  name: string,
+) {
+  const route = registry.snapshot().routes.get(name)
+  assert.ok(route, `missing published route for ${name}`)
+  return route
 }
 
 test("config registers all 10 categories as subagents", async () => {
@@ -192,4 +202,123 @@ test("category prompts receive role-specific terminal delegation contracts", asy
   assert.match(deep, /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`\./)
   assert.match(deep, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
   assert.match(deep, /Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\), `normal-task`, `deep`, or `complex`/)
+})
+
+test("registry-managed categories publish category provenance and write final route models", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const target = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: defaultConfig,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const catalogRoute = publishedCategoryRoute(routeRegistry, "hard-reasoning")
+  const headRoute = publishedCategoryRoute(routeRegistry, "quick")
+  assert.deepEqual(
+    { requirementSource: catalogRoute.requirementSource, primarySource: catalogRoute.primarySource },
+    { requirementSource: "category-default", primarySource: "catalog-upgrade" },
+  )
+  assert.deepEqual(
+    { requirementSource: headRoute.requirementSource, primarySource: headRoute.primarySource },
+    { requirementSource: "category-default", primarySource: "builtin-requirement" },
+  )
+  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, catalogRoute.model)
+  assert.equal((target.agent.quick as Record<string, unknown>).model, headRoute.model)
+})
+
+test("registry-managed configured categories register non-builtins and give same-name agents priority", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      collision: { model: "openai/agent-wins" },
+      frontend: { model: "openai/frontend-agent-wins" },
+    },
+    categories: {
+      "custom-category": { model: "openai/custom-category" },
+      collision: { model: "openai/category-loses" },
+      frontend: { model: "openai/frontend-category-loses" },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const custom = publishedCategoryRoute(routeRegistry, "custom-category")
+  const collision = publishedCategoryRoute(routeRegistry, "collision")
+  const frontend = publishedCategoryRoute(routeRegistry, "frontend")
+  assert.equal((target.agent["custom-category"] as Record<string, unknown>).mode, "subagent")
+  assert.equal((target.agent["custom-category"] as Record<string, unknown>).model, custom.model)
+  assert.deepEqual(
+    { requirementSource: custom.requirementSource, primarySource: custom.primarySource },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+  assert.equal(collision.model, "openai/agent-wins")
+  assert.equal(collision.requirement.fallbackChain[0]?.model, "agent-wins")
+  assert.equal(frontend.model, "openai/frontend-agent-wins")
+  assert.equal(frontend.requirement.fallbackChain[0]?.model, "frontend-agent-wins")
+})
+
+test("registry-managed same-name agent ownership suppresses category fallback without a usable requirement", async () => {
+  for (const agents of [
+    { collision: { disabled: true } },
+    { collision: { description: "metadata only" } },
+  ]) {
+    const routeRegistry = createEffectiveRouteRegistry()
+    const config = {
+      ...defaultConfig(),
+      agents,
+      categories: { collision: { model: "openai/category-must-not-fallback" } },
+    }
+    const target: { agent: Record<string, unknown> } = { agent: {} }
+
+    await createConfigHandler({
+      getConfig: () => config,
+      routeRegistry,
+      getFastMode: () => false,
+    })(target, undefined)
+
+    assert.equal(target.agent.collision, undefined, JSON.stringify(agents))
+    assert.equal(routeRegistry.snapshot().routes.has("collision"), false, JSON.stringify(agents))
+  }
+})
+
+test("registry-managed host-disabled custom categories remain unpublished", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    categories: { "custom-category": { model: "openai/category-model" } },
+  }
+  const target = {
+    agent: {
+      "custom-category": {
+        model: "host/category-model",
+        disable: true,
+        permission: { custom: "allow" },
+      },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const category = target.agent["custom-category"]
+  assert.equal(category.disable, true)
+  assert.equal(category.model, "host/category-model")
+  assert.deepEqual(category.permission, { custom: "allow" })
+  assert.equal("mode" in category, false)
+  assert.equal("prompt" in category, false)
+  assert.equal(routeRegistry.snapshot().routes.has("custom-category"), false)
 })

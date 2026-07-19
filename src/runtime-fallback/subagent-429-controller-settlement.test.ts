@@ -244,3 +244,52 @@ test("returns retry-succeeded with idle continuation unsuppressed after a settle
   await flush()
   assert.deepEqual(controller.onIdle("child"), idle("retry-succeeded", false))
 })
+
+test("snapshot changes prevent prepared commits before and after a deferred switch, while a current switch commits once", async () => {
+  const config = runtimeConfig({ subagent429: { enabled: true, maxRetries: 0, providerScopes: {} } })
+  const switched = target("provider-b", "model-b")
+
+  let beforeCommits = 0
+  const before = createHarness({ dispatchRetry: async () => true })
+  before.controller.onSessionCreated("before", true, 0)
+  before.controller.on429(errorInput("before", {
+    config,
+    snapshotId: 0,
+    prepareSwitch: () => ({ ok: true, prepared: { target: switched, attempt: 1, snapshotId: 0, commit: () => { beforeCommits++ } } }),
+  }))
+  before.currentSnapshotId = 1
+  assert.deepEqual(before.controller.onIdle("before", 1), idle("untracked", false))
+  await before.scheduler.run(0, true)
+  assert.equal(before.dispatches.length, 0)
+  assert.equal(beforeCommits, 0)
+
+  const deferredDispatch = deferred<boolean>()
+  let deferredCommits = 0
+  const during = createHarness({ dispatchRetry: async () => deferredDispatch.promise })
+  during.controller.onSessionCreated("during", true, 0)
+  during.controller.on429(errorInput("during", {
+    config,
+    snapshotId: 0,
+    prepareSwitch: () => ({ ok: true, prepared: { target: switched, attempt: 1, snapshotId: 0, commit: () => { deferredCommits++ } } }),
+  }))
+  during.controller.onIdle("during", 0)
+  await during.scheduler.run(0)
+  during.currentSnapshotId = 1
+  deferredDispatch.resolve(true)
+  await flush()
+  assert.equal(deferredCommits, 0)
+  assert.deepEqual(during.controller.onIdle("during", 1), idle("untracked", false))
+
+  let currentCommits = 0
+  const current = createHarness({ dispatchRetry: async () => true })
+  current.controller.onSessionCreated("current", true, 0)
+  current.controller.on429(errorInput("current", {
+    config,
+    snapshotId: 0,
+    prepareSwitch: () => ({ ok: true, prepared: { target: switched, attempt: 1, snapshotId: 0, commit: () => { currentCommits++ } } }),
+  }))
+  current.controller.onIdle("current", 0)
+  await current.scheduler.run(0)
+  await flush()
+  assert.equal(currentCommits, 1)
+})
