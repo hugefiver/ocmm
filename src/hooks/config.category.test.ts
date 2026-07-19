@@ -204,6 +204,22 @@ test("category prompts receive role-specific terminal delegation contracts", asy
   assert.match(deep, /Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\), `normal-task`, `deep`, or `complex`/)
 })
 
+test("every category receives only the common compression policy", async () => {
+  const cfg: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
+
+  for (const category of BUILTIN_CATEGORIES) {
+    const prompt = String((cfg.agent[category.name] as Record<string, unknown>).prompt)
+    assert.equal(prompt.match(/<ocmm-subagent-compression-policy>/g)?.length, 1, category.name)
+    assert.match(prompt, /only when the current execution is a subagent session/i, category.name)
+    assert.match(prompt, /When no trustworthy capacity signal or size estimate exists, do not compress proactively/i, category.name)
+    assert.match(prompt, /more than 100k tokens of source material/i, category.name)
+    assert.match(prompt, /Never compress during an active exploration/i, category.name)
+    assert.doesNotMatch(prompt, /Additional continued Reviewer\/Oracle proactive exception/i, category.name)
+    assert.doesNotMatch(prompt, /<ocmm-review-session-efficiency-policy>/, category.name)
+  }
+})
+
 test("registry-managed categories publish category provenance and write final route models", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
   const target = {

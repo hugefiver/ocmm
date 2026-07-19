@@ -64,6 +64,28 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
   return match[1]!
 }
 
+const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
+const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
+
+function taggedPolicy(agentMap: Record<string, unknown>, name: string, tag: string): string {
+  const prompt = String((agentMap[name] as Record<string, unknown>).prompt)
+  const openingTags = prompt.match(new RegExp(`<${tag}>`, "g")) ?? []
+  const closingTags = prompt.match(new RegExp(`</${tag}>`, "g")) ?? []
+  assert.equal(openingTags.length, 1, `expected exactly one ${tag} block for ${name}`)
+  assert.equal(closingTags.length, 1, `expected exactly one closing ${tag} block for ${name}`)
+  const match = prompt.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))
+  assert.ok(match, `missing ${tag} block for ${name}`)
+  return match[1]!
+}
+
+function compressionPolicy(agentMap: Record<string, unknown>, name: string): string {
+  return taggedPolicy(agentMap, name, COMPRESSION_POLICY_TAG)
+}
+
+function reviewSessionPolicy(agentMap: Record<string, unknown>, name: string): string {
+  return taggedPolicy(agentMap, name, REVIEW_SESSION_POLICY_TAG)
+}
+
 function publishedRoute(
   registry: ReturnType<typeof createEffectiveRouteRegistry>,
   name: string,
@@ -318,16 +340,240 @@ test("config appends authoritative contracts to non-primary builtin agents", asy
   assert.match(planner, /plan-critic.*orchestrator-owned/i)
 })
 
-test("config appends one terminal contract to an existing host prompt", async () => {
-  const cfg = { agent: { planner: { prompt: "Host planner prompt." } } }
+test("config scopes conservative compression to managed subagent execution", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: { "custom-worker": { model: "openai/gpt-5.5" } },
+  }
+  const target: { agent: Record<string, unknown> } = {
+    agent: { "custom-worker": { prompt: "Host custom prompt." } },
+  }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  for (const name of ["orchestrator", "builder", "custom-worker"]) {
+    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+    assert.doesNotMatch(prompt, /<ocmm-subagent-compression-policy>/, name)
+  }
+  assert.match(String((target.agent["custom-worker"] as Record<string, unknown>).prompt), /Host custom prompt\./)
+
+  const ordinary = compressionPolicy(target.agent, "code-search")
+  assert.match(ordinary, /only when the current execution is a subagent session and a `compress` tool is available/i)
+  assert.match(ordinary, /If `compress` is unavailable, do not propose, simulate, or attempt compression/i)
+  assert.match(ordinary, /long conversation, a high message count, one large tool result, or a stage boundary is not sufficient/i)
+  assert.match(ordinary, /When no trustworthy capacity signal or size estimate exists, do not compress proactively/i)
+  assert.match(ordinary, /next bounded task cannot fit/i)
+  assert.match(ordinary, /smallest closed range needed to continue safely/i)
+  assert.match(ordinary, /task goal, constraints, current state, pending work, decisions, paths, interfaces, and necessary evidence/i)
+  assert.match(ordinary, /Never compress the active phase, unresolved errors, or source material/i)
+  assert.match(ordinary, /Completed large-exploration recommendation/i)
+  assert.match(ordinary, /exploration is completely finished/i)
+  assert.match(ordinary, /more than 100k tokens of source material/i)
+  assert.match(ordinary, /findings, paths, decisions, constraints, and exact evidence.*materialized/i)
+  assert.match(ordinary, /same subagent will continue into a subsequent synthesis, planning, implementation, or review phase/i)
+  assert.match(ordinary, /If exploration completes the assignment.*do not compress/i)
+  assert.match(ordinary, /Never compress during an active exploration/i)
+  assert.doesNotMatch(ordinary, /130k|50k|ten additional model turns/i)
+  assert.doesNotMatch(ordinary, /Additional continued Reviewer\/Oracle proactive exception/i)
+
+  const planner = compressionPolicy(target.agent, "planner")
+  assert.match(planner, /subagent session/i)
+  assert.doesNotMatch(planner, /Additional continued Reviewer\/Oracle proactive exception/i)
+  assert.equal((target.agent.planner as Record<string, unknown>).mode, "all")
+})
+
+test("only parsed Reviewer and Oracle identities receive proactive compression guardrails", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: { variants: { high: "max" as const } },
+      "oracle-3rd": {
+        model: "anthropic/claude-opus-4-7",
+        variants: { max: "max" as const },
+      },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  for (const name of ["reviewer", "reviewer-high", "oracle", "oracle-2nd", "oracle-3rd-max"]) {
+    const policy = compressionPolicy(target.agent, name)
+    assert.match(policy, /Completed large-exploration recommendation/i, name)
+    assert.match(policy, /more than 100k tokens of source material/i, name)
+    assert.match(policy, /common emergency and completed >100k exploration paths remain independently available/i, name)
+    assert.match(policy, /Additional continued Reviewer\/Oracle proactive exception/i, name)
+    assert.match(policy, /other closed review material/i, name)
+    assert.match(policy, /continued this same review session inside the current review stage/i, name)
+    assert.match(policy, /rather than starting a fresh consultation or crossing a stage boundary/i, name)
+    assert.match(policy, /substantial phase has closed/i, name)
+    assert.match(policy, /materialized in a response or durable note/i, name)
+    assert.match(policy, /selected range is closed and is no longer needed verbatim/i, name)
+    assert.match(policy, /stage-ending compression with no expected follow-up is forbidden/i, name)
+    assert.match(policy, /approximately 130k or more current context/i, name)
+    assert.match(policy, /at least 50k removable closed context/i, name)
+    assert.match(policy, /about ten additional model turns/i, name)
+    assert.match(policy, /If any estimate is unavailable, do not invent it/i, name)
+    assert.match(policy, /single completed tool call is not a phase boundary/i, name)
+  }
+
+  for (const name of ["planner", "plan-critic", "clarifier", "code-search", "creative"]) {
+    assert.doesNotMatch(compressionPolicy(target.agent, name), /Additional continued Reviewer\/Oracle proactive exception/i, name)
+  }
+})
+
+test("only orchestrator receives deterministic review-session reuse guidance", async () => {
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => defaultConfig() })(target, undefined)
+
+  const policy = reviewSessionPolicy(target.agent, "orchestrator")
+  assert.match(policy, /continue the same reviewer or plan-critic `task_id` for corrections and rechecks inside that stage/i)
+  assert.match(policy, /plan-critic rejection followed by a corrected version of the same plan remains the same stage/i)
+  assert.match(policy, /reviewer findings followed by fixes to the same implementation review also remain the same stage/i)
+  assert.match(policy, /start a fresh session at every stage boundary/i)
+  assert.match(policy, /design review to plan review/i)
+  assert.match(policy, /plan-critic approval to implementation/i)
+  assert.match(policy, /implementation to final acceptance/i)
+  assert.match(policy, /role, artifact, or review objective/i)
+  assert.match(policy, /prior context is unavailable or invalid/i)
+  assert.match(policy, /continuation fails/i)
+  assert.match(policy, /intentionally independent evidence is required/i)
+  assert.match(policy, /Do not fan out additional reviewers merely because profiles or tiers are configured/i)
+  assert.match(policy, /current authoritative artifact path\/revision/i)
+  assert.match(policy, /files changed since the previous pass/i)
+  assert.match(policy, /changed plan sections when applicable/i)
+  assert.match(policy, /new or updated evidence/i)
+  assert.match(policy, /never excuses the reviewer or plan-critic from reading the current authoritative artifact/i)
+  assert.match(policy, /Do not paste the whole accumulated conversation/i)
+  assert.match(policy, /timeout, partial response, stale-revision receipt, or failed continuation is not approval/i)
+  assert.doesNotMatch(policy, /ses_[A-Za-z0-9]+|Date\.now|\d{4}-\d{2}-\d{2}T/i)
+
+  for (const name of ["builder", "planner", "reviewer", "plan-critic", "coding"]) {
+    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+    assert.doesNotMatch(prompt, /<ocmm-review-session-efficiency-policy>/, name)
+  }
+})
+
+test("compression policy is independent of workflow and model family", async () => {
+  const cases = [
+    { workflow: "omo" as const, model: "anthropic/claude-sonnet-4-6" },
+    { workflow: "v1" as const, model: "zhipu/glm-5.1" },
+  ]
+
+  try {
+    for (const { workflow, model } of cases) {
+      loadAllPrompts(join(process.cwd(), "prompts"), workflow)
+      const configured = {
+        ...defaultConfig(),
+        workflow,
+        agents: { "code-search": { model } },
+      }
+      const target: { agent: Record<string, unknown> } = { agent: {} }
+      await createConfigHandler({ getConfig: () => configured })(target, undefined)
+      assert.match(
+        compressionPolicy(target.agent, "code-search"),
+        /subagent session/i,
+        `${workflow}/${model}`,
+      )
+    }
+  } finally {
+    loadAllPrompts(join(process.cwd(), "prompts"), "omo")
+  }
+})
+
+test("config preserves host text and keeps all owned terminal policies idempotent", async () => {
+  const cfg = {
+    agent: {
+      orchestrator: {
+        prompt: [
+          "Host orchestrator prompt.",
+          "<ocmm-review-session-efficiency-policy>",
+          "stale review policy",
+          "</ocmm-review-session-efficiency-policy>",
+        ].join("\n"),
+      },
+      planner: {
+        prompt: [
+          "Host planner prompt.",
+          "<ocmm-subagent-compression-policy>",
+          "stale compression policy",
+          "</ocmm-subagent-compression-policy>",
+          "<ocmm-delegation-contract>",
+          "stale delegation contract",
+          "</ocmm-delegation-contract>",
+        ].join("\n"),
+      },
+    },
+  }
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   await handler(cfg, undefined)
   await handler(cfg, undefined)
 
-  const prompt = String((cfg.agent.planner as Record<string, unknown>).prompt)
-  assert.match(prompt, /Host planner prompt\./)
-  assert.equal(prompt.match(/<ocmm-delegation-contract>/g)?.length, 1)
-  assert.match(prompt, /<\/ocmm-delegation-contract>\s*$/)
+  const orchestrator = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
+  assert.match(orchestrator, /Host orchestrator prompt\./)
+  assert.doesNotMatch(orchestrator, /stale review policy/)
+  assert.equal(orchestrator.match(/<ocmm-review-session-efficiency-policy>/g)?.length, 1)
+
+  const planner = String((cfg.agent.planner as Record<string, unknown>).prompt)
+  assert.match(planner, /Host planner prompt\./)
+  assert.doesNotMatch(planner, /stale compression policy|stale delegation contract/)
+  assert.equal(planner.match(/<ocmm-subagent-compression-policy>/g)?.length, 1)
+  assert.equal(planner.match(/<ocmm-delegation-contract>/g)?.length, 1)
+  assert.ok(
+    planner.indexOf("</ocmm-subagent-compression-policy>") < planner.indexOf("<ocmm-delegation-contract>"),
+  )
+  assert.match(planner, /<\/ocmm-delegation-contract>\s*$/)
+})
+
+test("config preserves a middle owned-tagged host example while replacing terminal policies", async () => {
+  const middleHostExample = [
+    "Host text before the quoted policy example.",
+    "<ocmm-subagent-compression-policy>",
+    "This complete tagged block is host documentation, not an ocmm-owned suffix.",
+    "</ocmm-subagent-compression-policy>",
+    "Host text after the quoted policy example.",
+  ].join("\n")
+  const staleTerminalPolicies = [
+    "<ocmm-subagent-compression-policy>",
+    "stale terminal compression policy",
+    "</ocmm-subagent-compression-policy>",
+    "<ocmm-review-session-efficiency-policy>",
+    "stale terminal review-session policy",
+    "</ocmm-review-session-efficiency-policy>",
+    "<ocmm-delegation-contract>",
+    "stale terminal delegation contract",
+    "</ocmm-delegation-contract>",
+  ].join("\n\n---\n\n")
+  const cfg = {
+    agent: {
+      planner: { prompt: `${middleHostExample}\n\n---\n\n${staleTerminalPolicies}` },
+    },
+  }
+  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
+
+  const assertCurrentPrompt = (prompt: string): void => {
+    assert.ok(prompt.includes(middleHostExample), "middle host example must remain byte-for-byte unchanged")
+    assert.doesNotMatch(prompt, /stale terminal compression policy|stale terminal review-session policy|stale terminal delegation contract/)
+    assert.equal(prompt.match(/<ocmm-subagent-compression-policy>/g)?.length, 2)
+    assert.equal(prompt.match(/<ocmm-review-session-efficiency-policy>/g)?.length ?? 0, 0)
+    assert.equal(prompt.match(/<ocmm-delegation-contract>/g)?.length, 1)
+
+    const terminalPolicies = prompt.slice(prompt.lastIndexOf("<ocmm-subagent-compression-policy>"))
+    assert.equal(terminalPolicies.match(/<ocmm-subagent-compression-policy>/g)?.length, 1)
+    assert.equal(terminalPolicies.match(/<ocmm-review-session-efficiency-policy>/g)?.length ?? 0, 0)
+    assert.equal(terminalPolicies.match(/<ocmm-delegation-contract>/g)?.length, 1)
+    assert.ok(
+      terminalPolicies.indexOf("</ocmm-subagent-compression-policy>") < terminalPolicies.indexOf("<ocmm-delegation-contract>"),
+    )
+    assert.match(terminalPolicies, /<\/ocmm-delegation-contract>\s*$/)
+  }
+
+  await handler(cfg, undefined)
+  const firstPass = String((cfg.agent.planner as Record<string, unknown>).prompt)
+  assertCurrentPrompt(firstPass)
+
+  await handler(cfg, undefined)
+  const secondPass = String((cfg.agent.planner as Record<string, unknown>).prompt)
+  assertCurrentPrompt(secondPass)
+  assert.equal(secondPass, firstPass, "terminal policy assembly must remain idempotent")
 })
 
 test("planner preserves an explicit host task permission override", async () => {

@@ -192,13 +192,19 @@ function prependPromptPrefix(prompt: string, prefix: string): string {
 }
 
 const DELEGATION_CONTRACT_TAG = "ocmm-delegation-contract"
-const DELEGATION_CONTRACT_BLOCK = new RegExp(
-  `(?:\\n\\n---\\n\\n)?<${DELEGATION_CONTRACT_TAG}>[\\s\\S]*?<\\/${DELEGATION_CONTRACT_TAG}>\\s*`,
-  "g",
+const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
+const REVIEW_SESSION_EFFICIENCY_POLICY_TAG = "ocmm-review-session-efficiency-policy"
+const TERMINAL_POLICY_TAGS = [
+  DELEGATION_CONTRACT_TAG,
+  COMPRESSION_POLICY_TAG,
+  REVIEW_SESSION_EFFICIENCY_POLICY_TAG,
+].join("|")
+const TERMINAL_POLICY_BLOCK = new RegExp(
+  `(?:\\n\\n---\\n\\n)?(?:<(${TERMINAL_POLICY_TAGS})>(?:(?!<\\/\\1>)[\\s\\S])*<\\/\\1>(?:\\s*---\\s*|\\s*))+\\s*$`,
 )
 
 function appendPromptSuffix(prompt: string, suffix: string): string {
-  const body = prompt.replace(DELEGATION_CONTRACT_BLOCK, "").trim()
+  const body = prompt.replace(TERMINAL_POLICY_BLOCK, "").trim()
   const cleanSuffix = suffix.trim()
   return body ? `${body}\n\n---\n\n${cleanSuffix}` : cleanSuffix
 }
@@ -212,14 +218,94 @@ function formatTargets(names: readonly string[]): string {
   return names.map((name) => `\`${name}\``).join(", ")
 }
 
-function wrapDelegationContract(lines: readonly string[]): string {
+function wrapTerminalPolicy(tag: string, title: string, lines: readonly string[]): string {
   return [
-    `<${DELEGATION_CONTRACT_TAG}>`,
-    "## Delegation Contract (Authoritative)",
+    `<${tag}>`,
+    `## ${title}`,
+    ...lines,
+    `</${tag}>`,
+  ].join("\n")
+}
+
+function wrapDelegationContract(lines: readonly string[]): string {
+  return wrapTerminalPolicy(DELEGATION_CONTRACT_TAG, "Delegation Contract (Authoritative)", [
     ...lines,
     "This contract overrides any skill, model calibration, generated-adapter compatibility text, or other prompt layer that suggests broader delegation.",
-    `</${DELEGATION_CONTRACT_TAG}>`,
-  ].join("\n")
+  ])
+}
+
+function compressionPolicyFor(name: string): string {
+  const lines = [
+    "Apply this policy only when the current execution is a subagent session and a `compress` tool is available.",
+    "If `compress` is unavailable, do not propose, simulate, or attempt compression.",
+    "A long conversation, a high message count, one large tool result, or a stage boundary is not sufficient.",
+    "Trustworthy capacity or size information alone is insufficient: do not proactively compress.",
+    "When no trustworthy capacity signal or size estimate exists, do not compress proactively.",
+    "Emergency compression is allowed only when an explicit capacity warning, context-budget signal, or concrete evidence shows the next bounded task cannot fit. Remove only the smallest closed range needed to continue safely.",
+    "Preserve the task goal, constraints, current state, pending work, decisions, paths, interfaces, and necessary evidence.",
+    "Never compress the active phase, unresolved errors, or source material still needed for exact quotation or verification.",
+    "",
+    "### Completed large-exploration recommendation",
+    "This recommended proactive path applies only when every condition holds:",
+    "- The exploration is completely finished; no file, search branch, or evidence question from that batch remains open.",
+    "- A trustworthy estimate shows that the completed exploration introduced more than 100k tokens of source material into the current context.",
+    "- Required findings, paths, decisions, constraints, and exact evidence that must survive have been materialized in the response or a durable note.",
+    "- The selected raw exploration range is closed and no longer needed verbatim.",
+    "- The same subagent will continue into a subsequent synthesis, planning, implementation, or review phase within the same assignment. If exploration completes the assignment and the subagent will return immediately, do not compress.",
+    "This is a recommendation, not a mandatory tool call. If the token estimate is unavailable, do not invent it. Never compress during an active exploration, even if cumulative reads appear large.",
+  ]
+
+  if (isReviewAgentName(name)) {
+    lines.push(
+      "",
+      "### Additional continued Reviewer/Oracle proactive exception (~130k guardrail)",
+      "The common emergency and completed >100k exploration paths remain independently available. This is an additional path only for other closed review material.",
+      "This additional path is available only when every condition holds:",
+      "- The caller explicitly continued this same review session inside the current review stage rather than starting a fresh consultation or crossing a stage boundary.",
+      "- A substantial phase has closed, such as a large read/search batch with recorded findings or a review pass with stable conclusions.",
+      "- Those conclusions have been materialized in a response or durable note.",
+      "- The selected range is closed and is no longer needed verbatim by the active review.",
+      "- The same session is expected to continue; stage-ending compression with no expected follow-up is forbidden.",
+      "- Trustworthy estimates indicate approximately 130k or more current context, at least 50k removable closed context, and either a real capacity signal or about ten additional model turns.",
+      "These constraints do not prohibit a bounded follow-up under either common path when its own conditions are met.",
+      "If any estimate is unavailable, do not invent it; only this additional path becomes unavailable, while the common paths (the emergency and completed >100k exploration paths) remain independently available under their own conditions. A single completed tool call is not a phase boundary.",
+    )
+  }
+
+  return wrapTerminalPolicy(COMPRESSION_POLICY_TAG, "Subagent Compression Policy", lines)
+}
+
+function reviewSessionEfficiencyPolicy(): string {
+  return wrapTerminalPolicy(REVIEW_SESSION_EFFICIENCY_POLICY_TAG, "Review Session Efficiency Policy", [
+    "A review stage is one role, one authoritative artifact or decision target, and one review objective from initial dispatch through corrections until approval or receipt, abandonment, or handoff to another workflow phase.",
+    "Continue the same reviewer or plan-critic `task_id` for corrections and rechecks inside that stage.",
+    "A plan-critic rejection followed by a corrected version of the same plan remains the same stage; reviewer findings followed by fixes to the same implementation review also remain the same stage.",
+    "Start a fresh session at every stage boundary: design review to plan review, plan-critic approval to implementation, implementation to final acceptance, or any change of role, artifact, or review objective.",
+    "Also start fresh when prior context is unavailable or invalid for the current target, continuation fails, or intentionally independent evidence is required.",
+    "Do not fan out additional reviewers merely because profiles or tiers are configured. Existing reviewer-selection rules remain authoritative.",
+    "On continuation, supply the current authoritative artifact path/revision, the files changed since the previous pass, changed plan sections when applicable, and new or updated evidence. This focus manifest avoids repeated broad exploration but never excuses the reviewer or plan-critic from reading the current authoritative artifact required for its verdict.",
+    "Do not paste the whole accumulated conversation when the current artifact plus change manifest and evidence are sufficient.",
+    "A timeout, partial response, stale-revision receipt, or failed continuation is not approval.",
+  ])
+}
+
+function terminalPromptSuffixFor({
+  name,
+  includeCompressionPolicy,
+  includeReviewSessionEfficiency = false,
+  compressionIdentity = name,
+}: {
+  name: string
+  includeCompressionPolicy: boolean
+  includeReviewSessionEfficiency?: boolean
+  compressionIdentity?: string
+}): string {
+  const policies = [
+    includeCompressionPolicy ? compressionPolicyFor(compressionIdentity) : "",
+    includeReviewSessionEfficiency ? reviewSessionEfficiencyPolicy() : "",
+    delegationContractFor(name),
+  ].filter((policy): policy is string => policy.length > 0)
+  return policies.join("\n\n")
 }
 
 function delegationContractFor(name: string): string {
@@ -598,8 +684,12 @@ export function createConfigHandler(
       if (mode === "primary" || mode === "all") {
         extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       }
-      const contract = delegationContractFor(a.name)
-      if (contract) extras.promptSuffix = contract
+      const terminalSuffix = terminalPromptSuffixFor({
+        name: a.name,
+        includeCompressionPolicy: mode !== "primary",
+        includeReviewSessionEfficiency: a.name === "orchestrator",
+      })
+      if (terminalSuffix) extras.promptSuffix = terminalSuffix
       if (applyAgentEntry(agentMap, a, norm, extras)) {
         registerEffectiveRoute({
           build: routeBuild,
@@ -642,8 +732,12 @@ export function createConfigHandler(
       if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
       const extras: AgentExtras = { mode: "subagent", model: primary.model }
       if (prompt) extras.prompt = prompt
-      const contract = delegationContractFor(profile.name)
-      if (contract) extras.promptSuffix = contract
+      const terminalSuffix = terminalPromptSuffixFor({
+        name: profile.name,
+        includeCompressionPolicy: true,
+        compressionIdentity: profile.name,
+      })
+      if (terminalSuffix) extras.promptSuffix = terminalSuffix
       if (applyAgentEntry(agentMap, synthetic, {
         ...(profile.registration.description ? { description: profile.registration.description } : {}),
         requirement: profile.requirement,
@@ -691,8 +785,12 @@ export function createConfigHandler(
       const prompt = promptForBuiltinCategory(c.name, cfg.workflow, primary.model)
       if (prompt) extras.prompt = prompt
       extras.model = primary.model
-      const contract = delegationContractFor(c.name)
-      if (contract) extras.promptSuffix = contract
+      const terminalSuffix = terminalPromptSuffixFor({
+        name: c.name,
+        includeCompressionPolicy: true,
+        compressionIdentity: c.name,
+      })
+      if (terminalSuffix) extras.promptSuffix = terminalSuffix
       if (applyAgentEntry(agentMap, baseAgent, merged, extras)) {
         registerEffectiveRoute({
           build: routeBuild,
@@ -919,10 +1017,14 @@ function registerCompatAgentAliases(
     if (typeof aliasEntry.description !== "string") {
       aliasEntry.description = `Compatibility alias for @${target}.`
     }
-    const contract = delegationContractFor(alias)
-    if (contract) {
+    const terminalSuffix = terminalPromptSuffixFor({
+      name: alias,
+      includeCompressionPolicy: aliasEntry.mode !== "primary",
+      compressionIdentity: isReviewAgentName(alias) ? alias : target,
+    })
+    if (terminalSuffix) {
       const basePrompt = typeof aliasEntry.prompt === "string" ? aliasEntry.prompt : ""
-      aliasEntry.prompt = appendPromptSuffix(basePrompt, contract)
+      aliasEntry.prompt = appendPromptSuffix(basePrompt, terminalSuffix)
     }
     agentMap[alias] = aliasEntry
   }

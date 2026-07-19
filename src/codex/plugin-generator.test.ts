@@ -27,6 +27,26 @@ function extractDelegationContract(instructions: string): string {
   return match[1]!
 }
 
+function extractTaggedPolicy(instructions: string, tag: string): string {
+  const openingTag = `<${tag}>`
+  const closingTag = `</${tag}>`
+  const openingIndex = instructions.indexOf(openingTag)
+  assert.notEqual(openingIndex, -1, `generated instructions are missing <${tag}>`)
+  assert.equal(
+    instructions.indexOf(openingTag, openingIndex + openingTag.length),
+    -1,
+    `generated instructions contain more than one <${tag}>`,
+  )
+  const closingIndex = instructions.indexOf(closingTag, openingIndex + openingTag.length)
+  assert.notEqual(closingIndex, -1, `generated instructions are missing </${tag}>`)
+  assert.equal(
+    instructions.indexOf(closingTag, closingIndex + closingTag.length),
+    -1,
+    `generated instructions contain more than one </${tag}>`,
+  )
+  return instructions.slice(openingIndex + openingTag.length, closingIndex)
+}
+
 const REMOVED_GPT56_SECTION_HEADINGS = [
   "## Shell Adaptation",
   "## Discovery Before Planning",
@@ -245,6 +265,60 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   )
 })
 
+test("Codex agents inherit compression and review-session policies by managed identity", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      agents: { reviewer: { variants: { high: "high" as const } } },
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const agent = (sourceName: string) => {
+    const found = agents.find((candidate) => candidate.sourceName === sourceName)
+    assert.ok(found, `missing ${sourceName} agent`)
+    return found
+  }
+  const compressionTag = "ocmm-subagent-compression-policy"
+  const reviewSessionTag = "ocmm-review-session-efficiency-policy"
+  const orchestrator = agent("orchestrator")
+  const builder = agent("builder")
+  const planner = agent("planner")
+  const reviewer = agent("reviewer")
+  const reviewerHigh = agent("reviewer-high")
+  const planCritic = agent("plan-critic")
+  const coding = agent("coding")
+  const codeSearch = agent("code-search")
+  const explore = agent("explore")
+  const creative = agent("creative")
+  const oracle = agent("oracle")
+  const oracle2nd = agent("oracle-2nd")
+
+  assert.doesNotMatch(orchestrator.developerInstructions, new RegExp(`<${compressionTag}>`))
+  const reviewSessionPolicy = extractTaggedPolicy(orchestrator.developerInstructions, reviewSessionTag)
+  assert.match(reviewSessionPolicy, /same.*(?:reviewer|plan-critic).*task_id.*(?:corrections?|rechecks?)/is)
+  for (const candidate of [builder, planner, reviewer, planCritic, coding]) {
+    assert.doesNotMatch(candidate.developerInstructions, new RegExp(`<${reviewSessionTag}>`), candidate.sourceName)
+  }
+  assert.doesNotMatch(builder.developerInstructions, new RegExp(`<${compressionTag}>`))
+
+  const commonCompressionPolicy = extractTaggedPolicy(codeSearch.developerInstructions, compressionTag)
+  for (const candidate of [explore, planner, creative]) {
+    assert.equal(extractTaggedPolicy(candidate.developerInstructions, compressionTag), commonCompressionPolicy, candidate.sourceName)
+  }
+  assert.match(commonCompressionPolicy, /trustworthy.*capacity.*do not proactively/is)
+  assert.doesNotMatch(commonCompressionPolicy, /reviewer/i)
+
+  for (const candidate of [reviewer, reviewerHigh, oracle, oracle2nd]) {
+    const policy = extractTaggedPolicy(candidate.developerInstructions, compressionTag)
+    assert.match(policy, /completed.*large.*exploration.*(?:>|more than)\s*100k/is, candidate.sourceName)
+    assert.match(policy, /common paths.*independently available/is, candidate.sourceName)
+    assert.match(policy, /do not prohibit.*follow-up/is, candidate.sourceName)
+    assert.match(policy, /(?:~|about)\s*130k/is, candidate.sourceName)
+  }
+})
+
 test("Codex emits canonical default review slots without legacy or alias duplicates", async () => {
   const agents = await buildCodexAgents({
     config: { ...defaultConfig(), workflow: "codex" },
@@ -383,6 +457,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const runtimePackage = JSON.parse(readFileSync(join(result.pluginRoot, "package.json"), "utf8")) as Record<string, unknown>
     const marketplace = JSON.parse(readFileSync(result.marketplacePath, "utf8")) as Record<string, unknown>
     const orchestrator = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-orchestrator.toml`), "utf8")
+    const builder = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-builder.toml`), "utf8")
     const oracle = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle.toml`), "utf8")
     const oracle2nd = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-2nd.toml`), "utf8")
     const reviewer = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-reviewer.toml`), "utf8")
@@ -416,6 +491,20 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(orchestrator, /select only from the user's current available catalog/)
     assert.match(orchestrator, /Ordered Oracle review semantics:/)
     assert.match(orchestrator, /For GPT\/Codex review routes \(plan-critic and parsed review names\), enforce at least xhigh/)
+    assert.doesNotMatch(orchestrator, /<ocmm-subagent-compression-policy>/)
+    assert.match(
+      extractTaggedPolicy(orchestrator, "ocmm-review-session-efficiency-policy"),
+      /files changed since (?:the )?previous pass/i,
+    )
+    assert.doesNotMatch(builder, /<ocmm-(?:subagent-compression-policy|review-session-efficiency-policy)>/)
+    assert.match(
+      extractTaggedPolicy(coding, "ocmm-subagent-compression-policy"),
+      /smallest closed range/i,
+    )
+    assert.match(
+      extractTaggedPolicy(reviewer, "ocmm-subagent-compression-policy"),
+      /about ten additional model turns/i,
+    )
     assert.match(oracle, /^name = "dw-oracle"$/m)
     assert.match(oracle, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(oracle2nd, /^name = "dw-oracle-2nd"$/m)
