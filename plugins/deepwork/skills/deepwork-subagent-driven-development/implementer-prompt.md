@@ -39,7 +39,7 @@ Task tool (general-purpose):
 
     Use direct tools first. If direct tools are insufficient and a separate bounded utility result materially improves this task, you may call only utility leaves permitted by your effective Task tool: `quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`. If the Task tool exposes fewer targets, use only the exposed subset.
 
-    Do not launch `planner`, `plan-critic`, `reviewer`, `oracle`, or `oracle-high`. Do not launch another implementation or coordination workflow agent. If a skill requests a disallowed review or handoff, report that need to the orchestrator instead of dispatching it.
+    Do not launch `planner`, `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), or any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants). Do not launch another implementation or coordination workflow agent. If a skill requests a disallowed review or handoff, report that need to the orchestrator instead of dispatching it.
 
     After local verification, return status, changed files, commands, and evidence to the orchestrator. The orchestrator owns formal plan review and final acceptance review. It also owns planner, plan-critic, and review dispatch.
 

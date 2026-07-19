@@ -189,6 +189,28 @@ test("real deepwork prompts do not retain obsolete planner or broad review trigg
   }
 })
 
+test("agent-specific prompts enforce bounded leaf delegation", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const root = join(process.cwd(), "prompts", workflow, "agents")
+    const planner = readFileSync(join(root, "planner.md"), "utf8")
+    assert.match(planner, /leaf.*code-search.*doc-search/is, `${workflow}/planner`)
+    assert.match(planner, /unsuffixed.*reviewer.*at most once.*concrete blocking architecture, security, or performance decision/is, `${workflow}/planner`)
+    assert.match(planner, /never.*plan-critic.*Oracle.*Reviewer tier.*implementation/is, `${workflow}/planner`)
+
+    const reviewer = readFileSync(join(root, "reviewer.md"), "utf8")
+    assert.match(reviewer, /leaf read-only.*lookup/i, `${workflow}/reviewer`)
+    assert.match(reviewer, /never.*planner.*reviewer.*Oracle.*plan-critic.*implementation/is, `${workflow}/reviewer`)
+
+    const clarifier = readFileSync(join(root, "clarifier.md"), "utf8")
+    assert.match(clarifier, /read-only discovery.*resolve ambiguity/i, `${workflow}/clarifier`)
+    assert.match(clarifier, /never.*planner.*reviewer.*Oracle.*plan-critic.*implementation/is, `${workflow}/clarifier`)
+
+    const critic = readFileSync(join(root, "plan-critic.md"), "utf8")
+    assert.match(critic, /read-only lookup.*verify.*plan claim/i, `${workflow}/plan-critic`)
+    assert.match(critic, /never.*planner.*reviewer.*Oracle.*another plan-critic.*implementation/is, `${workflow}/plan-critic`)
+  }
+})
+
 test("planner and GPT-5.6 prompts keep delegation and review ownership flat", () => {
   const root = join(process.cwd(), "prompts")
   try {
@@ -197,8 +219,10 @@ test("planner and GPT-5.6 prompts keep delegation and review ownership flat", ()
       const planner = getAgentPrompt("planner")
       assert.match(planner, /Use direct tools first/)
       assert.match(planner, /Return the completed plan to the orchestrator/)
-      assert.match(planner, /Do not dispatch `plan-critic`, `reviewer`, `oracle`, or `oracle-high`/)
-      assert.doesNotMatch(planner, /Use `reviewer`|Consult `reviewer`|Submit the complete current plan to `plan-critic`/)
+      assert.match(planner, /exactly (?:the )?unsuffixed `reviewer` at most once.*concrete blocking architecture, security, or performance decision/i)
+      assert.match(planner, /Do not dispatch `plan-critic`, any Reviewer tier \(`reviewer-low`, `reviewer-high`, `reviewer-max`\), or any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\)/)
+      assert.doesNotMatch(planner, /Do not use `quick`, implementation\/coordinator agents, or planning\/review agents\./)
+      assert.doesNotMatch(planner, /Never dispatch an implementation worker or a reviewer from the planner role\./)
 
       const gpt56 = getDeepworkPrompt("gpt-5.6")
       assert.match(gpt56, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
@@ -405,7 +429,7 @@ test("v1 implementer template and maintenance docs record flat workflow ownershi
   )
   assert.match(implementer, /## Delegation Boundary/)
   assert.match(implementer, /`quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`/)
-  assert.match(implementer, /Do not launch `planner`, `plan-critic`, `reviewer`, `oracle`, or `oracle-high`/)
+  assert.match(implementer, /Do not launch `planner`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), or any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\)/)
   assert.match(implementer, /orchestrator owns formal plan review and final acceptance review/i)
   assert.doesNotMatch(implementer, /Commit your work/)
 
@@ -440,5 +464,28 @@ test("orchestrator prompts describe code review as review-input based", () => {
     )
     assert.match(prompt, /committed range or working-tree\/staged diff/i, `${workflow} orchestrator missing review-input wording`)
     assert.doesNotMatch(prompt, /work SHAs/i, `${workflow} orchestrator still assumes SHA-only review input`)
+  }
+})
+
+test("GPT-5.6 prompts proceed under clear facts and ask only deliverable-changing questions", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-5.6.md"), "utf8")
+    assert.match(text, /When facts are clear, answer or proceed directly/i, workflow)
+    assert.match(text, /safe default.*state the assumption.*continue/i, workflow)
+    assert.match(text, /changes the deliverable shape/i, workflow)
+    assert.match(text, /cannot be found with available tools/i, workflow)
+    assert.match(text, /material rework/i, workflow)
+    assert.match(text, /Do not ask for confirmation after routine discovery, planning, integration, or verification milestones/i, workflow)
+  }
+})
+
+test("orchestrator alone owns workflow-role composition in all prompt sets", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"), "utf8")
+    assert.match(text, /exclusive owner.*workflow-agent composition/i, workflow)
+    assert.match(text, /ordered Oracle/i, workflow)
+    assert.match(text, /configuring multiple.*does not.*fan-out/i, workflow)
+    assert.match(text, /complex.*configured high.*otherwise.*normal/is, workflow)
+    assert.match(text, /runtime-safety.*configured max.*configured high.*normal/is, workflow)
   }
 })

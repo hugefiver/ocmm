@@ -18,7 +18,7 @@ import { createConfigHandler } from "./hooks/config.ts"
 import { createResolutionLedger } from "./routing/ledger.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler, createSessionIntentStore } from "./hooks/chat-message.ts"
-import { createEventHandler } from "./hooks/event.ts"
+import { createEventRuntime } from "./hooks/event.ts"
 import { createDirectoryAgentsInjector } from "./hooks/directory-agents-injector.ts"
 import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
 import { createRulesInjector } from "./hooks/rules-injector.ts"
@@ -124,7 +124,16 @@ export function createPlugin(input?: ServerInput): {
     sessionAgentMap,
     sessionDepthMap,
   })
+  const fallbackRuntime = createEventRuntime({
+    getConfig,
+    ...(input?.client !== undefined ? { client: input.client } : {}),
+    directory: cwd,
+    idleState,
+    registeredAgentModels,
+    clearSessionIntent: (sid) => sessionIntentStore.clearSessionIntent(sid),
+  })
   const toolAfterHandlers = [
+    fallbackRuntime.afterTask,
     createHashlineReadEnhancer({ getConfig }),
     createRulesInjector({ getConfig, projectRoot: cwd }),
     createDirectoryAgentsInjector({ getConfig, projectRoot: cwd, sessionCache: agentsSessionCache }),
@@ -134,16 +143,8 @@ export function createPlugin(input?: ServerInput): {
   // Composed event handler — calls both the runtime-fallback handler (model
   // fallback + idle continuation) and the permission-guards handler (per-session
   // cache cleanup) so session.deleted/compacted clears all shared caches.
-  const fallbackEventHandler = createEventHandler({
-    getConfig,
-    ...(input?.client !== undefined ? { client: input.client } : {}),
-    directory: cwd,
-    idleState,
-    registeredAgentModels,
-    clearSessionIntent: (sid) => sessionIntentStore.clearSessionIntent(sid),
-  })
   const composedEvent = async (raw: unknown) => {
-    await fallbackEventHandler(raw)
+    await fallbackRuntime.event(raw)
     await permissionGuards.event?.(raw)
   }
 

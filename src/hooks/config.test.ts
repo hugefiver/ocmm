@@ -30,6 +30,11 @@ const READ_ONLY_TASK_RULES = {
   "media-reader": "allow",
 } as const
 
+const PLANNER_TASK_RULES = {
+  ...READ_ONLY_TASK_RULES,
+  reviewer: "allow",
+} as const
+
 const LOCAL_COORDINATOR_TASK_RULES = {
   ...UTILITY_TASK_RULES,
   coding: "allow",
@@ -199,14 +204,14 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
 
   // oracle is now an independent builtin with cross-gen requirement (not a reviewer alias).
   assert.notEqual(cfg.agent.oracle, cfg.agent.reviewer)
-  assert.ok(cfg.agent["oracle-high"], "oracle-high should be registered as subagent")
+  assert.ok(cfg.agent["oracle-2nd"], "oracle-2nd should be registered as subagent")
   assertExactTaskRules(
-    ((cfg.agent["oracle-high"] as Record<string, unknown>).permission as Record<string, unknown>).task,
+    ((cfg.agent["oracle-2nd"] as Record<string, unknown>).permission as Record<string, unknown>).task,
     READ_ONLY_TASK_RULES,
-    "oracle-high read-only task rules",
+    "oracle-2nd read-only allowlist",
   )
-  // oracle-high reuses reviewer prompt/calibration.
-  assert.match(String((cfg.agent["oracle-high"] as Record<string, unknown>).prompt), /Agent Role: reviewer|READ-ONLY REVIEWER/)
+  // oracle-2nd reuses reviewer prompt/calibration.
+  assert.match(String((cfg.agent["oracle-2nd"] as Record<string, unknown>).prompt), /Agent Role: reviewer|READ-ONLY REVIEWER/)
   // explore remains a compatibility alias for code-search.
   assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
   assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
@@ -228,9 +233,12 @@ test("config applies the exact flat-workflow task permission graph", async () =>
   for (const name of ["coding", "normal-task", "frontend", "creative", "hard-reasoning", "documenting"]) {
     assertExactTaskRules(agentPermission(cfg.agent, name).task, UTILITY_TASK_RULES, `${name} utility allowlist`)
   }
-  for (const name of ["planner", "reviewer", "oracle", "oracle-high", "clarifier", "plan-critic"]) {
+  assertExactTaskRules(agentPermission(cfg.agent, "planner").task, PLANNER_TASK_RULES, "planner reviewer exception")
+  assert.equal(agentPermission(cfg.agent, "planner")["task_*"], undefined, "planner must not retain a broad task wildcard")
+  assertExactTaskRules(agentPermission(cfg.agent, "clarifier").task, READ_ONLY_TASK_RULES, "clarifier read-only allowlist")
+  assert.equal(agentPermission(cfg.agent, "clarifier")["task_*"], undefined, "clarifier must not retain a broad task wildcard")
+  for (const name of ["reviewer", "oracle", "oracle-2nd", "plan-critic"]) {
     assertExactTaskRules(agentPermission(cfg.agent, name).task, READ_ONLY_TASK_RULES, `${name} read-only allowlist`)
-    assert.equal(agentPermission(cfg.agent, name)["task_*"], undefined, `${name} must not retain a broad task wildcard`)
   }
   for (const name of ["deep", "complex"]) {
     assertExactTaskRules(agentPermission(cfg.agent, name).task, LOCAL_COORDINATOR_TASK_RULES, `${name} local-coordinator allowlist`)
@@ -244,12 +252,16 @@ test("config preserves scalar and granular explicit permission overrides", async
     agents: {
       orchestrator: { permission: { task: "deny" as const, custom: "allow" as const } },
       reviewer: { tools: { task: true } },
+      oracle: { variants: { high: "max" as const } },
     },
   }
   const hostTaskOverride = { "*": "allow" as const, planner: "allow" as const }
   const handler = createConfigHandler({ getConfig: () => configured })
   const cfg: { agent: Record<string, unknown>; permission?: Record<string, unknown> } = {
-    agent: { coding: { permission: { task: hostTaskOverride } } },
+    agent: {
+      coding: { permission: { task: hostTaskOverride } },
+      "oracle-high": { permission: { task: hostTaskOverride } },
+    },
     permission: { webfetch: "deny" },
   }
   await handler(cfg, undefined)
@@ -260,6 +272,7 @@ test("config preserves scalar and granular explicit permission overrides", async
   assert.equal(agentPermission(cfg.agent, "orchestrator").custom, "allow")
   assert.equal(agentPermission(cfg.agent, "reviewer").task, "allow")
   assertExactTaskRules(agentPermission(cfg.agent, "coding").task, hostTaskOverride, "host granular override")
+  assertExactTaskRules(agentPermission(cfg.agent, "oracle-high").task, hostTaskOverride, "host generated-review override")
 })
 
 test("config does not impose built-in task defaults on custom agents", async () => {
@@ -288,8 +301,10 @@ test("config appends authoritative contracts to non-primary builtin agents", asy
 
   const planner = delegationContract(cfg.agent, "planner")
   assert.match(planner, /Allowed utility targets: `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./)
+  assert.match(planner, /exactly the unsuffixed `reviewer` at most once/i)
+  assert.match(planner, /concrete blocking architecture, security, or performance decision/i)
   assert.match(planner, /`quick` is forbidden/)
-  assert.match(planner, /Return the completed plan or findings to the caller/)
+  assert.match(planner, /Return the completed plan to the caller/)
   assert.match(planner, /plan-critic.*orchestrator-owned/i)
 })
 
@@ -305,18 +320,121 @@ test("config appends one terminal contract to an existing host prompt", async ()
   assert.match(prompt, /<\/ocmm-delegation-contract>\s*$/)
 })
 
+test("planner preserves an explicit host task permission override", async () => {
+  const hostTaskOverride = { "*": "allow" as const, planner: "allow" as const }
+  const cfg: { agent: Record<string, unknown> } = {
+    agent: { planner: { permission: { task: hostTaskOverride } } },
+  }
+  await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
+  assertExactTaskRules(agentPermission(cfg.agent, "planner").task, hostTaskOverride, "planner host override")
+})
+
 test("disabledAgents skips OMO-compatible aliases", async () => {
-  const c = { ...defaultConfig(), disabledAgents: ["oracle", "oracle-high", "explore", "deep"] }
+  const c = {
+    ...defaultConfig(),
+    agents: { oracle: { variants: { high: "max" as const } } },
+    disabledAgents: ["oracle-2nd", "oracle-high", "explore", "deep"],
+  }
   const handler = createConfigHandler({ getConfig: () => c })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
   assert.ok(cfg.agent.reviewer)
   assert.ok(cfg.agent["code-search"])
-  assert.equal(cfg.agent.oracle, undefined)
+  assert.ok(cfg.agent.oracle)
+  assert.equal(cfg.agent["oracle-2nd"], undefined)
   assert.equal(cfg.agent["oracle-high"], undefined)
   assert.equal(cfg.agent.explore, undefined)
   assert.equal(cfg.agent.deep, undefined)
+})
+
+test("default config registers only normal review built-ins", async () => {
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: defaultConfig })(target, undefined)
+  assert.ok(target.agent.oracle)
+  assert.ok(target.agent["oracle-2nd"])
+  assert.ok(target.agent.reviewer)
+  assert.equal(target.agent["oracle-high"], undefined)
+  assert.equal(target.agent["oracle-2nd-high"], undefined)
+})
+
+test("config registers canonical review profiles and no runtime alias duplicate", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      oracle: { variants: { high: "max" as const } },
+      "oracle-3rd": { model: "anthropic/claude-opus-4-7", variants: { max: "max" as const } },
+      reviewer: { variants: { low: "high" as const } },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+  for (const name of ["oracle", "oracle-high", "oracle-2nd", "oracle-3rd", "oracle-3rd-max", "reviewer", "reviewer-low"]) {
+    assert.ok(target.agent[name], name)
+    assert.equal((target.agent[name] as Record<string, unknown>).mode, "subagent")
+    assertExactTaskRules(
+      ((target.agent[name] as Record<string, unknown>).permission as Record<string, unknown>).task,
+      READ_ONLY_TASK_RULES,
+      `${name} read-only allowlist`,
+    )
+  }
+  assert.equal(target.agent["oracle-second"], undefined)
+})
+
+test("generated tiers inherit review registration overrides", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: {
+        model: "openai/gpt-5.6-sol",
+        tools: { read: true, task: false },
+        permission: { webfetch: "allow" as const },
+        skills: ["requesting-code-review"],
+        promptAppend: "Inspect the complete diff.",
+        temperature: 0.25,
+        variants: { high: "max" as const },
+      },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+  const high = target.agent["reviewer-high"] as Record<string, unknown>
+  assert.deepEqual(high.skills, ["requesting-code-review"])
+  assert.equal(high.temperature, 0.25)
+  assert.match(String(high.prompt), /Inspect the complete diff\./)
+  assert.equal((high.permission as Record<string, unknown>).task, "deny")
+  assert.equal((high.permission as Record<string, unknown>).webfetch, "allow")
+})
+
+test("slot disable cascades and disables pre-existing host profiles", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: { oracle: { variants: { high: "max" as const } } },
+    disabledAgents: ["oracle"],
+  }
+  const target = { agent: { oracle: { model: "host/model" }, "oracle-high": { model: "host/model" }, "oracle-2nd": { model: "host/second" } } }
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+  assert.equal((target.agent.oracle as Record<string, unknown>).disable, true)
+  assert.equal((target.agent["oracle-high"] as Record<string, unknown>).disable, true)
+  assert.notEqual((target.agent["oracle-2nd"] as Record<string, unknown>).disable, true)
+})
+
+test("unconfigured host review tiers stay enabled with their models and parser-based read-only permissions", async () => {
+  const target = {
+    agent: {
+      "reviewer-high": { model: "host/reviewer-high" },
+    },
+  }
+  await createConfigHandler({ getConfig: defaultConfig })(target, undefined)
+
+  const hostTier = target.agent["reviewer-high"] as Record<string, unknown>
+  assert.equal(hostTier.model, "host/reviewer-high")
+  assert.notEqual(hostTier.disable, true)
+  assertExactTaskRules(
+    (hostTier.permission as Record<string, unknown>).task,
+    READ_ONLY_TASK_RULES,
+    "host reviewer-high read-only allowlist",
+  )
 })
 
 test("user model override selects specialized deepwork prompt variant", async () => {

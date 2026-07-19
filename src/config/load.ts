@@ -2,8 +2,17 @@
  * Config file loader.
  *
  * Reads ocmm.json / ocmm.jsonc from project + user locations, parses (with
- * minimal JSONC support — strip comments & trailing commas), validates with
+ * minimal JSONC support - strip comments & trailing commas), validates with
  * Zod, then deep-merges (project wins). Missing files are silently tolerated.
+ *
+ * Before schema validation, every base layer's `agents` map and every
+ * inline/directory profile's `agents` map is canonicalized through the
+ * review-agent migration phase (`./review-agent-migration.ts`). Legacy
+ * `agents.oracle-high` migrates to `agents.oracle-2nd` with a source-aware
+ * deprecation warning; the `oracle-second` alias migrates silently. Different
+ * spellings targeting `oracle-2nd` across active layers are conflicts: the pure
+ * preparation APIs throw `ReviewConfigConflictError`, and `loadConfig()`
+ * catches that and returns defaults.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs"
@@ -13,6 +22,13 @@ import { z } from "zod"
 import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, type OcmmConfig } from "./schema.ts"
 import { tolerantParse, tolerantParseLayers, type TolerantParseLayer } from "./tolerant-parse.ts"
 import { log } from "../shared/logger.ts"
+import {
+  assertSelectedReviewProfileCompatible,
+  prepareConfigLayers,
+  prepareReviewProfile,
+  ReviewConfigConflictError,
+  type PreparedReviewProfile,
+} from "./review-agent-migration.ts"
 
 const FILE_BASENAMES = ["ocmm.jsonc", "ocmm.json"]
 const ProfileSelectionSchema = z.object({
@@ -100,22 +116,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * Load profile entries from a directory of `<name>.jsonc` / `<name>.json` files.
  *
  * Each file is parsed (JSONC) and returned under its basename (extension
- * stripped). Parse failures are warned and skipped. `profiles` and
- * `activeProfile` keys are defensively stripped from each entry to prevent
- * nested-profile leakage (ProfileEntrySchema forbids them, but this function
- * does not run schema validation — the merge step would otherwise leak them).
+ * stripped) along with its absolute winning source path. Parse failures are
+ * warned and skipped. `profiles` and `activeProfile` keys are defensively
+ * stripped from each entry to prevent nested-profile leakage
+ * (ProfileEntrySchema forbids them, but this function does not run schema
+ * validation - the merge step would otherwise leak them).
  *
  * `.jsonc` is preferred when both `<name>.jsonc` and `<name>.json` exist.
  * Returns `{}` if the directory does not exist or is empty.
  */
-export function loadProfilesFromDir(dir: string): Record<string, unknown> {
+export type ProfileFileEntry = { source: string; value: unknown }
+
+export function loadProfileEntriesFromDir(dir: string): Record<string, ProfileFileEntry> {
   let entries: string[]
   try {
     entries = readdirSync(dir)
   } catch {
     return {}
   }
-  const out: Record<string, unknown> = {}
+  const out: Record<string, ProfileFileEntry> = {}
   const seen = new Set<string>()
   // Sort so .jsonc is processed after .json (later wins) for same basename.
   const files = entries.filter((n) => n.endsWith(".jsonc") || n.endsWith(".json")).sort()
@@ -124,7 +143,7 @@ export function loadProfilesFromDir(dir: string): Record<string, unknown> {
     const ext = name.endsWith(".jsonc") ? "jsonc" : "json"
     // If we already have a .jsonc version, skip .json.
     if (ext === "json" && seen.has(baseName + ":jsonc")) continue
-    const path = join(dir, name)
+    const path = resolve(join(dir, name))
     const raw = readFileSync(path, "utf8")
     let parsed: unknown
     try {
@@ -151,8 +170,20 @@ export function loadProfilesFromDir(dir: string): Record<string, unknown> {
     if (stripped) {
       log.warn(`profile ${path} contained profiles/activeProfile; stripped`)
     }
-    out[baseName] = cleaned
+    out[baseName] = { source: path, value: cleaned }
     seen.add(baseName + ":" + ext)
+  }
+  return out
+}
+
+/**
+ * Backward-compatible wrapper returning the profile value only.
+ */
+export function loadProfilesFromDir(dir: string): Record<string, unknown> {
+  const entries = loadProfileEntriesFromDir(dir)
+  const out: Record<string, unknown> = {}
+  for (const [name, entry] of Object.entries(entries)) {
+    out[name] = entry.value
   }
   return out
 }
@@ -162,7 +193,7 @@ export function loadProfilesFromDir(dir: string): Record<string, unknown> {
  *
  * Default array policy: REPLACE (override wins) for predictable override
  * semantics. Model fallback and feature-disable arrays are UNIONED de-duped
- * instead — these accumulate across user+project layers so global/project
+ * instead - these accumulate across user+project layers so global/project
  * gates compose predictably.
  *
  * Pass `{ profileOverlay: true }` to force ALL arrays to replace (use when
@@ -210,6 +241,10 @@ export type LoadedConfig = {
   activeProfile?: string
 }
 
+function reviewWarn(message: string): void {
+  log.warn(message)
+}
+
 export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?: boolean } = {}): LoadedConfig {
   const cwd = resolve(opts.cwd ?? process.cwd())
   const host = opts.host ?? "opencode"
@@ -218,64 +253,123 @@ export function loadConfig(opts: { cwd?: string; host?: ConfigHost; includeUser?
   const userPath = opts.includeUser === false ? null : locateFile(userConfigDir(host))
   const projectPath = locateFile(projectConfigDir(cwd, host))
 
-  const baseLayers: TolerantParseLayer[] = []
+  // Build the raw layer list. Apply stripProjectOnlyFields to project first.
+  const rawLayers: { source: string; value: unknown }[] = []
   if (userPath) {
     const data = readJsoncFile(userPath)
     if (data !== null) {
-      baseLayers.push({ value: cleanAgentEntries(data) })
+      rawLayers.push({ source: userPath, value: data })
       sources.user = userPath
     }
   }
   if (projectPath) {
     const data = readJsoncFile(projectPath)
     if (data !== null) {
-      baseLayers.push({ value: cleanAgentEntries(stripProjectOnlyFields(data)) })
+      rawLayers.push({ source: projectPath, value: stripProjectOnlyFields(data) })
       sources.project = projectPath
     }
   }
 
-  const profileSelection = tolerantParseLayers(ProfileSelectionSchema, baseLayers, mergeConfigLayers)
-  const selectedBaseLayers = profileSelection.success ? profileSelection.layers : baseLayers
-  const selection = profileSelection.success ? profileSelection.data : {}
+  try {
+    const emittedReviewWarnings = new Set<string>()
+    const warnReviewOnce = (message: string): void => {
+      if (emittedReviewWarnings.has(message)) return
+      emittedReviewWarnings.add(message)
+      reviewWarn(message)
+    }
+    const prepared = prepareConfigLayers(rawLayers, warnReviewOnce)
+    const baseLayers: TolerantParseLayer[] = prepared.layers.map((layer) => ({
+      value: cleanAgentEntries(layer.value),
+    }))
 
-  // Profile selection: OCMM_PROFILE env var wins over config's activeProfile.
-  // Empty string is treated as unset so `OCMM_PROFILE= opencode ...` falls
-  // back to the config's activeProfile rather than selecting a "" profile.
-  // OCMM_NO_PROFILE=1 disables profile loading entirely (overrides everything).
-  const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
-  const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
-  const activeProfileRaw = noProfile ? undefined : (envProfile ?? selection.activeProfile)
-  const activeProfile =
-    typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
-      ? activeProfileRaw
-      : undefined
+    const profileSelection = tolerantParseLayers(ProfileSelectionSchema, baseLayers, mergeConfigLayers)
+    const selectedBaseLayers = profileSelection.success ? profileSelection.layers : baseLayers
+    const selection = profileSelection.success ? profileSelection.data : {}
 
-  // Directory profiles shadow all inline profiles: project wins over user.
-  const userDirProfiles = loadProfilesFromDir(join(userConfigDir(host), "ocmm-profiles"))
-  const projectDirProfiles = host === "opencode"
-    ? loadProfilesFromDir(join(projectConfigDir(cwd, host), "ocmm-profiles"))
-    : {}
+    const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
+    const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
+    const activeProfileRaw = noProfile ? undefined : (envProfile ?? selection.activeProfile)
+    const activeProfile =
+      typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
+        ? activeProfileRaw
+        : undefined
 
-  // Inline profile sources retain per-layer provenance. They are merged as a
-  // group before replacing base config so their normal array merge policy is
-  // preserved while profiles still own arrays over the base configuration.
-  const profileLayers = activeProfile
-    ? selectedProfileLayers(activeProfile, selectedBaseLayers, userDirProfiles, projectDirProfiles)
-    : []
-  if (activeProfile && profileLayers.length === 0) {
-    log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
-  }
+    const userDirEntries = loadProfileEntriesFromDir(join(userConfigDir(host), "ocmm-profiles"))
+    const projectDirEntries = host === "opencode"
+      ? loadProfileEntriesFromDir(join(projectConfigDir(cwd, host), "ocmm-profiles"))
+      : {}
 
-  const layers = [...selectedBaseLayers, ...profileLayers]
-  const parsed = tolerantParseLayers(OcmmConfigSchema, layers, mergeConfigLayers)
-  if (!parsed.success) {
-    log.warn(
-      `ocmm config validation failed; using defaults. issues:`,
-      parsed.issues.slice(0, 5),
+    let selectedContributions: readonly PreparedReviewProfile[] = []
+    if (activeProfile) {
+      const projectDirWinner = projectDirEntries[activeProfile]
+      if (projectDirWinner) {
+          selectedContributions = [prepareReviewProfile({
+            name: activeProfile,
+            source: projectDirWinner.source,
+            value: projectDirWinner.value,
+          }, warnReviewOnce)]
+      } else {
+        const userDirWinner = userDirEntries[activeProfile]
+        if (userDirWinner) {
+          selectedContributions = [prepareReviewProfile({
+            name: activeProfile,
+            source: userDirWinner.source,
+            value: userDirWinner.value,
+          }, warnReviewOnce)]
+        } else {
+          const activeSources = new Set(
+            prepared.layers
+              .filter((_, index) => selectedBaseLayers[index]?.value !== undefined)
+              .map((layer) => layer.source),
+          )
+          selectedContributions = (prepared.inlineProfiles.get(activeProfile) ?? [])
+            .filter((profile) => activeSources.has(profile.source))
+        }
+      }
+    }
+
+    assertSelectedReviewProfileCompatible(prepared.baseOrigins, selectedContributions)
+
+    const profileLayers = selectedProfileLayers(selectedContributions)
+    if (activeProfile && profileLayers.length === 0) {
+      log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
+    }
+
+    const parsed = tolerantParseLayers(
+      OcmmConfigSchema,
+      [...selectedBaseLayers, ...profileLayers],
+      mergeConfigLayers,
     )
-    return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
+    if (!parsed.success) {
+      log.warn(
+        `ocmm config validation failed; using defaults. issues:`,
+        parsed.issues.slice(0, 5),
+      )
+      return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
+    }
+    return { config: parsed.data, sources, ...(activeProfile ? { activeProfile } : {}) }
+  } catch (err) {
+    if (err instanceof ReviewConfigConflictError) {
+      log.warn(`ocmm review-agent config conflict; using defaults: ${err.message}`)
+      // Re-derive activeProfile from the raw layers without re-running migration,
+      // so callers see what would have been selected.
+      let mergedRaw: Record<string, unknown> = {}
+      for (const layer of rawLayers) {
+        if (isPlainObject(layer.value)) {
+          mergedRaw = deepMerge(mergedRaw, layer.value) as Record<string, unknown>
+        }
+      }
+      const noProfile = process.env.OCMM_NO_PROFILE === "1" || process.env.OCMM_NO_PROFILE === "true"
+      const envProfile = noProfile ? undefined : (process.env.OCMM_PROFILE || undefined)
+      const activeProfileRaw = noProfile ? undefined : (envProfile ?? mergedRaw.activeProfile)
+      const activeProfile =
+        typeof activeProfileRaw === "string" && activeProfileRaw.length > 0
+          ? activeProfileRaw
+          : undefined
+      return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
+    }
+    throw err
   }
-  return { config: parsed.data, sources, ...(activeProfile ? { activeProfile } : {}) }
 }
 
 function stripProjectOnlyFields(value: unknown): unknown {
@@ -292,7 +386,7 @@ function mergeConfigLayers(layers: readonly TolerantParseLayer[]): unknown {
   let hasProfile = false
   for (const layer of layers) {
     if (layer.profileOverlay) {
-      profile = deepMerge(profile, layer.value)
+      profile = deepMerge(profile, layer.value, undefined, { profileOverlay: true })
       hasProfile = true
     } else {
       base = deepMerge(base, layer.value)
@@ -301,32 +395,11 @@ function mergeConfigLayers(layers: readonly TolerantParseLayer[]): unknown {
   return hasProfile ? deepMerge(base, profile, undefined, { profileOverlay: true }) : base
 }
 
-function selectedProfileLayers(
-  activeProfile: string,
-  baseLayers: readonly TolerantParseLayer[],
-  userDirProfiles: Record<string, unknown>,
-  projectDirProfiles: Record<string, unknown>,
-): TolerantParseLayer[] {
-  if (Object.hasOwn(projectDirProfiles, activeProfile)) {
-    return [{ value: cleanAgentEntries(projectDirProfiles[activeProfile]), profileOverlay: true }]
-  }
-  if (Object.hasOwn(userDirProfiles, activeProfile)) {
-    return [{ value: cleanAgentEntries(userDirProfiles[activeProfile]), profileOverlay: true }]
-  }
-
-  const layers: TolerantParseLayer[] = []
-  for (const layer of baseLayers) {
-    const profile = inlineProfile(layer.value, activeProfile)
-    if (profile.found) layers.push({ value: cleanAgentEntries(profile.value), profileOverlay: true })
-  }
-  return layers
-}
-
-function inlineProfile(value: unknown, name: string): { found: boolean; value?: unknown } {
-  if (!isPlainObject(value) || !isPlainObject(value.profiles) || !Object.hasOwn(value.profiles, name)) {
-    return { found: false }
-  }
-  return { found: true, value: value.profiles[name] }
+function selectedProfileLayers(selectedProfiles: readonly PreparedReviewProfile[]): TolerantParseLayer[] {
+  return selectedProfiles.map((profile) => ({
+    value: cleanAgentEntries(profile.value),
+    profileOverlay: true,
+  }))
 }
 
 function cleanAgentEntries(value: unknown): unknown {

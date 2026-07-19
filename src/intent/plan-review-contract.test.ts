@@ -83,3 +83,33 @@ test("frontend DESIGN.md docs separate planned showcase checks from reusable ent
     assert.match(source, /implemented reusable patterns used 2\+ times/i)
   }
 })
+
+test("review skills use ordered Oracle priority and logical tiers", () => {
+  const reviewSkills = [
+    read("skills", "v1", "requesting-code-review", "SKILL.md"),
+    read("skills", "v1", "subagent-driven-development", "SKILL.md"),
+  ]
+
+  for (const text of reviewSkills) {
+    assert.match(text, /oracle-2nd.*priority/is)
+    assert.match(text, /low.*normal.*high.*max/is)
+    assert.match(text, /first available.*Oracle/is)
+    assert.match(text, /additional.*Oracle.*in order/is)
+    assert.match(text, /runtime-safety.*max.*high.*normal/is)
+    assert.doesNotMatch(text, /triple review|third reviewer|supplemental high-effort|high-intensity reviewer/i)
+  }
+})
+
+test("active docs describe canonical review variants and interruption recovery", () => {
+  const files = ["README.md", "AGENTS.md", "docs/architecture.md", "examples/ocmm.example.jsonc"]
+  const texts = new Map(files.map((path) => [path, readFileSync(join(process.cwd(), path), "utf8")]))
+  for (const [path, text] of texts) {
+    assert.match(text, /oracle-2nd/, path)
+    assert.match(text, /variants/, path)
+    assert.doesNotMatch(text, /supplemental high-intensity|optional third reviewer|triple review/i, path)
+  }
+  assert.match(texts.get("README.md")!, /agents\.oracle-high.*migrat.*agents\.oracle-2nd/is)
+  assert.match(texts.get("README.md")!, /subagent-interruption-recovery/)
+  assert.match(texts.get("AGENTS.md")!, /message\.part\.updated/)
+  assert.match(texts.get("docs/architecture.md")!, /single.*429 controller/is)
+})

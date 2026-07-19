@@ -22,11 +22,6 @@ test("oracle routes to its own cross-gen builtin chain", () => {
     modelID: "gpt-5.5",
     providerID: "openai",
   })
-  const oracleHigh = resolveModelRouting({
-    agentName: "oracle-high",
-    modelID: "gpt-5.5",
-    providerID: "openai",
-  })
   const explore = resolveModelRouting({
     agentName: "explore",
     modelID: "gpt-5.4-mini-fast",
@@ -36,11 +31,70 @@ test("oracle routes to its own cross-gen builtin chain", () => {
   assert.equal(oracle!.source, "agent-default")
   assert.equal(oracle!.variant, "xhigh")
   assert.equal(oracle!.entry.model, "gpt-5.5")
-  assert.equal(oracleHigh!.source, "agent-default")
-  assert.equal(oracleHigh!.variant, "max")
-  assert.equal(oracleHigh!.entry.model, "gpt-5.5")
   assert.equal(explore!.source, "agent-default")
   assert.equal(explore!.entry.model, "gpt-5.4-mini-fast")
+})
+
+test("oracle-high resolves the first slot's configured high tier", () => {
+  const r = resolveModelRouting({
+    agentName: "oracle-high",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+    agentsConfig: {
+      oracle: { variants: { high: "max" } },
+    },
+  })
+  assert.equal(r!.source, "user-config")
+  assert.equal(r!.variant, "max")
+  assert.equal(r!.entry.model, "gpt-5.5")
+})
+
+test("review routing resolves generated tiers and runtime alias from one expansion", () => {
+  const agentsConfig = {
+    oracle: {
+      model: "openai/gpt-5.6-terra",
+      fallbackModels: ["anthropic/claude-opus-4-7"],
+      variants: {
+        low: "low" as const,
+        max: { model: "openai/gpt-5.6-sol", variant: "max" as const },
+      },
+    },
+  }
+  const low = resolveModelRouting({
+    agentName: "oracle-low",
+    providerID: "anthropic",
+    modelID: "claude-opus-4-7",
+    agentsConfig,
+  })
+  assert.equal(low?.source, "user-config")
+  assert.equal(low?.variant, "low")
+
+  const max = resolveModelRouting({
+    agentName: "oracle-max",
+    providerID: "openai",
+    modelID: "gpt-5.6-sol",
+    agentsConfig,
+  })
+  assert.equal(max?.entry.model, "gpt-5.6-sol")
+  assert.equal(max?.variant, "max")
+
+  const second = resolveModelRouting({
+    agentName: "oracle-second",
+    providerID: "openai",
+    modelID: "gpt-5.5",
+    agentsConfig,
+  })
+  assert.equal(second?.source, "agent-default")
+})
+
+test("disabled review profile does not resolve", () => {
+  assert.equal(resolveModelRouting({
+    agentName: "oracle-high",
+    providerID: "openai",
+    modelID: "gpt-5.6-terra",
+    agentsConfig: { oracle: { variants: { high: "max" } } },
+    disabledAgents: ["oracle-high"],
+  }), null)
 })
 
 test("oracle GPT cross-generation entries prefer 5.4 then 5.5 before same-generation Terra", () => {
@@ -125,10 +179,10 @@ test("user shorthand `model` produces a one-entry chain", () => {
 
 test("disabled agent override drops to built-in", () => {
   const r = resolveModelRouting({
-    agentName: "reviewer",
+    agentName: "builder",
     modelID: "gpt-5.5",
     providerID: "openai",
-    agentsConfig: { reviewer: { disabled: true } },
+    agentsConfig: { builder: { disabled: true } },
   })
   assert.ok(r)
   assert.equal(r!.source, "agent-default")

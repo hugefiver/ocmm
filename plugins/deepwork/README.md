@@ -8,6 +8,7 @@ Generated from the Deepwork source tree. Do not edit generated files by hand; ru
 - MCP servers are generated from the Deepwork `mcp` config namespace.
 - The default `lsp` MCP uses the plugin-local `ocmm-lsp` wrapper and bundled GitHub Release binary.
 - Workflow skill: `deepwork`.
-- Generated Codex agent profiles use the `dw-*` prefix, including functional agents such as `dw-oracle`, `dw-oracle-high`, and `dw-creative`.
+- Generated Codex agent profiles use the `dw-*` prefix, including functional agents such as `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`.
+- Logical Oracle/Reviewer tiers (for example `dw-oracle-high`) are emitted only when explicitly configured.
 
 The OpenCode plugin remains `dist/index.js`; this directory is the Codex adapter bundle.

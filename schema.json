@@ -522,7 +522,33 @@
                         ]
                       }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "model"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "variant"
+                    ]
                   }
                 ]
               },
@@ -563,7 +589,33 @@
                         ]
                       }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "model"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "variant"
+                    ]
                   }
                 ]
               },
@@ -604,7 +656,33 @@
                         ]
                       }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "model"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "variant": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "minimal",
+                          "none",
+                          "auto",
+                          "thinking"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "variant"
+                    ]
                   }
                 ]
               }
@@ -1548,7 +1626,33 @@
                               ]
                             }
                           },
-                          "additionalProperties": false
+                          "additionalProperties": false,
+                          "required": [
+                            "model"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "variant"
+                          ]
                         }
                       ]
                     },
@@ -1589,7 +1693,33 @@
                               ]
                             }
                           },
-                          "additionalProperties": false
+                          "additionalProperties": false,
+                          "required": [
+                            "model"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "variant"
+                          ]
                         }
                       ]
                     },
@@ -1630,7 +1760,33 @@
                               ]
                             }
                           },
-                          "additionalProperties": false
+                          "additionalProperties": false,
+                          "required": [
+                            "model"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "variant": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "minimal",
+                                "none",
+                                "auto",
+                                "thinking"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "variant"
+                          ]
                         }
                       ]
                     }

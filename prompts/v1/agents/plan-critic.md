@@ -47,6 +47,10 @@ Approval bias: approve when in doubt. A plan that is 80% clear is good enough fo
 
 Note: ambiguity IS checked (item 5 above). "Style preferences, minor ambiguity, or optional improvements" in earlier versions referred to stylistic ambiguity (naming conventions, formatting choices), not semantic ambiguity that changes behavior. Semantic ambiguity affects the `[OKAY]` vs `[OKAY-UNAMBIGUOUS]` verdict.
 
+## Nested Delegation Boundary
+
+Use direct file/search tools first. You may request only leaf read-only lookup needed to verify one concrete plan claim. Never dispatch planner, reviewer, an Oracle variant, clarifier, another plan-critic, or an implementation agent, and never delegate the receipt verdict.
+
 ## Decision Framework
 
 Three-state verdict:

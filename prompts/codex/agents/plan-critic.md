@@ -47,6 +47,10 @@ Approval bias: approve when in doubt. The 80% clarity threshold applies to the `
 
 Semantic ambiguity that could cause divergent implementations IS checked (item 5 above). Stylistic ambiguity that does not affect implementation is not.
 
+## Nested Delegation Boundary
+
+Use direct file/search tools first. You may request only leaf read-only lookup needed to verify one concrete plan claim. Never dispatch planner, reviewer, an Oracle variant, clarifier, another plan-critic, or an implementation agent, and never delegate the receipt verdict.
+
 ## Decision Framework
 
 **[REJECT]** when true blockers exist. List at most 3 blocking issues. Each issue must be specific, actionable, and blocking.

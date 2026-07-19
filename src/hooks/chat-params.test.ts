@@ -137,7 +137,7 @@ test("chat.params enforces review-agent GPT/Codex xhigh floors after every overr
     { name: "direct max", reasoningEffort: "max", expectedVariant: "xhigh", expectedEffort: "xhigh" },
   ] as const
 
-  for (const agentName of ["reviewer", "oracle", "oracle-high", "plan-critic"] as const) {
+  for (const agentName of ["reviewer", "oracle", "plan-critic"] as const) {
     for (const family of ["gpt", "codex"] as const) {
       const modelID = family === "codex"
         ? agentName === "reviewer" ? "gpt-5.5-codex" : "gpt-5-codex"
@@ -184,7 +184,7 @@ test("chat.params enforces review-agent GPT/Codex xhigh floors after every overr
 })
 
 test("chat.params preserves GPT-5.6 native max for review and plan-review agents", async () => {
-  for (const agentName of ["reviewer", "oracle", "oracle-high", "plan-critic"] as const) {
+  for (const agentName of ["reviewer", "oracle", "plan-critic"] as const) {
     clearResolutions()
     const cfg = OcmmConfigSchema.parse({
       agents: {
@@ -250,12 +250,13 @@ test("chat.params applies review floors after explicit non-GPT high-effort contr
       },
       oracle: {
         requirement: {
-          fallbackChain: [{ providers: ["anthropic"], model: "claude-opus-4-6", variant: "minimal", thinking: { type: "enabled", budgetTokens: 1234 } }],
+          fallbackChain: [{ providers: ["anthropic"], model: "claude-opus-4-6", variant: "minimal", reasoningEffort: "low" }],
         },
-      },
-      "oracle-high": {
-        requirement: {
-          fallbackChain: [{ providers: ["zhipu"], model: "glm-5.2", variant: "minimal", reasoningEffort: "low", thinking: { type: "disabled" } }],
+        variants: {
+          high: {
+            model: "zhipu/glm-5.2",
+            variant: "minimal",
+          },
         },
       },
       "plan-critic": {
@@ -321,6 +322,53 @@ test("chat.params applies review floors after explicit non-GPT high-effort contr
   )
   assert.deepEqual(planCriticOutput, { options: { reasoningEffort: "xhigh" } })
   assert.equal(recentResolutions().at(-1)!.applied.variant, "xhigh")
+})
+
+test("logical low review profiles retain the xhigh-equivalent safety floor", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      oracle: { model: "openai/gpt-5.6-terra", variants: { low: "low" as const } },
+      "oracle-2nd": { model: "openai/gpt-5.6-sol", variants: { low: "minimal" as const } },
+      reviewer: { model: "openai/gpt-5.6-sol", variants: { low: "low" as const } },
+    },
+  }
+  for (const agentName of ["oracle-low", "oracle-2nd-low", "reviewer-low", "oracle-second"] as const) {
+    const output = { options: {} as Record<string, unknown> }
+    const modelID = agentName === "oracle-second" ? "gpt-5.6-sol" : agentName === "oracle-low" ? "gpt-5.6-terra" : "gpt-5.6-sol"
+    await createChatParamsHandler({ getConfig: () => config })(makeInput({ agentName, modelID }), output)
+    assert.equal(output.options.reasoningEffort, "xhigh", agentName)
+  }
+})
+
+test("plan-critic floor remains independent of review-name parsing", async () => {
+  const output = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: () => defaultConfig() })(makeInput({ agentName: "plan-critic", modelID: "gpt-5.5" }), output)
+  assert.equal(output.options.reasoningEffort, "xhigh")
+})
+
+test("generated non-GPT review tiers receive family-specific floors", async () => {
+  const config = OcmmConfigSchema.parse({
+    agents: {
+      oracle: {
+        model: "anthropic/claude-opus-4-6",
+        variant: "minimal",
+        variants: { high: { model: "google/gemini-3.1-pro", variant: "minimal" } },
+      },
+      reviewer: {
+        model: "google/gemini-3.1-pro",
+        variants: { low: { model: "zhipu/glm-5.2", variant: "minimal" } },
+      },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => config })
+  const gemini: Record<string, unknown> = { options: {} }
+  await handler(makeInput({ agentName: "oracle-high", providerID: "google", modelID: "gemini-3.1-pro" }), gemini)
+  assert.deepEqual(gemini, { options: { reasoningEffort: "high", thinking: { type: "enabled" } } })
+
+  const glm: Record<string, unknown> = { options: {} }
+  await handler(makeInput({ agentName: "reviewer-low", providerID: "zhipu", modelID: "glm-5.2" }), glm)
+  assert.deepEqual(glm, { options: { reasoningEffort: "xhigh", thinking: { type: "enabled" } } })
 })
 
 test("chat.params floors review-agent explicit thinking on Opus 4.7+", async () => {
@@ -453,4 +501,125 @@ test("chat.params records sessionID → agentName in sessionAgentMap", async () 
   const output: Record<string, unknown> = { options: {} }
   await handler(makeInput({ sessionID: "ses_test_agent_map", agentName: "coding" }), output)
   assert.equal(sessionAgentMap.get("ses_test_agent_map"), "coding")
+})
+
+test("chat.params applies the review floor to a host-provided reviewer-high profile absent from expandedReviewAgentMap (GPT)", async () => {
+  clearResolutions()
+  // No user config for reviewer.variants.high, so expandedReviewAgentMap has
+  // no "reviewer-high" entry and resolveModelRouting returns null. The host
+  // still routed a real reviewer-high chat, so the floor must apply.
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "reviewer-high", modelID: "gpt-5.5" }),
+    output,
+  )
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "xhigh")
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.applied.variant, "xhigh")
+  assert.equal(last.applied.reasoningEffort, "xhigh")
+  assert.equal(last.input.providerID, "openai")
+  assert.equal(last.input.modelID, "gpt-5.5")
+  assert.equal(last.agent, "reviewer-high")
+})
+
+test("chat.params applies the review floor to a host-provided reviewer-high profile absent from expandedReviewAgentMap (GLM)", async () => {
+  clearResolutions()
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "reviewer-high", providerID: "zhipu", modelID: "glm-5.2" }),
+    output,
+  )
+  const opts = output.options as Record<string, unknown>
+  // GLM translates non-explicit xhigh to its native max level (model-native
+  // behavior preserved); the logical floor variant remains xhigh.
+  assert.equal(opts.reasoningEffort, "max")
+  assert.deepEqual(opts.thinking, { type: "enabled" })
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.applied.variant, "xhigh")
+  assert.equal(last.applied.reasoningEffort, "max")
+  assert.equal(last.input.providerID, "zhipu")
+  assert.equal(last.input.modelID, "glm-5.2")
+})
+
+test("chat.params applies the review floor to a host-provided oracle-high profile absent from expandedReviewAgentMap", async () => {
+  clearResolutions()
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "oracle-high", modelID: "gpt-5.5" }),
+    output,
+  )
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "xhigh")
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.applied.variant, "xhigh")
+  assert.equal(last.applied.reasoningEffort, "xhigh")
+  assert.equal(last.agent, "oracle-high")
+})
+
+test("chat.params keeps host logical high at xhigh and preserves native max only for logical max", async () => {
+  clearResolutions()
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const highOutput: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "reviewer-high", modelID: "gpt-5.6-sol" }),
+    highOutput,
+  )
+  assert.equal((highOutput.options as Record<string, unknown>).reasoningEffort, "xhigh")
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.applied.variant, "xhigh")
+  assert.equal(last.applied.reasoningEffort, "xhigh")
+
+  const maxOutput: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "reviewer-max", modelID: "gpt-5.6-sol" }),
+    maxOutput,
+  )
+  assert.equal((maxOutput.options as Record<string, unknown>).reasoningEffort, "max")
+  const maxResolution = recentResolutions().at(-1)!
+  assert.equal(maxResolution.applied.variant, "max")
+  assert.equal(maxResolution.applied.reasoningEffort, "max")
+})
+
+test("chat.params host-profile floor does not route through an unrelated configured model", async () => {
+  clearResolutions()
+  // The user configured an unrelated model for `coding`. The floor must be
+  // enforced against the actual runtime provider/model (openai/gpt-5.5), not
+  // the configured coding model (zhipu/glm-5.2).
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      coding: { model: "zhipu/glm-5.2" },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "reviewer-high", providerID: "openai", modelID: "gpt-5.5" }),
+    output,
+  )
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, "xhigh")
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.input.providerID, "openai")
+  assert.equal(last.input.modelID, "gpt-5.5")
+  assert.equal((output.options as Record<string, unknown>).thinking, undefined)
+})
+
+test("chat.params host-profile floor preserves ordinary unknown-agent no-op", async () => {
+  clearResolutions()
+  const cfg = defaultConfig()
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+  const output: Record<string, unknown> = { options: {} }
+  await handler(
+    makeInput({ agentName: "totally-unknown-agent", providerID: "openai", modelID: "gpt-5.5" }),
+    output,
+  )
+  assert.equal((output.options as Record<string, unknown>).reasoningEffort, undefined)
+  const last = recentResolutions().at(-1)!
+  assert.equal(last.source, "no-op")
+  assert.deepEqual(last.applied, {})
 })

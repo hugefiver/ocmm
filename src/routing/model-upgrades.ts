@@ -1,5 +1,6 @@
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { isRecord } from "../shared/logger.ts"
+import { parseReviewAgentName } from "../review-agents/names.ts"
 
 type Version = [number, number, number]
 
@@ -21,12 +22,35 @@ const GPT_LANE_BY_AGENT = new Map<string, "sol" | "terra">([
   ["clarifier", "sol"],
   ["plan-critic", "sol"],
   ["oracle", "terra"],
-  ["oracle-high", "sol"],
   ["hard-reasoning", "sol"],
   ["deep", "sol"],
   ["complex", "terra"],
   ["normal-task", "terra"],
 ])
+
+/**
+ * Resolve the GPT lane (Sol/Terra) for an agent name.
+ *
+ * Review agents (oracle/reviewer and their logical tiers/runtime aliases) are
+ * classified by canonical slot identity, not the runtime suffix:
+ *   - reviewer                 -> Sol
+ *   - oracle (slot 1, any tier) -> Terra
+ *   - oracle-2nd (slot 2)      -> Sol
+ *   - later oracle slots       -> no invented lane (rely on explicit requirement)
+ *
+ * Logical tier suffixes (-low/-high/-max) never change the canonical slot's
+ * lane. Non-review agent names fall back to the static map.
+ */
+function gptLaneForAgent(agentName: string): "sol" | "terra" | undefined {
+  const review = parseReviewAgentName(agentName)
+  if (review) {
+    if (review.role === "reviewer") return "sol"
+    if (review.canonicalSlot === "oracle") return "terra"
+    if (review.canonicalSlot === "oracle-2nd") return "sol"
+    return undefined
+  }
+  return GPT_LANE_BY_AGENT.get(agentName)
+}
 
 function compareVersion(a: Version, b: Version): number {
   for (let index = 0; index < a.length; index += 1) {
@@ -107,9 +131,11 @@ export function selectCatalogModel(
   const providers = isRecord(target.provider) ? target.provider : undefined
   if (!providers) return undefined
 
-  const lane = GPT_LANE_BY_AGENT.get(agentName)
+  const review = parseReviewAgentName(agentName)
+  const isCanonicalOracleFirstSlot = review?.canonicalSlot === "oracle"
+  const lane = gptLaneForAgent(agentName)
   const gptBaseline = compatibleEntry(requirement, undefined, (entry) => parseGptVersion(entry.model) !== null)
-  if (agentName === "oracle") {
+  if (isCanonicalOracleFirstSlot) {
     for (const entry of requirement.fallbackChain) {
       if (parseGptVersion(entry.model) === null) continue
       if (parseGptLane(entry.model) !== null) continue

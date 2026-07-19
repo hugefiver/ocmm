@@ -3,24 +3,26 @@ import { matchRequirementSuccessor } from "../routing/model-upgrades.ts"
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import type { Subagent429Target } from "./subagent-429-controller.ts"
 import { isRecord } from "../shared/logger.ts"
+import { resolveSessionLineageProperties } from "../shared/opencode-events.ts"
 import { createFallbackState, modelKey, type FallbackState } from "./fallback-state.ts"
 import type { OcmmClient } from "./dispatcher.ts"
 
 export type ModelIdentity = { providerID: string; modelID: string }
 
-const ABORT_NAMES = new Set(["AbortError", "MessageAbortedError", "DOMException"])
+const ABORT_NAMES = new Set(["AbortError", "DOMException"])
+
+export function isExplicitRuntimeFallbackAbort(error: unknown): boolean {
+  return isRecord(error) && error.isAbort === true
+}
 
 export function isRuntimeFallbackAbort(error: unknown): boolean {
   if (!isRecord(error)) return false
   const name = typeof error.name === "string" ? error.name : ""
-  return ABORT_NAMES.has(name) || error.isAbort === true
+  return ABORT_NAMES.has(name) || isExplicitRuntimeFallbackAbort(error)
 }
 
 export function resolveRuntimeFallbackSessionID(props: unknown): string {
-  if (!isRecord(props)) return ""
-  if (typeof props.sessionID === "string") return props.sessionID
-  if (isRecord(props.session) && typeof props.session.id === "string") return props.session.id
-  return ""
+  return resolveSessionLineageProperties(props)?.sessionID ?? ""
 }
 
 export function resolveRuntimeFallbackAgent(props: unknown): string | undefined {
@@ -45,12 +47,7 @@ export function parseModelIdentity(value: string | null | undefined): ModelIdent
 }
 
 export function resolveParentSessionID(props: unknown): string | undefined {
-  if (!isRecord(props)) return undefined
-  for (const key of ["parentID", "parentId", "parentSessionID", "parentSessionId"]) {
-    const value = props[key]
-    if (typeof value === "string" && value) return value
-  }
-  return undefined
+  return resolveSessionLineageProperties(props)?.parentSessionID
 }
 
 function matchingEntry(
@@ -134,6 +131,7 @@ export function getOrCreateFallbackState(
  */
 export type RuntimeFallbackSessionLifecycle = {
   beginSession: (sessionID: string) => number
+  hasSession: (sessionID: string) => boolean
   invalidateSession: (sessionID: string) => void
   currentGeneration: (sessionID: string) => number
   isCurrent: (sessionID: string, generation: number) => boolean
@@ -164,6 +162,7 @@ export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undef
     cancellationSignals.set(generation, createCancellationSignal())
     return generation
   }
+  const hasSession = (sessionID: string): boolean => sessionGenerations.has(sessionID)
   const invalidateSession = (sessionID: string): void => {
     const generation = sessionGenerations.get(sessionID)
     if (generation !== undefined) {
@@ -231,6 +230,7 @@ export function createRuntimeFallbackSessionLifecycle(client: OcmmClient | undef
 
   return {
     beginSession,
+    hasSession,
     invalidateSession,
     currentGeneration,
     isCurrent,

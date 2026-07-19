@@ -5,7 +5,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 
 import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
+import { resolveSessionLineage } from "../shared/opencode-events.ts"
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
+import { canonicalizeReviewAgentName, isReviewAgentName } from "../review-agents/names.ts"
 
 const READ_TOOL = "read"
 const WRITE_TOOL = "write"
@@ -16,6 +18,7 @@ const MAX_QUESTION_LABEL_LENGTH = 30
 const REDIRECT_TIMEOUT_MS = 3000
 const MAX_TRACKED_SESSIONS = 50
 const UNKNOWN_SUBAGENT_DEPTH = Number.MAX_SAFE_INTEGER
+const PRIMARY_COORDINATOR_NAMES = new Set(["orchestrator", "builder"])
 
 const JSON_ERROR_NOTICE = `[JSON PARSE ERROR - IMMEDIATE ACTION REQUIRED]
 The previous tool output appears to contain a JSON parse failure. Inspect the raw output, identify the invalid JSON fragment, and retry with corrected JSON rather than repeating the same call.`
@@ -78,6 +81,7 @@ export function createPermissionGuards(args: {
   return {
     before: async (rawInput, rawOutput) => {
       const config = args.getConfig()
+      canonicalizeTaskSubagentType(rawInput, rawOutput)
       await trackReadPermission(config, rawInput, readPermissions, readmeSessionCache, lastAccess, projectRoot)
       guardNotepadWrite(config, rawInput, projectRoot)
       guardExistingFileWrite(config, rawInput, projectRoot)
@@ -132,15 +136,14 @@ function createGuardEventHandler(caches: {
     const event = (raw as Record<string, unknown>).event ?? raw
     const eventType = (event as Record<string, unknown>).type
     if (eventType === "session.created") {
-      const props = (event as Record<string, unknown>).properties ?? event
-      const sid = stringFromRecord(props, "sessionID") ?? stringFromRecord(props, "sessionId")
-      const parentId =
-        stringFromRecord(props, "parentID") ??
-        stringFromRecord(props, "parentId") ??
-        stringFromRecord(props, "parentSessionID") ??
-        stringFromRecord(props, "parentSessionId")
-      if (typeof sid === "string") {
-        if (typeof parentId === "string") {
+      // Reuse the shared session-lineage decoder so permissions and runtime
+      // fallback share one parent-ID spelling policy. Preserve fail-closed
+      // behavior: an unknown parent depth still resolves to UNKNOWN depth.
+      const lineage = resolveSessionLineage(raw)
+      if (lineage) {
+        const sid = lineage.sessionID
+        const parentId = lineage.parentSessionID
+        if (parentId) {
           const parentDepth = caches.sessionDepthMap.get(parentId)
           caches.sessionDepthMap.set(
             sid,
@@ -149,7 +152,10 @@ function createGuardEventHandler(caches: {
               : parentDepth + 1,
           )
         } else {
-          caches.sessionDepthMap.set(sid, 0)
+          // A parentless lifecycle event establishes no trustworthy depth.
+          // Dispatch-time recovery is restricted to an explicitly mapped
+          // primary coordinator; every other identity fails closed.
+          caches.sessionDepthMap.set(sid, UNKNOWN_SUBAGENT_DEPTH)
         }
       }
       return
@@ -162,8 +168,8 @@ function createGuardEventHandler(caches: {
     caches.readmeSessionCache.delete(sid)
     caches.lastAccess.delete(sid)
     caches.agentsSessionCache?.delete(sid)
-    caches.sessionAgentMap?.delete(sid)
     if (eventType === "session.deleted") {
+      caches.sessionAgentMap?.delete(sid)
       caches.sessionDepthMap.delete(sid)
     }
   }
@@ -594,12 +600,6 @@ function lastNonOptionOperand(tokens: string[]): string | null {
   return null
 }
 
-function stringFromRecord(record: unknown, key: string): string | undefined {
-  if (!isRecord(record)) return undefined
-  const value = record[key]
-  return typeof value === "string" && value.length > 0 ? value : undefined
-}
-
 function guardSubagentDepth(
   config: OcmmConfig,
   rawInput: unknown,
@@ -611,13 +611,14 @@ function guardSubagentDepth(
   const sid = sessionId(rawInput)
   const maxDepth = config.subagent.maxDepth
   let depth = sessionDepthMap.get(sid)
-  if (depth === undefined) {
-    // Fallback when explicit session.created lineage was missed. Known
-    // non-builtin sessions fail closed so missing ancestry cannot silently
-    // bypass the configured nesting limit.
+  if (depth === undefined || depth >= UNKNOWN_SUBAGENT_DEPTH) {
+    // Fallback when lifecycle lineage is absent or untrustworthy. Only an
+    // explicitly mapped primary coordinator may recover as depth zero; an
+    // unmapped session must never inherit main-agent authority.
     const agentName = sessionAgentMap?.get(sid)
-    if (agentName === undefined || isBuiltinAgentName(agentName)) {
+    if (agentName !== undefined && isPrimaryCoordinatorName(agentName)) {
       depth = 0
+      sessionDepthMap.set(sid, depth)
     } else {
       depth = maxDepth
     }
@@ -628,6 +629,14 @@ function guardSubagentDepth(
         `Dispatching further subagents is blocked. Disable the "subagent-depth-guard" hook to allow deeper nesting.`,
     )
   }
+}
+
+function canonicalizeTaskSubagentType(rawInput: unknown, rawOutput: unknown): void {
+  if (toolName(rawInput) !== "task") return
+  const args = mutableArgs(rawInput, rawOutput)
+  if (!args || typeof args.subagent_type !== "string") return
+  const canonical = canonicalizeReviewAgentName(args.subagent_type)
+  if (canonical && canonical !== args.subagent_type) args.subagent_type = canonical
 }
 
 function guardSubagentGit(
@@ -646,10 +655,9 @@ function guardSubagentGit(
   if (gitWritesAllowedInTempRepo(command, workdir, projectRoot)) return
   const sid = sessionId(rawInput)
   const agentName = sessionAgentMap.get(sid)
-  if (!agentName) return // unknown session — safe default, don't block
-  if (isBuiltinAgentName(agentName)) return // main agent — allow
+  if (agentName !== undefined && isPrimaryCoordinatorName(agentName)) return // primary coordinator — allow
   throw new Error(
-      `ocmm: subagent sessions are not allowed to run git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The main agent must handle version control. (agent: ${agentName})`,
+    `ocmm: subagent sessions are not allowed to run git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The main agent must handle version control. (agent: ${agentName ?? "<unmapped>"})`,
   )
 }
 
@@ -1409,7 +1417,7 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
   "revert",
 ])
 
-const BUILTIN_AGENT_ALIASES = new Set(["oracle", "explore"])
+const BUILTIN_AGENT_ALIASES = new Set(["explore"])
 
 type GitCommandToken = { text: string; quoted: boolean; startsQuoted?: boolean }
 
@@ -1818,7 +1826,13 @@ function hasHelpFlag(tokens: string[], start: number, subcommand?: string): bool
 
 /** Check if an agent name is a builtin agent (including aliases like oracle, explore). */
 export function isBuiltinAgentName(name: string): boolean {
-  return BUILTIN_AGENT_INDEX.has(name) || BUILTIN_AGENT_ALIASES.has(name)
+  return BUILTIN_AGENT_INDEX.has(name) || BUILTIN_AGENT_ALIASES.has(name) || isReviewAgentName(name)
+}
+
+/** Only these names represent primary coordinator sessions. Builtin catalog
+ * membership is broader because it also includes generated review profiles. */
+export function isPrimaryCoordinatorName(name: string): boolean {
+  return PRIMARY_COORDINATOR_NAMES.has(name)
 }
 
 export function hookDisabled(config: OcmmConfig, name: string, alias?: string): boolean {

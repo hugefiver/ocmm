@@ -12,6 +12,8 @@ import { normalizeAgentShorthand, normalizeShorthand, type NormalizedShorthand }
 import type { OcmmConfig } from "../config/schema.ts"
 import { selectCatalogModel } from "../routing/model-upgrades.ts"
 import { isRecord, log } from "../shared/logger.ts"
+import { expandReviewAgents, isExpandedReviewAgentDisabled, type ReviewAgentRegistrationOverrides } from "../review-agents/expand.ts"
+import { isReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
 
 const COMPAT_AGENT_ALIASES = [
   { alias: "explore", target: "code-search" },
@@ -47,12 +49,7 @@ const STANDARD_WORKFLOW_SUBAGENTS = [
   "documenting",
 ] as const
 const READ_ONLY_WORKFLOW_AGENTS = [
-  "planner",
-  "reviewer",
-  "oracle",
-  "oracle-high",
   "clarifier",
-  "plan-critic",
 ] as const
 const LOCAL_COORDINATORS = ["deep", "complex"] as const
 const SPECIALIST_EXECUTION_AGENTS = [
@@ -106,6 +103,7 @@ function applyAgentEntry(
   agent: Agent,
   override: NormalizedShorthand | undefined,
   extras?: AgentExtras,
+  registration?: ReviewAgentRegistrationOverrides,
 ): void {
   if (override?.disabled) return
 
@@ -136,7 +134,28 @@ function applyAgentEntry(
     const basePrompt = typeof existing.prompt === "string" ? existing.prompt : ""
     existing.prompt = appendPromptSuffix(basePrompt, extras.promptSuffix)
   }
+  if (registration?.tools) {
+    mergePermission(
+      existing,
+      Object.fromEntries(
+        Object.entries(registration.tools).map(([name, enabled]) => [name, enabled ? "allow" : "deny"]),
+      ) as PermissionDefaults,
+      true,
+    )
+  }
   if (override?.permission) mergePermission(existing, override.permission, true)
+  if (registration) {
+    for (const key of ["skills", "temperature", "topP", "maxTokens", "thinking", "reasoningEffort"] as const) {
+      if (existing[key] !== undefined) continue
+      const value = registration[key]
+      if (value === undefined) continue
+      existing[key] = Array.isArray(value)
+        ? [...value]
+        : typeof value === "object" && value !== null
+          ? structuredClone(value)
+          : value
+    }
+  }
 
   agentMap[agent.name] = existing
 }
@@ -202,6 +221,7 @@ function wrapDelegationContract(lines: readonly string[]): string {
 }
 
 function delegationContractFor(name: string): string {
+  const readOnlyReviewRole = isReviewAgentName(name) || name === "plan-critic"
   if (UTILITY_LEAF_AGENT_SET.has(name)) {
     return wrapDelegationContract([
       "This role is a utility leaf agent. Do not dispatch any subagent.",
@@ -209,7 +229,17 @@ function delegationContractFor(name: string): string {
     ])
   }
 
-  if (READ_ONLY_WORKFLOW_AGENT_SET.has(name)) {
+  if (name === "planner") {
+    return wrapDelegationContract([
+      "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
+      `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
+      "You may consult exactly the unsuffixed `reviewer` at most once, only for one concrete blocking architecture, security, or performance decision that repository evidence cannot settle. This is not formal plan review or final acceptance.",
+      "`quick` is forbidden. Do not dispatch `plan-critic`, any Reviewer tier (`reviewer-low`, `reviewer-high`, `reviewer-max`), any Oracle profile, implementation agents, or routine reviewer self-checks.",
+      "Return the completed plan to the caller. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
+    ])
+  }
+
+  if (READ_ONLY_WORKFLOW_AGENT_SET.has(name) || readOnlyReviewRole) {
     return wrapDelegationContract([
       "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
       `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
@@ -233,7 +263,7 @@ function delegationContractFor(name: string): string {
       "Multiple steps, routine confirmation, or wanting another opinion are not sufficient.",
       `Allowed utility targets: ${formatTargets(UTILITY_LEAF_AGENTS)}.`,
       `Allowed specialist targets: ${formatTargets(SPECIALIST_EXECUTION_AGENTS)}.`,
-      "Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, `reviewer`, `oracle`, `oracle-high`, `normal-task`, `deep`, or `complex`.",
+      "Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants), `normal-task`, `deep`, or `complex`.",
       "Integrate and verify child results, then return to the parent. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
     ])
   }
@@ -341,6 +371,14 @@ export function createConfigHandler(args: {
 
     const disabled = new Set(cfg.disabledAgents ?? [])
 
+    for (const [name, raw] of Object.entries(agentMap)) {
+      const disabledReview = parseReviewAgentName(name) !== null && isExpandedReviewAgentDisabled(name, {
+        agents: cfg.agents,
+        disabledAgents: cfg.disabledAgents,
+      })
+      if ((disabled.has(name) || disabledReview) && isRecord(raw)) raw.disable = true
+    }
+
     if (cfg.disableOpenCodeBuiltinAgents) {
       for (const name of ["build", "plan"]) {
         if (!isRecord(agentMap[name])) agentMap[name] = {}
@@ -357,6 +395,7 @@ export function createConfigHandler(args: {
     }
 
     for (const a of BUILTIN_AGENTS) {
+      if (parseReviewAgentName(a.name)) continue
       if (disabled.has(a.name)) continue
       let norm = normalizeAgentShorthand(a.name, cfg.agents)
       // Inject builtin defaultAlias when the user wrote an entry for this agent
@@ -401,6 +440,31 @@ export function createConfigHandler(args: {
       applyAgentEntry(agentMap, a, norm, extras)
     }
 
+    for (const profile of expandReviewAgents({ agents: cfg.agents, disabledAgents: cfg.disabledAgents })) {
+      const synthetic: Agent = {
+        name: profile.name,
+        ...(profile.registration.description ? { description: profile.registration.description } : {}),
+        requirement: profile.requirement,
+        promptSource: profile.promptSource,
+      }
+      const existingModel = rawAgentModel(agentMap, profile.name)
+      const catalogModel = !existingModel && !profile.suppressCatalogUpgrade
+        ? selectCatalogModel(target, profile.name, profile.requirement)
+        : undefined
+      const finalModel = existingModel ?? catalogModel ?? fmtModel(profile.requirement.fallbackChain[0]!)
+      let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, finalModel)
+      if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
+      const extras: AgentExtras = { mode: "subagent", model: finalModel }
+      if (prompt) extras.prompt = prompt
+      const contract = delegationContractFor(profile.name)
+      if (contract) extras.promptSuffix = contract
+      applyAgentEntry(agentMap, synthetic, {
+        ...(profile.registration.description ? { description: profile.registration.description } : {}),
+        requirement: profile.requirement,
+        ...(profile.registration.permission ? { permission: profile.registration.permission } : {}),
+      }, extras, profile.registration)
+    }
+
     for (const c of BUILTIN_CATEGORIES) {
       if (disabled.has(c.name)) continue
       const agentOverride = normalizeAgentShorthand(c.name, cfg.agents)
@@ -434,6 +498,7 @@ export function createConfigHandler(args: {
         if (disabled.has(name)) continue
         if (BUILTIN_AGENTS.some((b) => b.name === name)) continue
         if (BUILTIN_CATEGORIES.some((c) => c.name === name)) continue
+        if (parseReviewAgentName(name)) continue
         const norm = normalizeAgentShorthand(name, cfg.agents)
         if (!norm?.requirement?.fallbackChain?.length) continue
         const synthetic: Agent = {
@@ -475,9 +540,20 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
     if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(UTILITY_LEAF_AGENTS) }, false)
   }
 
+  const planner = agentMap.planner
+  if (isRecord(planner)) {
+    mergePermission(planner, { task: taskAllowlist([...READ_ONLY_UTILITY_AGENTS, "reviewer"]) }, false)
+  }
+
   for (const name of READ_ONLY_WORKFLOW_AGENTS) {
     const entry = agentMap[name]
     if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(READ_ONLY_UTILITY_AGENTS) }, false)
+  }
+
+  for (const [name, entry] of Object.entries(agentMap)) {
+    if (isRecord(entry) && (isReviewAgentName(name) || name === "plan-critic")) {
+      mergePermission(entry, { task: taskAllowlist(READ_ONLY_UTILITY_AGENTS) }, false)
+    }
   }
 
   for (const name of LOCAL_COORDINATORS) {

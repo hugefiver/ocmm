@@ -395,13 +395,13 @@ test("OCMM_PROFILE set to empty string falls back to config activeProfile", () =
   }
 })
 
-test("OCMM_NO_PROFILE disables all profile loading", () => {
+test("OCMM_NO_PROFILE ignores even an invalid active review profile", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
       agents: { orchestrator: { model: "hoo/glm-5.2" } },
       profiles: {
-        a: { agents: { orchestrator: { model: "openai/gpt-5.5" } } },
+        a: { agents: { "reviewer-high": { model: "openai/gpt-5.5" } } },
       },
       activeProfile: "a",
     })
@@ -518,38 +518,113 @@ test("loader logs an active base-profile spelling conflict and returns defaults"
   }
 })
 
-test("inactive inline profiles are canonicalized and remain schema-valid", () => {
+test("inactive profiles tolerate invalid review names and preserve valid legacy aliases canonically", () => {
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
-      agents: { "oracle-2nd": { model: "openai/gpt-5.5" } },
-      profiles: { inactive: { agents: { "oracle-high": { model: "anthropic/claude-opus-4-7" } } } },
+      agents: { orchestrator: { model: "openai/gpt-5.5" } },
+      profiles: {
+        invalid: { agents: { "reviewer-high": { model: "anthropic/claude-opus-4-7" } } },
+        legacy: { agents: { "oracle-high": { model: "openai/gpt-5.6-terra" } } },
+        alias: { agents: { "oracle-second": { model: "openai/gpt-5.5" } } },
+      },
     })
     const loaded = loadWithXdg(xdg)
-    assert.equal(loaded.config.agents?.["oracle-2nd"]?.model, "openai/gpt-5.5")
-    assert.equal(loaded.config.profiles.inactive?.agents?.["oracle-high"], undefined)
-    assert.equal(loaded.config.profiles.inactive?.agents?.["oracle-2nd"]?.model, "anthropic/claude-opus-4-7")
+    assert.equal(loaded.config.agents?.orchestrator?.model, "openai/gpt-5.5")
+    assert.deepEqual(loaded.config.profiles.invalid?.agents, {})
+    assert.equal(loaded.config.profiles.legacy?.agents?.["oracle-high"], undefined)
+    assert.equal(loaded.config.profiles.legacy?.agents?.["oracle-2nd"]?.model, "openai/gpt-5.6-terra")
+    assert.equal(loaded.config.profiles.alias?.agents?.["oracle-second"], undefined)
+    assert.equal(loaded.config.profiles.alias?.agents?.["oracle-2nd"]?.model, "openai/gpt-5.5")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
 })
 
-test("project directory profile shadows a conflicting lower inline spelling", () => {
+test("project directory profile shadows an invalid lower inline profile", () => {
   const xdg = makeTempXdg()
   const project = mkdtempSync(join(tmpdir(), "ocmm-review-profile-project-"))
   try {
     writeConfig(xdg, {
-      agents: { "oracle-2nd": { model: "openai/gpt-5.5" } },
-      profiles: { selected: { agents: { "oracle-high": { model: "google/gemini-3.1-pro" } } } },
+      agents: { orchestrator: { model: "openai/gpt-5.5" } },
+      profiles: { selected: { agents: { "reviewer-high": { model: "google/gemini-3.1-pro" } } } },
       activeProfile: "selected",
     })
     const directory = join(project, ".opencode", "ocmm-profiles")
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, "selected.jsonc"), JSON.stringify({
-      agents: { "oracle-2nd": { model: "anthropic/claude-opus-4-7" } },
+      agents: { orchestrator: { model: "anthropic/claude-opus-4-7" } },
     }))
     const loaded = loadWithXdg(xdg, project)
-    assert.equal(loaded.config.agents?.["oracle-2nd"]?.model, "anthropic/claude-opus-4-7")
+    assert.equal(loaded.config.agents?.orchestrator?.model, "anthropic/claude-opus-4-7")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("selected active profiles migrate valid review aliases and tolerate review violations", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "openai/gpt-5.5" } },
+      profiles: {
+        selected: { agents: { "oracle-high": { model: "anthropic/claude-opus-4-7" } } },
+      },
+      activeProfile: "selected",
+    })
+    const valid = loadWithXdg(xdg)
+    assert.equal(valid.config.agents?.["oracle-2nd"]?.model, "anthropic/claude-opus-4-7")
+
+    writeConfig(xdg, {
+      agents: { orchestrator: { model: "openai/gpt-5.5" } },
+      profiles: {
+        selected: { agents: { reviewer: { variants: { high: {} } } } },
+      },
+      activeProfile: "selected",
+    })
+    const tolerant = loadWithXdg(xdg).config
+    assert.equal(tolerant.agents?.orchestrator?.model, "openai/gpt-5.5")
+    assert.equal(tolerant.agents?.reviewer?.variants?.high, undefined)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("selected inline review profile can alias a base-defined review model", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { "review-model": { model: "openai/gpt-5.6-sol" } },
+      profiles: {
+        selected: { agents: { "oracle-3rd": { alias: "review-model" } } },
+      },
+      activeProfile: "selected",
+    })
+
+    const loaded = loadWithXdg(xdg)
+    assert.equal(loaded.config.agents?.["oracle-3rd"]?.alias, "review-model")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("selected directory review profile can alias a base-defined review model", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-review-profile-alias-"))
+  try {
+    writeConfig(xdg, {
+      agents: { "review-model": { model: "openai/gpt-5.6-sol" } },
+      activeProfile: "selected",
+    })
+    const directory = join(project, ".opencode", "ocmm-profiles")
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, "selected.jsonc"), JSON.stringify({
+      agents: { "oracle-3rd": { alias: "review-model" } },
+    }))
+
+    const loaded = loadWithXdg(xdg, project)
+    assert.equal(loaded.config.agents?.["oracle-3rd"]?.alias, "review-model")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
     rmSync(project, { recursive: true, force: true })

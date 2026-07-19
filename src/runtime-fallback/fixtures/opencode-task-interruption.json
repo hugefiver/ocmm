@@ -1,0 +1,26 @@
+{
+  "openCodeVersion": "1.18.3",
+  "sessionCreated": {
+    "type": "session.created",
+    "sessionID": "ses_REDACTED",
+    "parentSessionID": "ses_REDACTED"
+  },
+  "retryableChildError": {
+    "type": "session.error",
+    "sessionID": "ses_REDACTED",
+    "errorName": "APIError"
+  },
+  "terminalParentTaskPart": null,
+  "toolExecuteAfter": {
+    "tool": "task",
+    "sessionID": "ses_REDACTED",
+    "callID": "call_ocmm_probe",
+    "childSessionID": "ses_REDACTED",
+    "outputKind": "other",
+    "noticePresent": false
+  },
+  "handoff": "original-call",
+  "taskIDObserved": null,
+  "resumeReusedChildSession": false,
+  "explicitAbortRecovered": false
+}

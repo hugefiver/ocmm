@@ -128,8 +128,26 @@ test("plugin tracks subagent depth and blocks task dispatches beyond maxDepth", 
   await withIsolatedConfig(null, async (cwd) => {
     const { pluginInterface } = createPlugin({ directory: cwd })
 
-    // Fire session.created events to build depth: main -> d1 -> d2 -> d3.
+    await pluginInterface["chat.params"]?.(
+      {
+        sessionID: "main",
+        agent: { name: "orchestrator" },
+        model: { providerID: "openai", modelID: "gpt-5.6-sol" },
+        provider: { id: "openai" },
+        message: {},
+      },
+      { options: {} },
+    )
+
+    // A parentless creation is initially untrusted. The mapped primary's first
+    // task dispatch establishes depth 0 before child lineage is observed.
     await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "main" } })
+    await pluginInterface["tool.execute.before"]?.(
+      { tool: "task", sessionID: "main", args: { description: "x", subagent_type: "coding", prompt: "y" } },
+      {},
+    )
+
+    // Fire child session.created events to build depth: main -> d1 -> d2 -> d3.
     await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d1", parentID: "main" } })
     await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d2", parentID: "d1" } })
     await pluginInterface.event?.({ type: "session.created", properties: { sessionID: "d3", parentID: "d2" } })
@@ -148,5 +166,60 @@ test("plugin tracks subagent depth and blocks task dispatches beyond maxDepth", 
       { tool: "task", sessionID: "d2", args: { description: "x", subagent_type: "coding", prompt: "y" } },
       {},
     )
+  })
+})
+
+test("task after-hook appends recovery notice without prompting any session", async () => {
+  await withIsolatedConfig(null, async (cwd) => {
+    let promptCalls = 0
+    const client = {
+      session: {
+        async abort() {
+          return undefined
+        },
+        async messages() {
+          return { messages: [] }
+        },
+        async prompt() {
+          promptCalls += 1
+          return undefined
+        },
+      },
+    }
+
+    const { pluginInterface } = createPlugin({ directory: cwd, client })
+    await pluginInterface.event?.({
+      event: {
+        type: "session.created",
+        properties: { sessionID: "child", parentID: "parent" },
+      },
+    })
+    await pluginInterface.event?.({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "parent",
+          part: {
+            id: "part",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "error",
+              error: "Tool execution aborted",
+              input: { task_id: "tsk_resume_1", subagent_type: "code-search" },
+              metadata: { sessionId: "child", interrupted: true },
+            },
+          },
+        },
+      },
+    })
+
+    const output = { output: "Tool execution aborted", metadata: { sessionId: "child" } }
+    await pluginInterface["tool.execute.after"]?.(
+      { tool: "task", sessionID: "parent", callID: "part", args: { task_id: "tsk_resume_1" } },
+      output,
+    )
+    assert.match(output.output, /resumable task identifier "tsk_resume_1"/)
+    assert.equal(promptCalls, 0)
   })
 })

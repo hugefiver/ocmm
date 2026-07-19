@@ -10,12 +10,12 @@ import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
 import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
+import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
-const REVIEW_AGENTS = new Set(["reviewer", "oracle", "oracle-high", "plan-critic"])
 const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
   "gpt",
   "codex",
@@ -26,8 +26,24 @@ const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
   "deepseek",
 ])
 
+/**
+ * Review-variant floor applies to:
+ *   - `plan-critic` (independent branch - not a parseReviewAgentName() identity)
+ *   - any agent whose runtime name parses as a review identity
+ *     (oracle, oracle-2nd, oracle-2nd-low, reviewer, reviewer-max, runtime
+ *     alias oracle-second, etc.)
+ *
+ * Disabled review profiles never reach this handler because
+ * `resolveModelRouting()` returns null for them (expandedReviewAgentMap
+ * filters disabled canonical names). The floor check therefore only fires
+ * on resolvable review profiles.
+ */
+function isReviewFloorAgent(agentName: string | undefined): boolean {
+  return agentName === "plan-critic" || (agentName !== undefined && parseReviewAgentName(agentName) !== null)
+}
+
 function requiresReviewVariantFloor(agentName: string | undefined, family: string): boolean {
-  return !!agentName && REVIEW_AGENTS.has(agentName) && REVIEW_VARIANT_FLOOR_FAMILIES.has(family)
+  return isReviewFloorAgent(agentName) && REVIEW_VARIANT_FLOOR_FAMILIES.has(family)
 }
 
 function floorReviewVariant(variant: Variant | undefined): Variant {
@@ -91,6 +107,51 @@ function applyReviewOutputFloor(args: {
     }
     delete args.outputOptions.reasoningEffort
   }
+}
+
+function applyHostProfileReviewFloor(args: {
+  agentName: string | undefined
+  input: ChatParamsInput
+  output: ChatParamsOutput
+}): { family: string; appliedVariant: Variant } | null {
+  const family = classifyModelFamily({
+    providerID: args.input.model.providerID,
+    modelID: args.input.model.modelID,
+  })
+  if (!requiresReviewVariantFloor(args.agentName, family)) return null
+
+  // A host-provided review profile (e.g. `reviewer-high`) may be present in
+  // the OpenCode host config but absent from `expandedReviewAgentMap` when the
+  // user did not configure the matching tier override. Resolution returns
+  // null, but the runtime still routed a real review chat through the actual
+  // runtime provider/model. Enforce the xhigh-equivalent output safety floor
+  // against that runtime model without routing through any unrelated
+  // configured model.
+  const reviewIdentity = args.agentName === undefined ? null : parseReviewAgentName(args.agentName)
+  const baseVariant: Variant = reviewIdentity?.logicalTier === "max" ? "max" : "xhigh"
+  const appliedVariant: Variant = capUnsupportedNativeMaxVariant(family, args.input.model.modelID, baseVariant) ?? baseVariant
+
+  const effect = translateVariant(family, appliedVariant, {
+    modelID: args.input.model.modelID,
+    respectExplicit: false,
+  })
+  if (effect.reasoningEffort !== undefined) {
+    args.output.options.reasoningEffort = effect.reasoningEffort
+  }
+  if (effect.thinking !== undefined) {
+    args.output.options.thinking = effect.thinking
+  }
+  if (effect.temperature !== undefined && args.output.temperature === undefined) {
+    args.output.temperature = effect.temperature
+  }
+  applyReviewOutputFloor({
+    agentName: args.agentName,
+    family,
+    modelID: args.input.model.modelID,
+    appliedVariant,
+    outputOptions: args.output.options,
+  })
+  return { family, appliedVariant }
 }
 
 function protectedModelHasNoReasoningParam(family: string): boolean {
@@ -198,9 +259,56 @@ export function createChatParamsHandler(args: {
       inputVariant: input.message.variant,
       agentsConfig: cfg.agents,
       categoriesConfig: cfg.categories,
+      disabledAgents: cfg.disabledAgents,
     })
 
     if (!resolution) {
+      // A host-provided review profile (e.g. `reviewer-high`) may be present
+      // in the OpenCode host config but absent from `expandedReviewAgentMap`
+      // when the user did not configure the matching tier override. The
+      // resolution is null, but the runtime still routed a real review chat
+      // through the actual runtime provider/model. Enforce the
+      // xhigh-equivalent output safety floor against that runtime model
+      // independently of expanded-route availability, without routing through
+      // any unrelated configured model. Ordinary unknown agents remain no-ops.
+      const hostFloor = applyHostProfileReviewFloor({ agentName, input, output })
+      if (hostFloor) {
+        record({
+          ts: Date.now(),
+          sessionID: input.sessionID,
+          agent: agentName ?? "",
+          input: {
+            providerID: input.model.providerID,
+            modelID: input.model.modelID,
+            variant: input.message.variant,
+          },
+          applied: {
+            variant: hostFloor.appliedVariant,
+            ...(typeof output.options.reasoningEffort === "string"
+              ? { reasoningEffort: output.options.reasoningEffort }
+              : {}),
+            ...(isRecord(output.options.thinking)
+              ? {
+                  thinking: {
+                    type: (output.options.thinking.type as "enabled" | "disabled") ?? "disabled",
+                    ...(typeof output.options.thinking.budgetTokens === "number"
+                      ? { budgetTokens: output.options.thinking.budgetTokens }
+                      : {}),
+                  },
+                }
+              : {}),
+            ...(typeof output.temperature === "number" ? { temperature: output.temperature } : {}),
+          },
+          source: "host-profile-floor",
+        })
+        if (cfg.debug) {
+          log.debug(
+            `routed agent=${agentName ?? "<none>"} model=${input.model.providerID}/${input.model.modelID} ` +
+              `variant=${hostFloor.appliedVariant} source=host-profile-floor`,
+          )
+        }
+        return
+      }
       record({
         ts: Date.now(),
         sessionID: input.sessionID,

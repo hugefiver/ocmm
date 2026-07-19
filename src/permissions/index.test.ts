@@ -548,6 +548,23 @@ function taskInput(sessionID = "s1", agent = "coding"): Record<string, unknown> 
   }
 }
 
+test("task before-hook canonicalizes oracle-second before OpenCode agent lookup", async () => {
+  const root = tempProject()
+  try {
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionAgentMap: new Map([["parent", "orchestrator"]]),
+    })
+    const input = taskInput("parent", "oracle-second")
+    const output: Record<string, unknown> = {}
+    await guards.before(input, output)
+    assert.equal((output.args as Record<string, unknown>).subagent_type, "oracle-2nd")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("subagent depth guard blocks task when maxDepth=0", async () => {
   const root = tempProject()
   try {
@@ -596,6 +613,7 @@ test("subagent depth guard allows task at depth 2 with default maxDepth=3", asyn
       getConfig: defaultConfig,
       projectRoot: root,
       sessionDepthMap,
+      sessionAgentMap: new Map([["s1", "coding"]]),
     })
 
     await guards.before(taskInput("s1"), {})
@@ -635,7 +653,7 @@ test("subagent depth guard fail-closes session.created when parent depth is miss
     assert.equal(sessionDepthMap.get("child"), Number.MAX_SAFE_INTEGER)
     await assert.rejects(
       guards.before(taskInput("child"), {}),
-      /subagent nesting depth limit reached.*current depth: 9007199254740991/,
+      /subagent nesting depth limit reached.*current depth: 3/,
     )
 
     sessionDepthMap.set("parent", 2)
@@ -670,27 +688,79 @@ test("subagent depth guard tracks depth with alternate parent id casing", async 
   }
 })
 
-test("subagent depth guard preserves depth on session.compacted and clears on session.deleted", async () => {
+test("subagent depth guard resolves nested info-based and wrapped-event lineage via shared decoder", async () => {
   const root = tempProject()
   try {
-    const sessionDepthMap = new Map<string, number>([["s1", 2]])
+    const sessionDepthMap = new Map<string, number>()
     const guards = createPermissionGuards({
       getConfig: defaultConfig,
       projectRoot: root,
       sessionDepthMap,
     })
 
-    await guards.event?.({ type: "session.compacted", properties: { sessionID: "s1" } })
-    assert.equal(sessionDepthMap.get("s1"), 2)
+    // Current nested form: properties.info.id + properties.info.parentID
+    sessionDepthMap.set("parent-nested", 1)
+    await guards.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "child-nested", parentID: "parent-nested" } },
+      },
+    })
+    assert.equal(sessionDepthMap.get("child-nested"), 2, "nested info.id/info.parentID must resolve")
 
-    await guards.event?.({ type: "session.deleted", properties: { sessionID: "s1" } })
-    assert.equal(sessionDepthMap.has("s1"), false)
+    // Wrapped event form (raw.event.properties) with session.id nested under session
+    sessionDepthMap.set("parent-wrapped", 1)
+    await guards.event?.({
+      event: {
+        type: "session.created",
+        properties: { session: { id: "child-wrapped", parentSessionID: "parent-wrapped" } },
+      },
+    })
+    assert.equal(sessionDepthMap.get("child-wrapped"), 2, "wrapped session.id/session.parentSessionID must resolve")
+
+    // Flat event shape (no nested event wrapper)
+    sessionDepthMap.set("parent-flat", 1)
+    await guards.event?.({
+      type: "session.created",
+      properties: { sessionID: "child-flat", parentID: "parent-flat" },
+    })
+    assert.equal(sessionDepthMap.get("child-flat"), 2, "flat shape must still resolve through shared decoder")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("subagent depth guard allows unknown/builtin sessions but fail-closes known subagents without depth lineage", async () => {
+test("subagent depth guard preserves depth on session.compacted and clears on session.deleted", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([["s1", 2]])
+    const sessionAgentMap = new Map<string, string>([["s1", "reviewer"]])
+    mkdirSync(join(root, ".git"))
+    makeValidGitDir(root)
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+      sessionAgentMap,
+    })
+
+    await guards.event?.({ type: "session.compacted", properties: { sessionID: "s1" } })
+    assert.equal(sessionDepthMap.get("s1"), 2)
+    assert.equal(sessionAgentMap.get("s1"), "reviewer")
+    await assert.rejects(
+      guards.before(gitGuardInput("git commit -m x", "s1", root), {}),
+      /subagent sessions are not allowed/,
+    )
+
+    await guards.event?.({ type: "session.deleted", properties: { sessionID: "s1" } })
+    assert.equal(sessionDepthMap.has("s1"), false)
+    assert.equal(sessionAgentMap.has("s1"), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard allows only mapped primary coordinators without depth lineage", async () => {
   const root = tempProject()
   try {
     const sessionAgentMap = new Map<string, string>([
@@ -706,14 +776,97 @@ test("subagent depth guard allows unknown/builtin sessions but fail-closes known
     // Built-in main agent at depth 0 can still dispatch with default maxDepth=3.
     await guards.before(taskInput("s1"), {})
 
-    // A session with no agent mapping is treated as main/unknown depth 0.
-    await guards.before(taskInput("s3"), {})
+    // A session with no agent mapping fails closed rather than impersonating a coordinator.
+    await assert.rejects(
+      guards.before(taskInput("s3"), {}),
+      /subagent nesting depth limit reached.*current depth: 3/,
+    )
 
-    // A known non-builtin agent without explicit lineage fails closed.
+    // A known non-primary agent without explicit lineage also fails closed.
     await assert.rejects(
       guards.before(taskInput("s2"), {}),
       /subagent nesting depth limit reached.*current depth: 3/,
     )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("subagent depth guard fails closed for every recognized non-primary review profile without lineage", async () => {
+  const root = tempProject()
+  try {
+    const sessionAgentMap = new Map<string, string>([
+      ["orchestrator", "orchestrator"],
+      ["builder", "builder"],
+      ["oracle-2nd", "oracle-2nd"],
+      ["oracle-9th-max", "oracle-9th-max"],
+      ["reviewer-low", "reviewer-low"],
+      ["oracle-second", "oracle-second"],
+    ])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionAgentMap,
+    })
+
+    await guards.before(taskInput("orchestrator"), {})
+    await guards.before(taskInput("builder"), {})
+    await assert.rejects(
+      guards.before(taskInput("unknown"), {}),
+      /subagent nesting depth limit reached.*current depth: 3/,
+    )
+
+    for (const sessionID of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second"]) {
+      await assert.rejects(
+        guards.before(taskInput(sessionID), {}),
+        /subagent nesting depth limit reached.*current depth: 3/,
+        sessionID,
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("parentless sessions retain unknown depth until only mapped primary coordinators recover", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>()
+    const sessionAgentMap = new Map<string, string>([
+      ["orchestrator", "orchestrator"],
+      ["builder", "builder"],
+      ["reviewer", "reviewer"],
+      ["oracle", "oracle"],
+    ])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+      sessionAgentMap,
+    })
+
+    for (const sessionID of sessionAgentMap.keys()) {
+      await guards.event?.({ type: "session.created", properties: { sessionID } })
+      assert.equal(sessionDepthMap.get(sessionID), Number.MAX_SAFE_INTEGER, sessionID)
+    }
+
+    await guards.before(taskInput("orchestrator"), {})
+    await guards.before(taskInput("builder"), {})
+    assert.equal(sessionDepthMap.get("orchestrator"), 0)
+    assert.equal(sessionDepthMap.get("builder"), 0)
+
+    await guards.event?.({
+      type: "session.created",
+      properties: { sessionID: "child", parentID: "orchestrator" },
+    })
+    assert.equal(sessionDepthMap.get("child"), 1)
+    for (const sessionID of ["reviewer", "oracle"]) {
+      await assert.rejects(
+        guards.before(taskInput(sessionID), {}),
+        /subagent nesting depth limit reached.*current depth: 3/,
+        sessionID,
+      )
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -790,6 +943,49 @@ test("subagent git writes remain blocked for the project repo even when project 
       () => guards.before(gitGuardInput("git commit -m x", "s1", project), {}),
       /subagent sessions are not allowed/,
     )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("unmapped sessions cannot git-write in the project repository when identity tracking exists", async () => {
+  const project = tempProject()
+  try {
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
+    const guards = createPermissionGuards({
+      getConfig: configWithReadme,
+      projectRoot: project,
+      sessionAgentMap: new Map([["primary", "orchestrator"]]),
+    })
+
+    await assert.rejects(
+      () => guards.before(gitGuardInput("git commit -m x", "unmapped", project), {}),
+      /subagent sessions are not allowed/,
+    )
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("review profiles cannot git-write in the project repository", async () => {
+  const project = tempProject()
+  try {
+    mkdirSync(join(project, ".git"))
+    writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
+
+    for (const agent of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second"]) {
+      const guards = createPermissionGuards({
+        getConfig: configWithReadme,
+        projectRoot: project,
+        sessionAgentMap: subagentSessionMap("review", agent),
+      })
+      await assert.rejects(
+        () => guards.before(gitGuardInput("git commit -m x", "review", project), {}),
+        /subagent sessions are not allowed/,
+        agent,
+      )
+    }
   } finally {
     rmSync(project, { recursive: true, force: true })
   }

@@ -35,6 +35,10 @@ Approval bias: approve when in doubt. A plan that is 80% clear is good enough if
 - Style preferences, minor ambiguity, or optional improvements.
 - Code quality or performance unless the plan is explicitly broken.
 
+## Nested Delegation Boundary
+
+Use direct file/search tools first. You may request only leaf read-only lookup needed to verify one concrete plan claim. Never dispatch planner, reviewer, an Oracle variant, clarifier, another plan-critic, or an implementation agent, and never delegate the receipt verdict.
+
 ## Decision Framework
 
 **[OKAY]** when referenced files exist, tasks can start, no contradictions exist, and QA is executable enough.

@@ -62,7 +62,7 @@ The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
 
 npm installs the matching optional package automatically for your OS/CPU/libc unless optional dependencies are omitted (e.g. `--omit=optional`, `npm_config_optional=false`, or the package manager skips optionals). GitHub Release tarballs already include the matching native binary, so the optional package is not needed there.
 
-The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/deepwork/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add deepwork@deepwork-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle`, `dw-oracle-high`, and `dw-creative`. `dw-oracle` (self-supervision) defaults to a configured heterogeneous review lane; `dw-reviewer` (external review) defaults to the primary reasoning lane chosen from explicit configuration and the available catalog. `dw-oracle-high` is an optional supplemental high-effort review profile; include it as a third reviewer only when explicitly configured by user/profile, available in the current catalog/dispatch surface, and not disabled.
+The package also carries the Codex adapter marketplace at `.agents/plugins/marketplace.json` and the generated plugin bundle at `plugins/deepwork/`. When testing release/package install paths, verify both `codex plugin marketplace add <package-root>` and `codex plugin add deepwork@deepwork-local`; the Codex `.mcp.json` must keep the default `lsp` MCP plugin-local as `./dist/cli/ocmm-lsp.js` rather than baking local source, Cargo, `target/`, or marketplace-root-relative `../../dist` paths. The Codex bundle should expose the workflow skill as `deepwork` and generated agent profiles with the `dw-*` prefix, including `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`; configured review `variants` may additionally emit logical tier profiles such as `dw-oracle-high`. `dw-oracle` (self-supervision) defaults to slot-1 logical normal; `dw-oracle-2nd` is the default second-priority Oracle slot when configured/available; `dw-reviewer` (external review) defaults to the primary reasoning lane chosen from explicit configuration and the available catalog.
 
 ### Publishing a new release
 
@@ -135,6 +135,7 @@ Critical: step 2 (regenerate Codex bundle) must run **after** the version bump a
 | `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
+| `subagent-interruption-recovery` | Enabled | Correlates child `session.error` and parent `message.part.updated` task-part evidence and lets the task-output adapter append at most one manual continuation notice; retry dispatch remains owned by the existing fallback controller. |
 | `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed `subagent.maxDepth`; default max depth is 3 subagent layers. |
 
 ## Live Integration Test
@@ -169,6 +170,15 @@ $env:XDG_CACHE_HOME   = "$testDir/xdg-cache"
 ```
 
 Verify isolation with `opencode debug paths` — the generated OpenCode `data`, `bin`, `log`, `repos`, `cache`, `config`, and `state` paths should point inside `$testDir`. The fixed `home` and `tmp` rows may still point to the OS user home/temp roots.
+
+Capture an explicit probe artifact under the isolated directory so verification evidence is colocated with the test run:
+
+```powershell
+mkdir.exe -p "$testDir/evidence"
+opencode debug paths 2>&1 | tee "$testDir/evidence/opencode-debug-paths.txt"
+```
+
+Treat all raw logs and credentials in `$testDir` as temporary test material only (for example `opencode.json` API keys and debug logs). Do not copy them into project files or long-lived config locations.
 
 ### 3. Write a minimal opencode.json
 
@@ -302,6 +312,15 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 | `chat.message` | `v1 skills queued: N chars` (v1 only; omo is no-op) | v1 skill content queued on first message per session |
 | `experimental.chat.system.transform` | `prepended N chars` | Queued content injected into system message |
 | `event` | (no output on success) | Session lifecycle hooks fire without errors |
+
+Interruption-recovery event coverage (same `event` + output-adapter surface):
+
+- `session.created`: records one durable child-session correlation record in the existing fallback controller for child sessions.
+- `session.error`: records provider-error evidence for correlation and lets the existing controller decide dedicated 429 vs generic fallback ownership.
+- `session.idle`: advances existing gate/dispatch state; does not create independent retry state.
+- `session.deleted`: invalidates lifecycle/timer/dispatch generations and clears session-scoped controller state.
+- `message.part.updated`: ingests and deduplicates parent task-part evidence keyed to correlated child session.
+- task output adapter responsibility: may append at most one manual continuation notice when explicit task-id evidence exists; it never dispatches retries, never synthesizes parent prompts, and never substitutes `childSessionID` for `task_id`.
 
 ### Notes
 

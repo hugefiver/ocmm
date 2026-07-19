@@ -9,7 +9,7 @@
  *   builder         - primary implementer; handles execution-heavy work
  *   reviewer       - read-only consultant for hard reasoning / debugging
  *   oracle         - self-supervision reviewer for work the agent itself produced
- *   oracle-high    - supplemental high-intensity reviewer for optional multi-review passes
+ *   oracle-2nd     - second-priority Oracle review model for additional independent evidence
  *   doc-search     - external library / docs / OSS lookups
  *   code-search    - internal codebase grep
  *   planner        - produces structured work plans
@@ -82,17 +82,17 @@ export const BUILTIN_AGENTS: Agent[] = [
     },
   },
   {
-    name: "oracle-high",
+    name: "oracle-2nd",
     description:
-      "Supplemental high-intensity reviewer used for optional multi-review passes. Only enabled when explicitly configured and not disabled; otherwise remains inactive.",
+      "Second-priority Oracle review model for additional independent evidence. Priority does not imply greater capability or effort.",
     promptSource: "reviewer",
     requirement: {
-      variant: "max",
+      variant: "high",
       fallbackChain: [
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
-        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "max" },
-        { providers: ["zhipu"], model: "glm-5.1", variant: "max" },
+        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "xhigh" },
+        { providers: ["zhipu"], model: "glm-5.1", variant: "xhigh" },
       ],
     },
   },

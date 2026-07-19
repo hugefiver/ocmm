@@ -1,5 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import {
   AgentEntrySchema,
@@ -116,55 +118,82 @@ test("review variants accept native strings and non-empty objects", () => {
   assert.equal(parsed.agents?.oracle?.variants?.max && typeof parsed.agents.oracle.variants.max, "object")
 })
 
-test("review variants: invalid fields are dropped while canonical agents remain", () => {
-  // variants on non-review agents (e.g. planner) is stripped, entry kept.
-  const nonReviewResult = OcmmConfigSchema.safeParse({
-    agents: { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
-  })
-  assert.equal(nonReviewResult.success, true, "planner entry kept, variants stripped")
-  assert.equal(nonReviewResult.success && nonReviewResult.data.agents?.planner?.variants, undefined)
-
-  // Invalid variant overrides (empty object, unsupported tier) lose only the
-  // invalid field. Unknown keys are stripped by the runtime object schema.
-  for (const { agents, expectedHigh } of [
-    { agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } }, expectedHigh: undefined },
-    { agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { normal: "high" } } }, expectedHigh: undefined },
-    {
-      agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { high: { model: "x/y", extra: true } } } },
-      expectedHigh: { model: "x/y" },
-    },
+test("review variants fail closed in direct schema parsing", () => {
+  for (const agents of [
+    { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
+    { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } },
+    { oracle: { model: "openai/gpt-5.6-terra", variants: { normal: "high" } } },
+    { oracle: { model: "openai/gpt-5.6-terra", variants: { high: { model: "x/y", extra: true } } } },
   ]) {
-    const result = OcmmConfigSchema.safeParse({ agents })
-    assert.equal(result.success, true, `parse succeeds: ${JSON.stringify(agents)}`)
-    assert.equal(result.success && result.data.agents?.oracle?.model, "openai/gpt-5.6-terra", `oracle kept: ${JSON.stringify(agents)}`)
-    assert.deepEqual(result.success && result.data.agents?.oracle?.variants?.high, expectedHigh, `field recovered: ${JSON.stringify(agents)}`)
+    assert.equal(OcmmConfigSchema.safeParse({ agents }).success, false, JSON.stringify(agents))
   }
 })
 
-test("invalid optional agent fields are dropped while the entry remains", () => {
-  const result = OcmmConfigSchema.safeParse({
+test("direct schema rejects invalid ordinary agent fields while tolerant parsing preserves siblings", () => {
+  const input = {
     agents: {
       orchestrator: {
         model: "openai/gpt-5.6-terra",
         temperature: 3,
       },
     },
-  })
+  }
+  assert.equal(OcmmConfigSchema.safeParse(input).success, false)
+
+  const result = tolerantParse(OcmmConfigSchema, input)
   assert.equal(result.success, true)
   assert.equal(result.success && result.data.agents?.orchestrator?.model, "openai/gpt-5.6-terra")
   assert.equal(result.success && result.data.agents?.orchestrator?.temperature, undefined)
 })
 
-test("reserved review namespace drops non-canonical config keys but parse succeeds", () => {
+test("review variant object requires model or variant in the generated JSON Schema", () => {
+  const asRecord = (value: unknown): Record<string, unknown> => {
+    assert.ok(value !== null && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>
+  }
+  const schema = asRecord(JSON.parse(readFileSync(join(process.cwd(), "schema.json"), "utf8")))
+  const properties = asRecord(schema.properties)
+  const agents = asRecord(properties.agents)
+  const entry = asRecord(agents.additionalProperties)
+  const variants = asRecord(asRecord(entry.properties).variants)
+  const high = asRecord(asRecord(variants.properties).high)
+  const branches = high.oneOf ?? high.anyOf
+  assert.ok(Array.isArray(branches), "review variant must be a JSON-Schema union")
+  const requiredSets = branches.map((branch) => asRecord(branch).required)
+  assert.ok(requiredSets.some((required) => Array.isArray(required) && required.includes("model")))
+  assert.ok(requiredSets.some((required) => Array.isArray(required) && required.includes("variant")))
+
+  const objectBranches = branches.map(asRecord).filter((branch) => branch.type === "object")
+  const matchesObjectBranch = (value: Record<string, unknown>, branch: Record<string, unknown>): boolean => {
+    const branchProperties = asRecord(branch.properties)
+    const required = Array.isArray(branch.required) ? branch.required : []
+    if (!required.every((key) => typeof key === "string" && key in value)) return false
+    if (branch.additionalProperties === false && Object.keys(value).some((key) => !(key in branchProperties))) return false
+    return true
+  }
+  for (const [value, expected] of [
+    [{ model: "openai/gpt-5.6-sol" }, 1],
+    [{ variant: "max" }, 1],
+    [{ model: "openai/gpt-5.6-sol", variant: "max" }, 1],
+    [{}, 0],
+  ] as const) {
+    assert.equal(
+      objectBranches.filter((branch) => matchesObjectBranch(value, branch)).length,
+      expected,
+      JSON.stringify(value),
+    )
+  }
+})
+
+test("direct schema rejects non-canonical reserved review keys", () => {
   for (const name of ["oracle-high", "oracle-2", "oracle-10th", "oracle-2nd-high", "reviewer-2nd", "reviewer-high", "oracle-second"]) {
     const result = OcmmConfigSchema.safeParse({ agents: { [name]: { model: "openai/gpt-5.6-sol" } } })
-    assert.equal(result.success, true, `${name}: parse succeeds`)
-    assert.equal(result.success && result.data.agents?.[name], undefined, `${name}: entry dropped`)
+    assert.equal(result.success, false, `${name}: rejected`)
   }
   assert.equal(OcmmConfigSchema.safeParse({ agents: { "oracle-9th": { model: "openai/gpt-5.6-sol" } } }).success, true)
 })
 
-test("later Oracle slots without a resolved normal requirement are dropped (tolerant)", () => {
+test("direct schema rejects later Oracle slots without a resolved normal requirement", () => {
   const rejected = [
     { "oracle-3rd": { variants: { high: "max" } } },
     { "oracle-4th": { description: "metadata only" } },
@@ -179,14 +208,7 @@ test("later Oracle slots without a resolved normal requirement are dropped (tole
   ]
   for (const agents of rejected) {
     const result = OcmmConfigSchema.safeParse({ agents })
-    assert.equal(result.success, true, `parse succeeds: ${JSON.stringify(agents)}`)
-    // The later Oracle slot itself must be dropped.
-    if (result.success && result.data.agents) {
-      const laterSlots = Object.keys(agents).filter((name) => name.startsWith("oracle-"))
-      for (const name of laterSlots) {
-        assert.equal(result.data.agents[name], undefined, `${name} dropped: ${JSON.stringify(agents)}`)
-      }
-    }
+    assert.equal(result.success, false, `rejected: ${JSON.stringify(agents)}`)
   }
 
   for (const agents of [
@@ -206,13 +228,7 @@ test("later Oracle slots without a resolved normal requirement are dropped (tole
   }).success, true, "builtin review slots keep their default normal requirements")
 })
 
-test("regression: reviewer-high in a profile no longer fails the whole config", () => {
-  // Reproduces the user-reported scenario: a profile carried a `reviewer-high`
-  // agent key (a runtime tier name, not a valid config key). Before the
-  // tolerant-schema hotfix, this made the entire OcmmConfigSchema parse fail
-  // and loadConfig silently fell back to defaults (anthropic/claude-opus-4-7).
-  // After the hotfix, the offending entry is dropped with a warning and the
-  // rest of the config loads normally.
+test("direct schema rejects invalid review-agent entries in profiles", () => {
   const result = OcmmConfigSchema.safeParse({
     agents: { orchestrator: { model: "hoo/glm-5.2" } },
     profiles: {
@@ -225,10 +241,7 @@ test("regression: reviewer-high in a profile no longer fails the whole config", 
     },
     activeProfile: "oa",
   })
-  assert.equal(result.success, true, "config with reviewer-high in profile must parse")
-  assert.equal(result.data.agents?.orchestrator?.model, "hoo/glm-5.2", "base agent kept")
-  assert.equal(result.data.profiles?.oa?.agents?.reviewer?.model, "hoo/glm-5.2", "profile reviewer kept")
-  assert.equal(result.data.profiles?.oa?.agents?.["reviewer-high"], undefined, "reviewer-high dropped from profile")
+  assert.equal(result.success, false)
 })
 
 test("unknown top-level keys and unknown agent fields are stripped (tolerant)", () => {

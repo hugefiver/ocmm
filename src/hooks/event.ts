@@ -1,21 +1,13 @@
-import { createRuntimeFallbackEventHandler, type OcmmClient } from "../runtime-fallback/index.ts"
-import type { OcmmConfig } from "../config/schema.ts"
-import type { IdleContinuationState } from "../runtime-fallback/idle-state.ts"
+import {
+  createRuntimeFallbackRuntime,
+  type RuntimeFallbackDeps,
+  type RuntimeFallbackRuntime,
+} from "../runtime-fallback/index.ts"
 
-export function createEventHandler(args: {
-  getConfig: () => OcmmConfig
-  client?: OcmmClient
-  directory?: string
-  idleState?: IdleContinuationState
-  clearSessionIntent?: (sessionID: string) => void
-  registeredAgentModels?: ReadonlyMap<string, string>
-}): (input: unknown) => Promise<void> {
-  return createRuntimeFallbackEventHandler({
-    getConfig: args.getConfig,
-    ...(args.client !== undefined ? { client: args.client } : {}),
-    ...(args.directory !== undefined ? { directory: args.directory } : {}),
-    ...(args.idleState !== undefined ? { idleState: args.idleState } : {}),
-    ...(args.clearSessionIntent !== undefined ? { clearSessionIntent: args.clearSessionIntent } : {}),
-    ...(args.registeredAgentModels !== undefined ? { registeredAgentModels: args.registeredAgentModels } : {}),
-  })
+export function createEventRuntime(args: RuntimeFallbackDeps): RuntimeFallbackRuntime {
+  return createRuntimeFallbackRuntime(args)
+}
+
+export function createEventHandler(args: RuntimeFallbackDeps): (input: unknown) => Promise<void> {
+  return createEventRuntime(args).event
 }

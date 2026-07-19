@@ -149,7 +149,9 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   const deep = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-deep`)
   const documenting = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-documenting`)
   const oracle = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle`)
+  const oracle2nd = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle-2nd`)
   const oracleHigh = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle-high`)
+  const oracleSecondAlias = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-oracle-second`)
   const reviewer = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-reviewer`)
   const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
@@ -171,9 +173,11 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.ok(oracle)
   assert.equal(oracle.sourceName, "oracle")
   assert.equal(oracle.reasoningEffort, "xhigh")
-  assert.ok(oracleHigh)
-  assert.equal(oracleHigh.sourceName, "oracle-high")
-  assert.equal(oracleHigh.reasoningEffort, "xhigh")
+  assert.ok(oracle2nd)
+  assert.equal(oracle2nd.sourceName, "oracle-2nd")
+  assert.equal(oracle2nd.reasoningEffort, "xhigh")
+  assert.equal(oracleHigh, undefined)
+  assert.equal(oracleSecondAlias, undefined)
   assert.ok(reviewer)
   assert.equal(reviewer.sourceName, "reviewer")
   assert.equal(reviewer.reasoningEffort, "xhigh")
@@ -208,78 +212,100 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   )
 })
 
-test("custom GPT review and plan-review profiles never generate below xhigh and preserve max", async () => {
-  const scenarios = [
-    {
-      reviewer: { model: "openai/gpt-5.6-sol" },
-      oracle: { description: "inherits reviewer without an effort override" },
-      "oracle-high": { description: "inherits reviewer without an effort override", model: "openai/gpt-5.6-sol", variant: "minimal" as const },
-      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
-    },
-    {
-      reviewer: { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
-      oracle: {
-        requirement: {
-          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "low" }],
-        },
-      },
-      "oracle-high": {
-        requirement: {
-          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "low" }],
-        },
-      },
-      "plan-critic": {
-        requirement: {
-          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol", reasoningEffort: "low" }],
-        },
-      },
-    },
-    {
-      reviewer: { model: "openai/gpt-5.6-sol", variant: "xhigh" as const },
-      oracle: { model: "openai/gpt-5.6-terra", variant: "xhigh" as const },
-      "oracle-high": { model: "openai/gpt-5.6-terra", variant: "xhigh" as const },
-      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "xhigh" as const },
-    },
-    {
-      reviewer: { model: "openai/gpt-5.6-sol", variant: "max" as const },
-      oracle: {
-        requirement: {
-          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "max" }],
-        },
-      },
-      "oracle-high": {
-        requirement: {
-          fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", reasoningEffort: "max" }],
-        },
-      },
-      "plan-critic": { model: "openai/gpt-5.6-sol", variant: "max" as const },
-    },
-  ]
+test("Codex emits canonical default review slots without legacy or alias duplicates", async () => {
+  const agents = await buildCodexAgents({
+    config: { ...defaultConfig(), workflow: "codex" },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const names = new Set(agents.map((agent) => agent.name))
+  assert.equal(names.has("dw-oracle"), true)
+  assert.equal(names.has("dw-oracle-2nd"), true)
+  assert.equal(names.has("dw-reviewer"), true)
+  assert.equal(names.has("dw-oracle-high"), false)
+  assert.equal(names.has("dw-oracle-second"), false)
+})
 
-  for (const agentsConfig of scenarios) {
-    const agents = await buildCodexAgents({
-      config: { ...defaultConfig(), workflow: "codex", agents: agentsConfig },
-      cwd: process.cwd(),
-      skillsRoot: join(process.cwd(), "skills"),
+test("Codex emits only configured logical tiers and later Oracle slots", async () => {
+  const config = {
+    ...defaultConfig(),
+    workflow: "codex" as const,
+    agents: {
+      oracle: { variants: { high: "max" as const } },
+      "oracle-3rd": { model: "openai/gpt-5.6-sol", variants: { max: "max" as const } },
+      reviewer: { variants: { low: "low" as const } },
+    },
+  }
+  const agents = await buildCodexAgents({
+    config,
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const names = agents.map((agent) => agent.name)
+  for (const name of ["dw-oracle-high", "dw-oracle-3rd", "dw-oracle-3rd-max", "dw-reviewer-low"]) {
+    assert.ok(names.includes(name), name)
+  }
+  assert.equal(names.includes("dw-oracle-low"), false)
+  assert.equal(names.includes("dw-reviewer-2nd"), false)
+})
+
+test("Codex review floors use parsed identities and preserve GPT-5.6 native max", async () => {
+  const config = {
+    ...defaultConfig(),
+    workflow: "codex" as const,
+    agents: {
+      oracle: { model: "openai/gpt-5.6-terra", variants: { low: "low" as const, max: "max" as const } },
+      "oracle-2nd": { model: "openai/gpt-5.5", variants: { low: "minimal" as const } },
+      reviewer: { model: "openai/gpt-5.6-sol", variants: { max: "max" as const } },
+    },
+  }
+  const agents = await buildCodexAgents({ config, cwd: process.cwd(), skillsRoot: join(process.cwd(), "skills") })
+  const effort = new Map(agents.map((agent) => [agent.sourceName, agent.reasoningEffort]))
+  assert.equal(effort.get("oracle-low"), "xhigh")
+  assert.equal(effort.get("oracle-max"), "max")
+  assert.equal(effort.get("oracle-2nd-low"), "xhigh")
+  assert.equal(effort.get("reviewer-max"), "max")
+})
+
+test("generated workflow describes ordered priority and logical tiers without supplemental semantics", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-ordered-review-"))
+  try {
+    await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, ".codex", "agents"),
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
     })
-    for (const role of ["reviewer", "oracle", "oracle-high", "plan-critic"]) {
-      const effort = agents.find((agent) => agent.sourceName === role)?.reasoningEffort
-      const roleConfig = agentsConfig[role as keyof typeof agentsConfig]
-      const hasExplicitMax = roleConfig && (
-        "requirement" in roleConfig
-          ? roleConfig.requirement?.fallbackChain?.[0]?.reasoningEffort === "max"
-          : "variant" in roleConfig && roleConfig.variant === "max"
-      )
-      if (hasExplicitMax) {
-        assert.equal(effort, "max", `${role} must preserve explicit max for GPT/Codex`)
-      } else {
-        assert.equal(effort, "xhigh", `${role} must retain the GPT/Codex xhigh floor`)
-      }
-    }
+    const skill = readFileSync(join(root, "plugins", "deepwork", "skills", "deepwork", "SKILL.md"), "utf8")
+    assert.match(skill, /Oracle priority.*oracle.*oracle-2nd/is)
+    assert.match(skill, /logical tier.*low.*normal.*high.*max/is)
+    assert.match(skill, /configuring multiple.*does not.*fan-out/is)
+    assert.match(skill, /runtime-safety.*max.*high.*normal/is)
+    assert.doesNotMatch(skill, /supplemental high-intensity|stronger Oracle|triple-review/i)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("Codex generation resolves arbitrary multi-hop reviewer and oracle aliases", async () => {
+test("Codex first-slot logical-high profile generates only from agents.oracle.variants.high", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      agents: { oracle: { model: "openai/gpt-5.6-sol", variants: { high: "max" as const } } },
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const oracleHigh = agents.find((agent) => agent.sourceName === "oracle-high")
+  assert.ok(oracleHigh)
+  assert.equal(oracleHigh.name, `${CODEX_AGENT_PREFIX}-oracle-high`)
+  assert.equal(oracleHigh.reasoningEffort, "max")
+})
+
+test("Codex generation resolves arbitrary multi-hop reviewer and oracle-2nd aliases", async () => {
   const agents = await buildCodexAgents({
     config: {
       ...defaultConfig(),
@@ -289,15 +315,14 @@ test("Codex generation resolves arbitrary multi-hop reviewer and oracle aliases"
         "review-policy-a": { alias: "review-policy-b" },
         "review-policy-b": { alias: "review-model" },
         "review-model": { model: "openai/gpt-5.6-sol", variant: "minimal" as const },
-        oracle: { description: "inherits the effective reviewer model" },
-        "oracle-high": { description: "inherits the effective reviewer model", alias: "review-policy-b" },
+        "oracle-2nd": { description: "inherits the effective reviewer model", alias: "review-policy-b" },
       },
     },
     cwd: process.cwd(),
     skillsRoot: join(process.cwd(), "skills"),
   })
 
-  for (const role of ["reviewer", "oracle", "oracle-high"]) {
+  for (const role of ["reviewer", "oracle-2nd"]) {
     const agent = agents.find((candidate) => candidate.sourceName === role)
     assert.equal(agent?.model, "gpt-5.6-sol")
     assert.equal(agent?.reasoningEffort, "xhigh")
@@ -325,7 +350,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     const marketplace = JSON.parse(readFileSync(result.marketplacePath, "utf8")) as Record<string, unknown>
     const orchestrator = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-orchestrator.toml`), "utf8")
     const oracle = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle.toml`), "utf8")
-    const oracleHigh = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`), "utf8")
+    const oracle2nd = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-2nd.toml`), "utf8")
     const reviewer = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-reviewer.toml`), "utf8")
     const creative = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-creative.toml`), "utf8")
     const planner = readFileSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-planner.toml`), "utf8")
@@ -355,22 +380,21 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(orchestrator, /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/)
     assert.match(orchestrator, /MultiAgent V1\/V2 names and examples elsewhere are lower-priority compatibility examples/)
     assert.match(orchestrator, /select only from the user's current available catalog/)
-    assert.match(orchestrator, /primary reasoning lane for flagship and external-review work/)
-    assert.match(orchestrator, /prefer a configured heterogeneous or otherwise non-identical capable model before a supplemental same-lane fallback/)
+    assert.match(orchestrator, /Ordered Oracle review semantics:/)
+    assert.match(orchestrator, /For GPT\/Codex review routes \(plan-critic and parsed review names\), enforce at least xhigh/)
     assert.match(oracle, /^name = "dw-oracle"$/m)
     assert.match(oracle, /^model_reasoning_effort = "xhigh"$/m)
-    assert.match(oracleHigh, /^name = "dw-oracle-high"$/m)
-    assert.match(oracleHigh, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(oracle2nd, /^name = "dw-oracle-2nd"$/m)
+    assert.match(oracle2nd, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(reviewer, /^name = "dw-reviewer"$/m)
     assert.match(reviewer, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(creative, /^name = "dw-creative"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
     assert.match(workflowSkill, /agent_type="dw-plan-critic"/)
     assert.match(workflowSkill, /\[@dw-oracle\]\(subagent:\/\/dw-oracle\)/)
-    assert.match(workflowSkill, /\[@dw-oracle-high\]\(subagent:\/\/dw-oracle-high\)/)
-    assert.match(workflowSkill, /explicitly configured by user\/profile/)
-    assert.match(workflowSkill, /available in the current catalog\/dispatch surface/)
-    assert.match(workflowSkill, /not disabled/)
+    assert.match(workflowSkill, /\[@dw-oracle-2nd\]\(subagent:\/\/dw-oracle-2nd\)/)
+    assert.equal(existsSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`)), false)
+    assert.match(workflowSkill, /configured later slots only when additional independent evidence is explicitly needed/)
     assert.match(workflowSkill, /Do not pass `dw-\*\.toml` files as `items`, `skill` attachments, or prompt context/)
     assert.match(workflowSkill, /current callable dispatch-tool schema is the only availability signal/)
     assert.match(workflowSkill, /Exact profile/)
@@ -408,23 +432,27 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.doesNotMatch(workflowSkill, /\| dw-oracle \| gpt-/)
     assert.match(workflowSkill, /user's currently available model catalog and explicit local configuration/)
     assert.match(workflowSkill, /Best available primary reasoning model in the user's catalog/)
-    assert.match(workflowSkill, /Reviewer, oracle, and oracle-high routes use an `xhigh`-equivalent minimum/)
+    assert.match(workflowSkill, /Reviewer and Oracle routes use an `xhigh`-equivalent minimum/)
     assert.match(workflowSkill, /GPT-5\.6 supports native `max`/)
-    assert.match(workflowSkill, /default complex\/large review set is `?dw-oracle`? \+ `?dw-reviewer`?/i)
-    assert.match(workflowSkill, /Add `?dw-oracle-high`? only when it is explicitly configured by user\/profile/)
-    assert.match(workflowSkill, /Built-in, default, or generated-profile existence alone must not force three-review dispatch/)
+    assert.match(workflowSkill, /Oracle priority.*dw-oracle.*dw-oracle-2nd/is)
+    assert.match(workflowSkill, /logical tier.*low.*normal.*high.*max/is)
+    assert.match(workflowSkill, /configuring multiple.*does not.*fan-out/is)
+    assert.match(workflowSkill, /runtime-safety.*max.*high.*normal/is)
+    assert.doesNotMatch(workflowSkill, /supplemental high-intensity|stronger Oracle|triple-review/i)
     const planCriticPolicyLines = workflowSkill
       .split(/\r?\n/)
       .filter((line) => line.includes(`${CODEX_AGENT_PREFIX}-plan-critic`))
     assert.ok(planCriticPolicyLines.some((line) => /xhigh minimum/i.test(line)))
-    assert.match(workflowSkill, /Independent review rule/)
-    assert.match(workflowSkill, /Prefer oracle diversity from a configured heterogeneous or otherwise non-identical capable model/)
-    assert.match(workflowSkill, /default complex\/large review set is `?dw-oracle`? \+ `?dw-reviewer`?/i)
+    assert.match(workflowSkill, /Ordered Oracle review/)
+    assert.match(workflowSkill, /Additional Oracle passes select later configured slots in order only when additional independent evidence is explicitly needed/)
+    assert.match(workflowSkill, /Complex cross-module final acceptance selects the first available Oracle plus Reviewer/)
+    assert.match(workflowSkill, /simple final acceptance selects the first available Oracle normal profile/i)
+    assert.match(workflowSkill, /Reviewer has logical tier variants only and has no ordinal profiles/)
     assert.doesNotMatch(workflowSkill, new RegExp(`Latest available ${"Terra-lane"} model`))
     assert.doesNotMatch(workflowSkill, /never downgrade or leave the Terra lane merely to force diversity/)
     assert.equal(workflowSkill.includes(`${"Previous"}-${"gen"} ${"flagship"}`), false)
     assert.equal(workflowSkill.includes(`should use a **different ${"generation"}**`), false)
-    assert.match(workflowSkill, /Independent review rule/)
+    assert.match(workflowSkill, /Review dispatch guardrail/)
     assert.match(workflowSkill, /Tier assignments/)
     assert.match(workflowSkill, /this plugin bundle's `agents\/` directory/)
     assert.doesNotMatch(workflowSkill, /plugins\/ocmm\/agents/)

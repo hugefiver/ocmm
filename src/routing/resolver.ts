@@ -2,6 +2,8 @@ import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import { normalizeAgentShorthand, normalizeShorthand } from "../config/normalize.ts"
 import { matchRequirementSuccessor } from "./model-upgrades.ts"
+import { expandedReviewAgentMap } from "../review-agents/expand.ts"
+import { parseReviewAgentName } from "../review-agents/names.ts"
 import type { AgentEntry, CategoryEntry } from "../config/schema.ts"
 import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
 
@@ -12,6 +14,7 @@ export type ResolveOpts = {
   inputVariant?: string | undefined
   agentsConfig?: Record<string, AgentEntry>
   categoriesConfig?: Record<string, CategoryEntry>
+  disabledAgents?: readonly string[]
 }
 
 export type Resolution = {
@@ -185,8 +188,23 @@ export function resolveEffectiveRequirement(opts: {
   agentName: string
   agentsConfig?: Record<string, AgentEntry>
   categoriesConfig?: Record<string, CategoryEntry>
+  disabledAgents?: readonly string[]
 }): { requirement: ModelRequirement; source: Resolution["source"] } | null {
-  const { agentName, agentsConfig, categoriesConfig } = opts
+  const { agentName, agentsConfig, categoriesConfig, disabledAgents } = opts
+
+  // Review agent names (oracle, oracle-2nd, oracle-2nd-low, reviewer-low,
+  // runtime alias oracle-second, etc.) resolve exclusively from the expanded
+  // profile map. Disabled profiles are filtered at expansion time, so a
+  // disabled canonical name returns null here. Do not fall through to ordinary
+  // built-in/category resolution for review names - those paths no longer
+  // understand the canonical tier grammar.
+  const reviewIdentity = parseReviewAgentName(agentName)
+  if (reviewIdentity) {
+    const profile = expandedReviewAgentMap({ agents: agentsConfig, disabledAgents }).get(reviewIdentity.canonicalName)
+    if (!profile) return null
+    return { requirement: profile.requirement, source: profile.resolutionSource }
+  }
+
   const canonicalName = canonicalAgentName(agentName)
   const canonicalUserReq = canonicalName !== agentName
     ? userAgentRequirementWithAlias(canonicalName, agentsConfig)
@@ -210,10 +228,10 @@ export function resolveEffectiveRequirement(opts: {
 }
 
 export function resolveModelRouting(opts: ResolveOpts): Resolution | null {
-  const { agentName, modelID, providerID, inputVariant, agentsConfig, categoriesConfig } = opts
+  const { agentName, modelID, providerID, inputVariant, agentsConfig, categoriesConfig, disabledAgents } = opts
 
   if (agentName) {
-    const effective = resolveEffectiveRequirement({ agentName, agentsConfig, categoriesConfig })
+    const effective = resolveEffectiveRequirement({ agentName, agentsConfig, categoriesConfig, disabledAgents })
     if (effective) {
       const r = resolveAgainstRequirement(
         effective.requirement,

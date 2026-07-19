@@ -515,6 +515,12 @@ describe("isBuiltinAgentName", () => {
   test("recognizes alias explore as builtin", () => {
     assert.ok(isBuiltinAgentName("explore"))
   })
+  test("recognizes canonical and generated review profiles as builtins", () => {
+    for (const name of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second"]) {
+      assert.equal(isBuiltinAgentName(name), true, name)
+    }
+    assert.equal(isBuiltinAgentName("reviewer-2nd"), false)
+  })
   test("does NOT recognize coding (category, not builtin agent)", () => {
     assert.ok(!isBuiltinAgentName("coding"))
   })

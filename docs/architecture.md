@@ -33,6 +33,27 @@ Routing resolves along two independent axes through the same pipeline:
 
 Both axes feed the same 4-tier resolution pipeline (below), producing a variant that is then translated to provider params.
 
+## Canonical review profile expansion pipeline
+
+```text
+raw config layer
+  -> context-specific legacy/alias migration with provenance
+  -> schema + semantic validation
+  -> pure review profile expansion
+  -> one canonical candidate map
+  -> OpenCode registration / resolver / floors / permissions / Codex generation
+
+OpenCode lifecycle + task-part events
+  -> shared event decoder
+  -> one durable child record in the existing 429 controller
+  -> existing 429 or generic fallback owns dispatch
+  -> task-output adapter may append one resume notice; it owns no retry state
+```
+
+The fallback path uses a single 429 controller for both dedicated child-session handling and interruption correlation ownership; interruption recovery layers evidence tracking on top of that controller instead of creating a parallel retry engine.
+
+Canonical review slots are unsuffixed names such as `oracle` and `oracle-2nd`; logical tier profiles (`-low`, `-high`, `-max`) are derived from configured `variants` on those slots rather than independent capability-ranked lanes.
+
 ## 4-tier variant resolution
 
 Priority (highest wins), implemented in `src/routing/resolver.ts`:
@@ -156,6 +177,16 @@ non-429 during active dispatch -> queue first outcome -> post-settlement generic
 During an active dedicated dispatch, the first queued provider outcome takes precedence over idle. A queued 429 is processed serially against the dispatched target after settlement. A queued non-429 completes accounting once, stops the dedicated controller, and hands off to generic fallback once. A bare `false` dispatch result with no queued outcome stops the dedicated flow. `runtimeFallback.dispatch: false` is observe-only: it records the classification but schedules and dispatches nothing.
 
 `FallbackState` and the controller have separate ownership. `FallbackState` owns `fallbackIndex`, committed model-switch `attempts`, `activeModel`, and generic cooldowns. At the controller layer, each child-session state owns its initial marker, scoped retry counts, blocked deadlines, pending two-signal gate, active-dispatch idle state, queued outcome plus generic-handoff state, one timer, and lifecycle/timer/dispatch generations. No child-session state crosses session boundaries, and idle never clears `FallbackState`.
+
+### Interruption recovery (correlation + output adapter)
+
+Interruption recovery is a documentation-level name for the `subagent-interruption-recovery` hook behavior in the same event pipeline:
+
+1. It reuses the existing 429/generic fallback controller and retry budgets.
+2. Correlation keys are child-session based and parent `message.part.updated` evidence is deduplicated.
+3. Child `session.error` events are treated as provider-error evidence in the same controller record.
+4. No retry is dispatched for explicit abort, permission denial, unknown agent, deletion, or ordinary empty-output outcomes.
+5. The task-output adapter may append at most one manual continuation notice only when explicit task-id evidence exists in task input/output or correlated parent-part evidence; it never substitutes `childSessionID` for `task_id`, never dispatches from `tool.execute.after`, and never synthesizes parent prompts.
 
 ### Config
 

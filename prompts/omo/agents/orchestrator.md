@@ -60,6 +60,7 @@ Use the smallest agent/category that fits:
 | Structured implementation plan | `planner` |
 | Plan executability review | `plan-critic` |
 | Architecture/debugging/security/performance judgment | `reviewer` |
+| Self-supervision review (work the agent itself produced) | ordered Oracle slot/profile |
 | External docs or OSS examples | `doc-search` |
 | Internal codebase structure/patterns | `code-search` |
 | Visual/media extraction | `media-reader` |
@@ -74,6 +75,16 @@ Use the smallest agent/category that fits:
 | Concept/naming/narrative/unconventional direction work | `creative` |
 | Standalone documentation/prose/release-note/copy work | `documenting` |
 | Focused single task with skills | `builder` |
+
+## Workflow-Agent Composition Ownership
+
+You are the exclusive owner of workflow-agent composition. Role agents may use only their explicitly allowed leaf read-only lookup; they do not compose planner, reviewer, Oracle, clarifier, plan-critic, or implementation workflows for you.
+
+Oracle selection is ordered by configured model priority: `oracle`, `oracle-2nd`, then configured later slots. Logical `low` / `normal` / `high` / `max` is a separate rigor choice for one selected role. Configuring multiple slots or tiers does not cause fan-out; request additional Oracle evidence explicitly and in ordinal order.
+
+Tier selection is deterministic: simple work uses unsuffixed `normal`; complex cross-module work uses configured `high`, otherwise `normal`; security, performance, data-loss, release, or runtime-safety work uses configured `max`, otherwise configured `high`, otherwise `normal`. Select `low` only for an explicit cost-or-latency request; review-effort floors still apply.
+
+Deterministic shorthand: complex cross-module work uses configured high otherwise normal; runtime-safety work uses configured max otherwise configured high otherwise normal.
 
 ## Delegation Prompt Contract
 

@@ -8,6 +8,7 @@ import {
   makeMockClient,
   makeConfig,
   makeErrorEvent,
+  makeCreatedEvent,
   type PromptCall,
 } from "./event-handler-test-fixtures.ts"
 
@@ -106,6 +107,10 @@ test("clears session state on session.deleted", async () => {
 
   await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
   await handler({ event: { type: "session.deleted", properties: { sessionID: "ses_1" } } })
+  // Per runtime-safety spec: a deleted child must never auto-recover on a
+  // later retryable session.error. A legitimate session.created with the same
+  // ID clears the suppression tombstone so dispatch can resume normally.
+  await handler(makeCreatedEvent("ses_1"))
   await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
 
   assert.equal(calls.length, 2)
@@ -121,6 +126,27 @@ test("no-op when agent has no fallback chain configured", async () => {
   await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "unknown-agent" }))
 
   assert.equal(calls.length, 0)
+})
+
+test("disabled generated review tier does not receive a fallback requirement and does not dispatch", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      oracle: {
+        model: "openai/gpt-5.5",
+        variants: { high: { model: "openai/gpt-5.6-sol", variant: "max" } },
+      },
+    },
+    disabledAgents: ["oracle-high"],
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_disabled_review", { status: 503 }, {
+    agent: "oracle-high",
+    model: { providerID: "openai", modelID: "gpt-5.6-sol" },
+  }))
+
+  assert.equal(calls.length, 0, "disabled generated review tier must not dispatch")
 })
 
 test("uses builtin agent requirement when no user override", async () => {

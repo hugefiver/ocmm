@@ -1,8 +1,6 @@
 import { z } from "zod"
 
 import { isReservedReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
-import { log } from "../shared/logger.ts"
-import { tolerantParse } from "./tolerant-parse.ts"
 
 export const VariantEnum = z.enum([
   "low",
@@ -260,12 +258,15 @@ export const ReviewVariantOverrideSchema = z.union([
   VariantEnum,
   z
     .object({
-      model: z.string().min(1).optional(),
+      model: z.string().min(1),
       variant: VariantEnum.optional(),
     })
-    .refine((value) => value.model !== undefined || value.variant !== undefined, {
-      message: "review variant object must contain model and/or variant",
-    }),
+    .strict(),
+  z
+    .object({
+      variant: VariantEnum,
+    })
+    .strict(),
 ])
 
 export const ReviewVariantsSchema = z
@@ -274,6 +275,7 @@ export const ReviewVariantsSchema = z
     high: ReviewVariantOverrideSchema.optional(),
     max: ReviewVariantOverrideSchema.optional(),
   })
+  .strict()
 
 export type ReviewVariantOverride = z.infer<typeof ReviewVariantOverrideSchema>
 export type ReviewVariants = z.infer<typeof ReviewVariantsSchema>
@@ -316,80 +318,47 @@ function resolvesNormalRequirement(
 }
 
 /**
- * Declarative `agents` map schema used only for JSON-schema generation
- * (`scripts/gen-schema.ts`). Mirrors the shape of {@link AgentsConfigSchema}
- * so IDEs and config consumers get full field-level autocomplete on each
- * agent entry. Runtime validation uses {@link AgentsConfigSchema}, which
- * tolerates per-entry errors by dropping offending entries instead of
- * failing the whole config.
+ * Declarative `agents` map schema used for JSON-schema generation. The
+ * runtime schema below adds cross-entry review-agent constraints that JSON
+ * Schema cannot express.
  */
 export const AgentsConfigSchemaForJsonSchema = z.record(z.string(), AgentEntrySchema)
 
 /**
- * Validated `agents` map. Reserved review-agent keys must be canonical
- * unsuffixed normal slots (`oracle`, `oracle-2nd` ... `oracle-9th`, or
- * `reviewer`); legacy/tier/alias spellings are dropped with a warning so
- * they no longer fail the whole config. `variants` is allowed only on
- * canonical Oracle/Reviewer normal-slot entries; on other entries it is
- * dropped with a warning. Later Oracle slots that do not resolve a normal
- * model requirement are dropped with a warning.
- *
- * Per-entry isolation: each agent entry is parsed independently. Invalid
- * fields are dropped before retrying; only structurally unrecoverable entries
- * are skipped rather than failing the entire `agents` map.
+ * Strict configuration boundary for every agent map. Generic runtime loading
+ * applies `tolerantParse` before this schema, but direct callers must receive
+ * errors for any malformed entry or invalid review-agent declaration.
  */
-const AgentsConfigSchema = z
-  .record(z.string(), z.unknown())
-  .transform((agents): Record<string, z.infer<typeof AgentEntrySchema>> => {
-    const cleaned: Record<string, z.infer<typeof AgentEntrySchema>> = {}
-    for (const [name, raw] of Object.entries(agents)) {
-      // First filter reserved-but-not-canonical keys before even parsing the
-      // entry - the review-name grammar reserves `reviewer-*` and `oracle-*-<tier>`.
-      const identity = parseReviewAgentName(name)
-      const canonicalNormal = identity?.logicalTier === "normal" && identity.canonicalName === name
-      if (isReservedReviewAgentName(name) && !canonicalNormal) {
-        log.warn(
-          `ocmm config: dropping agents.${name} - review-agent config keys must be canonical unsuffixed slots (oracle, oracle-2nd through oracle-9th, or reviewer). Use agents.${identity?.canonicalSlot ?? "reviewer"}.variants.${identity?.logicalTier ?? "high"} for tier overrides.`,
-        )
-        continue
-      }
-
-      const parsedEntry = tolerantParse(AgentEntrySchema, raw)
-      if (!parsedEntry.success) {
-        log.warn(
-          `ocmm config: dropping agents.${name} due to validation errors:`,
-          parsedEntry.issues.slice(0, 3),
-        )
-        continue
-      }
-      const entry = parsedEntry.data
-
-      // `variants` only on canonical Oracle/Reviewer normal-slot entries.
-      if (entry.variants !== undefined && !canonicalNormal) {
-        log.warn(
-          `ocmm config: stripping agents.${name}.variants - variants is allowed only on canonical Oracle or Reviewer normal-slot entries.`,
-        )
-        const { variants: _variants, ...rest } = entry
-        cleaned[name] = { ...rest }
-        continue
-      }
-
-      cleaned[name] = entry
+export const AgentsConfigSchema = z.record(z.string(), AgentEntrySchema).superRefine((agents, ctx) => {
+  for (const [name, entry] of Object.entries(agents)) {
+    const identity = parseReviewAgentName(name)
+    const canonicalNormal = identity?.logicalTier === "normal" && identity.canonicalName === name
+    if (isReservedReviewAgentName(name) && !canonicalNormal) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: "review-agent config keys must be canonical unsuffixed slots",
+      })
     }
-
-    // Later Oracle slots must resolve a normal requirement. Check after the
-    // cleaned map is built so alias chains across surviving entries work.
-    for (const name of Object.keys(cleaned)) {
-      if (LATER_ORACLE_SLOT_NAMES.has(name) && !resolvesNormalRequirement(name, cleaned)) {
-        log.warn(
-          `ocmm config: dropping agents.${name} - later Oracle slots must resolve a normal model requirement through model, fallbackModels, requirement, or alias.`,
-        )
-        delete cleaned[name]
-      }
+    if (entry.variants !== undefined && !canonicalNormal) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name, "variants"],
+        message: "variants is allowed only on canonical Oracle or Reviewer normal-slot entries",
+      })
     }
+  }
 
-    return cleaned
-  })
+  for (const name of Object.keys(agents)) {
+    if (LATER_ORACLE_SLOT_NAMES.has(name) && !resolvesNormalRequirement(name, agents)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: "later Oracle slots must resolve a normal model requirement through model, fallbackModels, requirement, or alias",
+      })
+    }
+  }
+})
 
 /**
  * Reactive runtime-fallback config.

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { deepMerge, loadConfig, loadProfilesFromDir, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
+import { deepMerge, loadConfig, loadProfileEntriesFromDir, loadProfilesFromDir, stripJsoncCommentsAndTrailingCommas } from "./load.ts"
 import { defaultConfig } from "./schema.ts"
 
 test("stripJsoncCommentsAndTrailingCommas keeps strings intact", () => {
@@ -161,7 +161,7 @@ test("codex host reads CODEX_HOME and project .codex config without changing ope
     assert.equal(loaded.config.workflow, "v1")
     assert.equal(loaded.config.debug, true)
 
-    const opencodeLoaded = loadConfig({ cwd })
+    const opencodeLoaded = loadConfig({ cwd, includeUser: false })
     assert.equal(opencodeLoaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
     assert.equal(opencodeLoaded.config.workflow, "omo")
     assert.equal(opencodeLoaded.config.debug, false)
@@ -603,6 +603,86 @@ test("loadConfig silently ignores missing directory profile", () => {
   } finally {
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = prevXdg
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("loadProfileEntriesFromDir retains the winning profile source path", () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-profile-source-"))
+  try {
+    writeFileSync(join(root, "focused.json"), JSON.stringify({ debug: false }))
+    writeFileSync(join(root, "focused.jsonc"), JSON.stringify({ debug: true }))
+    const loaded = loadProfileEntriesFromDir(root)
+    assert.equal(loaded.focused?.source, join(root, "focused.jsonc"))
+    assert.deepEqual(loaded.focused?.value, { debug: true })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadConfig tolerates review-only violations without discarding valid siblings", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-review-validation-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-review-validation-cwd-"))
+  const configDir = join(xdg, "opencode")
+  mkdirSync(configDir, { recursive: true })
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  process.env.XDG_CONFIG_HOME = xdg
+  try {
+    const scenarios = [
+      {
+        agents: { "reviewer-high": { model: "openai/gpt-5.6-sol" } },
+        verify: (config: ReturnType<typeof loadConfig>["config"]) => {
+          assert.equal(config.agents?.["reviewer-high"], undefined)
+        },
+      },
+      {
+        agents: { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } },
+        verify: (config: ReturnType<typeof loadConfig>["config"]) => {
+          assert.equal(config.agents?.oracle?.model, "openai/gpt-5.6-terra")
+          assert.equal(config.agents?.oracle?.variants?.high, undefined)
+        },
+      },
+      {
+        agents: { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
+        verify: (config: ReturnType<typeof loadConfig>["config"]) => {
+          assert.equal(config.agents?.planner?.model, "openai/gpt-5.6-sol")
+          assert.equal(config.agents?.planner?.variants, undefined)
+        },
+      },
+      {
+        agents: { "oracle-3rd": { description: "missing normal requirement" } },
+        verify: (config: ReturnType<typeof loadConfig>["config"]) => {
+          assert.equal(config.agents?.["oracle-3rd"], undefined)
+        },
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      writeFileSync(join(configDir, "ocmm.jsonc"), JSON.stringify({
+        workflow: "omo",
+        agents: {
+          orchestrator: { model: "openai/gpt-5.6-sol" },
+          ...scenario.agents,
+        },
+      }))
+      const config = loadConfig({ cwd }).config
+      assert.equal(config.workflow, "omo", JSON.stringify(scenario.agents))
+      assert.equal(config.agents?.orchestrator?.model, "openai/gpt-5.6-sol")
+      scenario.verify(config)
+    }
+
+    writeFileSync(join(configDir, "ocmm.jsonc"), JSON.stringify({
+      workflow: "omo",
+      agents: { orchestrator: { model: "openai/gpt-5.6-terra", temperature: 3 } },
+    }))
+    const tolerant = loadConfig({ cwd }).config
+    assert.equal(tolerant.workflow, "omo")
+    assert.equal(tolerant.agents?.orchestrator?.model, "openai/gpt-5.6-terra")
+    assert.equal(tolerant.agents?.orchestrator?.temperature, undefined)
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
     rmSync(xdg, { recursive: true, force: true })
     rmSync(cwd, { recursive: true, force: true })
   }

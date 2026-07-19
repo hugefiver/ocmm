@@ -111,4 +111,5 @@ export type ResolutionSource =
   | "agent-default"
   | "category-default"
   | "input-variant"
+  | "host-profile-floor"
   | "no-op"

@@ -22,4 +22,9 @@ export {
   type DispatchArgs,
   type OcmmClient,
 } from "./dispatcher.ts"
-export { createRuntimeFallbackEventHandler } from "./event-handler.ts"
+export {
+  createRuntimeFallbackRuntime,
+  createRuntimeFallbackEventHandler,
+  type RuntimeFallbackRuntime,
+  type RuntimeFallbackDeps,
+} from "./event-handler.ts"

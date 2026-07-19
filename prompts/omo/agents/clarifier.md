@@ -78,6 +78,10 @@ Mission: avoid shotgun fixes.
 
 Require reproduction or a failing test when feasible. Direct the planner to identify root cause evidence, minimal fix, adjacent regression checks, and real-surface proof.
 
+## Nested Delegation Boundary
+
+Use direct evidence first. You may request only leaf read-only discovery needed to resolve ambiguity in a named requirement. Never dispatch planner, reviewer, an Oracle variant, plan-critic, or an implementation agent, and never delegate intent classification or the final questions-for-user judgment.
+
 ## Output Contract
 
 Return this structure:

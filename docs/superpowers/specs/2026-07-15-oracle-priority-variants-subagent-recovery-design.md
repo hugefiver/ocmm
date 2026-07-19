@@ -1,0 +1,469 @@
+# Oracle Priority, Review Variants, and Subagent Recovery Design
+
+## Goal
+
+Replace the old capability-ranked `oracle-high` concept with an ordered Oracle review-model priority list, add configurable logical review tiers for Oracle and Reviewer agents, recover safely from retryable subagent interruptions, and tighten GPT-5.6 delegation guidance.
+
+The implementation must preserve current review-effort safety floors, extend the in-progress subagent 429 runtime fallback rather than competing with it, and keep OpenCode and generated Codex behavior aligned.
+
+## Scope
+
+This design covers four related surfaces:
+
+1. Up to nine ordered Oracle model slots.
+2. Logical `low` / `normal` / `high` / `max` agent variants for every configured Oracle slot and for `reviewer`.
+3. A disableable `subagent-interruption-recovery` hook backed by existing runtime-fallback lifecycle state.
+4. GPT-5.6 prompt rules for lower question frequency and bounded nested delegation.
+
+It does not implement the feature. The current session ends after the implementation plan.
+
+## Context and Constraints
+
+- `oracle-high` currently means a supplemental high-intensity third reviewer with a Sol-lane/max default. That meaning is removed.
+- `src/config/schema.ts`, built-in agent data, config registration, review floors, model upgrades, permissions, and Codex generation currently identify review agents with static string lists.
+- `AgentEntry.variant` is a native model variant. The requested logical tiers are a separate concept and must not be added to the existing `Variant` type.
+- The runtime fallback already owns `session.error`, `session.idle`, and `session.deleted`. A separate interruption state machine would create duplicate dispatch and budget races.
+- The approved subagent 429 design and plan are already being implemented. `src/runtime-fallback/error-classifier.ts` and its tests contain unrelated in-progress work and are the dependency baseline for this feature.
+- Changes under `prompts/v1/` or `skills/v1/` require a synchronized `docs/v1-maintenance.md` update. Changes under `prompts/omo/` require `docs/prompt-sync.md`. Schema and Codex source changes require regenerated artifacts.
+- No Git write is authorized in this session.
+
+## Considered Approaches
+
+### 1. Bounded static slots with generated logical tiers
+
+Use canonical configuration names `oracle`, `oracle-2nd`, through `oracle-9th`. Expand configured logical tiers into runtime agent names.
+
+Advantages:
+
+- Stable names for OpenCode task dispatch, permissions, disabled agents, logs, and Codex profiles.
+- A strict maximum of nine is enforceable without introducing array merge semantics.
+- Existing agent configuration remains the primary entry point.
+- Name parsing can replace scattered static review-agent lists.
+
+Disadvantage: the schema and registration code must recognize a bounded family of names.
+
+### 2. An `oracles: []` configuration array
+
+An array is compact, but every element still needs a generated task/Codex name. Profile overlays would need index-based replacement or custom merge semantics, and supporting both the array and existing `agents` entries would create precedence ambiguity.
+
+### 3. Arbitrary agent names tagged with review metadata
+
+This is the most extensible option, but it changes the current agent contract, requires role metadata throughout routing and permissions, and does not serve the explicit nine-slot bound better than static slots.
+
+### Decision
+
+Use bounded static slots with generated logical tiers. It is the smallest architecture that cleanly separates review-model priority from task-complexity selection.
+
+## Naming Contract
+
+### Oracle priority axis
+
+Canonical Oracle slot names are:
+
+```text
+oracle
+oracle-2nd
+oracle-3rd
+oracle-4th
+oracle-5th
+oracle-6th
+oracle-7th
+oracle-8th
+oracle-9th
+```
+
+`oracle-second` is accepted as a configuration or runtime invocation alias for `oracle-2nd`, then canonicalized immediately. It is never retained as a separate entry and does not produce a duplicate Codex profile. No word-form aliases are added for later slots.
+
+The ordinal is model priority, highest first. It does not imply capability or reasoning effort. A single Oracle review selects the first configured and available slot. When a workflow intentionally requests multiple independent Oracle reviews, it selects the first N available slots in order. Merely configuring multiple slots never causes automatic fan-out.
+
+`oracle-2nd` replaces the built-in slot currently named `oracle-high`. Slots 3 through 9 are registered only when explicitly configured.
+
+### Logical-tier axis
+
+Logical tiers are:
+
+```text
+low < normal < high < max
+```
+
+`normal` is represented by the unsuffixed slot name. Other configured tiers generate suffixes:
+
+```text
+oracle-low
+oracle-high
+oracle-max
+oracle-2nd-low
+oracle-2nd-high
+oracle-2nd-max
+reviewer-low
+reviewer-high
+reviewer-max
+```
+
+Only explicitly configured tier overrides are generated by OCMM synthesis. No unused tier profiles are synthesized. This does not remove a valid host-provided parsed review profile: host profiles remain available unless an explicit `disabledAgents` policy (including its canonical slot) disables them, and they still receive parser-based review floors.
+
+The logical tier guides the orchestrating model's choice based on task complexity and rigor. It is independent of the selected model's native `variant` value.
+
+### Central name parser
+
+Add one review-agent name module that parses and canonicalizes names into:
+
+```ts
+type ReviewAgentIdentity = {
+  role: "oracle" | "reviewer"
+  ordinal: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+  logicalTier: "low" | "normal" | "high" | "max"
+  canonicalSlot: string
+  canonicalName: string
+}
+```
+
+Reviewer names are valid only with `ordinal: 1`. The module also exposes predicates and ordered Oracle-slot enumeration. Config registration, disabled-agent checks, default permissions, route selection, model upgrades, chat review floors, and Codex generation consume this module instead of maintaining independent review-name sets.
+
+`plan-critic` remains a review-floor agent but is not part of this Oracle/Reviewer naming grammar.
+
+## Configuration Contract
+
+### Variant override schema
+
+`AgentEntrySchema` gains an optional `variants` field only for review-agent entries after semantic validation:
+
+```ts
+type ReviewVariantOverride =
+  | Variant
+  | {
+      model?: string
+      variant?: Variant
+    }
+
+type ReviewVariants = {
+  low?: ReviewVariantOverride
+  high?: ReviewVariantOverride
+  max?: ReviewVariantOverride
+}
+```
+
+The object form is strict and must contain at least one of `model` or `variant`. `normal` is deliberately absent because the top-level entry is the normal tier. A `variants` field on a non-Oracle/non-Reviewer agent is a declarative schema error.
+
+The strict declarative boundary and runtime loading policy are intentionally different. `schema.json` and direct `OcmmConfigSchema` callers reject malformed review names, variants, and unresolved later slots. Ordinary `loadConfig()` continues the repository's tolerant layered-loading contract: it removes only the invalid review field or entry and preserves valid siblings and lower-priority values. A legacy/canonical spelling collision remains fail-closed because choosing either migrated value would be ambiguous.
+
+The normal entry retains all current `AgentEntry` capabilities, including alias, requirement, fallbacks, permissions, and prompt overrides. Generated tiers inherit the normal entry's description, prompt, permissions, tools, skills, and inference controls.
+
+Resolution rules are:
+
+1. A string tier value reuses the normal model requirement and overrides its native variant.
+2. An object tier value clones the normal model requirement, then replaces the primary model and/or native variant.
+3. When an object changes only the model, the normal native variant is retained.
+4. Normal fallback entries remain available after a primary-model override; the override does not mutate the source normal entry.
+5. A tier cannot be generated if the normal slot cannot resolve a model requirement.
+6. Existing review-agent xhigh-equivalent floors still apply after tier resolution. Therefore logical `low` means a lower-cost or less-capable configured review route, not permission to bypass the review safety floor.
+
+Example:
+
+```jsonc
+{
+  "agents": {
+    "oracle": {
+      "model": "openai/gpt-5.6-terra",
+      "variant": "xhigh",
+      "variants": {
+        "high": "max",
+        "max": {
+          "model": "openai/gpt-5.6-sol",
+          "variant": "max"
+        }
+      }
+    },
+    "oracle-2nd": {
+      "model": "anthropic/claude-opus-4-7",
+      "variant": "xhigh",
+      "variants": {
+        "max": "max"
+      }
+    },
+    "reviewer": {
+      "model": "google/gemini-3.1-pro",
+      "variant": "xhigh",
+      "variants": {
+        "high": {
+          "model": "openai/gpt-5.6-sol",
+          "variant": "max"
+        }
+      }
+    }
+  }
+}
+```
+
+This registers `oracle`, `oracle-high`, `oracle-max`, `oracle-2nd`, `oracle-2nd-max`, `reviewer`, and `reviewer-high`.
+
+### Slot bounds and aliases
+
+- `oracle-10th` and higher are rejected.
+- `oracle-2` and arbitrary spelling variants are rejected.
+- `agents.oracle-second` is normalized to `agents.oracle-2nd` before schema validation or accepted by a dedicated preprocessing alias, but never retained as a second entry.
+- If alias and canonical configuration keys are both present, loading fails with a precise conflict rather than merging them.
+
+### Legacy `oracle-high` migration
+
+The old and new meanings conflict, so compatibility is surface-specific:
+
+| Surface | Behavior |
+|---|---|
+| Legacy config key `agents.oracle-high` | Pre-schema migration to `agents.oracle-2nd` with a deprecation warning |
+| Both `agents.oracle-high` and `agents.oracle-2nd` | Configuration error; no silent precedence |
+| Runtime `task(subagent_type="oracle-high")` | New meaning: first Oracle slot, logical high tier |
+| Runtime `task(subagent_type="oracle-second")` | Alias of `oracle-2nd` |
+| `disabledAgents: ["oracle-high"]` | Disables the generated first-slot high tier |
+| Disable former supplemental slot | Use `disabledAgents: ["oracle-2nd"]` |
+| Codex `dw-oracle-high` | New logical high profile, generated only when configured |
+| Codex second slot | `dw-oracle-2nd`; no duplicate `dw-oracle-second` file |
+
+Migration occurs before user/project/profile merging is finalized so aliases and legacy keys obey one conflict policy across all config sources. The migration warning identifies the source path when available.
+
+## Registration and Routing Architecture
+
+### Built-in agent catalog
+
+- Keep `oracle` as the first self-supervision/cross-check slot.
+- Rename the current `oracle-high` built-in to `oracle-2nd`, retain the reviewer prompt source, and remove capability-ranked wording and implicit max semantics.
+- Give `oracle-2nd` a normal review-effort default. Its model chain may retain the previous secondary lane as a default model choice, but documentation describes it only as the second-priority configured review model.
+- Do not add built-in entries for slots 3 through 9.
+- Keep `reviewer` as the external review role.
+
+### Expansion phase
+
+Introduce a pure expansion step between config normalization and agent registration:
+
+1. Canonicalize legacy and alias keys.
+2. Resolve each configured normal review slot with existing shorthand/alias behavior.
+3. Emit a normal registration candidate.
+4. For each configured logical tier, clone the normalized candidate and apply its model/native-variant override.
+5. Apply `disabledAgents` to canonical runtime names.
+6. Register the surviving candidates with inherited reviewer prompts and review-only permissions.
+
+The same expansion function supplies Codex generation so OpenCode and Codex cannot disagree about which profiles exist.
+
+### Model selection and review floors
+
+- Model-upgrade lane selection operates on `canonicalSlot`, ignoring logical-tier suffixes.
+- `oracle` keeps its cross-check/Terra successor behavior.
+- `oracle-2nd` retains the secondary configured lane. Later slots use their explicit configured requirement and do not receive an invented lane.
+- All parsed Oracle/Reviewer names receive current review-agent output floors.
+- `plan-critic` keeps its existing floor through an explicit non-name-parser branch.
+- Explicit logical-tier model selection runs before native variant normalization and output floors.
+
+## Review Workflow Semantics
+
+Model-facing review guidance changes from fixed `oracle-high` triple-review rules to ordered selection:
+
+- Simple final acceptance defaults to the first available `oracle` slot at normal tier.
+- Complex/large final acceptance keeps `oracle + reviewer` as the normal independent pair, selecting an appropriate logical tier for each.
+- Additional Oracle passes use `oracle-2nd` onward in priority order only when the workflow needs more independent review evidence.
+- A higher logical tier may be selected without selecting more reviewers.
+- A later Oracle slot is not described as stronger than an earlier slot.
+- Availability, explicit configuration, and disabled state remain gates for non-built-in slots and generated tiers.
+
+## Subagent Interruption Recovery Hook
+
+### Hook surface
+
+Add `subagent-interruption-recovery` to `HOOK_NAMES`. It is enabled by default and can be disabled through `disabledHooks`.
+
+The hook has two adapters sharing the existing runtime-fallback controller state:
+
+1. An event adapter observes child-session lifecycle and provider errors.
+2. A `tool.execute.after` output adapter recognizes successful task-tool transport responses that report an interruption and emits a precise continuation notice when a resumable task identifier is present.
+
+The output adapter is not an error detector of record and never dispatches a retry by itself. OpenCode does not guarantee `tool.execute.after` for failed calls.
+
+### State ownership
+
+The in-progress subagent 429 controller remains the owner of child retry scheduling, model-switch preparation, dispatch generations, and retry budgets. Interruption correlation extends that controller/session record with:
+
+```ts
+type SubagentInterruptionCorrelation = {
+  childSessionID: string
+  parentSessionID: string
+  callID?: string
+  agent?: string
+  taskID?: string
+  terminalTaskErrorObserved: boolean
+  retryableChildErrorObserved: boolean
+  explicitlyAborted: boolean
+}
+```
+
+`childSessionID` is the primary key. `callID` deduplicates parent task events but is not trusted as the sole identity. No second retry budget or fallback-chain index is introduced.
+
+### Event evidence
+
+- `session.created` records parent/child lineage using the same supported parent-ID spellings as the subagent depth guard.
+- Child `session.error` is the only provider-error evidence. Existing error classification decides whether it is retryable, and existing 429 ownership rules decide whether same-model retry or generic model fallback owns it.
+- `message.part.updated` may associate a parent `task` tool part in terminal error state with a child session/call/task identifier. It does not independently authorize a retry.
+- `session.idle` advances existing prior-error-idle barriers and may establish that no more provider outcome is pending.
+- `session.deleted` clears timers and correlation state. A deleted child is not recreated automatically.
+- Duplicate or out-of-order events are ignored by controller generation and object-identity checks.
+
+### Recovery decisions
+
+Automatic retry or fallback occurs only when all of the following are true:
+
+1. The hook and runtime fallback are enabled for the event path.
+2. The session is a correlated child session.
+3. A child `session.error` was classified as retryable.
+4. The failure is not an explicit abort, permission denial, unknown agent, deleted session, or exhausted retry/fallback budget.
+5. The existing controller establishes ownership so the same failure consumes only one retry path.
+
+If a task result says `Tool execution aborted` or equivalent without correlated retryable child evidence, the output adapter preserves the original result and appends a continuation notice only when it can expose an existing `task_id`. It does not create a new task or automatically prompt the parent.
+
+Explicit user abort never receives an automatic retry or a misleading recovery notice. Ordinary empty output remains owned by `empty-task-response-detector` and is not treated as interruption evidence.
+
+### Parent handoff proof
+
+The implementation must not assume that a child response produced after the parent task part enters terminal error can return through the original tool call. Before enabling automatic handling for that ordering, an isolated live OpenCode test must prove one of these outcomes:
+
+1. The original task call receives the recovered child result, or
+2. The parent can resume the same child through the emitted `task_id` without creating a duplicate session.
+
+If neither is true, automatic recovery stops at child stabilization and the parent receives only the resumable notice. No synthetic parent prompt is added by this feature.
+
+## GPT-5.6 Prompt Contract
+
+Update GPT-5.6 deepwork prompts for v1, omo, and Codex with these rules:
+
+### Questions
+
+- When facts are clear, answer or proceed directly.
+- When a safe default exists, state the assumption briefly and continue.
+- Ask the user only when the choice changes the deliverable shape, required information cannot be found with available tools, or proceeding risks material rework.
+- Do not ask for confirmation after routine discovery, planning, or verification milestones.
+
+### Nested delegation
+
+The orchestrator owns workflow-agent composition. Role agents may use leaf research delegation only within these bounds:
+
+| Current role | Allowed nested delegation | Prohibited by default |
+|---|---|---|
+| orchestrator | Any justified agent under normal routing and skill gates | Speculative delegation without a distinct deliverable |
+| planner | `code-search`, `doc-search`, and equivalent read-only fact gathering; one reviewer consultation only for a concrete blocking architecture decision | planner, oracle, plan-critic, implementation agents, routine reviewer self-checks |
+| reviewer / oracle variants | Read-only source or documentation lookup only when required to verify a finding | planner, reviewer-to-oracle, oracle-to-reviewer, plan-critic, implementation agents |
+| clarifier | Read-only discovery needed to resolve ambiguity | planner, reviewer/oracle, plan-critic, implementation agents |
+| plan-critic | Read-only lookup needed to verify plan claims | planner, reviewer/oracle, another plan-critic, implementation agents |
+
+Every allowed nested call still requires a distinct deliverable and must respect depth limits. A role agent does not delegate its defining judgment to another workflow role.
+
+Prompt edits must remain model-facing as `deepwork`; `v1` appears only as a path/version label in maintenance documentation.
+
+## Error Handling
+
+- Invalid Oracle ordinal or tier names fail direct schema validation; runtime loading warns and discards only the invalid field or entry.
+- A generated tier without a resolvable normal requirement is rejected with the slot and tier named.
+- Legacy/canonical config collisions fail instead of silently overriding and are the only review-migration error that falls back to defaults.
+- Unsupported native `max` continues to cap through existing variant translation.
+- A missing later Oracle slot is skipped; it does not block an earlier slot or Reviewer.
+- Runtime interruption state is session-local and cleared on deletion. Plugin process restart does not promise persistent retries.
+- Unknown or malformed OpenCode event payloads are ignored and logged at debug level.
+- Dispatch failure follows existing controller settlement rules and does not consume two budgets.
+
+## Testing Strategy
+
+### Name and configuration tests
+
+- Parse every canonical Oracle slot and every logical tier combination.
+- Accept `oracle-second` as a runtime alias and reject invalid or out-of-range ordinals.
+- Validate strict `variants` values, object non-emptiness, and non-review rejection.
+- Prove legacy `oracle-high` migration, warning, and collision failure across base/profile config.
+- Regenerate and inspect `schema.json`.
+
+### Expansion, routing, and permissions tests
+
+- Expand only configured tiers and slots.
+- Prove normal/tier requirement inheritance and non-mutation.
+- Prove first-available and first-N priority ordering without automatic fan-out.
+- Apply review-only permissions and xhigh-equivalent floors to every parsed generated name.
+- Preserve Oracle first-slot cross-check upgrades, second-slot defaults, explicit later-slot models, and `plan-critic` floors.
+- Verify `disabledAgents` independently disables a slot or one generated tier.
+
+### Codex tests
+
+- Generate canonical `dw-oracle-2nd` and configured tier profiles without alias duplicates.
+- Remove old supplemental-capability guidance.
+- Verify ordered Oracle selection and logical-tier guidance.
+- Verify native variant mapping and review floors for GPT-5.6 and a non-GPT family.
+- Regenerate `.agents/plugins/marketplace.json`, `.codex/agents`, and `plugins/deepwork`.
+
+### Interruption tests
+
+- Correlated retryable child error recovers exactly once.
+- Parent terminal-error and child error events work in both arrival orders.
+- Repeated `message.part.updated`, idle, and error events are idempotent.
+- Existing 429 same-model retry and generic model fallback never both own one error.
+- An interruption output with a task ID gets a continuation notice but no blind dispatch.
+- An interruption output without evidence or task ID remains unchanged except existing detector behavior.
+- Explicit abort, permission denial, unknown agent, deletion, empty output, and exhausted budgets do not recover.
+- Disabled hook preserves existing runtime behavior.
+
+### Prompt tests
+
+- Loader/contract tests assert direct progress under clear facts and the role delegation matrix.
+- v1, omo, and Codex GPT-5.6 prompts remain synchronized in intent.
+- Review skills no longer describe `oracle-high` as a stronger third reviewer.
+
+### Real-surface verification
+
+Use an isolated OpenCode XDG environment to capture event payloads and verify:
+
+1. A retryable child provider error recovers or cleanly falls back.
+2. A transport interruption with a reusable task ID can continue the same child.
+3. An explicit user abort does not recover.
+
+Then run schema/Codex generation, targeted tests, `pnpm run typecheck`, `pnpm test`, and `pnpm run build`.
+
+## Documentation and Generated Artifacts
+
+Update active user and maintainer guidance, including:
+
+- `README.md`
+- `AGENTS.md`
+- `docs/architecture.md`
+- `examples/ocmm.example.jsonc`
+- `docs/v1-maintenance.md`
+- `docs/prompt-sync.md`
+- `skills/v1/requesting-code-review/SKILL.md`
+- `skills/v1/subagent-driven-development/SKILL.md`
+- affected GPT-5.6 prompts
+- `schema.json`
+- `.agents/plugins/marketplace.json`
+- `.codex/agents`
+- `plugins/deepwork`
+
+The old `2026-07-14-oracle-high-review` documents remain historical records; new active guidance supersedes their semantics.
+
+## Implementation Ordering and Integration Boundary
+
+1. Wait for or integrate against the current subagent 429 work; do not overwrite its dirty classifier changes.
+2. Implement the review-name parser and config migration/variant schema.
+3. Implement pure review-profile expansion and migrate registration/routing/permissions to it.
+4. Update Codex generation and review workflow guidance.
+5. Extend the existing runtime controller with interruption correlation and add the output adapter.
+6. Update GPT-5.6 prompts and maintenance synchronization docs.
+7. Regenerate artifacts and run full verification plus isolated live integration.
+
+## Out of Scope
+
+- More than nine Oracle slots.
+- Reviewer ordinal slots.
+- Automatic multi-review fan-out solely because multiple Oracle slots exist.
+- Bypassing review-effort floors with a logical low tier.
+- Persistent recovery across plugin process restarts.
+- Recreating deleted child sessions or retrying explicit user cancellation.
+- A new general workflow scheduler or a second runtime fallback state machine.
+- Git commits, pushes, or tags without separate explicit authorization.
+
+## Self-Review
+
+- Placeholder scan: no placeholders, TODOs, or unresolved sections remain.
+- Internal consistency: ordinal priority, logical tier, and native model variant are separate across configuration, registration, routing, and documentation.
+- Scope check: all four requested changes share agent orchestration and runtime safety boundaries; no unrelated refactor is included.
+- Ambiguity check: canonical names, aliases, migration behavior, Reviewer scope, recovery evidence, abort behavior, and 429 ownership are explicit.

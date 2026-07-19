@@ -14,8 +14,8 @@ description: Use when executing implementation plans with independent tasks in t
       (no pre-judging, no open-ended directives, verbatim global constraints, no
       history pasting, findings handling by severity); Narration discipline rule;
       task-type analysis hint (prefer dispatching-parallel-agents for independent
-      tasks); Final Acceptance Review stage updated with optional `oracle-high`
-      third reviewer gate. v1 intentionally replaces per-task reviewer loops with
+      tasks); Final Acceptance Review stage updated with ordered Oracle slot
+      priority and logical tiers. v1 intentionally replaces per-task reviewer loops with
       completion/integration checks plus one final acceptance review; ⚠️ Items
       section (reviewer "Cannot verify from diff" items). Did NOT sync:
      review-package/task-brief bash scripts (Windows incompatible); progress
@@ -212,15 +212,22 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
 
 After all plan tasks are marked complete, before declaring the work done, run a final acceptance review over the full change set. This is distinct from completion/integration checks — it evaluates the work as a whole.
 
-**1. Assess complexity:**
+**1. Assess complexity and choose reviewers deliberately:**
 
-| Complexity | Signal | Reviewer(s) |
+Review selection has two independent axes: role/model priority and logical rigor.
+
+- Oracle slots are ordered by selection priority as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
+- `oracle-2nd` and later slots mean lower selection priority, never stronger capability.
+- Logical rigor tiers are `low`, `normal`, `high`, `max` (`normal` is the unsuffixed profile; other tiers are used only when configured and available).
+
+| Complexity / evidence shape | Reviewer(s) | Tier choice |
 |---|---|---|
-| Simple | 1-2 tasks, single module, no architectural change | `oracle` (self-supervision) |
-| Complex | 3+ tasks, cross-module, architectural change, security/performance sensitive, migration | `oracle` + `reviewer` (both, in parallel) |
-| High-risk / very large final gate with explicit triple-review configuration | Complex/large work where `oracle-high` is explicitly configured, available, and not disabled | `oracle` + `reviewer` + `oracle-high` (all three, in parallel) |
+| Simple | 1-2 tasks, single module, no architectural change | first available Oracle at `normal` |
+| Complex / cross-module | 3+ tasks, cross-module integration, architectural change, migration | first available Oracle + `reviewer` in parallel; configured `high`, otherwise `normal` |
+| Security / performance / data-loss / release / runtime-safety | high-impact risk profile regardless of file count | first available Oracle + `reviewer` in parallel; configured `max`, otherwise `high`, otherwise `normal` |
+| Additional evidence requested | user/orchestrator asks for more independent model evidence | additional Oracle slots in order (start with `oracle-2nd`, then later configured/available slots in ordinal order) while keeping the intentionally selected tier |
 
-The orchestrator judges complexity from the plan scope and actual changes. When unsure, upgrade to `oracle` + `reviewer`. Add `oracle-high` only when it is explicitly configured by user/profile, available in the current dispatch surface/catalog, and not disabled; built-in or profile existence alone must not force three-review dispatch.
+The orchestrator performs this selection after all tasks complete. Do not fan out reviews merely because several Oracle slots or tiers are registered. Collect only intentionally requested reviews. A later Oracle slot is another configured model perspective, not a stronger reviewer.
 
 **2. Dispatch the acceptance review:**
 
@@ -230,9 +237,9 @@ Use the `requesting-code-review` skill. Pass either a committed range or an unco
 
 Do not require implementation subagents to commit, stage, or push merely to create review SHAs. The orchestrator owns any Git write and performs it only after explicit user authorization.
 
-For two-reviewer dispatch: spawn two subagents in parallel (one `oracle`, one `reviewer`), each with the same review input and context. Collect both feedback sets before proceeding.
+For baseline dispatch: use the selected first available Oracle, and add `reviewer` only when the complexity table says so.
 
-For three-reviewer dispatch: spawn three subagents in parallel (one `oracle`, one `reviewer`, one `oracle-high`) only when `oracle-high` is explicitly configured, available, and not disabled. Collect all feedback sets before proceeding. Do not force a third reviewer merely because the profile exists.
+For additional evidence: add the next configured/available Oracle slot(s) in ordinal order, each with the same review input and context. Do not add slots automatically without an intentional evidence need.
 
 **3. Process feedback:**
 

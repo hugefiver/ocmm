@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import type { ModelRequirement } from "../shared/types.ts"
+import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { matchRequirementSuccessor, selectCatalogModel } from "./model-upgrades.ts"
 
 const reviewerRequirement: ModelRequirement = {
@@ -53,21 +54,24 @@ test("oracle catalog selection prefers exact cross-generation GPT fallbacks befo
   )
 })
 
-test("oracle-high catalog selection uses Sol lane", () => {
-  const oracleHighRequirement: ModelRequirement = {
-    fallbackChain: [
-      { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
-    ],
-  }
+test("review catalog lanes ignore logical tier suffixes", () => {
+  const target = { provider: { openai: { models: {
+    "gpt-5.7-sol": {}, "gpt-5.7-terra": {},
+  } } } }
+  const oracle = BUILTIN_AGENT_INDEX.get("oracle")!.requirement
+  const second = BUILTIN_AGENT_INDEX.get("oracle-2nd")!.requirement
+  assert.equal(selectCatalogModel(target, "oracle-low", oracle), "openai/gpt-5.7-terra")
+  assert.equal(selectCatalogModel(target, "oracle-high", oracle), "openai/gpt-5.7-terra")
+  assert.equal(selectCatalogModel(target, "oracle-2nd-max", second), "openai/gpt-5.7-sol")
+  assert.equal(selectCatalogModel(target, "reviewer-high", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement), "openai/gpt-5.7-sol")
+})
 
-  assert.equal(
-    selectCatalogModel({ provider: { openai: { models: { "gpt-5.6-sol": {} } } } }, "oracle-high", oracleHighRequirement),
-    "openai/gpt-5.6-sol",
-  )
-  assert.equal(
-    selectCatalogModel({ provider: { openai: { models: { "gpt-5.7-terra": {} } } } }, "oracle-high", oracleHighRequirement),
-    undefined,
-  )
+test("later Oracle slots receive no invented GPT lane", () => {
+  const requirement: ModelRequirement = {
+    fallbackChain: [{ providers: ["openai"], model: "gpt-5.5", variant: "xhigh" as const }],
+  }
+  const target = { provider: { openai: { models: { "gpt-5.7-sol": {}, "gpt-5.7-terra": {} } } } }
+  assert.equal(selectCatalogModel(target, "oracle-3rd", requirement), undefined)
 })
 
 test("successor matching prefers same GPT lane baseline before cross-generation entries", () => {

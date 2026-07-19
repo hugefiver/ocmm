@@ -222,7 +222,7 @@ The Codex plugin exposes:
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
 - a `deepwork` skill that maps ocmm's planning/delegation semantics to Codex tools;
 - plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
-- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle`, `dw-oracle-high`, and `dw-creative`.
+- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`; configured review `variants` can also emit logical tier profiles such as `dw-oracle-high` and `dw-oracle-2nd-low`.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 
@@ -343,6 +343,66 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 }
 ```
 
+### Canonical review-slot configuration
+
+```jsonc
+{
+  "agents": {
+    "oracle": {
+      "model": "openai/gpt-5.6-terra",
+      "variant": "xhigh",
+      "variants": {
+        "low": "high",
+        "high": "max",
+        "max": { "model": "openai/gpt-5.6-sol", "variant": "max" }
+      }
+    },
+    "oracle-2nd": {
+      "model": "anthropic/claude-opus-4-7",
+      "variant": "xhigh",
+      "variants": { "max": "max" }
+    },
+    "oracle-3rd": { "model": "google/gemini-3.1-pro" },
+    "reviewer": {
+      "model": "openai/gpt-5.6-sol",
+      "variants": { "high": { "variant": "max" } }
+    }
+  }
+}
+```
+
+- Unsuffixed slot names (`oracle`, `oracle-2nd`, `oracle-3rd`, `reviewer`) mean logical **normal** tier.
+- Logical tier (`-low`/`-high`/`-max`) and native provider model `variant` are separate controls.
+- Review slots are priority order, not capability ranking.
+- Slots `oracle-3rd` through `oracle-9th` require explicit config.
+- Multiple configured review profiles do not fan out automatically; dispatch still uses one selected profile.
+- `reviewer` has no ordinal slot naming.
+- xhigh-equivalent review floors still apply even when a logical `low` tier is selected.
+- `agents.oracle-high` is a deprecated config spelling migrated to `agents.oracle-2nd`, while runtime `oracle-high` remains the first-slot logical high tier.
+- Alias/canonical collisions fail validation.
+- `schema.json` and direct `OcmmConfigSchema` parsing remain strict. Runtime `loadConfig()` is tolerant: a schema-mismatched review field or entry is discarded locally while valid siblings and lower-priority values remain loaded. Only ambiguous alias/canonical migration collisions fall back to defaults.
+
+### Disabling review slots and interruption recovery
+
+```jsonc
+{
+  "disabledAgents": ["oracle-2nd", "oracle-high"],
+  "disabledHooks": ["subagent-interruption-recovery"]
+}
+```
+
+- `oracle-2nd` disables that entire second review slot, including its logical tier profiles.
+- `oracle-high` disables only the first-slot logical high tier profile; it does not disable `oracle` normal or other slots.
+- `subagent-interruption-recovery` is optional evidence correlation + resume-note behavior layered on top of existing fallback flow.
+
+Interruption recovery behavior:
+
+1. Reuses the existing dedicated 429/generic fallback controller and retry budgets.
+2. Keys correlation by child session and deduplicates parent `message.part.updated` evidence.
+3. Treats child `session.error` as provider-error evidence.
+4. Never retries explicit abort, permission denial, unknown agent, deletion, or ordinary empty output outcomes.
+5. May append one manual continuation notice only when an explicit task identifier is observed in task input/output or correlated parent-part evidence; it never substitutes `childSessionID` for `task_id`, dispatches from `tool.execute.after`, or synthesizes a parent prompt.
+
 ### Shorthand vs full form
 
 Both `agents.*` and `categories.*` accept either shape:
@@ -382,6 +442,7 @@ Both `agents.*` and `categories.*` accept either shape:
 | `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
+| `subagent-interruption-recovery` | Enabled | Correlates child-session interruption evidence (`session.error` + `message.part.updated`) and lets the output adapter append at most one manual continuation notice without owning retry dispatch. |
 | `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed `subagent.maxDepth`; default max depth is 3 subagent layers. |
 
 ## Variant policy
@@ -390,7 +451,7 @@ Both `agents.*` and `categories.*` accept either shape:
 
 | Model family | ocmm behavior |
 | ------------ | ------------- |
-| Explicit user config or request | Respected as written except for review/plan-review floors: `reviewer`, `oracle`, `oracle-high`, and `plan-critic` are raised to the model family's xhigh-equivalent/highest-supported review effort when possible. |
+| Explicit user config or request | Respected as written except for review/plan-review floors: `reviewer`, Oracle review profiles (`oracle`, `oracle-high`, `oracle-2nd`, etc.), and `plan-critic` are raised to the model family's xhigh-equivalent/highest-supported review effort when possible. |
 | GPT-like non-mini built-in defaults | Built-in defaults never request below `high`; category defaults from `coding` upward resolve to `max`. GPT-5.6 supports native `reasoningEffort=max`; other GPT-like/Codex-like families use their catalog-supported maximum effort. |
 | GPT-like mini | Keeps the provider's full low-effort ladder, including `minimal`, `low`, and no-op `none` when supported. |
 | Claude Opus 4.7+ / Fable | Built-in defaults do not emit an ocmm-owned `thinking` budget or `reasoningEffort`; explicit non-review user config is passed through as written, while review/plan-review agents still receive the xhigh-equivalent floor when possible. |
@@ -406,8 +467,9 @@ Both `agents.*` and `categories.*` accept either shape:
 orchestrator    primary reasoning lane          variant=max     main coordinator
 builder         implementation lane             variant=high    autonomous implementer
 reviewer        primary review lane             xhigh floor     read-only consultant
-oracle          cross-check lane                xhigh floor     self-supervision reviewer (heterogeneous when configured/available)
-oracle-high     supplemental high-effort review variant=max     optional third reviewer (explicit config only)
+oracle          review slot 1 (logical normal) xhigh floor     self-supervision reviewer
+oracle-high     review slot 1 logical high     derived profile runtime tier profile (from variants)
+oracle-2nd      review slot 2 (logical normal) xhigh floor     second-priority independent reviewer
 doc-search      lightweight lookup lane         (none)          external docs / OSS lookup
 code-search     lightweight lookup lane         (none)          internal codebase grep
 planner         primary reasoning lane          variant=max     work-plan author
@@ -433,7 +495,7 @@ documenting     prose-capable lane           (none)          standalone document
 
 Rows above describe built-in selection lanes, not required provider channels or model IDs. Example model names elsewhere in the repository are references only; explicit user configuration and the currently available model catalog decide the actual model. Agent rows show source defaults or enforced review floors; category rows show the **raw source values** from `src/data/categories.ts`. At runtime the variant policy normalizes categories from `coding` upward to model-appropriate `max` unless the user explicitly overrides them; see the variant policy table above. Entries marked `(none)` carry no built-in variant and rely on this normalization.
 
-The primary structure is `orchestrator` plus six functional agents: `reviewer`, `oracle`, `oracle-high`, `planner`, `clarifier`, and `plan-critic`. `oracle` is an independent built-in agent for self-supervision with a configured cross-check / heterogeneous review default, and it shares the reviewer prompt via `promptSource: "reviewer"`. `oracle-high` reuses the reviewer prompt but is not a `reviewer` alias; it is an optional supplemental high-effort reviewer used only when explicitly configured, available, and not disabled. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` is registered with `mode:"primary"`; `planner` is registered with `mode:"all"` so it can be selected directly and used as a delegated task agent. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. The upstream-style compatibility alias `@explore` maps to local `code-search`; `@oracle` selects the independent local `oracle` agent rather than aliasing `reviewer`.
+The primary review structure is `reviewer` plus canonical Oracle slots (`oracle`, `oracle-2nd`, optional `oracle-3rd` ... `oracle-9th` when explicitly configured). Runtime logical tier names such as `oracle-high` and `oracle-max` are derived from configured `variants` and stay within slot 1; they are not separate slot registrations. `oracle` is the first-slot self-supervision agent and shares the reviewer prompt via `promptSource: "reviewer"`; `oracle-2nd` is the second-priority independent slot. `agents.oracle-high` is a deprecated config spelling migrated to `agents.oracle-2nd` during config load so legacy config keeps working while canonical keys remain slot-based. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` is registered with `mode:"primary"`; `planner` is registered with `mode:"all"` so it can be selected directly and used as a delegated task agent. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. The upstream-style compatibility alias `@explore` maps to local `code-search`; `@oracle` selects the independent local `oracle` agent rather than aliasing `reviewer`.
 
 ## Prompt architecture
 
@@ -624,6 +686,16 @@ While a dedicated dispatch is active, the first queued provider outcome takes pr
 ```
 
 Abort errors are never retried. Deduplication is enforced via an in-flight `Set<sessionID>`.
+
+### Subagent interruption recovery
+
+The `subagent-interruption-recovery` hook is enabled by default and layers evidence correlation over the existing fallback ownership model:
+
+- It reuses the existing 429/generic fallback controller and budget accounting.
+- Correlation is keyed by child session and deduplicates parent `message.part.updated` task-part evidence.
+- Child `session.error` events are treated as provider-error evidence in that correlation record.
+- It never retries explicit abort, permission denial, unknown agent, deletion, or ordinary empty-output outcomes.
+- The task-output adapter may append at most one manual continuation notice only when an explicit task identifier is observed in tool input/output or correlated parent-part evidence. It never substitutes `childSessionID` for `task_id`, dispatches from `tool.execute.after`, or synthesizes a parent prompt.
 
 ## Develop
 
