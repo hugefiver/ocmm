@@ -67,6 +67,150 @@ function loadPluginWithXdg(
   }
 }
 
+test("loadOpenCodePluginConfig discards an invalid base field while retaining valid disk-config siblings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      workflow: "unsupported",
+      debug: true,
+      agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.equal(loaded.config.workflow, "v1")
+    assert.equal(loaded.config.debug, true)
+    assert.equal(loaded.config.agents?.orchestrator?.model, "openai/gpt-5.6-sol")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig discards an invalid selected inline profile field while retaining valid siblings", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      workflow: "omo",
+      locale: "en-US",
+      agents: { orchestrator: { model: "BASE" } },
+      profiles: {
+        selected: {
+          locale: "unsupported",
+          debug: true,
+          agents: { orchestrator: { model: "PROFILE" } },
+        },
+      },
+      activeProfile: "selected",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.equal(loaded.activeProfile, "selected")
+    assert.equal(loaded.config.workflow, "omo")
+    assert.equal(loaded.config.locale, "en-US")
+    assert.equal(loaded.config.debug, true)
+    assert.equal(loaded.config.agents?.orchestrator?.model, "PROFILE")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig restores lower selected inline profile values after invalid project overrides", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-inline-profile-layers-"))
+  try {
+    writeConfig(xdg, {
+      locale: "en-US",
+      agents: { orchestrator: { model: "BASE" } },
+      profiles: {
+        selected: {
+          locale: "zh-CN",
+          agents: { orchestrator: { model: "LOWER" } },
+        },
+      },
+      activeProfile: "selected",
+    })
+    mkdirSync(join(project, ".opencode"), { recursive: true })
+    writeFileSync(join(project, ".opencode", "ocmm.jsonc"), JSON.stringify({
+      profiles: {
+        selected: {
+          locale: "unsupported",
+          debug: true,
+          agents: { orchestrator: { model: 42, description: "PROJECT" } },
+        },
+      },
+    }))
+
+    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project))
+    const plugin = loadPluginWithXdg(xdg, project)
+
+    assert.equal(generic.config.locale, "zh-CN")
+    assert.equal(generic.config.debug, true)
+    assert.equal(generic.config.agents?.orchestrator?.model, "LOWER")
+    assert.equal(generic.config.agents?.orchestrator?.description, "PROJECT")
+
+    assert.equal(plugin.config.locale, "zh-CN")
+    assert.equal(plugin.config.debug, true)
+    assert.equal(plugin.config.agents?.orchestrator?.model, "LOWER")
+    assert.equal(plugin.config.agents?.orchestrator?.description, "PROJECT")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig does not inject profile defaults over omitted base fields", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      disabledHooks: ["custom-hook"],
+      profiles: { selected: { debug: true } },
+      activeProfile: "selected",
+    })
+
+    const generic = withPluginEnv({}, () => loadWithXdg(xdg))
+    const plugin = loadPluginWithXdg(xdg)
+
+    assert.deepEqual(generic.config.disabledHooks, ["custom-hook"])
+    assert.deepEqual(plugin.config.disabledHooks, ["custom-hook"])
+    assert.equal(plugin.config.debug, true)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("loadOpenCodePluginConfig restores lower inline qualified-alias targets after invalid project overrides", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-inline-alias-layers-"))
+  try {
+    writeConfig(xdg, {
+      agents: { source: { alias: "precision:reviewer" } },
+      profiles: {
+        precision: { agents: { reviewer: { model: "openai/LOWER" } } },
+      },
+    })
+    mkdirSync(join(project, ".opencode"), { recursive: true })
+    writeFileSync(join(project, ".opencode", "ocmm.jsonc"), JSON.stringify({
+      profiles: {
+        precision: {
+          agents: { reviewer: { model: 42, description: "PROJECT" } },
+        },
+      },
+    }))
+
+    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project))
+    const plugin = loadPluginWithXdg(xdg, project)
+
+    assert.equal(generic.config.agents?.source?.alias, "precision:reviewer")
+    assert.equal(generic.config.agents?.source?.requirement, undefined)
+    assert.equal(plugin.config.agents?.source?.alias, "precision:reviewer")
+    assert.equal(plugin.config.agents?.source?.requirement?.fallbackChain[0]?.model, "LOWER")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
 test("loadOpenCodePluginConfig profile descriptors preserve inline < user dir < project dir precedence", () => {
   const xdg = makeTempXdg()
   const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-profile-project-"))

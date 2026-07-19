@@ -242,28 +242,42 @@ function prepareProfileDescriptorValue(
   source: string,
   value: unknown,
 ): { value: unknown; error?: ProfileDescriptorError } {
-  if (!isPlainObject(value)) {
-    return { value, error: { kind: "shape", message: `profile ${name} in ${source} is not a JSON object` } }
-  }
-  if ("profiles" in value || "activeProfile" in value) {
-    return {
-      value,
-      error: { kind: "shape", message: `profile ${name} in ${source} cannot contain profiles or activeProfile` },
-    }
-  }
+  const structuralError = profileDescriptorStructuralError(name, source, value)
+  if (structuralError) return { value, error: structuralError }
   let prepared: PreparedReviewProfile
   try {
     prepared = prepareReviewProfile({ name, source, value }, () => {})
   } catch (err) {
     return { value, error: { kind: "shape", message: (err as Error).message } }
   }
-  const result = ProfileEntrySchema.safeParse(prepared.value)
-  if (result.success) return { value: prepared.value }
-  return { value, error: { kind: "shape", message: result.error.issues.map((issue) => issue.message).join("; ") } }
+  return sanitizeProfileDescriptorLayers(name, source, selectedProfileLayers([prepared]))
 }
 
-function profileDescriptorShapeError(name: string, source: string, value: unknown): ProfileDescriptorError | undefined {
-  return prepareProfileDescriptorValue(name, source, value).error
+function profileDescriptorStructuralError(
+  name: string,
+  source: string,
+  value: unknown,
+): ProfileDescriptorError | undefined {
+  if (!isPlainObject(value)) {
+    return { kind: "shape", message: `profile ${name} in ${source} is not a JSON object` }
+  }
+  if ("profiles" in value || "activeProfile" in value) {
+    return { kind: "shape", message: `profile ${name} in ${source} cannot contain profiles or activeProfile` }
+  }
+  return undefined
+}
+
+function sanitizeProfileDescriptorLayers(
+  name: string,
+  source: string,
+  layers: readonly TolerantParseLayer[],
+): { value: unknown; error?: ProfileDescriptorError } {
+  const result = tolerantParseLayers(ProfileEntrySchema, layers, mergeConfigLayers)
+  if (result.success) return { value: mergeConfigLayers(result.layers) }
+  return {
+    value: mergeConfigLayers(layers),
+    error: { kind: "shape", message: `profile ${name} in ${source} failed schema validation` },
+  }
 }
 
 export type LoadedConfig = {
@@ -453,14 +467,16 @@ function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedCon
 
   const prepared = prepareConfigLayers(located.rawLayers, warnReviewOnce)
   const baseLayers: TolerantParseLayer[] = prepared.layers.map((layer) => ({ value: layer.value }))
-  const rawBase = mergeConfigLayers(baseLayers)
-  const baseParsed = OcmmConfigSchema.safeParse(rawBase)
+  // Runtime loading is intentionally tolerant even though OcmmConfigSchema/schema.json are strict.
+  // Do not replace this with safeParse: one invalid field must be discarded without erasing valid
+  // siblings or lower layers. Only structural/semantic plugin-pipeline failures below are atomic.
+  const baseParsed = tolerantParseLayers(OcmmConfigSchema, baseLayers, mergeConfigLayers)
   if (!baseParsed.success) {
-    throw new PluginProfilePipelineError(`base config validation failed: ${formatZodIssues(baseParsed.error.issues)}`)
+    throw new PluginProfilePipelineError("base config validation could not be recovered")
   }
 
   const descriptors = composeProfileDescriptors(
-    inlineProfileDescriptorsFromRoot(rawBase),
+    inlineProfileDescriptorsFromPreparedProfiles(prepared.inlineProfiles),
     located.includeUser
       ? loadProfileDescriptorsFromDir(join(userConfigDir("opencode"), "ocmm-profiles"), "user-directory")
       : new Map(),
@@ -484,7 +500,18 @@ function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedCon
     } else {
       const selectedContributions = selectedPluginProfileContributions(activeProfile, descriptor, prepared, warnReviewOnce)
       assertSelectedReviewProfileCompatible(prepared.baseOrigins, selectedContributions)
-      const finalRaw = mergeConfigLayers([{ value: rawBase }, ...selectedProfileLayers(selectedContributions)])
+      const selectedProfile = tolerantParseLayers(
+        ProfileEntrySchema,
+        selectedProfileLayers(selectedContributions),
+        mergeConfigLayers,
+      )
+      if (!selectedProfile.success) {
+        throw new PluginProfilePipelineError("selected profile validation could not be recovered")
+      }
+      const finalRaw = mergeConfigLayers([
+        { value: baseParsed.data },
+        { value: mergeConfigLayers(selectedProfile.layers), profileOverlay: true },
+      ])
       const finalParsed = OcmmConfigSchema.safeParse(finalRaw)
       if (!finalParsed.success) {
         throw new PluginProfilePipelineError(`profiled config validation failed: ${formatZodIssues(finalParsed.error.issues)}`)
@@ -525,13 +552,19 @@ function composeProfileDescriptors(
   return out
 }
 
-function inlineProfileDescriptorsFromRoot(root: unknown): Map<string, ProfileDescriptor> {
+function inlineProfileDescriptorsFromPreparedProfiles(
+  profiles: ReadonlyMap<string, readonly PreparedReviewProfile[]>,
+): Map<string, ProfileDescriptor> {
   const descriptors = new Map<string, ProfileDescriptor>()
-  if (!isPlainObject(root) || !isPlainObject(root.profiles)) return descriptors
-  for (const [name, value] of Object.entries(root.profiles)) {
-    const descriptor: ProfileDescriptor = { name, source: "inline", value }
-    const shapeError = profileDescriptorShapeError(name, "inline profile", value)
-    if (shapeError) descriptor.error = shapeError
+  for (const [name, contributions] of profiles) {
+    const layers = selectedProfileLayers(contributions)
+    const rawValue = mergeConfigLayers(layers)
+    const structuralError = profileDescriptorStructuralError(name, "inline profile", rawValue)
+    const prepared = structuralError
+      ? { value: rawValue, error: structuralError }
+      : sanitizeProfileDescriptorLayers(name, "inline profile", layers)
+    const descriptor: ProfileDescriptor = { name, source: "inline", value: prepared.value }
+    if (prepared.error) descriptor.error = prepared.error
     descriptors.set(name, descriptor)
   }
   return descriptors

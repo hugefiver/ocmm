@@ -687,7 +687,7 @@ test("loadProfileDescriptorsFromDir keeps preferred invalid jsonc descriptor wit
   }
 })
 
-test("loadProfileDescriptorsFromDir records shape errors with parsed values", () => {
+test("loadProfileDescriptorsFromDir records structural shape errors and sanitizes ordinary invalid fields", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-profile-descriptor-shape-"))
   try {
     writeFileSync(join(root, "array.jsonc"), JSON.stringify(["not", "object"]))
@@ -707,8 +707,24 @@ test("loadProfileDescriptorsFromDir records shape errors with parsed values", ()
     assert.ok(invalidAgentDescriptor)
     assert.equal(invalidAgentDescriptor.source, "user-directory")
     assert.equal(invalidAgentDescriptor.path, join(root, "invalid-agent.jsonc"))
-    assert.equal(invalidAgentDescriptor.error?.kind, "shape")
-    assert.deepEqual(invalidAgentDescriptor.value, invalidProfile)
+    assert.equal(invalidAgentDescriptor.error, undefined)
+    assert.deepEqual((invalidAgentDescriptor.value as { agents?: unknown }).agents, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("loadProfileDescriptorsFromDir does not inject defaults for omitted profile fields", () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-profile-descriptor-defaults-"))
+  try {
+    writeFileSync(join(root, "selected.jsonc"), JSON.stringify({ debug: true }))
+
+    const descriptor = loadProfileDescriptorsFromDir(root, "user-directory").get("selected")
+    const value = descriptor?.value as Record<string, unknown> | undefined
+
+    assert.ok(value)
+    assert.equal(value.debug, true)
+    assert.equal(Object.hasOwn(value, "disabledHooks"), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
