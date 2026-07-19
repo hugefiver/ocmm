@@ -27,6 +27,35 @@ function extractDelegationContract(instructions: string): string {
   return match[1]!
 }
 
+const REMOVED_GPT56_SECTION_HEADINGS = [
+  "## Shell Adaptation",
+  "## Discovery Before Planning",
+  "## Planner Trigger",
+  "## Answer-When-Answerable",
+  "## Scope",
+  "## Workflow-role composition",
+] as const
+
+function extractGpt56Calibration(instructions: string): string {
+  const marker = "# GPT-5.6 EXECUTION CALIBRATION"
+  const start = instructions.indexOf(marker)
+  assert.notEqual(start, -1, "generated instructions are missing the GPT-5.6 calibration")
+  const end = instructions.indexOf("</deepwork-mode>", start)
+  assert.notEqual(end, -1, "generated GPT-5.6 calibration is missing its closing wrapper")
+  return instructions.slice(start, end)
+}
+
+function assertCompactGpt56Calibration(instructions: string, label: string): void {
+  const calibration = extractGpt56Calibration(instructions)
+  assert.match(calibration, /concrete requested outcome.*observable completion condition/is, `${label} outcome`)
+  assert.match(calibration, /suitable timeout.*completion signal/is, `${label} waiting`)
+  assert.match(calibration, /After two unchanged checks.*increase the wait|After two unchanged checks.*completion signal/is, `${label} backoff`)
+  assert.match(calibration, /Rerun validation only when relevant inputs changed after the last green result/i, `${label} revalidation`)
+  assert.match(calibration, /Lead with the outcome.*evidence.*residual risk.*unverified/is, `${label} reporting priority`)
+  for (const heading of REMOVED_GPT56_SECTION_HEADINGS) assert.equal(calibration.includes(heading), false, `${label} duplicates ${heading}`)
+  assert.doesNotMatch(calibration, /\[product\]|\[evidence\]/i, `${label} duplicates review-label doctrine`)
+}
+
 test("Codex manifest declares deepwork plugin resources", () => {
   const manifest = createPluginManifest("1.2.3")
 
@@ -161,7 +190,11 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
   assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
   assert.match(orchestrator.developerInstructions, /GPT-5\.6 EXECUTION CALIBRATION/)
-  assert.match(orchestrator.developerInstructions, /Apply this layer only when the selected model identifies as part of the GPT-5\.6 family/)
+  assertCompactGpt56Calibration(orchestrator.developerInstructions, "in-memory orchestrator")
+  assert.match(
+    orchestrator.developerInstructions,
+    /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
+  )
   assert.ok(builder)
   assert.equal(builder.model, "gpt-5.5")
   assert.ok(planner)
@@ -334,6 +367,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
   try {
     const config = {
       ...defaultConfig(),
+      workflow: "codex" as const,
       agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
     }
     const result = await generateCodexPlugin({
@@ -420,8 +454,11 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /a `task_name` does not select a profile/)
     assert.match(workflowSkill, /generic or flat subagent does not load the generated profile/)
     assert.match(orchestrator, /GPT-5\.6 EXECUTION CALIBRATION/)
-    assert.match(orchestrator, /two independent waves add no useful evidence/)
-    assert.match(orchestrator, /Apply this layer only when the selected model identifies as part of the GPT-5\.6 family/)
+    assertCompactGpt56Calibration(orchestrator, "generated orchestrator TOML")
+    assert.match(
+      orchestrator,
+      /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
+    )
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
     assert.match(workflowSkill, /\| dw-creative \|/)

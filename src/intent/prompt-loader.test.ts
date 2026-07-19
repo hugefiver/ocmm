@@ -21,6 +21,39 @@ function makeTempRoot(workflow: "omo" | "v1"): string {
   return root
 }
 
+const GPT56_WORKFLOWS = ["omo", "v1", "codex"] as const
+type Gpt56Workflow = (typeof GPT56_WORKFLOWS)[number]
+
+const GPT56_BASELINE_CHARS: Record<Gpt56Workflow, number> = {
+  omo: 6742,
+  v1: 6794,
+  codex: 6799,
+}
+
+const REMOVED_GPT56_SECTION_HEADINGS = [
+  "## Shell Adaptation",
+  "## Discovery Before Planning",
+  "## Planner Trigger",
+  "## Answer-When-Answerable",
+  "## Scope",
+  "## Workflow-role composition",
+] as const
+
+function effectiveGpt56Prompt(base: "gpt" | "planner"): string {
+  return `${getDeepworkPrompt(base)}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
+}
+
+function countOccurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
+
+function sharedGpt56Doctrine(text: string): string {
+  const start = text.indexOf("## Outcome-first execution")
+  assert.notEqual(start, -1, "missing shared GPT-5.6 doctrine start")
+  const closingTag = text.indexOf("</deepwork-mode>", start)
+  return text.slice(start, closingTag === -1 ? undefined : closingTag).trim()
+}
+
 test("loadAllPrompts loads files from the workflow subdir", () => {
   const root = makeTempRoot("omo")
   try {
@@ -127,10 +160,13 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
 
 test("real workflows include shell adaptation in every effective prompt path", () => {
   const root = join(process.cwd(), "prompts")
-  for (const workflow of ["omo", "v1", "codex"] as const) {
+  for (const workflow of GPT56_WORKFLOWS) {
     loadAllPrompts(root, workflow)
     for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
-      assert.match(getDeepworkPrompt(variant), /## Shell Adaptation/, `${workflow}/${variant} missing shell adaptation`)
+      const prompt = variant === "gpt-5.6"
+        ? effectiveGpt56Prompt("gpt")
+        : getDeepworkPrompt(variant)
+      assert.match(prompt, /## Shell Adaptation/, `${workflow}/${variant} missing effective shell adaptation`)
     }
     for (const category of [
       "frontend",
@@ -211,25 +247,25 @@ test("agent-specific prompts enforce bounded leaf delegation", () => {
   }
 })
 
-test("planner and GPT-5.6 prompts keep delegation and review ownership flat", () => {
+test("planner owns flat review composition while GPT-5.6 keeps only the delegation threshold", () => {
   const root = join(process.cwd(), "prompts")
   try {
-    for (const workflow of ["omo", "v1", "codex"] as const) {
+    for (const workflow of GPT56_WORKFLOWS) {
       loadAllPrompts(root, workflow)
       const planner = getAgentPrompt("planner")
       assert.match(planner, /Use direct tools first/)
       assert.match(planner, /Return the completed plan to the orchestrator/)
       assert.match(planner, /exactly (?:the )?unsuffixed `reviewer` at most once.*concrete blocking architecture, security, or performance decision/i)
       assert.match(planner, /Do not dispatch `plan-critic`, any Reviewer tier \(`reviewer-low`, `reviewer-high`, `reviewer-max`\), or any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\)/)
-      assert.doesNotMatch(planner, /Do not use `quick`, implementation\/coordinator agents, or planning\/review agents\./)
-      assert.doesNotMatch(planner, /Never dispatch an implementation worker or a reviewer from the planner role\./)
 
-      const gpt56 = getDeepworkPrompt("gpt-5.6")
-      assert.match(gpt56, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
-      assert.match(gpt56, /Utility leaf agents never dispatch/)
-      assert.match(gpt56, /Read-only workflow agents never call `quick`/)
-      assert.match(gpt56, /Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review remain orchestrator-owned/)
-      assert.doesNotMatch(gpt56, /Nested subagent calls require a distinct deliverable/)
+      const specialization = getDeepworkPrompt("gpt-5.6")
+      const effective = effectiveGpt56Prompt("gpt")
+      assert.match(effective, /Multiple steps, routine confirmation, or (?:a desire for|wanting) another opinion are insufficient reasons to delegate/i)
+      assert.match(effective, /effective role\/delegation contract permits it/i)
+      assert.doesNotMatch(specialization, /Utility leaf agents never dispatch/)
+      assert.doesNotMatch(specialization, /Read-only workflow agents never call `quick`/)
+      assert.doesNotMatch(specialization, /Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review remain orchestrator-owned/)
+      assert.doesNotMatch(specialization, /\| Current role \| Allowed nested work \|/)
     }
   } finally {
     loadAllPrompts(root, "omo")
@@ -299,12 +335,15 @@ test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   )
 })
 
-test("real deepwork prompts contain ocmm-native workflow semantics per variant", () => {
+test("real effective deepwork prompts retain ocmm-native workflow semantics per variant", () => {
   const root = join(process.cwd(), "prompts")
-  for (const workflow of ["omo", "v1", "codex"] as const) {
+  for (const workflow of GPT56_WORKFLOWS) {
     loadAllPrompts(root, workflow)
     for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
-      const prompt = getDeepworkPrompt(variant)
+      const specialization = getDeepworkPrompt("gpt-5.6")
+      const prompt = variant === "gpt-5.6"
+        ? effectiveGpt56Prompt("gpt")
+        : getDeepworkPrompt(variant)
       const label = `${workflow}/${variant}`
 
       assert.match(
@@ -323,16 +362,8 @@ test("real deepwork prompts contain ocmm-native workflow semantics per variant",
           /answer[- ]when[- ]answerable|answer when you have enough evidence|stop and answer/i,
           `${label} missing answer-when-answerable semantics`,
         )
-        assert.match(
-          prompt,
-          /\[product\]/i,
-          `${label} missing [product] review label`,
-        )
-        assert.match(
-          prompt,
-          /\[evidence\]/i,
-          `${label} missing [evidence] review label`,
-        )
+        assert.match(prompt, /\[product\]/i, `${label} missing [product] review label`)
+        assert.match(prompt, /\[evidence\]/i, `${label} missing [evidence] review label`)
       }
       assert.match(
         prompt,
@@ -344,14 +375,15 @@ test("real deepwork prompts contain ocmm-native workflow semantics per variant",
         /(?<!not\s)default\s+(?:to\s+)?(?:a\s+)?(?:minimum viable|MVP|phase-1)/i,
         `${label} contains default scope reduction language`,
       )
-      assert.ok(prompt.includes("## Shell Adaptation"), `${label} missing shell adaptation`)
+      assert.ok(prompt.includes("## Shell Adaptation"), `${label} missing effective shell adaptation`)
 
       if (variant === "gpt-5.6") {
-        assert.match(
-          prompt,
-          /GPT-5\.6|speculative nested|subagent depth/i,
-          `${label} missing GPT-5.6 subagent restraint`,
-        )
+        assert.match(specialization, /GPT-5\.6 EXECUTION CALIBRATION/)
+        assert.match(specialization, /Delegate only when.*materially improves completion/is)
+        assert.equal(countOccurrences(prompt, "## Discovery Before Planning"), 1, `${label} duplicates discovery doctrine`)
+        assert.equal(countOccurrences(prompt, "## Planner Trigger"), 1, `${label} duplicates planner doctrine`)
+        assert.equal(countOccurrences(prompt, "## Answer-When-Answerable"), 1, `${label} duplicates answer doctrine`)
+        assert.equal(countOccurrences(prompt, "## Shell Adaptation"), 1, `${label} duplicates shell doctrine`)
       } else {
         assert.doesNotMatch(
           prompt,
@@ -360,6 +392,27 @@ test("real deepwork prompts contain ocmm-native workflow semantics per variant",
         )
       }
     }
+  }
+})
+
+test("GPT-5.6 planner and category paths retain their base doctrine", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of GPT56_WORKFLOWS) {
+    loadAllPrompts(root, workflow)
+    const specialization = getDeepworkPrompt("gpt-5.6")
+    const planner = effectiveGpt56Prompt("planner")
+    const category = `${getCategoryPrompt("coding")}\n\n---\n\n${specialization}`
+
+    assert.match(planner, /# Deepwork Planner Injection/, `${workflow}/planner role doctrine`)
+    assert.match(planner, /first discovery wave/i, `${workflow}/planner discovery doctrine`)
+    assert.match(planner, /## Shell Adaptation/, `${workflow}/planner shell doctrine`)
+    assert.match(planner, /## Outcome-first execution/, `${workflow}/planner GPT-5.6 calibration`)
+    assert.equal(countOccurrences(planner, "## Shell Adaptation"), 1, `${workflow}/planner duplicate shell doctrine`)
+
+    assert.ok(getCategoryPrompt("coding").length > 0, `${workflow}/coding role missing`)
+    assert.match(category, /## Shell Adaptation/, `${workflow}/coding shell doctrine`)
+    assert.match(category, /## Outcome-first execution/, `${workflow}/coding GPT-5.6 calibration`)
+    assert.equal(countOccurrences(category, "## Shell Adaptation"), 1, `${workflow}/coding duplicate shell doctrine`)
   }
 })
 
@@ -467,16 +520,68 @@ test("orchestrator prompts describe code review as review-input based", () => {
   }
 })
 
-test("GPT-5.6 prompts proceed under clear facts and ask only deliverable-changing questions", () => {
-  for (const workflow of ["v1", "omo", "codex"] as const) {
+test("GPT-5.6 prompts proceed under clear facts and ask only material questions", () => {
+  for (const workflow of GPT56_WORKFLOWS) {
     const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-5.6.md"), "utf8")
     assert.match(text, /When facts are clear, answer or proceed directly/i, workflow)
-    assert.match(text, /safe default.*state the assumption.*continue/i, workflow)
-    assert.match(text, /changes the deliverable shape/i, workflow)
-    assert.match(text, /cannot be found with available tools/i, workflow)
+    assert.match(text, /otherwise state a safe assumption and continue/i, workflow)
+    assert.match(text, /choice changes the deliverable/i, workflow)
+    assert.match(text, /required information.*unavailable.*tools/i, workflow)
+    assert.match(text, /action is destructive/i, workflow)
     assert.match(text, /material rework/i, workflow)
-    assert.match(text, /Do not ask for confirmation after routine discovery, planning, integration, or verification milestones/i, workflow)
   }
+})
+
+test("GPT-5.6 specializations are compact additive calibrations synchronized across workflows", () => {
+  const shared = new Map<Gpt56Workflow, string>()
+
+  for (const workflow of GPT56_WORKFLOWS) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-5.6.md"), "utf8")
+    const label = `${workflow}/gpt-5.6`
+    assert.ok(text.length <= 3500, `${label} is ${text.length} characters; expected <= 3500`)
+    assert.ok(
+      text.length <= Math.floor(GPT56_BASELINE_CHARS[workflow] * 0.6),
+      `${label} did not shrink by at least 40% from ${GPT56_BASELINE_CHARS[workflow]}`,
+    )
+
+    assert.match(text, /GPT-5\.6 supports native `max`/i, `${label} native max`)
+    assert.match(text, /explicit user configuration.*authoritative/is, `${label} authority`)
+    assert.match(text, /authorization.*verification policy.*delegation contract.*authoritative/is, `${label} authority chain`)
+    assert.match(text, /concrete requested outcome.*observable completion condition/is, `${label} outcome`)
+    assert.match(text, /Continue until.*required verification.*hold.*then stop/is, `${label} stopping rule`)
+    assert.match(text, /Delegate only when.*effective role\/delegation contract permits it.*materially improves completion/is, `${label} delegation threshold`)
+    assert.match(text, /Multiple steps, routine confirmation, or (?:a desire for|wanting) another opinion are insufficient reasons to delegate/i, `${label} anti-speculation threshold`)
+    assert.match(text, /`GOAL`.*`STOP WHEN`.*`EVIDENCE`.*scope.*non-goals/is, `${label} bounded delegation`)
+    assert.match(text, /suitable timeout.*completion signal/is, `${label} waiting`)
+    assert.match(text, /do not repeatedly poll unchanged state|empty short-interval reads/i, `${label} polling restraint`)
+    assert.match(text, /After two unchanged checks.*increase the wait|After two unchanged checks.*completion signal/is, `${label} backoff`)
+    assert.match(text, /Rerun validation only when relevant inputs changed after the last green result/i, `${label} revalidation`)
+    assert.match(text, /Lead with the outcome.*evidence.*residual risk.*unverified/is, `${label} reporting priority`)
+    assert.match(text, /Do not infer permission to modify/i, `${label} authorization boundary`)
+
+    for (const heading of REMOVED_GPT56_SECTION_HEADINGS) {
+      assert.equal(text.includes(heading), false, `${label} duplicates ${heading}`)
+    }
+    assert.doesNotMatch(text, /\| Current role \| Allowed nested work \|/, `${label} contains role matrix`)
+    assert.doesNotMatch(text, /Utility leaf agents never dispatch|Read-only workflow agents never call `quick`/, `${label} contains role allowlist`)
+    assert.doesNotMatch(text, /\[product\]|\[evidence\]/i, `${label} duplicates review-label doctrine`)
+
+    if (workflow === "omo") {
+      assert.doesNotMatch(text, /^<deepwork-mode>/, `${label} must remain unwrapped`)
+    } else {
+      assert.match(text, /^<deepwork-mode>\s*/, `${label} opening wrapper`)
+      assert.match(text, /<\/deepwork-mode>\s*$/, `${label} closing wrapper`)
+    }
+    if (workflow === "codex") {
+      assert.match(text, /Codex profiles may carry this layer ahead of runtime model selection/i)
+      assert.match(text, /embedded skills.*Codex tool-compatibility rules/is)
+    }
+
+    shared.set(workflow, sharedGpt56Doctrine(text))
+  }
+
+  assert.equal(shared.get("v1"), shared.get("omo"), "v1 shared doctrine drifted from omo")
+  assert.equal(shared.get("codex"), shared.get("omo"), "Codex shared doctrine drifted from omo")
 })
 
 test("orchestrator alone owns workflow-role composition in all prompt sets", () => {

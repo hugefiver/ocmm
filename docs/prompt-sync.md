@@ -32,7 +32,7 @@ prompts/<workflow>/
 |------------|--------------------|-------|
 | `deepwork/default.md` | local ocmm controller + upstream discipline concepts | v1 default is intentionally concise; omo default stays upstream-first; all workflows add shell-adaptation guidance so examples are translated to the active runtime shell |
 | `deepwork/gpt.md` | `packages/prompts-core/prompts/ultrawork/gpt.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
-| `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts` and `packages/omo-codex/.../hephaestus/gpt-5.6.md` | GPT-5.6-only outcome-first, conditional-retrieval, evidence-first, and subagent-restraint layer; retains local authorization and tiered QA rules; also carries the global shell-adaptation guidance; **2026-07-17 flat-workflow adjustment:** replaced distinct-deliverable nesting with role-aware utility/specialist allowlists and a strict necessity threshold; **2026-07-18 threshold/composition adjustment:** added explicit questions-and-safe-defaults thresholds and a workflow-role composition matrix that makes orchestrator ownership explicit |
+| `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts`, `packages/omo-codex/plugin/components/rules/bundled-rules/hephaestus/gpt-5.6.md`, and `packages/omo-opencode/src/agents/momus-gpt-5-6.ts` | Additive GPT-5.6 calibration only: applicability/authority, outcome-first completion, conservative retrieval/delegation, context-efficient waiting/revalidation, and reporting priority. Shared discovery, planner trigger, answerability, scope, shell, review labels, and exact role permissions remain in effective base/role/category/skill/terminal-contract layers rather than being duplicated here. **2026-07-19 simplification:** preserves native `max`, safe defaults, authorization, observable delegation evidence, backed-off waiting, and changed-input validation while removing the role matrix and detailed allowlists. |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline plus shell-adaptation guidance |
 | `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates |
@@ -52,7 +52,7 @@ prompts/<workflow>/
 9. Do not expose `v1` as model-facing workflow wording. Files under `prompts/v1/` should say `deepwork` to the model; `v1` remains only a config/path label.
 10. When syncing from upstream, compare against the local upstream checkout at `./omo` or a fresh checkout of the same repository, then re-apply local naming and OpenCode/ocmm tool semantics.
 11. Shell-adaptation guidance is a local global invariant across every effective `deepwork/*` variant and every category prompt path: prompt/skill shell snippets are examples and must be translated to the active runtime shell. Category prompts carry the guidance directly because not every category runtime path inherits a deepwork layer.
-12. GPT-5.6 subagent-restraint wording belongs only in `deepwork/gpt-5.6.md`; do not copy it into generic GPT/Gemini/GLM/Codex/default prompts. The GPT-5.6 questions-and-safe-defaults threshold and workflow-role composition matrix are also exclusive to `deepwork/gpt-5.6.md`.
+12. GPT-5.6-specific additive calibration belongs only in `deepwork/gpt-5.6.md`. Do not copy its outcome/waiting/revalidation layer into generic GPT/Gemini/GLM/Codex/default prompts. Conversely, do not restore generic discovery, planner-trigger, answerability, scope, shell, review-label, workflow-role matrix, or detailed allowlist copies inside the specialization; those remain authoritative in effective base/role/category/skill prompts and terminal delegation contracts.
 13. Nested delegation boundaries for functional agents are strict invariants across `prompts/{omo,v1,codex}/agents/*`: planner keeps direct planning and may consult exactly the unsuffixed `reviewer` at most once for one repository-evidence-blocked architecture/security/performance decision (never reviewer tiers, Oracle profiles, plan-critic, or implementation agents); reviewer/oracle keep read-only evidence lookup only, clarifier keeps direct evidence and judgment ownership, and plan-critic keeps direct lookup and receipt-verdict ownership.
 
 ## Last Upstream Prompt Check
@@ -61,6 +61,15 @@ prompts/<workflow>/
 - Prompt-relevant upstream changes since `c6058d5db`: Prometheus/planner prompt closed the implement-by-proxy loophole — "you never implement - not directly and not by proxy: a subagent you spawn that edits product code is you implementing ... no subagent you dispatch is ever that worker."
 - Local sync: `prompts/omo/deepwork/planner.md` now closes the proxy loophole with ocmm-adapted wording (no `/start-work`; references local execution workflow handoff). The codex.md ultrawork changes (Sparkshell removal, TUI visual QA, Browser plugin, `/start-work` rename, implement-by-proxy) were already represented locally — no action needed.
 - GPT-5.6 prompt-shape sync (2026-07-12): added `prompts/omo/deepwork/gpt-5.6.md`, selected only for the GPT-5.6 family. It adapts upstream outcome-first context gathering, explicit delegation outcomes, and evidence-first reporting while retaining OpenCode `task(...)`, local role names, tiered authorization, TDD, and QA semantics. The generic `gpt.md` remains unchanged. 2026-07-14 adjustments: the layer now states that concrete model or lane names are references only; user configuration and the currently available catalog decide the actual model; GPT-5.6 supports native `max` reasoning effort, so local `max` is not an `xhigh` alias for GPT-5.6.
+
+## GPT-5.6 Prompt Simplification (2026-07-19)
+
+- GitHub source of truth: `code-yeongyu/oh-my-openagent`, branch `dev`, commit `e8d842a38a7e0ed3edd5fc74f88247f8b63075ad`.
+- Reviewed sources: `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts`, `packages/omo-codex/plugin/components/rules/bundled-rules/hephaestus/gpt-5.6.md`, and `packages/omo-opencode/src/agents/momus-gpt-5-6.ts`.
+- Merged evidence: PR #6012 (shorter outcome-first prompts and prioritization), #6010 (shorter role-specific review contract), #6100 (`GOAL` / `STOP WHEN` / `EVIDENCE` delegation outcomes), and #6151 (no empty polling, backed-off waiting, and changed-input revalidation).
+- Local result: the three specialization sources keep one shared four-section doctrine and environment-specific applicability/authority wording only. Effective base-plus-specialization prompts retain discovery, planning, answerability, scope, shell, and review behavior without a second copy in the specialization.
+- Source budgets: omo 6,742, v1 6,794, and Codex 6,799 baseline characters; each replacement is capped at 3,500 characters and at 60% of its baseline.
+- Codex generated profiles carry the compact calibration ahead of runtime model selection; non-GPT-5.6 models ignore it. Generated agent instructions are refreshed only after clean-root and prompt-only candidate-diff checks.
 
 ## ocmm-Native Workflow Adaptation (2026-07-13)
 
@@ -72,7 +81,7 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - **Full-request scope**: deliver the full requested outcome by default. Removed default "minimum viable", "MVP", and phase-1 scope reduction language from clarifier prompts and deepwork scope constraints. Scope reduction only happens when the user explicitly asks for it or the work must be split.
 - **Review/QA labels**: review findings are labeled `[product]` (proposed implementation/product change) or `[evidence]` (missing or insufficient proof). An `[evidence]` blocker requires additional evidence, not a product rewrite. Added to the v1 `requesting-code-review` and `subagent-driven-development` skills and to all deepwork variants (except the planner variant, which does not review).
 - **GPT-5.6 restraint preserved**: `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` retains the existing GPT-5.6-specific subagent restraint. The new semantics above are expressed as general rules, not GPT-5.6-only rules.
-- **Shell Adaptation preserved**: existing global Shell Adaptation guidance remains untouched across all variants.
+- **Shell Adaptation preserved effectively**: base `gpt.md`, `planner.md`, and category prompts retain shell adaptation. The additive GPT-5.6 specialization no longer repeats that section, and tests verify each effective composed path still contains it exactly once.
 
 ## Flat Workflow Subagent Policy (2026-07-17)
 
@@ -80,8 +89,9 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - Standard workflow agents may call only utility leaves. Read-only workflow agents exclude `quick` and may call only `code-search`, `explore`, `doc-search`, `research`, and `media-reader`, except planner may consult the unsuffixed `reviewer` once for one concrete repository-evidence-blocked architecture/security/performance decision.
 - Local coordinators `deep` and `complex` may additionally call only `coding`, `frontend`, `hard-reasoning`, `creative`, and `documenting`, and only for materially useful bounded deliverables.
 - `prompts/{omo,v1,codex}/agents/planner.md` return completed plans to the orchestrator rather than launching plan-critic or formal review; they allow only the planner's once-only unsuffixed-reviewer consultation.
-- `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` use the same role-aware necessity threshold and no longer authorize arbitrary distinct-deliverable nesting.
-- `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` now include explicit question thresholds (proceed under clear facts/safe defaults; ask only for deliverable-shape changes, unavailable required info, or material rework risk).
+- `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` keep only the shared conservative decision threshold: direct tools first; delegation requires effective-role permission and a bounded result that materially improves completion; multiple steps, routine confirmation, or another opinion are insufficient.
+- Exact utility/specialist allowlists, utility-leaf termination, planner's once-only unsuffixed-reviewer exception, and orchestrator-owned formal review remain in role prompts and effective terminal delegation contracts, not in the model calibration.
+- `prompts/{omo,v1,codex}/deepwork/gpt-5.6.md` retain explicit safe-default question thresholds: proceed under clear facts; ask only for deliverable-changing choices, unavailable required information, destructive actions, or material-rework risk.
 - Effective config prompt contracts override broader skill/model/adapter wording. Formal planner dispatch, the plan-critic loop, formal plan review and final acceptance review remain orchestrator-owned.
 - Final review may consume either a committed range or a working-tree/staged diff; implementation subagents report changes and do not create commits merely to create review SHAs.
 - Orchestrator requesting-code-review wording must describe committed ranges or working-tree/staged diff review input, never SHA-only review input.
@@ -91,7 +101,6 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 
 The following upstream omo prompt/behavior items were reviewed and are intentionally recorded as observation-only. They are not implemented in this change and will only be reconsidered when a concrete trigger appears:
 
-- **Polling/backoff mechanics (item 7)**: no polling/backoff guidance added to prompts or skills. Revisit if a task explicitly involves polling loops, retry/backoff design, or rate-limit handling.
 - **Frontend layout-mechanics (item 8)**: no additional frontend layout mechanics guidance beyond the existing `frontend` skill. Revisit if a task explicitly involves CSS layout engine behavior, breakpoint mechanics, or visual QA beyond the current skill coverage.
 
 ## v1 Workflow Adjustment (2026-07-02)
