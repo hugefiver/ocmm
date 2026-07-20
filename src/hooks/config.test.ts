@@ -970,6 +970,83 @@ test("registerBuiltinAgents=false leaves agent map untouched", async () => {
   assert.deepEqual(cfg.agent, {})
 })
 
+test("config reports an observed host subagent depth once without mutating it", async () => {
+  const baseConfig = defaultConfig()
+  const config = {
+    ...baseConfig,
+    registerBuiltinAgents: false,
+    workflow: "omo" as const,
+    disabledCommands: ["ralph-loop", "audit-loop", "dwloop", "idle-continuation"],
+    mcp: { ...baseConfig.mcp, enabled: false },
+  }
+  const logs: Array<{ level: "info" | "warn"; message: string }> = []
+  const logger = {
+    info(...args: unknown[]) {
+      logs.push({ level: "info", message: String(args[0]) })
+    },
+    warn(...args: unknown[]) {
+      logs.push({ level: "warn", message: String(args[0]) })
+    },
+  }
+  const target = {
+    subagent_depth: 1,
+    provider: { private: { apiKey: "CONFIG_DEPTH_SECRET_SENTINEL" } },
+  }
+  const before = structuredClone(target)
+  const skillsRoot = mkdtempSync(join(tmpdir(), "ocmm-depth-diagnostics-"))
+  try {
+    const handler = createConfigHandler({ getConfig: () => config, logger, skillsRoot })
+
+    await handler({ config: target }, undefined)
+    await handler({ config: target }, undefined)
+
+    assert.deepEqual(target, before)
+    assert.deepEqual(logs.filter((entry) => entry.level === "warn"), [
+      {
+        level: "warn",
+        message: "subagent depth compatibility: OpenCode subagent_depth=1, ocmm subagent.maxDepth=3, effective=1 (host is stricter; task dispatches only)",
+      },
+    ])
+    assert.equal(logs.filter((entry) => entry.level === "info").length, 2)
+    assert.ok(logs.some((entry) => entry.message === "config: registered 0 skills, 0 commands, 0 MCPs"))
+    assert.doesNotMatch(logs.map((entry) => entry.message).join("\n"), /CONFIG_DEPTH_SECRET_SENTINEL/)
+  } finally {
+    rmSync(skillsRoot, { recursive: true, force: true })
+  }
+})
+
+test("config stays silent when host subagent depth is not observable", async () => {
+  const baseConfig = defaultConfig()
+  const config = {
+    ...baseConfig,
+    registerBuiltinAgents: false,
+    workflow: "omo" as const,
+    disabledCommands: ["ralph-loop", "audit-loop", "dwloop", "idle-continuation"],
+    mcp: { ...baseConfig.mcp, enabled: false },
+  }
+  const logs: Array<{ level: "info" | "warn"; message: string }> = []
+  const logger = {
+    info(...args: unknown[]) {
+      logs.push({ level: "info", message: String(args[0]) })
+    },
+    warn(...args: unknown[]) {
+      logs.push({ level: "warn", message: String(args[0]) })
+    },
+  }
+  const target = { provider: { public: {} } }
+  const before = structuredClone(target)
+  const skillsRoot = mkdtempSync(join(tmpdir(), "ocmm-depth-diagnostics-"))
+  try {
+    await createConfigHandler({ getConfig: () => config, logger, skillsRoot })({ config: target }, undefined)
+
+    assert.deepEqual(target, before)
+    assert.equal(Object.hasOwn(target, "subagent_depth"), false)
+    assert.equal(logs.some((entry) => entry.message.startsWith("subagent depth compatibility:")), false)
+  } finally {
+    rmSync(skillsRoot, { recursive: true, force: true })
+  }
+})
+
 test("config registers shared skill paths and preserves existing urls", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-hook-skills-"))
   try {

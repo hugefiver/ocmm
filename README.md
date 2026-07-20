@@ -351,6 +351,25 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 }
 ```
 
+### OpenCode host subagent depth compatibility
+
+OpenCode commit `285d315b4e5355e0a94608acc0678a11b720079e` added the top-level `subagent_depth` setting. Its implicit default is `1`. ocmm's `subagent.maxDepth` default remains `3`.
+
+When both guards are active, the effective Task limit is the lower value. ocmm never copies its value into host config and never changes either default. If the host field is observable in the plugin config hook, `OCMM_DEBUG=1` logs the host and local combination once: an `info` message when they agree, or a `warn` message that identifies the stricter guard when they differ. If ocmm's guard is disabled, the same debug setting logs an `info` message for the host-only limit.
+
+An absent `subagent_depth` field does not identify the host version. It can mean an older host without the capability or a newer host using its implicit default of `1`, and neither runtime case produces a compatibility log. On a newer host with the field omitted, the actual host limit is `1`, the local limit is `3`, and the effective limit is `1`; this documentation is the only way to explain that case at runtime.
+
+| Host situation | Host limit | Local guard | Effective Task limit | Diagnostic with `OCMM_DEBUG=1` |
+| --- | ---: | --- | ---: | --- |
+| Before the commit, field unavailable | Unavailable | Enabled, local `3` | `3` | None |
+| New host, field omitted | Implicit `1` | Enabled, local `3` | `1` | None |
+| Explicit `subagent_depth: 1` | `1` | Enabled, local `3` | `1` | `warn`, host is stricter |
+| Explicit `subagent_depth: 3` | `3` | Enabled, local `3` | `3` | `info`, limits agree |
+| Explicit `subagent_depth: 5` | `5` | Enabled, local `3` | `3` | `warn`, ocmm is stricter |
+| Explicit `subagent_depth: 1` | `1` | Disabled | `1` | `info`, host only |
+
+Both controls apply only to OpenCode `task` dispatches. ocmm does not classify a tool named `execute` as `task`, so neither depth guard applies to `execute`.
+
 ### Canonical review-slot configuration
 
 ```jsonc
@@ -451,7 +470,7 @@ Both `agents.*` and `categories.*` accept either shape:
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
 | `subagent-interruption-recovery` | Enabled | Correlates child-session interruption evidence (`session.error` + `message.part.updated`) and lets the output adapter append at most one manual continuation notice without owning retry dispatch. |
-| `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed `subagent.maxDepth`; default max depth is 3 subagent layers. |
+| `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed local `subagent.maxDepth` (default `3`); when host `subagent_depth` is observable, the effective limit is the lower active value and `OCMM_DEBUG` logs compatibility once per combination. Never treats `execute` as `task`. |
 
 ## Variant policy
 

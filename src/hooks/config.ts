@@ -24,6 +24,7 @@ import { resolveEffectiveRequirement } from "../routing/resolver.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import { expandReviewAgents, isExpandedReviewAgentDisabled, type ReviewAgentRegistrationOverrides } from "../review-agents/expand.ts"
 import { isReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
+import { createSubagentDepthDiagnosticReporter, type SubagentDepthDiagnosticLogger } from "./subagent-depth-diagnostics.ts"
 
 const COMPAT_AGENT_ALIASES = [
   { alias: "explore", target: "code-search" },
@@ -438,6 +439,7 @@ export type ConfigHandlerBaseArgs = {
   getConfig: () => OcmmConfig
   skillsRoot?: string
   cwd?: string
+  logger?: SubagentDepthDiagnosticLogger
 }
 
 export type ConfigHandlerRouteMode =
@@ -585,6 +587,9 @@ function registerEffectiveRoute(args: {
 export function createConfigHandler(
   args: ConfigHandlerArgs,
 ): (input: unknown, output: unknown) => Promise<void> {
+  const logger = args.logger ?? log
+  const reportSubagentDepth = createSubagentDepthDiagnosticReporter(logger)
+
   return async (rawInput, _output) => {
     const registryManaged = hasRouteRegistry(args)
     if (!registryManaged) args.registeredAgentModels?.clear()
@@ -597,11 +602,12 @@ export function createConfigHandler(
       ? { fastMode: args.getFastMode(), nextRoutes: new Map<string, ReturnType<typeof buildEffectiveModelRoute>>() }
       : undefined
     const cfg = compatibilityConfig ?? args.getConfig()
+    reportSubagentDepth(target, cfg)
     const registered = registerSkillsAndCommands(target, cfg, args.skillsRoot)
     const registeredMcps = registerMcps(target, cfg, args.cwd)
 
     if (!cfg.registerBuiltinAgents) {
-      log.info(`config: registered ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`)
+      logger.info(`config: registered ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`)
       if (registryManaged && routeBuild && generation !== undefined) {
         args.routeRegistry.publish(generation, routeBuild.nextRoutes)
       }
@@ -931,7 +937,7 @@ export function createConfigHandler(
       }
     }
 
-    log.info(
+    logger.info(
       `config: registered ${Object.keys(agentMap).length} agents (built-in + categories + user), ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`,
     )
     if (registryManaged && routeBuild && generation !== undefined && args.routeRegistry.publish(generation, routeBuild.nextRoutes)) {

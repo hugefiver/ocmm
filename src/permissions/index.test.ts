@@ -639,6 +639,22 @@ test("subagent depth guard is disabled when hook is disabled", async () => {
   }
 })
 
+test("subagent depth guard does not treat execute as task", async () => {
+  const root = tempProject()
+  try {
+    const sessionDepthMap = new Map<string, number>([["s1", 3]])
+    const guards = createPermissionGuards({
+      getConfig: defaultConfig,
+      projectRoot: root,
+      sessionDepthMap,
+    })
+
+    await guards.before({ tool: "execute", sessionID: "s1", args: {} }, {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("subagent depth guard fail-closes session.created when parent depth is missing", async () => {
   const root = tempProject()
   try {

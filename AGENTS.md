@@ -136,7 +136,7 @@ Critical: step 2 (regenerate Codex bundle) must run **after** the version bump a
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |
 | `subagent-interruption-recovery` | Enabled | Correlates child `session.error` and parent `message.part.updated` task-part evidence and lets the task-output adapter append at most one manual continuation notice; retry dispatch remains owned by the existing fallback controller. |
-| `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed `subagent.maxDepth`; default max depth is 3 subagent layers. |
+| `subagent-depth-guard` | Enabled | Blocks `task` dispatches that would exceed local `subagent.maxDepth` (default `3`); when host `subagent_depth` is observable, the effective limit is the lower active value and `OCMM_DEBUG` logs compatibility once per combination. Never treats `execute` as `task`. |
 
 ## Live Integration Test
 
