@@ -455,6 +455,57 @@ function renderOrderedOracleProfiles(agents: readonly CodexAgentSpec[]): string 
     .join("\n")
 }
 
+function renderCodexGenericDelegationEnvelope(): string {
+  return [
+    "`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.",
+    "`STOP WHEN:` State the exact completion condition and non-goal boundary.",
+    "`EVIDENCE:` State the paths, commands, outputs, or observations that prove completion.",
+  ].join("\n")
+}
+
+function renderCodexDispatchCompatibility(): string {
+  return `### Callable Dispatch Contract
+
+The current callable dispatch-tool schema is the only authority. Examples are not feature proof; omit hidden fields.
+
+Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership. Only call \`create_goal\` when a user, system, or developer instruction explicitly requests runtime goal creation. Ordinary workflow, planning, delegation, or a \`GOAL:\` line does not qualify.
+
+Use the first permitted route in this order:
+
+1. **Exact profile** — use \`agent_type\`, \`agent_path\`, or \`agent_nickname\` only when the current callable schema explicitly guarantees it selects a generated \`${CODEX_AGENT_PREFIX}-*\` profile.
+2. **Direct composition** — use only when the current callable schema exposes every model field required by the role, the schema-exact \`reasoning\` or \`reasoning_effort\` field when the role requires reasoning, the role's full system/developer instructions, and all required skills. Report this route as composition, not exact-profile selection.
+3. **V1/V2 generic or flat dispatch** — use the canonical envelope below. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
+4. **Local execution** — when delegation is permitted, use only when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
+
+For generic or flat dispatch, put this canonical envelope in the task message:
+
+${renderCodexGenericDelegationEnvelope()}
+
+The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
+
+The default V1 exact-profile call is \`multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")\`. V1 may send \`model\` only when the current callable schema exposes \`model\`. V1 may send exactly the schema-named \`reasoning\` or \`reasoning_effort\` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add \`fork_context\` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+
+V2-style flat dispatch uses \`spawn_agent\` to create, \`wait_agent\` to await, \`followup_task\` to continue, and \`interrupt_agent\` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable \`multi_agent_v2\` namespace is guaranteed. V2-style flat tools never receive \`fork_context\`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
+
+Only when the callable schema exposes \`fork_turns\` may the agent use \`fork_turns: none\` to request no context. If \`fork_turns\` is hidden, omit it. Other \`fork_turns\` values are only for explicit branch exploration.
+
+\`task_name\` is an identity, not a profile selector. Do not pass \`${CODEX_AGENT_PREFIX}-*.toml\` as a prompt, item, or skill attachment: generated TOML files are installation artifacts, not runtime skills.`
+}
+
+function renderCodexRuntimeCompatibility(): string {
+  return `## Runtime Controls
+
+${renderCodexDispatchCompatibility()}
+
+### Generated profile references
+
+- \`[@${CODEX_AGENT_PREFIX}-*](subagent://${CODEX_AGENT_PREFIX}-*)\` is a profile reference, not a spawn.
+- Plan review: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\`.
+- Code or work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\`.
+- Ordered Oracle review starts with \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\`; use \`[@${CODEX_AGENT_PREFIX}-oracle-2nd](subagent://${CODEX_AGENT_PREFIX}-oracle-2nd)\` through later configured slots only when explicit additional independent evidence is needed.
+- If an exact profile returns \`unknown agent_type\`, continue with Direct composition, then V1/V2 generic or flat dispatch, then Local execution.`
+}
+
 function renderWorkflowSkill(config: OcmmConfig, agents: readonly CodexAgentSpec[]): string {
   const agentRows = agents
     .map((agent) => `| ${agent.name} | ${agent.reasoningEffort} | ${agent.sourceName} |`)
@@ -486,30 +537,7 @@ Configured workflow: \`${config.workflow}\`
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
-## Delegation
-
-When a Deepwork role maps to a generated agent, use the exact Codex agent type when the current dispatch tool can select it. A generic or flat subagent does not load the generated profile; when that is the only callable route, follow the generic fallback below and state the role, skills, and task explicitly in its message.
-
-- Plan review: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-plan-critic", fork_context=false, message="Review the plan at <path>.")\`
-- Code/work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\` or \`multi_agent_v1.spawn_agent(agent_type="${CODEX_AGENT_PREFIX}-reviewer", fork_context=false, message="<bounded review task>")\`
-- Ordered Oracle review: \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\` first, then \`[@${CODEX_AGENT_PREFIX}-oracle-2nd](subagent://${CODEX_AGENT_PREFIX}-oracle-2nd)\` through configured later slots only when additional independent evidence is explicitly needed.
-
-When Codex exposes MultiAgentV2 flat tools, map Deepwork delegation to the available flat tool names instead of forcing V1 syntax: use \`spawn_agent\` to create a bounded agent, \`wait_agent\` to wait for completion, \`followup_task\` to continue an existing agent, \`interrupt_agent\` to stop a runaway agent, and \`fork_turns\` only for explicit branch-style exploration. If those names are not callable in the current thread, fall back to the route order below.
-
-The \`${CODEX_AGENT_PREFIX}-*\` agent profile is the preferred selector. When a current native dispatch tool can select that profile directly, use it before any generic route.
-
-Do not pass \`${CODEX_AGENT_PREFIX}-*.toml\` files as \`items\`, \`skill\` attachments, or prompt context to a generic subagent. TOML files are installation artifacts for Codex's agent registry, not runtime skills.
-
-The current callable dispatch-tool schema is the only availability signal. MultiAgent V1/V2 names are useful hints but not a contract: use any current or future native dispatch surface only according to the parameters it actually exposes. Do not inspect unrelated or deferred tools for a hidden profile selector. An \`[@${CODEX_AGENT_PREFIX}-*](subagent://${CODEX_AGENT_PREFIX}-*)\` link does not spawn an agent, and a \`task_name\` does not select a profile.
-
-Use the first available native route in this order:
-
-1. **Exact profile** — a tool field such as \`agent_type\`, \`agent_path\`, or \`agent_nickname\` only when the current tool schema or its documentation explicitly guarantees that it selects the generated \`${CODEX_AGENT_PREFIX}-*\` profile.
-2. **Direct composition** — a native dispatch tool that can choose the required model and supply the role's actual system or developer instructions plus skills. Select the matching model from the role tier below, supply the selected role's generated developer-instruction content (not its TOML wrapper), and attach or load the workflow skill and task-relevant \`SKILL.md\` artifacts through the fields the tool actually exposes. State that this is a generic fallback, not an exact-profile invocation.
-3. **Generic or flat dispatch** — when a callable subagent tool can only accept a task identity and message (for example \`task_name\`, \`message\`, and \`fork_turns\`), still delegate. Put this self-contained envelope in \`message\`:\n\n   \`TASK:\` <imperative, bounded assignment>\n   \`ROLE:\` <Deepwork role and purpose>\n   \`DELIVERABLE:\` <concrete expected output>\n   \`SCOPE:\` <files, context, and boundaries>\n   \`VERIFY:\` <test, evidence, or observable result>\n   \`REQUIRED SKILLS:\` <workflow skill and task-relevant skills>\n   \`CONTEXT:\` <minimal information the child needs>\n   \`CONSTRAINTS:\` <permissions and non-goals>\n\n   Use any real skill-loading field only when it is exposed. Do not claim that this loaded the \`${CODEX_AGENT_PREFIX}-*\` profile; the child uses its inherited/default model and follows the role and skill guidance in the message.
-4. **Local execution** — use only when no callable native subagent-dispatch route is available.
-
-If an exact \`${CODEX_AGENT_PREFIX}-*\` invocation returns \`unknown agent_type\`, continue at route 2 when it is complete enough, otherwise use route 3. A tool limited to \`task_name\`, \`message\`, and \`fork_turns\` cannot select a model or load the profile payload, but it is still a valid generic/flat dispatch route. Install the generated TOML files into project \`.codex/agents/\` or personal \`~/.codex/agents/\` and restart or refresh the Codex thread only when restoring exact-profile delegation is itself in scope.
+${renderCodexRuntimeCompatibility()}
 
 ## Generated Agents
 
@@ -621,9 +649,7 @@ function codexAgentInstructions(args: {
     args.prompt,
     "",
     "## Subagent Dispatch Compatibility (HARD-GATE)",
-    "The current callable dispatch-tool schema is authoritative; MultiAgent V1/V2 names and examples elsewhere are lower-priority compatibility examples.",
-    "Compatibility routing applies only after the effective delegation contract permits delegation. It never expands the role's target allowlist, permits a utility leaf to dispatch, or transfers planning/review ownership away from the orchestrator.",
-    "When delegation is permitted, use agent_type, agent_path, or agent_nickname as an exact profile selector only when the current tool schema or documentation explicitly guarantees that behavior. Otherwise use direct composition only when the tool can select the model and carry system/developer instructions plus skills. Otherwise, if the effective delegation contract permits delegation and a generic or flat dispatch tool is callable, use a self-contained message labeled TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS. Do not claim that a generic message loaded a dw-*.toml profile, and do not pass a dw-*.toml installation artifact as a skill or prompt attachment. Use local execution when delegation is forbidden or no native dispatch tool is callable.",
+    renderCodexDispatchCompatibility(),
     "Ordered Oracle review semantics:",
     "- Oracle slots are model priority, not capability ranking: dw-oracle, then dw-oracle-2nd through configured later slots.",
     "- Unsuffixed profile is logical normal; -low/-high/-max tiers choose rigor independent of slot priority.",
@@ -703,7 +729,10 @@ function normalizeSkillForCodex(skillDir: string, name?: string): void {
   text = text.replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
   if (name) text = text.replace(/^name:\s*.+$/m, `name: ${name}`)
   if (!text.includes("## Codex Compatibility")) {
-    text = `${text.trimEnd()}\n\n## Codex Compatibility\n\n- When this skill mentions TodoWrite, use Codex \`update_plan\`.\n- When this skill mentions OpenCode \`task(...)\`, use the current callable Codex subagent-dispatch tool and preserve the task contract. Treat an agent_type, agent_path, or agent_nickname field as an exact profile selector only when its current schema or documentation explicitly guarantees that behavior; otherwise prefer complete direct composition, then generic/flat dispatch.\n- A generic/flat child message must be self-contained and labeled \`TASK\`, \`ROLE\`, \`DELIVERABLE\`, \`SCOPE\`, \`VERIFY\`, \`REQUIRED SKILLS\`, \`CONTEXT\`, and \`CONSTRAINTS\`; do not claim it loaded a \`dw-*\` profile.\n- When this skill mentions OpenCode-specific tool names, choose the nearest Codex tool with the same intent and preserve the workflow contract.\n`
+    text = `${text.trimEnd()}\n\n## Codex Compatibility\n\n- When this skill mentions TodoWrite, use Codex \`update_plan\`.\n- When this skill mentions OpenCode \`task(...)\`, preserve its task contract and use the current callable Codex dispatch route.\n- When this skill mentions OpenCode-specific tool names, choose the nearest callable Codex tool with the same intent and preserve the workflow contract.\n`
+  }
+  if (!text.includes("### Callable Dispatch Contract")) {
+    text = `${text.trimEnd()}\n\n${renderCodexDispatchCompatibility()}\n`
   }
   writeFileSync(
     skillPath,

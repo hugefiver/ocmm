@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { isAbsolute, join } from "node:path"
 
@@ -74,6 +74,103 @@ function assertCompactGpt56Calibration(instructions: string, label: string): voi
   assert.match(calibration, /Lead with the outcome.*evidence.*residual risk.*unverified/is, `${label} reporting priority`)
   for (const heading of REMOVED_GPT56_SECTION_HEADINGS) assert.equal(calibration.includes(heading), false, `${label} duplicates ${heading}`)
   assert.doesNotMatch(calibration, /\[product\]|\[evidence\]/i, `${label} duplicates review-label doctrine`)
+}
+
+const LEGACY_CODEX_GENERIC_CONTRACTS = [
+  /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/,
+  /`TASK`, `ROLE`, `DELIVERABLE`, `SCOPE`, `VERIFY`, `REQUIRED SKILLS`, `CONTEXT`, and `CONSTRAINTS`/,
+  /`TASK:`.*imperative, bounded assignment/,
+  /`DELIVERABLE:`.*concrete expected output/,
+  /`VERIFY:`.*test, evidence, or observable result/,
+] as const
+
+function parseGeneratedDeveloperInstructions(toml: string, label: string): string {
+  const match = toml.match(/^developer_instructions = (".*")$/m)
+  assert.ok(match, `${label} is missing developer_instructions`)
+  const parsed = JSON.parse(match[1]!) as unknown
+  assert.equal(typeof parsed, "string", `${label} developer_instructions must decode to a string`)
+  return parsed as string
+}
+
+function extractCallableDispatchContract(text: string, label: string): string {
+  const marker = "### Callable Dispatch Contract"
+  const start = text.indexOf(marker)
+  assert.notEqual(start, -1, `${label} is missing ${marker}`)
+  const possibleEnds = [
+    text.indexOf("\n## ", start + marker.length),
+    text.indexOf("\n### Generated profile references", start + marker.length),
+    text.indexOf("\nOrdered Oracle review semantics:", start + marker.length),
+  ].filter((index) => index !== -1)
+  const end = possibleEnds.length > 0 ? Math.min(...possibleEnds) : text.length
+  return text.slice(start, end).trimEnd()
+}
+
+function assertCanonicalCodexDispatchContract(contract: string, label: string): void {
+  assert.match(contract, /current callable dispatch-tool schema is the only authority/i, `${label} schema authority`)
+  assert.match(contract, /Only call `create_goal`.*user, system, or developer.*explicitly requests/is, `${label} create_goal gate`)
+  assert.match(
+    contract,
+    /1\. \*\*Exact profile\*\*[\s\S]*2\. \*\*Direct composition\*\*[\s\S]*3\. \*\*V1\/V2 generic or flat dispatch\*\*[\s\S]*4\. \*\*Local execution\*\*/,
+    `${label} route order`,
+  )
+  assert.match(
+    contract,
+    /2\. \*\*Direct composition\*\* — use only when the current callable schema exposes every model field required by the role, the schema-exact `reasoning` or `reasoning_effort` field when the role requires reasoning, the role's full system\/developer instructions, and all required skills/,
+    `${label} direct-composition completeness`,
+  )
+  assert.match(
+    contract,
+    /Report this route as composition, not exact-profile selection/,
+    `${label} direct-composition reporting`,
+  )
+
+  const v1Default = contract.match(/multi_agent_v1\.spawn_agent\(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict\."\)/)
+  assert.ok(v1Default, `${label} is missing the default V1 exact-profile call`)
+  assert.doesNotMatch(v1Default[0], /model|reasoning|fork_context|fork_turns/, `${label} default V1 call must omit optional fields`)
+  assert.doesNotMatch(
+    contract,
+    /multi_agent_v1\.spawn_agent\([^)]*(?:model|reasoning|fork_context|fork_turns)/,
+    `${label} contains a V1 example with unproven optional fields`,
+  )
+  assert.match(contract, /V1 may send `model` only when the current callable schema exposes `model`/, `${label} V1 model gate`)
+  assert.match(
+    contract,
+    /V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed/,
+    `${label} V1 reasoning gate`,
+  )
+  assert.match(contract, /If either field is hidden, omit it; never send both reasoning spellings/, `${label} V1 hidden optional fields`)
+  assert.match(contract, /V1 may add `fork_context` only when the callable V1 schema exposes it/is, `${label} V1 fork gate`)
+
+  assert.match(
+    contract,
+    /V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop/,
+    `${label} V2 flat tool mapping`,
+  )
+  assert.match(
+    contract,
+    /Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema/,
+    `${label} V2 callable-schema gate`,
+  )
+  assert.match(contract, /V2-style flat tools never receive `fork_context`/, `${label} V2 fork prohibition`)
+  assert.doesNotMatch(contract, /multi_agent_v2\.(?:spawn_agent|wait_agent|followup_task|interrupt_agent)/, `${label} stable V2 namespace claim`)
+  assert.doesNotMatch(
+    contract,
+    /(?<!multi_agent_v1\.)(?:multi_agent_v2\.)?(?:spawn_agent|wait_agent|followup_task|interrupt_agent)\([^)]*(?:agent_type|model|reasoning|fork_context|fork_turns)/,
+    `${label} contains a V2-flat example with invented parameters`,
+  )
+  assert.match(contract, /Never synthesize a namespace, copy parameters between tools, or add hidden parameters/, `${label} V2 hidden-parameter prohibition`)
+  assert.match(contract, /Only when the callable schema exposes `fork_turns` may the agent use `fork_turns: none`/is, `${label} fork_turns gate`)
+  assert.match(contract, /If `fork_turns` is hidden, omit it/, `${label} hidden fork_turns`)
+  assert.doesNotMatch(contract, /spawn_agent\([^)]*fork_turns/, `${label} unconditional fork_turns call`)
+
+  for (const field of ["GOAL", "STOP WHEN", "EVIDENCE"]) {
+    assert.match(contract, new RegExp("`" + field + ":`"), `${label} generic envelope is missing ${field}`)
+  }
+  for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
+    assert.doesNotMatch(contract, legacy, `${label} retains ${legacy}`)
+  }
+  assert.match(contract, /`task_name`.*not a profile selector/is, `${label} task_name disclaimer`)
+  assert.match(contract, /does not load a profile, select a model, attach a skill, or enable a missing feature/, `${label} generic disclaimer`)
 }
 
 test("Codex manifest declares deepwork plugin resources", () => {
@@ -205,6 +302,14 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
   assert.ok(orchestrator)
+  const orchestratorContract = extractCallableDispatchContract(
+    orchestrator.developerInstructions,
+    "in-memory orchestrator",
+  )
+  assertCanonicalCodexDispatchContract(orchestratorContract, "in-memory orchestrator")
+  for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
+    assert.doesNotMatch(orchestrator.developerInstructions, legacy, `in-memory orchestrator retains ${legacy}`)
+  }
   assert.equal(orchestrator.model, "gpt-5.5")
   assert.equal(orchestrator.reasoningEffort, "high")
   assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
@@ -261,7 +366,7 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   )
   assert.match(
     planner.developerInstructions,
-    /Compatibility routing applies only after the effective delegation contract permits delegation/,
+    /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
   )
 })
 
@@ -484,10 +589,33 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(mcpManifest, /"lsp"/)
     assert.match(mcpManifest, /ocmm-lsp\.js/)
     assert.equal(isAbsolute(lspEntrypoint), false)
+    const generatedAgentInstructions = parseGeneratedDeveloperInstructions(orchestrator, "generated orchestrator TOML")
+    const agentContract = extractCallableDispatchContract(generatedAgentInstructions, "generated orchestrator TOML")
+    const workflowContract = extractCallableDispatchContract(workflowSkill, "generated workflow skill")
+    const normalizedWritingPlanContract = extractCallableDispatchContract(deepworkSkill, "normalized writing-plans skill")
+    const normalizedFrontendContract = extractCallableDispatchContract(frontendSkill, "normalized frontend skill")
+
+    for (const [label, contract] of [
+      ["generated workflow skill", workflowContract],
+      ["generated orchestrator TOML", agentContract],
+      ["normalized writing-plans skill", normalizedWritingPlanContract],
+      ["normalized frontend skill", normalizedFrontendContract],
+    ] as const) {
+      assert.equal(contract, workflowContract, `${label} compatibility drift`)
+      assertCanonicalCodexDispatchContract(contract, label)
+    }
+    for (const [label, surface] of [
+      ["generated workflow skill", workflowSkill],
+      ["generated orchestrator TOML", generatedAgentInstructions],
+      ["normalized writing-plans skill", deepworkSkill],
+      ["normalized frontend skill", frontendSkill],
+    ] as const) {
+      for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
+        assert.doesNotMatch(surface, legacy, `${label} retains ${legacy}`)
+      }
+    }
     assert.match(orchestrator, /^name = "dw-orchestrator"$/m)
     assert.match(orchestrator, /Subagent Dispatch Compatibility \(HARD-GATE\)/)
-    assert.match(orchestrator, /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/)
-    assert.match(orchestrator, /MultiAgent V1\/V2 names and examples elsewhere are lower-priority compatibility examples/)
     assert.match(orchestrator, /select only from the user's current available catalog/)
     assert.match(orchestrator, /Ordered Oracle review semantics:/)
     assert.match(orchestrator, /For GPT\/Codex review routes \(plan-critic and parsed review names\), enforce at least xhigh/)
@@ -517,31 +645,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /\[@dw-oracle\]\(subagent:\/\/dw-oracle\)/)
     assert.match(workflowSkill, /\[@dw-oracle-2nd\]\(subagent:\/\/dw-oracle-2nd\)/)
     assert.equal(existsSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`)), false)
-    assert.match(workflowSkill, /configured later slots only when additional independent evidence is explicitly needed/)
-    assert.match(workflowSkill, /Do not pass `dw-\*\.toml` files as `items`, `skill` attachments, or prompt context/)
-    assert.match(workflowSkill, /current callable dispatch-tool schema is the only availability signal/)
-    assert.match(workflowSkill, /Exact profile/)
-    assert.match(workflowSkill, /schema or its documentation explicitly guarantees/)
-    assert.match(workflowSkill, /Direct composition/)
-    assert.match(workflowSkill, /system or developer instructions plus skills/)
-    assert.match(workflowSkill, /generated developer-instruction content \(not its TOML wrapper\)/)
-    assert.match(workflowSkill, /Generic or flat dispatch/)
-    assert.match(workflowSkill, /MultiAgentV2 flat tools/)
-    assert.match(workflowSkill, /`spawn_agent`/)
-    assert.match(workflowSkill, /`wait_agent`/)
-    assert.match(workflowSkill, /`followup_task`/)
-    assert.match(workflowSkill, /`interrupt_agent`/)
-    assert.match(workflowSkill, /`fork_turns`/)
-    assert.match(workflowSkill, /`REQUIRED SKILLS:` <workflow skill and task-relevant skills>/)
-    assert.match(workflowSkill, /self-contained envelope in `message`/)
-    assert.match(workflowSkill, /`TASK:` <imperative, bounded assignment>/)
-    assert.match(workflowSkill, /`DELIVERABLE:` <concrete expected output>/)
-    assert.match(workflowSkill, /`VERIFY:` <test, evidence, or observable result>/)
-    assert.match(workflowSkill, /still a valid generic\/flat dispatch route/)
-    assert.match(workflowSkill, /no callable native subagent-dispatch route is available/)
-    assert.match(workflowSkill, /child inherits its native\/default model while the role and skills are carried in `message`/)
-    assert.match(workflowSkill, /a `task_name` does not select a profile/)
-    assert.match(workflowSkill, /generic or flat subagent does not load the generated profile/)
+    assert.match(workflowSkill, /through later configured slots only when explicit additional independent evidence is needed/)
     assert.match(orchestrator, /GPT-5\.6 EXECUTION CALIBRATION/)
     assertCompactGpt56Calibration(orchestrator, "generated orchestrator TOML")
     assert.match(
@@ -624,7 +728,66 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(coding, /Allowed utility targets: `quick`, `code-search`, `explore`, `doc-search`, `research`, `media-reader`/)
     assert.match(quick, /Do not dispatch any subagent/)
     assert.match(deep, /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`/)
-    assert.match(planner, /Compatibility routing applies only after the effective delegation contract permits delegation/)
+    assert.match(
+      planner,
+      /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("generated Codex bundle shares one callable-schema contract across workflow, agents, and normalized skills", async () => {
+  const root = mkdtempSync(join(tmpdir(), "deepwork-codex-runtime-contract-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
+    })
+
+    const workflowSkill = readFileSync(
+      join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"),
+      "utf8",
+    )
+    const canonical = extractCallableDispatchContract(workflowSkill, "workflow skill")
+    assertCanonicalCodexDispatchContract(canonical, "workflow skill")
+
+    const projectAgentsRoot = result.projectAgentsRoot
+    assert.ok(projectAgentsRoot)
+    const bundledAgentsRoot = join(result.pluginRoot, "agents")
+    const agentFiles = readdirSync(bundledAgentsRoot).filter((name) => name.endsWith(".toml")).sort()
+    assert.equal(agentFiles.length, result.agentCount)
+    for (const file of agentFiles) {
+      const bundled = readFileSync(join(bundledAgentsRoot, file), "utf8")
+      const project = readFileSync(join(projectAgentsRoot, file), "utf8")
+      assert.equal(project, bundled, `${file} project/plugin copies differ`)
+      const instructions = parseGeneratedDeveloperInstructions(bundled, file)
+      const contract = extractCallableDispatchContract(instructions, file)
+      assert.equal(contract, canonical, `${file} dispatch contract differs from workflow skill`)
+      for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
+        assert.doesNotMatch(instructions, legacy, `${file} retains ${legacy}`)
+      }
+    }
+
+    const skillsRoot = join(result.pluginRoot, "skills")
+    const normalizedSkillNames = readdirSync(skillsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== CODEX_WORKFLOW_SKILL_NAME)
+      .map((entry) => entry.name)
+      .sort()
+    assert.equal(normalizedSkillNames.length, result.skillCount - 1)
+    for (const name of normalizedSkillNames) {
+      const skill = readFileSync(join(skillsRoot, name, "SKILL.md"), "utf8")
+      assert.match(skill, /## Codex Compatibility/, `${name} compatibility heading`)
+      const contract = extractCallableDispatchContract(skill, `${name} normalized skill`)
+      assert.equal(contract, canonical, `${name} dispatch contract differs from workflow skill`)
+      for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
+        assert.doesNotMatch(skill, legacy, `${name} retains ${legacy}`)
+      }
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
