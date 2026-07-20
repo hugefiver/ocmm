@@ -298,18 +298,34 @@ Until every success criterion PASSES with its evidence captured:
    vars. Append a one-line cleanup receipt to the notepad next to the
    artifact, e.g. `cleanup: killed 12345; tmux kill-session dw-qa-foo;
    rm -rf /tmp/dw.aB12cD`. No receipt → criterion stays in_progress.
-6. Verify: LSP diagnostics (via `lsp` MCP) clean on changed files + full test suite
-   green (no skipped, no xfail added this turn).
+6. Incremental verification: run LSP diagnostics (via `lsp` MCP) on
+   changed files plus only the tests and scenarios touched or affected
+   by this increment. Re-run a broader suite, typecheck, or build only
+   when relevant inputs have changed since its last green result.
 7. Mark completed. Append non-obvious findings / learnings.
-8. After each increment, re-run every criterion's scenario. Record
-   PASS/FAIL inline with the evidence paths AND the cleanup receipt.
-   Loop until all PASS.
+8. Before the final user-visible message, run one appropriate full pass
+   over the integrated change. HEAVY work still requires complete
+   RED/GREEN/SURFACE/CLEAN evidence for every criterion and the required
+   final acceptance authority; do not re-run unchanged criteria after
+   every increment.
 
 Parallel-batch independent reads / searches / subagents within a step,
 but NEVER parallelise RED and GREEN of the same criterion.
 
 # Codex subagent reliability
-Every `multi_agent_v1.spawn_agent()` delegation prompt must be self-contained and include `TASK`, `EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and `CONTEXT`. Use `fork_context=false` (the default) only when the parent has independent work to do while the child runs; otherwise prefer synchronous spawns so results return in the same turn.
+Every `multi_agent_v1.spawn_agent()` delegation prompt must preserve the
+local fields `TASK`, `EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`,
+`MUST NOT DO`, and `CONTEXT`, and add `GOAL`, `STOP WHEN`, and `EVIDENCE`.
+`GOAL` names the bounded child outcome; `STOP WHEN` names the child's
+observable completion condition; `EVIDENCE` names what the child must return.
+The parent verifies returned `EVIDENCE` against the delegated `GOAL` rather
+than trusting a completion claim. Use `fork_context=false` (the default) only
+when the parent has independent work to do while the child runs; otherwise
+prefer synchronous spawns so results return in the same turn.
+
+A delegated `STOP WHEN` bounds only that child assignment. The parent run
+stops only when the entire user goal and all required verification are
+complete.
 
 Track background agent results separately. Codex does not support session resume via `task_id` — each follow-up spawns a fresh agent with the full accumulated context. Do not count silence, timeout, or an ack-only reply as approval.
 
@@ -378,9 +394,10 @@ message + present for approval.
   list (`<sha> <subject>`). No file-by-file changelog unless asked.
 
 # Stop rules
-- Stop ONLY when every scenario PASSES with captured evidence, every
-  cleanup receipt is recorded, notepad is current, and final acceptance
-  review (if required) has approved unconditionally.
+- Stop the parent run ONLY when the entire user goal is complete: every
+  scenario PASSES with captured evidence, every cleanup receipt is
+  recorded, notepad is current, and final acceptance review (if required)
+  has approved unconditionally.
 - Leftover QA state (live process, `tmux` session, browser context,
   bound port, temp file / dir) means NOT done. Tear it down, record
   the receipt, then continue.

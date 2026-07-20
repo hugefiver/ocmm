@@ -35,7 +35,7 @@ prompts/<workflow>/
 | `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts`, `packages/omo-codex/plugin/components/rules/bundled-rules/hephaestus/gpt-5.6.md`, and `packages/omo-opencode/src/agents/momus-gpt-5-6.ts` | Additive GPT-5.6 calibration only: applicability/authority, outcome-first completion, conservative retrieval/delegation, context-efficient waiting/revalidation, and reporting priority. Shared discovery, planner trigger, answerability, scope, shell, review labels, and exact role permissions remain in effective base/role/category/skill/terminal-contract layers rather than being duplicated here. **2026-07-19 simplification:** preserves native `max`, safe defaults, authorization, observable delegation evidence, backed-off waiting, and changed-input validation while removing the role matrix and detailed allowlists. |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline plus shell-adaptation guidance |
-| `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates |
+| `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates. **2026-07-20 local policy refresh:** all three workflow sources use touched/affected increment checks, changed-input broader gates, one final full pass, and a local-envelope-plus-`GOAL`/`STOP WHEN`/`EVIDENCE` delegation contract without weakening complex-task evidence or final acceptance. |
 | `deepwork/planner.md` | `packages/prompts-core/prompts/ultrawork/planner.md` and Prometheus prompt | Upstream-first planner doctrine with local planner naming and shell-adaptation guidance |
 
 ## Maintenance Rules
@@ -96,6 +96,13 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - Final review may consume either a committed range or a working-tree/staged diff; implementation subagents report changes and do not create commits merely to create review SHAs.
 - Orchestrator requesting-code-review wording must describe committed ranges or working-tree/staged diff review input, never SHA-only review input.
 - `prompts/{omo,v1,codex}/agents/orchestrator.md` now state explicit workflow-agent composition ownership, ordered Oracle slot/profile selection, deterministic tier mapping, and no automatic fan-out from multiple configured slots/tiers.
+
+## Codex Prompt Policy Refresh (2026-07-20)
+
+- `prompts/{omo,v1,codex}/deepwork/codex.md` rerun only touched tests and affected scenarios per increment; suite/typecheck/build rerun only when relevant inputs changed after their last green result; one full integrated pass remains required before final reporting.
+- Complex-task RED/GREEN/SURFACE/CLEAN evidence, cleanup receipts, and each environment's final acceptance authority remain unchanged.
+- Delegation keeps `TASK`, `EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and `CONTEXT`, and adds observable `GOAL`, `STOP WHEN`, and `EVIDENCE`; the parent verifies evidence, and a child's stop condition never replaces whole-user-goal completion.
+- Prompt policy is separate from generated Codex MultiAgent V1/V2 compatibility. `src/codex/plugin-generator.ts` and its compatibility tests remain unchanged; the existing generator path does not consume `prompts/codex/deepwork/codex.md`, so tracked bundle regeneration is expected to be a no-op.
 
 ## Observation-Only Upstream Items (2026-07-13)
 

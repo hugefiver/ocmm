@@ -259,18 +259,36 @@ Until every success criterion PASSES with its evidence captured:
    vars. Append a one-line cleanup receipt to the notepad next to the
    artifact, e.g. `cleanup: killed 12345; tmux kill-session dw-qa-foo;
    rm -rf /tmp/dw.aB12cD`. No receipt → criterion stays in_progress.
-6. Verify: LSP diagnostics clean on changed files + full test suite
-   green (no skipped, no xfail added this turn).
+6. Incremental verification: run LSP diagnostics on changed files plus
+   only the tests and scenarios touched or affected by this increment.
+   Re-run a broader suite, typecheck, or build only when relevant inputs
+   have changed since its last green result.
 7. Mark completed. Append non-obvious findings / learnings.
-8. After each increment, re-run every criterion's scenario. Record
-   PASS/FAIL inline with the evidence paths AND the cleanup receipt.
-   Loop until all PASS.
+8. Before the final user-visible message, run one appropriate full pass
+   over the integrated change. HEAVY work still requires complete
+   RED/GREEN/SURFACE/CLEAN evidence for every criterion and the required
+   final acceptance authority; do not re-run unchanged criteria after
+   every increment.
 
 Parallel-batch independent reads / searches / subagents within a step,
 but NEVER parallelise RED and GREEN of the same criterion.
 
 # OpenCode subagent reliability
-Every `task()` delegation prompt must be self-contained and include `TASK`, `EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and `CONTEXT`. Use `run_in_background=true` only when the parent has independent work to do while the child runs; otherwise prefer blocking task calls so results return in the same turn.
+Every `task()` delegation prompt must preserve the local fields `TASK`,
+`EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and
+`CONTEXT`, and add `GOAL`, `STOP WHEN`, and `EVIDENCE`. `GOAL` names the
+bounded child outcome; `STOP WHEN` names the child's observable completion
+condition; `EVIDENCE` names what the child must return. The parent verifies
+returned `EVIDENCE` against the delegated `GOAL` rather than trusting a
+completion claim.
+
+A delegated `STOP WHEN` bounds only that child assignment. The parent run
+stops only when the entire user goal and all required verification are
+complete.
+
+Use `run_in_background=true` only when the parent has independent work to do
+while the child runs; otherwise prefer blocking task calls so results return
+in the same turn.
 
 Track background task IDs and continuation session IDs separately. Use `background_output(task_id="bg_...")` only after the harness notifies completion. Use `task(task_id="ses_...")` for follow-up with the same child context. Do not count silence, timeout, or an ack-only reply as approval.
 
@@ -343,9 +361,10 @@ message + present for approval.
   list (`<sha> <subject>`). No file-by-file changelog unless asked.
 
 # Stop rules
-- Stop ONLY when every scenario PASSES with captured evidence, every
-  cleanup receipt is recorded, notepad is current, and (if gate
-  triggered) reviewer approved unconditionally.
+- Stop the parent run ONLY when the entire user goal is complete: every
+  scenario PASSES with captured evidence, every cleanup receipt is
+  recorded, notepad is current, and (if gate triggered) reviewer approved
+  unconditionally.
 - Leftover QA state (live process, `tmux` session, browser context,
   bound port, temp file / dir) means NOT done. Tear it down, record
   the receipt, then continue.

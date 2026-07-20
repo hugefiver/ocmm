@@ -225,6 +225,83 @@ test("real deepwork prompts do not retain obsolete planner or broad review trigg
   }
 })
 
+test("Codex deepwork prompts use incremental validation and evidence-bounded delegation", () => {
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    const label = `${workflow}/codex`
+    const prompt = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "codex.md"), "utf8")
+    const loopStart = prompt.indexOf("Until every success criterion PASSES with its evidence captured:")
+    const loopEnd = prompt.indexOf("Parallel-batch independent reads / searches / subagents within a step,", loopStart)
+    const reliabilityHeading = workflow === "codex"
+      ? "# Codex subagent reliability"
+      : "# OpenCode subagent reliability"
+    const reliabilityStart = prompt.indexOf(reliabilityHeading)
+    const reliabilityEnd = prompt.indexOf("# Subagent-dependent transition barrier", reliabilityStart)
+    const triageStart = prompt.indexOf("# Tier triage")
+    const triageEnd = prompt.indexOf("# Manual-QA channels", triageStart)
+    assert.notEqual(loopStart, -1, `${label} missing incremental loop start`)
+    assert.notEqual(loopEnd, -1, `${label} missing incremental loop end`)
+    assert.notEqual(reliabilityStart, -1, `${label} missing reliability section`)
+    assert.notEqual(reliabilityEnd, -1, `${label} missing reliability section boundary`)
+    assert.notEqual(triageStart, -1, `${label} missing tier triage`)
+    assert.notEqual(triageEnd, -1, `${label} missing tier triage boundary`)
+    const loop = prompt.slice(loopStart, loopEnd)
+    const reliability = prompt.slice(reliabilityStart, reliabilityEnd)
+    const triage = prompt.slice(triageStart, triageEnd)
+
+    assert.match(loop, /only the tests and scenarios touched or affected\s+by this increment/i, `${label} lacks incremental validation`)
+    assert.match(loop, /Re-run a broader suite, typecheck, or build only\s+when relevant inputs\s+have changed since its last green result/i, `${label} lacks changed-input broader validation`)
+    assert.match(loop, /Before the final user-visible message, run one appropriate full pass\s+over the integrated change/i, `${label} lacks final integrated validation`)
+    assert.doesNotMatch(loop, /full test suite\s+green/i, `${label} retains per-increment full-suite validation`)
+    assert.doesNotMatch(loop, /After each increment, re-run every criterion's scenario/i, `${label} retains per-increment scenario reruns`)
+    assert.match(loop, /PIN \+ RED:/, `${label} lacks PIN + RED evidence`)
+    assert.match(loop, /GREEN:/, `${label} lacks GREEN evidence`)
+    assert.match(loop, /SURFACE:/, `${label} lacks SURFACE evidence`)
+    assert.match(loop, /CLEANUP \(PAIRED — NEVER SKIP\):[\s\S]*No receipt → criterion stays in_progress\./, `${label} lacks paired cleanup evidence`)
+
+    assert.match(triage, /Default is LIGHT/i, `${label} lacks default LIGHT classification`)
+    assert.match(triage, /LIGHT —/, `${label} lacks LIGHT classification`)
+    assert.match(triage, /HEAVY —/, `${label} lacks HEAVY classification`)
+    assert.ok(triage.indexOf("LIGHT —") < triage.indexOf("HEAVY —"), `${label} orders LIGHT after HEAVY`)
+
+    for (const field of ["TASK", "EXPECTED OUTCOME", "REQUIRED TOOLS", "MUST DO", "MUST NOT DO", "CONTEXT", "GOAL", "STOP WHEN", "EVIDENCE"]) {
+      assert.match(reliability, new RegExp("`" + field + "`"), `${label} reliability section lacks ${field}`)
+    }
+    assert.match(reliability, /parent verifies\s+returned `EVIDENCE` against the delegated `GOAL` rather\s+than trusting a\s+completion claim/i, `${label} does not require parent evidence verification`)
+    assert.match(reliability, /delegated `STOP WHEN` bounds only that child assignment/i, `${label} does not bound child stopping`)
+
+    if (workflow === "codex") {
+      assert.match(reliability, /Every `multi_agent_v1\.spawn_agent\(\)` delegation prompt/i, `${label} lacks Codex dispatch`)
+      assert.match(reliability, /Use `fork_context=false` \(the default\) only\s+when the parent has independent work to do while the child runs; otherwise\s+prefer synchronous spawns so results return in the same turn\./i, `${label} lacks Codex background dispatch policy`)
+      assert.match(reliability, /Track background agent results separately\./, `${label} lacks Codex background tracking`)
+      assert.match(reliability, /Codex does not support session resume via `task_id`\s+— each follow-up spawns a fresh agent with the full accumulated context\./, `${label} lacks Codex session limitation`)
+    } else {
+      assert.match(reliability, /Every `task\(\)` delegation prompt/i, `${label} lacks OpenCode task dispatch`)
+      assert.match(reliability, /Use `run_in_background=true` only when the parent has independent work to do\s+while the child runs; otherwise prefer blocking task calls so results return\s+in the same turn\./i, `${label} lacks OpenCode background dispatch policy`)
+      assert.match(reliability, /Track background task IDs and continuation session IDs separately\./, `${label} lacks OpenCode task/session tracking`)
+      assert.match(reliability, /Use `background_output\(task_id="bg_\.\.\."\)` only after the harness notifies completion\./, `${label} lacks background output policy`)
+      assert.match(reliability, /Use `task\(task_id="ses_\.\.\."\)` for follow-up with the same child context\./, `${label} lacks continuation session policy`)
+    }
+
+    assert.match(prompt, /Stop the parent run ONLY when the entire user goal is complete/i, `${label} does not preserve whole-goal parent stopping`)
+
+    if (workflow === "omo") {
+      const gateStart = prompt.indexOf("# Verification gate (TRIGGERED, NOT OPTIONAL)")
+      const gateEnd = prompt.indexOf("# Commits", gateStart)
+      assert.notEqual(gateStart, -1, `${label} missing verification gate`)
+      assert.notEqual(gateEnd, -1, `${label} missing verification gate boundary`)
+      const gate = prompt.slice(gateStart, gateEnd)
+      assert.match(gate, /Treat the reviewer's verdict as binding\./, `${label} lacks binding reviewer verdict`)
+      assert.match(gate, /UNCONDITIONAL approval/, `${label} lacks unconditional reviewer approval`)
+    } else {
+      const finalReviewStart = prompt.indexOf("## Final Acceptance Review")
+      assert.notEqual(finalReviewStart, -1, `${label} missing final acceptance review`)
+      const finalReview = prompt.slice(finalReviewStart)
+      assert.match(finalReview, /After all plan tasks complete, dispatch a final acceptance review over the full change set\./, `${label} lacks integrated final review dispatch`)
+      assert.match(finalReview, /skip it only on explicit user delegation\./, `${label} allows final review to be skipped too broadly`)
+    }
+  }
+})
+
 test("agent-specific prompts enforce bounded leaf delegation", () => {
   for (const workflow of ["v1", "omo", "codex"] as const) {
     const root = join(process.cwd(), "prompts", workflow, "agents")
