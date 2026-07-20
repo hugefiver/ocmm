@@ -263,7 +263,7 @@ Should show the `providerID` and `modelID` you configured. (This command does no
 '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist\cli\ocmm-lsp.js mcp
 ```
 
-Should list the seven primary LSP tools: `status`, `diagnostics`, `goto_definition`, `find_references`, `symbols`, `prepare_rename`, and `rename`.
+Should list the eight primary LSP tools: `status`, `diagnostics`, `goto_definition`, `find_references`, `find_symbol_related`, `symbols`, `prepare_rename`, and `rename`.
 
 **Run a real chat round-trip:**
 

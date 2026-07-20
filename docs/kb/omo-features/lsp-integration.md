@@ -6,9 +6,10 @@
 > **Current ocmm status**: Migrated as a project-owned Rust stdio MCP server,
 > `ocmm-lsp`. ocmm registers the built-in MCP name `lsp` with `ocmm-lsp mcp`
 > by default, replacing the earlier upstream `omo-lsp mcp` dependency. The
-> native server implements the same 7 primary tool contracts plus `lsp_*`
-> aliases, uses line or Content-Length JSON-RPC framing, and supports project
-> config at `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, and
+> native server implements the seven upstream primary contracts, the local
+> grouped `find_symbol_related` tool, and `lsp_*` aliases. It uses line or
+> Content-Length JSON-RPC framing and supports project config at
+> `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, and
 > `.codex/lsp-client.json`.
 
 ## 1. Package Layering
@@ -251,14 +252,32 @@ The previous assessment was that OpenCode environments may already expose the
 can be resolved. This removes the runtime dependency on upstream `omo-lsp` and
 keeps the tool surface available in isolated OpenCode test environments.
 
-Implemented tools:
+The eight canonical tools are:
 - `status` / `lsp_status`
 - `diagnostics` / `lsp_diagnostics`
 - `goto_definition` / `lsp_goto_definition`
 - `find_references` / `lsp_find_references`
+- `find_symbol_related` / `lsp_find_symbol_related`
 - `symbols` / `lsp_symbols`
 - `prepare_rename` / `lsp_prepare_rename`
 - `rename` / `lsp_rename`
+
+Symbol-related requests accept `filePath`, one-based `line`, and zero-based
+`character`. `find_symbol_related` runs definition, implementation, and
+references sequentially in one fresh language-server session. Each group has
+status `ok`, `unsupported`, or `error`, with canonical URI/range items.
+Failures use structured `code`, `message`, and `data`; unsupported capabilities
+use JSON-RPC code `-32601`. Items are deduplicated within each group. When a
+server returns a `LocationLink`, the native server uses `targetUri` with
+`targetSelectionRange` when available, then falls back to `targetRange`.
+Process shutdown is bounded and graceful. On Windows, the server creates an
+unnamed `KILL_ON_JOB_CLOSE` Job Object, launches the wrapper suspended, assigns
+it to the Job, verifies its initial thread owner, and resumes only after that
+ownership barrier succeeds. The Job remains open during the graceful-exit
+window; timeout terminates the Job and boundedly polls the direct child for
+reaping. The cleanup primitive returns any failure to its caller, while
+`LspSession::shutdown()` intentionally treats cleanup as best-effort. Other
+platforms retain bounded direct-child cleanup. There is no daemon.
 
 This migration intentionally does not port the full upstream daemon. The native
 server is a direct stdio MCP process with a curated builtin language-server
@@ -281,7 +300,7 @@ table and project/user config overrides.
 ### Historical migration checklist (superseded by native Rust implementation)
 1. Port `lsp-core/src/lsp/` — replaced by `crates/ocmm-lsp/src/main.rs`.
 2. Port `lsp-core/src/mcp.ts` — replaced by native stdio JSON-RPC handling.
-3. Port `lsp-core/src/tools/` — covered by the 7 native tool handlers.
+3. Port `lsp-core/src/tools/` — covered by the seven upstream-compatible native handlers plus local find_symbol_related aggregation.
 4. Skip `lsp-daemon/src/` — still skipped; no shared socket daemon locally.
 5. Adapt config paths — done with `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, and `.codex/lsp-client.json`.
 6. Decide server definitions — currently a curated builtin table plus config overrides.
