@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "status": "SKIP",
+  "reasonCode": "provider-config-unavailable",
+  "goNoGo": "NO-DECISION",
+  "host": {
+    "openCodeVersion": null,
+    "openCodeSha256": null,
+    "platform": "win32-x64",
+    "providerModel": null,
+    "ocmmRevision": null,
+    "worktreeDirty": false,
+    "featureFlag": "OPENCODE_EXPERIMENTAL_CODE_MODE"
+  },
+  "isolation": {
+    "xdgState": "unknown",
+    "projectConfigIsolated": false
+  },
+  "registration": {
+    "ocmmLoaded": false,
+    "lspConnected": false,
+    "probeConnected": false,
+    "directLspSmoke": false
+  },
+  "execute": {
+    "outerBeforeCount": 0,
+    "outerAfterCount": 0,
+    "argumentKeys": [],
+    "timedOut": false,
+    "permissionBlocked": false,
+    "outputClassifiable": true,
+    "exactCode": false,
+    "executeProbeMarker": false,
+    "lspOk": false,
+    "identityOk": false,
+    "hookPayloadOk": false,
+    "emittedTask": false
+  },
+  "permissions": {
+    "deniedTool": "codemode_probe_denied",
+    "deniedHidden": false,
+    "deniedCalled": false
+  },
+  "hooks": {
+    "nestedBefore": [],
+    "nestedAfter": [],
+    "completedMetadataTools": [],
+    "allNestedToolsIdentified": false
+  },
+  "mcp": {
+    "identityCount": 0,
+    "jsonErrorCount": 0,
+    "deniedCount": 0
+  },
+  "cleanup": {
+    "attemptCount": 0,
+    "pidLedgerComplete": true,
+    "trackedPids": 0,
+    "remainingPids": 0,
+    "attemptRootsRemoved": 0,
+    "removalAttempted": true,
+    "removalFailed": false,
+    "parentRootRemoved": true
+  }
+}
