@@ -900,6 +900,9 @@ test("runAttempt treats version as a hard barrier before paths config MCP and pr
       })
       assert.deepEqual(calls, scenario.expected, scenario.name)
       assert.equal(managedConfigChecked, true, scenario.name)
+      if (scenario.expected.length === 1) {
+        assert.equal(attempt.cleanup.pidLedgerComplete, true, scenario.name)
+      }
       if (scenario.name !== "clean") {
         const unsupportedVersion = scenario.name === "unsupported-host-version"
         assert.equal(attempt.facts.host.openCodeAvailable, unsupportedVersion, scenario.name)
@@ -993,6 +996,69 @@ test("runAttempt enforces XDG, config, and MCP barriers before provider executio
       ),
       ["version", "paths", "config", "mcp", "run"],
     )
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true })
+  }
+})
+
+test("pre-MCP barriers allow absent ownership ledgers", async () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), "ocmm-codemode-pre-mcp-ledgers-"))
+  const providerConfig = join(parentRoot, "provider.json")
+  writeFileSync(providerConfig, JSON.stringify(validProviderConfig()))
+  try {
+    const cases = [
+      { name: "version", expected: ["version"], version: { exitCode: 1, stdout: "", stderr: "", timedOut: false, pid: null } },
+      { name: "paths", expected: ["version", "paths"], version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null } },
+      { name: "config", expected: ["version", "paths", "config"], version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null } },
+    ] as const
+    for (const scenario of cases) {
+      const rootPath = join(parentRoot, scenario.name)
+      const calls: string[] = []
+      const attempt = await runAttempt({
+        id: "attempt-1",
+        rootPath,
+        options: {
+          providerConfig,
+          model: "test/model",
+          fixtureOut: join(parentRoot, "unused.json"),
+          opencode: "opencode",
+          timeoutMs: 1000,
+        },
+        nativeLspPath: process.execPath,
+        runCommand: async (_command, args): Promise<CommandResult> => {
+          if (args[0] === "--version") {
+            calls.push("version")
+            return scenario.version
+          }
+          if (args[0] === "debug" && args[1] === "paths") {
+            calls.push("paths")
+            return {
+              exitCode: 0,
+              stdout: scenario.name === "paths" ? `data  ${join(rootPath, "data")}` : barrierPathsFor(rootPath),
+              stderr: "",
+              timedOut: false,
+              pid: null,
+            }
+          }
+          if (args[0] === "debug" && args[1] === "config") {
+            calls.push("config")
+            return {
+              exitCode: 0,
+              stdout: `[ocmm] config loaded: project=${join(rootPath, ".opencode", "ocmm.jsonc")}, user=present`,
+              stderr: "",
+              timedOut: false,
+              pid: null,
+            }
+          }
+          assert.fail(`unexpected MCP/provider command: ${args.join(" ")}`)
+        },
+      })
+      assert.deepEqual(calls, scenario.expected, scenario.name)
+      assert.equal(attempt.cleanup.pidLedgerComplete, true, scenario.name)
+      assert.deepEqual(attempt.pids.fixture, [], scenario.name)
+      assert.deepEqual(attempt.pids.wrapper, [], scenario.name)
+      assert.deepEqual(attempt.pids.native, [], scenario.name)
+    }
   } finally {
     rmSync(parentRoot, { recursive: true, force: true })
   }
@@ -1892,6 +1958,102 @@ test("process wrapper keeps ledger failure nonzero when native exits successfull
     assert.match(completed.stderr, /failed to record process ownership/i)
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("MCP startup missing ownership ledgers preserves cleanup evidence roots", async () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), "ocmm-codemode-mcp-ledger-boundary-"))
+  const rootPath = join(parentRoot, "attempt-1")
+  const providerConfig = join(parentRoot, "provider.json")
+  writeFileSync(providerConfig, JSON.stringify(validProviderConfig()))
+  try {
+    let wrapperResult: CommandResult | null = null
+    const nativeStartedPath = join(rootPath, "native-started")
+    const nativeStoppedPath = join(rootPath, "native-stopped")
+    const nativeCode = [
+      'const fs = require("node:fs")',
+      `fs.writeFileSync(${JSON.stringify(nativeStartedPath)}, "started")`,
+      `process.on("SIGTERM", () => { fs.writeFileSync(${JSON.stringify(nativeStoppedPath)}, "stopped"); process.exit(0) })`,
+      "setInterval(() => {}, 1000)",
+    ].join("; ")
+    const command = async (_command: string, args: string[], options: CommandOptions): Promise<CommandResult> => {
+      if (args[0] === "--version") {
+        return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+      }
+      if (args[0] === "debug" && args[1] === "paths") {
+        return { exitCode: 0, stdout: barrierPathsFor(rootPath), stderr: "", timedOut: false, pid: null }
+      }
+      if (args[0] === "debug" && args[1] === "config") {
+        return { exitCode: 0, stdout: isolatedConfigFor(rootPath), stderr: "", timedOut: false, pid: null }
+      }
+      assert.equal(args[0], "mcp")
+      const lspCommand = JSON.parse(String(options.env.OCMM_LSP_COMMAND)) as string[]
+      const lspLedgerPath = lspCommand[2]
+      assert.equal(lspLedgerPath, join(rootPath, "pid", "lsp.jsonl"))
+      mkdirSync(lspLedgerPath)
+      wrapperResult = await runCommand(process.execPath, [
+        PROCESS_WRAPPER_FIXTURE,
+        lspLedgerPath,
+        process.execPath,
+        "-e",
+        nativeCode,
+      ], {
+        cwd: rootPath,
+        env: options.env,
+        timeoutMs: 1500,
+      })
+      assert.equal(wrapperResult.timedOut, false)
+      assert.equal(wrapperResult.exitCode, 1)
+      assert.match(wrapperResult.stderr, /failed to record process ownership/i)
+      assert.equal(existsSync(nativeStartedPath), true)
+      assert.equal(existsSync(nativeStoppedPath), true)
+      rmSync(lspLedgerPath, { recursive: true, force: true })
+      return {
+        exitCode: 0,
+        stdout: "lsp not connected\ncodemode_probe not connected\n",
+        stderr: wrapperResult.stderr,
+        timedOut: false,
+        pid: wrapperResult.pid,
+      }
+    }
+
+    const attempt = await runAttempt({
+      id: "attempt-1",
+      rootPath,
+      options: {
+        providerConfig,
+        model: "test/model",
+        fixtureOut: join(parentRoot, "unused.json"),
+        opencode: "opencode",
+        timeoutMs: 1500,
+      },
+      runCommand: command,
+      nativeLspPath: process.execPath,
+    })
+    assert.ok(wrapperResult)
+    assert.equal(attempt.facts.registration.lspConnected, false)
+    assert.equal(attempt.facts.registration.probeConnected, false)
+    assert.deepEqual(attempt.pids.fixture, [])
+    assert.deepEqual(attempt.pids.wrapper, [])
+    assert.deepEqual(attempt.pids.native, [])
+    assert.equal(attempt.cleanup.pidLedgerComplete, false)
+
+    const cleanup = await cleanupRunTopology(parentRoot, [attempt])
+    assert.equal(cleanup.attempts[0]?.cleanup.pidLedgerComplete, false)
+    assert.equal(cleanup.aggregate.pidLedgerComplete, false)
+    assert.equal(cleanup.aggregate.removalAttempted, false)
+    assert.equal(cleanup.aggregate.parentRootRemoved, false)
+    assert.deepEqual(cleanup.residualRoots, [rootPath, parentRoot])
+    assert.equal(existsSync(rootPath), true)
+    assert.equal(existsSync(parentRoot), true)
+    assert.deepEqual(classifyProbe({ ...attempt.facts, cleanup: cleanup.aggregate }), {
+      status: "FAIL",
+      reasonCode: "cleanup-incomplete",
+      exitCode: 2,
+      goNoGo: "NO-GO",
+    })
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true })
   }
 })
 

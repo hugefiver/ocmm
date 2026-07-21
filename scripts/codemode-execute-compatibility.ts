@@ -1324,6 +1324,7 @@ export async function runAttempt(context: RunAttemptContext): Promise<AttemptRec
   const hostPids: number[] = []
   const commandResults: CommandResult[] = []
   let pids = emptyLedger()
+  let mcpStartupAttempted = false
   const rawRoot = join(context.rootPath, "raw")
 
   const finalize = (forceIncomplete = false): AttemptRecord => {
@@ -1337,8 +1338,9 @@ export async function runAttempt(context: RunAttemptContext): Promise<AttemptRec
     const pidState = readAttemptPidLedgerState(context.rootPath, hostPids)
     pids = pidState.ledger
     const pidLedgerComplete = !forceIncomplete && pidState.complete &&
-      (!facts.registration.probeConnected || pids.fixture.length > 0) &&
-      (!facts.registration.lspConnected || (pids.wrapper.length > 0 && pids.native.length > 0))
+      (!mcpStartupAttempted || (
+        pids.fixture.length > 0 && pids.wrapper.length > 0 && pids.native.length > 0
+      ))
     return {
       id: context.id,
       rootPath: context.rootPath,
@@ -1443,6 +1445,7 @@ export async function runAttempt(context: RunAttemptContext): Promise<AttemptRec
     }
 
     // Barrier 4: require both isolated MCP connections before making a provider/model call.
+    mcpStartupAttempted = true
     const mcpResult = await execute("mcp-list", ["mcp", "list", "--print-logs", "--log-level", "DEBUG"])
     const mcpText = `${mcpResult.stdout}\n${mcpResult.stderr}`
     const mcpConnections = parseMcpConnections(mcpText)

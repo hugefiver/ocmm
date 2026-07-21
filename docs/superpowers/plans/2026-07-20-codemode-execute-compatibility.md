@@ -295,7 +295,7 @@ The harness must cover:
 14. structured sanitized DEFER after injected preflight exception;
 15. secret rejection for every required prefix while `deniedCalled` remains valid;
 16. normal exit waits for `close` and drains late inherited descendant output; a timeout after direct-parent `exit` never calls `Child.kill()` while descendant-held output still drains; timeout requests cooperative stop, the wrapper reaps its owned native child, and the runner closes only its still-unexited owned direct host child with no taskkill helper;
-17. MCP/wrapper stop-signal behavior, including wrapper watcher cleanup after native spawn failure and native reap after ledger-append failure;
+17. MCP/wrapper stop-signal behavior, including wrapper watcher cleanup after native spawn failure and native reap after ledger-append failure; once MCP startup is attempted, missing fixture or LSP ownership rows mark the attempt incomplete even when the corresponding MCP never reaches `connected`, while pre-MCP exits still permit absent ledgers;
 18. two attempts with eight owned stop-aware role processes, all dead before first deletion;
 19. malformed or unreadable ledger retaining any valid rows, marking incomplete, and preserving roots;
 20. live historical-host sentinel PID surviving outer cleanup plus EPERM PID-probe failure closing safely without deletion;
@@ -323,13 +323,13 @@ if ($LASTEXITCODE -ne 0) { throw "compatibility harness failed" }
 ```powershell
 foreach ($run in 1..3) {
   node --test --experimental-strip-types `
-    --test-name-pattern="timeout|runCommand waits for close and drains inherited descendant output|runCommand never kills an exited child|two-attempt|malformed PID ledger|unreadable PID ledger|historical host PID|PID probe permission|stop signal|ownership ledger append|ledger failure" `
+    --test-name-pattern="timeout|runCommand waits for close and drains inherited descendant output|runCommand never kills an exited child|two-attempt|malformed PID ledger|unreadable PID ledger|historical host PID|PID probe permission|stop signal|ownership ledger append|ledger failure|MCP startup missing ownership ledgers" `
     scripts/codemode-execute-compatibility.test.ts
   if ($LASTEXITCODE -ne 0) { throw "stress run $run failed" }
 }
 ```
 
-This isolation-only revision does not change `runCommand`, wrappers, PID ledgers, or cleanup. Its full harness reruns the existing process coverage; the previously recorded three-round stress receipt remains applicable and need not be repeated.
+This review fix changes only the attempt-level ledger completeness boundary; it does not change `runCommand`, wrappers, or topology cleanup. The full harness and focused missing-ledger regression cover the changed input, while the previously recorded three-round process stress receipt remains applicable and need not be repeated.
 
 ### Focused current external-review blockers
 
@@ -416,6 +416,6 @@ For untracked task files, use `git diff --no-index --check -- NUL <path>` and ac
 
 ## Completion Receipt
 
-Report the focused RED failures and final GREEN counts, full harness count (at least 67), typecheck exit, prior applicable timeout/close cleanup stress receipt (do not rerun when process code is unchanged), exact OpenCode `1.18.3` bundled-SDK no-install allowlist, test-home/empty-managed-config/provider-shape/version-barrier evidence, fixture-write fallback/exhaustion receipts, exact live/SKIP line and exit, fixture whitelist/leak results, process/root cleanup counts, documentation synchronization, eight-path scope, excluded planning-logical-tiers paths, and confirmation that no Git write occurred. A unit-test GREEN or structured SKIP is not a live compatibility PASS.
+Report the focused RED failures and final GREEN counts, full harness count (at least 69), typecheck exit, prior applicable timeout/close cleanup stress receipt (do not rerun when process code is unchanged), exact OpenCode `1.18.3` bundled-SDK no-install allowlist, test-home/empty-managed-config/provider-shape/version-barrier evidence, fixture-write fallback/exhaustion receipts, exact live/SKIP line and exit, fixture whitelist/leak results, process/root cleanup counts, documentation synchronization, eight-path scope, excluded planning-logical-tiers paths, and confirmation that no Git write occurred. A unit-test GREEN or structured SKIP is not a live compatibility PASS.
 
-Current revision receipt: the historical RED was `0/5` for the original five-test blocker set, while the current focused command is GREEN at `7/7`; focused compatibility QA is `21/21`; the full harness is `67/67`; typecheck exits `0`. No caller provider/model is present, so build/provider execution is skipped and the real CLI emits exactly one `SKIP:provider-config-unavailable` receipt with exit `3`, zero cleanup-residue lines, sanitized fixture cleanup complete, and zero task-owned Node/`taskkill.exe` residue. This is NO DECISION, not PASS.
+Current revision receipt: the historical RED was `0/5` for the original five-test blocker set, while the current external-review focused command is GREEN at `7/7`; focused compatibility QA is `21/21`. The missing-ledger review regression was RED at `0/1` under the old connected-only rule and is GREEN together with the pre-MCP control at `2/2`; the full harness is `69/69`; typecheck exits `0`. No caller provider/model is present, so build/provider execution is skipped and the real CLI emits exactly one `SKIP:provider-config-unavailable` receipt with exit `3`, zero cleanup-residue lines, sanitized fixture cleanup complete, and zero task-owned Node/`taskkill.exe` residue. This is NO DECISION, not PASS.
