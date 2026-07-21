@@ -97,6 +97,51 @@ test("raw pre-publication resolution passes disabledAgents and suppresses disabl
   }), null)
 })
 
+test("planning routing resolves only configured canonical tiers", () => {
+  const agentsConfig = {
+    planner: { variants: { high: "max" as const } },
+    "plan-critic": { variants: { low: "low" as const } },
+  }
+  const planner = resolveModelRouting({
+    agentName: "planner-high",
+    providerID: "openai",
+    modelID: "gpt-5.5",
+    agentsConfig,
+  })
+  const critic = resolveModelRouting({
+    agentName: "plan-critic-low",
+    providerID: "openai",
+    modelID: "gpt-5.5",
+    agentsConfig,
+  })
+
+  assert.equal(planner?.source, "user-config")
+  assert.equal(planner?.variant, "max")
+  assert.equal(critic?.source, "user-config")
+  assert.equal(critic?.variant, "low")
+})
+
+test("unconfigured planning suffixes resolve exclusively to null", () => {
+  assert.equal(resolveModelRouting({
+    agentName: "planner-high",
+    providerID: "openai",
+    modelID: "gpt-5.5",
+    agentsConfig: { "planner-high": { model: "openai/gpt-5.5" } },
+    categoriesConfig: { "planner-high": { model: "openai/gpt-5.5" } },
+  }), null)
+})
+
+test("disabled canonical planning normals do not fall through to built-ins", () => {
+  for (const agentName of ["planner", "plan-critic"] as const) {
+    assert.equal(resolveModelRouting({
+      agentName,
+      providerID: "openai",
+      modelID: "gpt-5.5",
+      disabledAgents: [agentName],
+    }), null, agentName)
+  }
+})
+
 test("published effective requirement overrides contradictory raw agent and category config", () => {
   const r = resolveModelRouting({
     agentName: "builder",

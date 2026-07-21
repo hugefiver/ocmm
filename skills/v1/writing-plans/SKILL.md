@@ -162,6 +162,17 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 
+## Plan-Critic Profile Selection
+
+Before starting a fresh plan-review stage, inspect the current callable or registered plan-critic profile names. Configuration examples and generated files are not availability proof. Choose the first actually available candidate for the plan being reviewed:
+
+- Consider `plan-critic-low` only for an explicit user cost/latency request; for that request try `plan-critic-low`, then `plan-critic`.
+- A small or clear plan: `plan-critic`, the unsuffixed normal profile.
+- A complex or cross-module plan: `plan-critic-high`, then `plan-critic`.
+- A high-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration plan: `plan-critic-max`, then `plan-critic-high`, then `plan-critic`.
+
+Never invent or synthesize a missing profile. The selected tier changes only the configured model route, not the role, prompt, mode, permissions, or verdict. Continue the same `task_id` and selected tier within an existing review stage rather than changing profiles mid-stage. Every tier uses the same current-revision receipt contract. `plan-critic-low` may select a cheaper or lower-latency model, but it always retains the xhigh-equivalent effort floor.
+
 ## plan-critic Review Loop
 
 After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. A review round covers exactly one saved, complete, current plan revision. A current receipt is valid only when that round returns an explicit `[OKAY]` or `[OKAY-UNAMBIGUOUS]`; any plan edit invalidates every earlier receipt.
@@ -170,8 +181,8 @@ Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict, or a r
 
 **Loop procedure:**
 
-1. Save the complete plan, then submit that exact plan path to the `plan-critic` agent.
-2. Dispatch the plan-critic agent and wait for one explicit verdict for the current revision.
+1. Save the complete plan, then submit that exact plan path to the selected available plan-critic profile.
+2. Dispatch the selected available plan-critic profile and wait for one explicit verdict for the current revision.
 3. Branch on the verdict:
 
    | Verdict | Meaning | Action |

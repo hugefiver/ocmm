@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { isReservedPlanningAgentName, parsePlanningAgentName } from "../planning-agents/names.ts"
 import { isReservedReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
 
 export const VariantEnum = z.enum([
@@ -274,13 +275,13 @@ const ProfileSkillsConfigSchema = z
 export const CategoryEntrySchema = z.object(ShorthandFields)
 
 /**
- * Logical review-tier override for a canonical Oracle/Reviewer normal slot.
+ * Logical-tier override for a canonical normal profile.
  *
  * - A string materializes the native variant for that tier.
  * - An object may override `model` and/or `variant`; at least one is required.
  *   `normal` is not a tier key (the unsuffixed slot IS normal).
  */
-export const ReviewVariantOverrideSchema = z.union([
+export const LogicalTierVariantOverrideSchema = z.union([
   VariantEnum,
   z
     .object({
@@ -295,21 +296,26 @@ export const ReviewVariantOverrideSchema = z.union([
     .strict(),
 ])
 
-export const ReviewVariantsSchema = z
+export const LogicalTierVariantsSchema = z
   .object({
-    low: ReviewVariantOverrideSchema.optional(),
-    high: ReviewVariantOverrideSchema.optional(),
-    max: ReviewVariantOverrideSchema.optional(),
+    low: LogicalTierVariantOverrideSchema.optional(),
+    high: LogicalTierVariantOverrideSchema.optional(),
+    max: LogicalTierVariantOverrideSchema.optional(),
   })
   .strict()
 
-export type ReviewVariantOverride = z.infer<typeof ReviewVariantOverrideSchema>
-export type ReviewVariants = z.infer<typeof ReviewVariantsSchema>
+export type LogicalTierVariantOverride = z.infer<typeof LogicalTierVariantOverrideSchema>
+export type LogicalTierVariants = z.infer<typeof LogicalTierVariantsSchema>
+
+export const ReviewVariantOverrideSchema = LogicalTierVariantOverrideSchema
+export const ReviewVariantsSchema = LogicalTierVariantsSchema
+export type ReviewVariantOverride = LogicalTierVariantOverride
+export type ReviewVariants = LogicalTierVariants
 
 export const AgentEntrySchema = z.object({
   ...ShorthandFields,
   ...AgentOverrideFields,
-  variants: ReviewVariantsSchema.optional(),
+  variants: LogicalTierVariantsSchema.optional(),
   disabled: z.boolean().optional(),
 })
 
@@ -357,20 +363,29 @@ export const AgentsConfigSchemaForJsonSchema = z.record(z.string(), AgentEntrySc
  */
 export const AgentsConfigSchema = z.record(z.string(), AgentEntrySchema).superRefine((agents, ctx) => {
   for (const [name, entry] of Object.entries(agents)) {
-    const identity = parseReviewAgentName(name)
-    const canonicalNormal = identity?.logicalTier === "normal" && identity.canonicalName === name
-    if (isReservedReviewAgentName(name) && !canonicalNormal) {
+    const reviewIdentity = parseReviewAgentName(name)
+    const canonicalReviewNormal =
+      reviewIdentity?.logicalTier === "normal" && reviewIdentity.canonicalName === name
+    const planningIdentity = parsePlanningAgentName(name)
+    const canonicalPlanningNormal =
+      planningIdentity?.logicalTier === "normal" && planningIdentity.canonicalName === name
+    const canonicalTierBase = canonicalReviewNormal || canonicalPlanningNormal
+
+    if (
+      (isReservedReviewAgentName(name) || isReservedPlanningAgentName(name))
+      && !canonicalTierBase
+    ) {
       ctx.addIssue({
         code: "custom",
         path: [name],
-        message: "review-agent config keys must be canonical unsuffixed slots",
+        message: "logical-tier agent config keys must be canonical unsuffixed roles or review slots",
       })
     }
-    if (entry.variants !== undefined && !canonicalNormal) {
+    if (entry.variants !== undefined && !canonicalTierBase) {
       ctx.addIssue({
         code: "custom",
         path: [name, "variants"],
-        message: "variants is allowed only on canonical Oracle or Reviewer normal-slot entries",
+        message: "variants is allowed only on canonical Oracle, Reviewer, planner, or plan-critic entries",
       })
     }
   }

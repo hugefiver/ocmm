@@ -16,7 +16,9 @@ import { createConfigHandler } from "../hooks/config.ts"
 import { classifyModelFamily, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
+import { LOGICAL_TIER_ORDER } from "../logical-tiers/names.ts"
 import { loadMcpJsonSync, resolveMcpServers } from "../mcp/index.ts"
+import { PLANNING_AGENT_NAMES, parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { resolveEffectiveRequirement } from "../routing/resolver.ts"
 import { translateVariant } from "../routing/variant-translator.ts"
@@ -455,6 +457,24 @@ function renderOrderedOracleProfiles(agents: readonly CodexAgentSpec[]): string 
     .join("\n")
 }
 
+export function renderPlanningLogicalTierProfiles(agents: readonly CodexAgentSpec[]): string {
+  const lines = PLANNING_AGENT_NAMES
+    .flatMap((role) => {
+      const profiles = agents
+        .flatMap((agent) => {
+          const identity = parsePlanningAgentName(agent.sourceName)
+          return identity?.role === role ? [{ agent, logicalTier: identity.logicalTier }] : []
+        })
+        .sort((left, right) =>
+          LOGICAL_TIER_ORDER.indexOf(left.logicalTier) - LOGICAL_TIER_ORDER.indexOf(right.logicalTier))
+        .map(({ agent }) => `\`${agent.name}\``)
+      return profiles.length > 0 ? [`- \`${role}\`: ${profiles.join(", ")}`] : []
+    })
+  return lines.length > 0
+    ? lines.join("\n")
+    : "- No planning logical-tier profiles are generated in this bundle."
+}
+
 function renderCodexGenericDelegationEnvelope(): string {
   return [
     "`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.",
@@ -483,7 +503,7 @@ ${renderCodexGenericDelegationEnvelope()}
 
 The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-The default V1 exact-profile call is \`multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")\`. V1 may send \`model\` only when the current callable schema exposes \`model\`. V1 may send exactly the schema-named \`reasoning\` or \`reasoning_effort\` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add \`fork_context\` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is \`multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")\`. V1 may send \`model\` only when the current callable schema exposes \`model\`. V1 may send exactly the schema-named \`reasoning\` or \`reasoning_effort\` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add \`fork_context\` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses \`spawn_agent\` to create, \`wait_agent\` to await, \`followup_task\` to continue, and \`interrupt_agent\` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable \`multi_agent_v2\` namespace is guaranteed. V2-style flat tools never receive \`fork_context\`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 
@@ -500,7 +520,7 @@ ${renderCodexDispatchCompatibility()}
 ### Generated profile references
 
 - \`[@${CODEX_AGENT_PREFIX}-*](subagent://${CODEX_AGENT_PREFIX}-*)\` is a profile reference, not a spawn.
-- Plan review: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\`.
+- Plan review normal-profile example, only when chosen by the planning selector and proven callable: \`[@${CODEX_AGENT_PREFIX}-plan-critic](subagent://${CODEX_AGENT_PREFIX}-plan-critic)\`.
 - Code or work review: \`[@${CODEX_AGENT_PREFIX}-reviewer](subagent://${CODEX_AGENT_PREFIX}-reviewer)\`.
 - Ordered Oracle review starts with \`[@${CODEX_AGENT_PREFIX}-oracle](subagent://${CODEX_AGENT_PREFIX}-oracle)\`; use \`[@${CODEX_AGENT_PREFIX}-oracle-2nd](subagent://${CODEX_AGENT_PREFIX}-oracle-2nd)\` through later configured slots only when explicit additional independent evidence is needed.
 - If an exact profile returns \`unknown agent_type\`, continue with Direct composition, then V1/V2 generic or flat dispatch, then Local execution.`
@@ -511,6 +531,7 @@ function renderWorkflowSkill(config: OcmmConfig, agents: readonly CodexAgentSpec
     .map((agent) => `| ${agent.name} | ${agent.reasoningEffort} | ${agent.sourceName} |`)
     .join("\n")
   const orderedOracleProfiles = renderOrderedOracleProfiles(agents)
+  const planningLogicalTierProfiles = renderPlanningLogicalTierProfiles(agents)
   return `---
 name: ${CODEX_WORKFLOW_SKILL_NAME}
 description: "MUST USE when the user asks for deepwork-style planning, multi-agent execution, code review, research, or workflow routing inside Codex."
@@ -560,7 +581,7 @@ Apply this section only when the current dispatch surface exposes a \`model\` fi
 | Flagship | Best available primary reasoning model in the user's catalog | \`xhigh\` minimum for planning, deep implementation, hard reasoning, architecture, algorithmic, security, or high-risk work; use native \`max\` on GPT-5.6 when maximum reasoning is requested, and use the family-supported maximum elsewhere. \`high\` remains acceptable for coordination, implementation, or clarification roles below that threshold. | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning |
 | External review | Same primary reasoning lane as flagship work, selected from available models; Reviewer has logical tiers only and no ordinal slots | \`xhigh\` minimum; use native \`max\` on GPT-5.6 for complex, cross-module, security, performance, high-risk, or final-gate review | ${CODEX_AGENT_PREFIX}-reviewer |
 | Ordered Oracle review | Oracle slots are model priority, not capability ranking (\`${CODEX_AGENT_PREFIX}-oracle\`, then \`${CODEX_AGENT_PREFIX}-oracle-2nd\` through configured later slots) | \`xhigh\` minimum for GPT/Codex review routes; preserve native \`max\` when explicitly selected and supported | ${CODEX_AGENT_PREFIX}-oracle*, ${CODEX_AGENT_PREFIX}-oracle-2nd*, ${CODEX_AGENT_PREFIX}-oracle-3rd*... |
-| Plan review | Same primary reasoning lane when directly configurable | \`xhigh\` minimum; local \`max\` only by explicit local configuration | ${CODEX_AGENT_PREFIX}-plan-critic |
+| Plan review | Same primary reasoning lane when directly configurable | Every normal or suffixed profile has an xhigh minimum (the xhigh-equivalent floor); local \`max\` only by explicit local configuration | ${CODEX_AGENT_PREFIX}-plan-critic* |
 | Mid | Best available mid-tier model; if none exists, use the primary reasoning model at a lower effort | Preserve the profile baseline unless task complexity requires more | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search |
 | Mini | Best available lightweight model for mechanical, search, or fast lookup work | \`high\` for accuracy unless the user explicitly configures otherwise | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore |
 
@@ -568,13 +589,28 @@ When a newer family is explicitly available, select a demonstrably better model 
 
 Reviewer and Oracle routes use an \`xhigh\`-equivalent minimum when the selected model family exposes that control; otherwise they use the highest supported review effort for that family. GPT-5.6 supports native \`max\`, so complex or high-risk review/verification on a GPT-5.6 selected model may request \`max\` directly. Other families use \`max\` only when their cataloged controls support it.
 
-The plan-critic profile uses \`xhigh\` minimum; raise it only through explicit local configuration.
+Every \`${CODEX_AGENT_PREFIX}-plan-critic*\` profile uses an \`xhigh\`-equivalent minimum; raise it only through explicit local configuration.
 
 ### Ordered Oracle profiles in this bundle
 
 ${orderedOracleProfiles}
 
 Slot ordering is always by Oracle ordinal (\`oracle\`, \`oracle-2nd\`, \`oracle-3rd\`, ...). Logical tier choice never reorders slots.
+
+### Planning logical-tier profiles in this bundle
+
+${planningLogicalTierProfiles}
+
+This inventory describes generated installation output only. The current callable dispatch-tool schema is the final authority for profile availability; generated files and configuration examples are not proof that a profile can be called.
+
+For base generated role \`${CODEX_AGENT_PREFIX}-R\` (\`${CODEX_AGENT_PREFIX}-planner\` or \`${CODEX_AGENT_PREFIX}-plan-critic\`), choose the first actually available candidate:
+
+- An explicit user cost/latency request tries \`${CODEX_AGENT_PREFIX}-R-low\`, then \`${CODEX_AGENT_PREFIX}-R\`; select low only for that explicit cost/latency request.
+- Small or clear work without that request uses the unsuffixed \`${CODEX_AGENT_PREFIX}-R\` normal profile.
+- Complex, cross-module, or coordination-heavy work tries \`${CODEX_AGENT_PREFIX}-R-high\`, then unsuffixed normal.
+- High-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration work tries \`${CODEX_AGENT_PREFIX}-R-max\`, then high, then unsuffixed normal.
+
+Never invent or synthesize a missing profile. The tier changes only the configured model route, never the role, prompt, mode, permissions, or receipt semantics. \`${CODEX_AGENT_PREFIX}-plan-critic-low\` may select a lower-cost or lower-latency model, but it retains the xhigh-equivalent effort floor. Every \`${CODEX_AGENT_PREFIX}-plan-critic*\` suffix has the same minimum.
 
 ### Ordered Oracle review
 
@@ -596,7 +632,7 @@ Slot ordering is always by Oracle ordinal (\`oracle\`, \`oracle-2nd\`, \`oracle-
 | Flagship | ${CODEX_AGENT_PREFIX}-orchestrator, ${CODEX_AGENT_PREFIX}-planner, ${CODEX_AGENT_PREFIX}-builder, ${CODEX_AGENT_PREFIX}-clarifier, ${CODEX_AGENT_PREFIX}-deep, ${CODEX_AGENT_PREFIX}-hard-reasoning | Primary reasoning model from the user's available catalog | xhigh minimum for planner/deep/hard-reasoning; native max for GPT-5.6 maximum-reasoning work. high only for coordination, implementation, or clarification roles below that threshold |
 | External review | ${CODEX_AGENT_PREFIX}-reviewer | Primary reasoning lane | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk review |
 | Ordered Oracle review | ${CODEX_AGENT_PREFIX}-oracle, ${CODEX_AGENT_PREFIX}-oracle-2nd, later configured Oracle slots | Ordered by Oracle slot ordinal; tier choice does not reorder slots | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk verification |
-| Plan review | ${CODEX_AGENT_PREFIX}-plan-critic | Primary reasoning lane | xhigh minimum unless local config raises it |
+| Plan review | ${CODEX_AGENT_PREFIX}-plan-critic* | Primary reasoning lane | xhigh-equivalent minimum for normal and every suffix unless local config raises it |
 | Mid | ${CODEX_AGENT_PREFIX}-complex, ${CODEX_AGENT_PREFIX}-normal-task, ${CODEX_AGENT_PREFIX}-coding, ${CODEX_AGENT_PREFIX}-research, ${CODEX_AGENT_PREFIX}-frontend, ${CODEX_AGENT_PREFIX}-creative, ${CODEX_AGENT_PREFIX}-documenting, ${CODEX_AGENT_PREFIX}-media-reader, ${CODEX_AGENT_PREFIX}-doc-search | Available mid-tier model, else primary reasoning model at lower effort | max or high by task shape |
 | Mini | ${CODEX_AGENT_PREFIX}-quick, ${CODEX_AGENT_PREFIX}-code-search, ${CODEX_AGENT_PREFIX}-explore | Available lightweight model | high |
 
@@ -610,7 +646,7 @@ Slot ordering is always by Oracle ordinal (\`oracle\`, \`oracle-2nd\`, \`oracle-
 
 Oracle and Reviewer profiles are selectable options, not automatic fan-out. Choose exactly the profiles required by risk/complexity and dispatch only those selections.
 
-${CODEX_AGENT_PREFIX}-plan-critic provides receipt-focused plan review through the Plan review lane at \`xhigh\` minimum.
+${CODEX_AGENT_PREFIX}-plan-critic* provides receipt-focused plan review through the Plan review lane at an \`xhigh\`-equivalent minimum for every suffix.
 
 Reviewer and Oracle routes use an \`xhigh\`-equivalent minimum when the selected model family exposes that control; otherwise they use the highest supported review effort for that family. GPT-5.6 supports native \`max\`; for other families, request \`max\` only when the selected model and catalog expose a maximum-effort control.
 
@@ -706,8 +742,12 @@ function codexReasoningEffort(args: {
   const gated = isGptCodex && normalized === "max" && !supportsNativeGptMaxReasoning(args.model)
     ? "xhigh"
     : normalized
-  const reviewFloor = args.sourceName === "plan-critic" || parseReviewAgentName(args.sourceName) !== null
-  if (reviewFloor && isGptCodex) {
+  const planningIdentity = parsePlanningAgentName(args.sourceName)
+  if (planningIdentity?.role === "plan-critic") {
+    return gated === "xhigh" || gated === "max" ? gated : "xhigh"
+  }
+  const protectedReview = parseReviewAgentName(args.sourceName) !== null
+  if (protectedReview && isGptCodex) {
     return gated === "xhigh" || gated === "max" ? gated : "xhigh"
   }
   return gated

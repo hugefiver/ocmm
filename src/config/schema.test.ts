@@ -191,7 +191,7 @@ test("tolerantParse preserves a skill source when an invalid union branch field 
   })
 })
 
-test("tolerantParse preserves a review variant model when its union variant is invalid", () => {
+test("tolerantParse preserves a logical tier model when its union variant is invalid", () => {
   const result = tolerantParse(ReviewVariantOverrideSchema, {
     model: "override/model",
     variant: "bad",
@@ -208,26 +208,40 @@ test("tolerantParse preserves an agent fallback entry when its union object has 
   assert.deepEqual(result.success && result.data.fallbackModels, [{ providers: ["openai"], model: "gpt-5.6" }])
 })
 
-test("review variants accept native strings and non-empty objects", () => {
+test("logical tier variants accept canonical review and planning roles", () => {
   const parsed = OcmmConfigSchema.parse({
     agents: {
       oracle: {
-        model: "openai/gpt-5.6-terra",
         variants: {
-          low: "low",
-          high: { variant: "max" },
-          max: { model: "openai/gpt-5.6-sol", variant: "max" },
+          high: "max",
         },
       },
-      reviewer: { model: "google/gemini-3.1-pro", variants: { high: "xhigh" } },
+      reviewer: { variants: { low: "low" } },
+      planner: { variants: { low: { model: "openai/gpt-5.5", variant: "high" }, high: "max" } },
+      "plan-critic": {
+        variants: { low: { model: "openai/gpt-5.5", variant: "low" }, max: "max" },
+      },
     },
   })
-  assert.equal(parsed.agents?.oracle?.variants?.max && typeof parsed.agents.oracle.variants.max, "object")
+  assert.equal(parsed.agents?.planner?.variants?.high, "max")
+  assert.deepEqual(parsed.agents?.["plan-critic"]?.variants?.low, {
+    model: "openai/gpt-5.5",
+    variant: "low",
+  })
 })
 
-test("review variants fail closed in direct schema parsing", () => {
+test("logical tier variants reject noncanonical and ineligible agent entries", () => {
   for (const agents of [
-    { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
+    { builder: { variants: { high: "max" } } },
+    { "planner-low": { model: "openai/gpt-5.6-sol" } },
+    { "planner-high": { model: "openai/gpt-5.6-sol" } },
+    { "plan-critic-low": { model: "openai/gpt-5.5" } },
+    { "planner-normal": { model: "openai/gpt-5.5" } },
+    { "plan-critic-2nd": { model: "openai/gpt-5.5" } },
+    { "planner-fast": { model: "openai/gpt-5.5" } },
+    { planner: { variants: { normal: "high" } } },
+    { "plan-critic": { variants: { low: {} } } },
+    { planner: { variants: { high: { model: "x/y", extra: true } } } },
     { oracle: { model: "openai/gpt-5.6-terra", variants: { high: {} } } },
     { oracle: { model: "openai/gpt-5.6-terra", variants: { normal: "high" } } },
     { oracle: { model: "openai/gpt-5.6-terra", variants: { high: { model: "x/y", extra: true } } } },
@@ -253,7 +267,7 @@ test("direct schema rejects invalid ordinary agent fields while tolerant parsing
   assert.equal(result.success && result.data.agents?.orchestrator?.temperature, undefined)
 })
 
-test("review variant object requires model or variant in the generated JSON Schema", () => {
+test("logical tier variant object requires model or variant in the generated JSON Schema", () => {
   const asRecord = (value: unknown): Record<string, unknown> => {
     assert.ok(value !== null && typeof value === "object" && !Array.isArray(value))
     return value as Record<string, unknown>
@@ -265,7 +279,7 @@ test("review variant object requires model or variant in the generated JSON Sche
   const variants = asRecord(asRecord(entry.properties).variants)
   const high = asRecord(asRecord(variants.properties).high)
   const branches = high.oneOf ?? high.anyOf
-  assert.ok(Array.isArray(branches), "review variant must be a JSON-Schema union")
+  assert.ok(Array.isArray(branches), "logical tier variant must be a JSON-Schema union")
   const requiredSets = branches.map((branch) => asRecord(branch).required)
   assert.ok(requiredSets.some((required) => Array.isArray(required) && required.includes("model")))
   assert.ok(requiredSets.some((required) => Array.isArray(required) && required.includes("variant")))

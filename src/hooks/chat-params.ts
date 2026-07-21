@@ -10,6 +10,7 @@ import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
 import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
+import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
@@ -29,18 +30,19 @@ const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
 
 /**
  * Review-variant floor applies to:
- *   - `plan-critic` (independent branch - not a parseReviewAgentName() identity)
+ *   - any planning identity whose role is `plan-critic`
  *   - any agent whose runtime name parses as a review identity
  *     (oracle, oracle-2nd, oracle-2nd-low, reviewer, reviewer-max, runtime
  *     alias oracle-second, etc.)
  *
- * Disabled review profiles never reach this handler because
- * `resolveModelRouting()` returns null for them (expandedReviewAgentMap
- * filters disabled canonical names). The floor check therefore only fires
- * on resolvable review profiles.
+ * Disabled managed review/planning profiles never reach normal resolution
+ * because their expanded profile maps filter disabled canonical names.
+ * Host-provided profiles are handled separately against the runtime model.
  */
 function isReviewFloorAgent(agentName: string | undefined): boolean {
-  return agentName === "plan-critic" || (agentName !== undefined && parseReviewAgentName(agentName) !== null)
+  if (agentName === undefined) return false
+  const planningIdentity = parsePlanningAgentName(agentName)
+  return planningIdentity?.role === "plan-critic" || parseReviewAgentName(agentName) !== null
 }
 
 function requiresReviewVariantFloor(agentName: string | undefined, family: string): boolean {
@@ -121,15 +123,16 @@ function applyHostProfileReviewFloor(args: {
   })
   if (!requiresReviewVariantFloor(args.agentName, family)) return null
 
-  // A host-provided review profile (e.g. `reviewer-high`) may be present in
-  // the OpenCode host config but absent from `expandedReviewAgentMap` when the
-  // user did not configure the matching tier override. Resolution returns
-  // null, but the runtime still routed a real review chat through the actual
-  // runtime provider/model. Enforce the xhigh-equivalent output safety floor
-  // against that runtime model without routing through any unrelated
-  // configured model.
+  // A host-provided protected review profile (e.g. `reviewer-high` or
+  // `plan-critic-low`) may be present in the OpenCode host config but absent
+  // from the corresponding expanded profile map. Resolution returns null,
+  // but the runtime still routed a real review chat through the actual runtime
+  // provider/model. Enforce the xhigh-equivalent output safety floor against
+  // that runtime model without routing through an unrelated configured model.
   const reviewIdentity = args.agentName === undefined ? null : parseReviewAgentName(args.agentName)
-  const baseVariant: Variant = reviewIdentity?.logicalTier === "max" ? "max" : "xhigh"
+  const planningIdentity = args.agentName === undefined ? null : parsePlanningAgentName(args.agentName)
+  const logicalTier = reviewIdentity?.logicalTier ?? planningIdentity?.logicalTier
+  const baseVariant: Variant = logicalTier === "max" ? "max" : "xhigh"
   const appliedVariant: Variant = capUnsupportedNativeMaxVariant(family, args.input.model.modelID, baseVariant) ?? baseVariant
 
   const effect = translateVariant(family, appliedVariant, {
@@ -275,14 +278,10 @@ export function createChatParamsHandler(args: {
     })
 
     if (!resolution) {
-      // A host-provided review profile (e.g. `reviewer-high`) may be present
-      // in the OpenCode host config but absent from `expandedReviewAgentMap`
-      // when the user did not configure the matching tier override. The
-      // resolution is null, but the runtime still routed a real review chat
-      // through the actual runtime provider/model. Enforce the
-      // xhigh-equivalent output safety floor against that runtime model
-      // independently of expanded-route availability, without routing through
-      // any unrelated configured model. Ordinary unknown agents remain no-ops.
+      // A host-provided protected review profile may be absent from its
+      // expanded route map when the matching tier is not configured. Enforce
+      // the xhigh-equivalent floor against the actual runtime model without
+      // inventing a route. Ordinary unknown agents remain no-ops.
       const hostFloor = applyHostProfileReviewFloor({ agentName, input, output })
       if (hostFloor) {
         record({

@@ -70,6 +70,20 @@ test("review catalog lanes ignore logical tier suffixes", () => {
   assert.equal(selectCatalogModel(target, "reviewer-high", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement), "openai/gpt-5.7-sol")
 })
 
+test("planning catalog lanes ignore logical tier suffixes", () => {
+  const target = { provider: { openai: { models: {
+    "gpt-5.7-sol": {}, "gpt-5.7-terra": {},
+  } } } }
+  assert.equal(
+    selectCatalogModel(target, "planner-high", BUILTIN_AGENT_INDEX.get("planner")!.requirement),
+    "openai/gpt-5.7-sol",
+  )
+  assert.equal(
+    selectCatalogModel(target, "plan-critic-low", BUILTIN_AGENT_INDEX.get("plan-critic")!.requirement),
+    "openai/gpt-5.7-sol",
+  )
+})
+
 test("later Oracle slots receive no invented GPT lane", () => {
   const requirement: ModelRequirement = {
     fallbackChain: [{ providers: ["openai"], model: "gpt-5.5", variant: "xhigh" as const }],

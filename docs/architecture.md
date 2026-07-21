@@ -33,15 +33,17 @@ Routing resolves along two independent axes through the same pipeline:
 
 Both axes feed the same 4-tier resolution pipeline (below), producing a variant that is then translated to provider params.
 
-## Canonical review profile expansion pipeline
+## Canonical logical-tier profile expansion pipeline
 
 ```text
 raw config layer
   -> context-specific legacy/alias migration with provenance
   -> schema + semantic validation
-  -> pure review profile expansion
-  -> one canonical candidate map
-  -> OpenCode registration / resolver / floors / permissions / Codex generation
+  -> logical-tiers/names grammar + logical-tiers/materialize requirement expansion
+  -> review-agents and planning-agents role adapters
+  -> one canonical candidate map per role family
+  -> OpenCode registration / exclusive resolver / permissions
+  -> chat.params and Codex plan-review floors / Codex generation
 
 OpenCode lifecycle + task-part events
   -> shared event decoder
@@ -53,6 +55,12 @@ OpenCode lifecycle + task-part events
 The fallback path uses a single 429 controller for both dedicated child-session handling and interruption correlation ownership; interruption recovery layers evidence tracking on top of that controller instead of creating a parallel retry engine.
 
 Canonical review slots are unsuffixed names such as `oracle` and `oracle-2nd`; logical tier profiles (`-low`, `-high`, `-max`) are derived from configured `variants` on those slots rather than independent capability-ranked lanes.
+
+The same shared logical-tier grammar and materializer serve canonical `planner` and `plan-critic` through the planning adapter without importing Oracle ordinals or review-slot aliases. Unsuffixed planning names are logical normal. Planning suffix profiles exist only for explicitly configured `variants`, inherit the canonical role's prompt/mode/permissions/registration policy, and are never synthesized from examples or nearby tiers.
+
+Suffix resolution is exclusive: a request for `planner-high` or `plan-critic-low` resolves only when that exact profile was materialized and remains enabled. It never falls through to the unsuffixed role, another suffix, a category, or input-variant routing. Before dispatch, model-facing selector policy inspects current callable/registered names and chooses the first available low→normal candidate only for explicit cost/latency requests, normal for small/clear work, high→normal for complex work, or max→high→normal for high-risk work.
+
+The plan-review floor is role-owned rather than suffix-owned. Every parsed `plan-critic` identity, including a host-provided route-miss profile, passes through the same chat/Codex xhigh-equivalent minimum. Therefore `plan-critic-low` can select a lower-cost model route but can never lower review effort or current-revision receipt semantics; `planner` tiers retain their configured effort.
 
 ## OpenCode plugin configuration and profile aliases
 

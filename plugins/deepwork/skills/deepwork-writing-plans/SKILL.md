@@ -162,6 +162,17 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 
+## Plan-Critic Profile Selection
+
+Before starting a fresh plan-review stage, inspect the current callable or registered plan-critic profile names. Configuration examples and generated files are not availability proof. Choose the first actually available candidate for the plan being reviewed:
+
+- Consider `plan-critic-low` only for an explicit user cost/latency request; for that request try `plan-critic-low`, then `plan-critic`.
+- A small or clear plan: `plan-critic`, the unsuffixed normal profile.
+- A complex or cross-module plan: `plan-critic-high`, then `plan-critic`.
+- A high-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration plan: `plan-critic-max`, then `plan-critic-high`, then `plan-critic`.
+
+Never invent or synthesize a missing profile. The selected tier changes only the configured model route, not the role, prompt, mode, permissions, or verdict. Continue the same `task_id` and selected tier within an existing review stage rather than changing profiles mid-stage. Every tier uses the same current-revision receipt contract. `plan-critic-low` may select a cheaper or lower-latency model, but it always retains the xhigh-equivalent effort floor.
+
 ## plan-critic Review Loop
 
 After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. A review round covers exactly one saved, complete, current plan revision. A current receipt is valid only when that round returns an explicit `[OKAY]` or `[OKAY-UNAMBIGUOUS]`; any plan edit invalidates every earlier receipt.
@@ -170,8 +181,8 @@ Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict, or a r
 
 **Loop procedure:**
 
-1. Save the complete plan, then submit that exact plan path to the `plan-critic` agent.
-2. Dispatch the plan-critic agent and wait for one explicit verdict for the current revision.
+1. Save the complete plan, then submit that exact plan path to the selected available plan-critic profile.
+2. Dispatch the selected available plan-critic profile and wait for one explicit verdict for the current revision.
 3. Branch on the verdict:
 
    | Verdict | Meaning | Action |
@@ -236,7 +247,7 @@ For generic or flat dispatch, put this canonical envelope in the task message:
 
 The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-The default V1 exact-profile call is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable `multi_agent_v2` namespace is guaranteed. V2-style flat tools never receive `fork_context`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 

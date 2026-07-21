@@ -1,5 +1,6 @@
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { isRecord } from "../shared/logger.ts"
+import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 
 type Version = [number, number, number]
@@ -54,7 +55,8 @@ function gptLaneForAgent(agentName: string): "sol" | "terra" | undefined {
     if (review.canonicalSlot === "oracle-2nd") return "sol"
     return undefined
   }
-  return GPT_LANE_BY_AGENT.get(agentName)
+  const planning = parsePlanningAgentName(agentName)
+  return GPT_LANE_BY_AGENT.get(planning?.role ?? agentName)
 }
 
 function compareVersion(a: Version, b: Version): number {

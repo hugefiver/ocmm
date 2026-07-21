@@ -100,6 +100,19 @@ test("review skills use ordered Oracle priority and logical tiers", () => {
   }
 })
 
+test("writing-plans selects only available plan-critic tiers without lowering review effort", () => {
+  const skill = read("skills", "v1", "writing-plans", "SKILL.md")
+  assert.match(skill, /inspect.*current.*(?:callable|registered).*plan-critic.*profile/is)
+  assert.match(skill, /small or clear.*`plan-critic`/is)
+  assert.match(skill, /complex.*`plan-critic-high`.*`plan-critic`/is)
+  assert.match(skill, /high-risk.*`plan-critic-max`.*`plan-critic-high`.*`plan-critic`/is)
+  assert.match(skill, /`plan-critic-low`.*explicit.*cost.*latency/is)
+  assert.match(skill, /never.*(?:invent|synthesize|fabricate).*profile/is)
+  assert.match(skill, /same `task_id`.*existing review stage/is)
+  assert.match(skill, /same current-revision receipt contract/is)
+  assert.match(skill, /`plan-critic-low`.*cheaper.*model.*xhigh-equivalent.*floor/is)
+})
+
 test("active docs describe canonical review variants and interruption recovery", () => {
   const files = ["README.md", "AGENTS.md", "docs/architecture.md", "examples/ocmm.example.jsonc"]
   const texts = new Map(files.map((path) => [path, readFileSync(join(process.cwd(), path), "utf8")]))
@@ -112,4 +125,23 @@ test("active docs describe canonical review variants and interruption recovery",
   assert.match(texts.get("README.md")!, /subagent-interruption-recovery/)
   assert.match(texts.get("AGENTS.md")!, /message\.part\.updated/)
   assert.match(texts.get("docs/architecture.md")!, /single.*429 controller/is)
+})
+
+test("active docs and synchronization records describe planning logical tiers", () => {
+  const files = ["README.md", "AGENTS.md", "docs/architecture.md", "examples/ocmm.example.jsonc"]
+  for (const path of files) {
+    const text = read(path)
+    assert.match(text, /planner/i, path)
+    assert.match(text, /plan-critic/i, path)
+    assert.match(text, /variants/i, path)
+    assert.match(text, /(?:explicit(?:ly)? configured|explicit-only).*(?:suffix|profile)|(?:suffix|profile).*only.*explicit/is, path)
+    assert.match(text, /plan-critic-low.*(?:xhigh-equivalent|xhigh).*(?:floor|minimum)/is, path)
+  }
+
+  const v1Maintenance = read("docs", "v1-maintenance.md")
+  assert.match(v1Maintenance, /writing-plans.*currently callable\/registered.*plan-critic-low.*xhigh/is)
+  assert.match(v1Maintenance, /agents\/orchestrator\.md.*planner.*plan-critic.*availability/is)
+
+  const promptSync = read("docs", "prompt-sync.md")
+  assert.match(promptSync, /orchestrator.*planner.*plan-critic.*availability/is)
 })

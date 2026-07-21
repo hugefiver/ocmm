@@ -393,6 +393,20 @@ Both controls apply only to OpenCode `task` dispatches. ocmm does not classify a
     "reviewer": {
       "model": "openai/gpt-5.6-sol",
       "variants": { "high": { "variant": "max" } }
+    },
+    "planner": {
+      "variants": {
+        "low": { "model": "openai/gpt-5.5", "variant": "high" },
+        "high": "max",
+        "max": { "model": "openai/gpt-5.6-sol", "variant": "max" }
+      }
+    },
+    "plan-critic": {
+      "variants": {
+        "low": { "model": "openai/gpt-5.5", "variant": "low" },
+        "high": "xhigh",
+        "max": { "model": "openai/gpt-5.6-sol", "variant": "max" }
+      }
     }
   }
 }
@@ -405,6 +419,10 @@ Both controls apply only to OpenCode `task` dispatches. ocmm does not classify a
 - Multiple configured review profiles do not fan out automatically; dispatch still uses one selected profile.
 - `reviewer` has no ordinal slot naming.
 - xhigh-equivalent review floors still apply even when a logical `low` tier is selected.
+- Unsuffixed `planner` and `plan-critic` are their logical **normal** profiles. Their `-low`, `-high`, and `-max` suffix profiles are materialized only for explicitly configured `variants`; examples or generated files do not prove that a profile is currently callable.
+- Before dispatching a planning role, inspect current callable/registered names and select the first available candidate: explicit cost/latency request uses low then normal; small/clear uses normal; complex/cross-module uses high then normal; security/performance/data-loss/release-safety/runtime-safety/critical-migration work uses max then high then normal. Never invent an absent suffix.
+- Every generated planning tier inherits its canonical role's prompt, mode, permissions, registration policy, routing behavior, and receipt semantics. A tier changes the configured model route only.
+- `plan-critic-low` may select a lower-cost or lower-latency model, but it is not lower-effort review: the xhigh-equivalent floor remains mandatory.
 - `agents.oracle-high` is a deprecated config spelling migrated to `agents.oracle-2nd`, while runtime `oracle-high` remains the first-slot logical high tier.
 - Alias/canonical collisions fail validation.
 - `schema.json` and direct `OcmmConfigSchema` parsing remain strict. Runtime `loadConfig()` is tolerant: a schema-mismatched review field or entry is discarded locally while valid siblings and lower-priority values remain loaded. Only ambiguous alias/canonical migration collisions fall back to defaults.

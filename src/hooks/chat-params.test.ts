@@ -531,6 +531,153 @@ test("plan-critic floor remains independent of review-name parsing", async () =>
   assert.equal(output.options.reasoningEffort, "xhigh")
 })
 
+test("plan-critic logical low selects its cheaper route but retains the xhigh floor", async () => {
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      "plan-critic": {
+        model: "openai/gpt-5.5",
+        reasoningEffort: "low",
+        variants: { low: { model: "openai/gpt-5.5", variant: "low" } },
+      },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+
+  for (const variant of [undefined, "minimal", "low"] as const) {
+    clearResolutions()
+    const output = { options: { reasoningEffort: "low" } as Record<string, unknown> }
+    await handler(makeInput({
+      agentName: "plan-critic-low",
+      modelID: "gpt-5.5",
+      ...(variant ? { variant } : {}),
+    }), output)
+
+    assert.equal(output.options.reasoningEffort, "xhigh", String(variant))
+    const resolution = recentResolutions().at(-1)!
+    assert.equal(resolution.applied.variant, "xhigh", String(variant))
+    assert.equal(resolution.applied.reasoningEffort, "xhigh", String(variant))
+  }
+})
+
+test("plan-critic max keeps GPT-5.6 native max while planner tiers are not floored", async () => {
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      planner: { variants: { low: { model: "openai/gpt-5.5", variant: "low" } } },
+      "plan-critic": { variants: { max: { model: "openai/gpt-5.6-sol", variant: "max" } } },
+    },
+  })
+  const handler = createChatParamsHandler({ getConfig: () => cfg })
+
+  const planner = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "planner-low", modelID: "gpt-5.5" }), planner)
+  assert.equal(planner.options.reasoningEffort, "low")
+  assert.equal(recentResolutions().at(-1)!.applied.variant, "low")
+
+  const critic = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "plan-critic-max", modelID: "gpt-5.6-sol" }), critic)
+  assert.equal(critic.options.reasoningEffort, "max")
+  assert.equal(recentResolutions().at(-1)!.applied.variant, "max")
+})
+
+test("plan-critic max caps unsupported GPT max to xhigh", async () => {
+  const cfg = OcmmConfigSchema.parse({
+    agents: {
+      "plan-critic": { variants: { max: { model: "openai/gpt-5.5", variant: "max" } } },
+    },
+  })
+  const output = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: () => cfg })(
+    makeInput({ agentName: "plan-critic-max", modelID: "gpt-5.5" }),
+    output,
+  )
+  assert.equal(output.options.reasoningEffort, "xhigh")
+  assert.equal(recentResolutions().at(-1)!.applied.variant, "xhigh")
+})
+
+test("host-provided planning suffixes floor only plan critics without inventing a route", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map())
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  const critic = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "plan-critic-low", modelID: "gpt-5.5" }), critic)
+  assert.equal(critic.options.reasoningEffort, "xhigh")
+  const criticResolution = recentResolutions().at(-1)!
+  assert.equal(criticResolution.source, "host-profile-floor")
+  assert.equal(criticResolution.applied.variant, "xhigh")
+  assert.equal(criticResolution.input.modelID, "gpt-5.5")
+
+  const criticMax = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "plan-critic-max", modelID: "gpt-5.6-sol" }), criticMax)
+  assert.equal(criticMax.options.reasoningEffort, "max")
+  const criticMaxResolution = recentResolutions().at(-1)!
+  assert.equal(criticMaxResolution.source, "host-profile-floor")
+  assert.equal(criticMaxResolution.applied.variant, "max")
+
+  const planner = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "planner-low", modelID: "gpt-5.5", variant: "low" }), planner)
+  assert.equal(planner.options.reasoningEffort, "low")
+  assert.equal(recentResolutions().at(-1)!.source, "input-variant")
+})
+
+test("plan-critic logical low receives the canonical family-specific review floors", async () => {
+  const cases = [
+    {
+      label: "Gemini",
+      providerID: "google",
+      modelID: "gemini-3.1-pro",
+      expected: { options: { reasoningEffort: "high", thinking: { type: "enabled" } } },
+    },
+    {
+      label: "GLM",
+      providerID: "zhipu",
+      modelID: "glm-5.2",
+      expected: { options: { reasoningEffort: "xhigh", thinking: { type: "enabled" } } },
+    },
+    {
+      label: "Claude",
+      providerID: "anthropic",
+      modelID: "claude-opus-4-6",
+      expected: { options: { thinking: { type: "enabled", budgetTokens: 16_384 } } },
+    },
+    {
+      label: "DeepSeek",
+      providerID: "hoo",
+      modelID: "deepseek-v4-pro",
+      expected: { options: { reasoningEffort: "xhigh" } },
+    },
+  ] as const
+
+  for (const testCase of cases) {
+    const cfg = OcmmConfigSchema.parse({
+      agents: {
+        "plan-critic": {
+          model: `${testCase.providerID}/${testCase.modelID}`,
+          variant: "minimal",
+          variants: { low: "low" },
+        },
+      },
+    })
+    const handler = createChatParamsHandler({ getConfig: () => cfg })
+    const canonical: Record<string, unknown> = { options: {} }
+    await handler(makeInput({
+      agentName: "plan-critic",
+      providerID: testCase.providerID,
+      modelID: testCase.modelID,
+    }), canonical)
+    assert.deepEqual(canonical, testCase.expected, `${testCase.label} canonical`)
+
+    const logicalLow: Record<string, unknown> = { options: {} }
+    await handler(makeInput({
+      agentName: "plan-critic-low",
+      providerID: testCase.providerID,
+      modelID: testCase.modelID,
+    }), logicalLow)
+    assert.deepEqual(logicalLow, canonical, `${testCase.label} logical low`)
+  }
+})
+
 test("generated non-GPT review tiers receive family-specific floors", async () => {
   const config = OcmmConfigSchema.parse({
     agents: {

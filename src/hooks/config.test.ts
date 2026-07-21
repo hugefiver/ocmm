@@ -285,6 +285,7 @@ test("config preserves scalar and granular explicit permission overrides", async
       orchestrator: { permission: { task: "deny" as const, custom: "allow" as const } },
       reviewer: { tools: { task: true } },
       oracle: { variants: { high: "max" as const } },
+      planner: { variants: { high: "max" as const } },
     },
   }
   const hostTaskOverride = { "*": "allow" as const, planner: "allow" as const }
@@ -293,6 +294,7 @@ test("config preserves scalar and granular explicit permission overrides", async
     agent: {
       coding: { permission: { task: hostTaskOverride } },
       "oracle-high": { permission: { task: hostTaskOverride } },
+      "planner-high": { permission: { task: hostTaskOverride, question: "deny" } },
     },
     permission: { webfetch: "deny" },
   }
@@ -305,6 +307,8 @@ test("config preserves scalar and granular explicit permission overrides", async
   assert.equal(agentPermission(cfg.agent, "reviewer").task, "allow")
   assertExactTaskRules(agentPermission(cfg.agent, "coding").task, hostTaskOverride, "host granular override")
   assertExactTaskRules(agentPermission(cfg.agent, "oracle-high").task, hostTaskOverride, "host generated-review override")
+  assertExactTaskRules(agentPermission(cfg.agent, "planner-high").task, hostTaskOverride, "host generated-planner override")
+  assert.equal(agentPermission(cfg.agent, "planner-high").question, "deny")
 })
 
 test("config does not impose built-in task defaults on custom agents", async () => {
@@ -612,6 +616,248 @@ test("default config registers only normal review built-ins", async () => {
   assert.ok(target.agent.reviewer)
   assert.equal(target.agent["oracle-high"], undefined)
   assert.equal(target.agent["oracle-2nd-high"], undefined)
+})
+
+test("default config registers only canonical normal planning profiles", async () => {
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: defaultConfig })(target, undefined)
+
+  assert.ok(target.agent.planner)
+  assert.ok(target.agent["plan-critic"])
+  for (const name of [
+    "planner-low", "planner-high", "planner-max",
+    "plan-critic-low", "plan-critic-high", "plan-critic-max",
+  ]) {
+    assert.equal(target.agent[name], undefined, name)
+  }
+})
+
+test("configured planning profiles register canonical prompts, policies, permissions, and routes", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    locale: "zh-CN",
+    agents: {
+      planner: {
+        variants: { high: { model: "openai/gpt-5.6-sol", variant: "max" as const } },
+      },
+      "plan-critic": { variants: { low: "low" as const } },
+    },
+  }
+  const target = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const planner = target.agent["planner-high"] as Record<string, unknown>
+  assert.ok(planner)
+  assert.equal(planner.mode, "all")
+  assert.equal(planner.model, "openai/gpt-5.6-sol", "model-only tiers suppress catalog upgrades")
+  assert.match(String(planner.prompt), /# Agent Role: planner/)
+  assert.match(String(planner.prompt), /# Deepwork Planner Injection/)
+  assert.match(String(planner.prompt), /Configured locale: zh-CN/)
+  assertExactTaskRules(agentPermission(target.agent, "planner-high").task, PLANNER_TASK_RULES, "planner-high task allowlist")
+  assert.equal(agentPermission(target.agent, "planner-high").question, "allow")
+  assert.match(delegationContract(target.agent, "planner-high"), /exactly the unsuffixed `reviewer` at most once/i)
+  assert.match(delegationContract(target.agent, "planner-high"), /Return the completed plan to the caller/)
+
+  const critic = target.agent["plan-critic-low"] as Record<string, unknown>
+  assert.ok(critic)
+  assert.equal(critic.mode, "subagent")
+  assert.equal(critic.model, "openai/gpt-5.7-sol")
+  assert.match(String(critic.prompt), /# Agent Role: plan-critic/)
+  assert.doesNotMatch(String(critic.prompt), /# Agent Role: planner/)
+  assert.doesNotMatch(String(critic.prompt), /<ocmm-locale-guidance>/)
+  assertExactTaskRules(agentPermission(target.agent, "plan-critic-low").task, READ_ONLY_TASK_RULES, "plan-critic-low task allowlist")
+  assert.match(delegationContract(target.agent, "plan-critic-low"), /read-only role must not modify work by proxy/i)
+
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "planner-high").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "planner-high").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "plan-critic-low").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "plan-critic-low").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "catalog-upgrade" },
+  )
+  for (const name of ["planner-low", "planner-max", "plan-critic-high", "plan-critic-max"]) {
+    assert.equal(target.agent[name], undefined, name)
+    assert.equal(routeRegistry.snapshot().routes.has(name), false, `${name} route`)
+  }
+})
+
+test("managed variant-only tiers may catalog-upgrade without weakening explicit precedence", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      planner: {
+        variants: {
+          low: "low" as const,
+          high: "high" as const,
+          max: { model: "openai/gpt-5.5", variant: "max" as const },
+        },
+      },
+      "plan-critic": { variants: { high: "high" as const } },
+      reviewer: { variants: { high: "high" as const } },
+    },
+  }
+  const target = {
+    agent: {
+      "planner-low": { model: "host/existing-planner-low" },
+    },
+    provider: {
+      openai: { models: { "gpt-5.7-sol": {} } },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  for (const name of ["planner-high", "plan-critic-high", "reviewer-high"] as const) {
+    assert.equal((target.agent[name] as Record<string, unknown>).model, "openai/gpt-5.7-sol", name)
+    assert.deepEqual(
+      {
+        requirementSource: publishedRoute(routeRegistry, name).requirementSource,
+        primarySource: publishedRoute(routeRegistry, name).primarySource,
+      },
+      { requirementSource: "user-config", primarySource: "catalog-upgrade" },
+      name,
+    )
+  }
+
+  assert.equal((target.agent["planner-max"] as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "planner-max").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "planner-max").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+  assert.equal((target.agent["planner-low"] as Record<string, unknown>).model, "host/existing-planner-low")
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "planner-low").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "planner-low").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "existing-model" },
+  )
+
+  const noCatalogRegistry = createEffectiveRouteRegistry()
+  const noCatalogTarget: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({
+    getConfig: () => ({
+      ...defaultConfig(),
+      agents: { planner: { variants: { high: "high" as const } } },
+    }),
+    routeRegistry: noCatalogRegistry,
+    getFastMode: () => false,
+  })(noCatalogTarget, undefined)
+  assert.equal(
+    (noCatalogTarget.agent["planner-high"] as Record<string, unknown>).model,
+    "anthropic/claude-opus-4-7",
+  )
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(noCatalogRegistry, "planner-high").requirementSource,
+      primarySource: publishedRoute(noCatalogRegistry, "planner-high").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+})
+
+test("planning base and suffix disables mark only existing host profiles without synthesis", async () => {
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      planner: { variants: { high: "high" as const } },
+      "plan-critic": { variants: { low: "low" as const } },
+    },
+    disabledAgents: ["planner", "plan-critic-low"],
+  }
+  const target = {
+    agent: {
+      "planner-high": { model: "host/planner-high" },
+      "plan-critic-low": { model: "host/plan-critic-low" },
+    },
+  }
+
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+
+  assert.equal((target.agent["planner-high"] as Record<string, unknown>).disable, true)
+  assert.equal((target.agent["plan-critic-low"] as Record<string, unknown>).disable, true)
+  assert.equal((target.agent as Record<string, unknown>)["planner-low"], undefined)
+  assert.equal((target.agent as Record<string, unknown>)["plan-critic-high"], undefined)
+})
+
+test("unconfigured host planning suffix stays host-owned, gets parser permissions, and has no route", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const target = {
+    agent: {
+      "planner-low": { model: "host/planner-low", nested: { preserved: true } },
+    },
+  }
+
+  await createConfigHandler({
+    getConfig: defaultConfig,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  const host = target.agent["planner-low"] as Record<string, unknown>
+  assert.equal(host.model, "host/planner-low")
+  assert.deepEqual(host.nested, { preserved: true })
+  assert.equal(host.mode, undefined)
+  assert.equal(host.prompt, undefined)
+  assertExactTaskRules(agentPermission(target.agent, "planner-low").task, PLANNER_TASK_RULES, "host planner-low task allowlist")
+  assert.equal(agentPermission(target.agent, "planner-low").question, "allow")
+  assert.equal(routeRegistry.snapshot().routes.has("planner-low"), false)
+})
+
+test("generated planning registrations deep-clone inherited overrides", async () => {
+  const planner = {
+    model: "openai/gpt-5.5",
+    skills: ["writing-plans"],
+    permission: { custom: "allow" as const },
+    thinking: { type: "enabled" as const, budgetTokens: 4_096 },
+    variants: { high: "max" as const },
+  }
+  const config = { ...defaultConfig(), agents: { planner } }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => config })(target, undefined)
+
+  const normal = target.agent.planner as Record<string, unknown>
+  const high = target.agent["planner-high"] as Record<string, unknown>
+  assert.notEqual(normal.skills, high.skills)
+  assert.notEqual(normal.thinking, high.thinking)
+  assert.notEqual(normal.permission, high.permission)
+
+  const highSkills = high.skills as string[]
+  const highThinking = high.thinking as { budgetTokens: number }
+  const highPermission = high.permission as Record<string, unknown>
+  highSkills.push("mutated")
+  highThinking.budgetTokens = 1
+  highPermission.custom = "deny"
+  assert.deepEqual(normal.skills, ["writing-plans"])
+  assert.deepEqual(normal.thinking, { type: "enabled", budgetTokens: 4_096 })
+  assert.equal((normal.permission as Record<string, unknown>).custom, "allow")
+  assert.deepEqual(planner.skills, ["writing-plans"])
+  assert.deepEqual(planner.thinking, { type: "enabled", budgetTokens: 4_096 })
+  assert.equal(planner.permission.custom, "allow")
 })
 
 test("config registers canonical review profiles and no runtime alias duplicate", async () => {

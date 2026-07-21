@@ -730,7 +730,7 @@ test("loadProfileDescriptorsFromDir does not inject defaults for omitted profile
   }
 })
 
-test("loadConfig tolerates review-only violations without discarding valid siblings", () => {
+test("loadConfig tolerates logical-tier violations without discarding valid siblings", () => {
   const xdg = mkdtempSync(join(tmpdir(), "ocmm-review-validation-"))
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-review-validation-cwd-"))
   const configDir = join(xdg, "opencode")
@@ -756,7 +756,7 @@ test("loadConfig tolerates review-only violations without discarding valid sibli
         agents: { planner: { model: "openai/gpt-5.6-sol", variants: { high: "max" } } },
         verify: (config: ReturnType<typeof loadConfig>["config"]) => {
           assert.equal(config.agents?.planner?.model, "openai/gpt-5.6-sol")
-          assert.equal(config.agents?.planner?.variants, undefined)
+          assert.equal(config.agents?.planner?.variants?.high, "max")
         },
       },
       {

@@ -18,6 +18,7 @@ import {
   createPluginManifest,
   createPluginRuntimePackage,
   generateCodexPlugin,
+  renderPlanningLogicalTierProfiles,
   stageCodexRuntime,
 } from "./plugin-generator.ts"
 
@@ -25,6 +26,16 @@ function extractDelegationContract(instructions: string): string {
   const match = instructions.match(/<ocmm-delegation-contract>([\s\S]*?)<\/ocmm-delegation-contract>/)
   assert.ok(match, "generated instructions are missing the delegation contract")
   return match[1]!
+}
+
+function extractOriginalDeepworkPrompt(instructions: string): string {
+  const marker = "Original Deepwork prompt:\n"
+  const start = instructions.indexOf(marker)
+  assert.notEqual(start, -1, "generated instructions are missing the original Deepwork prompt")
+  const promptStart = start + marker.length
+  const end = instructions.indexOf("\n\n## Subagent Dispatch Compatibility", promptStart)
+  assert.notEqual(end, -1, "generated instructions are missing the prompt boundary")
+  return instructions.slice(promptStart, end)
 }
 
 function extractTaggedPolicy(instructions: string, tag: string): string {
@@ -479,6 +490,223 @@ test("Codex review floors use parsed identities and preserve GPT-5.6 native max"
   assert.equal(effort.get("reviewer-max"), "max")
 })
 
+test("Codex emits only configured planning tiers with canonical prompts and critic floors", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      agents: {
+        planner: { variants: { high: { model: "openai/gpt-5.6-sol", variant: "max" as const } } },
+        "plan-critic": {
+          variants: {
+            low: { model: "openai/gpt-5.5", variant: "low" as const },
+            max: { model: "openai/gpt-5.6-sol", variant: "max" as const },
+          },
+        },
+      },
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const bySource = new Map(agents.map((agent) => [agent.sourceName, agent]))
+
+  assert.equal(bySource.has("planner-high"), true)
+  assert.equal(bySource.has("planner-low"), false)
+  assert.equal(bySource.has("planner-max"), false)
+  assert.equal(bySource.has("plan-critic-low"), true)
+  assert.equal(bySource.has("plan-critic-high"), false)
+  assert.equal(bySource.has("plan-critic-max"), true)
+  assert.equal(bySource.get("planner-high")!.name, "dw-planner-high")
+  assert.match(bySource.get("planner-high")!.developerInstructions, /Agent Role: planner/)
+  assert.match(bySource.get("plan-critic-low")!.developerInstructions, /Agent Role: plan-critic/)
+  assert.match(bySource.get("plan-critic-max")!.developerInstructions, /Agent Role: plan-critic/)
+  assert.equal(bySource.get("planner-high")!.model, "gpt-5.6-sol")
+  assert.equal(bySource.get("planner-high")!.reasoningEffort, "max")
+  assert.equal(bySource.get("plan-critic-low")!.model, "gpt-5.5")
+  assert.equal(bySource.get("plan-critic-low")!.reasoningEffort, "xhigh")
+  assert.equal(bySource.get("plan-critic-max")!.model, "gpt-5.6-sol")
+  assert.equal(bySource.get("plan-critic-max")!.reasoningEffort, "max")
+  assert.equal(
+    extractOriginalDeepworkPrompt(bySource.get("planner-high")!.developerInstructions),
+    extractOriginalDeepworkPrompt(bySource.get("planner")!.developerInstructions),
+  )
+  for (const sourceName of ["plan-critic-low", "plan-critic-max"] as const) {
+    assert.equal(
+      extractOriginalDeepworkPrompt(bySource.get(sourceName)!.developerInstructions),
+      extractOriginalDeepworkPrompt(bySource.get("plan-critic")!.developerInstructions),
+      sourceName,
+    )
+  }
+  assert.equal(
+    renderPlanningLogicalTierProfiles(agents),
+    "- `planner`: `dw-planner`, `dw-planner-high`\n" +
+      "- `plan-critic`: `dw-plan-critic`, `dw-plan-critic-low`, `dw-plan-critic-max`",
+  )
+})
+
+test("Codex planning inventory omits a disabled planning role", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      disabledAgents: ["planner"],
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+
+  assert.equal(
+    renderPlanningLogicalTierProfiles(agents),
+    "- `plan-critic`: `dw-plan-critic`",
+  )
+})
+
+test("Codex planning inventory reports when both planning roles are disabled", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      disabledAgents: ["planner", "plan-critic"],
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+
+  assert.equal(
+    renderPlanningLogicalTierProfiles(agents),
+    "- No planning logical-tier profiles are generated in this bundle.",
+  )
+})
+
+test("Codex floors non-GPT plan critics without flooring planners", async () => {
+  const config = {
+    ...defaultConfig(),
+    workflow: "codex" as const,
+    agents: {
+      planner: {
+        variants: {
+          low: { model: "github-copilot/claude-sonnet-4-6", variant: "low" as const },
+        },
+      },
+      "plan-critic": {
+        variants: {
+          low: { model: "github-copilot/claude-sonnet-4-6", variant: "low" as const },
+        },
+      },
+      oracle: {
+        variants: {
+          low: { model: "github-copilot/claude-sonnet-4-6", variant: "low" as const },
+        },
+      },
+      reviewer: {
+        variants: {
+          low: { model: "github-copilot/claude-sonnet-4-6", variant: "low" as const },
+        },
+      },
+    },
+  }
+  const agents = await buildCodexAgents({
+    config,
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const bySource = new Map(agents.map((agent) => [agent.sourceName, agent]))
+  assert.equal(bySource.get("planner-low")?.model, "claude-sonnet-4-6")
+  assert.equal(bySource.get("planner-low")?.reasoningEffort, "high")
+  assert.equal(bySource.get("plan-critic-low")?.model, "claude-sonnet-4-6")
+  assert.equal(bySource.get("plan-critic-low")?.reasoningEffort, "xhigh")
+  assert.equal(bySource.get("oracle-low")?.reasoningEffort, "high")
+  assert.equal(bySource.get("reviewer-low")?.reasoningEffort, "high")
+
+  const root = mkdtempSync(join(tmpdir(), "codex-non-gpt-planning-floor-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: false,
+      config,
+      packageVersion: "9.9.9",
+    })
+    const plannerLow = readFileSync(join(result.pluginRoot, "agents", "dw-planner-low.toml"), "utf8")
+    const criticLow = readFileSync(join(result.pluginRoot, "agents", "dw-plan-critic-low.toml"), "utf8")
+    const oracleLow = readFileSync(join(result.pluginRoot, "agents", "dw-oracle-low.toml"), "utf8")
+    const reviewerLow = readFileSync(join(result.pluginRoot, "agents", "dw-reviewer-low.toml"), "utf8")
+    assert.match(plannerLow, /^model_reasoning_effort = "high"$/m)
+    assert.match(criticLow, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(oracleLow, /^model_reasoning_effort = "high"$/m)
+    assert.match(reviewerLow, /^model_reasoning_effort = "high"$/m)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("temporary Codex generation writes configured planning tiers to plugin and project copies", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-planning-tiers-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config: {
+        ...defaultConfig(),
+        workflow: "codex",
+        agents: {
+          planner: { variants: { high: { model: "openai/gpt-5.6-sol", variant: "max" as const } } },
+          "plan-critic": {
+            variants: {
+              low: { model: "openai/gpt-5.5", variant: "low" as const },
+              max: { model: "openai/gpt-5.6-sol", variant: "max" as const },
+            },
+          },
+        },
+      },
+      packageVersion: "9.9.9",
+    })
+    const pluginAgents = join(result.pluginRoot, "agents")
+    const projectAgents = result.projectAgentsRoot
+    assert.ok(projectAgents)
+
+    for (const sourceName of ["planner-high", "plan-critic-low", "plan-critic-max"] as const) {
+      const filename = `${CODEX_AGENT_PREFIX}-${sourceName}.toml`
+      const pluginCopy = readFileSync(join(pluginAgents, filename), "utf8")
+      const projectCopy = readFileSync(join(projectAgents, filename), "utf8")
+      assert.equal(projectCopy, pluginCopy, `${sourceName} project/plugin copies`)
+    }
+    for (const sourceName of ["planner-low", "planner-max", "plan-critic-high"] as const) {
+      const filename = `${CODEX_AGENT_PREFIX}-${sourceName}.toml`
+      assert.equal(existsSync(join(pluginAgents, filename)), false, `${sourceName} plugin copy`)
+      assert.equal(existsSync(join(projectAgents, filename)), false, `${sourceName} project copy`)
+    }
+
+    const plannerHigh = readFileSync(join(pluginAgents, "dw-planner-high.toml"), "utf8")
+    const criticLow = readFileSync(join(pluginAgents, "dw-plan-critic-low.toml"), "utf8")
+    const criticMax = readFileSync(join(pluginAgents, "dw-plan-critic-max.toml"), "utf8")
+    const workflowSkill = readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8")
+    const planningInventory = workflowSkill.match(
+      /### Planning logical-tier profiles in this bundle\s+(- `planner`[^\n]*\n- `plan-critic`[^\n]*)/,
+    )?.[1] ?? ""
+    assert.match(plannerHigh, /Agent Role: planner/)
+    assert.match(plannerHigh, /^model = "gpt-5\.6-sol"$/m)
+    assert.match(plannerHigh, /^model_reasoning_effort = "max"$/m)
+    assert.match(criticLow, /Agent Role: plan-critic/)
+    assert.match(criticLow, /^model = "gpt-5\.5"$/m)
+    assert.match(criticLow, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(criticMax, /Agent Role: plan-critic/)
+    assert.match(criticMax, /^model = "gpt-5\.6-sol"$/m)
+    assert.match(criticMax, /^model_reasoning_effort = "max"$/m)
+    assert.equal(
+      planningInventory.trim(),
+      "- `planner`: `dw-planner`, `dw-planner-high`\n" +
+        "- `plan-critic`: `dw-plan-critic`, `dw-plan-critic-low`, `dw-plan-critic-max`",
+    )
+    assert.doesNotMatch(planningInventory, /dw-planner-(?:low|max)|dw-plan-critic-high/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("generated workflow describes ordered priority and logical tiers without supplemental semantics", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-ordered-review-"))
   try {
@@ -664,6 +892,13 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /Best available primary reasoning model in the user's catalog/)
     assert.match(workflowSkill, /Reviewer and Oracle routes use an `xhigh`-equivalent minimum/)
     assert.match(workflowSkill, /GPT-5\.6 supports native `max`/)
+    assert.match(workflowSkill, /Planning logical-tier profiles in this bundle/i)
+    assert.match(workflowSkill, /current callable dispatch-tool schema.*availability/is)
+    assert.match(workflowSkill, /small or clear.*unsuffixed.*normal/is)
+    assert.match(workflowSkill, /complex.*high.*normal/is)
+    assert.match(workflowSkill, /high-risk.*max.*high.*normal/is)
+    assert.match(workflowSkill, /low.*only.*explicit.*cost.*latency/is)
+    assert.match(workflowSkill, /plan-critic-low.*lower-cost.*model.*xhigh-equivalent.*floor/is)
     assert.match(workflowSkill, /Oracle priority.*dw-oracle.*dw-oracle-2nd/is)
     assert.match(workflowSkill, /logical tier.*low.*normal.*high.*max/is)
     assert.match(workflowSkill, /configuring multiple.*does not.*fan-out/is)

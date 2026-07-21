@@ -808,7 +808,7 @@ test("subagent depth guard allows only mapped primary coordinators without depth
   }
 })
 
-test("subagent depth guard fails closed for every recognized non-primary review profile without lineage", async () => {
+test("subagent depth guard fails closed for every recognized non-primary managed profile without lineage", async () => {
   const root = tempProject()
   try {
     const sessionAgentMap = new Map<string, string>([
@@ -818,6 +818,8 @@ test("subagent depth guard fails closed for every recognized non-primary review 
       ["oracle-9th-max", "oracle-9th-max"],
       ["reviewer-low", "reviewer-low"],
       ["oracle-second", "oracle-second"],
+      ["planner-high", "planner-high"],
+      ["plan-critic-low", "plan-critic-low"],
     ])
     const guards = createPermissionGuards({
       getConfig: defaultConfig,
@@ -832,7 +834,7 @@ test("subagent depth guard fails closed for every recognized non-primary review 
       /subagent nesting depth limit reached.*current depth: 3/,
     )
 
-    for (const sessionID of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second"]) {
+    for (const sessionID of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second", "planner-high", "plan-critic-low"]) {
       await assert.rejects(
         guards.before(taskInput(sessionID), {}),
         /subagent nesting depth limit reached.*current depth: 3/,
@@ -984,13 +986,13 @@ test("unmapped sessions cannot git-write in the project repository when identity
   }
 })
 
-test("review profiles cannot git-write in the project repository", async () => {
+test("generated review and planning profiles cannot git-write in the project repository", async () => {
   const project = tempProject()
   try {
     mkdirSync(join(project, ".git"))
     writeFileSync(join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
 
-    for (const agent of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second"]) {
+    for (const agent of ["oracle-2nd", "oracle-9th-max", "reviewer-low", "oracle-second", "planner-high", "plan-critic-low"]) {
       const guards = createPermissionGuards({
         getConfig: configWithReadme,
         projectRoot: project,

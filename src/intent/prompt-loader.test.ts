@@ -671,3 +671,16 @@ test("orchestrator alone owns workflow-role composition in all prompt sets", () 
     assert.match(text, /runtime-safety.*configured max.*configured high.*normal/is, workflow)
   }
 })
+
+test("orchestrators select planning logical tiers only from current availability", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"), "utf8")
+    assert.match(text, /planner.*plan-critic.*current.*(?:callable|registered).*availability/is, workflow)
+    assert.match(text, /small or clear.*unsuffixed.*normal/is, workflow)
+    assert.match(text, /complex.*high.*normal/is, workflow)
+    assert.match(text, /security.*performance.*data[- ]loss.*release[- ]safety.*runtime[- ]safety.*max.*high.*normal/is, workflow)
+    assert.match(text, /low.*only.*explicit.*cost.*latency/is, workflow)
+    assert.match(text, /never.*(?:invent|synthesize|fabricate).*profile/is, workflow)
+    assert.match(text, /plan-critic-low.*model.*(?:cost|latency).*not.*effort.*xhigh/is, workflow)
+  }
+})

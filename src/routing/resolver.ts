@@ -4,6 +4,8 @@ import { normalizeAgentShorthand, normalizeShorthand } from "../config/normalize
 import { matchRequirementSuccessor } from "./model-upgrades.ts"
 import { expandedReviewAgentMap } from "../review-agents/expand.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
+import { expandedPlanningAgentMap } from "../planning-agents/profiles.ts"
+import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import type { AgentEntry, CategoryEntry } from "../config/schema.ts"
 import type { FallbackEntry, ModelRequirement, RequirementSource, Variant } from "../shared/types.ts"
 
@@ -207,6 +209,13 @@ export function resolveEffectiveRequirement(opts: {
   const reviewIdentity = parseReviewAgentName(agentName)
   if (reviewIdentity) {
     const profile = expandedReviewAgentMap({ agents: agentsConfig, disabledAgents }).get(reviewIdentity.canonicalName)
+    if (!profile) return null
+    return { requirement: profile.requirement, source: profile.resolutionSource }
+  }
+
+  const planningIdentity = parsePlanningAgentName(agentName)
+  if (planningIdentity) {
+    const profile = expandedPlanningAgentMap({ agents: agentsConfig, disabledAgents }).get(planningIdentity.canonicalName)
     if (!profile) return null
     return { requirement: profile.requirement, source: profile.resolutionSource }
   }

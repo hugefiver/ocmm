@@ -22,7 +22,10 @@ import { selectCatalogModel } from "../routing/model-upgrades.ts"
 import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import { resolveEffectiveRequirement } from "../routing/resolver.ts"
 import { isRecord, log } from "../shared/logger.ts"
-import { expandReviewAgents, isExpandedReviewAgentDisabled, type ReviewAgentRegistrationOverrides } from "../review-agents/expand.ts"
+import type { AgentProfileRegistrationOverrides } from "../logical-tiers/materialize.ts"
+import { expandPlanningAgents, isExpandedPlanningAgentDisabled } from "../planning-agents/profiles.ts"
+import { parsePlanningAgentName } from "../planning-agents/names.ts"
+import { expandReviewAgents, isExpandedReviewAgentDisabled } from "../review-agents/expand.ts"
 import { isReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
 import { createSubagentDepthDiagnosticReporter, type SubagentDepthDiagnosticLogger } from "./subagent-depth-diagnostics.ts"
 
@@ -70,7 +73,7 @@ const SPECIALIST_EXECUTION_AGENTS = [
   "creative",
   "documenting",
 ] as const
-const QUESTION_ENABLED_WORKFLOW_AGENTS = ["planner", "deep", "complex", "coding", "normal-task"] as const
+const QUESTION_ENABLED_WORKFLOW_AGENTS = ["deep", "complex", "coding", "normal-task"] as const
 
 function taskAllowlist(allowed: readonly string[]): GranularPermission {
   const rules: GranularPermission = { "*": "deny" }
@@ -103,7 +106,7 @@ function applyAgentEntry(
   agent: Agent,
   override: NormalizedShorthand | undefined,
   extras?: AgentExtras,
-  registration?: ReviewAgentRegistrationOverrides,
+  registration?: AgentProfileRegistrationOverrides,
 ): boolean {
   const current = agentMap[agent.name]
   if (isRecord(current) && current.disable === true) return false
@@ -310,7 +313,8 @@ function terminalPromptSuffixFor({
 }
 
 function delegationContractFor(name: string): string {
-  const readOnlyReviewRole = isReviewAgentName(name) || name === "plan-critic"
+  const planningIdentity = parsePlanningAgentName(name)
+  const readOnlyReviewRole = isReviewAgentName(name) || planningIdentity?.role === "plan-critic"
   if (UTILITY_LEAF_AGENT_SET.has(name)) {
     return wrapDelegationContract([
       "This role is a utility leaf agent. Do not dispatch any subagent.",
@@ -318,7 +322,7 @@ function delegationContractFor(name: string): string {
     ])
   }
 
-  if (name === "planner") {
+  if (planningIdentity?.role === "planner") {
     return wrapDelegationContract([
       "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
       `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
@@ -390,7 +394,7 @@ function deepworkPromptForAgent(
     return specialization ? `${base}\n\n---\n\n${specialization}` : base
   }
   const variant = pickDeepworkVariantForAgent({
-    agentName: agent.name,
+    agentName: agent.promptSource ?? agent.name,
     preferenceModel: prefModel,
   })
   if (variant === "gpt-5.6") {
@@ -503,15 +507,17 @@ function selectRoutePrimary(args: {
   requirementSource: RequirementSource
   existingModel?: string
   allowCatalogUpgrade: boolean
+  catalogBeforeUserRequirement?: boolean
 }): PrimarySelection {
   if (args.existingModel) return { model: args.existingModel, source: "existing-model" }
-  if (args.requirementSource === "user-config") {
-    return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "user-requirement" }
-  }
   const catalogModel = args.allowCatalogUpgrade
+    && (args.requirementSource !== "user-config" || args.catalogBeforeUserRequirement)
     ? selectCatalogModel(args.target, args.agentName, args.requirement)
     : undefined
   if (catalogModel) return { model: catalogModel, source: "catalog-upgrade" }
+  if (args.requirementSource === "user-config") {
+    return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "user-requirement" }
+  }
   return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "builtin-requirement" }
 }
 
@@ -545,6 +551,42 @@ function allowCatalogUpgrade(args: {
 }): boolean {
   if (!args.requested) return false
   return args.registryManaged || !hasExplicitRouteSelection(args.cfg, args.agentName)
+}
+
+type ManagedAgentProfile = {
+  name: string
+  requirement: ModelRequirement
+  registration: AgentProfileRegistrationOverrides
+  resolutionSource: "user-config" | "agent-default"
+  suppressCatalogUpgrade: boolean
+  promptSource: string
+  mode: "all" | "subagent"
+  includeLocalePrefix: boolean
+}
+
+function expandManagedAgentProfiles(cfg: OcmmConfig): ManagedAgentProfile[] {
+  const input = { agents: cfg.agents, disabledAgents: cfg.disabledAgents }
+  const reviewProfiles: ManagedAgentProfile[] = expandReviewAgents(input).map((profile) => ({
+    name: profile.name,
+    requirement: profile.requirement,
+    registration: profile.registration,
+    resolutionSource: profile.resolutionSource,
+    suppressCatalogUpgrade: profile.suppressCatalogUpgrade,
+    promptSource: profile.promptSource,
+    mode: "subagent",
+    includeLocalePrefix: false,
+  }))
+  const planningProfiles: ManagedAgentProfile[] = expandPlanningAgents(input).map((profile) => ({
+    name: profile.name,
+    requirement: profile.requirement,
+    registration: profile.registration,
+    resolutionSource: profile.resolutionSource,
+    suppressCatalogUpgrade: profile.suppressCatalogUpgrade,
+    promptSource: profile.policy.promptSource,
+    mode: profile.policy.mode,
+    includeLocalePrefix: profile.policy.includeLocalePrefix,
+  }))
+  return [...reviewProfiles, ...planningProfiles]
 }
 
 function selectedProviderCatalogModels(
@@ -630,7 +672,11 @@ export function createConfigHandler(
         agents: cfg.agents,
         disabledAgents: cfg.disabledAgents,
       })
-      if ((disabled.has(name) || disabledReview) && isRecord(raw)) raw.disable = true
+      const disabledPlanning = parsePlanningAgentName(name) !== null && isExpandedPlanningAgentDisabled(name, {
+        agents: cfg.agents,
+        disabledAgents: cfg.disabledAgents,
+      })
+      if ((disabled.has(name) || disabledReview || disabledPlanning) && isRecord(raw)) raw.disable = true
     }
 
     if (cfg.disableOpenCodeBuiltinAgents) {
@@ -649,7 +695,7 @@ export function createConfigHandler(
     }
 
     for (const a of BUILTIN_AGENTS) {
-      if (parseReviewAgentName(a.name)) continue
+      if (parseReviewAgentName(a.name) || parsePlanningAgentName(a.name)) continue
       if (disabled.has(a.name)) continue
       let norm = normalizeAgentShorthand(a.name, cfg.agents)
       // Inject builtin defaultAlias when the user wrote an entry for this agent
@@ -710,16 +756,16 @@ export function createConfigHandler(
       }
     }
 
-    for (const profile of expandReviewAgents({ agents: cfg.agents, disabledAgents: cfg.disabledAgents })) {
+    for (const profile of expandManagedAgentProfiles(cfg)) {
       const synthetic: Agent = {
         name: profile.name,
         ...(profile.registration.description ? { description: profile.registration.description } : {}),
         requirement: profile.requirement,
         promptSource: profile.promptSource,
       }
-      const effective = resolveRouteRequirement(cfg, profile.name) ?? {
+      const effective = {
         requirement: profile.requirement,
-        source: "agent-default" as const,
+        source: profile.resolutionSource,
       }
       const primary = selectRoutePrimary({
         target,
@@ -733,11 +779,14 @@ export function createConfigHandler(
           agentName: profile.name,
           requested: !profile.suppressCatalogUpgrade,
         }),
+        catalogBeforeUserRequirement:
+          effective.source === "user-config" && !profile.suppressCatalogUpgrade,
       })
       let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, primary.model)
       if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
-      const extras: AgentExtras = { mode: "subagent", model: primary.model }
+      const extras: AgentExtras = { mode: profile.mode, model: primary.model }
       if (prompt) extras.prompt = prompt
+      if (profile.includeLocalePrefix) extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       const terminalSuffix = terminalPromptSuffixFor({
         name: profile.name,
         includeCompressionPolicy: true,
@@ -817,6 +866,7 @@ export function createConfigHandler(
         if (BUILTIN_AGENTS.some((b) => b.name === name)) continue
         if (BUILTIN_CATEGORIES.some((c) => c.name === name)) continue
         if (parseReviewAgentName(name)) continue
+        if (parsePlanningAgentName(name)) continue
         const norm = normalizeAgentShorthand(name, cfg.agents)
         if (!norm?.requirement?.fallbackChain?.length) continue
         const effective = resolveRouteRequirement(cfg, name)
@@ -961,18 +1011,20 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
     if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(UTILITY_LEAF_AGENTS) }, false)
   }
 
-  const planner = agentMap.planner
-  if (isRecord(planner)) {
-    mergePermission(planner, { task: taskAllowlist([...READ_ONLY_UTILITY_AGENTS, "reviewer"]) }, false)
-  }
-
   for (const name of READ_ONLY_WORKFLOW_AGENTS) {
     const entry = agentMap[name]
     if (isRecord(entry)) mergePermission(entry, { task: taskAllowlist(READ_ONLY_UTILITY_AGENTS) }, false)
   }
 
   for (const [name, entry] of Object.entries(agentMap)) {
-    if (isRecord(entry) && (isReviewAgentName(name) || name === "plan-critic")) {
+    if (!isRecord(entry)) continue
+    const planningIdentity = parsePlanningAgentName(name)
+    if (planningIdentity?.role === "planner") {
+      mergePermission(entry, {
+        task: taskAllowlist([...READ_ONLY_UTILITY_AGENTS, "reviewer"]),
+        question: "allow",
+      }, false)
+    } else if (isReviewAgentName(name) || planningIdentity?.role === "plan-critic") {
       mergePermission(entry, { task: taskAllowlist(READ_ONLY_UTILITY_AGENTS) }, false)
     }
   }

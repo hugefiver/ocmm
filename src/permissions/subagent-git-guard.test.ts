@@ -521,6 +521,14 @@ describe("isBuiltinAgentName", () => {
     }
     assert.equal(isBuiltinAgentName("reviewer-2nd"), false)
   })
+  test("recognizes canonical and generated planning profiles as builtins", () => {
+    for (const name of ["planner", "planner-high", "plan-critic", "plan-critic-low"]) {
+      assert.equal(isBuiltinAgentName(name), true, name)
+    }
+    for (const name of ["planner-medium", "planner-high-extra", "plan-critic-2nd"]) {
+      assert.equal(isBuiltinAgentName(name), false, name)
+    }
+  })
   test("does NOT recognize coding (category, not builtin agent)", () => {
     assert.ok(!isBuiltinAgentName("coding"))
   })

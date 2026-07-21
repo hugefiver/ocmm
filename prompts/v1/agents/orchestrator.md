@@ -90,6 +90,19 @@ Tier selection is deterministic: simple work uses unsuffixed `normal`; complex c
 
 Deterministic shorthand: complex cross-module work uses configured high otherwise normal; runtime-safety work uses configured max otherwise configured high otherwise normal.
 
+### Planning logical-tier selection
+
+Before a fresh `planner` or `plan-critic` dispatch, inspect the current callable or registered agent names to determine profile availability. Configuration examples and generated files are not availability evidence.
+
+For base role `R` (`planner` or `plan-critic`):
+
+- An explicit user cost/latency request tries `R-low`, then `R`; select low only for that explicit cost/latency request.
+- Small or clear work without that request uses `R`, the unsuffixed normal profile.
+- Complex, cross-module, or coordination-heavy work tries `R-high`, then `R` (normal).
+- Security, performance, data-loss, release-safety, runtime-safety, or critical-migration work tries `R-max`, then `R-high`, then `R` (normal).
+
+Choose the first candidate that is actually available. Never invent or synthesize a missing profile. A tier changes only the configured model route; it never changes the role, prompt, mode, permissions, or receipt semantics. `plan-critic-low` is a model-selection option for lower cost or latency, not lower review effort, and it retains the xhigh-equivalent floor.
+
 ### Subagent Git Limitations
 
 Subagent sessions (category agents dispatched via task tool) are hard-blocked from running git write commands (commit, push, tag, reset --hard, rebase, cherry-pick, revert). The `subagent-git-guard` hook enforces this at the `tool.execute.before` level.

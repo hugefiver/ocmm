@@ -7,6 +7,7 @@ import type { OcmmConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
 import { resolveSessionLineage } from "../shared/opencode-events.ts"
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
+import { isPlanningAgentName } from "../planning-agents/names.ts"
 import { canonicalizeReviewAgentName, isReviewAgentName } from "../review-agents/names.ts"
 
 const READ_TOOL = "read"
@@ -1826,7 +1827,10 @@ function hasHelpFlag(tokens: string[], start: number, subcommand?: string): bool
 
 /** Check if an agent name is a builtin agent (including aliases like oracle, explore). */
 export function isBuiltinAgentName(name: string): boolean {
-  return BUILTIN_AGENT_INDEX.has(name) || BUILTIN_AGENT_ALIASES.has(name) || isReviewAgentName(name)
+  return BUILTIN_AGENT_INDEX.has(name)
+    || BUILTIN_AGENT_ALIASES.has(name)
+    || isReviewAgentName(name)
+    || isPlanningAgentName(name)
 }
 
 /** Only these names represent primary coordinator sessions. Builtin catalog

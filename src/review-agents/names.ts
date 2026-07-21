@@ -1,3 +1,9 @@
+import {
+  logicalTierProfileName,
+  splitLogicalTierProfileName,
+  type LogicalTier,
+} from "../logical-tiers/names.ts"
+
 export const ORACLE_SLOT_NAMES = [
   "oracle",
   "oracle-2nd",
@@ -13,7 +19,7 @@ export const ORACLE_SLOT_NAMES = [
 export type OracleSlotName = (typeof ORACLE_SLOT_NAMES)[number]
 export type OracleOrdinal = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 export type ReviewAgentRole = "oracle" | "reviewer"
-export type ReviewLogicalTier = "low" | "normal" | "high" | "max"
+export type ReviewLogicalTier = LogicalTier
 
 export type ReviewAgentIdentity = {
   role: ReviewAgentRole
@@ -23,29 +29,20 @@ export type ReviewAgentIdentity = {
   canonicalName: string
 }
 
-const TIER_SUFFIXES = ["low", "high", "max"] as const
 const ORACLE_ORDINALS = new Map<OracleSlotName, OracleOrdinal>(
   ORACLE_SLOT_NAMES.map((slot, index) => [slot, (index + 1) as OracleOrdinal]),
 )
 
-function splitLogicalTier(name: string): { slot: string; tier: ReviewLogicalTier } {
-  for (const tier of TIER_SUFFIXES) {
-    const suffix = `-${tier}`
-    if (name.endsWith(suffix)) return { slot: name.slice(0, -suffix.length), tier }
-  }
-  return { slot: name, tier: "normal" }
-}
-
 export function parseReviewAgentName(name: string): ReviewAgentIdentity | null {
   const runtimeCanonical = name === "oracle-second" ? "oracle-2nd" : name
-  const { slot, tier } = splitLogicalTier(runtimeCanonical)
+  const { baseName: slot, logicalTier } = splitLogicalTierProfileName(runtimeCanonical)
   if (slot === "reviewer") {
     return {
       role: "reviewer",
       ordinal: 1,
-      logicalTier: tier,
+      logicalTier,
       canonicalSlot: "reviewer",
-      canonicalName: tier === "normal" ? "reviewer" : `reviewer-${tier}`,
+      canonicalName: logicalTierProfileName("reviewer", logicalTier),
     }
   }
   const ordinal = ORACLE_ORDINALS.get(slot as OracleSlotName)
@@ -54,9 +51,9 @@ export function parseReviewAgentName(name: string): ReviewAgentIdentity | null {
   return {
     role: "oracle",
     ordinal,
-    logicalTier: tier,
+    logicalTier,
     canonicalSlot,
-    canonicalName: tier === "normal" ? canonicalSlot : `${canonicalSlot}-${tier}`,
+    canonicalName: logicalTierProfileName(canonicalSlot, logicalTier),
   }
 }
 

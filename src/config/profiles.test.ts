@@ -159,6 +159,64 @@ test("loadOpenCodePluginConfig restores lower selected inline profile values aft
   }
 })
 
+test("layered loading removes invalid planning tier fields while preserving valid siblings and lower values", () => {
+  const xdg = makeTempXdg()
+  const project = mkdtempSync(join(tmpdir(), "ocmm-plugin-planning-tier-layers-"))
+  try {
+    writeConfig(xdg, {
+      agents: { planner: { model: "openai/BASE" } },
+      profiles: {
+        selected: {
+          agents: {
+            planner: {
+              description: "LOWER",
+              variants: {
+                low: { model: "openai/LOWER-TIER", variant: "low" },
+                high: "high",
+              },
+            },
+          },
+        },
+      },
+      activeProfile: "selected",
+    })
+    mkdirSync(join(project, ".opencode"), { recursive: true })
+    writeFileSync(join(project, ".opencode", "ocmm.jsonc"), JSON.stringify({
+      profiles: {
+        selected: {
+          agents: {
+            planner: {
+              description: "PROJECT",
+              variants: {
+                low: { model: "openai/PROJECT-TIER", variant: "invalid" },
+              },
+            },
+            "planner-high": { model: "openai/INVALID-DIRECT" },
+            "plan-critic": { model: "openai/CRITIC" },
+          },
+        },
+      },
+    }))
+
+    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project)).config
+    const plugin = loadPluginWithXdg(xdg, project).config
+    for (const config of [generic, plugin]) {
+      assert.equal(config.agents?.planner?.model, "openai/BASE")
+      assert.equal(config.agents?.planner?.description, "PROJECT")
+      assert.deepEqual(config.agents?.planner?.variants?.low, {
+        model: "openai/PROJECT-TIER",
+        variant: "low",
+      })
+      assert.equal(config.agents?.planner?.variants?.high, "high")
+      assert.equal(config.agents?.["planner-high"], undefined)
+      assert.equal(config.agents?.["plan-critic"]?.model, "openai/CRITIC")
+    }
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
 test("loadOpenCodePluginConfig does not inject profile defaults over omitted base fields", () => {
   const xdg = makeTempXdg()
   try {
