@@ -6,6 +6,7 @@ Apply this layer only when the selected model belongs to the GPT-5.6 family. Con
 
 ## Outcome-first execution
 
+- Before choosing a workflow, assess task complexity and required rigor. Use the lightest process preserving outcome and risk controls; do not force low-complexity work through full software-engineering practice or non-triggered Superpowers skills.
 - For each non-trivial task, identify the concrete requested outcome and an observable completion condition before acting.
 - Continue until that condition and required verification hold, then stop instead of adding process that does not change the result.
 - Preserve the complete requested deliverable. Concision removes repetition and ceremony, not requested content, evidence, or artifacts.
@@ -14,8 +15,10 @@ Apply this layer only when the selected model belongs to the GPT-5.6 family. Con
 ## Retrieval and delegation
 
 - Prefer direct tools, and stop retrieval when evidence is sufficient to act or answer.
-- Delegate only when the effective role/delegation contract permits it and a bounded result materially improves completion.
+- Use subagents only when the effective role/delegation contract permits it and they materially improve completion through parent-context savings, a required workflow stage, or parallel independent implementation.
 - Multiple steps, routine confirmation, or a desire for another opinion are insufficient reasons to delegate.
+- Reserve reviewer/Oracle profiles for software-engineering acceptance of project implementations or focused code-quality verification. Never use them for research, ideation, general answer validation, or routine confidence; choose one or more only by authoritative reviewer-selection rules.
+- For multi-module work with independent, non-coupled tasks, consider parallel implementation subagents; serialize coupled work or cases where delegation overhead exceeds context benefit.
 - Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals. The parent verifies returned evidence instead of trusting a completion claim.
 
 ## Context-efficient waiting and validation

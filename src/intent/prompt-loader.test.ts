@@ -456,7 +456,7 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
 
       if (variant === "gpt-5.6") {
         assert.match(specialization, /GPT-5\.6 EXECUTION CALIBRATION/)
-        assert.match(specialization, /Delegate only when.*materially improves completion/is)
+        assert.match(specialization, /subagents only when.*materially improve completion/is)
         assert.equal(countOccurrences(prompt, "## Discovery Before Planning"), 1, `${label} duplicates discovery doctrine`)
         assert.equal(countOccurrences(prompt, "## Planner Trigger"), 1, `${label} duplicates planner doctrine`)
         assert.equal(countOccurrences(prompt, "## Answer-When-Answerable"), 1, `${label} duplicates answer doctrine`)
@@ -609,6 +609,20 @@ test("GPT-5.6 prompts proceed under clear facts and ask only material questions"
   }
 })
 
+test("GPT-5.6 prompts scale process and constrain subagent use", () => {
+  for (const workflow of GPT56_WORKFLOWS) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-5.6.md"), "utf8")
+    assert.match(text, /Before choosing a workflow.*assess task complexity and required rigor/is, workflow)
+    assert.match(text, /lightest process.*do not force low-complexity work through full software-engineering practice/is, workflow)
+    assert.match(text, /non-triggered Superpowers skills/i, workflow)
+    assert.match(text, /subagents only when.*parent-context savings.*required workflow stage.*parallel independent implementation/is, workflow)
+    assert.match(text, /reviewer\/Oracle profiles.*acceptance.*project implementations.*code-quality verification/is, workflow)
+    assert.match(text, /Never use them for research, ideation, general answer validation, or routine confidence/i, workflow)
+    assert.match(text, /choose one or more only by authoritative reviewer-selection rules/i, workflow)
+    assert.match(text, /multi-module work.*independent, non-coupled tasks.*parallel implementation subagents/is, workflow)
+  }
+})
+
 test("GPT-5.6 specializations are compact additive calibrations synchronized across workflows", () => {
   const shared = new Map<Gpt56Workflow, string>()
 
@@ -626,7 +640,7 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
     assert.match(text, /authorization.*verification policy.*delegation contract.*authoritative/is, `${label} authority chain`)
     assert.match(text, /concrete requested outcome.*observable completion condition/is, `${label} outcome`)
     assert.match(text, /Continue until.*required verification.*hold.*then stop/is, `${label} stopping rule`)
-    assert.match(text, /Delegate only when.*effective role\/delegation contract permits it.*materially improves completion/is, `${label} delegation threshold`)
+    assert.match(text, /subagents only when.*effective role\/delegation contract permits it.*materially improve completion/is, `${label} delegation threshold`)
     assert.match(text, /Multiple steps, routine confirmation, or (?:a desire for|wanting) another opinion are insufficient reasons to delegate/i, `${label} anti-speculation threshold`)
     assert.match(text, /`GOAL`.*`STOP WHEN`.*`EVIDENCE`.*scope.*non-goals/is, `${label} bounded delegation`)
     assert.match(text, /suitable timeout.*completion signal/is, `${label} waiting`)
