@@ -1,0 +1,79 @@
+name: Nix
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CACHIX_AUTH_TOKEN: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') && secrets.CACHIX_AUTH_TOKEN || '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@00199f951aeb9404028a6e4b95ad42546f73296a
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569
+        continue-on-error: true
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+            nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          upload-chunk-size: 67108864
+
+      - name: Configure optional Cachix
+        if: ${{ vars.CACHIX_CACHE_NAME != '' }}
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71
+        with:
+          name: ${{ vars.CACHIX_CACHE_NAME }}
+          authToken: '${{ env.CACHIX_AUTH_TOKEN }}'
+
+      - name: Check flake
+        run: |
+          nix flake check --print-build-logs
+          if ($LASTEXITCODE -ne 0) {
+            throw "nix flake check failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build primary packages
+        run: |
+          nix build .#ocmm .#ocmm-lsp --no-link --print-build-logs
+          if ($LASTEXITCODE -ne 0) {
+            throw "nix build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Evaluate package derivations
+        run: |
+          $systems = @("x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin")
+          $packages = @("ocmm-lsp", "ocmm-unwrapped", "ocmm", "default")
+
+          foreach ($system in $systems) {
+            foreach ($package in $packages) {
+              nix eval --raw ".#packages.${system}.${package}.drvPath"
+              if ($LASTEXITCODE -ne 0) {
+                throw "nix eval failed for packages.${system}.${package}.drvPath with exit code $LASTEXITCODE"
+              }
+            }
+          }
+
+      - name: Smoke-test default app
+        run: |
+          nix run . -- --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "nix run failed with exit code $LASTEXITCODE"
+          }

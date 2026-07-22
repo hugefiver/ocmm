@@ -184,6 +184,169 @@ Then point your OpenCode config at the built plugin:
 
 Or use the `ocmm` shim binary (see below) to launch opencode with automatic plugin loading and config isolation.
 
+## Nix
+
+Run ocmm without adding it to a profile, or build either primary package:
+
+```console
+nix run github:hugefiver/ocmm
+nix build github:hugefiver/ocmm#ocmm
+nix build github:hugefiver/ocmm#ocmm-lsp
+```
+
+The default package and app wrap the `nixpkgs` OpenCode package, so the shim always has a known OpenCode executable. `ocmm-unwrapped` contains the plugin and native LSP only; OpenCode selection is then left to the CLI, configuration, environment, or `PATH`.
+
+### Unfree policy
+
+The direct flake packages and apps carry only a narrow internal AAAPL `allowUnfreePredicate` allowance for ocmm's own derivations, so ordinary `nix run github:hugefiver/ocmm` does not need an ambient `NIXPKGS_ALLOW_UNFREE`. Because AAAPL is non-free, downstream overlay, factory, Home Manager, and NixOS consumers must configure the same narrow predicate in their own `pkgs`:
+
+```nix
+nixpkgs.config.allowUnfreePredicate = package:
+  builtins.elem (lib.getName package) [
+    "ocmm-lsp"
+    "ocmm-unwrapped"
+    "ocmm"
+  ];
+```
+
+### Overlay
+
+Add the overlay to the package set that installs ocmm. This complete NixOS flake example keeps ocmm and the consumer on the same `nixpkgs` input and applies the narrow predicate before selecting `pkgs.ocmm`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    ocmm = {
+      url = "github:hugefiver/ocmm";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = inputs@{ nixpkgs, ... }: {
+    nixosConfigurations.example = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ({ lib, pkgs, ... }: {
+          nixpkgs.config.allowUnfreePredicate = package:
+            builtins.elem (lib.getName package) [
+              "ocmm-lsp"
+              "ocmm-unwrapped"
+              "ocmm"
+            ];
+          nixpkgs.overlays = [ inputs.ocmm.overlays.default ];
+          environment.systemPackages = [ pkgs.ocmm ];
+          system.stateVersion = "24.11";
+        })
+      ];
+    };
+  };
+}
+```
+
+### Package factory
+
+`lib.mkOcmmPackage` creates a wrapper around a chosen base ocmm package. Select either an OpenCode derivation:
+
+```nix
+inputs.ocmm.lib.mkOcmmPackage {
+  inherit pkgs;
+  opencodePackage = pkgs.opencode;
+}
+```
+
+or an executable command:
+
+```nix
+inputs.ocmm.lib.mkOcmmPackage {
+  inherit pkgs;
+  opencodeCommand = "/opt/opencode/bin/opencode";
+}
+```
+
+`opencodePackage` and `opencodeCommand` are mutually exclusive. Configure the narrow predicate above in the `pkgs` passed to the factory.
+
+The shim resolves OpenCode in this exact order:
+
+```text
+1. --opencode
+2. non-empty OCMM_OPENCODE
+3. ocmm.json or ocmm.jsonc shim.opencode
+4. non-empty OCMM_NIX_OPENCODE
+5. non-empty OCMM_PROGRAMS_OPENCODE
+6. opencode from PATH
+```
+
+### Home Manager
+
+For standalone Home Manager, construct the `pkgs` passed to `homeManagerConfiguration` with the same narrow predicate. The configuration imports the default module and enables both programs:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
+    ocmm = {
+      url = "github:hugefiver/ocmm";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = inputs@{ nixpkgs, home-manager, ocmm, ... }:
+    let
+      system = "x86_64-linux";
+      lib = nixpkgs.lib;
+      pkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfreePredicate = package:
+          builtins.elem (lib.getName package) [
+            "ocmm-lsp"
+            "ocmm-unwrapped"
+            "ocmm"
+          ];
+      };
+    in {
+      homeConfigurations."user@example" = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          {
+            imports = [ ocmm.homeManagerModules.default ];
+            home.username = "user";
+            home.homeDirectory = "/home/user";
+            home.stateVersion = "24.11";
+            programs.ocmm.enable = true;
+            programs.opencode.enable = true;
+          }
+        ];
+      };
+    };
+}
+```
+
+When both programs are enabled and `programs.opencode.package` is non-null, the wrapper reuses that package and appends ocmm's store plugin path to the end of the existing OpenCode plugin list.
+
+### NixOS module
+
+After configuring the same predicate in the NixOS package set, import the default NixOS module and set the OpenCode package explicitly:
+
+```nix
+{
+  imports = [ inputs.ocmm.nixosModules.default ];
+
+  programs.ocmm = {
+    enable = true;
+    opencode.package = pkgs.opencode;
+  };
+}
+```
+
+The NixOS module installs only the package and wrapper. It never creates a service or user configuration.
+
+### CI cache
+
+The repository's Nix workflow always uses a GitHub Actions Nix store cache. Cachix is optional: set the repository variable `CACHIX_CACHE_NAME` to enable it and the repository secret `CACHIX_AUTH_TOKEN` to authenticate writes. Without the variable, Cachix is not configured; without the token, it is read-only. Pull requests never receive the token, and only trusted pushes to `master` or manual workflow runs can use it to push.
+
 ## Codex adapter
 
 ocmm also ships a Codex plugin bundle generated from the same local workflow data:
