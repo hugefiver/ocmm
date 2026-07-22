@@ -1,6 +1,6 @@
 {
   "name": "ocmm-lsp-darwin-arm64",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Native ocmm-lsp binary package for aarch64-apple-darwin.",
   "license": "LicenseRef-AAAPL",
   "repository": {

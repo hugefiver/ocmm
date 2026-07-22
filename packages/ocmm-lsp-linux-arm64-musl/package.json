@@ -1,6 +1,6 @@
 {
   "name": "ocmm-lsp-linux-arm64-musl",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Native ocmm-lsp binary package for aarch64-unknown-linux-musl.",
   "license": "LicenseRef-AAAPL",
   "repository": {
