@@ -12,6 +12,7 @@ import {
   buildIsolatedConfig,
   resolvePluginPath,
   readShimDefaults,
+  resolveOpencodeBin,
 } from "./shim.ts"
 
 function dedupArray<T>(arr: T[]): T[] {
@@ -205,6 +206,75 @@ describe("shim buildChildEnv", () => {
     assert.deepEqual(parent, originalParent)
     assert.equal(child.OCMM_FAST, undefined)
     assert.equal("OCMM_FAST" in child, false)
+  })
+})
+
+describe("shim resolveOpencodeBin", () => {
+  it("uses each source in priority order and preserves passthrough args", () => {
+    const args = parseArgs(["--opencode", "cli-opencode", "--", "run", "hello"])
+    const defaults = { opencode: "config-opencode" }
+    const env = {
+      OCMM_OPENCODE: "user-opencode",
+      OCMM_NIX_OPENCODE: "nix-opencode",
+      OCMM_PROGRAMS_OPENCODE: "programs-opencode",
+    }
+
+    assert.deepEqual(args.passthrough, ["run", "hello"])
+    assert.equal(resolveOpencodeBin(args, defaults, env), "cli-opencode")
+    assert.equal(resolveOpencodeBin({ ...args, opencodeBin: undefined }, defaults, env), "user-opencode")
+    assert.equal(
+      resolveOpencodeBin({ ...args, opencodeBin: undefined }, defaults, {
+        ...env,
+        OCMM_OPENCODE: undefined,
+      }),
+      "config-opencode",
+    )
+    assert.equal(
+      resolveOpencodeBin({ ...args, opencodeBin: undefined }, {}, {
+        ...env,
+        OCMM_OPENCODE: undefined,
+      }),
+      "nix-opencode",
+    )
+    assert.equal(
+      resolveOpencodeBin({ ...args, opencodeBin: undefined }, {}, {
+        ...env,
+        OCMM_OPENCODE: undefined,
+        OCMM_NIX_OPENCODE: undefined,
+      }),
+      "programs-opencode",
+    )
+    assert.equal(
+      resolveOpencodeBin({ ...args, opencodeBin: undefined }, {}, {
+        ...env,
+        OCMM_OPENCODE: undefined,
+        OCMM_NIX_OPENCODE: undefined,
+        OCMM_PROGRAMS_OPENCODE: undefined,
+      }),
+      "opencode",
+    )
+  })
+
+  it("treats empty environment values as absent", () => {
+    assert.equal(
+      resolveOpencodeBin(parseArgs([]), {}, {
+        OCMM_OPENCODE: "",
+        OCMM_NIX_OPENCODE: "   ",
+        OCMM_PROGRAMS_OPENCODE: "\t",
+      }),
+      "opencode",
+    )
+  })
+
+  it("preserves CLI and config command strings verbatim", () => {
+    assert.equal(
+      resolveOpencodeBin(parseArgs(["--opencode", "  cli opencode  "]), {}, {}),
+      "  cli opencode  ",
+    )
+    assert.equal(
+      resolveOpencodeBin(parseArgs([]), { opencode: "  config opencode  " }, {}),
+      "  config opencode  ",
+    )
   })
 })
 

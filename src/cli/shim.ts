@@ -315,6 +315,23 @@ export function parseArgs(argv: string[]): ShimArgs {
   return args
 }
 
+function nonEmptyEnvironmentValue(value: string | undefined): string | undefined {
+  return value?.trim() ? value : undefined
+}
+
+export function resolveOpencodeBin(
+  args: Pick<ShimArgs, "opencodeBin">,
+  defaults: Pick<Partial<ShimConfig>, "opencode">,
+  env: NodeJS.ProcessEnv,
+): string {
+  return args.opencodeBin ??
+    nonEmptyEnvironmentValue(env.OCMM_OPENCODE) ??
+    defaults.opencode ??
+    nonEmptyEnvironmentValue(env.OCMM_NIX_OPENCODE) ??
+    nonEmptyEnvironmentValue(env.OCMM_PROGRAMS_OPENCODE) ??
+    "opencode"
+}
+
 export function buildChildEnv(parent: NodeJS.ProcessEnv, args: ShimArgs): NodeJS.ProcessEnv {
   const env = { ...parent }
 
@@ -471,7 +488,7 @@ function main(): void {
     }
   }
 
-  const opencodeBin = args.opencodeBin ?? defaults.opencode ?? "opencode"
+  const opencodeBin = resolveOpencodeBin(args, defaults, process.env)
   const child = spawn(opencodeBin, args.passthrough, {
     stdio: "inherit",
     env,
