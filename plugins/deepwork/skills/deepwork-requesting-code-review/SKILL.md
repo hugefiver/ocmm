@@ -8,15 +8,15 @@ description: Use after all implementation tasks complete, after major features a
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); added
      Reviewer Selection section for ordered Oracle slot semantics and logical
-     tiers (oracle slots = model-priority ordering, reviewer = external review
-     lane, tiers = low/normal/high/max). See docs/v1-maintenance.md for sync
+     tiers (oracle slots = external-model priority ordering, reviewer =
+     primary-lane self-review, tiers = low/normal/high/max). See docs/v1-maintenance.md for sync
      rules. -->
 
 # Requesting Code Review
 
 Dispatch a code reviewer subagent to catch issues before they cascade. The reviewer gets precisely crafted context for evaluation — never your session's history. This keeps the reviewer focused on the work product, not your thought process, and preserves your own context for continued work.
 
-**Core principle:** Review the integrated change set once implementation work is complete. Mid-stream reviews are exceptions for blockers, high-risk uncertainty, or explicit user requests for strict stepwise review.
+**Core principle:** Review implemented code or an integrated change set. Reviewer/Oracle profiles are not research, ideation, architecture-design, debugging, or general-answer consultants.
 
 ## When to Request Review
 
@@ -26,8 +26,7 @@ Dispatch a code reviewer subagent to catch issues before they cascade. The revie
 - Before merge to main
 
 **Optional but valuable:**
-- When stuck after concrete evidence gathering (fresh perspective)
-- Before high-risk refactoring that changes architecture/security/performance behavior
+- After completing a high-risk implementation increment that needs focused code-quality validation
 - After fixing a complex bug when the fix remains uncertain after local verification
 
 ## How to Request
@@ -77,9 +76,10 @@ Review selection has two independent axes: role/model priority and logical rigor
 
 ### Axis 1 — Role/Model Priority
 
-- Oracle slots are ordered as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
+- `reviewer` is the primary-model or primary-lane self-review profile; `reviewer-2nd` does not exist.
+- Oracle profiles are external-model cross-check slots ordered as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
 - `oracle-2nd` and every later slot have lower selection priority, never greater capability.
-- The external review lane is `reviewer`; `reviewer-2nd` does not exist.
+- Explicit user model configuration remains authoritative and may remove model heterogeneity.
 
 ### Axis 2 — Logical Rigor Tiers
 
@@ -103,7 +103,7 @@ Review selection has two independent axes: role/model priority and logical rigor
 - A later Oracle slot is another configured model perspective, not a stronger reviewer.
 - User overrides are allowed, but availability, disabled profiles, and floor constraints still apply.
 
-`oracle` can also be an optional independent consultation for a high-risk implementation plan. It does not replace the current `plan-critic` receipt, does not make dual plan review mandatory, and a timeout or partial response is not a conclusion.
+Reviewer and Oracle profiles do not review implementation plans; `plan-critic` owns plan receipts. A timeout, partial response, or review of a different revision is not an acceptance conclusion.
 
 **Reasoning policy:** Every parsed Oracle/Reviewer profile retains an `xhigh` minimum floor when the selected model family exposes that control; otherwise use the highest supported review effort for that family. This floor remains in effect while logical tier selection still includes `low`/`normal`/`high`/`max` semantics. GPT-5.6 supports native `max`, so complex or high-risk review/verification on GPT-5.6 can request local `max` directly; other model families use local `max` only when their cataloged controls expose a maximum-effort level. `plan-critic` uses `xhigh` minimum and may be raised by explicit local configuration. Example model names are references only; explicit user configuration and currently available models decide the actual selection.
 

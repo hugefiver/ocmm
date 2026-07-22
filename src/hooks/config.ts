@@ -326,9 +326,9 @@ function delegationContractFor(name: string): string {
     return wrapDelegationContract([
       "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
       `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
-      "You may consult exactly the unsuffixed `reviewer` at most once, only for one concrete blocking architecture, security, or performance decision that repository evidence cannot settle. This is not formal plan review or final acceptance.",
-      "`quick` is forbidden. Do not dispatch `plan-critic`, any Reviewer tier (`reviewer-low`, `reviewer-high`, `reviewer-max`), any Oracle profile, implementation agents, or routine reviewer self-checks.",
-      "Return the completed plan to the caller. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
+      "If repository evidence cannot settle a genuinely difficult, strict, or high-risk decision, return the blocker to the orchestrator for optional `hard-reasoning`; do not dispatch a decision agent yourself.",
+      "`quick` is forbidden. Do not dispatch `plan-critic`, any Reviewer profile, any Oracle profile, implementation agents, decision agents, or routine review checks.",
+      "Return the completed plan to the caller. Difficult-decision routing, formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
     ])
   }
 
@@ -1021,7 +1021,7 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
     const planningIdentity = parsePlanningAgentName(name)
     if (planningIdentity?.role === "planner") {
       mergePermission(entry, {
-        task: taskAllowlist([...READ_ONLY_UTILITY_AGENTS, "reviewer"]),
+        task: taskAllowlist(READ_ONLY_UTILITY_AGENTS),
         question: "allow",
       }, false)
     } else if (isReviewAgentName(name) || planningIdentity?.role === "plan-critic") {

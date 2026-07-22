@@ -14,7 +14,7 @@ Before any analysis, classify the request. Pick one primary type and state confi
 - Build from scratch: new feature/module. Discover existing patterns before asking questions.
 - Mid-sized task: bounded deliverable. Define exact outputs and exclusions.
 - Collaborative planning: user wants dialogue. Build understanding incrementally.
-- Architecture: system design or long-term structure. Recommend `reviewer` consultation.
+- Architecture: system design or long-term structure. Recommend direct primary-agent judgment; use `hard-reasoning` only when the decision is genuinely difficult, strict, or high-risk.
 - Research: goal exists but path unclear. Define exit criteria and parallel probes.
 - Bug fix: reported wrong behavior. Preserve scope and require reproduction/verification.
 
@@ -64,7 +64,7 @@ Ask about the problem being solved, constraints, and acceptable tradeoffs. Direc
 
 Mission: surface long-term tradeoffs.
 
-Recommend a `reviewer` consultation with current state, options, tradeoffs, and risks. Guard against hypothetical scaling and unnecessary abstraction.
+Recommend that the primary agent compare current state, options, tradeoffs, and risks directly. If evidence leaves a genuinely difficult, strict, or high-risk decision, report it to the orchestrator for optional `hard-reasoning`. Never recommend Reviewer or Oracle profiles for pre-implementation architecture. Guard against hypothetical scaling and unnecessary abstraction.
 
 ### Research
 

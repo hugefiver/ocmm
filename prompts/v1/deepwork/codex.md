@@ -341,9 +341,11 @@ completion/integration check: read the summary and evidence, inspect touched
 files/diff, run or record targeted checks, and resolve conflicts before moving
 to dependent work. This check is not a full reviewer loop.
 
-Consult a reviewer/oracle early only for DONE_WITH_CONCERNS, BLOCKED status,
-high-risk conflicts/regressions, or explicit user demands for strict stepwise
-review. Keep early consultation narrow to the blocker or concern.
+Consult a reviewer/oracle early only when an actual implementation diff has a
+DONE_WITH_CONCERNS code-quality issue, high-risk integration conflict/regression,
+or explicit user demand for strict stepwise code review. Keep early review narrow
+to the implemented diff; never use it for a BLOCKED task without code, architecture
+design, plan review, or root-cause debugging.
 
 After all implementation tasks complete, run the single Final Acceptance Review
 section below over the integrated change set. LIGHT work may record local
@@ -410,6 +412,6 @@ message + present for approval.
 
 ## Final Acceptance Review
 
-After all plan tasks complete, dispatch a final acceptance review over the full change set. Use `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. This is the only routine reviewer loop; skip it only on explicit user delegation.
+After all plan tasks complete, dispatch a final acceptance review over the full change set. Use the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. This is the only routine reviewer loop; skip it only on explicit user delegation.
 
 </deepwork-mode>

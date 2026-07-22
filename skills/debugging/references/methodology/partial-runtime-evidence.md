@@ -95,9 +95,9 @@ If the operation succeeded earlier (before quota ran out, before access was revo
 
 **Strength**: Real wire data, but often summarized — token counts, status codes, no payload bodies.
 
-### Tier 6 — Pure code reading with peer review
+### Tier 6 — Pure code reading with independent research verification
 
-If literally none of the above is available, read the code carefully and submit it to **one Oracle for skeptical review** (see "Verification Oracle" below). This is the weakest tier and you must explicitly mark conclusions as "unverified" in the journal.
+If literally none of the above is available, read the code carefully and use one bounded `research` pass to verify cited claims against the available source. This is the weakest tier and you must explicitly mark conclusions as "unverified" in the journal.
 
 ---
 
@@ -143,11 +143,9 @@ If you cannot achieve a complete Tier 2 capture **or** two independent non-Tier-
 
 ---
 
-## Verification Oracle pattern (for non-debug tasks)
+## Independent verification for non-debug artifacts
 
-The skill's main Oracle Triple (`04-oracle-triple.md`) is for **stuck debugging** — 2 failed rounds, mental box, three orthogonal framings to break out.
-
-For tasks where the deliverable is an **artifact, not a bug fix** (reverse engineering, extraction, audit, compliance documentation), use a different pattern: **single Oracle, late, skeptical, with the deliverable in hand**.
+Reviewer and Oracle profiles are reserved for software implementation acceptance and focused code-quality verification. For reverse engineering, extraction, audit, or compliance artifacts, use a bounded `research` verification pass. Use `hard-reasoning` only when the remaining judgment is genuinely difficult, strict, or high-risk; ordinary factual checking does not qualify.
 
 ### When to invoke
 
@@ -158,7 +156,7 @@ For tasks where the deliverable is an **artifact, not a bug fix** (reverse engin
 ### Pattern
 
 ```
-task(subagent_type="oracle", load_skills=[], run_in_background=false,
+task(subagent_type="research",
      prompt="""
 SKEPTICAL FINAL VERIFICATION — be critical, look for reasons the task is incomplete or wrong.
 
@@ -172,7 +170,7 @@ SKEPTICAL FINAL VERIFICATION — be critical, look for reasons the task is incom
 <bullet list of every concrete claim in the deliverable>
 
 ## Where to look
-<paths the Oracle should Read / Bash to verify>
+<paths and evidence sources to verify>
 
 ## Your job
 1. Read the deliverables.
@@ -183,19 +181,9 @@ Be skeptical. Don't rubber-stamp.
 """)
 ```
 
-### Why this differs from the Oracle Triple
+### Keep the roles distinct
 
-| | Oracle Triple (debug) | Verification Oracle (artifact) |
-|---|---|---|
-| Trigger | 2 failed hypothesis rounds | About to declare "done" |
-| Count | 3 in parallel, orthogonal framings | 1 sequential, focused review |
-| Goal | Break out of mental box | Catch unsubstantiated claims |
-| Tone of prompt | Brainstorm wide alternatives | Skeptical audit |
-| Iteration | Reset hypothesis set after | Fix gaps, re-invoke until PASS |
-
-### Don't conflate them
-
-If you're stuck debugging, do the Triple. If you have a deliverable and need it audited, do the Verification Oracle. Doing the Triple on a finished extraction will return three diverging "what if you tried…" tangents that are not what you need. Doing the Verification Oracle on a stuck debugging session will return a polite "the evidence is incomplete" that you already knew.
+Use `research` to verify factual artifact claims. Use the Phase 4 hard-reasoning escalation only for a genuinely difficult stuck root-cause hunt. Use Reviewer/Oracle profiles only when the artifact under review is an implemented software change and the objective is acceptance or code-quality verification.
 
 ---
 

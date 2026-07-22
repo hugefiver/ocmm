@@ -7,9 +7,9 @@
  * 11 built-in agents:
  *   orchestrator   - main coordinator; decomposes work + delegates
  *   builder         - primary implementer; handles execution-heavy work
- *   reviewer       - read-only consultant for hard reasoning / debugging
- *   oracle         - self-supervision reviewer for work the agent itself produced
- *   oracle-2nd     - second-priority Oracle review model for additional independent evidence
+ *   reviewer       - primary-lane self-reviewer for implementation acceptance
+ *   oracle         - external-model cross-check for implementation acceptance
+ *   oracle-2nd     - second-priority external review model for additional independent evidence
  *   doc-search     - external library / docs / OSS lookups
  *   code-search    - internal codebase grep
  *   planner        - produces structured work plans
@@ -52,7 +52,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "reviewer",
     description:
-      "Read-only consultant for hard reasoning, debugging, and architecture review.",
+      "Read-only primary-lane self-reviewer for implementation acceptance and focused code-quality verification.",
     requirement: {
       variant: "high",
       fallbackChain: [
@@ -66,7 +66,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "oracle",
     description:
-      "Self-supervision reviewer for work the agent itself produced. Uses a configured heterogeneous review lane by default to avoid self-confirmation bias.",
+      "Read-only external-model cross-check for implementation acceptance and focused code-quality verification. Uses a configured heterogeneous review lane by default.",
     promptSource: "reviewer",
     defaultAlias: "reviewer",
     requirement: {
@@ -84,7 +84,7 @@ export const BUILTIN_AGENTS: Agent[] = [
   {
     name: "oracle-2nd",
     description:
-      "Second-priority Oracle review model for additional independent evidence. Priority does not imply greater capability or effort.",
+      "Second-priority external Oracle model for additional independent implementation evidence. Priority does not imply greater capability or effort.",
     promptSource: "reviewer",
     requirement: {
       variant: "high",

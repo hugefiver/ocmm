@@ -81,7 +81,7 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 **DONE:** Run the completion/integration check, then continue to the next task. Do not dispatch spec-reviewer or code-quality-reviewer for a clean DONE result. If the work needs a commit, the implementer reports the intended files and message; the orchestrator handles any Git write only after explicit user authorization.
 
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, resolve them before continuing. If the concerns indicate high risk or cross-task conflict, consult a reviewer early; otherwise note them and continue after the completion check.
+**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, resolve them before continuing. If an actual implementation diff shows a high-risk code-quality or cross-task integration concern, a narrow early implementation review is allowed; otherwise note the concern and continue after the completion check.
 
 **NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
 
@@ -136,7 +136,7 @@ Each implementation task follows TDD:
 - Accept "close enough" when the completion check shows the task is not done
 - Let implementer self-review replace the completion check or the final acceptance review
 - Move to next task while the completion check has open issues
-- Confuse early reviewer consultation (DONE_WITH_CONCERNS, BLOCKED, high-risk conflict) with routine per-task review
+- Confuse narrow early review of an actual implementation diff with architecture consultation, debugging, plan review, or routine per-task review
 
 **If subagent asks questions:**
 - Answer clearly and completely
@@ -148,7 +148,7 @@ Each implementation task follows TDD:
 - Re-run the completion check after fixes
 - Repeat until the task is actually done
 
-**If a reviewer is consulted early (only for DONE_WITH_CONCERNS, BLOCKED, user-requested strict step-by-step review, or obvious high-risk conflict):**
+**If a reviewer is consulted early (only for an implemented diff with DONE_WITH_CONCERNS, user-requested strict step-by-step code review, or an obvious high-risk integration conflict):**
 - Implementer (same subagent) fixes the findings
 - Re-check only the narrow blocker or concern that triggered the consultation
 - Repeat only until that blocker is resolved
@@ -169,13 +169,14 @@ After each implementer returns, run this check before moving to the next task. I
 
 **Run targeted tests or record evidence:** If the task has targeted tests, run them. If not, record the implementer's test output or other evidence in the todo list.
 
-**Check integration / conflicts:** Does this change conflict with earlier tasks (same files, inverted assumptions, duplicated logic)? If yes, resolve before continuing, either by re-dispatching the same implementer or by consulting a reviewer if the conflict is high-risk.
+**Check integration / conflicts:** Does this change conflict with earlier tasks (same files, inverted assumptions, duplicated logic)? If yes, resolve before continuing, either by re-dispatching the same implementer or by requesting narrow implementation review of the actual diff when the conflict is high-risk.
 
-**When to consult a reviewer early:** Early reviewer/oracle consultation is exceptional and reserved for:
-- DONE_WITH_CONCERNS where the concern is about correctness, architecture, or cross-task impact
-- BLOCKED that may indicate a plan or design flaw
-- User explicitly asks for strict step-by-step review
-- Obvious high-risk conflict or regression between tasks
+**When to request early implementation review:** Reviewer/Oracle use is exceptional and requires an actual implementation diff. It is reserved for:
+- DONE_WITH_CONCERNS where the concern is about implemented-code correctness, implemented architecture, or cross-task impact
+- User explicitly asks for strict step-by-step code review of implemented work
+- Obvious high-risk conflict or regression visible between implemented tasks
+
+Do not use Reviewer or Oracle profiles for a BLOCKED task with no implementation to inspect, pre-implementation architecture, plan defects, or root-cause debugging; route those through the orchestrator's ordinary decision, plan, or debugging workflow.
 
 Do not dispatch spec-reviewer or code-quality-reviewer after a clean DONE result. If early consultation is needed, ask for the narrow issue to be evaluated; do not recreate the old routine per-task review loop.
 
@@ -216,12 +217,13 @@ After all plan tasks are marked complete, before declaring the work done, run a 
 
 Review selection has two independent axes: role/model priority and logical rigor.
 
-- Oracle slots are ordered by selection priority as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
+- `reviewer` is the primary-model or primary-lane self-review profile. Oracle profiles are external-model cross-check slots ordered by selection priority as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
 - `oracle-2nd` and later slots mean lower selection priority, never stronger capability.
 - Logical rigor tiers are `low`, `normal`, `high`, `max` (`normal` is the unsuffixed profile; other tiers are used only when configured and available).
+- Explicit user model configuration remains authoritative and may remove model heterogeneity.
 
-| Complexity / evidence shape | Reviewer(s) | Tier choice |
-|---|---|---|
+| Complexity / evidence shape | Criteria | Reviewer(s) | Tier choice |
+|---|---|---|---|
 | Simple | 1-2 tasks, single module, no architectural change | first available Oracle at `normal` |
 | Complex / cross-module | 3+ tasks, cross-module integration, architectural change, migration | first available Oracle + `reviewer` in parallel; configured `high`, otherwise `normal` |
 | Security / performance / data-loss / release / runtime-safety | high-impact risk profile regardless of file count | first available Oracle + `reviewer` in parallel; configured `max`, otherwise `high`, otherwise `normal` |

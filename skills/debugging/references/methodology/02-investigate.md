@@ -70,7 +70,7 @@ When the `team_*` tools are present, create a **debug-squad** team and split inv
     {
       "kind": "category",
       "category": "deep",
-      "prompt": "You are the Trace Correlator. Your job: take findings from the other members and cross-link them. Build a causal chain from symptom to suspected cause. Identify missing evidence. Propose the next single most-decisive runtime query. Never edit source code; only reason across already-captured evidence. If hypotheses diverge sharply after correlation, tell the Lead immediately — that is the signal for the Oracle Triple."
+      "prompt": "You are the Trace Correlator. Your job: take findings from the other members and cross-link them. Build a causal chain from symptom to suspected cause. Identify missing evidence. Propose the next single most-decisive runtime query. Never edit source code; only reason across already-captured evidence. If two complete evidence rounds fail, tell the Lead that the task now qualifies for the bounded hard-reasoning escalation."
     }
   ]
 }
@@ -84,7 +84,7 @@ When the `team_*` tools are present, create a **debug-squad** team and split inv
 - Synthesize member reports into updated hypothesis statuses.
 - Decide when to disband: `team_shutdown_request` → `team_approve_shutdown` → `team_delete`.
 
-**Team does NOT include Oracle** — Oracle is a hard-reject team member type. Oracle is used separately in Phase 4 (see `04-oracle-triple.md`).
+**Team does not include Reviewer or Oracle profiles** — they are reserved for implementation acceptance and code-quality verification. Phase 4 may use one `hard-reasoning` agent only after the strict difficulty threshold is met; see `04-hard-reasoning-escalation.md`.
 
 ### Path B: Team mode DISABLED
 
@@ -127,4 +127,4 @@ If you find yourself about to paraphrase, stop, go back, and copy the raw value.
 
 ## Round completion
 
-A "round" is complete when every hypothesis has either confirming or refuting evidence — or when you have exhausted the evidence sources available without a decisive result. If the round ends inconclusively, that counts as a failed round for the counter in the journal. See `04-oracle-triple.md` for what to do at 2 consecutive failed rounds.
+A "round" is complete when every hypothesis has either confirming or refuting evidence — or when you have exhausted the evidence sources available without a decisive result. If the round ends inconclusively, that counts as a failed round for the counter in the journal. See `04-hard-reasoning-escalation.md` for what to do at 2 consecutive failed rounds.

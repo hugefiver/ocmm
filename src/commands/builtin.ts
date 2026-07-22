@@ -39,7 +39,7 @@ Idle auto-continuation: when \`idleContinuation.enabled\` is true in ocmm config
 
 1. Parse the user's task from the command arguments.
 2. Work continuously through explore, plan, implement, verify, and cleanup.
-3. Before declaring completion, run an explicit verification pass. Prefer a blocking task to reviewer/oracle when available; otherwise perform a rigorous self-review against the original request, changed files, tests, and runtime evidence.
+3. Before declaring completion, run an explicit verification pass. For implemented software, apply the authoritative final-acceptance selection rules for Reviewer/Oracle profiles; for every other deliverable, verify directly against the original request and available evidence without using review profiles.
 4. If the verifier finds issues, fix them and verify again.
 5. Only when implementation and verification both pass, output: <promise>{{COMPLETION_PROMISE}}</promise>
 6. If blocked, state the blocker, the evidence, and the next required external input.

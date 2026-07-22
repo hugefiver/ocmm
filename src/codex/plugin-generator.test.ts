@@ -111,6 +111,7 @@ function extractCallableDispatchContract(text: string, label: string): string {
     text.indexOf("\n## ", start + marker.length),
     text.indexOf("\n### Generated profile references", start + marker.length),
     text.indexOf("\nOrdered Oracle review semantics:", start + marker.length),
+    text.indexOf("\nImplementation review semantics:", start + marker.length),
   ].filter((index) => index !== -1)
   const end = possibleEnds.length > 0 ? Math.min(...possibleEnds) : text.length
   return text.slice(start, end).trimEnd()
@@ -845,7 +846,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(orchestrator, /^name = "dw-orchestrator"$/m)
     assert.match(orchestrator, /Subagent Dispatch Compatibility \(HARD-GATE\)/)
     assert.match(orchestrator, /select only from the user's current available catalog/)
-    assert.match(orchestrator, /Ordered Oracle review semantics:/)
+    assert.match(orchestrator, /Implementation review semantics:/)
     assert.match(orchestrator, /For GPT\/Codex review routes \(plan-critic and parsed review names\), enforce at least xhigh/)
     assert.doesNotMatch(orchestrator, /<ocmm-subagent-compression-policy>/)
     assert.match(
@@ -863,10 +864,13 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     )
     assert.match(oracle, /^name = "dw-oracle"$/m)
     assert.match(oracle, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(oracle, /external-model cross-check for implementation acceptance/i)
     assert.match(oracle2nd, /^name = "dw-oracle-2nd"$/m)
     assert.match(oracle2nd, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(oracle2nd, /external Oracle model for additional independent implementation evidence/i)
     assert.match(reviewer, /^name = "dw-reviewer"$/m)
     assert.match(reviewer, /^model_reasoning_effort = "xhigh"$/m)
+    assert.match(reviewer, /primary-lane self-reviewer for implementation acceptance/i)
     assert.match(creative, /^name = "dw-creative"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
     assert.match(workflowSkill, /agent_type="dw-plan-critic"/)
@@ -909,6 +913,10 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
       .filter((line) => line.includes(`${CODEX_AGENT_PREFIX}-plan-critic`))
     assert.ok(planCriticPolicyLines.some((line) => /xhigh minimum/i.test(line)))
     assert.match(workflowSkill, /Ordered Oracle review/)
+    assert.match(workflowSkill, /Reviewer is primary-model or primary-lane self-review/)
+    assert.match(workflowSkill, /Oracle profiles are external-model implementation cross-checks/)
+    assert.match(workflowSkill, /only for software implementation acceptance or focused code-quality verification after an implementation diff exists/)
+    assert.match(workflowSkill, /never research, ideation, architecture design, root-cause debugging, general-answer validation, or routine confidence/)
     assert.match(workflowSkill, /Additional Oracle passes select later configured slots in order only when additional independent evidence is explicitly needed/)
     assert.match(workflowSkill, /Complex cross-module final acceptance selects the first available Oracle plus Reviewer/)
     assert.match(workflowSkill, /simple final acceptance selects the first available Oracle normal profile/i)
@@ -948,10 +956,10 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
       .split(/\r?\n/)
       .find((line) => line.startsWith("| requesting-code-review |")) ?? ""
     for (const source of [requestingReviewSkill, requestingReviewSourceRow]) {
-      assert.match(source, /optional independent consultation for a high-risk implementation plan/)
-      assert.match(source, /`xhigh` minimum/)
-      assert.match(source, /local `max`/)
-      assert.match(source, /GPT-5\.6 supports native `max`/)
+      assert.match(source, /do not review implementation plans|never review plans/i)
+      assert.match(source, /xhigh(?:`)?-equivalent|`xhigh` minimum/i)
+      assert.match(source, /native `max`/)
+      assert.match(source, /GPT-5\.6/i)
     }
 
     assert.equal(result.agentCount > 10, true)

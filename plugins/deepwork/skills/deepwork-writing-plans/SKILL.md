@@ -210,7 +210,7 @@ After the loop exits, determine whether user approval is required:
 
   Wait for the user's response. If they request changes, make them, re-run self-review, and re-run the plan-critic loop for the changed plan. Only proceed once the user approves or delegates.
 
-`oracle` may provide an optional, independent consultation for a high-risk plan, but it never replaces the current `plan-critic` receipt and does not create a mandatory dual-review gate.
+Reviewer and Oracle profiles do not review implementation plans. `plan-critic` owns plan review and the current-revision receipt; genuinely difficult, strict, or high-risk decision blockers return to the orchestrator for separate routing.
 
 ## Execution Handoff
 

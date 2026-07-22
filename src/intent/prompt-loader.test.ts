@@ -131,7 +131,8 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
   for (const workflow of ["omo", "v1"] as const) {
     loadAllPrompts(root, workflow)
     for (const name of ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]) {
-      assert.match(getAgentPrompt(name), new RegExp(`Agent Role: ${name}`), `${workflow}/${name}`)
+      const title = name === "reviewer" ? "implementation reviewer" : name
+      assert.match(getAgentPrompt(name), new RegExp(`Agent Role: ${title}`), `${workflow}/${name}`)
     }
     for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
       const prompt = getDeepworkPrompt(variant)
@@ -285,12 +286,12 @@ test("Codex deepwork prompts use incremental validation and evidence-bounded del
     assert.match(prompt, /Stop the parent run ONLY when the entire user goal is complete/i, `${label} does not preserve whole-goal parent stopping`)
 
     if (workflow === "omo") {
-      const gateStart = prompt.indexOf("# Verification gate (TRIGGERED, NOT OPTIONAL)")
+      const gateStart = prompt.indexOf("# Implementation acceptance gate (TRIGGERED, NOT OPTIONAL)")
       const gateEnd = prompt.indexOf("# Commits", gateStart)
       assert.notEqual(gateStart, -1, `${label} missing verification gate`)
       assert.notEqual(gateEnd, -1, `${label} missing verification gate boundary`)
       const gate = prompt.slice(gateStart, gateEnd)
-      assert.match(gate, /Treat the reviewer's verdict as binding\./, `${label} lacks binding reviewer verdict`)
+      assert.match(gate, /Treat each required verdict as binding\./, `${label} lacks binding review verdicts`)
       assert.match(gate, /UNCONDITIONAL approval/, `${label} lacks unconditional reviewer approval`)
     } else {
       const finalReviewStart = prompt.indexOf("## Final Acceptance Review")
@@ -307,8 +308,8 @@ test("agent-specific prompts enforce bounded leaf delegation", () => {
     const root = join(process.cwd(), "prompts", workflow, "agents")
     const planner = readFileSync(join(root, "planner.md"), "utf8")
     assert.match(planner, /leaf.*code-search.*doc-search/is, `${workflow}/planner`)
-    assert.match(planner, /unsuffixed.*reviewer.*at most once.*concrete blocking architecture, security, or performance decision/is, `${workflow}/planner`)
-    assert.match(planner, /never.*plan-critic.*Oracle.*Reviewer tier.*implementation/is, `${workflow}/planner`)
+    assert.match(planner, /genuinely difficult, strict, or high-risk.*report the blocker to the orchestrator.*hard-reasoning/is, `${workflow}/planner`)
+    assert.match(planner, /never.*plan-critic.*Reviewer profile.*Oracle profile.*implementation/is, `${workflow}/planner`)
 
     const reviewer = readFileSync(join(root, "reviewer.md"), "utf8")
     assert.match(reviewer, /leaf read-only.*lookup/i, `${workflow}/reviewer`)
@@ -324,7 +325,7 @@ test("agent-specific prompts enforce bounded leaf delegation", () => {
   }
 })
 
-test("planner owns flat review composition while GPT-5.6 keeps only the delegation threshold", () => {
+test("planner returns difficult decisions while GPT-5.6 keeps only the delegation threshold", () => {
   const root = join(process.cwd(), "prompts")
   try {
     for (const workflow of GPT56_WORKFLOWS) {
@@ -332,8 +333,8 @@ test("planner owns flat review composition while GPT-5.6 keeps only the delegati
       const planner = getAgentPrompt("planner")
       assert.match(planner, /Use direct tools first/)
       assert.match(planner, /Return the completed plan to the orchestrator/)
-      assert.match(planner, /exactly (?:the )?unsuffixed `reviewer` at most once.*concrete blocking architecture, security, or performance decision/i)
-      assert.match(planner, /Do not dispatch `plan-critic`, any Reviewer tier \(`reviewer-low`, `reviewer-high`, `reviewer-max`\), or any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\)/)
+      assert.match(planner, /genuinely difficult, strict, or high-risk.*report the blocker to the orchestrator.*hard-reasoning/is)
+      assert.match(planner, /Do not dispatch `plan-critic`, any Reviewer profile.*or any Oracle profile/is)
 
       const specialization = getDeepworkPrompt("gpt-5.6")
       const effective = effectiveGpt56Prompt("gpt")
@@ -582,7 +583,7 @@ test("v1 implementer template and maintenance docs record flat workflow ownershi
   for (const source of [v1Maintenance, promptSync]) {
     assert.match(source, /Flat Workflow Subagent Policy \(2026-07-17\)/)
     assert.match(source, /read-only workflow agents exclude `quick`/i)
-    assert.match(source, /formal plan review and final acceptance review remain orchestrator-owned/)
+    assert.match(source, /plan-critic loop.*final acceptance review remain orchestrator-owned/is)
   }
 })
 
@@ -616,9 +617,10 @@ test("GPT-5.6 prompts scale process and constrain subagent use", () => {
     assert.match(text, /lightest process.*do not force low-complexity work through full software-engineering practice/is, workflow)
     assert.match(text, /non-triggered Superpowers skills/i, workflow)
     assert.match(text, /subagents only when.*parent-context savings.*required workflow stage.*parallel independent implementation/is, workflow)
-    assert.match(text, /reviewer\/Oracle profiles.*acceptance.*project implementations.*code-quality verification/is, workflow)
-    assert.match(text, /Never use them for research, ideation, general answer validation, or routine confidence/i, workflow)
-    assert.match(text, /choose one or more only by authoritative reviewer-selection rules/i, workflow)
+    assert.match(text, /Reviewer is primary-lane self-review.*Oracle slots are external-model cross-checks/is, workflow)
+    assert.match(text, /only for implementation acceptance or (?:focused )?code-quality verification/i, workflow)
+    assert.match(text, /not research, ideation, architecture design, root-cause debugging, general answer validation, or routine confidence/i, workflow)
+    assert.match(text, /follow authoritative selection rules/i, workflow)
     assert.match(text, /multi-module work.*independent, non-coupled tasks.*parallel implementation subagents/is, workflow)
   }
 })
@@ -684,6 +686,54 @@ test("orchestrator alone owns workflow-role composition in all prompt sets", () 
     assert.match(text, /complex.*configured high.*otherwise.*normal/is, workflow)
     assert.match(text, /runtime-safety.*configured max.*configured high.*normal/is, workflow)
   }
+})
+
+test("review roles are implementation-only and difficult decisions do not route through them", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const root = join(process.cwd(), "prompts", workflow)
+    const reviewer = readFileSync(join(root, "agents", "reviewer.md"), "utf8")
+    const orchestrator = readFileSync(join(root, "agents", "orchestrator.md"), "utf8")
+    const planner = readFileSync(join(root, "agents", "planner.md"), "utf8")
+    const clarifier = readFileSync(join(root, "agents", "clarifier.md"), "utf8")
+    const hardReasoning = readFileSync(join(root, "category", "hard-reasoning.md"), "utf8")
+
+    assert.match(reviewer, /reviewer.*primary-model or primary-lane self-review.*Oracle profiles.*external-model cross-checks/is, workflow)
+    assert.match(reviewer, /implementation acceptance.*code-quality verification/is, workflow)
+    assert.match(reviewer, /Never use this role for research, ideation, architecture design before implementation, root-cause debugging, general answer validation, or routine confidence/i, workflow)
+    assert.match(orchestrator, /Architecture\/security\/performance tradeoff.*decide directly.*genuinely difficult, strict, or high-risk.*hard-reasoning/is, workflow)
+    assert.match(orchestrator, /Reviewer is the primary-model or primary-lane self-review profile.*Oracle profiles are external-model cross-check slots/is, workflow)
+    assert.match(planner, /Do not use.*Reviewer profiles.*Oracle profiles/is, workflow)
+    assert.match(clarifier, /Never recommend Reviewer or Oracle profiles for pre-implementation architecture/i, workflow)
+    assert.match(hardReasoning, /genuinely difficult, strict, or high-risk/i, workflow)
+    assert.match(hardReasoning, /Do not use.*ordinary architecture.*first-(?:pass|attempt) debugging.*routine design choice.*large/is, workflow)
+
+    for (const variant of ["default", "gpt", "gemini", "glm", "codex"] as const) {
+      const deepwork = readFileSync(join(root, "deepwork", `${variant}.md`), "utf8")
+      assert.doesNotMatch(deepwork, /reviewer agent \| Stuck on architecture\/debugging/i, `${workflow}/${variant}`)
+      assert.doesNotMatch(deepwork, /reviewer.*Conventional problems - architecture, debugging, complex logic/i, `${workflow}/${variant}`)
+      assert.doesNotMatch(deepwork, /Consult reviewer after forming concrete options/i, `${workflow}/${variant}`)
+      assert.doesNotMatch(deepwork, /reviewer agent \| Conflicting evidence or hard design choice/i, `${workflow}/${variant}`)
+    }
+  }
+})
+
+test("debugging escalates to hard-reasoning only after failed evidence rounds", () => {
+  const skill = readFileSync(join(process.cwd(), "skills", "debugging", "SKILL.md"), "utf8")
+  const escalation = readFileSync(
+    join(process.cwd(), "skills", "debugging", "references", "methodology", "04-hard-reasoning-escalation.md"),
+    "utf8",
+  )
+  const partialEvidence = readFileSync(
+    join(process.cwd(), "skills", "debugging", "references", "methodology", "partial-runtime-evidence.md"),
+    "utf8",
+  )
+  for (const source of [skill, escalation]) {
+    assert.match(source, /2 (?:consecutive )?failed (?:evidence|hypothesis) rounds/i)
+    assert.match(source, /genuinely difficult/i)
+  }
+  assert.match(escalation, /Reviewer and Oracle profiles are not debugging consultants/i)
+  assert.match(partialEvidence, /bounded `research` verification pass/i)
+  assert.doesNotMatch(`${skill}\n${escalation}\n${partialEvidence}`, /Oracle Triple|Verification Oracle|spawn Oracles/i)
 })
 
 test("orchestrators select planning logical tiers only from current availability", () => {

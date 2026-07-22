@@ -25,7 +25,7 @@ test("plan review requires a current complete receipt before handoff", () => {
   assert.match(skill, /Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict/i)
   assert.match(skill, /any plan edit invalidates every earlier receipt/i)
   assert.match(skill, /delegated-without-plan-approval/)
-  assert.match(skill, /never replaces the current `plan-critic` receipt/i)
+  assert.match(skill, /Reviewer and Oracle profiles do not review implementation plans/i)
 })
 
 test("maintenance docs preserve prompt layout and plan review receipts", () => {
@@ -39,26 +39,25 @@ test("maintenance docs preserve prompt layout and plan review receipts", () => {
       .find((line) => line.startsWith(`| ${name} |`)) ?? ""
 
   assert.match(promptSync, /deepwork\/\{default,gpt,gpt-5\.6,gemini,glm,codex,planner\}/)
-  assert.match(v1Maintenance, /optional high-risk plan consultation/i)
-  assert.match(v1Maintenance, /current plan revision/i)
+  assert.match(v1Maintenance, /Reviewer and Oracle profiles do not review plans/i)
+  assert.match(v1Maintenance, /current-revision/i)
 
   const requestingReviewRow = sourceRow("requesting-code-review")
-  assert.match(requestingReviewRow, /optional high-risk plan consultation/i)
-  assert.match(requestingReviewRow, /`xhigh` minimum/)
-  assert.match(requestingReviewRow, /local `max`/)
-  assert.match(requestingReviewRow, /GPT-5\.6 supports native `max`/)
+  assert.match(requestingReviewRow, /Reviewer is primary-model\/primary-lane self-review/i)
+  assert.match(requestingReviewRow, /Oracle slots are external-model cross-checks/i)
+  assert.match(requestingReviewRow, /xhigh-equivalent floors/i)
+  assert.match(requestingReviewRow, /GPT-5\.6 may use native `max`/)
 
   for (const source of [plannerPrompt, criticPrompt]) {
     assert.match(source, /current `?plan-critic`? receipt covers exactly one complete, current plan revision/i)
     assert.match(source, /any plan edit invalidates that receipt and requires a fresh review/i)
   }
 
-  for (const rowName of ["agents/planner.md", "agents/plan-critic.md"]) {
-    const row = sourceRow(rowName)
-    assert.match(row, /exactly one complete, current plan revision/i)
-    assert.match(row, /current `plan-critic` receipt/i)
-    assert.match(row, /any plan edit invalidates that receipt and requires a fresh review/i)
-  }
+  assert.match(sourceRow("agents/planner.md"), /current-revision plan-critic receipt semantics/i)
+  const criticRow = sourceRow("agents/plan-critic.md")
+  assert.match(criticRow, /exactly one complete, current plan revision/i)
+  assert.match(criticRow, /current `plan-critic` receipt/i)
+  assert.match(criticRow, /any plan edit invalidates that receipt and requires a fresh review/i)
 })
 
 test("frontend DESIGN.md docs separate planned showcase checks from reusable entries", () => {
@@ -139,8 +138,8 @@ test("active docs and synchronization records describe planning logical tiers", 
   }
 
   const v1Maintenance = read("docs", "v1-maintenance.md")
-  assert.match(v1Maintenance, /writing-plans.*currently callable\/registered.*plan-critic-low.*xhigh/is)
-  assert.match(v1Maintenance, /agents\/orchestrator\.md.*planner.*plan-critic.*availability/is)
+  assert.match(v1Maintenance, /writing-plans.*current callable availability.*plan-critic-low.*xhigh/is)
+  assert.match(v1Maintenance, /agents\/orchestrator\.md.*callable-profile tier selection/is)
 
   const promptSync = read("docs", "prompt-sync.md")
   assert.match(promptSync, /orchestrator.*planner.*plan-critic.*availability/is)

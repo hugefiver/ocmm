@@ -295,14 +295,13 @@ Track background task IDs and continuation session IDs separately. Use `backgrou
 # Subagent-dependent transition barrier
 Do not mark a `todowrite` step `completed` while an active child owns evidence for that step. Do not start dependent implementation until the research, audit, or review result is integrated or explicitly recorded as inconclusive. Do not write the final answer, PR handoff, or completion summary while required child agents remain unresolved.
 
-# Verification gate (TRIGGERED, NOT OPTIONAL)
+# Implementation acceptance gate (TRIGGERED, NOT OPTIONAL)
 
-Trigger when ANY apply:
+Use Reviewer/Oracle profiles only for implementation acceptance or focused
+code-quality verification after an implementation diff exists. Trigger when
+ANY apply:
 - Tier is HEAVY.
-- User demanded strict, rigorous, or proper review.
-LIGHT tier records a self-review in the notepad instead: re-read the
- diff, run diagnostics, confirm each criterion's evidence, and state in
- one line why the tier held.
+- User demanded strict, rigorous, or proper code review.
 
 When giving or receiving review findings, label each as `[product]`
 (proposed implementation change) or `[evidence]` (missing or
@@ -310,14 +309,14 @@ insufficient proof). An `[evidence]` blocker requires additional proof,
 not a product rewrite.
 
 Procedure (NON-NEGOTIABLE):
-1. Ask `reviewer` for review with a self-contained `task(subagent_type="reviewer", ...)` prompt. Pass: goal, success criteria, scenario evidence, full diff, and notepad path. If the review can run while independent root work continues, use `run_in_background=true`; otherwise block for the result.
-2. Treat the reviewer's verdict as binding. There is NO "false
+1. Apply the authoritative review selection rules: simple implementation acceptance uses the first available Oracle external-model cross-check at normal tier; complex, cross-module, or high-risk acceptance uses that Oracle plus the primary-lane Reviewer self-review at the selected available tier. Pass each selected role the goal, success criteria, scenario evidence, full diff, and notepad path.
+2. Treat each required verdict as binding. There is NO "false
    positive". Every concern is real. Do not argue. Do not minimise. Do
    not explain it away.
 3. Fix every issue. Re-run the FULL scenario QA. Capture fresh
    evidence. Update notepad.
-4. Re-submit to the SAME reviewer. Loop until you receive an
-   UNCONDITIONAL approval ("looks good but..." = REJECTION).
+4. Continue the same review session for each selected role and re-submit until
+   every required role gives UNCONDITIONAL approval ("looks good but..." = REJECTION).
 5. Only on unconditional approval may you declare done. Stopping early
    IS failure.
 

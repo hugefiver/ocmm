@@ -74,7 +74,7 @@ Goal: <one-sentence user request>
 ## Failed hypothesis round counter
 - Round 1: <result>
 - Round 2: <result>
-<!-- At 2 consecutive failures, invoke Oracle Triple (see 04-oracle-triple.md). -->
+<!-- At 2 consecutive evidence-backed failures, the task qualifies for one hard-reasoning escalation (see 04-hard-reasoning-escalation.md). -->
 
 ## Artifacts to revert
 <!-- Every temp edit, tmux session, fixture, env override, saved debugger session goes here
@@ -88,8 +88,8 @@ Goal: <one-sentence user request>
 ## Findings
 <!-- Append observed values here with timestamp. Verbatim only, no paraphrasing. -->
 
-## Oracle Triple (if invoked)
-<!-- One subsection per Oracle round, with the synthesized new hypothesis set. -->
+## Hard-Reasoning Escalation (if invoked)
+<!-- Record why the difficulty threshold was met and the resulting hypothesis set. -->
 
 ## Final fix
 <!-- File paths + test path. Filled during Phase 7. -->

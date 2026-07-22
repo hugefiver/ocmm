@@ -31,10 +31,7 @@ const READ_ONLY_TASK_RULES = {
   "media-reader": "allow",
 } as const
 
-const PLANNER_TASK_RULES = {
-  ...READ_ONLY_TASK_RULES,
-  reviewer: "allow",
-} as const
+const PLANNER_TASK_RULES = READ_ONLY_TASK_RULES
 
 const LOCAL_COORDINATOR_TASK_RULES = {
   ...UTILITY_TASK_RULES,
@@ -208,8 +205,8 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
   await handler(cfg, undefined)
 
   const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
-  assert.match(reviewerPrompt, /Agent Role: reviewer/)
-  assert.match(reviewerPrompt, /strategic technical advisor/i)
+  assert.match(reviewerPrompt, /Agent Role: implementation reviewer/)
+  assert.match(reviewerPrompt, /implementation acceptance and focused code-quality verification/i)
   assert.match(reviewerPrompt, /workflow-model-calibration/)
   assert.match(reviewerPrompt, /DEEPWORK MODE ENABLED/)
 
@@ -243,7 +240,7 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
     "oracle-2nd read-only allowlist",
   )
   // oracle-2nd reuses reviewer prompt/calibration.
-  assert.match(String((cfg.agent["oracle-2nd"] as Record<string, unknown>).prompt), /Agent Role: reviewer|READ-ONLY REVIEWER/)
+  assert.match(String((cfg.agent["oracle-2nd"] as Record<string, unknown>).prompt), /Agent Role: implementation reviewer/)
   // explore remains a compatibility alias for code-search.
   assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
   assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
@@ -265,7 +262,7 @@ test("config applies the exact flat-workflow task permission graph", async () =>
   for (const name of ["coding", "normal-task", "frontend", "creative", "hard-reasoning", "documenting"]) {
     assertExactTaskRules(agentPermission(cfg.agent, name).task, UTILITY_TASK_RULES, `${name} utility allowlist`)
   }
-  assertExactTaskRules(agentPermission(cfg.agent, "planner").task, PLANNER_TASK_RULES, "planner reviewer exception")
+  assertExactTaskRules(agentPermission(cfg.agent, "planner").task, PLANNER_TASK_RULES, "planner read-only allowlist")
   assert.equal(agentPermission(cfg.agent, "planner")["task_*"], undefined, "planner must not retain a broad task wildcard")
   assertExactTaskRules(agentPermission(cfg.agent, "clarifier").task, READ_ONLY_TASK_RULES, "clarifier read-only allowlist")
   assert.equal(agentPermission(cfg.agent, "clarifier")["task_*"], undefined, "clarifier must not retain a broad task wildcard")
@@ -337,8 +334,8 @@ test("config appends authoritative contracts to non-primary builtin agents", asy
 
   const planner = delegationContract(cfg.agent, "planner")
   assert.match(planner, /Allowed utility targets: `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./)
-  assert.match(planner, /exactly the unsuffixed `reviewer` at most once/i)
-  assert.match(planner, /concrete blocking architecture, security, or performance decision/i)
+  assert.match(planner, /genuinely difficult, strict, or high-risk decision/i)
+  assert.match(planner, /return the blocker to the orchestrator.*hard-reasoning/i)
   assert.match(planner, /`quick` is forbidden/)
   assert.match(planner, /Return the completed plan to the caller/)
   assert.match(planner, /plan-critic.*orchestrator-owned/i)
@@ -664,7 +661,7 @@ test("configured planning profiles register canonical prompts, policies, permiss
   assert.match(String(planner.prompt), /Configured locale: zh-CN/)
   assertExactTaskRules(agentPermission(target.agent, "planner-high").task, PLANNER_TASK_RULES, "planner-high task allowlist")
   assert.equal(agentPermission(target.agent, "planner-high").question, "allow")
-  assert.match(delegationContract(target.agent, "planner-high"), /exactly the unsuffixed `reviewer` at most once/i)
+  assert.match(delegationContract(target.agent, "planner-high"), /return the blocker to the orchestrator.*hard-reasoning/i)
   assert.match(delegationContract(target.agent, "planner-high"), /Return the completed plan to the caller/)
 
   const critic = target.agent["plan-critic-low"] as Record<string, unknown>

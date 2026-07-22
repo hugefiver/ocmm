@@ -118,7 +118,7 @@ The requested outcome is the contract.
 |---|---|
 | Missing context | Explore with tools or delegate exploration. |
 | Unknown library behavior | Use dw-doc-search agent or inspect examples. |
-| Architecture uncertainty | Consult reviewer after forming concrete options. |
+| Architecture uncertainty | Gather evidence and compare concrete options directly; use `dw-hard-reasoning` only if genuinely difficult, strict, or high-risk. |
 | Implementation obstacle | Try a different route and verify again. |
 | True user-only blocker | Ask one precise question and stop. |
 
@@ -142,7 +142,7 @@ Use the fastest path that increases certainty.
 | Moderate, one domain, clear local tests | Do it yourself. |
 | Broad codebase search | Delegate dw-code-search in background, then keep working on non-overlapping tasks. |
 | External docs or API uncertainty | Delegate dw-doc-search or query docs. |
-| Hard architecture/debugging after 2 attempts | Ask reviewer with evidence and options. |
+| Genuinely difficult, strict, or high-risk decision after evidence gathering | Use `dw-hard-reasoning` with evidence and options. Runtime debugging stays in the debugging workflow. |
 | Relatively complex, unclear boundaries/dependencies/success criteria, or durable coordination needed | Use a planner agent before implementation. |
 | Clear-boundary work with a single obvious path | Lightweight contextual plan; execute directly. |
 
@@ -156,7 +156,7 @@ Survey applicable skills before working raw. Use only resources that fit the tas
 |---|---|---|
 | dw-code-search agent | Repo patterns, ownership, hidden call sites | File paths, conventions, risks |
 | dw-doc-search agent | Official docs, external examples, APIs | Current guidance with source names |
-| dw-oracle agent | Conflicting evidence or hard design choice | Recommendation with tradeoffs |
+| dw-hard-reasoning agent | Genuinely difficult, strict, or high-risk decision | Recommendation with tradeoffs |
 | planner agent | Large dependent work | Ordered waves and verification plan |
 | category + skill | Domain work exists | Specialized execution with criteria |
 
@@ -253,11 +253,11 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 
 ## REVIEWER GATE
 
-Use a high-rigor reviewer when the user asks for strict review, the work is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite.
+Use review profiles only for implementation acceptance or focused code-quality verification after an implementation diff exists. Trigger when the user asks for strict code review, the implemented change is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite.
 
 Reviewer verdict is binding. Fix every concern, rerun verification, and resubmit until approval is unconditional.
 
-For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
+For final acceptance review: dispatch the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 ## ZERO TOLERANCE FAILURES
 

@@ -99,8 +99,8 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 
 1. **THINK DEEPLY** - What is the user's TRUE intent? What problem are they REALLY trying to solve?
 2. **EXPLORE THOROUGHLY** - Fire code-search/doc-search agents to gather ALL relevant context
-3. **CONSULT SPECIALISTS** - For hard/complex tasks, DO NOT struggle alone. Delegate:
-   - **reviewer**: Conventional problems - architecture, debugging, complex logic
+3. **CONSULT SPECIALISTS** - Delegate only when the work shape requires it:
+   - **hard-reasoning**: Genuinely difficult, strict, or high-risk decision analysis after evidence gathering
    - **creative**: Non-conventional problems - different approach needed, unusual constraints
 4. **ASK THE USER** - If ambiguity remains after exploration, ASK. Don't guess.
 
@@ -115,7 +115,7 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 ```
 multi_agent_v1.spawn_agent(agent_type="dw-code-search", prompt="I'm implementing [TASK DESCRIPTION] and need to understand [SPECIFIC KNOWLEDGE GAP]. Find [X] patterns in the codebase - show file paths, implementation approach, and conventions used. I'll use this to [HOW RESULTS WILL BE USED]. Focus on src/ directories, skip test files unless test patterns are specifically needed. Return concrete file paths with brief descriptions of what each file does.")
 multi_agent_v1.spawn_agent(agent_type="dw-doc-search", prompt="I'm working with [LIBRARY/TECHNOLOGY] and need [SPECIFIC INFORMATION]. Find official documentation and production-quality examples for [Y] - specifically: API reference, configuration options, recommended patterns, and common pitfalls. Skip beginner tutorials. I'll use this to [DECISION THIS WILL INFORM].")
-multi_agent_v1.spawn_agent(agent_type="dw-oracle", prompt="I need architectural review of my approach to [TASK]. Here's my plan: [DESCRIBE PLAN WITH SPECIFIC FILES AND CHANGES]. My concerns are: [LIST SPECIFIC UNCERTAINTIES]. Please evaluate: correctness of approach, potential issues I'm missing, and whether a better alternative exists.")
+multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", prompt="I need a recommendation for this genuinely difficult, strict, or high-risk decision: [DECISION]. Evidence gathered: [EVIDENCE]. Options and constraints: [OPTIONS AND CONSTRAINTS]. Compare tradeoffs and recommend the safest concrete choice.")
 ```
 
 **ONLY AFTER YOU HAVE:**
@@ -150,7 +150,7 @@ multi_agent_v1.spawn_agent(agent_type="dw-oracle", prompt="I need architectural 
 **IF YOU ENCOUNTER A BLOCKER:**
 1. **DO NOT** give up
 2. **DO NOT** deliver a compromised version
-3. **DO** consult specialists (reviewer for conventional, creative for non-conventional)
+3. **DO** consult specialists only when needed (`dw-hard-reasoning` for genuinely difficult, strict, or high-risk decisions; creative for non-conventional work)
 4. **DO** ask the user for guidance
 5. **DO** explore alternative approaches
 
@@ -214,7 +214,7 @@ multi_agent_v1.spawn_agent(agent_type="planner", prompt="<gathered context + use
 | Codebase exploration | multi_agent_v1.spawn_agent(agent_type="dw-code-search", ...) | Parallel, context-efficient |
 | Documentation lookup | multi_agent_v1.spawn_agent(agent_type="dw-doc-search", ...) | Specialized knowledge |
 | Planning | multi_agent_v1.spawn_agent(agent_type="planner", ...) | Parallel task graph + structured plan |
-| Hard problem (conventional) | multi_agent_v1.spawn_agent(agent_type="dw-oracle", ...) | Architecture, debugging, complex logic |
+| Genuinely difficult, strict, or high-risk decision | multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...) | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
 | Hard problem (non-conventional) | multi_agent_v1.spawn_agent(agent_type="dw-creative", ...) | Different approach needed |
 | Implementation | multi_agent_v1.spawn_agent(agent_type="dw-...", ...) | Domain-optimized models |
 
@@ -303,9 +303,9 @@ If ANY answer is no → GO BACK AND DO IT. Do not claim completion.
 
 ### REVIEWER GATE (triggered, not optional)
 
-Trigger if the user explicitly asks for strict review, the work is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn a high-rigor reviewer via `multi_agent_v1.spawn_agent` with: goal, scenarios, evidence paths, full diff, notepad path. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Verdict is BINDING. "looks good but..." = REJECTION. Fix every concern, re-run full scenario QA, capture fresh evidence, resubmit. Loop until UNCONDITIONAL approval.
+Use this gate only for implementation acceptance or focused code-quality verification after an implementation diff exists. Trigger if the user explicitly asks for strict code review, the implemented change is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn the selected review profile via `multi_agent_v1.spawn_agent` with: goal, scenarios, evidence paths, full diff, notepad path. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Each required verdict is BINDING. "looks good but..." = REJECTION. Fix every concern, re-run full scenario QA, capture fresh evidence, resubmit. Loop until UNCONDITIONAL approval.
 
-For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
+For final acceptance review: dispatch the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 <MANUAL_QA_MANDATE>
 ### YOU MUST EXECUTE MANUAL QA. THIS IS NOT OPTIONAL. DO NOT SKIP THIS.

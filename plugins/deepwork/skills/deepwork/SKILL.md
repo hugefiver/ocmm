@@ -59,8 +59,9 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 
 - `[@dw-*](subagent://dw-*)` is a profile reference, not a spawn.
 - Plan review normal-profile example, only when chosen by the planning selector and proven callable: `[@dw-plan-critic](subagent://dw-plan-critic)`.
-- Code or work review: `[@dw-reviewer](subagent://dw-reviewer)`.
-- Ordered Oracle review starts with `[@dw-oracle](subagent://dw-oracle)`; use `[@dw-oracle-2nd](subagent://dw-oracle-2nd)` through later configured slots only when explicit additional independent evidence is needed.
+- Primary-model or primary-lane implementation self-review: `[@dw-reviewer](subagent://dw-reviewer)`.
+- External-model implementation cross-check starts with `[@dw-oracle](subagent://dw-oracle)`; use `[@dw-oracle-2nd](subagent://dw-oracle-2nd)` through later configured slots only when explicit additional independent evidence is needed.
+- Use Reviewer and Oracle profiles only for software implementation acceptance or focused code-quality verification after an implementation diff exists; never use them for research, ideation, architecture design, root-cause debugging, general-answer validation, or routine confidence.
 - If an exact profile returns `unknown agent_type`, continue with Direct composition, then V1/V2 generic or flat dispatch, then Local execution.
 
 ## Generated Agents
@@ -103,8 +104,8 @@ Apply this section only when the current dispatch surface exposes a `model` fiel
 | Role lane | Selection principle | Reasoning effort | Roles |
 |---|---|---|---|
 | Flagship | Best available primary reasoning model in the user's catalog | `xhigh` minimum for planning, deep implementation, hard reasoning, architecture, algorithmic, security, or high-risk work; use native `max` on GPT-5.6 when maximum reasoning is requested, and use the family-supported maximum elsewhere. `high` remains acceptable for coordination, implementation, or clarification roles below that threshold. | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning |
-| External review | Same primary reasoning lane as flagship work, selected from available models; Reviewer has logical tiers only and no ordinal slots | `xhigh` minimum; use native `max` on GPT-5.6 for complex, cross-module, security, performance, high-risk, or final-gate review | dw-reviewer |
-| Ordered Oracle review | Oracle slots are model priority, not capability ranking (`dw-oracle`, then `dw-oracle-2nd` through configured later slots) | `xhigh` minimum for GPT/Codex review routes; preserve native `max` when explicitly selected and supported | dw-oracle*, dw-oracle-2nd*, dw-oracle-3rd*... |
+| Primary self-review | Same primary reasoning lane as flagship work, selected from available models; Reviewer has logical tiers only and no ordinal slots | `xhigh` minimum; use native `max` on GPT-5.6 for complex, cross-module, security, performance, high-risk, or final-gate review | dw-reviewer |
+| External Oracle cross-check | Oracle slots are external-model priority, not capability ranking (`dw-oracle`, then `dw-oracle-2nd` through configured later slots) | `xhigh` minimum for GPT/Codex review routes; preserve native `max` when explicitly selected and supported | dw-oracle*, dw-oracle-2nd*, dw-oracle-3rd*... |
 | Plan review | Same primary reasoning lane when directly configurable | Every normal or suffixed profile has an xhigh minimum (the xhigh-equivalent floor); local `max` only by explicit local configuration | dw-plan-critic* |
 | Mid | Best available mid-tier model; if none exists, use the primary reasoning model at a lower effort | Preserve the profile baseline unless task complexity requires more | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search |
 | Mini | Best available lightweight model for mechanical, search, or fast lookup work | `high` for accuracy unless the user explicitly configures otherwise | dw-quick, dw-code-search, dw-explore |
@@ -140,6 +141,8 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 
 ### Ordered Oracle review
 
+- Reviewer is primary-model or primary-lane self-review; Oracle profiles are external-model implementation cross-checks. Explicit user model configuration may remove model heterogeneity.
+- Reviewer and Oracle profiles are only for software implementation acceptance or focused code-quality verification after an implementation diff exists, never research, ideation, architecture design, root-cause debugging, general-answer validation, or routine confidence.
 - Oracle priority is ordered by slot: `dw-oracle`, then `dw-oracle-2nd` through later configured slots.
 - Oracle slots are model priority, not capability ranking.
 - The unsuffixed profile is logical `normal`; configured `-low`, `-high`, and `-max` profiles select task rigor independently of slot priority.
@@ -156,8 +159,8 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 | Tier | Agents | Model | Effort |
 |---|---|---|---|
 | Flagship | dw-orchestrator, dw-planner, dw-builder, dw-clarifier, dw-deep, dw-hard-reasoning | Primary reasoning model from the user's available catalog | xhigh minimum for planner/deep/hard-reasoning; native max for GPT-5.6 maximum-reasoning work. high only for coordination, implementation, or clarification roles below that threshold |
-| External review | dw-reviewer | Primary reasoning lane | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk review |
-| Ordered Oracle review | dw-oracle, dw-oracle-2nd, later configured Oracle slots | Ordered by Oracle slot ordinal; tier choice does not reorder slots | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk verification |
+| Primary self-review | dw-reviewer | Primary reasoning lane | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk review |
+| External Oracle cross-check | dw-oracle, dw-oracle-2nd, later configured Oracle slots | Ordered by Oracle slot ordinal; tier choice does not reorder slots | xhigh-equivalent minimum when supported; native max for GPT-5.6 complex or high-risk verification |
 | Plan review | dw-plan-critic* | Primary reasoning lane | xhigh-equivalent minimum for normal and every suffix unless local config raises it |
 | Mid | dw-complex, dw-normal-task, dw-coding, dw-research, dw-frontend, dw-creative, dw-documenting, dw-media-reader, dw-doc-search | Available mid-tier model, else primary reasoning model at lower effort | max or high by task shape |
 | Mini | dw-quick, dw-code-search, dw-explore | Available lightweight model | high |

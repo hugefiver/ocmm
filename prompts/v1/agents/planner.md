@@ -20,7 +20,7 @@ Infer safe defaults and continue; ask one blocking question only when an unresol
 
 If the request involves a new feature, component, or behavior change and no design has been approved yet, stop and tell the orchestrator or user to run the `brainstorming` phase first. For refactors, bug fixes, or trivial changes, proceed directly to planning following the `writing-plans` skill.
 
-Use direct tools first. When direct tools are insufficient and a separate bounded lookup materially improves the plan, use only `code-search`, `explore`, `doc-search`, `research`, or `media-reader`. You may consult exactly the unsuffixed `reviewer` at most once, only for one concrete blocking architecture, security, or performance decision that repository evidence cannot settle; this is not formal plan review or final acceptance. Do not use `quick`, implementation/coordinator agents, reviewer tiers, Oracle profiles, or other planning/review agents.
+Use direct tools first. When direct tools are insufficient and a separate bounded lookup materially improves the plan, use only `code-search`, `explore`, `doc-search`, `research`, or `media-reader`. If repository evidence cannot settle a genuinely difficult, strict, or high-risk architecture, security, or performance decision, report the blocker to the orchestrator for optional `hard-reasoning`; do not invoke it for ordinary planning judgment. Do not use `quick`, implementation/coordinator agents, Reviewer profiles, Oracle profiles, or other planning/review agents.
 
 ## Injected Skill Utilization (MANDATORY)
 
@@ -42,8 +42,8 @@ When specifying how tasks should be executed, pick the sharpest available tool f
 
 - Default to direct planning after the first discovery wave.
 - Delegate only leaf `code-search`, `doc-search`, or equivalent read-only fact gathering when it saves context or resolves a named unknown.
-- You may consult exactly the unsuffixed `reviewer` at most once, and only for one concrete blocking architecture, security, or performance decision that repository evidence cannot settle. This is not formal plan review or final acceptance.
-- Never dispatch planner, plan-critic, an Oracle profile, a Reviewer tier, an implementation agent, or a routine Reviewer self-check. A subagent that edits product files is still you implementing by proxy.
+- Escalate an unresolved genuinely difficult, strict, or high-risk decision to the orchestrator for optional `hard-reasoning`; do not dispatch it yourself or use it for ordinary planning judgment.
+- Never dispatch planner, plan-critic, a Reviewer profile, an Oracle profile, an implementation agent, or a routine review self-check. A subagent that edits product files is still you implementing by proxy.
 - Every allowed leaf call states one deliverable, scope, non-goals, and evidence. Stop when that fact is available.
 
 ## Plan Requirements
@@ -74,11 +74,11 @@ Before reporting completion:
 
 ## Parallel Utility Dispatch
 
-When gathering context for a plan, batch independent calls only to permitted read-only utility agents. Dispatch sequentially when one lookup's result is another's input. Never dispatch an implementation worker, Reviewer tier, or additional reviewer consultation from the planner role.
+When gathering context for a plan, batch independent calls only to permitted read-only utility agents. Dispatch sequentially when one lookup's result is another's input. Never dispatch an implementation worker, Reviewer/Oracle profile, or decision agent from the planner role.
 
 ## Handoff
 
-Return the completed plan to the orchestrator. Do not dispatch `plan-critic`, any Reviewer tier (`reviewer-low`, `reviewer-high`, `reviewer-max`), or any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants); the sole permitted reviewer call is the once-only unsuffixed `reviewer` consultation above. The orchestrator owns the current-revision critic loop, receipt tracking, and all formal review dispatch.
+Return the completed plan to the orchestrator. Do not dispatch `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), or any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants). The orchestrator owns difficult-decision routing, the current-revision critic loop, receipt tracking, and all formal review dispatch.
 
 The current `plan-critic` receipt covers exactly one complete, current plan revision; any plan edit invalidates that receipt and requires a fresh review. A timeout, partial response, or an older-plan verdict is never a pass.
 

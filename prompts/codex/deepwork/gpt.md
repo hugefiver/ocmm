@@ -124,7 +124,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 |----------|-------------|------------|
 | code-search agent | Need codebase patterns you don't have | `multi_agent_v1.spawn_agent(agent_type="dw-code-search", ...)` |
 | doc-search agent | External library docs, OSS examples | `multi_agent_v1.spawn_agent(agent_type="dw-doc-search", ...)` |
-| reviewer agent | Stuck on architecture/debugging after 2+ attempts | `multi_agent_v1.spawn_agent(agent_type="dw-oracle", ...)` |
+| hard-reasoning category | Genuinely difficult, strict, or high-risk decision after evidence gathering | `multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...)` |
 | planner agent | Relatively complex work with a clear purpose that needs durable coordination, or work whose boundaries/dependencies remain unclear after discovery | `multi_agent_v1.spawn_agent(agent_type="planner", ...)` |
 | task category | Specialized work matching a category | `multi_agent_v1.spawn_agent(agent_type="dw-<category>", ...)` |
 
@@ -233,9 +233,9 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 
 ## REVIEWER GATE (triggered)
 
-Trigger if the user explicitly asks for strict review, the work is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn a high-rigor reviewer via `multi_agent_v1.spawn_agent` with goal + scenarios + evidence + diff. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Reviewer verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.
+Use this gate only for implementation acceptance or focused code-quality verification after an implementation diff exists. Trigger if the user explicitly asks for strict code review, the implemented change is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn the selected review profile via `multi_agent_v1.spawn_agent` with goal + scenarios + evidence + diff. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Each required verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.
 
-For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
+For final acceptance review: dispatch the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 ## COMPLETION CRITERIA
 

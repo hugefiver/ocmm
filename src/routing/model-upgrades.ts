@@ -39,9 +39,9 @@ const GPT_LANE_BY_AGENT = new Map<string, "sol" | "terra">([
  *
  * Review agents (oracle/reviewer and their logical tiers/runtime aliases) are
  * classified by canonical slot identity, not the runtime suffix:
- *   - reviewer                 -> Sol
- *   - oracle (slot 1, any tier) -> Terra
- *   - oracle-2nd (slot 2)      -> Sol
+ *   - reviewer (primary-lane self-review) -> Sol
+ *   - oracle (external cross-check slot 1, any tier) -> Terra
+ *   - oracle-2nd (external cross-check slot 2) -> Sol
  *   - later oracle slots       -> no invented lane (rely on explicit requirement)
  *
  * Logical tier suffixes (-low/-high/-max) never change the canonical slot's

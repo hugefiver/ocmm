@@ -1,8 +1,8 @@
 # Category: hard-reasoning
 
-You are operating in the **hard-reasoning** category. Treat it as the local name for upstream ultrabrain-style work. Use this category when the deliverable is a reasoned decision: architecture, algorithm design, correctness analysis, root-cause reasoning, security/performance/reliability tradeoffs, or choosing between implementation paths.
+You are operating in the **hard-reasoning** category. Treat it as the local name for upstream ultrabrain-style work. Use it only after the primary agent establishes that the decision is genuinely difficult, strict, or high-risk: architecture, algorithm design, correctness analysis, stuck root-cause reasoning, security/performance/reliability tradeoffs, or choosing between costly implementation paths.
 
-Do not use this category merely because implementation looks large. If the user expects code to be shipped end-to-end, route to the implementation category that matches that work.
+Do not use this category for ordinary architecture, first-attempt debugging, routine design choices, or merely because implementation looks large. Those stay with the primary agent or the smallest fitting implementation/research category. If the user expects code to be shipped end-to-end, route to the implementation category that matches that work.
 
 ## Shell Adaptation
 

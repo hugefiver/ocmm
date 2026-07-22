@@ -115,7 +115,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 |----------|-------------|------------|
 | code-search agent | Need codebase patterns you don't have | `task(subagent_type="code-search", load_skills=[], run_in_background=true, ...)` |
 | doc-search agent | External library docs, OSS examples | `task(subagent_type="doc-search", load_skills=[], run_in_background=true, ...)` |
-| reviewer agent | Stuck on architecture/debugging after 2+ attempts | `task(subagent_type="reviewer", load_skills=[], run_in_background=false, ...)` |
+| hard-reasoning category | Genuinely difficult, strict, or high-risk decision after evidence gathering | `task(subagent_type="hard-reasoning", load_skills=[], run_in_background=false, ...)` |
 | planner agent | Relatively complex work with a clear purpose that needs durable coordination, or work whose boundaries/dependencies remain unclear after discovery | `task(subagent_type="planner", load_skills=[], run_in_background=false, ...)` |
 | task category | Specialized work matching a category | `task(category="...", load_skills=[...], run_in_background=true)` |
 
@@ -224,9 +224,9 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 
 ## REVIEWER GATE (triggered)
 
-Trigger if the user explicitly asks for strict review, the work is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn a high-rigor reviewer via `task` with goal + scenarios + evidence + diff. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Reviewer verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.
+Use this gate only for implementation acceptance or focused code-quality verification after an implementation diff exists. Trigger if the user explicitly asks for strict code review, the implemented change is complex/cross-module/architectural, security/performance/migration sensitive, release-facing, or final acceptance for a major implementation. Spawn the selected review profile with goal + scenarios + evidence + diff. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite. Each required verdict is BINDING; "looks good but..." = rejection. Re-submit until UNCONDITIONAL approval before declaring done.
 
-For final acceptance review: dispatch `oracle` (self-supervision) by default for simple tasks; dispatch both `oracle` and `reviewer` in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
+For final acceptance review: dispatch the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks (3+ tasks, cross-module, architectural change, security/perf sensitive).
 
 ## COMPLETION CRITERIA
 

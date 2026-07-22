@@ -17,7 +17,7 @@ Apply this layer only when the selected model belongs to the GPT-5.6 family. Con
 - Prefer direct tools, and stop retrieval when evidence is sufficient to act or answer.
 - Use subagents only when the effective role/delegation contract permits it and they materially improve completion through parent-context savings, a required workflow stage, or parallel independent implementation.
 - Multiple steps, routine confirmation, or a desire for another opinion are insufficient reasons to delegate.
-- Reserve reviewer/Oracle profiles for software-engineering acceptance of project implementations or focused code-quality verification. Never use them for research, ideation, general answer validation, or routine confidence; choose one or more only by authoritative reviewer-selection rules.
+- Reviewer is primary-lane self-review; Oracle slots are external-model cross-checks. They are only for implementation acceptance or code-quality verification—not research, ideation, architecture design, root-cause debugging, general answer validation, or routine confidence—and follow authoritative selection rules.
 - For multi-module work with independent, non-coupled tasks, consider parallel implementation subagents; serialize coupled work or cases where delegation overhead exceeds context benefit.
 - Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals. The parent verifies returned evidence instead of trusting a completion claim.
 
