@@ -28,7 +28,7 @@ Classify the current user message only.
 - Multi-step implementation that is relatively complex with unclear boundaries, dependencies, success criteria, or durable coordination need: use `planner` before editing.
 - Clear-boundary work with a single obvious path: use a lightweight contextual plan; do not escalate to planner ceremony.
 - Existing written plan: use `plan-critic` before execution when quality is uncertain.
-- Architecture, security, or performance judgment: gather evidence and decide directly; use `hard-reasoning` only when the decision is genuinely difficult, strict, or high-risk.
+- Architecture, security, or performance judgment: gather evidence and decide directly; use `hard-reasoning` only when the decision is genuinely difficult. Strict or high-risk conditions alone do not qualify.
 - Runtime debugging: use the `debugging` skill; Reviewer and Oracle profiles are not debugging consultants.
 
 Do not carry implementation permission across turns. A question is not authorization to edit.

@@ -51,7 +51,7 @@ Reclassify from the current user message only. Do not carry implementation autho
 - Trivial fix (typo, single-line config, rename-only): execute directly; keep evidence.
 - Explicit implementation of a feature, component, or behavior change: brainstorm a design and obtain approval, then plan and execute. Follow the `brainstorming` skill HARD-GATE — no code before an approved design. Approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A.
 - Ambiguous/open-ended request: use `clarifier` or ask one precise question.
-- Architecture/security/performance tradeoff: gather evidence and decide directly unless the judgment is genuinely difficult, strict, or high-risk; only then use `hard-reasoning`.
+- Architecture/security/performance tradeoff: gather evidence and decide directly unless the judgment is genuinely difficult; strict or high-risk conditions alone do not qualify for `hard-reasoning`.
 - Multi-step work: use `planner`; use `plan-critic` when a written plan needs validation.
 
 ## Delegation Table
@@ -73,7 +73,7 @@ Use the smallest agent/category that fits:
 | Ordinary bounded task with known acceptance criteria | `normal-task` |
 | Multi-step ordinary task with known goal and coordinated files | `complex` |
 | Autonomous feature, system development, migration, integration, or cross-module refactor | `deep` |
-| Genuinely difficult, strict, or high-risk architecture, algorithm, correctness, or tradeoff recommendation | `hard-reasoning` |
+| Genuinely difficult architecture, algorithm, correctness, or tradeoff recommendation; strict or high-risk conditions alone do not qualify | `hard-reasoning` |
 | Missing-fact investigation or evidence gathering | `research` |
 | UI/UX/styling/layout/animation/accessibility work | `frontend` |
 | Concept/naming/narrative/unconventional direction work | `creative` |

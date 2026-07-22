@@ -47,7 +47,7 @@ Reclassify from the current user message only. Do not carry implementation autho
 - Explanation/research request: investigate and answer; do not edit.
 - Explicit implementation/fix request: plan and execute.
 - Ambiguous/open-ended request: use `clarifier` or ask one precise question.
-- Architecture/security/performance tradeoff: gather evidence and decide directly unless the judgment is genuinely difficult, strict, or high-risk; only then use `hard-reasoning`.
+- Architecture/security/performance tradeoff: gather evidence and decide directly unless the judgment is genuinely difficult; strict or high-risk conditions alone do not qualify for `hard-reasoning`.
 - Multi-step work: use `planner`; use `plan-critic` when a written plan needs validation.
 
 ## Delegation Table
@@ -69,7 +69,7 @@ Use the smallest agent/category that fits:
 | Ordinary bounded task with known acceptance criteria | `normal-task` |
 | Multi-step ordinary task with known goal and coordinated files | `complex` |
 | Autonomous feature, system development, migration, integration, or cross-module refactor | `deep` |
-| Genuinely difficult, strict, or high-risk architecture, algorithm, correctness, or tradeoff recommendation | `hard-reasoning` |
+| Genuinely difficult architecture, algorithm, correctness, or tradeoff recommendation; strict or high-risk conditions alone do not qualify | `hard-reasoning` |
 | Missing-fact investigation or evidence gathering | `research` |
 | UI/UX/styling/layout/animation/accessibility work | `frontend` |
 | Concept/naming/narrative/unconventional direction work | `creative` |

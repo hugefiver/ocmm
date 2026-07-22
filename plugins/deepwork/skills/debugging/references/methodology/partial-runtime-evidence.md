@@ -145,7 +145,7 @@ If you cannot achieve a complete Tier 2 capture **or** two independent non-Tier-
 
 ## Independent verification for non-debug artifacts
 
-Reviewer and Oracle profiles are reserved for software implementation acceptance and focused code-quality verification. For reverse engineering, extraction, audit, or compliance artifacts, use a bounded `research` verification pass. Use `hard-reasoning` only when the remaining judgment is genuinely difficult, strict, or high-risk; ordinary factual checking does not qualify.
+Reviewer and Oracle profiles are reserved for software implementation acceptance and focused code-quality verification. For reverse engineering, extraction, audit, or compliance artifacts, use a bounded `research` verification pass. Use `hard-reasoning` only when the remaining judgment is genuinely difficult; strict or high-risk conditions alone do not qualify, nor does ordinary factual checking.
 
 ### When to invoke
 

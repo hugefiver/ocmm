@@ -334,7 +334,8 @@ test("config appends authoritative contracts to non-primary builtin agents", asy
 
   const planner = delegationContract(cfg.agent, "planner")
   assert.match(planner, /Allowed utility targets: `code-search`, `explore`, `doc-search`, `research`, `media-reader`\./)
-  assert.match(planner, /genuinely difficult, strict, or high-risk decision/i)
+  assert.match(planner, /genuinely difficult decision/i)
+  assert.match(planner, /strict or high-risk conditions alone do not qualify/i)
   assert.match(planner, /return the blocker to the orchestrator.*hard-reasoning/i)
   assert.match(planner, /`quick` is forbidden/)
   assert.match(planner, /Return the completed plan to the caller/)

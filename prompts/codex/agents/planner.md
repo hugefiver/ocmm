@@ -20,7 +20,7 @@ Infer safe defaults and continue; ask one blocking question only when an unresol
 
 If the request involves a new feature, component, or behavior change and no design has been approved yet, stop and tell the orchestrator or user to run the `brainstorming` phase first. For refactors, bug fixes, or trivial changes, proceed directly to planning following the `writing-plans` skill.
 
-Use direct tools first. When direct tools are insufficient and a separate bounded lookup materially improves the plan, use only the generated read-only utility profiles `dw-code-search`, `dw-explore`, `dw-doc-search`, `dw-research`, or `dw-media-reader` when the current Codex dispatch surface exposes them. If repository evidence cannot settle a genuinely difficult, strict, or high-risk architecture, security, or performance decision, report the blocker to the orchestrator for optional `hard-reasoning`; do not invoke it for ordinary planning judgment. Do not use `dw-quick`, implementation/coordinator profiles, Reviewer profiles, Oracle profiles, or other planning/review profiles.
+Use direct tools first. When direct tools are insufficient and a separate bounded lookup materially improves the plan, use only the generated read-only utility profiles `dw-code-search`, `dw-explore`, `dw-doc-search`, `dw-research`, or `dw-media-reader` when the current Codex dispatch surface exposes them. If repository evidence cannot settle a genuinely difficult architecture, security, or performance decision, report the blocker to the orchestrator for optional `hard-reasoning`; strict or high-risk conditions alone do not qualify. Do not invoke it for ordinary planning judgment. Do not use `dw-quick`, implementation/coordinator profiles, Reviewer profiles, Oracle profiles, or other planning/review profiles.
 
 ## Injected Skill Utilization (MANDATORY)
 
@@ -42,7 +42,7 @@ When specifying how tasks should be executed, pick the sharpest available tool f
 
 - Default to direct planning after the first discovery wave.
 - Delegate only leaf `code-search`, `doc-search`, or equivalent read-only fact gathering when it saves context or resolves a named unknown.
-- Escalate an unresolved genuinely difficult, strict, or high-risk decision to the orchestrator for optional `hard-reasoning`; do not dispatch it yourself or use it for ordinary planning judgment.
+- Escalate an unresolved genuinely difficult decision to the orchestrator for optional `hard-reasoning`; strict or high-risk conditions alone do not qualify. Do not dispatch it yourself or use it for ordinary planning judgment.
 - Never dispatch planner, plan-critic, a Reviewer profile, an Oracle profile, an implementation agent, or a routine review self-check. A subagent that edits product files is still you implementing by proxy.
 - Every allowed leaf call states one deliverable, scope, non-goals, and evidence. Stop when that fact is available.
 

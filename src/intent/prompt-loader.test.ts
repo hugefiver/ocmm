@@ -308,7 +308,7 @@ test("agent-specific prompts enforce bounded leaf delegation", () => {
     const root = join(process.cwd(), "prompts", workflow, "agents")
     const planner = readFileSync(join(root, "planner.md"), "utf8")
     assert.match(planner, /leaf.*code-search.*doc-search/is, `${workflow}/planner`)
-    assert.match(planner, /genuinely difficult, strict, or high-risk.*report the blocker to the orchestrator.*hard-reasoning/is, `${workflow}/planner`)
+    assert.match(planner, /genuinely difficult.*report the blocker to the orchestrator.*hard-reasoning.*strict or high-risk conditions alone do not qualify/is, `${workflow}/planner`)
     assert.match(planner, /never.*plan-critic.*Reviewer profile.*Oracle profile.*implementation/is, `${workflow}/planner`)
 
     const reviewer = readFileSync(join(root, "reviewer.md"), "utf8")
@@ -333,7 +333,7 @@ test("planner returns difficult decisions while GPT-5.6 keeps only the delegatio
       const planner = getAgentPrompt("planner")
       assert.match(planner, /Use direct tools first/)
       assert.match(planner, /Return the completed plan to the orchestrator/)
-      assert.match(planner, /genuinely difficult, strict, or high-risk.*report the blocker to the orchestrator.*hard-reasoning/is)
+      assert.match(planner, /genuinely difficult.*report the blocker to the orchestrator.*hard-reasoning.*strict or high-risk conditions alone do not qualify/is)
       assert.match(planner, /Do not dispatch `plan-critic`, any Reviewer profile.*or any Oracle profile/is)
 
       const specialization = getDeepworkPrompt("gpt-5.6")
@@ -700,11 +700,11 @@ test("review roles are implementation-only and difficult decisions do not route 
     assert.match(reviewer, /reviewer.*primary-model or primary-lane self-review.*Oracle profiles.*external-model cross-checks/is, workflow)
     assert.match(reviewer, /implementation acceptance.*code-quality verification/is, workflow)
     assert.match(reviewer, /Never use this role for research, ideation, architecture design before implementation, root-cause debugging, general answer validation, or routine confidence/i, workflow)
-    assert.match(orchestrator, /Architecture\/security\/performance tradeoff.*decide directly.*genuinely difficult, strict, or high-risk.*hard-reasoning/is, workflow)
+    assert.match(orchestrator, /Architecture\/security\/performance tradeoff.*decide directly.*genuinely difficult.*strict or high-risk conditions alone do not qualify.*hard-reasoning/is, workflow)
     assert.match(orchestrator, /Reviewer is the primary-model or primary-lane self-review profile.*Oracle profiles are external-model cross-check slots/is, workflow)
     assert.match(planner, /Do not use.*Reviewer profiles.*Oracle profiles/is, workflow)
     assert.match(clarifier, /Never recommend Reviewer or Oracle profiles for pre-implementation architecture/i, workflow)
-    assert.match(hardReasoning, /genuinely difficult, strict, or high-risk/i, workflow)
+    assert.match(hardReasoning, /genuinely difficult.*Strictness, risk, or scale alone do not qualify/is, workflow)
     assert.match(hardReasoning, /Do not use.*ordinary architecture.*first-(?:pass|attempt) debugging.*routine design choice.*large/is, workflow)
 
     for (const variant of ["default", "gpt", "gemini", "glm", "codex"] as const) {
@@ -713,6 +713,7 @@ test("review roles are implementation-only and difficult decisions do not route 
       assert.doesNotMatch(deepwork, /reviewer.*Conventional problems - architecture, debugging, complex logic/i, `${workflow}/${variant}`)
       assert.doesNotMatch(deepwork, /Consult reviewer after forming concrete options/i, `${workflow}/${variant}`)
       assert.doesNotMatch(deepwork, /reviewer agent \| Conflicting evidence or hard design choice/i, `${workflow}/${variant}`)
+      assert.doesNotMatch(deepwork, /Genuinely difficult, strict, or high-risk/i, `${workflow}/${variant}`)
     }
   }
 })
@@ -734,6 +735,21 @@ test("debugging escalates to hard-reasoning only after failed evidence rounds", 
   assert.match(escalation, /Reviewer and Oracle profiles are not debugging consultants/i)
   assert.match(partialEvidence, /bounded `research` verification pass/i)
   assert.doesNotMatch(`${skill}\n${escalation}\n${partialEvidence}`, /Oracle Triple|Verification Oracle|spawn Oracles/i)
+})
+
+test("subagent review selection tables keep role and tier in four columns", () => {
+  const paths = [
+    join(process.cwd(), "skills", "v1", "subagent-driven-development", "SKILL.md"),
+    join(process.cwd(), "plugins", "deepwork", "skills", "deepwork-subagent-driven-development", "SKILL.md"),
+  ]
+  for (const path of paths) {
+    const text = readFileSync(path, "utf8")
+    const table = text.slice(text.indexOf("| Complexity / evidence shape |"))
+      .split(/\r?\n\r?\n/, 1)[0]
+      .split(/\r?\n/)
+    assert.equal(table.length, 6, path)
+    for (const row of table) assert.equal(row.split("|").length, 6, `${path}: ${row}`)
+  }
 })
 
 test("orchestrators select planning logical tiers only from current availability", () => {

@@ -100,7 +100,7 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 1. **THINK DEEPLY** - What is the user's TRUE intent? What problem are they REALLY trying to solve?
 2. **EXPLORE THOROUGHLY** - Fire code-search/doc-search agents to gather ALL relevant context
 3. **CONSULT SPECIALISTS** - Delegate only when the work shape requires it:
-   - **hard-reasoning**: Genuinely difficult, strict, or high-risk decision analysis after evidence gathering
+   - **hard-reasoning**: Genuinely difficult decision analysis after evidence gathering; strict or high-risk conditions alone do not qualify
    - **creative**: Non-conventional problems - different approach needed, unusual constraints
 4. **ASK THE USER** - If ambiguity remains after exploration, ASK. Don't guess.
 
@@ -115,7 +115,7 @@ Where TYPE is one of: research | implementation | investigation | evaluation | f
 ```
 multi_agent_v1.spawn_agent(agent_type="dw-code-search", prompt="I'm implementing [TASK DESCRIPTION] and need to understand [SPECIFIC KNOWLEDGE GAP]. Find [X] patterns in the codebase - show file paths, implementation approach, and conventions used. I'll use this to [HOW RESULTS WILL BE USED]. Focus on src/ directories, skip test files unless test patterns are specifically needed. Return concrete file paths with brief descriptions of what each file does.")
 multi_agent_v1.spawn_agent(agent_type="dw-doc-search", prompt="I'm working with [LIBRARY/TECHNOLOGY] and need [SPECIFIC INFORMATION]. Find official documentation and production-quality examples for [Y] - specifically: API reference, configuration options, recommended patterns, and common pitfalls. Skip beginner tutorials. I'll use this to [DECISION THIS WILL INFORM].")
-multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", prompt="I need a recommendation for this genuinely difficult, strict, or high-risk decision: [DECISION]. Evidence gathered: [EVIDENCE]. Options and constraints: [OPTIONS AND CONSTRAINTS]. Compare tradeoffs and recommend the safest concrete choice.")
+multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", prompt="I need a recommendation for this genuinely difficult decision: [DECISION]. Evidence gathered: [EVIDENCE]. Options and constraints: [OPTIONS AND CONSTRAINTS]. Compare tradeoffs and recommend the safest concrete choice. Strict or high-risk conditions alone do not qualify.")
 ```
 
 **ONLY AFTER YOU HAVE:**
@@ -150,7 +150,7 @@ multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", prompt="I need a reco
 **IF YOU ENCOUNTER A BLOCKER:**
 1. **DO NOT** give up
 2. **DO NOT** deliver a compromised version
-3. **DO** consult specialists only when needed (`dw-hard-reasoning` for genuinely difficult, strict, or high-risk decisions; creative for non-conventional work)
+3. **DO** consult specialists only when needed (`dw-hard-reasoning` for genuinely difficult decisions—strict or high-risk conditions alone do not qualify; creative for non-conventional work)
 4. **DO** ask the user for guidance
 5. **DO** explore alternative approaches
 
@@ -214,7 +214,7 @@ multi_agent_v1.spawn_agent(agent_type="planner", prompt="<gathered context + use
 | Codebase exploration | multi_agent_v1.spawn_agent(agent_type="dw-code-search", ...) | Parallel, context-efficient |
 | Documentation lookup | multi_agent_v1.spawn_agent(agent_type="dw-doc-search", ...) | Specialized knowledge |
 | Planning | multi_agent_v1.spawn_agent(agent_type="planner", ...) | Parallel task graph + structured plan |
-| Genuinely difficult, strict, or high-risk decision | multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...) | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
+| Genuinely difficult decision; strict or high-risk conditions alone do not qualify | multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...) | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
 | Hard problem (non-conventional) | multi_agent_v1.spawn_agent(agent_type="dw-creative", ...) | Different approach needed |
 | Implementation | multi_agent_v1.spawn_agent(agent_type="dw-...", ...) | Domain-optimized models |
 

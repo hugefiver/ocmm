@@ -224,10 +224,10 @@ Review selection has two independent axes: role/model priority and logical rigor
 
 | Complexity / evidence shape | Criteria | Reviewer(s) | Tier choice |
 |---|---|---|---|
-| Simple | 1-2 tasks, single module, no architectural change | first available Oracle at `normal` |
-| Complex / cross-module | 3+ tasks, cross-module integration, architectural change, migration | first available Oracle + `reviewer` in parallel; configured `high`, otherwise `normal` |
-| Security / performance / data-loss / release / runtime-safety | high-impact risk profile regardless of file count | first available Oracle + `reviewer` in parallel; configured `max`, otherwise `high`, otherwise `normal` |
-| Additional evidence requested | user/orchestrator asks for more independent model evidence | additional Oracle slots in order (start with `oracle-2nd`, then later configured/available slots in ordinal order) while keeping the intentionally selected tier |
+| Simple | 1-2 tasks, single module, no architectural change | first available Oracle | `normal` |
+| Complex / cross-module | 3+ tasks, cross-module integration, architectural change, migration | first available Oracle + `reviewer` in parallel | configured `high`, otherwise `normal` |
+| Security / performance / data-loss / release / runtime-safety | high-impact risk profile regardless of file count | first available Oracle + `reviewer` in parallel | configured `max`, otherwise `high`, otherwise `normal` |
+| Additional evidence requested | user/orchestrator asks for more independent model evidence | additional Oracle slots in order (start with `oracle-2nd`, then later configured/available slots in ordinal order) | keep the intentionally selected tier |
 
 The orchestrator performs this selection after all tasks complete. Do not fan out reviews merely because several Oracle slots or tiers are registered. Collect only intentionally requested reviews. A later Oracle slot is another configured model perspective, not a stronger reviewer.
 

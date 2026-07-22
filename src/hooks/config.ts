@@ -326,7 +326,7 @@ function delegationContractFor(name: string): string {
     return wrapDelegationContract([
       "Use direct tools first. Delegate only when direct tools are insufficient and a separate bounded research result materially improves completion.",
       `Allowed utility targets: ${formatTargets(READ_ONLY_UTILITY_AGENTS)}.`,
-      "If repository evidence cannot settle a genuinely difficult, strict, or high-risk decision, return the blocker to the orchestrator for optional `hard-reasoning`; do not dispatch a decision agent yourself.",
+      "If repository evidence cannot settle a genuinely difficult decision, return the blocker to the orchestrator for optional `hard-reasoning`; strict or high-risk conditions alone do not qualify, and you must not dispatch a decision agent yourself.",
       "`quick` is forbidden. Do not dispatch `plan-critic`, any Reviewer profile, any Oracle profile, implementation agents, decision agents, or routine review checks.",
       "Return the completed plan to the caller. Difficult-decision routing, formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
     ])

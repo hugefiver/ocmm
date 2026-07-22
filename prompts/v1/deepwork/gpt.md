@@ -115,7 +115,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 |----------|-------------|------------|
 | code-search agent | Need codebase patterns you don't have | `task(subagent_type="code-search", load_skills=[], run_in_background=true, ...)` |
 | doc-search agent | External library docs, OSS examples | `task(subagent_type="doc-search", load_skills=[], run_in_background=true, ...)` |
-| hard-reasoning category | Genuinely difficult, strict, or high-risk decision after evidence gathering | `task(subagent_type="hard-reasoning", load_skills=[], run_in_background=false, ...)` |
+| hard-reasoning category | Genuinely difficult decision after evidence gathering; strict or high-risk conditions alone do not qualify | `task(subagent_type="hard-reasoning", load_skills=[], run_in_background=false, ...)` |
 | planner agent | Relatively complex work with a clear purpose that needs durable coordination, or work whose boundaries/dependencies remain unclear after discovery | `task(subagent_type="planner", load_skills=[], run_in_background=false, ...)` |
 | task category | Specialized work matching a category | `task(category="...", load_skills=[...], run_in_background=true)` |
 

@@ -86,7 +86,7 @@ The requested outcome is the contract.
 |---|---|
 | Missing context | Explore with tools or delegate exploration. |
 | Unknown library behavior | Use doc-search/docs or inspect examples. |
-| Architecture uncertainty | Gather evidence and compare concrete options directly; use `hard-reasoning` only if genuinely difficult, strict, or high-risk. |
+| Architecture uncertainty | Gather evidence and compare concrete options directly; use `hard-reasoning` only if genuinely difficult. Strict or high-risk conditions alone do not qualify. |
 | Implementation obstacle | Try a different route and verify again. |
 | True user-only blocker | Ask one precise question and stop. |
 
@@ -110,7 +110,7 @@ Use the fastest path that increases certainty.
 | Moderate, one domain, clear local tests | Do it yourself. |
 | Broad codebase search | Delegate explore in background, then keep working on non-overlapping tasks. |
 | External docs or API uncertainty | Delegate doc-search or query docs. |
-| Genuinely difficult, strict, or high-risk decision after evidence gathering | Use `hard-reasoning` with evidence and options. Runtime debugging stays in the debugging workflow. |
+| Genuinely difficult decision after evidence gathering; strict or high-risk conditions alone do not qualify | Use `hard-reasoning` with evidence and options. Runtime debugging stays in the debugging workflow. |
 | Relatively complex, unclear boundaries/dependencies/success criteria, or durable coordination needed | Use a planner agent before implementation. |
 | Clear-boundary work with a single obvious path | Lightweight contextual plan; execute directly. |
 
@@ -124,7 +124,7 @@ Survey applicable skills before working raw. Use only resources that fit the tas
 |---|---|---|
 | code-search agent | Repo patterns, ownership, hidden call sites | File paths, conventions, risks |
 | doc-search agent | Official docs, external examples, APIs | Current guidance with source names |
-| hard-reasoning category | Genuinely difficult, strict, or high-risk decision | Recommendation with tradeoffs |
+| hard-reasoning category | Genuinely difficult decision; strict or high-risk conditions alone do not qualify | Recommendation with tradeoffs |
 | planner agent | Large dependent work | Ordered waves and verification plan |
 | category + skill | Domain work exists | Specialized execution with criteria |
 

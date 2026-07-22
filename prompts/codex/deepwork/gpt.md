@@ -124,7 +124,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 |----------|-------------|------------|
 | code-search agent | Need codebase patterns you don't have | `multi_agent_v1.spawn_agent(agent_type="dw-code-search", ...)` |
 | doc-search agent | External library docs, OSS examples | `multi_agent_v1.spawn_agent(agent_type="dw-doc-search", ...)` |
-| hard-reasoning category | Genuinely difficult, strict, or high-risk decision after evidence gathering | `multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...)` |
+| hard-reasoning category | Genuinely difficult decision after evidence gathering; strict or high-risk conditions alone do not qualify | `multi_agent_v1.spawn_agent(agent_type="dw-hard-reasoning", ...)` |
 | planner agent | Relatively complex work with a clear purpose that needs durable coordination, or work whose boundaries/dependencies remain unclear after discovery | `multi_agent_v1.spawn_agent(agent_type="planner", ...)` |
 | task category | Specialized work matching a category | `multi_agent_v1.spawn_agent(agent_type="dw-<category>", ...)` |
 

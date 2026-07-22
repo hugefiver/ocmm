@@ -34,7 +34,7 @@ For research, explanation, or investigation requests: gather enough evidence to 
 1. **THINK DEEPLY** - What is the user's TRUE intent? What problem are they REALLY trying to solve?
 2. **EXPLORE THOROUGHLY** - Fire code-search/doc-search agents to gather ALL relevant context
 3. **CONSULT SPECIALISTS** - Delegate only when the work shape requires it:
-   - **hard-reasoning**: Genuinely difficult, strict, or high-risk decision analysis after evidence gathering
+   - **hard-reasoning**: Genuinely difficult decision analysis after evidence gathering; strict or high-risk conditions alone do not qualify
    - **Artistry**: Non-conventional problems - different approach needed, unusual constraints
 4. **ASK THE USER** - If ambiguity remains after exploration, ASK. Don't guess.
 
@@ -49,7 +49,7 @@ For research, explanation, or investigation requests: gather enough evidence to 
 ```
 task(subagent_type="code-search", load_skills=[], prompt="I'm implementing [TASK DESCRIPTION] and need to understand [SPECIFIC KNOWLEDGE GAP]. Find [X] patterns in the codebase - show file paths, implementation approach, and conventions used. I'll use this to [HOW RESULTS WILL BE USED]. Focus on src/ directories, skip test files unless test patterns are specifically needed. Return concrete file paths with brief descriptions of what each file does.", run_in_background=true)
 task(subagent_type="doc-search", load_skills=[], prompt="I'm working with [LIBRARY/TECHNOLOGY] and need [SPECIFIC INFORMATION]. Find official documentation and production-quality examples for [Y] - specifically: API reference, configuration options, recommended patterns, and common pitfalls. Skip beginner tutorials. I'll use this to [DECISION THIS WILL INFORM].", run_in_background=true)
-task(subagent_type="hard-reasoning", load_skills=[], prompt="I need a recommendation for this genuinely difficult, strict, or high-risk decision: [DECISION]. Evidence gathered: [EVIDENCE]. Options and constraints: [OPTIONS AND CONSTRAINTS]. Compare tradeoffs and recommend the safest concrete choice.", run_in_background=false)
+task(subagent_type="hard-reasoning", load_skills=[], prompt="I need a recommendation for this genuinely difficult decision: [DECISION]. Evidence gathered: [EVIDENCE]. Options and constraints: [OPTIONS AND CONSTRAINTS]. Compare tradeoffs and recommend the safest concrete choice. Strict or high-risk conditions alone do not qualify.", run_in_background=false)
 ```
 
 **ONLY AFTER YOU HAVE:**
@@ -158,7 +158,7 @@ task(task_id="ses_abc123", load_skills=[], run_in_background=false, prompt="Here
 | Codebase exploration | task(subagent_type="code-search", load_skills=[], run_in_background=true) | Parallel, context-efficient |
 | Documentation lookup | task(subagent_type="doc-search", load_skills=[], run_in_background=true) | Specialized knowledge |
 | Planning | task(subagent_type="planner", load_skills=[], run_in_background=false) | Parallel task graph + structured TODO list |
-| Genuinely difficult, strict, or high-risk decision | task(subagent_type="hard-reasoning", load_skills=[], run_in_background=false) | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
+| Genuinely difficult decision; strict or high-risk conditions alone do not qualify | task(subagent_type="hard-reasoning", load_skills=[], run_in_background=false) | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
 | Hard problem (non-conventional) | task(category="artistry", load_skills=[...], run_in_background=true) | Different approach needed |
 | Implementation | task(category="...", load_skills=[...], run_in_background=true) | Domain-optimized models |
 

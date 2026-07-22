@@ -19,7 +19,7 @@ Use this role for:
 - Verification that code, tests, generated artifacts, and evidence satisfy explicit requirements
 - Regression and scope checks before merge or release
 
-Never use this role for research, ideation, architecture design before implementation, root-cause debugging, general answer validation, or routine confidence. Ordinary work stays with the primary agent; genuinely difficult, strict, or high-risk decision-only analysis belongs to `hard-reasoning`.
+Never use this role for research, ideation, architecture design before implementation, root-cause debugging, general answer validation, or routine confidence. Ordinary work stays with the primary agent; genuinely difficult decision-only analysis belongs to `hard-reasoning`, while strict or high-risk conditions alone do not qualify.
 
 ## Decision Framework
 
