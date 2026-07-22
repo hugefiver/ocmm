@@ -77,6 +77,16 @@
 
       lib.mkOcmmPackage = mkOcmmPackage;
 
+      homeManagerModules = {
+        ocmm = import ./nix/modules/home-manager.nix { inherit self; };
+        default = self.homeManagerModules.ocmm;
+      };
+
+      nixosModules = {
+        ocmm = import ./nix/modules/nixos.nix { inherit self; };
+        default = self.nixosModules.ocmm;
+      };
+
       checks = forAllSystems (system:
         let
           pkgs = mkPkgs system;
@@ -84,10 +94,22 @@
             inherit lib pkgs mkOcmmPackage;
             packages = packageSets.${system};
           };
-        in packageChecks // {
+          moduleChecks = lib.optionalAttrs (system == "x86_64-linux") (
+            import ./nix/tests/modules.nix {
+              inherit self nixpkgs system pkgs;
+              home-manager = inputs.home-manager;
+            }
+          );
+        in
+        packageChecks
+        // moduleChecks
+        // {
           cross-system-evaluation = import ./nix/tests/cross-system.nix {
             inherit lib pkgs packageSets;
           };
+        }
+        // lib.optionalAttrs (system == "x86_64-linux") {
+          nixos-vm = import ./nix/tests/nixos-vm.nix { inherit self pkgs; };
         });
     };
 }
