@@ -1,6 +1,6 @@
 # OpenCode CodeMode `execute` Compatibility Spike Implementation Plan
 
-> **Status:** Implemented and verification-ready. This revision is authoritative for the eight-path compatibility-spike scope.
+> **Status:** OpenCode 1.18.4 migration verified locally; the live result is PASS/GO. This revision is authoritative for the seven-path uncommitted compatibility scope.
 
 **Goal:** Produce isolated, sanitized evidence for OpenCode CodeMode `execute` compatibility without changing ocmm product behavior or terminating processes by historical PID.
 
@@ -10,7 +10,7 @@
 
 ---
 
-## Exact Scope
+## Exact Current Scope
 
 | Path | Responsibility |
 |---|---|
@@ -18,12 +18,11 @@
 | `docs/superpowers/plans/2026-07-20-codemode-execute-compatibility.md` | Current implementation and verification plan. |
 | `scripts/codemode-execute-compatibility.ts` | Runner, CLI, normalization, cleanup, sanitization. |
 | `scripts/codemode-execute-compatibility.test.ts` | Mutation-resistant unit/integration harness. |
-| `scripts/fixtures/codemode-execute-probe-mcp.mjs` | Deterministic stdio MCP and stop-signal participant. |
-| `scripts/fixtures/codemode-execute-hook-trace-plugin.mjs` | Redacted hook-shape trace plugin. |
-| `scripts/fixtures/codemode-execute-process-wrapper.mjs` | Owned native-LSP wrapper and stop-signal participant. |
 | `scripts/fixtures/opencode-codemode-execute-compatibility.json` | Sanitized live or structured-SKIP fixture. |
+| `docs/superpowers/specs/2026-07-22-codemode-opencode-1-18-4-design.md` | Migration design and live-evidence record. |
+| `docs/superpowers/plans/2026-07-22-codemode-opencode-1-18-4.md` | Migration plan and disposable-transaction record. |
 
-Do not modify `src/**`, prompts, skills, schema, product configuration, package metadata, lockfiles, or planning-logical-tiers documents. Do not install software or perform Git writes.
+The three executable CodeMode fixture programs are protected and have no delta. Do not modify `src/**`, prompts, skills, schema, product configuration, package metadata, lockfiles, generated artifacts, or planning-logical-tiers documents. Do not install software or perform Git writes. The seven listed paths are the exact current allowlist; all remain unstaged and uncommitted.
 
 ---
 
@@ -96,7 +95,7 @@ Required functions include `parseCliOptions`, `classifyXdgPaths`, `parseHookTrac
 
 ### CodeMode search
 
-OpenCode `1.18.3` accepts `tools.$codemode.search({ query?, namespace?, limit?, offset? })` and returns `{ items, remaining, next }`. The exact probe is:
+OpenCode `1.18.4` accepts `tools.$codemode.search({ query?, namespace?, limit?, offset? })` and returns `{ items, remaining, next }`. The exact probe is:
 
 ```js
 const denied = await tools.$codemode.search({ query: "codemode_probe.denied", limit: 50 })
@@ -114,7 +113,7 @@ return {
 }
 ```
 
-OpenCode `1.18.3` maps tool descriptions through `toolExpression`, so the query remains `codemode_probe.denied` but the returned exact catalog path is `tools.codemode_probe.denied`. `deniedToolVisible()` mirrors that exact `{ items[].path }` contract for deterministic tests. The unprefixed path and array-style search results are rejected.
+OpenCode `1.18.4` maps tool descriptions through `toolExpression`, so the query remains `codemode_probe.denied` but the returned exact catalog path is `tools.codemode_probe.denied`. `deniedToolVisible()` mirrors that exact `{ items[].path }` contract for deterministic tests. The unprefixed path and array-style search results are rejected.
 
 ### Exact identity argument
 
@@ -146,6 +145,8 @@ safeMarkers: {
 
 Parser authority is outer-only and phase-specific. Only `phase="before", tool="execute"` may establish `exactCode`. Only `phase="after", tool="execute"` may establish `executeProbe`, `deniedHidden`, `lspOk`, `identityOk`, and `hookPayloadOk`. Nested before/after rows retain normalized tool identities and statuses but their `safeMarkers` never satisfy outer PASS evidence.
 
+Nested plugin hooks and completed CodeMode metadata are separate authorities. PASS requires exactly one before and one after hook for each of `lsp_status`, `codemode_probe_identity`, and `codemode_probe_json_error`. PASS independently requires the completed metadata multiset to be exactly `$codemode_search`, `lsp_status`, `codemode_probe_identity`, and `codemode_probe_json_error`; `$codemode_search` is metadata-only and must not appear as a nested plugin hook. Any hook or metadata multiset defect fails closed as `nested-hook-count-invalid`.
+
 ### Trusted host signals
 
 `permissionBlocked`, `featureUnsupported`, and `activationAmbiguous` are derived only from:
@@ -153,7 +154,9 @@ Parser authority is outer-only and phase-specific. Only `phase="before", tool="e
 - structured `--format json` events with `type: "error"`; and
 - recognizable host error/fatal/permission/execute/CodeMode stderr lines.
 
-Stdout `text`/`reasoning` event prose is never host evidence. JSON event classification recognizes `step_start`, `tool_use`, `text`, `reasoning`, `step_finish`, and `error`, requiring `part` for non-error events and `error` for error events.
+Stdout `text`/`reasoning` event prose is never host evidence. JSON event classification recognizes only `step_start`, `tool_use`, `text`, `reasoning`, `step_finish`, and `error`, requiring finite numeric `timestamp`, non-empty string `sessionID`, and record-valued `part` for non-error events and an `error` property for error events. Empty, malformed, unknown, or wrong-shape rows are unclassifiable.
+
+PASS additionally requires non-null provider-run JSONL aggregate facts with `eventCount > 0`, `eventTypes.length === eventCount`, `nonErrorPartCount + errorEventCount === eventCount`, `errorEventCount === 0`, and `nonErrorPartCount === eventCount`. This fact set is independently load-bearing: null, empty, count-inconsistent, or error-bearing facts produce `FAIL/provider-run-jsonl-invalid` before outer/hook PASS evidence can succeed.
 
 A nonzero provider-run exit does not force unclassifiable output when trusted `activationAmbiguous`, `featureUnsupported`, or `permissionBlocked` evidence exists. `featureUnsupported` accepts only explicit execute-itself forms: `unknown tool: execute`, `tool execute is unsupported`, and `execute tool is not available` (case-insensitive, with optional quoting around `execute`). It rejects nested/child failures such as `execute failed because nested tool lsp_status is not available` and `execute child ... unsupported`; those nonzero empty-stdout runs remain `DEFER/unclassifiable-output` unless another precise reason exists. With empty stdout, trusted activation remains `DEFER/codemode-activation-ambiguous`, precise trusted unsupported evidence remains `SKIP/codemode-unsupported-by-host`, and trusted permission evidence retains its higher-priority `DEFER/permission-blocked`; all are ineligible for retry. Non-empty malformed stdout still fails closed.
 
@@ -172,13 +175,13 @@ Unknown/escaped XDG or any registration failure forbids retry. `modelDeclinedTwi
 
 ### Attempt isolation barriers
 
-Parse the caller file as strict JSON and require a non-empty `provider` object with the selected `provider/model` explicitly declared. Missing, empty, array, malformed or truncated JSON, undeclared models, missing explicit SDK identity, and non-bundled SDK routes are `SKIP/provider-config-unavailable` and execute no host command. For the pinned OpenCode `1.18.3` contract, validate every provider-level `npm` and per-model `provider.npm` effective route against exactly: `@ai-sdk/amazon-bedrock`, `@ai-sdk/amazon-bedrock/mantle`, `@ai-sdk/anthropic`, `@ai-sdk/azure`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/google-vertex/anthropic`, `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, `@openrouter/ai-sdk-provider`, `@ai-sdk/xai`, `@ai-sdk/mistral`, `@ai-sdk/groq`, `@ai-sdk/deepinfra`, `@ai-sdk/cerebras`, `@ai-sdk/cohere`, `@ai-sdk/gateway`, `@ai-sdk/togetherai`, `@ai-sdk/perplexity`, `@ai-sdk/vercel`, `@ai-sdk/alibaba`, `gitlab-ai-provider`, `@ai-sdk/github-copilot`, and `venice-ai-sdk-provider`. Reject dynamic package names and `file://` routes before any host command so the caller config cannot reach OpenCode `1.18.3` `Npm.add()` or a local dynamic import. Construct a new attempt `opencode.json` from only a valid string `$schema`, the validated provider object, and valid string-array `enabled_providers` / `disabled_providers`. Force `share: "disabled"` and `autoupdate: false`; install exactly the built ocmm file plugin plus trace file plugin; install only local `codemode_probe` MCP; and replace permissions with the exact ordered map `task: deny`, `bash: deny`, `execute: allow`, `lsp_*: allow`, `codemode_probe_*: allow`, `codemode_probe_denied: deny`. Discard inherited plugins/MCPs/permissions/instructions/skills/references/agents/commands/share and arbitrary top-level keys. The harness never installs or provisions a provider SDK.
+Parse the caller file as strict JSON and require a non-empty `provider` object with the selected `provider/model` explicitly declared. Missing, empty, array, malformed or truncated JSON, undeclared models, missing explicit SDK identity, and non-bundled SDK routes are `SKIP/provider-config-unavailable` and execute no host command. For the pinned OpenCode `1.18.4` contract, validate every provider-level `npm` and per-model `provider.npm` effective route against exactly: `@ai-sdk/amazon-bedrock`, `@ai-sdk/amazon-bedrock/mantle`, `@ai-sdk/anthropic`, `@ai-sdk/azure`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/google-vertex/anthropic`, `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, `@openrouter/ai-sdk-provider`, `@ai-sdk/xai`, `@ai-sdk/mistral`, `@ai-sdk/groq`, `@ai-sdk/deepinfra`, `@ai-sdk/cerebras`, `@ai-sdk/cohere`, `@ai-sdk/gateway`, `@ai-sdk/togetherai`, `@ai-sdk/perplexity`, `@ai-sdk/vercel`, `@ai-sdk/alibaba`, `gitlab-ai-provider`, `@ai-sdk/github-copilot`, and `venice-ai-sdk-provider`. Reject dynamic package names and `file://` routes before any host command so the caller config cannot reach OpenCode `1.18.4` `Npm.add()` or a local dynamic import. Construct a new attempt `opencode.json` from only a valid string `$schema`, the validated provider object, and valid string-array `enabled_providers` / `disabled_providers`. Force `share: "disabled"` and `autoupdate: false`; install exactly the built ocmm file plugin plus trace file plugin; install only local `codemode_probe` MCP; and replace permissions with the exact ordered map `task: deny`, `bash: deny`, `execute: allow`, `lsp_*: allow`, `codemode_probe_*: allow`, and `codemode_probe_denied: deny`. Discard inherited plugins/MCPs/permissions/instructions/skills/references/agents/commands/share and arbitrary top-level keys. The harness never installs or provisions a provider SDK.
 
-Construct each child environment from a copy and remove inherited `HOME`, `USERPROFILE`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_CONFIG_DIR`, `OPENCODE_PERMISSION`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE`, `OPENCODE_PLUGIN_META_FILE`, `OPENCODE_AUTO_SHARE`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_MANAGED_CONFIG_DIR`, `OCMM_FAST`, `OCMM_PROFILE`, and `OCMM_NO_PROFILE` with case-insensitive key comparison. Then set canonical `HOME`, `USERPROFILE`, and `OPENCODE_TEST_HOME` to the attempt root; set `OPENCODE_TEST_MANAGED_CONFIG_DIR` to a pre-created empty `<attemptRoot>/managed-config`; set `OPENCODE_CONFIG` to exactly `<attemptRoot>/opencode.json`; and set `OPENCODE_DISABLE_PROJECT_CONFIG="1"`. `OPENCODE_CONFIG_CONTENT` and `OPENCODE_CONFIG_DIR` remain absent. Set all four XDG roots inside the attempt. This blocks parent/ancestor/home/test-home and Windows `ProgramData` managed config, `.opencode`, `AGENTS.md`, instruction/plugin injection, permission/pure/share/routing overrides without generically deleting provider credential/model variables. The input environment object remains unchanged.
+Construct each child environment from a copy and remove inherited `HOME`, `USERPROFILE`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_CONFIG_DIR`, `OPENCODE_PERMISSION`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE`, `OPENCODE_PLUGIN_META_FILE`, `OPENCODE_AUTO_SHARE`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_MANAGED_CONFIG_DIR`, `OCMM_FAST`, `OCMM_PROFILE`, and `OCMM_NO_PROFILE` with case-insensitive key comparison. Then set canonical `HOME`, `USERPROFILE`, and `OPENCODE_TEST_HOME` to the attempt root; set `OPENCODE_TEST_MANAGED_CONFIG_DIR` to a pre-created empty `<attemptRoot>/managed-config`; set `OPENCODE_CONFIG` to exactly `<attemptRoot>/opencode.json`; and set `OPENCODE_DISABLE_PROJECT_CONFIG="1"`. `OPENCODE_CONFIG_CONTENT` and `OPENCODE_CONFIG_DIR` remain absent. Set all four XDG roots inside the attempt. The base child environment uses `OCMM_DEBUG="1"` for the version, paths, config, and MCP barriers. Only provider `run` receives a copied environment with `OCMM_DEBUG="0"`, preventing plugin info diagnostics from contaminating strict JSONL stdout; raw capture, CLI log flags, parser rules, hook/MCP evidence, and product runtime stay unchanged. This blocks parent/ancestor/home/test-home and Windows `ProgramData` managed config, `.opencode`, `AGENTS.md`, instruction/plugin injection, permission/pure/share/routing overrides without generically deleting provider credential/model variables. The input environment object remains unchanged.
 
 `runAttempt()` executes only this gated sequence:
 
-1. `opencode --version`; return the complete partial attempt immediately unless exit is `0`, timeout is false, stdout is exactly one strict semantic version, and that version equals the pinned supported contract `1.18.3`. Reject another otherwise-valid version, core/numeric-prerelease leading zeroes, empty prerelease/build identifiers, and invalid identifier characters. No debug-path/config/MCP/provider command runs after nonzero, timeout, unsupported-version, malformed, or version-shaped-invalid output;
+1. `opencode --version`; return the complete partial attempt immediately unless exit is `0`, timeout is false, stdout is exactly one strict semantic version, and that version equals the pinned supported contract `1.18.4`. Reject another otherwise-valid version, core/numeric-prerelease leading zeroes, empty prerelease/build identifiers, and invalid identifier characters. No debug-path/config/MCP/provider command runs after nonzero, timeout, unsupported-version, malformed, or version-shaped-invalid output;
 2. `opencode debug paths`; parse immediately and return unless output is classifiable and `xdgState === "isolated"`;
 3. `opencode debug config`; count every `[ocmm] config loaded:` marker and require the total to be exactly one; that unique line must exactly equal `[ocmm] config loaded: project=<attemptRoot>/.opencode/ocmm.jsonc, user=<none>` before starting MCP processes. Zero markers, duplicate correct markers, correct mixed with wrong-root/user/malformed markers, split markers, another root, or any user config fail the barrier. `ocmmLoaded` may still record that one or more markers were observed, but `isolatedProjectConfig` is false unless the unique-marker rule passes;
 4. `opencode mcp list`; strip ANSI/glyph prefixes and anchor the full normalized line to exactly one server plus one allowed status. Require exactly one `lsp connected` row plus exactly one `codemode_probe connected` row before a provider/model call—`not connected`, failed, duplicate, mixed, same-line multi-status, trailing-junk, or cross-line status text fails the barrier, while `● lsp connected` passes;
@@ -188,7 +191,7 @@ Every early return preserves all command PIDs and raw outputs already produced. 
 
 ### Parent preflight gate
 
-`runProbe()` calls `runAttemptSequence()` only after successful non-timeout version output exactly equal to `1.18.3`, resolved executable target plus valid SHA-256, successful valid Git revision, successful dirty-state command, all build artifacts, and strict successful direct-native LSP smoke. A different valid host version is outside the pinned no-install proof, creates zero attempts, and remains `DEFER/unclassifiable-output`. Locator/direct timeout is `host-command-timeout`; malformed Git evidence is `unclassifiable-output`; missing build/hash and failed/malformed smoke retain their structured reason. Every failed gate creates zero attempt roots/model calls and cannot retry. Only the clean gate invokes the injected/default `runAttempt`.
+`runProbe()` calls `runAttemptSequence()` only after successful non-timeout version output exactly equal to `1.18.4`, resolved executable target plus valid SHA-256, successful valid Git revision, successful dirty-state command, all build artifacts, and strict successful direct-native LSP smoke. A different valid host version is outside the pinned no-install proof, creates zero attempts and remains `DEFER/unclassifiable-output`. A version mismatch stops before locator/hash, Git, artifact, direct-smoke, attempt, and model commands, but does not bypass outer cleanup, classification, fixture fallback, or the single result line. Locator/direct timeout is `host-command-timeout`; malformed Git evidence is `unclassifiable-output`; missing build/hash and failed/malformed smoke retain their structured reason. Every failed gate creates zero attempt roots/model calls and cannot retry. Only the clean gate invokes the injected/default `runAttempt`.
 
 ### Direct native LSP smoke
 
@@ -288,8 +291,8 @@ The harness must cover:
 7. null outer/nested tool identities producing deterministic FAIL reasons;
 8. model prose ignored while structured error/host stderr produces trusted signals; explicit execute-itself unsupported forms are accepted while nested/child unsupported failures are rejected and remain unclassifiable; nonzero stderr-only trusted activation and precise unsupported evidence remain classifiable with exact `DEFER/codemode-activation-ambiguous` or `SKIP/codemode-unsupported-by-host`, and neither retries;
 9. strict attempt barriers and retry rejection: nonzero/malformed attempt-local version runs no later command; escaped/unknown XDG never reaches config/MCP/run; zero, duplicate-correct, correct-plus-wrong/user/malformed, split, wrong-root, or user config markers never reach MCP/run; missing, failed, `not connected`, mixed, duplicate, cross-line, same-line multi-status, or trailing-junk MCP status never reaches run; glyph-prefixed exact connected rows pass; only fully isolated exact-count registration reaches the provider/model and only clean isolated refusal reaches two attempts;
-10. hostile provider config retains only provider allowlist fields, validates provider-level and per-model SDK routes against the exact OpenCode `1.18.3` bundled map, forces sharing/update off, installs exactly two local plugins/one local MCP, and replaces permissions with the exact task/bash deny plus execute/LSP/probe allow map and denied-probe rule last;
-11. native-direct LSP smoke command construction never references `dist/cli/ocmm-lsp.js`; strict JSON-RPC rejects missing/`1.0` versions plus prose/wrong-id/error/malformed/missing-tool envelopes and requires all eight canonical names;
+10. hostile provider config retains only provider allowlist fields, validates provider-level and per-model SDK routes against the exact OpenCode `1.18.4` bundled map, forces sharing/update off, installs exactly two local plugins/one local MCP, and replaces permissions with the exact task/bash deny plus execute/LSP/probe allow map and denied-probe rule last;
+11. native-direct LSP smoke command construction never references `dist/cli/ocmm-lsp.js`; strict JSON-RPC rejects missing/`1.0` versions plus prose/wrong-id/error/malformed/missing-tool envelopes and requires the exact eight canonical names, each exactly once, rejecting extras and duplicates;
 12. Scoop shim target hash differs from shim bytes and is selected; malformed/relative/missing-target existing shims fail closed; no-shim direct regular-file hash works;
 13. injected preflight locator timeout, Git failure, direct-smoke malformed/failure, and clean success prove model-attempt count is zero except on the clean path;
 14. structured sanitized DEFER after injected preflight exception;
@@ -305,7 +308,10 @@ The harness must cover:
 24. fail-once primary fixture writing and an actual existing-directory primary produce one `DEFER/fixture-write-failed` fallback receipt after successful cleanup, while the same location failure preserves an existing `FAIL/cleanup-incomplete`;
 25. primary/default/temp writer exhaustion emits no false path-bearing receipt, uses fixed safe stderr only, and preserves DEFER exit `4` or existing cleanup FAIL exit `2` rather than generic exit `3`;
 26. missing, empty, array, malformed/truncated JSON, undeclared selected model, missing explicit SDK identity, dynamic package, `file://`, and unsafe provider-level/per-model SDK routes create zero host commands/attempts and produce provider-unavailable SKIP;
-27. attempt-local nonzero, timeout, another valid host version, malformed, core-leading-zero, numeric-prerelease-leading-zero, or empty-identifier version stops after exactly `--version`, while exactly `1.18.3` reaches the existing clean barrier path; parent preflight likewise creates zero attempts for every other version.
+27. parent and attempt-local nonzero, timeout, another valid host version (including `1.18.3`), malformed, core-leading-zero, numeric-prerelease-leading-zero, or empty-identifier version stop after exactly `--version`, while exactly `1.18.4` reaches the existing clean barrier path; parent preflight likewise creates zero attempts for every other version.
+28. otherwise-PASS facts with null, empty, count-inconsistent, or error-bearing provider-run JSONL aggregates are `FAIL/provider-run-jsonl-invalid`;
+29. direct LSP smoke rejects an extra ninth tool and a duplicated canonical name; and
+30. the tracked sanitized fixture itself remains a complete whitelist-only `PASS/all-required-probes-passed` receipt with exact `1.18.4` / `apai/gpt-5.6-terra`, six non-error JSONL events, three hooks, four metadata entries, MCP `1/1/0`, and complete cleanup.
 
 ---
 
@@ -335,7 +341,7 @@ This review fix changes only the attempt-level ledger completeness boundary; it 
 
 ```powershell
 node --test --experimental-strip-types `
-  --test-name-pattern="OpenCode 1.18.3 provider SDK routes|OpenCode config keeps only provider allowlist|poisoned parent environment|attempt-local environment and allowlisted config|provider preflight rejects|version as a hard barrier|runProbe starts model attempts" `
+  --test-name-pattern="OpenCode 1.18.4 provider SDK routes|OpenCode config keeps only provider allowlist|poisoned parent environment|attempt-local environment and allowlisted config|provider preflight rejects|version as a hard barrier|runProbe starts model attempts" `
   scripts/codemode-execute-compatibility.test.ts
 if ($LASTEXITCODE -ne 0) { throw "current external-review blocker tests failed" }
 ```
@@ -353,7 +359,7 @@ if ($LASTEXITCODE -ne 0) { throw "external-review blocker tests failed" }
 
 ```powershell
 node --test --experimental-strip-types `
-  --test-name-pattern="exact execute code attestation is mandatory for PASS|probe prompt contains the exact one-call CodeMode program|CodeMode denied visibility uses official items/path search results|direct LSP smoke command owns the native binary directly|direct LSP smoke parser accepts only the strict canonical JSON-RPC envelope|runProbe starts model attempts only after every preflight gate passes|nonzero trusted activation ambiguity remains classifiable and forbids retry|featureUnsupported matches only execute itself and trusted unsupported forbids retry|runCommand waits for close and drains inherited descendant output|runCommand never kills an exited child|safe result markers only from authoritative outer phases|OpenCode hashing fails closed for an existing invalid Scoop shim|OpenCode config keeps only provider allowlist|OpenCode 1.18.3 provider SDK routes|poisoned parent environment cannot override isolated child evidence|attempt-local environment and allowlisted config|provider preflight rejects|version as a hard barrier|trace exact-code attestation rejects wrong and missing execute code without leaking values|runAttempt config barrier requires exactly one correct ocmm marker|runAttempt MCP barrier rejects duplicate and cross-line statuses" `
+  --test-name-pattern="exact execute code attestation is mandatory for PASS|probe prompt contains the exact one-call CodeMode program|CodeMode denied visibility uses official items/path search results|direct LSP smoke command owns the native binary directly|direct LSP smoke parser accepts only the strict canonical JSON-RPC envelope|runProbe starts model attempts only after every preflight gate passes|nonzero trusted activation ambiguity remains classifiable and forbids retry|featureUnsupported matches only execute itself and trusted unsupported forbids retry|runCommand waits for close and drains inherited descendant output|runCommand never kills an exited child|safe result markers only from authoritative outer phases|OpenCode hashing fails closed for an existing invalid Scoop shim|OpenCode config keeps only provider allowlist|OpenCode 1.18.4 provider SDK routes|poisoned parent environment cannot override isolated child evidence|attempt-local environment and allowlisted config|provider preflight rejects|version as a hard barrier|trace exact-code attestation rejects wrong and missing execute code without leaking values|runAttempt config barrier requires exactly one correct ocmm marker|runAttempt MCP barrier rejects duplicate and cross-line statuses" `
   scripts/codemode-execute-compatibility.test.ts
 if ($LASTEXITCODE -ne 0) { throw "final-blocker tests failed" }
 ```
@@ -365,7 +371,7 @@ pnpm run typecheck
 if ($LASTEXITCODE -ne 0) { throw "typecheck failed" }
 ```
 
-### Build only when live eligible
+### Isolated build only when live eligible
 
 ```powershell
 $providerConfig = $env:OCMM_CODEMODE_PROVIDER_CONFIG
@@ -373,31 +379,23 @@ $providerModel = $env:OCMM_CODEMODE_MODEL
 $liveEligible = -not [string]::IsNullOrWhiteSpace($providerConfig) -and
   -not [string]::IsNullOrWhiteSpace($providerModel)
 if ($liveEligible) {
-  pnpm run build
-  if ($LASTEXITCODE -ne 0) { throw "build failed" }
-
-  # Task 5 build/wrapper smoke is separate from the live native-direct preflight.
-  $wrapperTools = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist\cli\ocmm-lsp.js mcp
-  if ($LASTEXITCODE -ne 0 -or $wrapperTools -notmatch '"status"') { throw "built LSP wrapper smoke failed" }
+  # Use the guarded disposable-source transaction in the 2026-07-22 migration plan.
+  # Do not write main-repository dist or use its wrapper for live QA.
+  pnpm --dir $tempSource --config.verify-deps-before-run=false run build
+  if ($LASTEXITCODE -ne 0) { throw "isolated build failed" }
 }
 ```
 
-### Real or structured-SKIP CLI
+### Structured-SKIP CLI
 
 ```powershell
-$probeArgs = @("--fixture-out", "scripts/fixtures/opencode-codemode-execute-compatibility.json")
-if (-not [string]::IsNullOrWhiteSpace($env:OCMM_CODEMODE_PROVIDER_CONFIG)) {
-  $probeArgs += @("--provider-config", $env:OCMM_CODEMODE_PROVIDER_CONFIG)
-}
-if (-not [string]::IsNullOrWhiteSpace($env:OCMM_CODEMODE_MODEL)) {
-  $probeArgs += @("--model", $env:OCMM_CODEMODE_MODEL)
-}
+$probeArgs = @()
 node --experimental-strip-types scripts/codemode-execute-compatibility.ts @probeArgs
 $probeExit = $LASTEXITCODE
 if ($probeExit -notin @(0, 2, 3, 4)) { throw "unexpected probe exit: $probeExit" }
 ```
 
-With neither environment variable, require exactly `SKIP:provider-config-unavailable`, exit `3`, `NO-DECISION`, unknown XDG, zero attempts/PIDs, successful parent removal, and no build. This checked fixture is not a live compatibility PASS.
+With neither environment variable, require exactly `SKIP:provider-config-unavailable`, exit `3`, `NO-DECISION`, unknown XDG, zero attempts/PIDs, successful parent removal, and no build. This checked fixture is not a live compatibility PASS. Do not use this command for a provider-backed live run; that run belongs only in the guarded disposable-source transaction.
 
 ### Fixture and residue checks
 
@@ -410,12 +408,16 @@ git diff --check
 git status --short
 ```
 
-For untracked task files, use `git diff --no-index --check -- NUL <path>` and accept exit `1` as “different with no whitespace diagnostics.” Confirm exactly the eight CodeMode paths plus the caller's unrelated two planning-logical-tiers documents, and no protected product/package path. The planning-logical-tiers files are explicitly out of scope and must remain untouched.
+For untracked migration documents, use `git diff --no-index --check -- NUL <path>` and accept exit `1` as “different with no whitespace diagnostics.” Confirm exactly the seven current allowlist paths: the runner, test, sanitized fixture, this spec/plan pair, and the 2026-07-22 migration design/plan pair. Require staged state `0`, no protected product/package/generated path, and no delta to the three executable fixture programs. The planning-logical-tiers files are explicitly out of scope and must remain untouched.
 
 ---
 
 ## Completion Receipt
 
-Report the focused RED failures and final GREEN counts, full harness count (at least 69), typecheck exit, prior applicable timeout/close cleanup stress receipt (do not rerun when process code is unchanged), exact OpenCode `1.18.3` bundled-SDK no-install allowlist, test-home/empty-managed-config/provider-shape/version-barrier evidence, fixture-write fallback/exhaustion receipts, exact live/SKIP line and exit, fixture whitelist/leak results, process/root cleanup counts, documentation synchronization, eight-path scope, excluded planning-logical-tiers paths, and confirmation that no Git write occurred. A unit-test GREEN or structured SKIP is not a live compatibility PASS.
+### Post-live evidence hardening receipt
 
-Current revision receipt: the historical RED was `0/5` for the original five-test blocker set, while the current external-review focused command is GREEN at `7/7`; focused compatibility QA is `21/21`. The missing-ledger review regression was RED at `0/1` under the old connected-only rule and is GREEN together with the pre-MCP control at `2/2`; the full harness is `69/69`; typecheck exits `0`. No caller provider/model is present, so build/provider execution is skipped and the real CLI emits exactly one `SKIP:provider-config-unavailable` receipt with exit `3`, zero cleanup-residue lines, sanitized fixture cleanup complete, and zero task-owned Node/`taskkill.exe` residue. This is NO DECISION, not PASS.
+The JSONL PASS matrix and exact-eight direct-LSP cases were RED before their minimal runner guards: tampered/null JSONL facts still produced PASS, and an extra tool was accepted. The guards are now GREEN without relaxing the strict JSONL parser or JSON-RPC envelope. A separate tracked-fixture regression remains GREEN because it reads the existing sanitized fixture and confirms its exact top-level and nested schemas plus every retained PASS field, including host platform/revision/dirty-state/feature flag, `deniedTool`, and `allNestedToolsIdentified`. No provider/model call was needed. The post-hardening full harness remains `75/75`; the earlier `74/74` text below is historical pre-hardening evidence.
+
+Report the focused RED failures and final GREEN counts, full harness count, typecheck exit, prior applicable timeout/close cleanup stress receipt (do not rerun when process code is unchanged), exact OpenCode `1.18.4` bundled-SDK no-install allowlist, test-home/empty-managed-config/provider-shape/version-barrier evidence, fixture-write fallback/exhaustion receipts, exact live receipt and exit, fixture whitelist/leak results, process/root cleanup counts, documentation synchronization, seven-path scope, and confirmation that no Git write occurred. A unit-test GREEN or structured SKIP/DEFER is not a live compatibility PASS.
+
+Current revision receipt: historical RED/GREEN and process-stress receipts remain applicable. Task 1's exact-`1.18.4` migration was RED before the new version/provider/JSONL/hook-metadata assertions and GREEN at `73/73`; that unit-test GREEN was not a live PASS. Task 2 safely parsed the known JSONC source into an ephemeral apai-only strict-JSON config, retained only `$schema` and valid enabled/disabled provider arrays where present, and validated the unchanged exact 24-item no-install SDK map without exposing provider content. A disposable current-source build succeeded through a verified junction and the built wrapper exposed exactly eight canonical tools. The initial isolated run truthfully returned `DEFER:unclassifiable-output`, exit `4`: `OCMM_DEBUG="1"` allowed ocmm plugin info diagnostics onto provider-run stdout, so the unchanged strict JSONL parser correctly rejected that mixed stream. The required RED test recorded barrier debug `1`, provider-run debug `1`, and null JSONL facts. The minimal seam fix gives only provider `run` a copied environment with `OCMM_DEBUG="0"`; all barriers remain at `1`, raw capture and cleanup are unchanged, and no parser/filter/product-runtime behavior changed. The focused RED-to-GREEN regression and the unchanged strict parser pass. The one toggle-proof rerun emitted exactly `PASS:all-required-probes-passed`, exit `0`, for host `1.18.4` / `apai/gpt-5.6-terra` (host SHA-256 `59b66e1983b2665b498f234a17bf92e78e0e9e3f8c77406edf8dcf3e6239ee5c`): isolated XDG/project config; ocmm/LSP/probe registration; eight-tool direct smoke; one outer before/after pair with exact code; strict JSONL facts `6/6/6/0` and event sequence `step_start`, `tool_use`, `step_finish`, `step_start`, `text`, `step_finish`; three nested hooks; four completed metadata tools including `$codemode_search`; MCP counts `1/1/0`; and denied tool hidden/not called. The validated sanitized temp-source fixture refreshed the tracked fixture only after anchored receipt/exit, lexical/resolved containment, schema, version/model, and leak checks. Cleanup recorded one attempt, `16` tracked PIDs, zero remaining, one removed attempt root, and removed parent root; all raw/provider/build/junction/fallback/run-root/process state was removed. The final full harness is `74/74` and typecheck passes with ambient profile controls removed. No install, process kill, stage, commit, push, or tag occurred.

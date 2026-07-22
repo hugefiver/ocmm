@@ -1,63 +1,91 @@
 {
   "schemaVersion": 1,
-  "status": "SKIP",
-  "reasonCode": "provider-config-unavailable",
-  "goNoGo": "NO-DECISION",
+  "status": "PASS",
+  "reasonCode": "all-required-probes-passed",
+  "goNoGo": "GO",
   "host": {
-    "openCodeVersion": null,
-    "openCodeSha256": null,
+    "openCodeVersion": "1.18.4",
+    "openCodeSha256": "59b66e1983b2665b498f234a17bf92e78e0e9e3f8c77406edf8dcf3e6239ee5c",
     "platform": "win32-x64",
-    "providerModel": null,
-    "ocmmRevision": null,
-    "worktreeDirty": false,
+    "providerModel": "apai/gpt-5.6-terra",
+    "ocmmRevision": "15404c9",
+    "worktreeDirty": true,
     "featureFlag": "OPENCODE_EXPERIMENTAL_CODE_MODE"
   },
   "isolation": {
-    "xdgState": "unknown",
-    "projectConfigIsolated": false
+    "xdgState": "isolated",
+    "projectConfigIsolated": true
   },
   "registration": {
-    "ocmmLoaded": false,
-    "lspConnected": false,
-    "probeConnected": false,
-    "directLspSmoke": false
+    "ocmmLoaded": true,
+    "lspConnected": true,
+    "probeConnected": true,
+    "directLspSmoke": true
   },
   "execute": {
-    "outerBeforeCount": 0,
-    "outerAfterCount": 0,
-    "argumentKeys": [],
+    "outerBeforeCount": 1,
+    "outerAfterCount": 1,
+    "argumentKeys": [
+      "code"
+    ],
     "timedOut": false,
     "permissionBlocked": false,
     "outputClassifiable": true,
-    "exactCode": false,
-    "executeProbeMarker": false,
-    "lspOk": false,
-    "identityOk": false,
-    "hookPayloadOk": false,
+    "outputJsonlFacts": {
+      "eventCount": 6,
+      "eventTypes": [
+        "step_start",
+        "tool_use",
+        "step_finish",
+        "step_start",
+        "text",
+        "step_finish"
+      ],
+      "nonErrorPartCount": 6,
+      "errorEventCount": 0
+    },
+    "exactCode": true,
+    "executeProbeMarker": true,
+    "lspOk": true,
+    "identityOk": true,
+    "hookPayloadOk": true,
     "emittedTask": false
   },
   "permissions": {
     "deniedTool": "codemode_probe_denied",
-    "deniedHidden": false,
+    "deniedHidden": true,
     "deniedCalled": false
   },
   "hooks": {
-    "nestedBefore": [],
-    "nestedAfter": [],
-    "completedMetadataTools": [],
-    "allNestedToolsIdentified": false
+    "nestedBefore": [
+      "codemode_probe_identity",
+      "codemode_probe_json_error",
+      "lsp_status"
+    ],
+    "nestedAfter": [
+      "codemode_probe_identity",
+      "codemode_probe_json_error",
+      "lsp_status"
+    ],
+    "completedMetadataTools": [
+      "$codemode_search",
+      "codemode_probe_identity",
+      "codemode_probe_json_error",
+      "lsp_status"
+    ],
+    "allNestedToolsIdentified": true
   },
   "mcp": {
-    "identityCount": 0,
-    "jsonErrorCount": 0,
+    "identityCount": 1,
+    "jsonErrorCount": 1,
     "deniedCount": 0
   },
   "cleanup": {
-    "attemptCount": 0,
+    "attemptCount": 1,
     "pidLedgerComplete": true,
-    "trackedPids": 0,
+    "trackedPids": 16,
     "remainingPids": 0,
-    "attemptRootsRemoved": 0,
+    "attemptRootsRemoved": 1,
     "removalAttempted": true,
     "removalFailed": false,
     "parentRootRemoved": true

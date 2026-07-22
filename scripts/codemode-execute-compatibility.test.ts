@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { ChildProcess, spawn } from "node:child_process"
 import test from "node:test"
 
+import * as compatibilityRunner from "./codemode-execute-compatibility.ts"
 import {
   buildChildEnvironment,
   buildDirectLspSmokeCommand,
@@ -18,7 +19,6 @@ import {
   cleanupRunTopology,
   deniedToolVisible,
   hashOpenCodeExecutable,
-  OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS,
   parseCliOptions,
   parseDirectLspToolsList,
   parseHostSignals,
@@ -53,7 +53,7 @@ function validProviderConfig(extra: Record<string, unknown> = {}): Record<string
   }
 }
 
-const EXPECTED_OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS = [
+const EXPECTED_OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS = [
   "@ai-sdk/amazon-bedrock",
   "@ai-sdk/amazon-bedrock/mantle",
   "@ai-sdk/anthropic",
@@ -80,12 +80,72 @@ const EXPECTED_OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS = [
   "venice-ai-sdk-provider",
 ] as const
 
+test("OpenCode 1.18.4 exports the exact version and bundled provider baseline", () => {
+  const exports = compatibilityRunner as unknown as Record<string, unknown>
+  assert.equal(exports.SUPPORTED_OPENCODE_VERSION, "1.18.4")
+  assert.deepEqual(
+    exports.OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS,
+    EXPECTED_OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS,
+  )
+  assert.equal(Object.hasOwn(exports, "OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS"), false)
+})
+
+test("strict CodeMode JSONL parser returns only safe structural facts", () => {
+  const parser = (compatibilityRunner as unknown as {
+    parseOpenCodeRunJsonl?: (text: string) => unknown
+  }).parseOpenCodeRunJsonl
+  assert.equal(typeof parser, "function")
+  if (typeof parser !== "function") return
+
+  const event = (type: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    type,
+    timestamp: 1_725_000_000,
+    sessionID: "private-session-id",
+    ...(type === "error" ? { error: { message: "private error" } } : { part: { type: "text" } }),
+    ...extra,
+  })
+  const validTypes = ["tool_use", "step_start", "step_finish", "text", "reasoning", "error"]
+  const valid = validTypes.map((type) => JSON.stringify(event(type))).join("\r\n \r\n")
+  assert.deepEqual(parser(valid), {
+    eventCount: 6,
+    eventTypes: validTypes,
+    nonErrorPartCount: 5,
+    errorEventCount: 1,
+  })
+  const serialized = JSON.stringify(parser(valid))
+  assert.doesNotMatch(serialized, /private-session-id|1725000000|private error|session|timestamp/i)
+
+  const invalid = [
+    "",
+    " \r\n\t",
+    "not-json",
+    "[]",
+    "null",
+    JSON.stringify(event("unknown")),
+    JSON.stringify({ type: "text", sessionID: "private-session-id", part: {} }),
+    JSON.stringify(event("text", { timestamp: null })),
+    JSON.stringify(event("text", { timestamp: "1" })),
+    JSON.stringify({ type: "text", timestamp: 1, part: {} }),
+    JSON.stringify(event("text", { sessionID: "   " })),
+    JSON.stringify({ type: "text", timestamp: 1, sessionID: "private-session-id" }),
+    JSON.stringify(event("text", { part: [] })),
+    JSON.stringify({ type: "error", timestamp: 1, sessionID: "private-session-id" }),
+  ]
+  for (const text of invalid) assert.equal(parser(text), null, text)
+})
+
 function barrierPathsFor(root: string): string {
   return BARRIER_XDG_LABELS.map((label) => `${label}  ${join(root, label)}`).join("\n")
 }
 
 function isolatedConfigFor(root: string): string {
   return `[ocmm] config loaded: project=${join(root, ".opencode", "ocmm.jsonc")}, user=<none>`
+}
+
+function environmentFingerprint(env: NodeJS.ProcessEnv): string {
+  return createHash("sha256")
+    .update(JSON.stringify(Object.entries(env).sort(([left], [right]) => left.localeCompare(right))))
+    .digest("hex")
 }
 
 async function runBarrierCase(
@@ -103,7 +163,7 @@ async function runBarrierCase(
     let stage = "unknown"
     if (args[0] === "--version") {
       stage = "version"
-      stdout = "1.18.3\n"
+      stdout = "1.18.4\n"
     } else if (args[0] === "debug" && args[1] === "paths") {
       stage = "paths"
       stdout = pathsText
@@ -115,7 +175,7 @@ async function runBarrierCase(
       stdout = mcpText
     } else if (args[0] === "run") {
       stage = "run"
-      stdout = `${JSON.stringify({ type: "text", part: { type: "text" } })}\n`
+      stdout = `${JSON.stringify({ type: "text", timestamp: 1, sessionID: "test-session", part: { type: "text" } })}\n`
     }
     calls.push(stage)
     return { exitCode: 0, stdout, stderr: "", timedOut: false, pid: null }
@@ -222,7 +282,7 @@ function passingFacts(): NormalizedFacts {
   return {
     host: {
       openCodeAvailable: true,
-      openCodeVersion: "1.18.3",
+      openCodeVersion: "1.18.4",
       openCodeSha256: "a".repeat(64),
       platform: "win32-x64",
       providerModel: "test/model",
@@ -249,6 +309,12 @@ function passingFacts(): NormalizedFacts {
       timedOut: false,
       permissionBlocked: false,
       outputClassifiable: true,
+      outputJsonlFacts: {
+        eventCount: 1,
+        eventTypes: ["text"],
+        nonErrorPartCount: 1,
+        errorEventCount: 0,
+      },
       outerBeforeCount: 1,
       outerAfterCount: 1,
       outerArgumentKeys: ["code"],
@@ -264,7 +330,7 @@ function passingFacts(): NormalizedFacts {
       nestedBefore: [...REQUIRED],
       nestedAfter: [...REQUIRED],
       allNestedCallIdsPresent: true,
-      completedMetadataTools: [...REQUIRED],
+      completedMetadataTools: ["$codemode_search", ...REQUIRED],
     },
     mcpEvents: ["tools/call:identity", "tools/call:json_error"],
     cleanup: {
@@ -311,6 +377,7 @@ function nonPassingBaseline(): NormalizedFacts {
       timedOut: false,
       permissionBlocked: false,
       outputClassifiable: true,
+      outputJsonlFacts: null,
       outerBeforeCount: 0,
       outerAfterCount: 0,
       outerArgumentKeys: [],
@@ -400,6 +467,22 @@ test("classifyProbe emits stable FAIL reasons for compatibility defects", () => 
     ["probe-mcp-not-connected", (f) => { f.registration.probeConnected = false }],
     ["execute-hook-count-invalid", (f) => { f.execute.outerAfterCount = 0 }],
     ["nested-hook-count-invalid", (f) => { f.hooks.nestedAfter = ["lsp_status"] }],
+    ["provider-run-jsonl-invalid", (f) => { f.execute.outputJsonlFacts = null }],
+    ["provider-run-jsonl-invalid", (f) => {
+      f.execute.outputJsonlFacts = { eventCount: 0, eventTypes: [], nonErrorPartCount: 0, errorEventCount: 0 }
+    }],
+    ["provider-run-jsonl-invalid", (f) => {
+      f.execute.outputJsonlFacts = { eventCount: 2, eventTypes: ["text"], nonErrorPartCount: 2, errorEventCount: 0 }
+    }],
+    ["provider-run-jsonl-invalid", (f) => {
+      f.execute.outputJsonlFacts = { eventCount: 2, eventTypes: ["text", "step_finish"], nonErrorPartCount: 1, errorEventCount: 0 }
+    }],
+    ["provider-run-jsonl-invalid", (f) => {
+      f.execute.outputJsonlFacts = { eventCount: 1, eventTypes: ["text"], nonErrorPartCount: 0, errorEventCount: 1 }
+    }],
+    ["provider-run-jsonl-invalid", (f) => {
+      f.execute.outputJsonlFacts = { eventCount: 1, eventTypes: ["error"], nonErrorPartCount: 0, errorEventCount: 1 }
+    }],
     ["nested-mcp-count-invalid", (f) => { f.mcpEvents = ["tools/call:identity"] }],
     ["nested-call-id-missing", (f) => { f.hooks.allNestedCallIdsPresent = false }],
     ["denied-tool-visible-or-called", (f) => { f.execute.deniedHidden = false }],
@@ -552,6 +635,41 @@ test("PASS rejects duplicate required calls and hook evidence", () => {
   assert.equal(classifyProbe(duplicateOuter).reasonCode, "execute-hook-count-invalid")
 })
 
+test("nested hooks and completed metadata have separate exact CodeMode contracts", () => {
+  const requiredMetadata = ["$codemode_search", ...REQUIRED]
+  const passing = passingFacts()
+  assert.deepEqual(passing.hooks.nestedBefore, REQUIRED)
+  assert.deepEqual(passing.hooks.nestedAfter, REQUIRED)
+  assert.deepEqual(passing.hooks.completedMetadataTools, requiredMetadata)
+  assert.equal(classifyProbe(passing).status, "PASS")
+
+  for (const field of ["nestedBefore", "nestedAfter", "completedMetadataTools"] as const) {
+    for (const [shape, mutate] of [
+      ["missing", (values: string[]) => values.slice(1)],
+      ["duplicate", (values: string[]) => [...values, values[0]!]],
+      ["extra", (values: string[]) => [...values, "unexpected_tool"]],
+    ] as const) {
+      const facts = passingFacts()
+      facts.hooks[field] = mutate(facts.hooks[field])
+      assert.notEqual(classifyProbe(facts).status, "PASS", `${field} ${shape}`)
+    }
+  }
+
+  const trace = parseHookTrace([
+    { phase: "before", tool: "execute", hasSessionID: true, hasCallID: true, argumentKeys: ["code"], nestedStatuses: [], safeMarkers: {} },
+    ...REQUIRED.map((tool) => ({ phase: "before", tool, hasSessionID: true, hasCallID: true, argumentKeys: [], nestedStatuses: [], safeMarkers: {} })),
+    ...REQUIRED.map((tool) => ({ phase: "after", tool, hasSessionID: true, hasCallID: true, argumentKeys: [], nestedStatuses: [], safeMarkers: {} })),
+    {
+      phase: "after", tool: "execute", hasSessionID: true, hasCallID: true, argumentKeys: [],
+      nestedStatuses: requiredMetadata.map((tool) => ({ tool, status: "completed" })), safeMarkers: {},
+    },
+  ].map((row) => JSON.stringify(row)).join("\n"))
+  assert.deepEqual(trace.nestedBefore, REQUIRED)
+  assert.deepEqual(trace.nestedAfter, REQUIRED)
+  assert.deepEqual(trace.completedMetadataTools, requiredMetadata)
+  assert.equal(trace.nestedAfter.includes("$codemode_search"), false)
+})
+
 test("safety failures override feature SKIP and DEFER", () => {
   const facts = passingFacts()
   facts.execute.featureUnsupported = true
@@ -695,6 +813,126 @@ test("direct LSP smoke parser accepts only the strict canonical JSON-RPC envelop
   assert.equal(parseDirectLspToolsList(JSON.stringify({
     jsonrpc: "2.0", id: 1, result: { tools: DIRECT_LSP_TOOL_NAMES.filter((name) => name !== "find_symbol_related").map((name) => ({ name })) },
   })), false)
+  assert.equal(parseDirectLspToolsList(JSON.stringify({
+    jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES, "unexpected_tool"].map((name) => ({ name })) },
+  })), false)
+  assert.equal(parseDirectLspToolsList(JSON.stringify({
+    jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES.slice(0, 7), "rename", "rename"].map((name) => ({ name })) },
+  })), false)
+})
+
+test("tracked CodeMode compatibility fixture is a complete sanitized PASS receipt", () => {
+  const fixtureText = readFileSync(join(FIXTURES_ROOT, "opencode-codemode-execute-compatibility.json"), "utf8")
+  assert.doesNotMatch(
+    fixtureText,
+    /api[ _-]?key|authorization|bearer\s+|session[ _-]?id|call[ _-]?id|\b(?:sk-|ghp_|AKIA|xox[bpars]-)|[A-Za-z]:[\\/]|\\\\|\/(?:home|Users|tmp)\//i,
+  )
+  const assertRecord = (value: unknown, name: string): Record<string, unknown> => {
+    assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${name} must be an object`)
+    return value as Record<string, unknown>
+  }
+  const assertExactKeys = (value: Record<string, unknown>, expected: string[]): void => {
+    assert.deepEqual(Object.keys(value).sort(), [...expected].sort())
+  }
+  const fixture = assertRecord(JSON.parse(fixtureText), "fixture")
+
+  const assertNoUnsafeFields = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(assertNoUnsafeFields)
+      return
+    }
+    if (value === null || typeof value !== "object") return
+    for (const [key, nested] of Object.entries(value)) {
+      assert.doesNotMatch(
+        key,
+        /^(?:api(?:_|-)?key|authorization|session(?:_|-)?id|call(?:_|-)?id|path|raw(?:_|-)?(?:output|log)|stdout|stderr)$/i,
+      )
+      assertNoUnsafeFields(nested)
+    }
+  }
+
+  assertExactKeys(fixture, [
+    "cleanup", "execute", "goNoGo", "hooks", "host", "isolation", "mcp", "permissions", "reasonCode", "registration", "schemaVersion", "status",
+  ])
+  assertNoUnsafeFields(fixture)
+  const host = assertRecord(fixture.host, "fixture.host")
+  const isolation = assertRecord(fixture.isolation, "fixture.isolation")
+  const registration = assertRecord(fixture.registration, "fixture.registration")
+  const execute = assertRecord(fixture.execute, "fixture.execute")
+  const outputJsonlFacts = assertRecord(execute.outputJsonlFacts, "fixture.execute.outputJsonlFacts")
+  const permissions = assertRecord(fixture.permissions, "fixture.permissions")
+  const hooks = assertRecord(fixture.hooks, "fixture.hooks")
+  const mcp = assertRecord(fixture.mcp, "fixture.mcp")
+  const cleanup = assertRecord(fixture.cleanup, "fixture.cleanup")
+  assertExactKeys(host, ["featureFlag", "ocmmRevision", "openCodeSha256", "openCodeVersion", "platform", "providerModel", "worktreeDirty"])
+  assertExactKeys(isolation, ["projectConfigIsolated", "xdgState"])
+  assertExactKeys(registration, ["directLspSmoke", "lspConnected", "ocmmLoaded", "probeConnected"])
+  assertExactKeys(execute, [
+    "argumentKeys", "emittedTask", "exactCode", "executeProbeMarker", "hookPayloadOk", "identityOk", "lspOk", "outerAfterCount", "outerBeforeCount", "outputClassifiable", "outputJsonlFacts", "permissionBlocked", "timedOut",
+  ])
+  assertExactKeys(outputJsonlFacts, ["errorEventCount", "eventCount", "eventTypes", "nonErrorPartCount"])
+  assertExactKeys(permissions, ["deniedCalled", "deniedHidden", "deniedTool"])
+  assertExactKeys(hooks, ["allNestedToolsIdentified", "completedMetadataTools", "nestedAfter", "nestedBefore"])
+  assertExactKeys(mcp, ["deniedCount", "identityCount", "jsonErrorCount"])
+  assertExactKeys(cleanup, ["attemptCount", "attemptRootsRemoved", "parentRootRemoved", "pidLedgerComplete", "remainingPids", "removalAttempted", "removalFailed", "trackedPids"])
+  assert.equal(fixture.schemaVersion, 1)
+  assert.equal(fixture.status, "PASS")
+  assert.equal(fixture.reasonCode, "all-required-probes-passed")
+  assert.equal(fixture.goNoGo, "GO")
+  assert.equal(host.openCodeVersion, "1.18.4")
+  assert.equal(host.platform, "win32-x64")
+  assert.equal(host.providerModel, "apai/gpt-5.6-terra")
+  assert.match(String(host.openCodeSha256), /^[a-f0-9]{64}$/i)
+  assert.match(String(host.ocmmRevision), /^[a-f0-9]{4,40}$/i)
+  assert.equal(host.worktreeDirty, true)
+  assert.equal(host.featureFlag, "OPENCODE_EXPERIMENTAL_CODE_MODE")
+  assert.equal(isolation.xdgState, "isolated")
+  assert.equal(isolation.projectConfigIsolated, true)
+  assert.equal(registration.ocmmLoaded, true)
+  assert.equal(registration.lspConnected, true)
+  assert.equal(registration.probeConnected, true)
+  assert.equal(registration.directLspSmoke, true)
+  assert.equal(execute.outerBeforeCount, 1)
+  assert.equal(execute.outerAfterCount, 1)
+  assert.ok(Array.isArray(execute.argumentKeys))
+  assert.deepEqual(execute.argumentKeys, ["code"])
+  assert.equal(execute.timedOut, false)
+  assert.equal(execute.permissionBlocked, false)
+  assert.equal(execute.outputClassifiable, true)
+  assert.ok(Array.isArray(outputJsonlFacts.eventTypes))
+  assert.deepEqual(outputJsonlFacts, {
+    eventCount: 6,
+    eventTypes: ["step_start", "tool_use", "step_finish", "step_start", "text", "step_finish"],
+    nonErrorPartCount: 6,
+    errorEventCount: 0,
+  })
+  assert.equal(execute.exactCode, true)
+  assert.equal(execute.executeProbeMarker, true)
+  assert.equal(execute.lspOk, true)
+  assert.equal(execute.identityOk, true)
+  assert.equal(execute.hookPayloadOk, true)
+  assert.equal(execute.emittedTask, false)
+  assert.equal(permissions.deniedTool, "codemode_probe_denied")
+  assert.equal(permissions.deniedHidden, true)
+  assert.equal(permissions.deniedCalled, false)
+  assert.ok(Array.isArray(hooks.nestedBefore))
+  assert.ok(Array.isArray(hooks.nestedAfter))
+  assert.ok(Array.isArray(hooks.completedMetadataTools))
+  assert.deepEqual([...hooks.nestedBefore].sort(), [...REQUIRED].sort())
+  assert.deepEqual([...hooks.nestedAfter].sort(), [...REQUIRED].sort())
+  assert.deepEqual([...hooks.completedMetadataTools].sort(), ["$codemode_search", ...REQUIRED].sort())
+  assert.equal(hooks.allNestedToolsIdentified, true)
+  assert.equal(mcp.identityCount, 1)
+  assert.equal(mcp.jsonErrorCount, 1)
+  assert.equal(mcp.deniedCount, 0)
+  assert.equal(cleanup.attemptCount, 1)
+  assert.equal(cleanup.pidLedgerComplete, true)
+  assert.ok(Number(cleanup.trackedPids) > 0)
+  assert.equal(cleanup.remainingPids, 0)
+  assert.equal(cleanup.attemptRootsRemoved, 1)
+  assert.equal(cleanup.removalAttempted, true)
+  assert.equal(cleanup.removalFailed, false)
+  assert.equal(cleanup.parentRootRemoved, true)
 })
 
 test("runProbe starts model attempts only after every preflight gate passes", async () => {
@@ -716,7 +954,7 @@ test("runProbe starts model attempts only after every preflight gate passes", as
         if (args[0] === "--version") {
           return {
             exitCode: 0,
-            stdout: scenario.name === "unsupported-version" ? "1.18.4\n" : "1.18.3\n",
+            stdout: scenario.name === "unsupported-version" ? "1.18.3\n" : "1.18.4\n",
             stderr: "",
             timedOut: false,
             pid: null,
@@ -768,6 +1006,73 @@ test("runProbe starts model attempts only after every preflight gate passes", as
         assert.equal(outcome.result.reasonCode, "direct-lsp-smoke-failed")
       }
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("runProbe parent version barrier stops 1.18.3 before every later preflight surface", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-parent-version-barrier-"))
+  const provider = join(root, "provider.json")
+  writeFileSync(provider, JSON.stringify(validProviderConfig()))
+  try {
+    const runVersion = async (version: string): Promise<{
+      calls: string[]
+      stdout: string[]
+      outcome: Awaited<ReturnType<typeof runProbe>>
+    }> => {
+      const calls: string[] = []
+      const stdout: string[] = []
+      const outcome = await runProbe({
+        providerConfig: provider,
+        model: "test/model",
+        fixtureOut: join(root, `version-${version}.json`),
+        opencode: "opencode",
+        timeoutMs: 1000,
+      }, {
+        runCommand: async (command, args): Promise<CommandResult> => {
+          if (args[0] === "--version") {
+            calls.push("version")
+            return { exitCode: 0, stdout: `${version}\n`, stderr: "", timedOut: false, pid: null }
+          }
+          if (/where\.exe$/i.test(command)) {
+            calls.push("location")
+            return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
+          }
+          if (command === "git" && args[0] === "rev-parse") {
+            calls.push("revision")
+            return { exitCode: 0, stdout: "abcdef1\n", stderr: "", timedOut: false, pid: null }
+          }
+          if (command === "git" && args[0] === "status") {
+            calls.push("dirty")
+            return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: null }
+          }
+          calls.push("direct-lsp")
+          return { exitCode: 0, stdout: directLspResponse(), stderr: "", timedOut: false, pid: null }
+        },
+        runAttempt: async (context) => {
+          calls.push("attempt")
+          return attemptRecordFor(context)
+        },
+        writeStdout: (text) => stdout.push(text),
+        writeStderr: () => undefined,
+      })
+      return { calls, stdout, outcome }
+    }
+
+    const unsupported = await runVersion("1.18.3")
+    assert.deepEqual(unsupported.calls, ["version"])
+    assert.deepEqual(unsupported.outcome.result, {
+      status: "DEFER",
+      reasonCode: "unclassifiable-output",
+      exitCode: 4,
+      goNoGo: "NO-DECISION",
+    })
+    assert.equal(unsupported.outcome.facts.cleanup.parentRootRemoved, true)
+    assert.equal(unsupported.stdout.filter((line) => line.startsWith("OCMM_CODEMODE_RESULT=")).length, 1)
+
+    const supported = await runVersion("1.18.4")
+    assert.deepEqual(supported.calls.slice(0, 4), ["version", "location", "revision", "dirty"])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -842,14 +1147,14 @@ test("runAttempt treats version as a hard barrier before paths config MCP and pr
   writeFileSync(providerConfig, JSON.stringify(validProviderConfig()))
   try {
     const scenarios = [
-      { name: "nonzero", version: { exitCode: 1, stdout: "1.18.3\n", stderr: "fatal", timedOut: false, pid: null }, expected: ["version"] },
+      { name: "nonzero", version: { exitCode: 1, stdout: "1.18.4\n", stderr: "fatal", timedOut: false, pid: null }, expected: ["version"] },
       { name: "malformed", version: { exitCode: 0, stdout: "OpenCode current\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
       { name: "leading-zero-core", version: { exitCode: 0, stdout: "01.2.3\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
       { name: "leading-zero-prerelease", version: { exitCode: 0, stdout: "1.2.3-01\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
       { name: "empty-prerelease-identifier", version: { exitCode: 0, stdout: "1.2.3-alpha..1\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
-      { name: "unsupported-host-version", version: { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
-      { name: "timeout", version: { exitCode: null, stdout: "1.18.3\n", stderr: "", timedOut: true, pid: null }, expected: ["version"] },
-      { name: "clean", version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }, expected: ["version", "paths", "config", "mcp", "run"] },
+      { name: "unsupported-host-version", version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }, expected: ["version"] },
+      { name: "timeout", version: { exitCode: null, stdout: "1.18.4\n", stderr: "", timedOut: true, pid: null }, expected: ["version"] },
+      { name: "clean", version: { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }, expected: ["version", "paths", "config", "mcp", "run"] },
     ] as const
     for (const scenario of scenarios) {
       const rootPath = join(parentRoot, scenario.name)
@@ -879,7 +1184,7 @@ test("runAttempt treats version as a hard barrier before paths config MCP and pr
         calls.push("run")
         return {
           exitCode: 0,
-          stdout: `${JSON.stringify({ type: "text", part: { type: "text" } })}\n`,
+          stdout: `${JSON.stringify({ type: "text", timestamp: 1, sessionID: "test-session", part: { type: "text" } })}\n`,
           stderr: "",
           timedOut: false,
           pid: null,
@@ -903,14 +1208,98 @@ test("runAttempt treats version as a hard barrier before paths config MCP and pr
       if (scenario.expected.length === 1) {
         assert.equal(attempt.cleanup.pidLedgerComplete, true, scenario.name)
       }
+      if (scenario.name === "clean") {
+        assert.deepEqual(attempt.facts.execute.outputJsonlFacts, {
+          eventCount: 1,
+          eventTypes: ["text"],
+          nonErrorPartCount: 1,
+          errorEventCount: 0,
+        })
+        assert.doesNotMatch(JSON.stringify(attempt.facts.execute.outputJsonlFacts), /test-session|timestamp|session/i)
+      }
       if (scenario.name !== "clean") {
         const unsupportedVersion = scenario.name === "unsupported-host-version"
         assert.equal(attempt.facts.host.openCodeAvailable, unsupportedVersion, scenario.name)
-        assert.equal(attempt.facts.host.openCodeVersion, unsupportedVersion ? "1.18.4" : null, scenario.name)
+        assert.equal(attempt.facts.host.openCodeVersion, unsupportedVersion ? "1.18.3" : null, scenario.name)
         assert.equal(attempt.facts.registration.ocmmLoaded, false, scenario.name)
         assert.equal(attempt.facts.registration.lspConnected, false, scenario.name)
       }
     }
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true })
+  }
+})
+
+test("provider run disables plugin debug so JSONL stdout remains parseable", async () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), "ocmm-codemode-provider-debug-"))
+  const providerConfig = join(parentRoot, "provider.json")
+  const baseEnvironmentFingerprint = environmentFingerprint(process.env)
+  writeFileSync(providerConfig, JSON.stringify(validProviderConfig()))
+  try {
+    const rootPath = join(parentRoot, "attempt")
+    const debugByStage: Record<string, string | undefined> = {}
+    const validEvent = JSON.stringify({
+      type: "text",
+      timestamp: 1,
+      sessionID: "test-session",
+      part: { type: "text" },
+    })
+    const attempt = await runAttempt({
+      id: "attempt-1",
+      rootPath,
+      options: {
+        providerConfig,
+        model: "test/model",
+        fixtureOut: join(parentRoot, "unused.json"),
+        opencode: "opencode",
+        timeoutMs: 1000,
+      },
+      nativeLspPath: process.execPath,
+      runCommand: async (_command, args, commandOptions): Promise<CommandResult> => {
+        const stage = args[0] === "--version"
+          ? "version"
+          : args[0] === "debug" && args[1] === "paths"
+            ? "paths"
+            : args[0] === "debug" && args[1] === "config"
+              ? "config"
+              : args[0] === "mcp"
+                ? "mcp"
+                : "run"
+        debugByStage[stage] = commandOptions.env.OCMM_DEBUG
+        if (stage === "version") {
+          return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
+        }
+        if (stage === "paths") {
+          return { exitCode: 0, stdout: barrierPathsFor(rootPath), stderr: "", timedOut: false, pid: null }
+        }
+        if (stage === "config") {
+          return { exitCode: 0, stdout: isolatedConfigFor(rootPath), stderr: "", timedOut: false, pid: null }
+        }
+        if (stage === "mcp") {
+          return { exitCode: 0, stdout: "● lsp connected\n● codemode_probe connected", stderr: "", timedOut: false, pid: null }
+        }
+        const stdout = commandOptions.env.OCMM_DEBUG === "1"
+          ? `[ocmm] provider debug diagnostic\n${validEvent}\n`
+          : `${validEvent}\n`
+        return { exitCode: 0, stdout, stderr: "", timedOut: false, pid: null }
+      },
+    })
+
+    assert.deepEqual({
+      barrierDebug: [debugByStage.version, debugByStage.paths, debugByStage.config, debugByStage.mcp],
+      runDebug: debugByStage.run,
+      outputJsonlFacts: attempt.facts.execute.outputJsonlFacts,
+    }, {
+      barrierDebug: ["1", "1", "1", "1"],
+      runDebug: "0",
+      outputJsonlFacts: {
+        eventCount: 1,
+        eventTypes: ["text"],
+        nonErrorPartCount: 1,
+        errorEventCount: 0,
+      },
+    })
+    assert.equal(environmentFingerprint(process.env), baseEnvironmentFingerprint)
   } finally {
     rmSync(parentRoot, { recursive: true, force: true })
   }
@@ -1008,8 +1397,8 @@ test("pre-MCP barriers allow absent ownership ledgers", async () => {
   try {
     const cases = [
       { name: "version", expected: ["version"], version: { exitCode: 1, stdout: "", stderr: "", timedOut: false, pid: null } },
-      { name: "paths", expected: ["version", "paths"], version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null } },
-      { name: "config", expected: ["version", "paths", "config"], version: { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null } },
+      { name: "paths", expected: ["version", "paths"], version: { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null } },
+      { name: "config", expected: ["version", "paths", "config"], version: { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null } },
     ] as const
     for (const scenario of cases) {
       const rootPath = join(parentRoot, scenario.name)
@@ -1270,18 +1659,21 @@ test("OpenCode config keeps only provider allowlist and exact isolated probe sur
   }
 })
 
-test("OpenCode 1.18.3 provider SDK routes are limited to the bundled no-install map", () => {
+test("OpenCode 1.18.4 provider SDK routes are limited to the bundled no-install map", () => {
   const options = {
     ocmmPlugin: "C:\\repo\\dist\\index.js",
     tracePlugin: "C:\\repo\\scripts\\fixtures\\codemode-execute-hook-trace-plugin.mjs",
     nodePath: "C:\\node.exe",
     probeMcp: "C:\\repo\\scripts\\fixtures\\codemode-execute-probe-mcp.mjs",
   }
+  const bundledProviderNpmIds = (compatibilityRunner as unknown as {
+    OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS: readonly string[]
+  }).OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS
   assert.deepEqual(
-    [...OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS],
-    [...EXPECTED_OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS],
+    [...bundledProviderNpmIds],
+    [...EXPECTED_OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS],
   )
-  for (const npm of OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS) {
+  for (const npm of bundledProviderNpmIds) {
     assert.doesNotThrow(() => buildOpenCodeConfig({
       provider: { test: { npm, models: { model: {} } } },
     }, options), `provider-level ${npm}`)
@@ -1978,7 +2370,7 @@ test("MCP startup missing ownership ledgers preserves cleanup evidence roots", a
     ].join("; ")
     const command = async (_command: string, args: string[], options: CommandOptions): Promise<CommandResult> => {
       if (args[0] === "--version") {
-        return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+        return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
       }
       if (args[0] === "debug" && args[1] === "paths") {
         return { exitCode: 0, stdout: barrierPathsFor(rootPath), stderr: "", timedOut: false, pid: null }
@@ -2281,7 +2673,7 @@ test("nonzero trusted activation ambiguity remains classifiable and forbids retr
   try {
     const attemptRoot = join(root, "source-attempt")
     const fakeAttemptCommand = async (_command: string, args: string[]): Promise<CommandResult> => {
-      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
       if (args[0] === "debug" && args[1] === "paths") {
         return { exitCode: 0, stdout: barrierPathsFor(attemptRoot), stderr: "", timedOut: false, pid: null }
       }
@@ -2311,7 +2703,7 @@ test("nonzero trusted activation ambiguity remains classifiable and forbids retr
 
     let attemptCalls = 0
     const preflightCommand = async (command: string, args: string[]): Promise<CommandResult> => {
-      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
       if (/where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: "abcdef1\n", stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: null }
@@ -2370,7 +2762,7 @@ test("featureUnsupported matches only execute itself and trusted unsupported for
 
     const observeAttempt = async (attemptRoot: string, runStderr: string): Promise<AttemptRecord> => {
       const fakeAttemptCommand = async (_command: string, args: string[]): Promise<CommandResult> => {
-        if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+        if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
         if (args[0] === "debug" && args[1] === "paths") {
           return { exitCode: 0, stdout: barrierPathsFor(attemptRoot), stderr: "", timedOut: false, pid: null }
         }
@@ -2412,7 +2804,7 @@ test("featureUnsupported matches only execute itself and trusted unsupported for
 
     let attemptCalls = 0
     const preflightCommand = async (command: string, args: string[]): Promise<CommandResult> => {
-      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.3\n", stderr: "", timedOut: false, pid: null }
+      if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
       if (/where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: "abcdef1\n", stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: null }

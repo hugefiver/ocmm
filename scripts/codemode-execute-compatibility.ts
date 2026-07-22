@@ -51,6 +51,7 @@ export type NormalizedFacts = {
     timedOut: boolean
     permissionBlocked: boolean
     outputClassifiable: boolean
+    outputJsonlFacts: OpenCodeRunJsonlFacts | null
     outerBeforeCount: number
     outerAfterCount: number
     outerArgumentKeys: string[]
@@ -92,6 +93,11 @@ export const REQUIRED_NESTED_TOOLS = [
   "lsp_status",
   "codemode_probe_identity",
   "codemode_probe_json_error",
+] as const
+
+export const REQUIRED_COMPLETED_METADATA_TOOLS = [
+  "$codemode_search",
+  ...REQUIRED_NESTED_TOOLS,
 ] as const
 
 const EXIT = { PASS: 0, FAIL: 2, SKIP: 3, DEFER: 4 } as const
@@ -153,6 +159,17 @@ export function classifyProbe(facts: NormalizedFacts): ProbeResult {
     return result("FAIL", "attempt-topology-invalid")
   }
   if (facts.cleanup.trackedPids <= 0) return result("FAIL", "tracked-process-evidence-missing")
+  const outputJsonlFacts = facts.execute.outputJsonlFacts
+  if (
+    outputJsonlFacts === null ||
+    outputJsonlFacts.eventCount <= 0 ||
+    outputJsonlFacts.eventTypes.length !== outputJsonlFacts.eventCount ||
+    outputJsonlFacts.nonErrorPartCount + outputJsonlFacts.errorEventCount !== outputJsonlFacts.eventCount ||
+    outputJsonlFacts.errorEventCount !== 0 ||
+    outputJsonlFacts.nonErrorPartCount !== outputJsonlFacts.eventCount
+  ) {
+    return result("FAIL", "provider-run-jsonl-invalid")
+  }
   if (!facts.execute.exactCode) return result("FAIL", "execute-code-mismatch")
   if (
     facts.execute.outerBeforeCount !== 1 ||
@@ -164,7 +181,7 @@ export function classifyProbe(facts: NormalizedFacts): ProbeResult {
   if (
     !exactlyRequired(facts.hooks.nestedBefore, REQUIRED_NESTED_TOOLS) ||
     !exactlyRequired(facts.hooks.nestedAfter, REQUIRED_NESTED_TOOLS) ||
-    !exactlyRequired(facts.hooks.completedMetadataTools, REQUIRED_NESTED_TOOLS)
+    !exactlyRequired(facts.hooks.completedMetadataTools, REQUIRED_COMPLETED_METADATA_TOOLS)
   ) {
     return result("FAIL", "nested-hook-count-invalid")
   }
@@ -253,6 +270,7 @@ export function sanitizeFixture(facts: NormalizedFacts, probeResult: ProbeResult
       timedOut: facts.execute.timedOut,
       permissionBlocked: facts.execute.permissionBlocked,
       outputClassifiable: facts.execute.outputClassifiable,
+      outputJsonlFacts: facts.execute.outputJsonlFacts,
       exactCode: facts.execute.exactCode,
       executeProbeMarker: facts.execute.executeProbeMarker,
       lspOk: facts.execute.lspOk,
@@ -341,9 +359,9 @@ export function buildProbePrompt(): string {
   ].join("\n")
 }
 
-export const SUPPORTED_OPENCODE_VERSION = "1.18.3"
+export const SUPPORTED_OPENCODE_VERSION = "1.18.4"
 
-export const OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS = [
+export const OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS = [
   "@ai-sdk/amazon-bedrock",
   "@ai-sdk/amazon-bedrock/mantle",
   "@ai-sdk/anthropic",
@@ -370,7 +388,7 @@ export const OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS = [
   "venice-ai-sdk-provider",
 ] as const
 
-const BUNDLED_PROVIDER_NPM_IDS = new Set<string>(OPENCODE_1_18_3_BUNDLED_PROVIDER_NPM_IDS)
+const BUNDLED_PROVIDER_NPM_IDS = new Set<string>(OPENCODE_1_18_4_BUNDLED_PROVIDER_NPM_IDS)
 
 function bundledNpm(value: unknown): value is string {
   return typeof value === "string" && BUNDLED_PROVIDER_NPM_IDS.has(value)
@@ -1087,6 +1105,7 @@ function initialFacts(options: CliOptions): NormalizedFacts {
       timedOut: false,
       permissionBlocked: false,
       outputClassifiable: true,
+      outputJsonlFacts: null,
       outerBeforeCount: 0,
       outerAfterCount: 0,
       outerArgumentKeys: [],
@@ -1177,18 +1196,66 @@ function parseMcpEvents(path: string): string[] {
   })
 }
 
-function jsonOutputClassifiable(text: string): boolean {
+export const OPENCODE_RUN_JSONL_EVENT_TYPES = [
+  "tool_use",
+  "step_start",
+  "step_finish",
+  "text",
+  "reasoning",
+  "error",
+] as const
+
+export type OpenCodeRunJsonlEventType = typeof OPENCODE_RUN_JSONL_EVENT_TYPES[number]
+
+export type OpenCodeRunJsonlFacts = {
+  eventCount: number
+  eventTypes: OpenCodeRunJsonlEventType[]
+  nonErrorPartCount: number
+  errorEventCount: number
+}
+
+const OPENCODE_RUN_JSONL_EVENT_TYPE_SET = new Set<string>(OPENCODE_RUN_JSONL_EVENT_TYPES)
+
+export function parseOpenCodeRunJsonl(text: string): OpenCodeRunJsonlFacts | null {
   const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0)
-  if (lines.length === 0) return false
-  try {
-    const eventTypes = new Set(["step_start", "tool_use", "text", "reasoning", "step_finish", "error"])
-    return lines.every((line) => {
-      const event: unknown = JSON.parse(line)
-      if (!isRecord(event) || typeof event.type !== "string" || !eventTypes.has(event.type)) return false
-      return event.type === "error" ? Object.hasOwn(event, "error") : isRecord(event.part)
-    })
-  } catch {
-    return false
+  if (lines.length === 0) return null
+  const eventTypes: OpenCodeRunJsonlEventType[] = []
+  let nonErrorPartCount = 0
+  let errorEventCount = 0
+  for (const line of lines) {
+    let event: unknown
+    try {
+      event = JSON.parse(line)
+    } catch {
+      return null
+    }
+    if (!isRecord(event) || typeof event.type !== "string" ||
+      !OPENCODE_RUN_JSONL_EVENT_TYPE_SET.has(event.type) ||
+      typeof event.timestamp !== "number" || !Number.isFinite(event.timestamp) ||
+      typeof event.sessionID !== "string" || event.sessionID.trim().length === 0) {
+      return null
+    }
+    const type = event.type as OpenCodeRunJsonlEventType
+    if (type === "error") {
+      if (!Object.hasOwn(event, "error")) return null
+      errorEventCount += 1
+    } else {
+      if (!isRecord(event.part)) return null
+      nonErrorPartCount += 1
+    }
+    eventTypes.push(type)
+  }
+  return { eventCount: eventTypes.length, eventTypes, nonErrorPartCount, errorEventCount }
+}
+
+function mergeOpenCodeRunJsonlFacts(values: readonly (OpenCodeRunJsonlFacts | null)[]): OpenCodeRunJsonlFacts | null {
+  const present = values.filter((value): value is OpenCodeRunJsonlFacts => value !== null)
+  if (present.length === 0) return null
+  return {
+    eventCount: present.reduce((sum, value) => sum + value.eventCount, 0),
+    eventTypes: present.flatMap((value) => value.eventTypes),
+    nonErrorPartCount: present.reduce((sum, value) => sum + value.nonErrorPartCount, 0),
+    errorEventCount: present.reduce((sum, value) => sum + value.errorEventCount, 0),
   }
 }
 
@@ -1397,9 +1464,10 @@ export async function runAttempt(context: RunAttemptContext): Promise<AttemptRec
     })
     const runCommandImpl = context.runCommand ?? runCommand
     const execute = async (name: string, args: string[]): Promise<CommandResult> => {
+      const commandEnv = name === "run" ? { ...env, OCMM_DEBUG: "0" } : env
       const commandResult = await runCommandImpl(context.options.opencode, args, {
         cwd: context.rootPath,
-        env,
+        env: commandEnv,
         timeoutMs: context.options.timeoutMs,
       })
       if (commandResult.pid !== null) hostPids.push(commandResult.pid)
@@ -1498,7 +1566,8 @@ export async function runAttempt(context: RunAttemptContext): Promise<AttemptRec
     }
     const stderrOnlyTrustedSignal = runResult.stdout.trim() === "" &&
       (runSignals.activationAmbiguous || runSignals.featureUnsupported || runSignals.permissionBlocked)
-    if (!jsonOutputClassifiable(runResult.stdout) && !stderrOnlyTrustedSignal) {
+    facts.execute.outputJsonlFacts = parseOpenCodeRunJsonl(runResult.stdout)
+    if (facts.execute.outputJsonlFacts === null && !stderrOnlyTrustedSignal) {
       facts.execute.outputClassifiable = false
     }
     if (runResult.exitCode !== 0 && !facts.execute.featureUnsupported && !facts.execute.permissionBlocked &&
@@ -1555,6 +1624,7 @@ function mergeAttemptFacts(facts: NormalizedFacts, attempts: AttemptRecord[]): v
     timedOut: facts.execute.timedOut || attempts.some((attempt) => attempt.facts.execute.timedOut),
     permissionBlocked: attempts.some((attempt) => attempt.facts.execute.permissionBlocked),
     outputClassifiable: attempts.every((attempt) => attempt.facts.execute.outputClassifiable),
+    outputJsonlFacts: mergeOpenCodeRunJsonlFacts(attempts.map((attempt) => attempt.facts.execute.outputJsonlFacts)),
     outerBeforeCount: attempts.reduce((sum, attempt) => sum + attempt.facts.execute.outerBeforeCount, 0),
     outerAfterCount: attempts.reduce((sum, attempt) => sum + attempt.facts.execute.outerAfterCount, 0),
     outerArgumentKeys: attempts.flatMap((attempt) => attempt.facts.execute.outerArgumentKeys),
@@ -1624,7 +1694,7 @@ export function parseDirectLspToolsList(output: string): boolean {
       !Array.isArray(envelope.result.tools)) return false
     if (!envelope.result.tools.every((tool) => isRecord(tool) && typeof tool.name === "string")) return false
     const names = envelope.result.tools.map((tool) => (tool as { name: string }).name)
-    return REQUIRED_DIRECT_LSP_TOOLS.every((name) => names.includes(name))
+    return exactlyRequired(names, REQUIRED_DIRECT_LSP_TOOLS)
   } catch {
     return false
   }
@@ -1747,45 +1817,47 @@ export async function runProbe(
       facts.host.openCodeAvailable = versionResult.exitCode === 0 && !versionResult.timedOut && preflightVersion !== null
       facts.host.openCodeVersion = facts.host.openCodeAvailable ? preflightVersion : null
       const versionClean = facts.host.openCodeAvailable && facts.host.openCodeVersion === SUPPORTED_OPENCODE_VERSION
-      if (facts.host.openCodeAvailable && !versionClean) facts.execute.outputClassifiable = false
+      if (!versionClean) {
+        if (facts.host.openCodeAvailable) facts.execute.outputClassifiable = false
+      } else {
+        let executablePath: string | null = null
+        if (isAbsolute(effectiveOptions.opencode)) executablePath = firstRegularFile(effectiveOptions.opencode)
+        else {
+          const locator = process.platform === "win32" ? "where.exe" : "which"
+          const located = await preflight("opencode-location", locator, [effectiveOptions.opencode])
+          if (located.exitCode === 0 && !located.timedOut) executablePath = firstRegularFile(located.stdout)
+        }
+        if (executablePath) facts.host.openCodeSha256 = hashOpenCodeExecutable(executablePath)
+        const executableClean = executablePath !== null && facts.host.openCodeSha256 !== null
 
-      let executablePath: string | null = null
-      if (isAbsolute(effectiveOptions.opencode)) executablePath = firstRegularFile(effectiveOptions.opencode)
-      else {
-        const locator = process.platform === "win32" ? "where.exe" : "which"
-        const located = await preflight("opencode-location", locator, [effectiveOptions.opencode])
-        if (located.exitCode === 0 && !located.timedOut) executablePath = firstRegularFile(located.stdout)
-      }
-      if (executablePath) facts.host.openCodeSha256 = hashOpenCodeExecutable(executablePath)
-      const executableClean = executablePath !== null && facts.host.openCodeSha256 !== null
+        const revision = await preflight("git-revision", "git", ["rev-parse", "--short", "HEAD"])
+        const revisionText = revision.stdout.trim()
+        facts.host.ocmmRevision = /^[0-9a-f]{4,40}$/i.test(revisionText) ? revisionText : null
+        const revisionClean = revision.exitCode === 0 && !revision.timedOut && facts.host.ocmmRevision !== null
+        const dirty = await preflight("git-dirty", "git", ["status", "--porcelain"])
+        const dirtyClean = dirty.exitCode === 0 && !dirty.timedOut
+        facts.host.worktreeDirty = dirtyClean && dirty.stdout.trim().length > 0
+        if ((!revisionClean || !dirtyClean) && !facts.execute.timedOut) facts.execute.outputClassifiable = false
 
-      const revision = await preflight("git-revision", "git", ["rev-parse", "--short", "HEAD"])
-      const revisionText = revision.stdout.trim()
-      facts.host.ocmmRevision = /^[0-9a-f]{4,40}$/i.test(revisionText) ? revisionText : null
-      const revisionClean = revision.exitCode === 0 && !revision.timedOut && facts.host.ocmmRevision !== null
-      const dirty = await preflight("git-dirty", "git", ["status", "--porcelain"])
-      const dirtyClean = dirty.exitCode === 0 && !dirty.timedOut
-      facts.host.worktreeDirty = dirtyClean && dirty.stdout.trim().length > 0
-      if ((!revisionClean || !dirtyClean) && !facts.execute.timedOut) facts.execute.outputClassifiable = false
-
-      const nativeLsp = findNativeLsp()
-      facts.prerequisites.buildArtifactsAvailable = artifactsAvailable(nativeLsp)
-      const basePreflightClean = versionClean && executableClean && revisionClean && dirtyClean &&
-        facts.prerequisites.buildArtifactsAvailable && nativeLsp !== null && !facts.execute.timedOut
-      if (basePreflightClean && nativeLsp !== null) {
-        const smoke = buildDirectLspSmokeCommand(nativeLsp)
-        const direct = await preflight(
-          "direct-lsp",
-          smoke.command,
-          smoke.args,
-          smoke.input,
-        )
-        facts.prerequisites.directLspSmoke = direct.exitCode === 0 && !direct.timedOut && parseDirectLspToolsList(direct.stdout)
-      }
-      const preflightClean = basePreflightClean && facts.prerequisites.directLspSmoke && !facts.execute.timedOut
-      if (preflightClean) {
-        attemptRecords = await runAttemptSequence(runRoot, liveOptions, dependencies.runAttempt ?? runAttempt)
-        mergeAttemptFacts(facts, attemptRecords)
+        const nativeLsp = findNativeLsp()
+        facts.prerequisites.buildArtifactsAvailable = artifactsAvailable(nativeLsp)
+        const basePreflightClean = executableClean && revisionClean && dirtyClean &&
+          facts.prerequisites.buildArtifactsAvailable && nativeLsp !== null && !facts.execute.timedOut
+        if (basePreflightClean && nativeLsp !== null) {
+          const smoke = buildDirectLspSmokeCommand(nativeLsp)
+          const direct = await preflight(
+            "direct-lsp",
+            smoke.command,
+            smoke.args,
+            smoke.input,
+          )
+          facts.prerequisites.directLspSmoke = direct.exitCode === 0 && !direct.timedOut && parseDirectLspToolsList(direct.stdout)
+        }
+        const preflightClean = basePreflightClean && facts.prerequisites.directLspSmoke && !facts.execute.timedOut
+        if (preflightClean) {
+          attemptRecords = await runAttemptSequence(runRoot, liveOptions, dependencies.runAttempt ?? runAttempt)
+          mergeAttemptFacts(facts, attemptRecords)
+        }
       }
     }
   } catch {
