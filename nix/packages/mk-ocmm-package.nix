@@ -29,7 +29,7 @@ if explicitConflict then
   throw "lib.mkOcmmPackage: opencodePackage and opencodeCommand are mutually exclusive"
 else
 pkgs.symlinkJoin {
-  name = "ocmm-${ocmmPackage.version or "0.6.2"}";
+  name = "ocmm-${ocmmPackage.version or "0.6.3"}";
   paths = [ ocmmPackage ];
   nativeBuildInputs = [ pkgs.makeWrapper ];
   postBuild = lib.optionalString (environmentName != null) ''

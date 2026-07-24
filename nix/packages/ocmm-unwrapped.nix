@@ -15,7 +15,7 @@ let
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "ocmm-unwrapped";
-  version = "0.6.2";
+  version = "0.6.3";
   inherit src;
 
   pnpmDeps = fetchPnpmDeps {
