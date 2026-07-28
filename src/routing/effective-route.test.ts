@@ -7,12 +7,13 @@ import {
   buildEffectiveModelRoute,
   materializeSelectedPrimary,
   parseFastModeValue,
-  selectFastCandidate,
+  selectFastPath,
 } from "./effective-route.ts"
 
 const fastModels = (overrides: Partial<FastModelsConfig> = {}): FastModelsConfig => ({
   providers: [],
   mappings: {},
+  rules: [],
   ...overrides,
 })
 
@@ -44,111 +45,107 @@ test("fast activation accepts only exact 1 and true values", () => {
   assert.equal(parseFastModeValue("true"), true)
 })
 
-test("fast candidate requires a case-sensitive provider allowlist", () => {
-  assert.equal(selectFastCandidate({
-    selectedModel: "openai/gpt-5.6",
-    fastMode: true,
-    fastModels: fastModels({ providers: ["OpenAI"] }),
-    catalogModels: new Set(["gpt-5.6-fast"]),
-  }), null)
-})
-
-test("explicit mappings win without catalog visibility and preserve slash-containing provider-local model IDs", () => {
-  assert.equal(selectFastCandidate({
-    selectedModel: "openai/gpt-5.6",
+test("explicit mappings win without catalog visibility and preserve slash-containing provider-local IDs", () => {
+  const selectedModel = "google/publishers/google/models/gemini-3"
+  const modelID = "publishers/google/models/gemini-3-fast"
+  const args = {
+    selectedModel,
     fastMode: true,
     fastModels: fastModels({
-      providers: ["openai"],
-      mappings: { "openai/gpt-5.6": "gpt-5.6-turbo" },
-    }),
-  }), "gpt-5.6-turbo")
-
-  const slashContainingModelID = "publishers/google/models/gemini-fast"
-  const slashMappingArgs = {
-    selectedModel: "openai/gpt-5.6",
-    fastMode: true,
-    fastModels: fastModels({
-      providers: ["openai"],
-      mappings: { "openai/gpt-5.6": slashContainingModelID },
+      providers: ["google"],
+      mappings: { [selectedModel]: modelID },
     }),
   }
-  assert.equal(selectFastCandidate(slashMappingArgs), slashContainingModelID)
-  assert.equal(buildEffectiveModelRoute({
-    ...slashMappingArgs,
-    requirement: { fallbackChain: [{ providers: ["openai"], model: "gpt-5.6" }] },
+
+  assert.deepEqual(selectFastPath(args), { kind: "model", modelID })
+  assert.deepEqual(buildEffectiveModelRoute({
+    ...args,
+    requirement: { fallbackChain: [{ providers: ["google"], model: "publishers/google/models/gemini-3" }] },
     requirementSource: "agent-default",
     primarySource: "builtin-requirement",
-  }).model, `openai/${slashContainingModelID}`)
+  }).fastPath, { kind: "model", modelID })
 })
 
-test("an explicit self mapping is an authoritative no-op", () => {
-  assert.equal(selectFastCandidate({
+test("an allowlisted explicit self mapping suppresses suffix and options routes", () => {
+  const rules = [{ match: { provider: "openai" }, options: { serviceTier: "flex" } }]
+  assert.deepEqual(selectFastPath({
     selectedModel: "openai/gpt-5.6",
     fastMode: true,
     fastModels: fastModels({
       providers: ["openai"],
       mappings: { "openai/gpt-5.6": "gpt-5.6" },
+      rules,
     }),
     catalogModels: new Set(["gpt-5.6-fast"]),
-  }), null)
+  }), { kind: "off" })
 })
 
-test("an explicit mapping can promote an already-fast selected model", () => {
-  assert.equal(selectFastCandidate({
+test("explicit mappings run before already-fast suppression", () => {
+  const args = {
     selectedModel: "openai/gpt-5.6-fast",
     fastMode: true,
+    fastModels: fastModels({ providers: ["openai"] }),
+  }
+  assert.deepEqual(selectFastPath(args), { kind: "off" })
+  assert.deepEqual(selectFastPath({
+    ...args,
     fastModels: fastModels({
       providers: ["openai"],
       mappings: { "openai/gpt-5.6-fast": "gpt-5.6-turbo" },
     }),
-  }), "gpt-5.6-turbo")
+  }), { kind: "model", modelID: "gpt-5.6-turbo" })
 })
 
-test("automatic fast candidates require an allowlisted provider and catalog visibility", () => {
-  const args = {
+test("an allowlisted catalog suffix beats option routing", () => {
+  const rules = [{ match: { model: "gpt-*" }, options: { serviceTier: "flex" } }]
+  assert.deepEqual(selectFastPath({
     selectedModel: "openai/gpt-5.6",
     fastMode: true,
-    fastModels: fastModels({ providers: ["openai"] }),
+    fastModels: fastModels({ providers: ["openai"], rules }),
     catalogModels: new Set(["gpt-5.6-fast"]),
-  }
-  assert.equal(selectFastCandidate(args), "gpt-5.6-fast")
-  assert.equal(selectFastCandidate({ ...args, catalogModels: new Set<string>() }), null)
+  }), { kind: "model", modelID: "gpt-5.6-fast" })
 })
 
-test("fast candidate selection no-ops for disabled or invalid automatic inputs", () => {
-  const automatic = new Set(["gpt-5.6-fast", "gpt-5.6-fast-fast"])
-  assert.equal(selectFastCandidate({
+test("fast paths fall through to options for provider and catalog promotion misses", () => {
+  const rules = [{ match: { provider: "*" }, options: { nested: { enabled: true } } }]
+  const cases = [
+    fastModels({ providers: [], rules }),
+    fastModels({ providers: ["OpenAI"], rules }),
+    fastModels({ providers: ["openai"], rules }),
+  ]
+  const catalogModels = new Set<string>()
+  for (const configured of cases) {
+    assert.deepEqual(selectFastPath({
+      selectedModel: "openai/gpt-5.6",
+      fastMode: true,
+      fastModels: configured,
+      catalogModels,
+    }), { kind: "options", rules })
+  }
+  assert.deepEqual(selectFastPath({
+    selectedModel: "openai/gpt-5.6",
+    fastMode: true,
+    fastModels: fastModels(),
+    catalogModels,
+  }), { kind: "options", rules: [] })
+})
+
+test("disabled and invalid selected identities are off", () => {
+  const automatic = new Set(["gpt-5.6-fast"])
+  assert.deepEqual(selectFastPath({
     selectedModel: "openai/gpt-5.6",
     fastMode: false,
     fastModels: fastModels({ providers: ["openai"] }),
     catalogModels: automatic,
-  }), null)
-  assert.equal(selectFastCandidate({
-    selectedModel: "openai/gpt-5.6",
-    fastMode: true,
-    fastModels: {} as FastModelsConfig,
-    catalogModels: automatic,
-  }), null)
-  assert.equal(selectFastCandidate({
-    selectedModel: "openai/gpt-5.6",
-    fastMode: true,
-    fastModels: fastModels(),
-    catalogModels: automatic,
-  }), null)
+  }), { kind: "off" })
   for (const selectedModel of ["gpt-5.6", "/gpt-5.6", "openai/"]) {
-    assert.equal(selectFastCandidate({
+    assert.deepEqual(selectFastPath({
       selectedModel,
       fastMode: true,
       fastModels: fastModels({ providers: ["openai"] }),
       catalogModels: automatic,
-    }), null)
+    }), { kind: "off" })
   }
-  assert.equal(selectFastCandidate({
-    selectedModel: "openai/gpt-5.6-fast",
-    fastMode: true,
-    fastModels: fastModels({ providers: ["openai"] }),
-    catalogModels: automatic,
-  }), null)
 })
 
 test("materializing an exact primary copies controls, pins the provider, and removes only its baseline", () => {
@@ -253,6 +250,29 @@ test("primary materialization preserves distinct provider ordering and stable-de
   ])
 })
 
+test("an options fast path leaves the selected model and materialized fallback chain unchanged", () => {
+  const requirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["outside", "fallback"], model: "original", variant: "high" },
+      { providers: ["fallback"], model: "later", variant: "low" },
+    ],
+  }
+  const rules = [{ match: { provider: "outside" }, options: { serviceTier: "flex" } }]
+  const route = buildEffectiveModelRoute({
+    selectedModel: "outside/original",
+    requirement,
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastMode: true,
+    fastModels: fastModels({ rules }),
+    catalogModels: new Set(["original-fast"]),
+  })
+
+  assert.equal(route.model, "outside/original")
+  assert.deepEqual(route.requirement, materializeSelectedPrimary(requirement, "outside/original"))
+  assert.deepEqual(route.fastPath, { kind: "options", rules })
+})
+
 test("an effective fast route prepends the copied fast primary and retains distinct stable fallbacks", () => {
   const requirement: ModelRequirement = {
     variant: "max",
@@ -305,6 +325,7 @@ test("an effective fast route prepends the copied fast primary and retains disti
     },
     requirementSource: "agent-default",
     primarySource: "catalog-upgrade",
+    fastPath: { kind: "model", modelID: "original-fast" },
   })
   assert.notEqual(route.requirement.fallbackChain[0]!.thinking, requirement.fallbackChain[0]!.thinking)
   assert.notEqual(route.requirement.fallbackChain[1]!.thinking, requirement.fallbackChain[0]!.thinking)

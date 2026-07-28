@@ -1484,6 +1484,7 @@ test("registry-managed registration covers managed surfaces, preserves unmanaged
     fastModels: {
       providers: ["openai"],
       mappings: { "openai/custom-agent": "custom-agent-fast" },
+      rules: [],
     },
     agents: {
       "custom-agent": { model: "openai/custom-agent" },
@@ -1521,7 +1522,7 @@ test("registry-managed registration covers managed surfaces, preserves unmanaged
 test("registry-managed automatic fast promotion needs the selected provider catalog and an allowlist", async () => {
   const automaticConfig = {
     ...defaultConfig(),
-    fastModels: { providers: ["openai"], mappings: {} },
+    fastModels: { providers: ["openai"], mappings: {}, rules: [] },
     agents: { "automatic-worker": { model: "openai/automatic" } },
   }
   const registryWithoutCandidate = createEffectiveRouteRegistry()
@@ -1551,7 +1552,7 @@ test("registry-managed automatic fast promotion needs the selected provider cata
 
   const noAllowlistConfig = {
     ...automaticConfig,
-    fastModels: { providers: [], mappings: { "openai/automatic": "automatic-fast" } },
+    fastModels: { providers: [], mappings: { "openai/automatic": "automatic-fast" }, rules: [] },
   }
   const noAllowlistRegistry = createEffectiveRouteRegistry()
   await createConfigHandler({
@@ -1567,13 +1568,44 @@ test("registry-managed automatic fast promotion needs the selected provider cata
   assert.equal(originalRoute.requirement.fallbackChain[0]?.model, "automatic")
 })
 
+test("registry-managed registration publishes option fast paths without promoting models", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const rules = [{
+    match: { provider: "outside", model: "model" },
+    options: { serviceTier: "flex", nested: { enabled: true } },
+  }]
+  const config = {
+    ...defaultConfig(),
+    fastModels: { providers: [], mappings: {}, rules },
+    agents: { "option-worker": { model: "outside/model" } },
+  }
+  const unrelated = { model: "unmanaged/model", nested: { untouched: true } }
+  const target = {
+    agent: { unrelated: structuredClone(unrelated) },
+    provider: { outside: { models: { "model-fast": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => true,
+  })(target, undefined)
+
+  const route = publishedRoute(routeRegistry, "option-worker")
+  assert.equal((target.agent["option-worker"] as Record<string, unknown>).model, "outside/model")
+  assert.equal(route.model, "outside/model")
+  assert.deepEqual(route.fastPath, { kind: "options", rules })
+  assert.deepEqual(target.agent.unrelated, unrelated)
+  assert.equal(routeRegistry.snapshot().routes.has("unrelated"), false)
+})
+
 test("registry-managed registration samples fast activation once for each config hook", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
   let fastModeReads = 0
   const handler = createConfigHandler({
     getConfig: () => ({
       ...defaultConfig(),
-      fastModels: { providers: ["openai"], mappings: {} },
+      fastModels: { providers: ["openai"], mappings: {}, rules: [] },
       agents: { worker: { model: "openai/gpt-5.4-mini" } },
     }),
     routeRegistry,
@@ -1654,6 +1686,7 @@ test("compatibility mode stays non-fast and rebuilds only registeredAgentModels"
     fastModels: {
       providers: ["openai"],
       mappings: { "openai/compat-worker": "compat-worker-fast" },
+      rules: [],
     },
     agents: { "compat-worker": { model: "openai/compat-worker" } },
   }
@@ -1676,6 +1709,7 @@ test("compatibility mode registers a same-name custom agent over its category", 
     fastModels: {
       providers: ["openai"],
       mappings: { "openai/agent-wins": "agent-wins-fast" },
+      rules: [],
     },
     agents: { collision: { model: "openai/agent-wins" } },
     categories: { collision: { model: "openai/category-loses" } },
@@ -1812,7 +1846,7 @@ test("compatibility aliases receive independently materialized final routes", as
   const routeRegistry = createEffectiveRouteRegistry()
   const config = {
     ...defaultConfig(),
-    fastModels: { providers: ["openai"], mappings: {} },
+    fastModels: { providers: ["openai"], mappings: {}, rules: [] },
     agents: { "code-search": { model: "openai/code-search-original" } },
   }
   const target = {

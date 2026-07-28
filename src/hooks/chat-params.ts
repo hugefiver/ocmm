@@ -9,13 +9,14 @@
 import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
+import { mergeFastOptionRules } from "../routing/fast-option-rules.ts"
 import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
-import type { Variant, ResolutionEntry } from "../shared/types.ts"
+import type { EffectiveModelRoute, Variant, ResolutionEntry } from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
 const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
@@ -186,7 +187,7 @@ function normalizeReasoningEffortForModel(args: {
 type ChatParamsInput = {
   sessionID: string
   agent: { name?: string } | string
-  model: { providerID: string; modelID: string }
+  model: { providerID: string; modelID: string; sdk?: string }
   provider: { id: string }
   message: { variant?: string }
 }
@@ -197,6 +198,21 @@ type ChatParamsOutput = {
   topK?: number
   maxOutputTokens?: number
   options: Record<string, unknown>
+}
+
+function applyFastOptionRoute(args: {
+  route: EffectiveModelRoute | undefined
+  input: ChatParamsInput
+  output: ChatParamsOutput
+}): number[] {
+  if (args.route?.fastPath.kind !== "options") return []
+  const merged = mergeFastOptionRules(args.output.options, args.route.fastPath.rules, {
+    provider: args.input.model.providerID,
+    model: args.input.model.modelID,
+    ...(args.input.model.sdk !== undefined ? { sdk: args.input.model.sdk } : {}),
+  })
+  args.output.options = merged.options
+  return merged.matchedRuleIndexes
 }
 
 function readInput(raw: unknown): ChatParamsInput | null {
@@ -220,12 +236,15 @@ function readInput(raw: unknown): ChatParamsInput | null {
       ? raw.model.id
       : undefined
   if (!providerID || !modelID) return null
+  const sdk = isRecord(raw.model.api) && typeof raw.model.api.npm === "string"
+    ? raw.model.api.npm
+    : undefined
 
   const message = isRecord(raw.message) ? raw.message : {}
   return {
     sessionID,
     agent: { name: agentName ?? "" },
-    model: { providerID, modelID },
+    model: { providerID, modelID, ...(sdk !== undefined ? { sdk } : {}) },
     provider: { id: typeof raw.provider === "object" && raw.provider && "id" in raw.provider ? String((raw.provider as Record<string, unknown>).id ?? providerID) : providerID },
     message: { variant: typeof message.variant === "string" ? message.variant : undefined },
   }
@@ -278,6 +297,7 @@ export function createChatParamsHandler(args: {
     })
 
     if (!resolution) {
+      applyFastOptionRoute({ route, input, output })
       // A host-provided protected review profile may be absent from its
       // expanded route map when the matching tier is not configured. Enforce
       // the xhigh-equivalent floor against the actual runtime model without
@@ -396,6 +416,7 @@ export function createChatParamsHandler(args: {
     if (resolution.entry.maxTokens !== undefined && resolution.entry.maxTokens > 0) {
       output.maxOutputTokens = resolution.entry.maxTokens
     }
+    applyFastOptionRoute({ route, input, output })
     applyReviewOutputFloor({ agentName, family, modelID: input.model.modelID, appliedVariant, outputOptions: output.options })
 
     record({

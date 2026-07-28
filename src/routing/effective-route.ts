@@ -2,6 +2,7 @@ import type { FastModelsConfig } from "../config/schema.ts"
 import type {
   EffectiveModelRoute,
   FallbackEntry,
+  FastPath,
   ModelRequirement,
   PrimarySource,
   RequirementSource,
@@ -124,24 +125,29 @@ export function materializeSelectedPrimary(
   return { ...cloned, fallbackChain: stableDedupe([primary, ...remainder]) }
 }
 
-export function selectFastCandidate(args: {
+export function selectFastPath(args: {
   selectedModel: string
   fastMode: boolean
   fastModels: FastModelsConfig
   catalogModels?: ReadonlySet<string>
-}): string | null {
-  if (!args.fastMode) return null
+}): FastPath {
+  if (!args.fastMode) return { kind: "off" }
   const selected = parseSelectedModelIdentity(args.selectedModel)
-  if (!selected || !args.fastModels.providers?.includes(selected.providerID)) return null
+  if (!selected) return { kind: "off" }
 
-  const mappings = args.fastModels.mappings ?? {}
-  if (Object.prototype.hasOwnProperty.call(mappings, args.selectedModel)) {
-    return mappedCandidate(mappings[args.selectedModel]!, selected)
+  const promotionAllowed = args.fastModels.providers.includes(selected.providerID)
+  if (promotionAllowed && Object.prototype.hasOwnProperty.call(args.fastModels.mappings, args.selectedModel)) {
+    const candidate = mappedCandidate(args.fastModels.mappings[args.selectedModel]!, selected)
+    return candidate ? { kind: "model", modelID: candidate } : { kind: "off" }
   }
 
-  if (selected.modelID.endsWith("-fast")) return null
+  if (selected.modelID.endsWith("-fast")) return { kind: "off" }
   const candidate = `${selected.modelID}-fast`
-  return args.catalogModels?.has(candidate) ? candidate : null
+  if (promotionAllowed && args.catalogModels?.has(candidate)) {
+    return { kind: "model", modelID: candidate }
+  }
+
+  return { kind: "options", rules: args.fastModels.rules }
 }
 
 export function buildEffectiveModelRoute(args: {
@@ -154,27 +160,29 @@ export function buildEffectiveModelRoute(args: {
   catalogModels?: ReadonlySet<string>
 }): EffectiveModelRoute {
   const requirement = materializeSelectedPrimary(args.requirement, args.selectedModel)
-  const candidate = selectFastCandidate(args)
+  const fastPath = selectFastPath(args)
   const selected = parseSelectedModelIdentity(args.selectedModel)
 
-  if (!candidate || !selected) {
+  if (fastPath.kind !== "model" || !selected) {
     return {
       model: args.selectedModel,
       requirement,
       requirementSource: args.requirementSource,
       primarySource: args.primarySource,
+      fastPath,
     }
   }
 
   const original = requirement.fallbackChain[0]!
-  const fast = { ...cloneEntry(original), providers: [selected.providerID], model: candidate }
+  const fast = { ...cloneEntry(original), providers: [selected.providerID], model: fastPath.modelID }
   return {
-    model: `${selected.providerID}/${candidate}`,
+    model: `${selected.providerID}/${fastPath.modelID}`,
     requirement: {
       ...requirement,
       fallbackChain: stableDedupe([fast, ...requirement.fallbackChain]),
     },
     requirementSource: args.requirementSource,
     primarySource: args.primarySource,
+    fastPath,
   }
 }

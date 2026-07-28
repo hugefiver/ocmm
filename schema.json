@@ -1117,6 +1117,38 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "match": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "sdk": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "options": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "match",
+              "options"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -2230,6 +2262,38 @@
                 "type": "object",
                 "additionalProperties": {
                   "type": "string"
+                }
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "match": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "sdk": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "match",
+                    "options"
+                  ]
                 }
               }
             },

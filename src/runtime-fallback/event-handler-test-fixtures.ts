@@ -141,6 +141,7 @@ export function publishWorkerRouteSnapshot(
       requirement: { fallbackChain: chain },
       requirementSource: "user-config",
       primarySource: "user-requirement",
+      fastPath: { kind: "off" },
     }],
   ])
   assert.equal(registry.publish(generation, routes), true)

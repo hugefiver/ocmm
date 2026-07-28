@@ -76,6 +76,8 @@ The config hook constructs an `EffectiveModelRoute` for every OCMM-managed regis
 
 Final-primary precedence is: an existing same-name host model, then an explicit user requirement head, then a catalog upgrade when that registration permits one, then the requirement head. The selected primary `O` is always materialized into the fallback chain. When fast routing chooses a distinct fast primary `F`, it prepends it, yielding `F → O → remainder`; without a fast candidate the chain begins `O → remainder`.
 
+For each managed route, `config` also resolves `fastPath.kind` to `"off"`, `"model"`, or `"options"`. `fastModels.providers` plus `fastModels.mappings` and catalog-backed model promotion have first priority and produce `model`; disabled fast mode, an explicit self-map, and an already-`-fast` model produce `off`; only the remaining eligible `fastModels.rules` fallback produces `options` with that route's effective rule array. The registry deep-clones and freezes that array, including nested option values, as part of one immutable snapshot. Reload changes captured config but does not expose it until a complete later config build atomically republishes a new snapshot.
+
 An `EffectiveRouteRegistry` publishes immutable, generation-safe snapshots. A config invocation first begins a generation, writes final agent models, and publishes the complete route map once; a stale generation cannot publish. Before any publication, runtime fallback may use raw compatibility resolution. After publication, an empty map or a missing agent route is authoritative absence, not permission to recompute raw routes. Config, `chat.params`, and runtime fallback read the same immutable snapshot. `registeredAgentModels` exists only in the unchanged generic/Codex compatibility branch, never in registry-managed OpenCode routing.
 
 Reload replaces the captured config and fast-mode value, but keeps the last successful route snapshot until a later successful `config` publication. A failed or stale config build therefore cannot expose partial new routes.
@@ -143,7 +145,7 @@ Runs **before** the request leaves OpenCode. Resolves the variant via the 4-tier
 
 **Constraint:** `output` only allows `temperature`, `topP`, `topK`, `maxOutputTokens`, `options.{reasoningEffort, thinking}`.
 
-Flow: `input.agent` + `input.model` → 4-tier resolve → `classifyModelFamily` → `translateVariant` → mutate output → append `ResolutionEntry` to ledger (256 cap).
+Flow: `input.agent` + `input.model` → read one published route snapshot → 4-tier resolve → `classifyModelFamily` → `translateVariant` → apply option-path rules when eligible → enforce protected floors → mutate output → append `ResolutionEntry` to ledger (256 cap). For an `options` route, `chat.params` reads SDK identity only from `model.api.npm`, matches the actual runtime provider/model/SDK (including a runtime fallback target), and merges matching options after ordinary route controls. Reviewer and plan-critic reasoning floors are the final protected write.
 
 Code: `src/hooks/chat-params.ts`, `src/routing/{resolver,variant-translator}.ts`.
 
@@ -315,7 +317,7 @@ Key shapes:
 - **AgentEntry:** extends `CategoryEntry` + `disabled` + override fields (`tools`, `permission`, `skills`, `promptAppend`, `temperature`, `topP`, `maxTokens`, `thinking`, `reasoningEffort`). `.strict()`.
 - **RuntimeFallbackConfig:** `.default({})`.
 - **ProfileEntry:** partial overlay, `.strict()`, excludes `profiles` / `activeProfile`.
-- **FastModelsConfig:** root `{providers, mappings}` defaults to empty allowlist/map; profile `fastModels` fields are optional so an overlay changes only the fields it provides.
+- **FastModelsConfig:** root `{providers, mappings, rules}` defaults to empty allowlist/map/rules. `rules` entries match one or more of runtime provider/model/SDK and carry option objects. Profile `fastModels` fields are optional; a declared profile `rules` array replaces the root array in full, while omitting it inherits root rules.
 - **SkillsConfig:** `{sources, enable, disable}`. Top-level `disabledSkills` and `disabledCommands` further gate skill loading and command registration.
 
 ### Profiles
@@ -344,7 +346,7 @@ src/
 ├── intent/               # model-family.ts, skill-loader.ts, prompt-loader.ts
 ├── mcp/                  # MCP server registration and native LSP command resolution
 ├── permissions/         # permission rules
-├── routing/              # resolver.ts, effective-route.ts, route-registry.ts, variant-translator.ts
+├── routing/              # resolver.ts, effective-route.ts, fast-option-rules.ts, route-registry.ts, variant-translator.ts
 ├── rules/                # rule definitions
 ├── runtime-fallback/     # error-classifier, fallback-state, dispatcher, event-handler
 ├── shared/               # shared types/utilities

@@ -1,4 +1,5 @@
-import type { EffectiveModelRoute, FallbackEntry, ModelRequirement } from "../shared/types.ts"
+import type { FastOptionRule } from "../config/schema.ts"
+import type { EffectiveModelRoute, FallbackEntry, FastPath, ModelRequirement } from "../shared/types.ts"
 
 export type EffectiveRouteSnapshot = Readonly<{
   published: boolean
@@ -15,6 +16,40 @@ export type EffectiveRouteRegistry = {
 
 function freezeArray<T>(values: T[]): T[] {
   return Object.freeze(values) as T[]
+}
+
+function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function cloneAndFreezeOptionValue(value: unknown): unknown {
+  if (Array.isArray(value)) return freezeArray(value.map(cloneAndFreezeOptionValue))
+  if (isPlainObject(value)) return cloneAndFreezeOptionRecord(value)
+  return value
+}
+
+function cloneAndFreezeOptionRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, cloneAndFreezeOptionValue(entry)]),
+  ))
+}
+
+function cloneAndFreezeFastOptionRule(rule: FastOptionRule): FastOptionRule {
+  return Object.freeze({
+    match: cloneAndFreezeOptionRecord(rule.match) as FastOptionRule["match"],
+    options: cloneAndFreezeOptionRecord(rule.options) as FastOptionRule["options"],
+  })
+}
+
+function cloneAndFreezeFastPath(fastPath: FastPath): FastPath {
+  if (fastPath.kind === "off") return Object.freeze({ kind: "off" } as const)
+  if (fastPath.kind === "model") return Object.freeze({ kind: "model", modelID: fastPath.modelID } as const)
+  return Object.freeze({
+    kind: "options" as const,
+    rules: freezeArray(fastPath.rules.map(cloneAndFreezeFastOptionRule)),
+  })
 }
 
 function cloneAndFreezeRoute(route: EffectiveModelRoute): EffectiveModelRoute {
@@ -34,7 +69,11 @@ function cloneAndFreezeRoute(route: EffectiveModelRoute): EffectiveModelRoute {
       : { requiresProvider: freezeArray([...route.requirement.requiresProvider]) }),
   }
 
-  return Object.freeze({ ...route, requirement: Object.freeze(requirement) }) as EffectiveModelRoute
+  return Object.freeze({
+    ...route,
+    requirement: Object.freeze(requirement),
+    fastPath: cloneAndFreezeFastPath(route.fastPath),
+  }) as EffectiveModelRoute
 }
 
 function createReadonlyMapView<K, V>(source: ReadonlyMap<K, V>): ReadonlyMap<K, V> {

@@ -428,6 +428,12 @@ test("loadOpenCodePluginConfig profile overlay replaces fast providers and deep-
           "openai/gpt-5": "openai/gpt-5-mini",
           "anthropic/claude-opus": "anthropic/claude-haiku",
         },
+        rules: [
+          {
+            match: { provider: "openai" },
+            options: { reasoning: { effort: "minimal" } },
+          },
+        ],
       },
       profiles: {
         fast: {
@@ -437,6 +443,12 @@ test("loadOpenCodePluginConfig profile overlay replaces fast providers and deep-
               "openai/gpt-5": "openai/gpt-5-nano",
               "google/gemini-pro": "google/gemini-flash",
             },
+            rules: [
+              {
+                match: { provider: "google" },
+                options: { thinking: { budgetTokens: 128 } },
+              },
+            ],
           },
         },
       },
@@ -451,6 +463,42 @@ test("loadOpenCodePluginConfig profile overlay replaces fast providers and deep-
       "anthropic/claude-opus": "anthropic/claude-haiku",
       "google/gemini-pro": "google/gemini-flash",
     })
+    assert.deepEqual(loaded.config.fastModels.rules, [
+      {
+        match: { provider: "google" },
+        options: { thinking: { budgetTokens: 128 } },
+      },
+    ])
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("profile overlay inherits omitted fast rules", () => {
+  const xdg = makeTempXdg()
+  try {
+    const rules = [
+      {
+        match: { sdk: "openai-compatible" },
+        options: { temperature: 0.2 },
+      },
+    ]
+    writeConfig(xdg, {
+      fastModels: { rules },
+      profiles: {
+        inherited: {
+          fastModels: {
+            providers: ["profile-provider"],
+          },
+        },
+      },
+      activeProfile: "inherited",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+
+    assert.deepEqual(loaded.config.fastModels.providers, ["profile-provider"])
+    assert.deepEqual(loaded.config.fastModels.rules, rules)
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }

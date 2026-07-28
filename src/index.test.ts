@@ -236,6 +236,88 @@ test("plugin uses the OpenCode facade on initial load and reload, sharing its pu
   }, { OCMM_FAST: "1" })
 })
 
+test("plugin option rules use the published profile snapshot until config republishes after reload", async () => {
+  const initialConfig = {
+    fastModels: {
+      providers: ["openai"],
+      mappings: {},
+      rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "root" } }],
+    },
+    profiles: {
+      fast: {
+        fastModels: {
+          rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "flex" } }],
+        },
+      },
+    },
+    activeProfile: "fast",
+    agents: { worker: { model: "openai/gpt-5.6-sol" } },
+  }
+
+  await withIsolatedConfig(initialConfig, async (cwd) => {
+    const configPath = join(cwd, ".opencode", "ocmm.jsonc")
+    const { pluginInterface, reload } = createPlugin({ directory: cwd })
+    const publish = async () => {
+      const target: Record<string, unknown> = {
+        agent: {},
+        // No catalog candidate exists for gpt-5.6-sol-fast, so this covers
+        // option fallback rather than fast model promotion.
+        provider: { openai: { models: {} } },
+      }
+      await publishPluginConfig(pluginInterface, target)
+      return target
+    }
+    let invocation = 0
+    const invoke = async () => {
+      const output = { options: {} as Record<string, unknown> }
+      await pluginInterface["chat.params"]?.(
+        {
+          sessionID: `fast-options-${++invocation}`,
+          agent: { name: "worker" },
+          model: {
+            providerID: "openai",
+            modelID: "gpt-5.6-sol",
+            api: { npm: "@ai-sdk/openai" },
+          },
+          provider: { id: "openai" },
+          message: {},
+        },
+        output,
+      )
+      return output.options.serviceTier
+    }
+
+    const initialTarget = await publish()
+    assert.equal(
+      (initialTarget.agent as Record<string, { model?: string }>).worker?.model,
+      "openai/gpt-5.6-sol",
+      "option fallback keeps the selected model unchanged",
+    )
+    assert.equal(await invoke(), "flex")
+
+    writeFileSync(configPath, JSON.stringify({
+      ...initialConfig,
+      profiles: {
+        fast: {
+          fastModels: {
+            rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "priority" } }],
+          },
+        },
+      },
+    }))
+    reload()
+
+    assert.equal(await invoke(), "flex", "reload without config publication keeps the old snapshot")
+    const republishedTarget = await publish()
+    assert.equal(
+      (republishedTarget.agent as Record<string, { model?: string }>).worker?.model,
+      "openai/gpt-5.6-sol",
+      "republishing option rules still keeps the selected model unchanged",
+    )
+    assert.equal(await invoke(), "priority", "successful config publication atomically replaces rules")
+  }, { OCMM_FAST: "1" })
+})
+
 test("plugin fast activation accepts only exact true values through the config hook", async () => {
   const config = {
     fastModels: { providers: ["openai"], mappings: {} },

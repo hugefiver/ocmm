@@ -28,6 +28,7 @@ function makeInput(overrides?: Partial<{
   agentName: string
   providerID: string
   modelID: string
+  sdk: string
   variant: string
 }>) {
   return {
@@ -36,6 +37,7 @@ function makeInput(overrides?: Partial<{
     model: {
       providerID: overrides?.providerID ?? "openai",
       modelID: overrides?.modelID ?? "gpt-5.5",
+      ...(overrides?.sdk ? { api: { npm: overrides.sdk } } : {}),
     },
     provider: { id: overrides?.providerID ?? "openai" },
     message: overrides?.variant ? { variant: overrides.variant } : {},
@@ -84,6 +86,7 @@ test("chat.params uses a published route rather than contradictory raw config", 
     },
     requirementSource: "agent-default",
     primarySource: "builtin-requirement",
+    fastPath: { kind: "off" },
   }]]))
   const cfg = OcmmConfigSchema.parse({
     agents: {
@@ -112,6 +115,7 @@ test("chat.params retains the last published route until a later config publicat
     },
     requirementSource: "agent-default",
     primarySource: "builtin-requirement",
+    fastPath: { kind: "model", modelID: "gpt-5.4-mini-fast" },
   }]]))
   const handler = createChatParamsHandler({ getConfig: () => cfg, routeRegistry: registry })
 
@@ -130,6 +134,7 @@ test("chat.params retains the last published route until a later config publicat
     },
     requirementSource: "agent-default",
     primarySource: "builtin-requirement",
+    fastPath: { kind: "model", modelID: "gpt-5.4-mini-v2-fast" },
   }]]))
   const replaced = { options: {} as Record<string, unknown> }
   await handler(makeInput({ agentName: "builder", modelID: "gpt-5.4-mini-v2-fast" }), replaced)
@@ -146,6 +151,7 @@ test("chat.params treats a published user requirement as explicit regardless of 
     },
     requirementSource: "user-config",
     primarySource: "existing-model",
+    fastPath: { kind: "off" },
   }]]))
   const cfg = OcmmConfigSchema.parse({
     agents: {
@@ -206,6 +212,7 @@ test("chat.params matches published fast, original, and later fallback controls 
     },
     requirementSource: "agent-default",
     primarySource: "existing-model",
+    fastPath: { kind: "model", modelID: "gpt-5.4-mini-fast" },
   }]]))
   const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
 
@@ -218,6 +225,197 @@ test("chat.params matches published fast, original, and later fallback controls 
     await handler(makeInput({ agentName: "builder", modelID }), output)
     assert.equal((output.options as Record<string, unknown>).reasoningEffort, reasoningEffort, modelID)
     assert.equal(recentResolutions().at(-1)!.source, "agent-default", modelID)
+  }
+})
+
+test("chat.params merges matching published fast option rules using the runtime SDK identity", async () => {
+  const registry = createEffectiveRouteRegistry()
+  const baseOptions = {
+    serviceTier: "standard",
+    nested: { base: true, conflict: "base" },
+    replaceArray: ["base"],
+    baseOnly: { preserved: true },
+  }
+  const rules = [
+    {
+      match: { provider: "openai", model: "gpt-5.6", sdk: "@ai-sdk/openai" },
+      options: {
+        serviceTier: "flex",
+        nested: { firstRule: true, conflict: "first" },
+        replaceArray: ["first"],
+        nullValue: null,
+      },
+    },
+    {
+      match: { provider: "openai", model: "gpt-*", sdk: "@ai-sdk/openai" },
+      options: {
+        serviceTier: "priority",
+        nested: { secondRule: true, conflict: "second" },
+        replaceArray: ["second"],
+      },
+    },
+    {
+      match: { provider: "anthropic", model: "claude-*", sdk: "@ai-sdk/anthropic" },
+      options: { shouldNotApply: true },
+    },
+  ]
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.6",
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.6" }],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: { kind: "options", rules },
+  }]]))
+  const output = { options: baseOptions }
+
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "builder", modelID: "gpt-5.6", sdk: "@ai-sdk/openai" }),
+    output,
+  )
+
+  assert.deepEqual(output.options, {
+    serviceTier: "priority",
+    nested: { base: true, conflict: "second", firstRule: true, secondRule: true },
+    replaceArray: ["second"],
+    baseOnly: { preserved: true },
+    nullValue: null,
+  })
+  ;(output.options.nested as { base: boolean }).base = false
+  output.options.replaceArray.push("mutated")
+  assert.deepEqual(baseOptions, {
+    serviceTier: "standard",
+    nested: { base: true, conflict: "base" },
+    replaceArray: ["base"],
+    baseOnly: { preserved: true },
+  })
+  assert.deepEqual(rules[0]!.options, {
+    serviceTier: "flex",
+    nested: { firstRule: true, conflict: "first" },
+    replaceArray: ["first"],
+    nullValue: null,
+  })
+})
+
+test("chat.params applies published fast option rules to the runtime fallback identity only", async () => {
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.6",
+    requirement: {
+      fallbackChain: [
+        { providers: ["openai"], model: "gpt-5.6" },
+        { providers: ["anthropic"], model: "claude-4-6" },
+      ],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: {
+      kind: "options",
+      rules: [{
+        match: { provider: "anthropic", model: "claude-*", sdk: "@ai-sdk/anthropic" },
+        options: { appliedToFallback: true },
+      }],
+    },
+  }]]))
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  const fallback = { options: {} as Record<string, unknown> }
+  await handler(makeInput({
+    agentName: "builder",
+    providerID: "anthropic",
+    modelID: "claude-4-6",
+    sdk: "@ai-sdk/anthropic",
+  }), fallback)
+  assert.equal(fallback.options.appliedToFallback, true)
+
+  const primary = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", modelID: "gpt-5.6", sdk: "@ai-sdk/openai" }), primary)
+  assert.equal(primary.options.appliedToFallback, undefined)
+
+  const noSdk = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", providerID: "anthropic", modelID: "claude-4-6" }), noSdk)
+  assert.equal(noSdk.options.appliedToFallback, undefined)
+})
+
+test("chat.params never applies live fast option rules to off, model, or unmanaged snapshot routes", async () => {
+  const cfg = OcmmConfigSchema.parse({
+    fastModels: {
+      rules: [{ match: { provider: "*" }, options: { fromLiveConfig: true } }],
+    },
+  })
+
+  const offRegistry = createEffectiveRouteRegistry()
+  publishRoutes(offRegistry, new Map([["off-route", {
+    model: "openai/gpt-5.6",
+    requirement: { fallbackChain: [{ providers: ["openai"], model: "gpt-5.6" }] },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const offOutput = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: () => cfg, routeRegistry: offRegistry })(
+    makeInput({ agentName: "off-route", modelID: "gpt-5.6" }),
+    offOutput,
+  )
+  assert.equal(offOutput.options.fromLiveConfig, undefined)
+
+  const modelRegistry = createEffectiveRouteRegistry()
+  publishRoutes(modelRegistry, new Map([["model-route", {
+    model: "openai/gpt-5.6-fast",
+    requirement: {
+      fallbackChain: [
+        { providers: ["openai"], model: "gpt-5.6-fast" },
+        { providers: ["openai"], model: "gpt-5.6" },
+      ],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: { kind: "model", modelID: "gpt-5.6-fast" },
+  }]]))
+  const modelFallbackOutput = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: () => cfg, routeRegistry: modelRegistry })(
+    makeInput({ agentName: "model-route", modelID: "gpt-5.6" }),
+    modelFallbackOutput,
+  )
+  assert.equal(modelFallbackOutput.options.fromLiveConfig, undefined)
+
+  const unmanagedRegistry = createEffectiveRouteRegistry()
+  publishRoutes(unmanagedRegistry, new Map())
+  const unmanagedOutput = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: () => cfg, routeRegistry: unmanagedRegistry })(
+    makeInput({ agentName: "unmanaged", modelID: "gpt-5.6" }),
+    unmanagedOutput,
+  )
+  assert.equal(unmanagedOutput.options.fromLiveConfig, undefined)
+})
+
+test("chat.params restores review and plan-critic reasoning floors after fast options", async () => {
+  const registry = createEffectiveRouteRegistry()
+  const route = (): EffectiveModelRoute => ({
+    model: "openai/gpt-5.5",
+    requirement: { fallbackChain: [{ providers: ["openai"], model: "gpt-5.5" }] },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: {
+      kind: "options",
+      rules: [{
+        match: { provider: "openai", model: "gpt-5.5" },
+        options: { reasoningEffort: "low", serviceTier: "priority" },
+      }],
+    },
+  })
+  publishRoutes(registry, new Map([
+    ["reviewer", route()],
+    ["plan-critic", route()],
+  ]))
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  for (const agentName of ["reviewer", "plan-critic"] as const) {
+    const output = { options: {} as Record<string, unknown> }
+    await handler(makeInput({ agentName, modelID: "gpt-5.5" }), output)
+    assert.equal(output.options.serviceTier, "priority", `${agentName} service tier`)
+    assert.equal(output.options.reasoningEffort, "xhigh", `${agentName} reasoning floor`)
   }
 })
 

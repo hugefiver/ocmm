@@ -13,12 +13,31 @@
   // "locale": "zh-CN",
 
   // Fast routing is opt-in. Provider names are case-sensitive; omitted/empty
-  // providers disable promotion. Mapping keys are qualified original models.
+  // providers disable model promotion. Mappings/catalog `-fast` promotion has
+  // first priority; fastModels.rules are an options-only fallback for managed routes.
   "fastModels": {
     "providers": ["openai"],
     "mappings": {
       "openai/gpt-5.5": "gpt-5.5-fast"
-    }
+    },
+    // Rules merge in declaration order; this narrower model/SDK rule wins last.
+    // Fields match runtime providerID, modelID, and model.api.npm.
+    "rules": [
+      {
+        "match": { "provider": "openai" },
+        "options": {
+          "serviceTier": "standard",
+          "telemetry": { "fast": true }
+        }
+      },
+      {
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai*" },
+        "options": {
+          "serviceTier": "priority",
+          "telemetry": { "sampled": true }
+        }
+      }
+    ]
   },
 
   // Agents accept shorthand or full ModelRequirement form.
@@ -195,13 +214,19 @@
   // the OCMM_PROFILE env var (env wins). Missing profile warns and preserves the base config.
   "profiles": {
     "precision": {
-      // A profile `providers` array replaces the base allowlist, while
-      // `mappings` deep-merges by qualified original-model key.
+      // Profile `providers` and `rules` arrays replace root arrays; `mappings`
+      // deep-merges by qualified original-model key. Omitting `rules` inherits root rules.
       "fastModels": {
         "providers": ["openai"],
         "mappings": {
           "openai/gpt-5.5": "gpt-5.5-fast"
-        }
+        },
+        "rules": [
+          {
+            "match": { "sdk": "@ai-sdk/openai-compatible" },
+            "options": { "serviceTier": "flex" }
+          }
+        ]
       },
       "agents": {
         // Complete requirement imported by agents.oracle's qualified alias.

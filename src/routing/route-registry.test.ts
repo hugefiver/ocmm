@@ -16,6 +16,7 @@ const route = (model: string): EffectiveModelRoute => ({
   },
   requirementSource: "agent-default",
   primarySource: "builtin-requirement",
+  fastPath: { kind: "off" },
 })
 
 test("initial snapshot is unpublished, empty, and has id zero", () => {
@@ -175,4 +176,58 @@ test("published snapshots cannot be mutated through runtime casts", () => {
 
   assert.equal(snapshot.published, true)
   assert.deepEqual([...snapshot.routes], [["builder", route("openai/gpt-5.6")]])
+})
+
+test("publishing deeply clones and freezes option fast paths", () => {
+  const registry = createEffectiveRouteRegistry()
+  const options: Record<string, unknown> = Object.fromEntries([
+    ["serviceTier", "flex"],
+    ["nested", { enabled: true, presets: [{ name: "fast" }] }],
+    ["__proto__", { mustRemainData: true }],
+  ])
+  const rules = [{
+    match: { provider: "openai", model: "gpt-*" },
+    options,
+  }]
+  const inputRoute: EffectiveModelRoute = {
+    ...route("openai/gpt-5.6"),
+    fastPath: { kind: "options", rules },
+  }
+
+  assert.equal(registry.publish(registry.beginBuild(), new Map([["builder", inputRoute]])), true)
+  const published = registry.snapshot().routes.get("builder")!
+  assert.equal(published.fastPath.kind, "options")
+
+  rules[0]!.match.provider = "mutated"
+  options.serviceTier = "default"
+  ;((options.nested as Record<string, unknown>).presets as Array<Record<string, string>>)[0]!.name = "slow"
+  ;((options.nested as Record<string, unknown>).presets as Array<Record<string, string>>).push({ name: "added" })
+
+  assert.deepEqual(published.fastPath, {
+    kind: "options",
+    rules: [{
+      match: { provider: "openai", model: "gpt-*" },
+      options: Object.fromEntries([
+        ["serviceTier", "flex"],
+        ["nested", { enabled: true, presets: [{ name: "fast" }] }],
+        ["__proto__", { mustRemainData: true }],
+      ]),
+    }],
+  })
+
+  const publishedRule = published.fastPath.rules[0]!
+  const publishedOptions = publishedRule.options as Record<string, unknown>
+  assert.ok(Object.hasOwn(publishedOptions, "__proto__"))
+  assert.throws(() => {
+    publishedRule.match.provider = "other"
+  })
+  assert.throws(() => {
+    ;(publishedOptions.nested as Record<string, unknown>).enabled = false
+  })
+  assert.throws(() => {
+    ;((publishedOptions.nested as Record<string, unknown>).presets as Array<Record<string, string>>)[0]!.name = "slow"
+  })
+  assert.throws(() => {
+    ;((publishedOptions.nested as Record<string, unknown>).presets as Array<Record<string, string>>).push({ name: "added" })
+  })
 })

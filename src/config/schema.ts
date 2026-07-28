@@ -224,6 +224,7 @@ const defaultSubagentConfig = () => ({
 const defaultFastModelsConfig = () => ({
   providers: [],
   mappings: {},
+  rules: [],
 })
 
 const FastModelMappingKeySchema = z.string().regex(/^[^/]+\/.+$/)
@@ -232,10 +233,34 @@ const FastModelMappingValueSchema = z.string().refine((value) => /\S/.test(value
   message: "Fast model mapping values must contain non-whitespace text.",
 })
 
+const FastOptionPatternSchema = z.string().min(1)
+
+const FastOptionRuleMatchSchema = z
+  .object({
+    provider: FastOptionPatternSchema.optional(),
+    model: FastOptionPatternSchema.optional(),
+    sdk: FastOptionPatternSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (match) => match.provider !== undefined || match.model !== undefined || match.sdk !== undefined,
+    { message: "Fast option rules require at least one match field." },
+  )
+
+export const FastOptionRuleSchema = z
+  .object({
+    match: FastOptionRuleMatchSchema,
+    options: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+
+export type FastOptionRule = z.infer<typeof FastOptionRuleSchema>
+
 export const FastModelsConfigSchema = z
   .object({
     providers: z.array(z.string().min(1)).default([]),
     mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).default({}),
+    rules: z.array(FastOptionRuleSchema).default([]),
   })
   .strict()
   .default(defaultFastModelsConfig)
@@ -244,6 +269,7 @@ const ProfileFastModelsConfigSchema = z
   .object({
     providers: z.array(z.string().min(1)).optional(),
     mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).optional(),
+    rules: z.array(FastOptionRuleSchema).optional(),
   })
   .strict()
 

@@ -418,7 +418,18 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     "providers": ["openai"],
     "mappings": {
       "openai/<original-model>": "<provider-local-fast-model>"
-    }
+    },
+    // Rules are a fallback after model promotion. Later matches override earlier ones.
+    "rules": [
+      {
+        "match": { "provider": "openai" },
+        "options": { "serviceTier": "standard", "telemetry": { "fast": true } }
+      },
+      {
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai*" },
+        "options": { "serviceTier": "priority", "telemetry": { "sampled": true } }
+      }
+    ]
   },
 
   "agents": {
@@ -832,7 +843,17 @@ Before an explicit `--` separator, the shim consumes `--fast`; `ocmm -- --fast` 
 
 `fastModels.providers` is an explicit, case-sensitive provider allowlist. Omitting it or leaving it empty disables promotion. For an allowlisted selected model, `fastModels.mappings` looks up the qualified original key `provider/model`; its value is a provider-local model ID (it may itself contain `/`), and the already-selected provider is retained. An explicitly owned mapping key is authoritative, including a self-map no-op.
 
-Without an explicit mapping, ocmm tries `${modelID}-fast` only when that exact model exists in the selected provider's catalog. A selected model already ending in `-fast` is not promoted again.
+`providers` plus `mappings` are always the first-priority fast-model promotion path. Without an explicit mapping, ocmm tries `${modelID}-fast` only when that exact model exists in the selected provider's catalog. An explicit self-mapping and a selected model already ending in `-fast` are authoritative no-ops; neither falls through to option rules.
+
+### `fastModels.rules`
+
+When `--fast` / `OCMM_FAST=1|true` is active and an OCMM-managed route has no eligible mapping or catalog-backed `-fast` promotion, `fastModels.rules` provides an options-only fallback. It does not change the selected model, and it does not use `fastModels.providers` as an allowlist; use `match.provider` to scope a rule. `off` and model-promoted routes, plus unmanaged routes, never apply rules.
+
+Each rule has `match` and `options`. `match` must declare at least one of optional `provider`, `model`, or `sdk`; omitted fields are unrestricted and all present fields use AND semantics. Values are matched against the runtime `providerID`, provider-local runtime `modelID`, and OpenCode `model.api.npm` (for example `@ai-sdk/openai` or `@ai-sdk/anthropic`). Patterns are case-sensitive whole-string globs: `*` matches any number of characters, including `/`, and `?` matches exactly one character. A rule with `sdk` does not match when SDK metadata is absent.
+
+All matching rules merge in declaration order. Plain objects deep-merge, while arrays, scalars, and `null` replace the earlier value, so later rules win. Rule options overlay the pre-existing `output.options`; OCMM then applies protected reviewer and plan-critic reasoning floors last. Runtime fallback requests are re-matched against their actual fallback provider, model, and SDK on every `chat.params` call.
+
+Profile-declared `fastModels.rules` replaces the root rules array wholesale. A profile that omits `rules` inherits the root array.
 
 ## `ocmm` shim
 

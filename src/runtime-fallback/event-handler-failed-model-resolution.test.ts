@@ -19,6 +19,7 @@ function publishRoute(
     requirement: { fallbackChain },
     requirementSource: "user-config",
     primarySource: "user-requirement",
+    fastPath: { kind: "off" },
   }]]))
 }
 

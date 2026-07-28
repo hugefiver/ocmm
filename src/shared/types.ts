@@ -5,6 +5,8 @@
  * FallbackEntry/ModelRequirement concepts, so configs stay portable.
  */
 
+import type { FastOptionRule } from "../config/schema.ts"
+
 export type ThinkingMode = "enabled" | "disabled"
 
 /** Reasoning intensity / variant a model entry asks for. */
@@ -74,12 +76,18 @@ export type RequirementSource = "user-config" | "agent-default" | "category-defa
 /** Which final-primary selection branch won during route construction. */
 export type PrimarySource = "existing-model" | "user-requirement" | "catalog-upgrade" | "builtin-requirement"
 
+export type FastPath =
+  | Readonly<{ kind: "off" }>
+  | Readonly<{ kind: "model"; modelID: string }>
+  | Readonly<{ kind: "options"; rules: readonly FastOptionRule[] }>
+
 /** Immutable route snapshot materialized for one registered OpenCode agent. */
 export type EffectiveModelRoute = {
   readonly model: string
   readonly requirement: ModelRequirement
   readonly requirementSource: RequirementSource
   readonly primarySource: PrimarySource
+  readonly fastPath: FastPath
 }
 
 /** Lightweight category descriptor used for documentation + delegate-task hints. */

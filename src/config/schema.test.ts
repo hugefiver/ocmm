@@ -36,18 +36,21 @@ test("fast model policy applies root defaults", async () => {
   assert.deepEqual(mod.FastModelsConfigSchema.parse({}), {
     providers: [],
     mappings: {},
+    rules: [],
   })
   assert.deepEqual(defaultConfig().fastModels, {
     providers: [],
     mappings: {},
+    rules: [],
   })
   assert.deepEqual(OcmmConfigSchema.parse({}).fastModels, {
     providers: [],
     mappings: {},
+    rules: [],
   })
 })
 
-test("fast model policy validates root provider mappings", () => {
+test("fast model policy validates root provider mappings and structured rules", () => {
   assert.deepEqual(
     OcmmConfigSchema.parse({
       fastModels: {
@@ -64,7 +67,49 @@ test("fast model policy validates root provider mappings", () => {
         "openai/gpt-5.6-sol": "gpt-5.6-sol-fast",
         "openai/gpt-5.6-codex": "openai/gpt-5.6-codex-fast",
       },
+      rules: [],
     },
+  )
+
+  assert.deepEqual(
+    OcmmConfigSchema.parse({
+      fastModels: {
+        rules: [
+          {
+            match: {
+              provider: "openai",
+              model: "gpt-5.6.*",
+              sdk: "openai-compatible",
+            },
+            options: {
+              reasoning: { effort: "minimal", budget: 128 },
+              fallback: ["gpt-5.6-mini", { retry: false }],
+              temperature: 0.2,
+              enabled: true,
+              label: "fast",
+              nullable: null,
+            },
+          },
+        ],
+      },
+    }).fastModels.rules,
+    [
+      {
+        match: {
+          provider: "openai",
+          model: "gpt-5.6.*",
+          sdk: "openai-compatible",
+        },
+        options: {
+          reasoning: { effort: "minimal", budget: 128 },
+          fallback: ["gpt-5.6-mini", { retry: false }],
+          temperature: 0.2,
+          enabled: true,
+          label: "fast",
+          nullable: null,
+        },
+      },
+    ],
   )
 
   for (const fastModels of [
@@ -74,6 +119,15 @@ test("fast model policy validates root provider mappings", () => {
     { mappings: { "openai/gpt-5.6-sol": "" } },
     { mappings: { "openai/gpt-5.6-sol": "   " } },
     { providers: [], mappings: {}, extra: true },
+    { rules: [{ match: {}, options: {} }] },
+    { rules: [{ match: { provider: "" }, options: {} }] },
+    { rules: [{ match: { model: "" }, options: {} }] },
+    { rules: [{ match: { sdk: "" }, options: {} }] },
+    { rules: [{ match: { provider: "openai", extra: true }, options: {} }] },
+    { rules: [{ match: { provider: "openai" }, options: [] }] },
+    { rules: [{ match: { provider: "openai" }, options: null }] },
+    { rules: [{ match: { provider: "openai" }, options: "fast" }] },
+    { rules: [{ match: { provider: "openai" }, options: {}, extra: true }] },
   ]) {
     assert.equal(OcmmConfigSchema.safeParse({ fastModels }).success, false, JSON.stringify(fastModels))
   }
@@ -87,6 +141,12 @@ test("fast model policy profile form is strict and partial without child default
           mappings: {
             "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
           },
+          rules: [
+            {
+              match: { model: "gpt-5.6.*" },
+              options: { reasoning: { effort: "minimal" } },
+            },
+          ],
         },
       },
       empty: {},
@@ -97,6 +157,12 @@ test("fast model policy profile form is strict and partial without child default
     mappings: {
       "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
     },
+    rules: [
+      {
+        match: { model: "gpt-5.6.*" },
+        options: { reasoning: { effort: "minimal" } },
+      },
+    ],
   })
   assert.equal("providers" in (parsed.profiles.fast?.fastModels ?? {}), false)
   assert.equal("fastModels" in (parsed.profiles.empty ?? {}), false)
