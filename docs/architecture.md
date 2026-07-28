@@ -18,7 +18,7 @@ This document captures ocmm's design rationale, hook flow, and routing pipeline.
 
 - No custom `delegate_task` tool — use OpenCode's built-in task tool.
 - No team-mode orchestration or Boulder/Atlas runtime — out of scope.
-- No full Ralph/audit idle auto-continuation engine yet — ocmm currently exposes `/ralph-loop`, `/audit-loop`, and `/dwloop` command templates only.
+- No full Ralph/audit orchestration engine yet — ocmm has session-scoped, todo-driven idle continuation, but not loop iteration state, completion/no-progress detection, verifier orchestration, cancel/stop state, compaction persistence, Boulder, or Atlas hooks.
 - No per-agent `runtimeFallback` override — fallback config is global.
 - No npm long-lived token requirement — npmjs.org releases use npm Trusted Publishing through GitHub Actions OIDC.
 
@@ -311,7 +311,7 @@ Zod-validated (`src/config/schema.ts`), `unknown keys` rejected (see [`schema.js
 
 Key shapes:
 - **Variant enum:** `[low, medium, high, xhigh, max, minimal, none, auto, thinking]`
-- **FallbackEntry:** `{providers:string[], model:string, variant?, reasoningEffort?, temperature?, top_p?, maxTokens?, thinking?:{type:"enabled"|"disabled", budgetTokens?}}`
+- **FallbackEntry:** `{providers:string[], model:string, variant?, reasoningEffort?, temperature?, topP?, maxTokens?, thinking?:{type:"enabled"|"disabled", budgetTokens?}}`
 - **ModelRequirement:** `{fallbackChain:FallbackEntry[], variant?, requiresModel?, requiresAnyModel?:bool, requiresProvider?:string[]}`
 - **ShorthandFields:** `model`, `variant`, `fallbackModels`, `requirement`, `disabled`, `description` (expanded by `normalizeShorthand`).
 - **AgentEntry:** extends `CategoryEntry` + `disabled` + override fields (`tools`, `permission`, `skills`, `promptAppend`, `temperature`, `topP`, `maxTokens`, `thinking`, `reasoningEffort`). `.strict()`.
@@ -366,13 +366,13 @@ The TypeScript plugin and Rust `ocmm-lsp` crate are built together for releases.
 - **Build:** `pnpm run build` — TypeScript into `dist/`, then Cargo release build copied into `dist/bin/` under both the target-triple release name and local fallback name.
 - **Typecheck:** `pnpm run typecheck` — `tsc --noEmit`, strict mode.
 - **Test:** `pnpm test` — TypeScript tests via `node --test --experimental-strip-types` (Node 22+) plus `cargo test -p ocmm-lsp`.
-- **Runtime dep:** `zod ^3.23.8`.
-- **Dev deps:** `typescript ^5.6.0`, `@types/node ^22.10.0`, `rimraf ^6.0.1`.
+- **Runtime dep:** `zod ^4.4.3`.
+- **Dev deps:** `typescript ^6.0.3`, `@types/node ^26.0.0`, `rimraf ^6.1.3`.
 
 ## What's NOT implemented (vs upstream omo)
 
 - No `prompt-async-gate` — simple `Set<sessionID>` dedup instead.
-- No full loop runtime — `/ralph-loop`, `/audit-loop`, and `/dwloop` are command templates, not event-driven idle continuation. Noninteractive `opencode run` receives a compatibility expansion, but still no hidden background continuation. Ralph Loop runtime, stop/cancel, compaction, and verifier hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
+- No full Ralph/audit loop runtime — `/ralph-loop`, `/audit-loop`, and `/dwloop` can enable the existing session-scoped continuation that re-prompts on `session.idle` when unfinished todos remain. Loop iteration state, completion/no-progress detection, verifier orchestration, cancel/stop state, compaction persistence, and the broader Boulder/Atlas hooks remain follow-up work in `docs/kb/omo-features/loops.md`.
 - No per-agent `runtimeFallback` override — global config only.
 - No full upstream LSP daemon — ocmm ships a direct native stdio MCP instead of the shared socket daemon.
 - No toast notifications — logs only.

@@ -1,7 +1,7 @@
 # omo Loop Systems
 
 > **Source**: `omo/packages/omo-opencode/src/hooks/ralph-loop/`, `src/hooks/stop-continuation-guard/`, `src/hooks/compaction-context-injector/`, `src/hooks/compaction-todo-preserver/`, `src/hooks/todo-continuation-enforcer/`, `src/hooks/unstable-agent-babysitter/`, `src/hooks/background-notification/`, `src/hooks/atlas/`
-> **Current ocmm status**: Only slash command templates are migrated locally (`/ralph-loop`, `/audit-loop`, `/dwloop`). They are registered through OpenCode `config.command` and ocmm also expands bare noninteractive `opencode run "/ralph-loop ..."` input as command context. The event-driven idle continuation engine, verifier orchestration, cancel/stop state, Boulder, and Atlas hooks remain future work.
+> **Current ocmm status**: Slash command templates (`/ralph-loop`, `/audit-loop`, `/dwloop`) and a basic session-scoped, todo-driven idle continuation path are implemented. The commands are registered through OpenCode `config.command`; ocmm also expands bare noninteractive `opencode run "/ralph-loop ..."` input as command context. When enabled by `idleContinuation.enabled` or `/idle-continuation`, `session.idle` re-prompts sessions that still have unfinished todos, subject to abort and continuation-count guards. Full Ralph/audit iteration state, completion/no-progress detection, verifier orchestration, cancel/stop state, compaction persistence, Boulder, and Atlas hooks remain future work.
 > **Status**: Research complete
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
@@ -392,10 +392,10 @@ No external npm packages. No external binaries.
 
 ### Follow-up Development Plan
 
-Current ocmm intentionally stops at slash-command loop templates. A future full loop runtime should be split into guarded, reviewable phases:
+Current ocmm includes slash-command templates and generic todo-driven idle continuation, but intentionally stops short of a full Ralph/audit loop runtime. Further work should be split into guarded, reviewable phases:
 
-1. **Ralph Loop runtime MVP**: add loop state storage, no-progress detection, completion-promise detection, continuation prompt building, and a session-scoped `session.idle` handler. The handler must filter strictly to the active loop session and must never re-prompt completed child/subagent sessions.
-2. **Stop/cancel safety hooks**: add `/cancel-ralph`, `/stop-continuation`, and the stop-continuation guard before enabling any automatic continuation by default. This is a prerequisite for safe idle continuation.
+1. **Ralph Loop runtime MVP**: add loop state storage, no-progress detection, completion-promise detection, and continuation prompt building on top of the existing generic `session.idle` continuation path. Full-loop dispatch must filter strictly to the active loop session and must never re-prompt completed child/subagent sessions.
+2. **Stop/cancel safety hooks**: add `/cancel-ralph`, `/stop-continuation`, and the stop-continuation guard before enabling a full loop runtime by default.
 3. **Compaction hooks**: migrate/adapt compaction context injection and todo preservation so a running loop can survive context compaction without losing agent/model/tool state or outstanding todos.
 4. **Audit verification loop**: extend `/audit-loop` and `/dwloop` beyond prompt templates with explicit reviewer/oracle verification. Prefer blocking task calls for verifier work to avoid extra idle continuation messages.
 5. **Deferred heavy hooks**: keep `todoContinuationEnforcer`/Boulder and `atlasHook` out of the MVP. They remain useful follow-up work after the core runtime is stable, because both are large and tightly tied to OpenCode's event/task model.

@@ -67,7 +67,7 @@ A main `vX.Y.Z` release contains:
 For OpenCode, install the release tarball asset URL with your package manager:
 
 ```bash
-VERSION=0.1.1
+VERSION=0.6.3
 pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-opencode-plugin-${VERSION}.tgz"
 ```
 
@@ -89,7 +89,7 @@ codex plugin add deepwork@deepwork-local --json
 Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/deepwork` and point the marketplace at that directory:
 
 ```bash
-VERSION=0.1.1
+VERSION=0.6.3
 curl -L -o "deepwork-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/deepwork-codex-plugin-${VERSION}.tgz"
 mkdir -p .codex-plugins/deepwork
 tar -xzf "deepwork-codex-plugin-${VERSION}.tgz" -C .codex-plugins/deepwork
@@ -160,7 +160,7 @@ ocmm registers the built-in OpenCode MCP named `lsp` with the project-owned `ocm
 For direct external-program use, download the matching standalone asset from the `ocmm-lsp-vA.B.C` release and point `OCMM_LSP_COMMAND` at it:
 
 ```bash
-LSP_VERSION=0.1.1
+LSP_VERSION=0.3.2
 curl -L -o ~/.local/bin/ocmm-lsp "https://github.com/<owner>/ocmm/releases/download/ocmm-lsp-v${LSP_VERSION}/ocmm-lsp-x86_64-unknown-linux-gnu"
 chmod +x ~/.local/bin/ocmm-lsp
 OCMM_LSP_COMMAND="$HOME/.local/bin/ocmm-lsp" opencode run "check diagnostics"
@@ -325,6 +325,8 @@ For standalone Home Manager, construct the `pkgs` passed to `homeManagerConfigur
 ```
 
 When both programs are enabled and `programs.opencode.package` is non-null, the wrapper reuses that package and appends ocmm's store plugin path to the end of the existing OpenCode plugin list.
+
+Both modules also accept `programs.ocmm.opencode.command` for an explicit OpenCode executable path or command name. `programs.ocmm.opencode.package` and `programs.ocmm.opencode.command` are mutually exclusive; in Home Manager, leaving both unset allows the module to reuse the enabled `programs.opencode.package`.
 
 ### NixOS module
 
