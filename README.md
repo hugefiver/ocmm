@@ -67,7 +67,7 @@ A main `vX.Y.Z` release contains:
 For OpenCode, install the release tarball asset URL with your package manager:
 
 ```bash
-VERSION=0.6.3
+VERSION=0.6.4
 pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-opencode-plugin-${VERSION}.tgz"
 ```
 
@@ -89,7 +89,7 @@ codex plugin add deepwork@deepwork-local --json
 Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/deepwork` and point the marketplace at that directory:
 
 ```bash
-VERSION=0.6.3
+VERSION=0.6.4
 curl -L -o "deepwork-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/deepwork-codex-plugin-${VERSION}.tgz"
 mkdir -p .codex-plugins/deepwork
 tar -xzf "deepwork-codex-plugin-${VERSION}.tgz" -C .codex-plugins/deepwork
