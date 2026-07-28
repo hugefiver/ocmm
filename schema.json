@@ -1106,6 +1106,9 @@
     "fastModels": {
       "type": "object",
       "properties": {
+        "defaultRules": {
+          "type": "boolean"
+        },
         "providers": {
           "type": "array",
           "items": {
@@ -2252,6 +2255,9 @@
           "fastModels": {
             "type": "object",
             "properties": {
+              "defaultRules": {
+                "type": "boolean"
+              },
               "providers": {
                 "type": "array",
                 "items": {

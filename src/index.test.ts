@@ -236,17 +236,19 @@ test("plugin uses the OpenCode facade on initial load and reload, sharing its pu
   }, { OCMM_FAST: "1" })
 })
 
-test("plugin option rules use the published profile snapshot until config republishes after reload", async () => {
+test("plugin default and user fast rules use one published profile snapshot across reload", async () => {
   const initialConfig = {
     fastModels: {
+      defaultRules: false,
       providers: ["openai"],
       mappings: {},
-      rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "root" } }],
+      rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { profileMarker: "root" } }],
     },
     profiles: {
       fast: {
         fastModels: {
-          rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "flex" } }],
+          defaultRules: true,
+          rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { profileMarker: "v1" } }],
         },
       },
     },
@@ -284,7 +286,10 @@ test("plugin option rules use the published profile snapshot until config republ
         },
         output,
       )
-      return output.options.serviceTier
+      return {
+        serviceTier: output.options.serviceTier,
+        profileMarker: output.options.profileMarker,
+      }
     }
 
     const initialTarget = await publish()
@@ -293,28 +298,37 @@ test("plugin option rules use the published profile snapshot until config republ
       "openai/gpt-5.6-sol",
       "option fallback keeps the selected model unchanged",
     )
-    assert.equal(await invoke(), "flex")
+    assert.deepEqual(await invoke(), { serviceTier: "priority", profileMarker: "v1" })
 
     writeFileSync(configPath, JSON.stringify({
       ...initialConfig,
       profiles: {
         fast: {
           fastModels: {
-            rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { serviceTier: "priority" } }],
+            defaultRules: false,
+            rules: [{ match: { sdk: "@ai-sdk/openai" }, options: { profileMarker: "v2" } }],
           },
         },
       },
     }))
     reload()
 
-    assert.equal(await invoke(), "flex", "reload without config publication keeps the old snapshot")
+    assert.deepEqual(
+      await invoke(),
+      { serviceTier: "priority", profileMarker: "v1" },
+      "reload without config publication keeps the complete old snapshot",
+    )
     const republishedTarget = await publish()
     assert.equal(
       (republishedTarget.agent as Record<string, { model?: string }>).worker?.model,
       "openai/gpt-5.6-sol",
       "republishing option rules still keeps the selected model unchanged",
     )
-    assert.equal(await invoke(), "priority", "successful config publication atomically replaces rules")
+    assert.deepEqual(
+      await invoke(),
+      { serviceTier: undefined, profileMarker: "v2" },
+      "successful config publication atomically replaces the switch and rules",
+    )
   }, { OCMM_FAST: "1" })
 })
 

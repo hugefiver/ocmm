@@ -11,6 +11,19 @@ export type FastOptionMergeResult = {
   matchedRuleIndexes: number[]
 }
 
+const DEFAULT_FAST_OPTION_EXCLUDED_MODEL_TOKENS = new Set([
+  "nano",
+  "pro",
+  "realtime",
+  "audio",
+  "transcribe",
+  "image",
+  "search",
+  "tts",
+  "vision",
+  "codex",
+])
+
 function globMatches(pattern: string, value: string): boolean {
   let source = ""
   for (const character of pattern) {
@@ -58,23 +71,38 @@ function cloneOptions(options: Readonly<Record<string, unknown>>): Record<string
   return cloned
 }
 
-function mergeOptions(
+export function mergeFastOptions(
   baseOptions: Readonly<Record<string, unknown>>,
-  ruleOptions: Readonly<Record<string, unknown>>,
+  overrideOptions: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const merged = cloneOptions(baseOptions)
-  for (const key of Object.keys(ruleOptions)) {
-    const ruleValue = ownValue(ruleOptions, key)
+  for (const key of Object.keys(overrideOptions)) {
+    const ruleValue = ownValue(overrideOptions, key)
     const baseValue = ownValue(merged, key)
     defineValue(
       merged,
       key,
       isPlainObject(baseValue) && isPlainObject(ruleValue)
-        ? mergeOptions(baseValue, ruleValue)
+        ? mergeFastOptions(baseValue, ruleValue)
         : cloneOptionValue(ruleValue),
     )
   }
   return merged
+}
+
+function supportsDefaultFastOptions(model: string): boolean {
+  const match = /^gpt-(\d+)/u.exec(model)
+  if (match === null || Number(match[1]) < 4) return false
+  return !model.split(/[._-]/u).some((token) => DEFAULT_FAST_OPTION_EXCLUDED_MODEL_TOKENS.has(token))
+}
+
+export function resolveDefaultFastOptions(
+  context: FastOptionMatchContext,
+): Record<string, unknown> | undefined {
+  if (!supportsDefaultFastOptions(context.model)) return undefined
+  if (context.sdk === "@ai-sdk/openai") return { serviceTier: "priority" }
+  if (context.sdk === "@ai-sdk/openai-compatible") return { service_tier: "priority" }
+  return undefined
 }
 
 export function matchesFastOptionRule(
@@ -97,7 +125,7 @@ export function mergeFastOptionRules(
   const matchedRuleIndexes: number[] = []
   for (const [index, rule] of rules.entries()) {
     if (!matchesFastOptionRule(rule, context)) continue
-    options = mergeOptions(options, rule.options)
+    options = mergeFastOptions(options, rule.options)
     matchedRuleIndexes.push(index)
   }
   return { options, matchedRuleIndexes }

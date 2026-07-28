@@ -191,7 +191,7 @@ test("publishing deeply clones and freezes option fast paths", () => {
   }]
   const inputRoute: EffectiveModelRoute = {
     ...route("openai/gpt-5.6"),
-    fastPath: { kind: "options", rules },
+    fastPath: { kind: "options", defaultRules: true, rules },
   }
 
   assert.equal(registry.publish(registry.beginBuild(), new Map([["builder", inputRoute]])), true)
@@ -205,6 +205,7 @@ test("publishing deeply clones and freezes option fast paths", () => {
 
   assert.deepEqual(published.fastPath, {
     kind: "options",
+    defaultRules: true,
     rules: [{
       match: { provider: "openai", model: "gpt-*" },
       options: Object.fromEntries([
@@ -217,7 +218,11 @@ test("publishing deeply clones and freezes option fast paths", () => {
 
   const publishedRule = published.fastPath.rules[0]!
   const publishedOptions = publishedRule.options as Record<string, unknown>
+  const mutableFastPath = published.fastPath as { defaultRules: boolean }
   assert.ok(Object.hasOwn(publishedOptions, "__proto__"))
+  assert.throws(() => {
+    mutableFastPath.defaultRules = false
+  })
   assert.throws(() => {
     publishedRule.match.provider = "other"
   })

@@ -34,16 +34,19 @@ test("fast model policy applies root defaults", async () => {
   const mod = await import("./schema.ts")
   assert.equal(typeof mod.FastModelsConfigSchema?.parse, "function")
   assert.deepEqual(mod.FastModelsConfigSchema.parse({}), {
+    defaultRules: false,
     providers: [],
     mappings: {},
     rules: [],
   })
   assert.deepEqual(defaultConfig().fastModels, {
+    defaultRules: false,
     providers: [],
     mappings: {},
     rules: [],
   })
   assert.deepEqual(OcmmConfigSchema.parse({}).fastModels, {
+    defaultRules: false,
     providers: [],
     mappings: {},
     rules: [],
@@ -62,6 +65,7 @@ test("fast model policy validates root provider mappings and structured rules", 
       },
     }).fastModels,
     {
+      defaultRules: false,
       providers: ["openai"],
       mappings: {
         "openai/gpt-5.6-sol": "gpt-5.6-sol-fast",
@@ -113,6 +117,13 @@ test("fast model policy validates root provider mappings and structured rules", 
   )
 
   for (const fastModels of [
+    { defaultRules: 0 },
+    { defaultRules: 1 },
+    { defaultRules: "true" },
+    { defaultRules: "false" },
+    { defaultRules: null },
+    { defaultRules: {} },
+    { defaultRules: [] },
     { providers: [""] },
     { mappings: { openai: "openai/gpt-5.6-flash" } },
     { mappings: { "/gpt-5.6-sol": "openai/gpt-5.6-flash" } },
@@ -131,6 +142,9 @@ test("fast model policy validates root provider mappings and structured rules", 
   ]) {
     assert.equal(OcmmConfigSchema.safeParse({ fastModels }).success, false, JSON.stringify(fastModels))
   }
+
+  assert.equal(OcmmConfigSchema.parse({ fastModels: { defaultRules: true } }).fastModels.defaultRules, true)
+  assert.equal(OcmmConfigSchema.parse({ fastModels: { defaultRules: false } }).fastModels.defaultRules, false)
 })
 
 test("fast model policy profile form is strict and partial without child defaults", () => {
@@ -138,6 +152,7 @@ test("fast model policy profile form is strict and partial without child default
     profiles: {
       fast: {
         fastModels: {
+          defaultRules: true,
           mappings: {
             "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
           },
@@ -150,10 +165,12 @@ test("fast model policy profile form is strict and partial without child default
         },
       },
       empty: {},
+      emptyFastModels: { fastModels: {} },
     },
   })
 
   assert.deepEqual(parsed.profiles.fast?.fastModels, {
+    defaultRules: true,
     mappings: {
       "openai/gpt-5.6-sol": "openai/gpt-5.6-flash",
     },
@@ -166,6 +183,7 @@ test("fast model policy profile form is strict and partial without child default
   })
   assert.equal("providers" in (parsed.profiles.fast?.fastModels ?? {}), false)
   assert.equal("fastModels" in (parsed.profiles.empty ?? {}), false)
+  assert.deepEqual(parsed.profiles.emptyFastModels?.fastModels, {})
   assert.deepEqual(parsed.profiles.fast?.disabledHooks, ["directory-readme-injector"])
 
   assert.equal(

@@ -504,6 +504,44 @@ test("profile overlay inherits omitted fast rules", () => {
   }
 })
 
+test("profile overlay overrides and inherits fast default rules", () => {
+  const xdg = makeTempXdg()
+  try {
+    for (const { name, rootDefaultRules, profileFastModels, expectedDefaultRules } of [
+      {
+        name: "profile false overrides root true",
+        rootDefaultRules: true,
+        profileFastModels: { defaultRules: false },
+        expectedDefaultRules: false,
+      },
+      {
+        name: "profile true overrides root false",
+        rootDefaultRules: false,
+        profileFastModels: { defaultRules: true },
+        expectedDefaultRules: true,
+      },
+      {
+        name: "omitted profile value inherits root",
+        rootDefaultRules: true,
+        profileFastModels: { providers: ["profile-provider"] },
+        expectedDefaultRules: true,
+      },
+    ]) {
+      writeConfig(xdg, {
+        fastModels: { defaultRules: rootDefaultRules },
+        profiles: { selected: { fastModels: profileFastModels } },
+        activeProfile: "selected",
+      })
+
+      const loaded = loadPluginWithXdg(xdg)
+
+      assert.equal(loaded.config.fastModels.defaultRules, expectedDefaultRules, name)
+    }
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("loadOpenCodePluginConfig materializes qualified aliases using project descriptor precedence", () => {
   const xdg = makeTempXdg()
   const project = mkdtempSync(join(tmpdir(), "ocmm-qualified-precedence-"))

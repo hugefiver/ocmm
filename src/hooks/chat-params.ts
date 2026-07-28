@@ -9,7 +9,12 @@
 import { resolveModelRouting } from "../routing/resolver.ts"
 import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
-import { mergeFastOptionRules } from "../routing/fast-option-rules.ts"
+import {
+  mergeFastOptionRules,
+  mergeFastOptions,
+  resolveDefaultFastOptions,
+  type FastOptionMatchContext,
+} from "../routing/fast-option-rules.ts"
 import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
@@ -206,11 +211,18 @@ function applyFastOptionRoute(args: {
   output: ChatParamsOutput
 }): number[] {
   if (args.route?.fastPath.kind !== "options") return []
-  const merged = mergeFastOptionRules(args.output.options, args.route.fastPath.rules, {
+  const context: FastOptionMatchContext = {
     provider: args.input.model.providerID,
     model: args.input.model.modelID,
     ...(args.input.model.sdk !== undefined ? { sdk: args.input.model.sdk } : {}),
-  })
+  }
+  const defaultOptions = args.route.fastPath.defaultRules
+    ? resolveDefaultFastOptions(context)
+    : undefined
+  const optionsWithDefaults = defaultOptions === undefined
+    ? args.output.options
+    : mergeFastOptions(args.output.options, defaultOptions)
+  const merged = mergeFastOptionRules(optionsWithDefaults, args.route.fastPath.rules, context)
   args.output.options = merged.options
   return merged.matchedRuleIndexes
 }

@@ -13,6 +13,7 @@ import {
 const fastModels = (overrides: Partial<FastModelsConfig> = {}): FastModelsConfig => ({
   providers: [],
   mappings: {},
+  defaultRules: false,
   rules: [],
   ...overrides,
 })
@@ -109,25 +110,28 @@ test("an allowlisted catalog suffix beats option routing", () => {
 test("fast paths fall through to options for provider and catalog promotion misses", () => {
   const rules = [{ match: { provider: "*" }, options: { nested: { enabled: true } } }]
   const cases = [
-    fastModels({ providers: [], rules }),
-    fastModels({ providers: ["OpenAI"], rules }),
-    fastModels({ providers: ["openai"], rules }),
+    fastModels({ providers: [], defaultRules: true, rules }),
+    fastModels({ providers: ["OpenAI"], defaultRules: true, rules }),
+    fastModels({ providers: ["openai"], defaultRules: true, rules }),
   ]
   const catalogModels = new Set<string>()
   for (const configured of cases) {
-    assert.deepEqual(selectFastPath({
+    const fastPath = selectFastPath({
       selectedModel: "openai/gpt-5.6",
       fastMode: true,
       fastModels: configured,
       catalogModels,
-    }), { kind: "options", rules })
+    })
+    assert.deepEqual(fastPath, { kind: "options", defaultRules: true, rules })
+    assert.equal(fastPath.kind, "options")
+    assert.notEqual(fastPath.rules, configured.rules)
   }
   assert.deepEqual(selectFastPath({
     selectedModel: "openai/gpt-5.6",
     fastMode: true,
     fastModels: fastModels(),
     catalogModels,
-  }), { kind: "options", rules: [] })
+  }), { kind: "options", defaultRules: false, rules: [] })
 })
 
 test("disabled and invalid selected identities are off", () => {
@@ -264,13 +268,13 @@ test("an options fast path leaves the selected model and materialized fallback c
     requirementSource: "agent-default",
     primarySource: "builtin-requirement",
     fastMode: true,
-    fastModels: fastModels({ rules }),
+    fastModels: fastModels({ defaultRules: true, rules }),
     catalogModels: new Set(["original-fast"]),
   })
 
   assert.equal(route.model, "outside/original")
   assert.deepEqual(route.requirement, materializeSelectedPrimary(requirement, "outside/original"))
-  assert.deepEqual(route.fastPath, { kind: "options", rules })
+  assert.deepEqual(route.fastPath, { kind: "options", defaultRules: true, rules })
 })
 
 test("an effective fast route prepends the copied fast primary and retains distinct stable fallbacks", () => {

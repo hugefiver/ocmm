@@ -415,6 +415,7 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 
   // Opt in per provider before --fast / OCMM_FAST can promote a route.
   "fastModels": {
+    "defaultRules": true,
     "providers": ["openai"],
     "mappings": {
       "openai/<original-model>": "<provider-local-fast-model>"
@@ -423,11 +424,15 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
     "rules": [
       {
         "match": { "provider": "openai" },
-        "options": { "serviceTier": "standard", "telemetry": { "fast": true } }
+        "options": { "telemetry": { "fast": true } }
       },
       {
-        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai*" },
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai" },
         "options": { "serviceTier": "priority", "telemetry": { "sampled": true } }
+      },
+      {
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai-compatible" },
+        "options": { "service_tier": "priority", "telemetry": { "sampled": true } }
       }
     ]
   },
@@ -845,15 +850,19 @@ Before an explicit `--` separator, the shim consumes `--fast`; `ocmm -- --fast` 
 
 `providers` plus `mappings` are always the first-priority fast-model promotion path. Without an explicit mapping, ocmm tries `${modelID}-fast` only when that exact model exists in the selected provider's catalog. An explicit self-mapping and a selected model already ending in `-fast` are authoritative no-ops; neither falls through to option rules.
 
+`fastModels.defaultRules` defaults to `false`. When enabled on an options-only fast path, ocmm applies a best-effort OpenAI Priority Processing default based on the exact, case-sensitive runtime `model.api.npm` and model ID: `@ai-sdk/openai` receives `serviceTier: "priority"`, while `@ai-sdk/openai-compatible` receives the wire-compatible `service_tier: "priority"`. Other or missing SDK metadata is unchanged. It performs no network probe.
+
+The model must start with lowercase `gpt-` followed immediately by numeric major version 4 or newer. Standard, mini, snapshot, and future numeric GPT generations are eligible; IDs containing an exact `.`, `_`, or `-` delimited token from `nano`, `pro`, `realtime`, `audio`, `transcribe`, `image`, `search`, `tts`, `vision`, or `codex` are excluded. GPT 3.5, non-GPT, fine-tuned, and case-mismatched IDs are excluded. This heuristic is intentionally best-effort: OpenAI can change Priority support, and an OpenAI-compatible backend remains the final authority and may reject `service_tier`.
+
 ### `fastModels.rules`
 
 When `--fast` / `OCMM_FAST=1|true` is active and an OCMM-managed route has no eligible mapping or catalog-backed `-fast` promotion, `fastModels.rules` provides an options-only fallback. It does not change the selected model, and it does not use `fastModels.providers` as an allowlist; use `match.provider` to scope a rule. `off` and model-promoted routes, plus unmanaged routes, never apply rules.
 
 Each rule has `match` and `options`. `match` must declare at least one of optional `provider`, `model`, or `sdk`; omitted fields are unrestricted and all present fields use AND semantics. Values are matched against the runtime `providerID`, provider-local runtime `modelID`, and OpenCode `model.api.npm` (for example `@ai-sdk/openai` or `@ai-sdk/anthropic`). Patterns are case-sensitive whole-string globs: `*` matches any number of characters, including `/`, and `?` matches exactly one character. A rule with `sdk` does not match when SDK metadata is absent.
 
-All matching rules merge in declaration order. Plain objects deep-merge, while arrays, scalars, and `null` replace the earlier value, so later rules win. Rule options overlay the pre-existing `output.options`; OCMM then applies protected reviewer and plan-critic reasoning floors last. Runtime fallback requests are re-matched against their actual fallback provider, model, and SDK on every `chat.params` call.
+For an options path, ordinary route/hook options are the base, enabled built-ins overlay that base, matching user rules overlay the built-ins in declaration order, and protected reviewer/plan-critic reasoning floors write last. A user rule can therefore override a built-in field or reset the official provider with `serviceTier: "default"`; the two SDK-specific names are not emitted together unless a user rule explicitly adds the other name. Plain objects deep-merge, while arrays, scalars, and `null` replace the earlier value, so later rules win. Runtime fallback requests are re-matched against their actual fallback provider, model, and SDK on every `chat.params` call.
 
-Profile-declared `fastModels.rules` replaces the root rules array wholesale. A profile that omits `rules` inherits the root array.
+Profile `fastModels.defaultRules` is a scalar: omission inherits the root value, while explicit `true` or `false` overrides it. Profile-declared `fastModels.rules` continues to replace the root array wholesale; omission continues to inherit the root rules.
 
 ## `ocmm` shim
 

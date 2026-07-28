@@ -147,7 +147,11 @@ export function selectFastPath(args: {
     return { kind: "model", modelID: candidate }
   }
 
-  return { kind: "options", rules: args.fastModels.rules }
+  return {
+    kind: "options",
+    defaultRules: args.fastModels.defaultRules,
+    rules: [...args.fastModels.rules],
+  }
 }
 
 export function buildEffectiveModelRoute(args: {

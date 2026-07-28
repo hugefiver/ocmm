@@ -48,6 +48,7 @@ function cloneAndFreezeFastPath(fastPath: FastPath): FastPath {
   if (fastPath.kind === "model") return Object.freeze({ kind: "model", modelID: fastPath.modelID } as const)
   return Object.freeze({
     kind: "options" as const,
+    defaultRules: fastPath.defaultRules,
     rules: freezeArray(fastPath.rules.map(cloneAndFreezeFastOptionRule)),
   })
 }

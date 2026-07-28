@@ -16,6 +16,9 @@
   // providers disable model promotion. Mappings/catalog `-fast` promotion has
   // first priority; fastModels.rules are an options-only fallback for managed routes.
   "fastModels": {
+    // Off by default. Uses serviceTier for @ai-sdk/openai and service_tier for
+    // @ai-sdk/openai-compatible when the runtime numeric GPT policy matches.
+    "defaultRules": true,
     "providers": ["openai"],
     "mappings": {
       "openai/gpt-5.5": "gpt-5.5-fast"
@@ -26,14 +29,20 @@
       {
         "match": { "provider": "openai" },
         "options": {
-          "serviceTier": "standard",
           "telemetry": { "fast": true }
         }
       },
       {
-        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai*" },
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai" },
         "options": {
           "serviceTier": "priority",
+          "telemetry": { "sampled": true }
+        }
+      },
+      {
+        "match": { "model": "gpt-5.*", "sdk": "@ai-sdk/openai-compatible" },
+        "options": {
+          "service_tier": "priority",
           "telemetry": { "sampled": true }
         }
       }
@@ -214,9 +223,11 @@
   // the OCMM_PROFILE env var (env wins). Missing profile warns and preserves the base config.
   "profiles": {
     "precision": {
-      // Profile `providers` and `rules` arrays replace root arrays; `mappings`
-      // deep-merges by qualified original-model key. Omitting `rules` inherits root rules.
+      // `defaultRules` is a scalar override; omitting it inherits the root value.
+      // `providers` and `rules` arrays replace root arrays; `mappings` deep-merges
+      // by qualified original-model key. Omitting `rules` inherits root rules.
       "fastModels": {
+        "defaultRules": false,
         "providers": ["openai"],
         "mappings": {
           "openai/gpt-5.5": "gpt-5.5-fast"
@@ -224,7 +235,7 @@
         "rules": [
           {
             "match": { "sdk": "@ai-sdk/openai-compatible" },
-            "options": { "serviceTier": "flex" }
+            "options": { "service_tier": "flex" }
           }
         ]
       },

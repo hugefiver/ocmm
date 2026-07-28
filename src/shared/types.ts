@@ -79,7 +79,7 @@ export type PrimarySource = "existing-model" | "user-requirement" | "catalog-upg
 export type FastPath =
   | Readonly<{ kind: "off" }>
   | Readonly<{ kind: "model"; modelID: string }>
-  | Readonly<{ kind: "options"; rules: readonly FastOptionRule[] }>
+  | Readonly<{ kind: "options"; defaultRules: boolean; rules: readonly FastOptionRule[] }>
 
 /** Immutable route snapshot materialized for one registered OpenCode agent. */
 export type EffectiveModelRoute = {

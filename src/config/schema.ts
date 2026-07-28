@@ -222,6 +222,7 @@ const defaultSubagentConfig = () => ({
 })
 
 const defaultFastModelsConfig = () => ({
+  defaultRules: false,
   providers: [],
   mappings: {},
   rules: [],
@@ -258,6 +259,7 @@ export type FastOptionRule = z.infer<typeof FastOptionRuleSchema>
 
 export const FastModelsConfigSchema = z
   .object({
+    defaultRules: z.boolean().default(false),
     providers: z.array(z.string().min(1)).default([]),
     mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).default({}),
     rules: z.array(FastOptionRuleSchema).default([]),
@@ -267,6 +269,7 @@ export const FastModelsConfigSchema = z
 
 const ProfileFastModelsConfigSchema = z
   .object({
+    defaultRules: z.boolean().optional(),
     providers: z.array(z.string().min(1)).optional(),
     mappings: z.record(FastModelMappingKeySchema, FastModelMappingValueSchema).optional(),
     rules: z.array(FastOptionRuleSchema).optional(),
