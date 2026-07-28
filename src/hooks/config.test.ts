@@ -63,6 +63,12 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
 
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
+const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
+const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
+
+function countText(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
 
 function taggedPolicy(agentMap: Record<string, unknown>, name: string, tag: string): string {
   const prompt = String((agentMap[name] as Record<string, unknown>).prompt)
@@ -767,7 +773,7 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
   })(noCatalogTarget, undefined)
   assert.equal(
     (noCatalogTarget.agent["planner-high"] as Record<string, unknown>).model,
-    "anthropic/claude-opus-4-7",
+    "anthropic/claude-opus-5",
   )
   assert.deepEqual(
     {
@@ -1025,6 +1031,87 @@ test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async 
   assert.match(prompt, /Outcome-first/)
 })
 
+test("omo and v1 compose default plus Opus 5 exactly once for orchestrator only", async () => {
+  const promptsRoot = join(process.cwd(), "prompts")
+  const opus5Agents = Object.fromEntries(
+    BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
+  )
+
+  try {
+    for (const workflow of ["omo", "v1"] as const) {
+      loadAllPrompts(promptsRoot, workflow)
+      const configured = {
+        ...defaultConfig(),
+        workflow,
+        agents: opus5Agents,
+      }
+      const target = {
+        agent: {},
+        provider: { anthropic: { models: { "claude-opus-5": {} } } },
+      }
+      await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+      const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
+      assert.match(orchestrator, /Agent Role: orchestrator/, workflow)
+      assert.match(orchestrator, /DEEPWORK MODE ENABLED!/, `${workflow}: default base doctrine`)
+      assert.equal(countText(orchestrator, "DEEPWORK MODE ENABLED!"), 1, `${workflow}: default base`)
+      assert.equal(countText(orchestrator, CLAUDE_OPUS_5_MARKER), 1, `${workflow}: orchestrator marker`)
+      assert.ok(orchestrator.indexOf("Agent Role: orchestrator") < orchestrator.indexOf(CLAUDE_OPUS_5_MARKER), workflow)
+
+      for (const { name } of BUILTIN_AGENTS) {
+        if (name === "orchestrator") continue
+        const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+        assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, `${workflow}/${name}`)
+      }
+      assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
+    }
+  } finally {
+    loadAllPrompts(promptsRoot, "omo")
+  }
+})
+
+test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", async () => {
+  const promptsRoot = join(process.cwd(), "prompts")
+  const opus5Agents = Object.fromEntries(
+    BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
+  )
+  loadAllPrompts(promptsRoot, "codex")
+
+  try {
+    const configured = {
+      ...defaultConfig(),
+      workflow: "codex" as const,
+      agents: {
+        ...opus5Agents,
+        reviewer: { model: "anthropic/claude-opus-5", variants: { high: "max" as const } },
+        planner: { model: "anthropic/claude-opus-5", variants: { high: "max" as const } },
+      },
+    }
+    const target = {
+      agent: {},
+      provider: { anthropic: { models: { "claude-opus-5": {} } } },
+    }
+    await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+    for (const [name, raw] of Object.entries(target.agent)) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
+      const prompt = String((raw as Record<string, unknown>).prompt ?? "")
+      if (!prompt) continue
+      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), name === "orchestrator" ? 1 : 0, name)
+    }
+
+    const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
+    assert.match(orchestrator, /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is)
+    assert.equal(countText(orchestrator, GPT_56_MARKER), 1)
+    for (const name of [...BUILTIN_AGENTS.map(({ name: agentName }) => agentName), "reviewer-high", "planner-high"]) {
+      const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+      assert.equal(countText(prompt, GPT_56_MARKER), 1, `${name}: GPT-5.6 carriage`)
+    }
+  } finally {
+    loadAllPrompts(promptsRoot, "omo")
+  }
+})
+
 test("existing host models drive prompt calibration", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg = {
@@ -1120,9 +1207,9 @@ test("config keeps existing defaults without a matching GPT-5.6 catalog entry", 
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.5")
-  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.6-terra")
 })
 
 test("config upgrades GLM 5.1 fallbacks only from a catalog-confirmed GLM 5.2+ model", async () => {
@@ -1147,8 +1234,8 @@ test("config keeps GLM 5.1 baseline without a newer GLM catalog entry", async ()
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-4-7")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
 })
 
 test("explicit and existing agent models suppress GLM catalog replacement and prompt specialization", async () => {
@@ -1787,7 +1874,7 @@ test("compatibility mode suppresses catalog upgrades for unresolved qualified al
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 
-  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.6-sol")
 })
 
 test("compatibility mode suppresses category catalog upgrades for unresolved qualified aliases", async () => {
@@ -1802,7 +1889,7 @@ test("compatibility mode suppresses category catalog upgrades for unresolved qua
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 
-  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-5.5")
+  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-5.6-sol")
 })
 
 test("a malformed registry-managed invocation invalidates an older in-progress generation", async () => {

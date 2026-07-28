@@ -25,7 +25,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
       variant: "high",
       fallbackChain: [
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
@@ -38,7 +40,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
       variant: "high",
       fallbackChain: [
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
@@ -50,7 +54,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "xhigh",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
       ],
@@ -63,7 +69,9 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
       ],
@@ -87,6 +95,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
@@ -98,6 +107,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-terra", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["google", "google-vertex"], model: "gemini-3-flash" },
         { providers: ["minimax"], model: "minimax-m3" },
@@ -111,9 +121,12 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-terra", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k3" },
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
       ],
     },
@@ -125,9 +138,12 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "max",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "max" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k3" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
@@ -139,6 +155,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
       "Standalone text and documentation work that does not change product behavior: guides, explanations, release notes, prose cleanup, and copy edits.",
     requirement: {
       fallbackChain: [
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k3" },
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
         { providers: ["google", "google-vertex"], model: "gemini-3-flash" },
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },

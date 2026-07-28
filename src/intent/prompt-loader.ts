@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
+ *     deepwork/{default,gpt,gpt-5.6,claude-opus-5,gemini,glm,codex,planner}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
  *
@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -23,7 +23,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "omo" | "v1" | "codex"
 
-type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gemini" | "glm" | "codex" | "planner"
+type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -37,7 +37,7 @@ type CategoryName =
   | "deep"
   | "documenting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "claude-opus-5", "gemini", "glm", "codex", "planner"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -113,6 +113,9 @@ export function pickDeepworkVariantForAgent(opts: {
   preferenceModel: string
 }): DeepworkVariant {
   if (isPlannerAgent(opts.agentName)) return "planner"
+  if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
+    return "claude-opus-5"
+  }
   if (isGpt56Model(opts.preferenceModel)) return "gpt-5.6"
   const family = classifyModelFamily({
     providerID: "",

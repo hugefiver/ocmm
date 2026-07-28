@@ -42,6 +42,11 @@ export function isClaudeModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("claude")
 }
 
+export function isClaudeOpus5Model(modelID: string): boolean {
+  const name = extractModelName(modelID)
+  return /^claude-opus-5(?:$|[-.](?:20\d{6}(?:[-.][a-z0-9]+)*|[a-z][a-z0-9-]*))$/i.test(name)
+}
+
 export function isClaudeOpus47OrLaterModel(modelID: string): boolean {
   const lc = modelID.toLowerCase()
   if (lc.includes("claude-fable")) return true
@@ -112,7 +117,7 @@ export function classifyModelFamily(opts: {
   const name = extractModelName(modelID)
   if (isCodexModel(modelID, providerID) || isCodexModel(name, providerID)) return "codex"
   if (isGptModel(name)) return "gpt"
-  if (isClaudeOpus47OrLaterModel(name)) return "claude-opus-47-plus"
+  if (isClaudeOpus5Model(name) || isClaudeOpus47OrLaterModel(name)) return "claude-opus-47-plus"
   if (isClaudeModel(name)) return "claude"
   if (isGeminiModel(modelID, providerID)) return "gemini"
   if (isKimiK27Model(name)) return "kimi-k27"

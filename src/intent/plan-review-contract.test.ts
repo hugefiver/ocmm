@@ -38,7 +38,7 @@ test("maintenance docs preserve prompt layout and plan review receipts", () => {
       .split(/\r?\n/)
       .find((line) => line.startsWith(`| ${name} |`)) ?? ""
 
-  assert.match(promptSync, /deepwork\/\{default,gpt,gpt-5\.6,gemini,glm,codex,planner\}/)
+  assert.match(promptSync, /deepwork\/\{default,gpt,gpt-5\.6,claude-opus-5,gemini,glm,codex,planner\}/)
   assert.match(v1Maintenance, /Reviewer and Oracle profiles do not review plans/i)
   assert.match(v1Maintenance, /current-revision/i)
 

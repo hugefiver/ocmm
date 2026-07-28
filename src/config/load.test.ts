@@ -14,6 +14,206 @@ import {
 } from "./load.ts"
 import { defaultConfig } from "./schema.ts"
 
+const UNSAFE_CONFIG_KEYS = ["__proto__", "constructor", "prototype"] as const
+
+function collectUnsafeOwnKeyPaths(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectUnsafeOwnKeyPaths(item, `${path}[${index}]`))
+  }
+  if (typeof value !== "object" || value === null) return []
+
+  const record = value as Record<string, unknown>
+  const paths: string[] = []
+  for (const [key, nested] of Object.entries(record)) {
+    const nestedPath = `${path}.${key}`
+    if ((UNSAFE_CONFIG_KEYS as readonly string[]).includes(key)) paths.push(nestedPath)
+    paths.push(...collectUnsafeOwnKeyPaths(nested, nestedPath))
+  }
+  return paths
+}
+
+function assertSafeConfigTree(value: unknown, path = "$"): void {
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) assertSafeConfigTree(item, `${path}[${index}]`)
+    return
+  }
+  if (typeof value !== "object" || value === null) return
+
+  assert.equal(Object.getPrototypeOf(value), Object.prototype, `${path} must have the ordinary object prototype`)
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    assert.equal(
+      (UNSAFE_CONFIG_KEYS as readonly string[]).includes(key),
+      false,
+      `${path}.${key} must be removed`,
+    )
+    assertSafeConfigTree(nested, `${path}.${key}`)
+  }
+}
+
+const MALICIOUS_MERGE_SCENARIOS: readonly {
+  name: string
+  base: unknown
+  override: unknown
+  expected: unknown
+}[] = [
+  {
+    name: "the base layer when override is undefined",
+    base: JSON.parse(
+      '{"__proto__":{"polluted":"base-root"},"constructor":{"polluted":"base-root"},"prototype":{"polluted":"base-root"},"safe":{"kept":"base"},"array":[1,{"safe":true}],"scalar":7,"nullable":null}',
+    ),
+    override: undefined,
+    expected: {
+      safe: { kept: "base" },
+      array: [1, { safe: true }],
+      scalar: 7,
+      nullable: null,
+    },
+  },
+  {
+    name: "the override layer",
+    base: JSON.parse('{"safe":{"base":true},"ordinary":[1],"scalar":"base"}'),
+    override: JSON.parse(
+      '{"__proto__":{"polluted":"override-root"},"constructor":{"polluted":"override-root"},"prototype":{"polluted":"override-root"},"safe":{"override":true},"ordinary":[2],"scalar":"override","nullable":null}',
+    ),
+    expected: {
+      safe: { base: true, override: true },
+      ordinary: [2],
+      scalar: "override",
+      nullable: null,
+    },
+  },
+  {
+    name: "multiple nested object depths",
+    base: JSON.parse(
+      '{"nested":{"__proto__":{"polluted":"base-nested"},"safeBase":true,"deeper":{"constructor":{"polluted":"base-deep"},"safe":"base"}}}',
+    ),
+    override: JSON.parse(
+      '{"nested":{"prototype":{"polluted":"override-nested"},"safeOverride":true,"deeper":{"__proto__":{"polluted":"override-deep"},"constructor":{"polluted":"override-deep"},"safe":"override"}}}',
+    ),
+    expected: {
+      nested: {
+        safeBase: true,
+        safeOverride: true,
+        deeper: { safe: "override" },
+      },
+    },
+  },
+  {
+    name: "objects inside a replacement array",
+    base: JSON.parse(
+      '{"other":[{"safe":"base","__proto__":{"polluted":"base-array"},"constructor":{"polluted":"base-array"},"prototype":{"polluted":"base-array"}}]}',
+    ),
+    override: JSON.parse(
+      '{"other":[{"safe":"override","__proto__":{"polluted":"override-array"}},{"nested":{"constructor":{"polluted":"array-nested"},"prototype":{"polluted":"array-nested"},"safe":true}},null,3]}',
+    ),
+    expected: {
+      other: [
+        { safe: "override" },
+        { nested: { safe: true } },
+        null,
+        3,
+      ],
+    },
+  },
+]
+
+for (const scenario of MALICIOUS_MERGE_SCENARIOS) {
+  test(`deepMerge removes dangerous own keys from ${scenario.name}`, () => {
+    const unsafeInputPaths = [
+      ...collectUnsafeOwnKeyPaths(scenario.base),
+      ...collectUnsafeOwnKeyPaths(scenario.override),
+    ]
+    for (const key of UNSAFE_CONFIG_KEYS) {
+      assert.ok(
+        unsafeInputPaths.some((path) => path.endsWith(`.${key}`)),
+        `${scenario.name} fixture must contain an own ${key} key`,
+      )
+    }
+    const baseBefore = structuredClone(scenario.base)
+    const overrideBefore = structuredClone(scenario.override)
+
+    const merged = deepMerge(scenario.base, scenario.override)
+
+    assert.equal(Reflect.get(Object.prototype, "polluted"), undefined)
+    assertSafeConfigTree(merged)
+    assert.deepEqual(merged, scenario.expected)
+    assert.deepEqual(scenario.base, baseBefore)
+    assert.deepEqual(scenario.override, overrideBefore)
+  })
+}
+
+test("deepMerge preserves ordinary, accumulating, and profile-overlay array policies", () => {
+  const base = JSON.parse('{"other":[1,2],"disabledHooks":["base","shared"]}')
+  const override = JSON.parse('{"other":[3],"disabledHooks":["shared","override"]}')
+
+  assert.deepEqual(deepMerge(base, override), {
+    other: [3],
+    disabledHooks: ["base", "shared", "override"],
+  })
+  assert.deepEqual(deepMerge(base, override, undefined, { profileOverlay: true }), {
+    other: [3],
+    disabledHooks: ["shared", "override"],
+  })
+})
+
+test("loadConfig removes dangerous keys parsed from project JSONC including array elements", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-prototype-hardening-"))
+  const saved = new Map<string, string | undefined>()
+  for (const key of ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST"]) {
+    saved.set(key, process.env[key])
+    delete process.env[key]
+  }
+
+  try {
+    mkdirSync(join(cwd, ".opencode"), { recursive: true })
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), `{
+      // Keep this as JSONC so the real parser and loader boundary are exercised.
+      "fastModels": {
+        "rules": [{
+          "match": { "provider": "prototype-hardening" },
+          "options": {
+            "__proto__": { "polluted": "top" },
+            "constructor": { "polluted": "top" },
+            "prototype": { "polluted": "top" },
+            "safe": {
+              "kept": true,
+              "__proto__": { "polluted": "nested" },
+              "nested": {
+                "constructor": { "polluted": "nested" },
+                "prototype": { "polluted": "nested" },
+                "value": "ok",
+              },
+            },
+            "items": [{
+              "__proto__": { "polluted": "array" },
+              "constructor": { "polluted": "array" },
+              "prototype": { "polluted": "array" },
+              "kept": "array",
+            }, null],
+          },
+        }],
+      },
+    }`)
+
+    const loaded = loadConfig({ cwd, includeUser: false })
+    const options = loaded.config.fastModels.rules[0]?.options
+
+    assert.ok(options)
+    assert.equal(Reflect.get(Object.prototype, "polluted"), undefined)
+    assertSafeConfigTree(options)
+    assert.deepEqual(options, {
+      safe: { kept: true, nested: { value: "ok" } },
+      items: [{ kept: "array" }, null],
+    })
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 test("generic OpenCode loading preserves qualified aliases without materializing or validating targets", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-qualified-generic-"))
   const saved = new Map<string, string | undefined>()

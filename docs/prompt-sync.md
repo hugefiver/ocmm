@@ -9,7 +9,7 @@ Both workflows use the same prompt layers:
 ```text
 prompts/<workflow>/
   agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
-  deepwork/{default,gpt,gpt-5.6,gemini,glm,codex,planner}.md
+  deepwork/{default,gpt,gpt-5.6,claude-opus-5,gemini,glm,codex,planner}.md
   category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
 ```
 
@@ -33,6 +33,7 @@ prompts/<workflow>/
 | `deepwork/default.md` | local ocmm controller + upstream discipline concepts | v1 default is intentionally concise; omo default stays upstream-first; all workflows add shell-adaptation guidance so examples are translated to the active runtime shell |
 | `deepwork/gpt.md` | `packages/prompts-core/prompts/ultrawork/gpt.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
 | `deepwork/gpt-5.6.md` | `packages/omo-opencode/src/agents/hephaestus/gpt-5-6.ts`, `packages/omo-codex/plugin/components/rules/bundled-rules/hephaestus/gpt-5.6.md`, and `packages/omo-opencode/src/agents/momus-gpt-5-6.ts` | Additive GPT-5.6 calibration only: applicability/authority, outcome-first completion, conservative retrieval/delegation, context-efficient waiting/revalidation, and reporting priority. Shared discovery, planner trigger, answerability, scope, shell, review labels, and exact role permissions remain in effective base/role/category/skill/terminal-contract layers rather than being duplicated here. **2026-07-19 simplification:** preserves native `max`, safe defaults, authorization, observable delegation evidence, backed-off waiting, and changed-input validation while removing the role matrix and detailed allowlists. **2026-07-22 agile calibration:** adds complexity/rigor-first process scaling, context/workflow-gated subagent use, review-agent purpose and selection boundaries, and parallel implementation guidance for independent non-coupled modules. |
+| `deepwork/claude-opus-5.md` | `./omo@79a15710a4a637d7958ba8f54d8070cf8e8a883d`, `packages/omo-opencode/src/agents/sisyphus/claude-opus-5.ts` | Partial local adaptation only: compact orchestrator-only additive calibration for exact-scope delivery, direct-tool/specialist delegation economy, unchanged-input one-pass evidence gates, and concise narration. Local sources intentionally omit upstream provider inventory, Sisyphus branding, and the complete upstream role prompt; role/workflow/authorization/terminal contracts remain authoritative. Codex alone carries a guarded ahead-of-runtime copy. |
 | `deepwork/gemini.md` | `packages/prompts-core/prompts/ultrawork/gemini.md` | Upstream-first; local agent/tool names plus shell-adaptation guidance |
 | `deepwork/glm.md` | `packages/prompts-core/prompts/ultrawork/glm.md` | Upstream-first GLM reliability and evidence discipline plus shell-adaptation guidance |
 | `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates. **2026-07-20 local policy refresh:** all three workflow sources use touched/affected increment checks, changed-input broader gates, one final full pass, and a local-envelope-plus-`GOAL`/`STOP WHEN`/`EVIDENCE` delegation contract without weakening complex-task evidence or final acceptance. |
@@ -53,7 +54,8 @@ prompts/<workflow>/
 10. When syncing from upstream, compare against the local upstream checkout at `./omo` or a fresh checkout of the same repository, then re-apply local naming and OpenCode/ocmm tool semantics.
 11. Shell-adaptation guidance is a local global invariant across every effective `deepwork/*` variant and every category prompt path: prompt/skill shell snippets are examples and must be translated to the active runtime shell. Category prompts carry the guidance directly because not every category runtime path inherits a deepwork layer.
 12. GPT-5.6-specific additive calibration belongs only in `deepwork/gpt-5.6.md`. Do not copy its outcome/waiting/revalidation layer into generic GPT/Gemini/GLM/Codex/default prompts. Conversely, do not restore generic discovery, planner-trigger, answerability, scope, shell, review-label, workflow-role matrix, or detailed allowlist copies inside the specialization; those remain authoritative in effective base/role/category/skill prompts and terminal delegation contracts.
-13. Nested delegation boundaries for functional agents are strict invariants across `prompts/{omo,v1,codex}/agents/*`: planner keeps direct planning and returns genuinely difficult decision blockers to the orchestrator; strict or high-risk conditions alone do not qualify. Reviewer/Oracle profiles perform only implementation acceptance or focused code-quality verification with read-only evidence lookup; clarifier keeps direct evidence and judgment ownership; plan-critic keeps direct lookup and receipt-verdict ownership.
+13. Claude Opus 5-specific calibration belongs only in `deepwork/claude-opus-5.md`. It is additive and orchestrator-only, with one guarded ahead-of-runtime Codex copy; do not copy upstream provider inventory, branding, or a complete role prompt into the local sources.
+14. Nested delegation boundaries for functional agents are strict invariants across `prompts/{omo,v1,codex}/agents/*`: planner keeps direct planning and returns genuinely difficult decision blockers to the orchestrator; strict or high-risk conditions alone do not qualify. Reviewer/Oracle profiles perform only implementation acceptance or focused code-quality verification with read-only evidence lookup; clarifier keeps direct evidence and judgment ownership; plan-critic keeps direct lookup and receipt-verdict ownership.
 
 ## Last Upstream Prompt Check
 
@@ -71,6 +73,13 @@ prompts/<workflow>/
 - Source budgets: omo 6,742, v1 6,794, and Codex 6,799 baseline characters; each replacement is capped at 3,500 characters and at 60% of its baseline.
 - Codex generated profiles carry the compact calibration ahead of runtime model selection; non-GPT-5.6 models ignore it. Generated agent instructions are refreshed only after clean-root and prompt-only candidate-diff checks.
 - 2026-07-22 agile calibration: GPT-5.6 now chooses the lightest sufficient process after assessing complexity and rigor, delegates only for parent-context savings or workflow/parallel-delivery value, confines reviewer/Oracle profiles to implementation acceptance or focused code-quality verification under existing selection rules, and considers parallel subagents for independent non-coupled modules.
+
+## Claude Opus 5 Partial Adaptation (2026-07-28)
+
+- Reviewed ignored upstream checkout `./omo@79a15710a4a637d7958ba8f54d8070cf8e8a883d`, source `packages/omo-opencode/src/agents/sisyphus/claude-opus-5.ts`.
+- Adapted only exact-scope fidelity, direct-tool and bounded specialist/independent-track delegation, unchanged-input one-pass evidence, and concise narration.
+- Did not copy upstream provider inventory, branding, or the complete role prompt. The layer is additive, orchestrator-only, and subordinate to local role, workflow, authorization, evidence, final-review, and terminal-policy authority.
+- The Codex source starts with a runtime applicability guard so only the generated orchestrator may carry it ahead of runtime selection without applying it to another model.
 
 ## ocmm-Native Workflow Adaptation (2026-07-13)
 

@@ -382,7 +382,7 @@ test("oracle Terra successor restarts fallback from the chain head", async () =>
 
   assert.equal(calls.length, 1)
   assert.equal(calls[0]?.body.providerID, "anthropic")
-  assert.equal(calls[0]?.body.modelID, "claude-opus-4-7")
+  assert.equal(calls[0]?.body.modelID, "claude-opus-5")
 })
 
 test("multi-hop reviewer aliases provide oracle's inherited fallback chain", async () => {

@@ -11,7 +11,12 @@ import { resolveEffectiveRequirement } from "../routing/resolver.ts"
 import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-message.ts"
-import { markSessionAborted, clearSession, type IdleContinuationState } from "./idle-state.ts"
+import {
+  beginIdleSession,
+  invalidateIdleSession,
+  markSessionAborted,
+  type IdleContinuationState,
+} from "./idle-state.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import {
   createSubagent429Controller,
@@ -159,6 +164,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       const lineage = resolveSessionLineage(raw)
       if (lineage && lineage.sessionID) {
         const childSessionID = lineage.sessionID
+        if (deps.idleState) beginIdleSession(deps.idleState, childSessionID)
         if (!lifecycle.hasSession(childSessionID)) {
           // Legitimate (re)creation: this is either a fresh session or a
           // delete->recreate cycle. Either way, clear any prior suppression
@@ -186,6 +192,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       } else if (sessionID) {
         // Fallback: sessionID resolved through the legacy path even if the
         // shared decoder did not produce a lineage. Preserve prior behavior.
+        if (deps.idleState) beginIdleSession(deps.idleState, sessionID)
         if (!lifecycle.hasSession(sessionID)) {
           clearSuppression(sessionID)
           lifecycle.beginSession(sessionID)
@@ -208,7 +215,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
         controller.onDeleted(sessionID);
         (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         sessionStates.delete(sessionID)
-        if (deps.idleState) clearSession(deps.idleState, sessionID)
+        if (deps.idleState) invalidateIdleSession(deps.idleState, sessionID)
         // Record a bounded lifecycle tombstone so late retryable session.error
         // events cannot fall through to dedicated 429 or generic fallback. A
         // legitimate session.created with the same ID clears it immediately.

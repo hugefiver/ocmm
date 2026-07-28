@@ -13,6 +13,9 @@ import {
   isGpt56Model,
 } from "./prompt-loader.ts"
 
+const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "claude-opus-5", "gemini", "glm", "codex", "planner"] as const
+const CLAUDE_OPUS5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
+
 function makeTempRoot(workflow: "omo" | "v1"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
   mkdirSync(join(root, workflow, "deepwork"), { recursive: true })
@@ -41,6 +44,10 @@ const REMOVED_GPT56_SECTION_HEADINGS = [
 
 function effectiveGpt56Prompt(base: "gpt" | "planner"): string {
   return `${getDeepworkPrompt(base)}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
+}
+
+function effectiveClaudeOpus5Prompt(): string {
+  return `${getDeepworkPrompt("default")}\n\n---\n\n${getDeepworkPrompt("claude-opus-5")}`
 }
 
 function countOccurrences(text: string, needle: string): number {
@@ -97,16 +104,18 @@ test("reload clears stale cache so removed files disappear", () => {
   }
 })
 
-test("loadAllPrompts loads glm and codex deepwork variants", () => {
+test("loadAllPrompts loads specialized deepwork variants", () => {
   const root = makeTempRoot("omo")
   try {
     writeFileSync(join(root, "omo", "deepwork", "glm.md"), "glm-content")
     writeFileSync(join(root, "omo", "deepwork", "codex.md"), "codex-content")
     writeFileSync(join(root, "omo", "deepwork", "gpt-5.6.md"), "gpt-5.6-content")
+    writeFileSync(join(root, "omo", "deepwork", "claude-opus-5.md"), "claude-opus-5-content")
     loadAllPrompts(root, "omo")
     assert.equal(getDeepworkPrompt("glm"), "glm-content")
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
     assert.equal(getDeepworkPrompt("gpt-5.6"), "gpt-5.6-content")
+    assert.equal(getDeepworkPrompt("claude-opus-5"), "claude-opus-5-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -134,7 +143,7 @@ test("real workflows include functional agents and wrapped v1 deepwork prompts",
       const title = name === "reviewer" ? "implementation reviewer" : name
       assert.match(getAgentPrompt(name), new RegExp(`Agent Role: ${title}`), `${workflow}/${name}`)
     }
-    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+    for (const variant of DEEPWORK_VARIANTS) {
       const prompt = getDeepworkPrompt(variant)
       assert.ok(prompt.length > 0, `${workflow}/${variant} prompt missing`)
       if (workflow === "v1") {
@@ -163,9 +172,11 @@ test("real workflows include shell adaptation in every effective prompt path", (
   const root = join(process.cwd(), "prompts")
   for (const workflow of GPT56_WORKFLOWS) {
     loadAllPrompts(root, workflow)
-    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+    for (const variant of DEEPWORK_VARIANTS) {
       const prompt = variant === "gpt-5.6"
         ? effectiveGpt56Prompt("gpt")
+        : variant === "claude-opus-5"
+          ? effectiveClaudeOpus5Prompt()
         : getDeepworkPrompt(variant)
       assert.match(prompt, /## Shell Adaptation/, `${workflow}/${variant} missing effective shell adaptation`)
     }
@@ -191,7 +202,7 @@ test("real prompts do not retain hardcoded Bash or PowerShell command-selection 
   for (const workflow of ["omo", "v1", "codex"] as const) {
     loadAllPrompts(root, workflow)
     const prompts = [
-      ...["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"].map((variant) => getDeepworkPrompt(variant as Parameters<typeof getDeepworkPrompt>[0])),
+      ...DEEPWORK_VARIANTS.map((variant) => getDeepworkPrompt(variant)),
       ...[
         "frontend",
         "creative",
@@ -215,7 +226,7 @@ test("real deepwork prompts do not retain obsolete planner or broad review trigg
   const root = join(process.cwd(), "prompts")
   for (const workflow of ["omo", "v1", "codex"] as const) {
     loadAllPrompts(root, workflow)
-    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
+    for (const variant of DEEPWORK_VARIANTS) {
       const prompt = getDeepworkPrompt(variant)
       assert.doesNotMatch(prompt, /5\+ steps|Task has 2\+ steps|Implementation required\s*\|\s*MUST call planner agent/i, `${workflow}/${variant} retains raw step-count planner trigger`)
       assert.doesNotMatch(prompt, /MUST ALWAYS INVOKE THE PLAN AGENT|FAILURE TO CALL PLAN AGENT = INCOMPLETE WORK/i, `${workflow}/${variant} retains unconditional planner requirement`)
@@ -352,7 +363,7 @@ test("planner returns difficult decisions while GPT-5.6 keeps only the delegatio
 
 test("pickDeepworkVariantForAgent picks planner for planner agent", () => {
   assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-4-7" }),
+    pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-5" }),
     "planner",
   )
   assert.equal(
@@ -379,6 +390,32 @@ test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () 
   )
   assert.equal(isGpt56Model("vercel/openai/gpt-5.6-terra"), true)
   assert.equal(isGpt56Model("gpt-5.7-sol"), false)
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "gpt-5.6-terra" }),
+    "gpt-5.6",
+  )
+})
+
+test("pickDeepworkVariantForAgent reserves the Opus 5 calibration for orchestrator", () => {
+  for (const modelID of [
+    "claude-opus-5",
+    "anthropic/claude-opus-5",
+    "claude-opus-5-20260728",
+    "claude-opus-5.latest",
+  ]) {
+    assert.equal(
+      pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }),
+      "claude-opus-5",
+      modelID,
+    )
+  }
+  for (const agentName of ["reviewer", "coding", "deep"]) {
+    assert.equal(
+      pickDeepworkVariantForAgent({ agentName, preferenceModel: "claude-opus-5" }),
+      "default",
+      agentName,
+    )
+  }
 })
 
 test("pickDeepworkVariantForAgent picks gemini variant for gemini model", () => {
@@ -417,10 +454,16 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
   const root = join(process.cwd(), "prompts")
   for (const workflow of GPT56_WORKFLOWS) {
     loadAllPrompts(root, workflow)
-    for (const variant of ["default", "gpt", "gpt-5.6", "gemini", "glm", "codex", "planner"] as const) {
-      const specialization = getDeepworkPrompt("gpt-5.6")
+    for (const variant of DEEPWORK_VARIANTS) {
+      const specialization = variant === "gpt-5.6"
+        ? getDeepworkPrompt("gpt-5.6")
+        : variant === "claude-opus-5"
+          ? getDeepworkPrompt("claude-opus-5")
+          : ""
       const prompt = variant === "gpt-5.6"
         ? effectiveGpt56Prompt("gpt")
+        : variant === "claude-opus-5"
+          ? effectiveClaudeOpus5Prompt()
         : getDeepworkPrompt(variant)
       const label = `${workflow}/${variant}`
 
@@ -462,6 +505,12 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
         assert.equal(countOccurrences(prompt, "## Planner Trigger"), 1, `${label} duplicates planner doctrine`)
         assert.equal(countOccurrences(prompt, "## Answer-When-Answerable"), 1, `${label} duplicates answer doctrine`)
         assert.equal(countOccurrences(prompt, "## Shell Adaptation"), 1, `${label} duplicates shell doctrine`)
+      } else if (variant === "claude-opus-5") {
+        assert.match(specialization, /CLAUDE OPUS 5 EXECUTION CALIBRATION/)
+        assert.ok(countOccurrences(prompt, "## Discovery Before Planning") <= 1, `${label} duplicates discovery doctrine`)
+        assert.ok(countOccurrences(prompt, "## Planner Trigger") <= 1, `${label} duplicates planner doctrine`)
+        assert.ok(countOccurrences(prompt, "## Answer-When-Answerable") <= 1, `${label} duplicates answer doctrine`)
+        assert.ok(countOccurrences(prompt, "## Shell Adaptation") <= 1, `${label} duplicates shell doctrine`)
       } else {
         assert.doesNotMatch(
           prompt,
@@ -470,6 +519,47 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
         )
       }
     }
+  }
+})
+
+test("Claude Opus 5 calibrations are compact additive sources synchronized across all workflows", () => {
+  const root = join(process.cwd(), "prompts")
+  try {
+    for (const workflow of GPT56_WORKFLOWS) {
+      loadAllPrompts(root, workflow)
+      const text = getDeepworkPrompt("claude-opus-5")
+      const label = `${workflow}/claude-opus-5`
+      const lineCount = text.trim().split(/\r?\n/).length
+
+      assert.ok(lineCount >= 15 && lineCount <= 30, `${label} line count ${lineCount}`)
+      assert.equal(countOccurrences(text, CLAUDE_OPUS5_MARKER), 1, label)
+      assert.match(text, /requested scope.*neither.*expanding.*nor.*omitting/is, `${label} scope fidelity`)
+      assert.match(text, /direct tools.*few calls/is, `${label} direct tools`)
+      assert.match(text, /matching specialist domain.*independent, sizeable work track/is, `${label} dispatch threshold`)
+      assert.match(text, /Do not dispatch an agent to review the same work.*parent.*completed/is, `${label} duplicate review`)
+      assert.match(text, /evidence gate once.*inputs.*unchanged/is, `${label} evidence cadence`)
+      assert.match(text, /Preserve every required final review and required evidence/i, `${label} final review`)
+      assert.match(text, /Start with one sentence.*quiet between tool calls.*short outcome-first report/is, `${label} narration`)
+      assert.match(text, /role prompt.*workflow rules.*authorization.*terminal policies.*authoritative/is, `${label} authority`)
+      assert.doesNotMatch(text, /Sisyphus|Prometheus|Hephaestus|Momus|Agent Role:/i, `${label} branding or role replacement`)
+
+      if (workflow === "omo") {
+        assert.equal(countOccurrences(text, "<deepwork-mode>"), 0, `${label} wrapper`)
+      } else {
+        assert.equal(countOccurrences(text, "<deepwork-mode>"), 1, `${label} opening wrapper`)
+        assert.equal(countOccurrences(text, "</deepwork-mode>"), 1, `${label} closing wrapper`)
+        assert.match(text, /^<deepwork-mode>[\s\S]*<\/deepwork-mode>\s*$/, `${label} single envelope`)
+      }
+      if (workflow === "codex") {
+        assert.match(text, /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is, `${label} guard`)
+      }
+
+      const effective = effectiveClaudeOpus5Prompt()
+      assert.match(effective, /DEEPWORK MODE ENABLED!/, `${label} default base`)
+      assert.equal(countOccurrences(effective, CLAUDE_OPUS5_MARKER), 1, `${label} effective marker`)
+    }
+  } finally {
+    loadAllPrompts(root, "omo")
   }
 })
 

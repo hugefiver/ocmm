@@ -74,7 +74,7 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 | dw-coding | high | coding |
 | dw-complex | high | complex |
 | dw-creative | high | creative |
-| dw-deep | xhigh | deep |
+| dw-deep | max | deep |
 | dw-doc-search | high | doc-search |
 | dw-documenting | high | documenting |
 | dw-explore | high | explore |
@@ -86,7 +86,7 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 | dw-oracle-2nd | xhigh | oracle-2nd |
 | dw-orchestrator | high | orchestrator |
 | dw-plan-critic | xhigh | plan-critic |
-| dw-planner | xhigh | planner |
+| dw-planner | max | planner |
 | dw-quick | high | quick |
 | dw-research | high | research |
 | dw-reviewer | xhigh | reviewer |

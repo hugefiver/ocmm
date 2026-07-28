@@ -377,7 +377,8 @@ function deepworkPromptForAgent(
   agent: Agent,
   override: NormalizedShorthand | undefined,
   workflow: string,
-  selectedModel?: string,
+  selectedModel: string | undefined,
+  promptName: string,
 ): string {
   const chain =
     override?.requirement?.fallbackChain?.length
@@ -386,19 +387,24 @@ function deepworkPromptForAgent(
   const prefModel = selectedModel ?? chain[0]?.model ?? ""
   const gpt56Specialization = isGpt56Model(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
   // Codex profiles are generated ahead of runtime model overrides. Carry the
-  // separately guarded GPT-5.6 layer in every Codex profile so a later Sol or
-  // Terra override can apply it; non-5.6 models are explicitly told to ignore it.
+  // separately guarded GPT-5.6 layer in every Codex profile, and carry the
+  // separately guarded Opus 5 layer only for the orchestrator prompt identity.
   if (workflow === "codex") {
-    const base = getDeepworkPrompt("gpt")
-    const specialization = getDeepworkPrompt("gpt-5.6")
-    return specialization ? `${base}\n\n---\n\n${specialization}` : base
+    return [
+      getDeepworkPrompt("gpt"),
+      getDeepworkPrompt("gpt-5.6"),
+      promptName === "orchestrator" ? getDeepworkPrompt("claude-opus-5") : "",
+    ].filter(Boolean).join("\n\n---\n\n")
   }
   const variant = pickDeepworkVariantForAgent({
-    agentName: agent.promptSource ?? agent.name,
+    agentName: promptName,
     preferenceModel: prefModel,
   })
   if (variant === "gpt-5.6") {
     return `${getDeepworkPrompt("gpt")}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
+  }
+  if (variant === "claude-opus-5") {
+    return `${getDeepworkPrompt("default")}\n\n---\n\n${getDeepworkPrompt("claude-opus-5")}`
   }
   const base = getDeepworkPrompt(variant)
   return gpt56Specialization ? `${base}\n\n---\n\n${gpt56Specialization}` : base
@@ -412,7 +418,7 @@ function promptForBuiltinAgent(
 ): string {
   const promptName = agent.promptSource ?? agent.name
   const rolePrompt = getAgentPrompt(promptName).trim()
-  const modelPrompt = deepworkPromptForAgent(agent, override, workflow, selectedModel).trim()
+  const modelPrompt = deepworkPromptForAgent(agent, override, workflow, selectedModel, promptName).trim()
   if (!rolePrompt) return modelPrompt
   if (!modelPrompt) return rolePrompt
   return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`

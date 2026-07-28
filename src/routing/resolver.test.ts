@@ -198,16 +198,16 @@ test("published absence retains a valid request-local input variant", () => {
   assert.equal(r.entry.model, "gpt-5.4-mini")
 })
 
-test("oracle GPT cross-generation entries prefer 5.4 then 5.5 before same-generation Terra", () => {
+test("oracle GPT cross-generation entries retain their static Terra adjacency", () => {
   const chain = BUILTIN_AGENT_INDEX.get("oracle")!.requirement.fallbackChain
   const gptEntries = chain.filter((entry) => entry.providers.includes("openai") && entry.model.startsWith("gpt-"))
 
   assert.deepEqual(
     gptEntries.map((entry) => `${entry.model}:${entry.variant}`),
-    ["gpt-5.4:xhigh", "gpt-5.5:xhigh", "gpt-5.6-terra:xhigh"],
+    ["gpt-5.4:xhigh", "gpt-5.6-terra:xhigh", "gpt-5.5:xhigh"],
   )
-  assert.equal(chain[0]!.model, "claude-opus-4-7")
-  assert.equal(chain[1]!.model, "gemini-3.1-pro")
+  assert.equal(chain[0]!.model, "claude-opus-5")
+  assert.equal(chain[1]!.model, "claude-opus-4-7")
 })
 
 test("oracle inherits reviewer model via defaultAlias when user writes oracle entry without model", () => {
@@ -233,7 +233,7 @@ test("falls back to first chain entry when current model isn't in the chain", ()
     providerID: "openai",
   })
   assert.ok(r)
-  assert.equal(r!.entry.model, "gpt-5.5")
+  assert.equal(r!.entry.model, "gpt-5.6-sol")
   assert.equal(r!.source, "agent-default")
 })
 

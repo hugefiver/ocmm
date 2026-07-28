@@ -29,9 +29,12 @@ export const BUILTIN_AGENTS: Agent[] = [
       variant: "max",
       requiresAnyModel: true,
       fallbackChain: [
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k3" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
@@ -45,6 +48,7 @@ export const BUILTIN_AGENTS: Agent[] = [
       requiresProvider: ["openai", "github-copilot", "vercel", "opencode"],
       requiresAnyModel: true,
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
     },
@@ -56,8 +60,10 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "xhigh" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["zhipu"], model: "glm-5.1", variant: "xhigh" },
       ],
@@ -72,11 +78,12 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.4", variant: "xhigh" },
-        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-terra", variant: "xhigh" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["zhipu"], model: "glm-5.1", variant: "xhigh" },
       ],
     },
@@ -89,7 +96,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "xhigh" },
         { providers: ["zhipu"], model: "glm-5.1", variant: "xhigh" },
@@ -127,7 +136,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "max",
       fallbackChain: [
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "max" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
         { providers: ["zhipu"], model: "glm-5.1" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
@@ -140,7 +151,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       fallbackChain: [
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
         { providers: ["zhipu"], model: "glm-5.1" },
       ],
@@ -152,7 +165,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "xhigh",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "xhigh" },
         { providers: ["zhipu"], model: "glm-5.1", variant: "xhigh" },
@@ -165,7 +180,9 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "high",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
+        { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k3" },
         { providers: ["kimi-for-coding", "moonshot"], model: "kimi-k2.6" },
         { providers: ["zhipu"], model: "glm-4.6v" },
       ],

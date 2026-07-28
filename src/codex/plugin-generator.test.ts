@@ -87,6 +87,13 @@ function assertCompactGpt56Calibration(instructions: string, label: string): voi
   assert.doesNotMatch(calibration, /\[product\]|\[evidence\]/i, `${label} duplicates review-label doctrine`)
 }
 
+const CLAUDE_OPUS5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
+const GPT56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
+
+function countOccurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
+
 const LEGACY_CODEX_GENERIC_CONTRACTS = [
   /TASK, ROLE, DELIVERABLE, SCOPE, VERIFY, REQUIRED SKILLS, CONTEXT, and CONSTRAINTS/,
   /`TASK`, `ROLE`, `DELIVERABLE`, `SCOPE`, `VERIFY`, `REQUIRED SKILLS`, `CONTEXT`, and `CONSTRAINTS`/,
@@ -322,7 +329,7 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
     assert.doesNotMatch(orchestrator.developerInstructions, legacy, `in-memory orchestrator retains ${legacy}`)
   }
-  assert.equal(orchestrator.model, "gpt-5.5")
+  assert.equal(orchestrator.model, "gpt-5.6-sol")
   assert.equal(orchestrator.reasoningEffort, "high")
   assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
   assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
@@ -333,11 +340,11 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
     /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
   )
   assert.ok(builder)
-  assert.equal(builder.model, "gpt-5.5")
+  assert.equal(builder.model, "gpt-5.6-sol")
   assert.ok(planner)
-  assert.equal(planner.reasoningEffort, "xhigh")
+  assert.equal(planner.reasoningEffort, "max")
   assert.ok(deep)
-  assert.equal(deep.reasoningEffort, "xhigh")
+  assert.equal(deep.reasoningEffort, "max")
   assert.ok(documenting)
   assert.equal(documenting.model, "gpt-5.5")
   assert.ok(oracle)
@@ -380,6 +387,105 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
     planner.developerInstructions,
     /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
   )
+})
+
+test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is fresh", async () => {
+  const config = { ...defaultConfig(), workflow: "codex" as const }
+  const agents = await buildCodexAgents({
+    config,
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const bySource = new Map(agents.map((agent) => [agent.sourceName, agent]))
+  const orchestrator = bySource.get("orchestrator")
+  const planner = bySource.get("planner")
+
+  assert.ok(orchestrator)
+  assert.ok(planner)
+  assert.equal(orchestrator.model, "gpt-5.6-sol")
+  assert.equal(planner.model, "gpt-5.6-sol")
+  assert.equal(orchestrator.preferredChain[0], "anthropic/claude-opus-5")
+  assert.equal(planner.preferredChain[0], "anthropic/claude-opus-5")
+  assert.equal(countOccurrences(orchestrator.developerInstructions, CLAUDE_OPUS5_MARKER), 1)
+  assert.match(
+    orchestrator.developerInstructions,
+    /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is,
+  )
+
+  for (const agent of agents) {
+    const expectedOpusMarkerCount = agent.sourceName === "orchestrator" ? 1 : 0
+    assert.equal(countOccurrences(agent.developerInstructions, CLAUDE_OPUS5_MARKER), expectedOpusMarkerCount, agent.sourceName)
+    assert.equal(countOccurrences(agent.developerInstructions, GPT56_MARKER), 1, `${agent.sourceName}: GPT-5.6 carriage`)
+  }
+
+  const explicitlyConfigured = await buildCodexAgents({
+    config: {
+      ...config,
+      agents: {
+        orchestrator: { model: "openai/gpt-5.5" },
+        planner: { model: "openai/gpt-5.5" },
+      },
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const explicitBySource = new Map(explicitlyConfigured.map((agent) => [agent.sourceName, agent]))
+  assert.equal(explicitBySource.get("orchestrator")?.model, "gpt-5.5")
+  assert.equal(explicitBySource.get("planner")?.model, "gpt-5.5")
+
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-opus5-carriage-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config,
+      packageVersion: "9.9.9",
+    })
+    const generatedAgentsRoot = join(result.pluginRoot, "agents")
+    const temporaryOrchestrator = readFileSync(join(generatedAgentsRoot, "dw-orchestrator.toml"), "utf8")
+    const temporaryInstructions = parseGeneratedDeveloperInstructions(temporaryOrchestrator, "temporary dw-orchestrator")
+
+    assert.equal(countOccurrences(temporaryInstructions, CLAUDE_OPUS5_MARKER), 1)
+    assert.match(
+      temporaryInstructions,
+      /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is,
+    )
+    for (const file of readdirSync(generatedAgentsRoot).filter((name) => name.endsWith(".toml"))) {
+      if (file === "dw-orchestrator.toml") continue
+      const instructions = parseGeneratedDeveloperInstructions(readFileSync(join(generatedAgentsRoot, file), "utf8"), file)
+      assert.equal(countOccurrences(instructions, CLAUDE_OPUS5_MARKER), 0, file)
+      assert.equal(countOccurrences(instructions, GPT56_MARKER), 1, `${file}: GPT-5.6 carriage`)
+    }
+
+    const generatedAgentFiles = readdirSync(generatedAgentsRoot)
+      .filter((name) => name.endsWith(".toml"))
+      .sort()
+    for (const [label, trackedAgentsRoot] of [
+      ["tracked plugin bundle", join(process.cwd(), CODEX_PLUGIN_DIR, "agents")],
+      ["tracked project agents", join(process.cwd(), CODEX_PROJECT_AGENTS_DIR)],
+    ] as const) {
+      const trackedAgentFiles = readdirSync(trackedAgentsRoot)
+        .filter((name) => name.endsWith(".toml"))
+        .sort()
+      assert.deepEqual(trackedAgentFiles, generatedAgentFiles, `${label} agent inventory is stale`)
+      for (const file of generatedAgentFiles) {
+        assert.equal(
+          readFileSync(join(trackedAgentsRoot, file), "utf8"),
+          readFileSync(join(generatedAgentsRoot, file), "utf8"),
+          `${label} ${file} is stale`,
+        )
+      }
+    }
+    assert.equal(
+      readFileSync(join(process.cwd(), CODEX_PLUGIN_DIR, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8"),
+      readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8"),
+      "tracked deepwork workflow skill is stale",
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("Codex agents inherit compression and review-session policies by managed identity", async () => {

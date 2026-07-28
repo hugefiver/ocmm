@@ -31,6 +31,13 @@ const LOCAL_COORDINATOR_TASK_RULES = {
   documenting: "allow",
 } as const
 
+const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
+const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
+
+function countText(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
+
 function assertExactTaskRules(actual: unknown, expected: Record<string, string>, label: string): void {
   assert.ok(actual && typeof actual === "object" && !Array.isArray(actual), `${label} task rules must be granular`)
   assert.deepEqual(Object.entries(actual as Record<string, unknown>), Object.entries(expected), `${label} task rule order`)
@@ -136,6 +143,27 @@ test("GPT-5.6 category selections append only the additive calibration after the
   }
 })
 
+test("Opus 5 category selections never attach the orchestrator calibration", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "omo")
+  const configured = {
+    ...defaultConfig(),
+    categories: Object.fromEntries(
+      BUILTIN_CATEGORIES.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
+    ),
+  }
+  const target = {
+    agent: {},
+    provider: { anthropic: { models: { "claude-opus-5": {} } } },
+  }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  for (const category of BUILTIN_CATEGORIES) {
+    const prompt = String((target.agent[category.name] as Record<string, unknown>).prompt)
+    assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
+    assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), category.name)
+  }
+})
+
 test("Codex generation gives every builtin category the guarded GPT-5.6 calibration", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
@@ -145,12 +173,16 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
     const cfg: { agent: Record<string, unknown> } = { agent: {} }
     await handler(cfg, undefined)
     const specialization = getDeepworkPrompt("gpt-5.6").trim()
+    const opus5 = getDeepworkPrompt("claude-opus-5").trim()
 
     for (const category of BUILTIN_CATEGORIES) {
       const entry = cfg.agent[category.name] as Record<string, unknown>
       const prompt = entry.prompt as string
       assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
       assert.ok(prompt.includes(specialization), `${category.name}: missing GPT-5.6 calibration`)
+      assert.equal(countText(prompt, GPT_56_MARKER), 1, `${category.name}: GPT-5.6 marker`)
+      assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
+      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
       assert.match(
         prompt,
         /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,

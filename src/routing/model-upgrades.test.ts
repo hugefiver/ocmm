@@ -36,20 +36,14 @@ test("catalog ties follow the compatible fallback provider order", () => {
 })
 
 test("oracle catalog selection prefers exact cross-generation GPT fallbacks before Terra successors", () => {
-  const oracleRequirement: ModelRequirement = {
-    fallbackChain: [
-      { providers: ["openai", "github-copilot"], model: "gpt-5.4", variant: "xhigh" },
-      { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
-      { providers: ["openai", "github-copilot"], model: "gpt-5.6-terra", variant: "xhigh" },
-    ],
-  }
+  const oracleRequirement = BUILTIN_AGENT_INDEX.get("oracle")!.requirement
 
   assert.equal(
-    selectCatalogModel({ provider: { openai: { models: { "gpt-5.4": {}, "gpt-5.6-terra": {} } } } }, "oracle", oracleRequirement),
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.4": {}, "gpt-5.5": {}, "gpt-5.6-terra": {} } } } }, "oracle", oracleRequirement),
     "openai/gpt-5.4",
   )
   assert.equal(
-    selectCatalogModel({ provider: { openai: { models: { "gpt-5.5": {}, "gpt-5.7-terra": {} } } } }, "oracle", oracleRequirement),
+    selectCatalogModel({ provider: { openai: { models: { "gpt-5.5": {}, "gpt-5.6-terra": {} } } } }, "oracle", oracleRequirement),
     "openai/gpt-5.5",
   )
   assert.equal(

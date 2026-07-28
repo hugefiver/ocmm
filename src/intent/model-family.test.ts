@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   classifyModelFamily,
   extractModelName,
+  isClaudeOpus5Model,
   isClaudeOpus47OrLaterModel,
   isCodexModel,
   isDeepSeekModel,
@@ -48,6 +49,34 @@ test("isClaudeOpus47OrLaterModel matches >= 4.7 and claude-fable", () => {
   assert.equal(isClaudeOpus47OrLaterModel("claude-sonnet-4-6"), false)
 })
 
+test("isClaudeOpus5Model accepts only exact, provider-prefixed, date, and named snapshots", () => {
+  for (const modelID of [
+    "claude-opus-5",
+    "anthropic/claude-opus-5",
+    "providers/anthropic/claude-opus-5",
+    "claude-opus-5-20260728",
+    "claude-opus-5.20260728",
+    "claude-opus-5.20260728-beta.1",
+    "claude-opus-5-latest",
+    "claude-opus-5.preview",
+  ]) {
+    assert.equal(isClaudeOpus5Model(modelID), true, modelID)
+  }
+
+  for (const modelID of [
+    "claude-opus-4-8",
+    "claude-opus-5.0",
+    "claude-opus-50",
+    "claude-sonnet-5",
+    "prefix-claude-opus-5",
+    "claude-opus-5_20260728",
+    "claude-opus-5-19990101",
+    "unrelated",
+  ]) {
+    assert.equal(isClaudeOpus5Model(modelID), false, modelID)
+  }
+})
+
 test("isGeminiModel covers provider + name signals", () => {
   assert.equal(isGeminiModel("google/gemini-3.1-pro"), true)
   assert.equal(isGeminiModel("google-vertex/gemini-3-flash"), true)
@@ -76,6 +105,7 @@ test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "codex-mini-latest" }), "codex")
   assert.equal(classifyModelFamily({ modelID: "gpt-5.5" }), "gpt")
   assert.equal(classifyModelFamily({ modelID: "claude-opus-4-7" }), "claude-opus-47-plus")
+  assert.equal(classifyModelFamily({ modelID: "anthropic/claude-opus-5" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "claude-sonnet-4-6" }), "claude")
   assert.equal(
     classifyModelFamily({ modelID: "gemini-3.1-pro", providerID: "google" }),
