@@ -1,16 +1,14 @@
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs"
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
+
+export type ReplaceTarget = (source: string, target: string) => void
 
 export type StageOcmmLspBinariesOptions = {
   source: string
   outDir: string
   names: readonly string[]
   platform?: NodeJS.Platform
-  replaceTarget?: (source: string, target: string) => void
-}
-
-function isMissing(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+  replaceTarget?: ReplaceTarget
 }
 
 export function stageOcmmLspBinaries(options: StageOcmmLspBinariesOptions): void {
@@ -33,9 +31,9 @@ export function stageOcmmLspBinaries(options: StageOcmmLspBinariesOptions): void
     const target = join(options.outDir, name)
     let targetBytes: Buffer | undefined
     try {
-      if (statSync(target).isFile()) targetBytes = readFileSync(target)
-    } catch (error) {
-      if (!isMissing(error)) throw error
+      targetBytes = readFileSync(target)
+    } catch {
+      targetBytes = undefined
     }
     if (targetBytes?.equals(sourceBytes)) continue
 

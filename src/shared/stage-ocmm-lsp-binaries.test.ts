@@ -14,7 +14,7 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { test } from "node:test"
 
-import { stageOcmmLspBinaries } from "../../scripts/stage-ocmm-lsp-binaries.ts"
+import { stageOcmmLspBinaries, type ReplaceTarget } from "../../scripts/stage-ocmm-lsp-binaries.ts"
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "ocmm-stage-ocmm-lsp-"))
@@ -66,17 +66,18 @@ test("replaces missing and different expected targets", () => {
     mkdirSync(outDir, { recursive: true })
     writeFileSync(different, "stale binary")
     const replacements: string[] = []
+    const replaceTarget: ReplaceTarget = (freshSource, target) => {
+      replacements.push(basename(target))
+      rmSync(target, { force: true })
+      copyFileSync(freshSource, target)
+    }
 
     stageOcmmLspBinaries({
       source,
       outDir,
       names: ["ocmm-lsp-missing.exe", "ocmm-lsp-different.exe"],
       platform: "win32",
-      replaceTarget(freshSource, target) {
-        replacements.push(basename(target))
-        rmSync(target, { force: true })
-        copyFileSync(freshSource, target)
-      },
+      replaceTarget,
     })
 
     assert.deepEqual(replacements, ["ocmm-lsp-missing.exe", "ocmm-lsp-different.exe"])
@@ -126,5 +127,53 @@ test("propagates injected replacement errors", () => {
         throw new Error("sentinel replacement error")
       },
     }), { message: "sentinel replacement error" })
+  })
+})
+
+test("copied non-Windows target is executable", () => {
+  withTempDir((dir) => {
+    const source = join(dir, "source")
+    const outDir = join(dir, "bin")
+    const target = join(outDir, "ocmm-lsp")
+    writeFileSync(source, "fresh binary")
+
+    stageOcmmLspBinaries({
+      source,
+      outDir,
+      names: ["ocmm-lsp"],
+      platform: "linux",
+    })
+
+    if (process.platform !== "win32") assert.notEqual(statSync(target).mode & 0o111, 0)
+  })
+})
+
+test("default replacement failure propagates instead of accepting a stale target", () => {
+  withTempDir((dir) => {
+    const source = join(dir, "source.exe")
+    const outDir = join(dir, "bin")
+    const target = join(outDir, "ocmm-lsp.exe")
+    writeFileSync(source, "fresh binary")
+    mkdirSync(target, { recursive: true })
+
+    let replacements = 0
+    assert.throws(() => stageOcmmLspBinaries({
+      source,
+      outDir,
+      names: ["ocmm-lsp.exe"],
+      platform: "win32",
+      replaceTarget() {
+        replacements += 1
+        throw new Error("replacement sentinel")
+      },
+    }), { message: "replacement sentinel" })
+    assert.equal(replacements, 1)
+
+    assert.throws(() => stageOcmmLspBinaries({
+      source,
+      outDir,
+      names: ["ocmm-lsp.exe"],
+      platform: "win32",
+    }))
   })
 })
