@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { isAbsolute, join } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 
 import { defaultConfig } from "../config/schema.ts"
 import {
@@ -190,6 +190,109 @@ function assertCanonicalCodexDispatchContract(contract: string, label: string): 
   }
   assert.match(contract, /`task_name`.*not a profile selector/is, `${label} task_name disclaimer`)
   assert.match(contract, /does not load a profile, select a model, attach a skill, or enable a missing feature/, `${label} generic disclaimer`)
+}
+
+function listRelativeFiles(root: string): string[] {
+  function visit(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const absolute = join(directory, entry.name)
+      return entry.isDirectory()
+        ? visit(absolute)
+        : [relative(root, absolute).replaceAll("\\", "/")]
+    })
+  }
+
+  return visit(root).sort()
+}
+
+function assertGeneratedSharedSkillTree(
+  label: string,
+  sourceRoot: string,
+  temporaryRoot: string,
+  trackedRoot: string,
+  requiredFile: string,
+): string {
+  const sourceFiles = listRelativeFiles(sourceRoot)
+  const temporaryFiles = listRelativeFiles(temporaryRoot)
+  const trackedFiles = listRelativeFiles(trackedRoot)
+
+  assert.ok(sourceFiles.includes(requiredFile), `${label} source is missing ${requiredFile}`)
+  assert.deepEqual(temporaryFiles, sourceFiles, `temporary ${label} skill inventory differs from source`)
+  assert.deepEqual(trackedFiles, sourceFiles, `tracked ${label} skill inventory is stale`)
+
+  let routerSuffix = ""
+  for (const file of sourceFiles) {
+    const source = readFileSync(join(sourceRoot, file))
+    const temporary = readFileSync(join(temporaryRoot, file))
+    const tracked = readFileSync(join(trackedRoot, file))
+
+    assert.deepEqual(tracked, temporary, `tracked ${label}/${file} differs from fresh generation`)
+    if (file === "SKILL.md") {
+      const sourceText = source.toString("utf8")
+      const temporaryText = temporary.toString("utf8")
+      const normalizedSourceBody = sourceText
+        .replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
+        .trimEnd()
+      assert.ok(temporaryText.startsWith(normalizedSourceBody), `${label} router does not preserve the normalized source body`)
+      routerSuffix = temporaryText.slice(normalizedSourceBody.length)
+      assert.match(routerSuffix, /^\r?\n\r?\n## Codex Compatibility/, `${label} router suffix`)
+      assertCanonicalCodexDispatchContract(
+        extractCallableDispatchContract(temporaryText, `${label} generated router`),
+        `${label} generated router`,
+      )
+    } else {
+      assert.deepEqual(temporary, source, `${label}/${file} is not a byte-for-byte source copy`)
+    }
+  }
+
+  return routerSuffix
+}
+
+function assertGeneratedV1SkillTree(name: string, temporaryPluginRoot: string): void {
+  const label = `deepwork-${name}`
+  const sourceRoot = join(process.cwd(), "skills", "v1", name)
+  const temporaryRoot = join(temporaryPluginRoot, "skills", label)
+  const trackedRoot = join(process.cwd(), CODEX_PLUGIN_DIR, "skills", label)
+  const sourceFiles = listRelativeFiles(sourceRoot)
+  const temporaryFiles = listRelativeFiles(temporaryRoot)
+  const trackedFiles = listRelativeFiles(trackedRoot)
+
+  assert.deepEqual(temporaryFiles, sourceFiles, `temporary ${label} skill inventory differs from source`)
+  assert.deepEqual(trackedFiles, sourceFiles, `tracked ${label} skill inventory is stale`)
+
+  for (const file of sourceFiles) {
+    const source = readFileSync(join(sourceRoot, file))
+    const temporary = readFileSync(join(temporaryRoot, file))
+    const tracked = readFileSync(join(trackedRoot, file))
+
+    assert.deepEqual(tracked, temporary, `tracked ${label}/${file} differs from fresh generation`)
+    if (file !== "SKILL.md") {
+      assert.deepEqual(temporary, source, `${label}/${file} is not a byte-for-byte source copy`)
+      continue
+    }
+
+    const normalizedSource = source
+      .toString("utf8")
+      .replace(/^name:\s*.+$/m, `name: ${label}`)
+      .trimEnd()
+    const temporaryText = temporary.toString("utf8")
+    assert.ok(temporaryText.startsWith(normalizedSource), `${label} router does not preserve normalized source content`)
+    const suffix = temporaryText.slice(normalizedSource.length)
+    assert.match(suffix, /^\r?\n\r?\n## Codex Compatibility/, `${label} router suffix`)
+    assertCanonicalCodexDispatchContract(
+      extractCallableDispatchContract(temporaryText, `${label} generated router`),
+      `${label} generated router`,
+    )
+  }
+}
+
+function extractReviewArtifactIdentityModule(text: string, label: string): string {
+  const marker = "<!-- ocmm-review-artifact-identity-js -->"
+  assert.equal(countOccurrences(text, marker), 1, `${label} must contain exactly one identity JS marker`)
+  const following = text.slice(text.indexOf(marker) + marker.length)
+  const fence = /^\r?\n```js\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/.exec(following)
+  assert.ok(fence, `${label} is missing an adjacent identity JS fence`)
+  return fence[1]!
 }
 
 test("Codex manifest declares deepwork plugin resources", () => {
@@ -1081,6 +1184,165 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
       planner,
       /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
     )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("Codex generated debugging and frontend skill trees mirror source inventory and bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "deepwork-codex-shared-skills-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
+    })
+
+    const suffixes = new Map<string, string>()
+    for (const [name, requiredFile] of [
+      ["debugging", "references/methodology/03-flaky-triage.md"],
+      ["frontend", "references/design/interaction-skill.md"],
+    ] as const) {
+      suffixes.set(
+        name,
+        assertGeneratedSharedSkillTree(
+          name,
+          join(process.cwd(), "skills", name),
+          join(result.pluginRoot, "skills", name),
+          join(process.cwd(), CODEX_PLUGIN_DIR, "skills", name),
+          requiredFile,
+        ),
+      )
+    }
+
+    assert.equal(
+      suffixes.get("debugging"),
+      suffixes.get("frontend"),
+      "normalized shared-skill routers must carry the same canonical compatibility suffix",
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("Codex generated review identity contract mirrors source, temporary, tracked, and orchestrator surfaces", async () => {
+  const root = mkdtempSync(join(tmpdir(), "deepwork-codex-review-identity-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
+    })
+
+    for (const name of ["requesting-code-review", "subagent-driven-development"] as const) {
+      assertGeneratedV1SkillTree(name, result.pluginRoot)
+    }
+
+    const sourceRequestingSkill = readFileSync(
+      join(process.cwd(), "skills", "v1", "requesting-code-review", "SKILL.md"),
+      "utf8",
+    )
+    const temporaryRequestingSkill = readFileSync(
+      join(result.pluginRoot, "skills", "deepwork-requesting-code-review", "SKILL.md"),
+      "utf8",
+    )
+    const trackedRequestingSkill = readFileSync(
+      join(process.cwd(), CODEX_PLUGIN_DIR, "skills", "deepwork-requesting-code-review", "SKILL.md"),
+      "utf8",
+    )
+    const canonicalIdentityModule = extractReviewArtifactIdentityModule(sourceRequestingSkill, "source requesting-code-review skill")
+    for (const [label, skill] of [
+      ["temporary requesting-code-review skill", temporaryRequestingSkill],
+      ["tracked requesting-code-review skill", trackedRequestingSkill],
+    ] as const) {
+      assert.equal(extractReviewArtifactIdentityModule(skill, label), canonicalIdentityModule, `${label} canonical identity module`)
+      assert.match(skill, /## Codex Compatibility/, `${label} compatibility heading`)
+      assertCanonicalCodexDispatchContract(extractCallableDispatchContract(skill, label), label)
+    }
+
+    const sourceReviewerTemplate = readFileSync(
+      join(process.cwd(), "skills", "v1", "requesting-code-review", "code-reviewer.md"),
+    )
+    const temporaryReviewerTemplate = readFileSync(
+      join(result.pluginRoot, "skills", "deepwork-requesting-code-review", "code-reviewer.md"),
+    )
+    const trackedReviewerTemplate = readFileSync(
+      join(process.cwd(), CODEX_PLUGIN_DIR, "skills", "deepwork-requesting-code-review", "code-reviewer.md"),
+    )
+    assert.deepEqual(temporaryReviewerTemplate, sourceReviewerTemplate, "temporary reviewer template is not a byte-for-byte source copy")
+    assert.deepEqual(trackedReviewerTemplate, sourceReviewerTemplate, "tracked reviewer template is not a byte-for-byte source copy")
+
+    const sourceSubagentSkill = readFileSync(
+      join(process.cwd(), "skills", "v1", "subagent-driven-development", "SKILL.md"),
+      "utf8",
+    )
+    const temporarySubagentSkill = readFileSync(
+      join(result.pluginRoot, "skills", "deepwork-subagent-driven-development", "SKILL.md"),
+      "utf8",
+    )
+    const trackedSubagentSkill = readFileSync(
+      join(process.cwd(), CODEX_PLUGIN_DIR, "skills", "deepwork-subagent-driven-development", "SKILL.md"),
+      "utf8",
+    )
+    for (const [marker, sources] of [
+      [
+        "<!-- ocmm-review-artifact-identity-js -->",
+        [sourceRequestingSkill, temporaryRequestingSkill, trackedRequestingSkill],
+      ],
+      [
+        "<!-- ocmm-review-artifact-identity-bash -->",
+        [sourceRequestingSkill, temporaryRequestingSkill, trackedRequestingSkill],
+      ],
+      [
+        "<!-- ocmm-review-artifact-identity-powershell -->",
+        [sourceRequestingSkill, temporaryRequestingSkill, trackedRequestingSkill],
+      ],
+      [
+        "<!-- ocmm-review-artifact-identity-packet -->",
+        [sourceRequestingSkill, temporaryRequestingSkill, trackedRequestingSkill],
+      ],
+      [
+        "<!-- ocmm-review-artifact-reviewer-template -->",
+        [sourceReviewerTemplate.toString("utf8"), temporaryReviewerTemplate.toString("utf8"), trackedReviewerTemplate.toString("utf8")],
+      ],
+      [
+        "<!-- ocmm-review-artifact-final-acceptance -->",
+        [sourceSubagentSkill, temporarySubagentSkill, trackedSubagentSkill],
+      ],
+    ] as const) {
+      for (const source of sources) assert.equal(countOccurrences(source, marker), 1, `${marker} occurrence count`)
+    }
+
+    const mandate = "Final implementation acceptance must load and follow the applicable identity-bound requesting-code-review skill. The orchestrator owns artifact-identity recomputation, one common packet for selected lanes, stale-verdict rejection, and completion only when every required receipt has the same current identity."
+    const sourceOrchestrator = readFileSync(join(process.cwd(), "prompts", "codex", "agents", "orchestrator.md"), "utf8")
+    const temporaryPluginOrchestrator = readFileSync(join(result.pluginRoot, "agents", "dw-orchestrator.toml"), "utf8")
+    const temporaryProjectAgentsRoot = result.projectAgentsRoot
+    assert.ok(temporaryProjectAgentsRoot)
+    const temporaryProjectOrchestrator = readFileSync(join(temporaryProjectAgentsRoot, "dw-orchestrator.toml"), "utf8")
+    const trackedPluginOrchestrator = readFileSync(join(process.cwd(), CODEX_PLUGIN_DIR, "agents", "dw-orchestrator.toml"), "utf8")
+    const trackedProjectOrchestrator = readFileSync(join(process.cwd(), CODEX_PROJECT_AGENTS_DIR, "dw-orchestrator.toml"), "utf8")
+    assert.equal(temporaryProjectOrchestrator, temporaryPluginOrchestrator, "temporary project/plugin orchestrator copies differ")
+    assert.equal(trackedPluginOrchestrator, temporaryPluginOrchestrator, "tracked plugin orchestrator is stale")
+    assert.equal(trackedProjectOrchestrator, temporaryPluginOrchestrator, "tracked project orchestrator is stale")
+
+    const temporaryBuilder = readFileSync(join(result.pluginRoot, "agents", "dw-builder.toml"), "utf8")
+    assert.equal(countOccurrences(parseGeneratedDeveloperInstructions(temporaryBuilder, "temporary dw-builder"), mandate), 0)
+    for (const [label, instructions] of [
+      ["source orchestrator prompt", sourceOrchestrator],
+      ["temporary plugin orchestrator", parseGeneratedDeveloperInstructions(temporaryPluginOrchestrator, "temporary plugin dw-orchestrator")],
+      ["temporary project orchestrator", parseGeneratedDeveloperInstructions(temporaryProjectOrchestrator, "temporary project dw-orchestrator")],
+      ["tracked plugin orchestrator", parseGeneratedDeveloperInstructions(trackedPluginOrchestrator, "tracked plugin dw-orchestrator")],
+      ["tracked project orchestrator", parseGeneratedDeveloperInstructions(trackedProjectOrchestrator, "tracked project dw-orchestrator")],
+    ] as const) {
+      assert.equal(countOccurrences(instructions, mandate), 1, `${label} identity mandate count`)
+      assert.doesNotMatch(instructions, /record\("ocmm-review-artifact-v1"/, `${label} must not duplicate the canonical algorithm`)
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

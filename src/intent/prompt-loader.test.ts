@@ -662,11 +662,16 @@ test("v1 implementer template and maintenance docs record flat workflow ownershi
     join(process.cwd(), "skills", "v1", "requesting-code-review", "code-reviewer.md"),
     "utf8",
   )
-  assert.match(requestingReview, /Working-tree diff review/i)
-  assert.match(requestingReview, /git diff --stat\s+git diff/s)
-  assert.match(requestingReview, /Do not require implementation subagents to commit/i)
-  assert.match(reviewerTemplate, /Git Range or Working-Tree Diff to Review/)
-  assert.match(reviewerTemplate, /git diff --stat\s+git diff/s)
+  assert.match(requestingReview, /committed-range:BASE_SHA=<40-or-64-hex>;HEAD_SHA=<40-or-64-hex>/)
+  assert.match(requestingReview, /git diff --binary --no-ext-diff "\$BASE_SHA\.\.\$HEAD_SHA" \|\| exit \$\?/)
+  assert.match(requestingReview, /ARTIFACT_KIND:[\s\S]*ARTIFACT_IDENTITY:[\s\S]*DESCRIPTION:[\s\S]*PLAN_OR_REQUIREMENTS:[\s\S]*REVIEW_INPUT:[\s\S]*VERIFICATION_EVIDENCE:[\s\S]*GLOBAL_CONSTRAINTS:/)
+  assert.match(requestingReview, /Identity-Bound Review Packet/)
+  assert.match(requestingReview, /role\/profile lane:[\s\S]*task_id or session receipt:[\s\S]*artifact identity:[\s\S]*verdict:[\s\S]*report artifact\/source:/)
+  assert.match(requestingReview, /Do not require\s+implementation subagents to commit/i)
+  assert.match(reviewerTemplate, /Artifact Identity Echo/)
+  assert.match(reviewerTemplate, /Review Receipt/)
+  assert.doesNotMatch(requestingReview, /git diff --stat\s+git diff/s)
+  assert.doesNotMatch(reviewerTemplate, /Git Range or Working-Tree Diff to Review/)
 
   const v1Maintenance = readFileSync(join(process.cwd(), "docs", "v1-maintenance.md"), "utf8")
   const promptSync = readFileSync(join(process.cwd(), "docs", "prompt-sync.md"), "utf8")
@@ -685,6 +690,41 @@ test("orchestrator prompts describe code review as review-input based", () => {
     )
     assert.match(prompt, /committed range or working-tree\/staged diff/i, `${workflow} orchestrator missing review-input wording`)
     assert.doesNotMatch(prompt, /work SHAs/i, `${workflow} orchestrator still assumes SHA-only review input`)
+  }
+})
+
+test("orchestrator prompts load the concise identity-bound review mandate", () => {
+  const mandate = "Final implementation acceptance must load and follow the applicable identity-bound requesting-code-review skill. The orchestrator owns artifact-identity recomputation, one common packet for selected lanes, stale-verdict rejection, and completion only when every required receipt has the same current identity."
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    const prompt = readFileSync(
+      join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"),
+      "utf8",
+    )
+    assert.equal(countOccurrences(prompt, mandate), 1, `${workflow} mandate must occur once`)
+    assert.doesNotMatch(prompt, /createHash|sha256|ARTIFACT_KIND|ocmm-review-artifact-v1/, `${workflow} duplicates skill algorithm`)
+    const mandateOffset = prompt.indexOf(mandate)
+    assert.doesNotMatch(prompt.slice(mandateOffset, mandateOffset + mandate.length), /\bv1\b/i, `${workflow} mandate has visible v1 leakage`)
+  }
+})
+
+test("GPT run contract defines bounded tracking and parent stop ownership", () => {
+  for (const workflow of GPT56_WORKFLOWS) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt.md"), "utf8")
+    assert.match(text, /## Run-scoped tracking and stop contract/i, `${workflow}: missing run contract heading`)
+    assert.match(text, /multi-step work.*available .*tracking surface/is, `${workflow}: tracking surface`)
+    assert.match(text, /atomic items.*exactly one active item.*immediate status transitions/is, `${workflow}: live item discipline`)
+    assert.match(text, /insert newly discovered required work/i, `${workflow}: discovered work`)
+    assert.match(text, /do not batch-complete/i, `${workflow}: batch completion`)
+    assert.match(text, /create_goal.*available.*user, system, or developer.*explicitly requests or authorizes/is, `${workflow}: conditional create_goal`)
+    assert.match(text, /parent run.*complete requested behavior.*required evidence.*cleanup.*triggered final review/is, `${workflow}: parent stop condition`)
+    assert.match(text, /child delegation.*STOP WHEN.*ends only the child.*never replaces the parent/is, `${workflow}: child stop boundary`)
+    assert.match(text, /stop immediately.*parent run condition.*satisfied/is, `${workflow}: immediate stop`)
+    assert.match(text, /do not repeat validation.*relevant inputs have not changed/is, `${workflow}: unchanged-input validation`)
+    assert.match(text, /tracking completion never authorizes a Git write.*commit authorization boundary/is, `${workflow}: Git authorization boundary`)
+    assert.doesNotMatch(text, /(?:always|automatically)\s+(?:create\s+an?\s+)?commit|commit after (?:every|each) increment|history-mimicking commits/i, `${workflow}: automatic commit instruction`)
+    assert.doesNotMatch(text, /(?:always|immediately|unconditionally)\s+(?:call|use)\s+`?create_goal`?/i, `${workflow}: unconditional goal instruction`)
+    if (workflow === "codex") assert.match(text, /available `update_plan` or notepad tracking surface/i, workflow)
+    else assert.match(text, /available todo or notepad tracking surface/i, workflow)
   }
 })
 

@@ -130,6 +130,15 @@ deep_context = background_output(task_id=...)
 
 At start, run `NOTE=$(mktemp -t dw-$(date +%Y%m%d-%H%M%S).XXXXXX.md)` and echo the path. APPEND (never rewrite) to sections: Plan, Scenarios, Now, Todo, Findings (file:line refs), Learnings. If context is lost, re-read and resume.
 
+## Run-scoped tracking and stop contract
+
+- For multi-step work, use the available todo or notepad tracking surface. Keep atomic items, exactly one active item, and immediate status transitions; insert newly discovered required work when found. Do not batch-complete items at the end.
+- Call `create_goal` only when it is available and a user, system, or developer instruction explicitly requests or authorizes that persistent mechanism. Otherwise keep the run goal in the existing todo, plan, or notepad surface.
+- Define the parent run condition from the complete requested behavior plus required evidence, cleanup, and any triggered final review.
+- A child delegation's `STOP WHEN` ends only the child task and never replaces the parent run condition.
+- Stop immediately when the parent run condition is satisfied. Do not repeat validation when relevant inputs have not changed since the last green result.
+- Tracking completion never authorizes a Git write; follow the existing commit authorization boundary.
+
 ## SCENARIO CONTRACT (binding, defined BEFORE coding)
 
 Define 3+ scenarios covering: **happy path**, **edge** (boundary / empty / malformed / concurrent), **adjacent-surface regression**. For each, write:

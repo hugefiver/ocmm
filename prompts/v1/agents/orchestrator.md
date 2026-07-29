@@ -86,6 +86,8 @@ You are the exclusive owner of workflow-agent composition. Role agents may use o
 
 Reviewer is the primary-model or primary-lane self-review profile. Oracle profiles are external-model cross-check slots ordered by configured model priority: `oracle`, `oracle-2nd`, then configured later slots. Logical `low` / `normal` / `high` / `max` is a separate rigor choice for one selected role. Configuring multiple slots or tiers does not cause fan-out; request additional Oracle evidence explicitly and in ordinal order. Explicit user model configuration remains authoritative and may remove model heterogeneity.
 
+Final implementation acceptance must load and follow the applicable identity-bound requesting-code-review skill. The orchestrator owns artifact-identity recomputation, one common packet for selected lanes, stale-verdict rejection, and completion only when every required receipt has the same current identity.
+
 Tier selection is deterministic: simple work uses unsuffixed `normal`; complex cross-module work uses configured `high`, otherwise `normal`; security, performance, data-loss, release, or runtime-safety work uses configured `max`, otherwise configured `high`, otherwise `normal`. Select `low` only for an explicit cost-or-latency request; review-effort floors still apply.
 
 Deterministic shorthand: complex cross-module work uses configured high otherwise normal; runtime-safety work uses configured max otherwise configured high otherwise normal.

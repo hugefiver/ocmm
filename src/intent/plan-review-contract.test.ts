@@ -1,10 +1,43 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { test } from "node:test"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const root = process.cwd()
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8")
+
+function countExact(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
+
+function markerComment(marker: string): string {
+  return `<!-- ${marker} -->`
+}
+
+function extractMarkedFence(text: string, marker: string, language: string): string {
+  const comment = markerComment(marker)
+  assert.equal(countExact(text, comment), 1, `${marker} marker must appear exactly once`)
+  const markerOffset = text.indexOf(comment)
+  const following = text.slice(markerOffset + comment.length)
+  const fence = new RegExp(
+    "^\\r?\\n" + "```" + language + "\\r?\\n([\\s\\S]*?)\\r?\\n```(?:\\r?\\n|$)",
+  ).exec(following)
+  assert.notEqual(fence, null, `${marker} must introduce one adjacent ${language} fence`)
+  return fence![1]
+}
+
+function runFixtureGit(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim()
+}
+
+function computeFixtureIdentity(cwd: string, script: string): string {
+  return execFileSync("node", ["--input-type=module", "-e", script], {
+    cwd,
+    encoding: "utf8",
+  }).trim()
+}
 
 test("plan review requires a current complete receipt before handoff", () => {
   const skill = read("skills", "v1", "writing-plans", "SKILL.md")
@@ -96,6 +129,283 @@ test("review skills use ordered Oracle priority and logical tiers", () => {
     assert.match(text, /additional.*Oracle.*in order/is)
     assert.match(text, /runtime-safety.*max.*high.*normal/is)
     assert.doesNotMatch(text, /triple review|third reviewer|supplemental high-effort|high-intensity reviewer/i)
+  }
+})
+
+test("review artifact identity contract binds packets, receipts, and shell wrappers", () => {
+  const skill = read("skills", "v1", "requesting-code-review", "SKILL.md")
+  const reviewerTemplate = read("skills", "v1", "requesting-code-review", "code-reviewer.md")
+  const subagentSkill = read("skills", "v1", "subagent-driven-development", "SKILL.md")
+  const markers = [
+    "ocmm-review-artifact-identity-js",
+    "ocmm-review-artifact-identity-bash",
+    "ocmm-review-artifact-identity-powershell",
+    "ocmm-review-artifact-identity-packet",
+  ]
+
+  for (const marker of markers) {
+    assert.equal(countExact(skill, markerComment(marker)), 1, `${marker} marker`)
+  }
+  assert.equal(
+    countExact(reviewerTemplate, markerComment("ocmm-review-artifact-reviewer-template")),
+    1,
+  )
+  assert.equal(
+    countExact(subagentSkill, markerComment("ocmm-review-artifact-final-acceptance")),
+    1,
+  )
+
+  const canonical = extractMarkedFence(skill, "ocmm-review-artifact-identity-js", "js")
+  const bash = extractMarkedFence(skill, "ocmm-review-artifact-identity-bash", "bash")
+  const powershell = extractMarkedFence(skill, "ocmm-review-artifact-identity-powershell", "powershell")
+  const packet = extractMarkedFence(skill, "ocmm-review-artifact-identity-packet", "text")
+
+  assert.match(canonical, /import \{ createHash \} from "node:crypto"/)
+  assert.match(canonical, /import \{ execFileSync \} from "node:child_process"/)
+  assert.match(canonical, /encoding: "buffer", maxBuffer: 1024 \* 1024 \* 1024/)
+  assert.match(canonical, /record\("head", runGit\("rev-parse", "HEAD"\)\)/)
+  assert.equal(
+    countExact(canonical, 'runGit("diff", "--binary", "--no-ext-diff", "HEAD", "--")'),
+    1,
+    "one combined tracked diff record",
+  )
+  assert.match(canonical, /runGit\("ls-files", "--others", "--exclude-standard", "-z"\)/)
+  assert.match(canonical, /\.sort\(Buffer\.compare\)/)
+  assert.match(
+    canonical,
+    /if \(index === start\) throw new Error\("git NUL output contained an empty field"\)/,
+  )
+  assert.match(canonical, /stat\.isFile\(\).*readFileSync\(path\)/s)
+  assert.match(canonical, /stat\.isSymbolicLink\(\).*readlinkSync\(path, \{ encoding: "buffer" \}\)/s)
+  assert.match(canonical, /unsupported untracked entry type/)
+  assert.match(canonical, /process\.stdout\.write\(`sha256:\$\{hash\.digest\("hex"\)\}\\n`\)/)
+
+  for (const wrapper of [bash, powershell]) {
+    assert.match(wrapper, /readFileSync/)
+    assert.match(wrapper, /ocmm-review-artifact-" \+ "identity-js/)
+    assert.match(wrapper, /node --input-type=module -e/)
+    assert.match(wrapper, /```js\\r\?\\n/)
+    assert.doesNotMatch(wrapper, /createHash|record\(/)
+  }
+  assert.match(bash, /skill_path='skills\/v1\/requesting-code-review\/SKILL\.md'/)
+  assert.match(bash, /readFileSync\(process\.argv\[1\], "utf8"\)/)
+  assert.match(bash, /\$\(\s*node --input-type=module/s)
+  assert.match(bash, /\|\| exit \$\?/)
+  assert.match(bash, /\^sha256:\[0-9a-f\]\{64\}\$/)
+  assert.match(bash, /if ! node -e .*artifact_identity.*; then exit 1; fi/s)
+  assert.doesNotMatch(bash, /@'|\$LASTEXITCODE/)
+  assert.match(powershell, /\$skillPath/)
+  assert.match(powershell, /readFileSync\(process\.argv\[1\], "utf8"\)/)
+  assert.match(powershell, /@'/)
+  assert.match(powershell, /\$LASTEXITCODE -ne 0/)
+  assert.match(powershell, /\$scriptLines = @\(node -e \$extractor \$skillPath\)/)
+  assert.match(powershell, /\$script = \$scriptLines -join "`n"/)
+  assert.match(powershell, /\$artifactIdentityLines = @\(node --input-type=module -e \$script\)/)
+  assert.match(powershell, /\$artifactIdentity = \$artifactIdentityLines -join "`n"/)
+  assert.match(powershell, /\^sha256:\[0-9a-f\]\{64\}\$/)
+  assert.doesNotMatch(powershell, /artifact_identity=|\$\(/)
+
+  assert.match(skill, /BASE_SHA=\$\(git rev-parse HEAD~1\).*\nif \[ \$\? -ne 0 \]; then exit 1; fi/s)
+  assert.match(skill, /HEAD_SHA=\$\(git rev-parse HEAD\).*\nif \[ \$\? -ne 0 \]; then exit 1; fi/s)
+  assert.match(skill, /sha_pattern='\^\(\[0-9a-f\]\{40\}\|\[0-9a-f\]\{64\}\)\$'/)
+  assert.match(skill, /\[\[ "\$BASE_SHA" =~ \$sha_pattern \]\] \|\| exit 1/)
+  assert.match(skill, /\[\[ "\$HEAD_SHA" =~ \$sha_pattern \]\] \|\| exit 1/)
+  assert.match(skill, /git diff --binary --no-ext-diff "\$BASE_SHA\.\.\$HEAD_SHA" \|\| exit \$\?/)
+  assert.match(skill, /\$baseShaLines = @\(git rev-parse HEAD~1\)/)
+  assert.match(skill, /\$baseSha = \(\$baseShaLines -join "`n"\)\.Trim\(\)/)
+  assert.match(skill, /\$headShaLines = @\(git rev-parse HEAD\)/)
+  assert.match(skill, /\$headSha = \(\$headShaLines -join "`n"\)\.Trim\(\)/)
+  assert.match(skill, /\$baseSha -notmatch '\^\(\?:\[0-9a-f\]\{40\}\|\[0-9a-f\]\{64\}\)\$'/)
+  assert.match(skill, /\$headSha -notmatch '\^\(\?:\[0-9a-f\]\{40\}\|\[0-9a-f\]\{64\}\)\$'/)
+  assert.match(
+    skill,
+    /git diff --binary --no-ext-diff "\$baseSha\.\.\$headSha"\s+if \(\$LASTEXITCODE -ne 0\) \{ throw/,
+  )
+
+  const packetFields = [...packet.matchAll(/^([A-Z_]+):/gm)].map((match) => match[1])
+  assert.deepEqual(packetFields, [
+    "ARTIFACT_KIND",
+    "ARTIFACT_IDENTITY",
+    "DESCRIPTION",
+    "PLAN_OR_REQUIREMENTS",
+    "REVIEW_INPUT",
+    "VERIFICATION_EVIDENCE",
+    "GLOBAL_CONSTRAINTS",
+  ])
+  const receiptFields = [
+    "role/profile lane",
+    "task_id or session receipt",
+    "artifact identity",
+    "verdict",
+    "report artifact/source",
+  ]
+  assert.match(skill, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
+  assert.match(reviewerTemplate, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
+  assert.match(subagentSkill, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
+  assert.match(skill, /parent recompute.*after.*return/i)
+  assert.match(skill, /\[evidence\].*(?:missing|mismatch|drift).*blocker/i)
+  assert.match(skill, /same.*task_id.*new packet.*identity/is)
+  assert.match(skill, /no memory reconstruction/i)
+  assert.match(skill, /no (?:ledger|runtime|hash CLI)/i)
+  assert.match(skill, /Do not require\s+implementation subagents to commit/i)
+  assert.match(skill, /hash.*identity.*not.*quality/i)
+  assert.match(reviewerTemplate, /Do not re-run tests/i)
+  assert.match(reviewerTemplate, /evaluate stamped evidence/i)
+  assert.match(reviewerTemplate, /Artifact Identity Echo/)
+  assert.match(reviewerTemplate, /Review Receipt/)
+  assert.match(subagentSkill, /common current\s+identity/i)
+  assert.match(subagentSkill, /same review task IDs.*new.*packet.*identity/is)
+  assert.match(subagentSkill, /no memory reconstruction|never reconstruct.*memory/i)
+  assert.match(subagentSkill, /no (?:ledger|Git)/i)
+
+  const exampleStart = skill.indexOf("## Example")
+  assert.notEqual(exampleStart, -1)
+  const example = skill.slice(exampleStart)
+  for (const field of [...packetFields, ...receiptFields]) assert.match(example, new RegExp(field, "i"))
+  assert.doesNotMatch(example, /git diff --stat\s+git diff/s)
+})
+
+test("review artifact identity authoritative mapping rows stay current", () => {
+  const v1Maintenance = read("docs", "v1-maintenance.md")
+  const promptSync = read("docs", "prompt-sync.md")
+  const v1Row = (name: string) =>
+    v1Maintenance
+      .split(/\r?\n/)
+      .find((line) => line.startsWith(`| ${name} |`)) ?? ""
+  const promptSyncRow = (name: string) =>
+    promptSync
+      .split(/\r?\n/)
+      .find((line) => line.startsWith(`| \`${name}\` |`)) ?? ""
+
+  const subagentRow = v1Row("subagent-driven-development")
+  assert.match(subagentRow, /2026-07-29/)
+  assert.match(subagentRow, /common current identity packet/i)
+  assert.match(subagentRow, /parent recompute/i)
+  assert.match(subagentRow, /same task continuation.*new identity/i)
+  assert.match(subagentRow, /all required receipts.*current/i)
+
+  const requestingReviewRow = v1Row("requesting-code-review")
+  assert.match(requestingReviewRow, /2026-07-29/)
+  assert.match(requestingReviewRow, /committed endpoints.*working canonical identity/i)
+  assert.match(requestingReviewRow, /exact packet.*receipt/i)
+  assert.match(requestingReviewRow, /\[evidence\].*mismatch.*drift.*blocker/i)
+  assert.match(requestingReviewRow, /no memory reconstruction.*runtime ledger/i)
+
+  const reviewerTemplateRow = v1Row("requesting-code-review/code-reviewer.md")
+  assert.match(reviewerTemplateRow, /2026-07-29/)
+  assert.match(reviewerTemplateRow, /identity echo.*verification/i)
+  assert.match(reviewerTemplateRow, /\[evidence\].*mismatch.*drift.*blocker/i)
+  assert.match(reviewerTemplateRow, /evaluate stamped evidence.*no test rerun/i)
+
+  const v1OrchestratorRow = v1Row("agents/orchestrator.md")
+  assert.match(v1OrchestratorRow, /2026-07-29/)
+  assert.match(v1OrchestratorRow, /identity-bound skill mandate/i)
+  assert.match(v1OrchestratorRow, /common packet.*recompute.*current receipts/i)
+  assert.match(v1OrchestratorRow, /without algorithm duplication/i)
+
+  const promptSyncOrchestratorRow = promptSyncRow("orchestrator")
+  assert.match(promptSyncOrchestratorRow, /2026-07-29/)
+  assert.match(promptSyncOrchestratorRow, /omo\/v1\/codex/i)
+  assert.match(promptSyncOrchestratorRow, /identity-bound skill mandate/i)
+  assert.match(promptSyncOrchestratorRow, /common packet.*recompute.*current receipts/i)
+})
+
+test("canonical review artifact identity parser rejects malformed NUL fields", () => {
+  const skill = read("skills", "v1", "requesting-code-review", "SKILL.md")
+  const canonical = extractMarkedFence(skill, "ocmm-review-artifact-identity-js", "js")
+  const executionStart = 'record("ocmm-review-artifact-v1", "");'
+  assert.equal(countExact(canonical, executionStart), 1, "canonical execution must have one exact start")
+  const executionOffset = canonical.indexOf(executionStart)
+  assert.notEqual(executionOffset, -1, "canonical execution start must be present")
+  const harness = canonical.replace(
+    canonical.slice(executionOffset),
+    `const asUtf8 = (bytes) => nulFields(bytes).map((field) => field.toString("utf8"));
+if (JSON.stringify(asUtf8(Buffer.alloc(0))) !== "[]") throw new Error("empty buffer must yield no fields");
+if (JSON.stringify(asUtf8(Buffer.from("foo\\0"))) !== '["foo"]') throw new Error("normal terminator must yield one field");
+for (const bytes of [Buffer.from("\\0"), Buffer.from("\\0foo\\0"), Buffer.from("foo\\0\\0"), Buffer.from("foo")]) {
+  let threw = false;
+  try {
+    nulFields(bytes);
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error(\`expected malformed NUL output to throw: \${bytes.toString("hex")}\`);
+}
+process.stdout.write("NUL_FIELDS_PASS\\n");`,
+  )
+  assert.notEqual(harness, canonical, "harness must replace canonical top-level execution")
+  assert.doesNotMatch(harness, /record\("head", runGit\(/)
+  const output = execFileSync("node", ["--input-type=module", "-e", harness], {
+    encoding: "utf8",
+  }).trim()
+  assert.equal(output, "NUL_FIELDS_PASS")
+})
+
+test("canonical review artifact identity tracks the complete disposable repository state", () => {
+  const skill = read("skills", "v1", "requesting-code-review", "SKILL.md")
+  const canonical = extractMarkedFence(skill, "ocmm-review-artifact-identity-js", "js")
+  const fixture = mkdtempSync(join(tmpdir(), "ocmm-review-artifact-"))
+
+  try {
+    runFixtureGit(fixture, "init")
+    runFixtureGit(fixture, "config", "user.name", "Review Artifact Test")
+    runFixtureGit(fixture, "config", "user.email", "review-artifact@example.test")
+    writeFileSync(join(fixture, ".gitignore"), "ignored-entry.txt\n")
+    writeFileSync(join(fixture, "tracked.txt"), "baseline\n")
+    runFixtureGit(fixture, "add", ".gitignore", "tracked.txt")
+    runFixtureGit(fixture, "commit", "-m", "fixture baseline")
+
+    const baseline = computeFixtureIdentity(fixture, canonical)
+    assert.match(baseline, /^sha256:[0-9a-f]{64}$/)
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "unchanged identity is stable")
+
+    writeFileSync(join(fixture, "tracked.txt"), "tracked edit\n")
+    assert.notEqual(computeFixtureIdentity(fixture, canonical), baseline, "tracked edit changes identity")
+    writeFileSync(join(fixture, "tracked.txt"), "baseline\n")
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "tracked revert returns baseline")
+
+    writeFileSync(join(fixture, "tracked.txt"), "staged only\n")
+    runFixtureGit(fixture, "add", "tracked.txt")
+    const stagedOnly = computeFixtureIdentity(fixture, canonical)
+    writeFileSync(join(fixture, "tracked.txt"), "staged plus unstaged\n")
+    assert.notEqual(computeFixtureIdentity(fixture, canonical), stagedOnly, "final tracked state includes staged and unstaged changes")
+    runFixtureGit(fixture, "reset", "--hard", "HEAD")
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "full tracked revert returns baseline")
+
+    const untracked = join(fixture, "untracked.bin")
+    writeFileSync(untracked, Buffer.from([0, 1, 2]))
+    const untrackedAdded = computeFixtureIdentity(fixture, canonical)
+    assert.notEqual(untrackedAdded, baseline, "untracked add changes identity")
+    writeFileSync(untracked, Buffer.from([0, 1, 3]))
+    assert.notEqual(computeFixtureIdentity(fixture, canonical), untrackedAdded, "untracked content changes identity")
+    rmSync(untracked)
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "untracked removal returns baseline")
+
+    const ignored = join(fixture, "ignored-entry.txt")
+    writeFileSync(ignored, "ignored one\n")
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "ignored add is excluded")
+    writeFileSync(ignored, "ignored two\n")
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "ignored change is excluded")
+
+    const link = join(fixture, "untracked-link")
+    try {
+      symlinkSync("first-target", link, "file")
+      const firstLink = computeFixtureIdentity(fixture, canonical)
+      rmSync(link)
+      symlinkSync("second-target", link, "file")
+      assert.notEqual(computeFixtureIdentity(fixture, canonical), firstLink, "symlink target changes identity")
+      rmSync(link)
+    } catch (error: unknown) {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: string }).code)
+        : ""
+      assert.match(code, /^(EPERM|EACCES|ENOSYS|ENOTSUP)$/)
+      assert.match(canonical, /readlinkSync\(path, \{ encoding: "buffer" \}\)/)
+    }
+
+    assert.equal(computeFixtureIdentity(fixture, canonical), baseline, "full revert returns baseline")
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
   }
 })
 

@@ -1,11 +1,14 @@
 # Frontend Design References — Index
 
-All reference files live flat in this directory. Three layers:
+All reference files live flat in this directory. Three layers plus one separate composable-mechanics set:
 - **Layer 0 — design system architecture** (1 file): the mandatory gate. Defines `DESIGN.md` structure, creation workflow, validation rules. Always loaded by Phase 0 when no design system exists.
 - **Layer A — taste skills** (12 files): how to execute. Discipline, motion, spacing, anti-slop, output completeness.
+- **Composable interaction mechanics** (1 file): state and motion behavior that stacks with the selected style/brand references without becoming a style choice.
 - **Layer B — design systems** (70 files): what it should look like. Brand-specific color/type/component tokens.
 
 **Phase 0 runs first** (check/create `DESIGN.md`), then most non-trivial tasks load **one Layer A + one Layer B** together. See the routing flow in the sibling `README.md`.
+
+**Inventory:** 1 architecture + 12 taste/style + 1 interaction mechanics + 70 brand = 84 total design references.
 
 ---
 
@@ -49,6 +52,16 @@ From [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill).
 2. **`output-skill.md` and `stitch-skill.md` stack on top of any style skill.** They add discipline and output format, not visual direction.
 3. **`image-to-code-skill.md` pairs with one imagegen skill** for the full flow.
 4. **Imagegen skills are image-only.** Do not load them when the user actually wants code.
+
+---
+
+## Composable Interaction Mechanics (1)
+
+This is stacking behavior, not a Layer A style choice. Load it in addition to the selected style/brand references when the interaction surface requires it.
+
+| File | Purpose | Load when |
+|---|---|---|
+| `interaction-skill.md` | State matrices, spatial continuity, input-responsive motion, reduced-motion behavior, and real-browser interaction QA. | The work includes meaningful hover/focus/press/open-close/loading/success/error behavior or motion mechanics. |
 
 ---
 

@@ -15,7 +15,9 @@ description: Use when executing implementation plans with independent tasks in t
       history pasting, findings handling by severity); Narration discipline rule;
       task-type analysis hint (prefer dispatching-parallel-agents for independent
       tasks); Final Acceptance Review stage updated with ordered Oracle slot
-      priority and logical tiers. v1 intentionally replaces per-task reviewer loops with
+      priority and logical tiers. Project 5 adaptation binds final acceptance to one
+      current review artifact identity and five-field receipts without a ledger or Git
+      requirement. v1 intentionally replaces per-task reviewer loops with
       completion/integration checks plus one final acceptance review; ⚠️ Items
       section (reviewer "Cannot verify from diff" items). Did NOT sync:
      review-package/task-brief bash scripts (Windows incompatible); progress
@@ -231,23 +233,52 @@ Review selection has two independent axes: role/model priority and logical rigor
 
 The orchestrator performs this selection after all tasks complete. Do not fan out reviews merely because several Oracle slots or tiers are registered. Collect only intentionally requested reviews. A later Oracle slot is another configured model perspective, not a stronger reviewer.
 
-**2. Dispatch the acceptance review:**
+<!-- ocmm-review-artifact-final-acceptance -->
+**2. Capture and dispatch the identity-bound acceptance packet:**
 
-Use the `requesting-code-review` skill. Pass either a committed range or an uncommitted working-tree/staged diff:
-- committed range: `BASE_SHA`, `HEAD_SHA`, `DESCRIPTION`, and `PLAN_OR_REQUIREMENTS` when the orchestrator has already created a user-authorized commit;
-- working-tree/staged diff: `git diff --stat`, `git diff`, `git diff --cached --stat`, `git diff --cached`, `DESCRIPTION`, and `PLAN_OR_REQUIREMENTS` when implementation subagents returned uncommitted changes.
+Load the applicable `requesting-code-review` skill and, immediately before each
+dispatch, capture one common current seven-field packet:
 
-Do not require implementation subagents to commit, stage, or push merely to create review SHAs. The orchestrator owns any Git write and performs it only after explicit user authorization.
+```text
+ARTIFACT_KIND: committed-range | working-tree
+ARTIFACT_IDENTITY: <current identity from the requesting-code-review skill>
+DESCRIPTION: <implemented change summary>
+PLAN_OR_REQUIREMENTS: <path or supplied requirements>
+REVIEW_INPUT: <current binary review input and manifest/report reference>
+VERIFICATION_EVIDENCE: <identity-stamped affected evidence>
+GLOBAL_CONSTRAINTS: <verbatim task constraints>
+```
 
-For baseline dispatch: use the selected first available Oracle, and add `reviewer` only when the complexity table says so.
+Dispatch that common packet only to the Oracle and Reviewer lanes deliberately
+selected by the table. For baseline acceptance use the selected first available
+Oracle, adding `reviewer` only when the table says so; later Oracle slots require
+an intentional evidence need. Do not fan out merely because profiles are available.
+Every lane must return exactly this five-field receipt:
 
-For additional evidence: add the next configured/available Oracle slot(s) in ordinal order, each with the same review input and context. Do not add slots automatically without an intentional evidence need.
+```text
+role/profile lane: <selected reviewer or Oracle profile>
+task_id or session receipt: <task_id or durable session/result reference>
+artifact identity: <received and verified identity>
+verdict: <approved | rejected | with fixes>
+report artifact/source: <review report path or task-result source>
+```
 
-**3. Process feedback:**
+The parent recomputes the artifact identity after each lane returns. A missing
+receipt field, missing identity, mismatch, or drift is an `[evidence]` blocker;
+reject the stale verdict and do not declare completion. Do not reconstruct a lost
+receipt from memory: re-review the current artifact; no memory reconstruction. No ledger, Git write, or
+implementation-subagent commit requirement is introduced. Do not require implementation subagents to commit, stage, or push merely to create review input.
 
-- Use the `receiving-code-review` skill to handle feedback with technical rigor.
-- Fix Critical/Important issues, re-review, loop.
-- Only declare the work done when the reviewer(s) approve.
+**3. Process feedback and converge:**
+
+- Use the `receiving-code-review` skill to handle findings with technical rigor.
+- For Critical or Important findings, dispatch one fix subagent carrying all
+  findings. Continue its review in the same review task IDs, but capture a new
+  packet and artifact identity after the fix.
+- Re-run affected evidence and the required final pass, then re-dispatch only the
+  selected lanes whose prior receipt no longer covers the changed artifact.
+- Accept completion only when every required receipt has the same common current
+  identity. A previous approval for any different identity is stale.
 
 **4. When to skip:**
 

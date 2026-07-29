@@ -142,7 +142,8 @@ SOFTWARE.
 
 `frontend/SKILL.md`, `frontend/references/design/README.md`, `_INDEX.md`,
 `aside.md`, `clone-from-url.md`, `design-system-architecture.md`,
-`react-dev-tooling-skill.md`, `frontend/references/perfection/README.md`,
+`frontend/references/design/interaction-skill.md`, `react-dev-tooling-skill.md`,
+`frontend/references/perfection/README.md`,
 `react-perf-tooling.md`, and `frontend/scripts/perfection/lighthouse-audit.py` are original
 to this project and require no third-party attribution. The perfection docs and script only
 invoke third-party tools (react-scan, react-doctor, react-grab, playwright-lighthouse,
@@ -161,3 +162,5 @@ workflow guide. Its browser + `getComputedStyle` clone approach follows the same
 source from that template is copied. It carries no third-party attribution beyond that
 lineage note, and it grants no license to copy any target site's trademarks, brand assets,
 or proprietary copy.
+
+`frontend/references/design/interaction-skill.md` is a project-original local adaptation and synthesis of general interaction-state and motion-mechanics practices. It contains no vendored component catalog or third-party implementation, requires no network source at runtime, and grants no license to copy vendor components or branded assets.

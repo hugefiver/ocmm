@@ -1,6 +1,6 @@
 ---
 name: frontend
-description: "MUST USE for ANY frontend, web UI, UX, or visual work — building, styling, or redesigning pages/components, React project setup, performance audits, design QA. Routes three rulesets: design (anti-slop taste router over 12 taste skills + 70 brand DESIGN.md refs — Apple, Stripe, Linear, Notion, Vercel, Claude, Nike, Aside — plus React dev tooling gate: react-grab, react-scan, react-doctor), perfection (Lighthouse 100 in every category via real Playwright Chromium audits, NEVER the lighthouse CLI, never by weakening UX), ui-ux-db (searchable 50+ styles, 97 palettes, 57 font pairings, 99 UX guidelines). Triggers: frontend, UI, UX, design, redesign, styling, layout, animation, motion, taste, premium, luxury, minimal, brutalist, Awwwards, anti-slop, polish, DESIGN.md, mockup, react setup, react-scan, react-doctor, lighthouse, performance, Core Web Vitals, LCP, CLS, INP, SEO, accessibility, a11y, WCAG, audit my site, make this faster, color palette, font pairing, looks generic, make it pretty, like X brand, clone site, clone from url."
+description: "MUST USE for ANY frontend, web UI, UX, or visual work — building, styling, or redesigning pages/components, React project setup, performance audits, design QA. Routes three rulesets: design (anti-slop taste router over 12 taste skills + 70 brand DESIGN.md refs — Apple, Stripe, Linear, Notion, Vercel, Claude, Nike, Aside — plus composable interaction mechanics and the React dev tooling gate: react-grab, react-scan, react-doctor), perfection (Lighthouse 100 in every category via real Playwright Chromium audits, NEVER the lighthouse CLI, never by weakening UX), ui-ux-db (searchable 50+ styles, 97 palettes, 57 font pairings, 99 UX guidelines). Triggers: frontend, UI, UX, design, redesign, styling, layout, animation, motion, interaction, interaction mechanics, state, reduced-motion, taste, premium, luxury, minimal, brutalist, Awwwards, anti-slop, polish, DESIGN.md, mockup, react setup, react-scan, react-doctor, lighthouse, performance, Core Web Vitals, LCP, CLS, INP, SEO, accessibility, a11y, WCAG, audit my site, make this faster, color palette, font pairing, looks generic, make it pretty, like X brand, clone site, clone from url."
 ---
 
 # Frontend
@@ -19,7 +19,7 @@ This file is a router, not a rulebook. The rules live in three rulesets under `r
 
 ## Ruleset 1 — design (`references/design/`)
 
-The reference library has one architecture file, 12 taste skills (Layer A — *how to execute*), and 70 brand design systems (Layer B — *what it should look like*). Most non-trivial tasks load **one Layer A + one Layer B**. `README.md` carries the full routing flow, stacking rules, anti-patterns, and the mandatory browser-based Design QA phase; `_INDEX.md` catalogs all 83 files with mood-to-brand mappings — read it whenever routing is not obvious from the tables below.
+The reference library has one architecture file, 12 taste skills (Layer A — *how to execute*), one composable interaction-mechanics reference, and 70 brand design systems (Layer B — *what it should look like*). Most non-trivial tasks load **one Layer A + one Layer B**; add the interaction reference when the surface needs it. `README.md` carries the full routing flow, stacking rules, anti-patterns, and the mandatory browser-based Design QA phase; `_INDEX.md` catalogs all 84 files with mood-to-brand mappings — read it whenever routing is not obvious from the tables below.
 
 ### Layer 0 — architecture
 
@@ -41,6 +41,12 @@ The reference library has one architecture file, 12 taste skills (Layer A — *h
 | `output-skill.md` | Stacks on any style skill when output is incomplete — placeholders, `// TODO`, half-done components. |
 | `stitch-skill.md` | Stacks on any style skill for Google Stitch compatibility or a `DESIGN.md` doc export. |
 | `imagegen-frontend-web.md` / `imagegen-frontend-mobile.md` / `imagegen-brandkit.md` | Image-only output (mockup, app-screen concepts, brand board). These NEVER write code — switch to `image-to-code-skill.md` if code is wanted. |
+
+### Composable interaction mechanics (stacks; not a style choice)
+
+| File | Read when |
+|---|---|
+| `interaction-skill.md` | The work includes meaningful interaction states, open/close transitions, spatial continuity, loading/success/error transitions, keyboard focus behavior, or reduced-motion behavior. Stack it with the selected style/brand references; it does not consume the one-style slot. |
 
 ### Layer B — brand design systems (orthogonal to Layer A; stack freely)
 
@@ -89,6 +95,7 @@ Domains: `product` `style` `typography` `color` `landing` `chart` `ux` `react` `
 | "Aside-style agent-browser landing" | `design/README.md` + `design/aside.md` + `design/taste-skill.md` + `perfection/README.md` |
 | "Clone this site" / "rebuild `<url>`" | `design/README.md` + `design/clone-from-url.md` + `perfection/README.md` |
 | "Improve this existing dashboard" | `design/README.md` + `design/redesign-skill.md` + `perfection/README.md` |
+| "Polish these interactions" / "add motion and states" | `design/README.md` + `design/interaction-skill.md` + the selected style/brand reference + `perfection/README.md` |
 | "Audit my site" / "make this page faster" | `perfection/README.md` (+ `perfection/react-perf-tooling.md` if React) |
 | "Mockup image of a fintech app" — no code | `design/imagegen-frontend-mobile.md` (+ a Layer B brand if named) |
 | "What palette/fonts fit a wellness brand?" | `ui-ux-db/README.md` → search CLI |

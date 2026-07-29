@@ -7,12 +7,13 @@ You are an elite frontend design engineer. Your only job in this skill is to **r
 
 `taste-skill.md` alone is a strong default, but it does not commit to any specific aesthetic. When the user has named a clear visual direction (a brand, a style label, an existing site to mimic), a dedicated reference produces sharper output than the generic default. Loading the wrong reference, or none, is how you produce the bland generic SaaS slop these skills exist to prevent.
 
-The library lives flat in this directory (`references/design/`, max depth 1) and has two conceptual layers, and **most non-trivial tasks load one from each layer**:
+The library lives flat in this directory (`references/design/`, max depth 1) and has one architecture reference plus three conceptual sets. **Most non-trivial tasks load one Layer A and one Layer B reference**, then add interaction mechanics when needed:
 
 - **Layer A — taste skills (12 files):** how to execute. Discipline, motion physics, spacing rules, anti-slop guardrails, output completeness. Filenames end in `-skill.md` or start with `imagegen-`.
+- **Composable interaction mechanics (1 file):** state and motion behavior that stacks with the selected style/brand references without consuming the one-style slot.
 - **Layer B — design systems (70 files):** what it should look like. Concrete color/type/component tokens for one specific brand aesthetic. Filenames are brand names (`aside.md`, `claude.md`, `notion.md`, `stripe.md`, …).
 
-A combined directory of all 83 reference files is at `_INDEX.md`. **Read that index before loading anything** unless the routing is obvious — it has the full mood-mapping and stacking rules in one place.
+With the architecture reference, the combined directory contains all 84 design reference files cataloged in `_INDEX.md`. **Read that index before loading anything** unless the routing is obvious — it has the full mood-mapping and stacking rules in one place.
 
 ## Open Design Library
 
@@ -155,14 +156,19 @@ Triggers (mid-conversation, not initial): "you keep leaving placeholders", "stop
 
 **Action:** Add `output-skill.md` on top of whatever is currently loaded. This stacks cleanly — it is purely about output completeness, not visual style.
 
+### Step 8 — Does the surface require interaction mechanics?
+
+After selecting the style and optional brand inputs above, load `interaction-skill.md` when the work includes meaningful hover/focus/press states, open/close transitions, spatial continuity, loading/success/error transitions, keyboard focus behavior, or reduced-motion behavior. This is composable behavior, not another visual style.
+
 ## Stacking rules (read this once, internalize it)
 
 1. **At most one Layer A *style* skill at a time.** A layout cannot be both `minimalist-skill` and `brutalist-skill` simultaneously — they encode opposite spacing and typography philosophies. Pick one.
-2. **`taste-skill.md` and `gpt-tasteskill.md` are also style-skills** — do not stack them with `minimalist`, `brutalist`, or `soft`. They are alternative defaults at different intensity levels.
-3. **`output-skill.md` and `stitch-skill.md` stack on top of any style skill.** They add discipline and output format, not visual direction.
-4. **`redesign-skill.md` replaces a style-skill** when the task is auditing, not building. Stack a Layer B brand if the user wants a specific direction.
-5. **`image-to-code-skill.md` pairs with one imagegen skill** for the full flow.
-6. **Layer B (brand DESIGN.md) is orthogonal to Layer A.** You can pair any Layer A skill with any Layer B brand. Use Layer B as the source of color/type/component tokens; let Layer A drive the execution discipline.
+2. **`interaction-skill.md` stacks with the selected style and brand references.** It adds interaction mechanics, not visual direction, and does not consume the at-most-one-style slot.
+3. **`taste-skill.md` and `gpt-tasteskill.md` are also style-skills** — do not stack them with `minimalist`, `brutalist`, or `soft`. They are alternative defaults at different intensity levels.
+4. **`output-skill.md` and `stitch-skill.md` stack on top of any style skill.** They add discipline and output format, not visual direction.
+5. **`redesign-skill.md` replaces a style-skill** when the task is auditing, not building. Stack a Layer B brand if the user wants a specific direction.
+6. **`image-to-code-skill.md` pairs with one imagegen skill** for the full flow.
+7. **Layer B (brand DESIGN.md) is orthogonal to Layer A.** You can pair any Layer A skill with any Layer B brand. Use Layer B as the source of color/type/component tokens; let Layer A drive the execution discipline.
 
 ## Anti-patterns — do not do these
 
@@ -198,6 +204,7 @@ Once references are loaded, before writing any UI code:
 | "Premium SaaS hero, like Stripe" | `stripe.md` + `soft-skill.md` |
 | "Brutalist portfolio" | `brutalist-skill.md` (+ optional `nike.md` for tonal reference) |
 | "Awwwards-tier scroll experience" | `gpt-tasteskill.md` |
+| "Polish these interactions" / "add motion and states" | `interaction-skill.md` + the selected style/brand references |
 | "Improve this existing dashboard" | `redesign-skill.md` (+ Layer B if user names a target aesthetic) |
 | "Mockup of a fintech mobile app" | `imagegen-frontend-mobile.md` (+ `revolut.md` or `stripe.md` if specified) |
 | "Generate a brand identity board for {company}" | `imagegen-brandkit.md` |

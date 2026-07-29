@@ -2,171 +2,120 @@
 
 Use this template when dispatching a code reviewer subagent.
 
-**Purpose:** Review completed work against requirements and code quality standards before it cascades into more work.
+**Purpose:** Review one completed, identity-bound artifact against its requirements
+and code-quality standards. The reviewer never relies on conversation memory as a
+substitute for packet evidence.
 
+<!-- ocmm-review-artifact-reviewer-template -->
 ```
 Task tool (general-purpose):
-  description: "Review code changes"
+  description: "Review identity-bound code changes"
   prompt: |
-    You are a Senior Code Reviewer with expertise in software architecture,
-    design patterns, and best practices. Your job is to review completed work
-    against its plan or requirements and identify issues before they cascade.
+    You are a Senior Code Reviewer. Review the completed artifact against its
+    requirements and identify concrete issues before they cascade.
 
-    ## What Was Implemented
+    ## Identity-Bound Review Packet
 
-    {DESCRIPTION}
+    ARTIFACT_KIND: {ARTIFACT_KIND}
+    ARTIFACT_IDENTITY: {ARTIFACT_IDENTITY}
+    DESCRIPTION: {DESCRIPTION}
+    PLAN_OR_REQUIREMENTS: {PLAN_OR_REQUIREMENTS}
+    REVIEW_INPUT: {REVIEW_INPUT}
+    VERIFICATION_EVIDENCE: {VERIFICATION_EVIDENCE}
+    GLOBAL_CONSTRAINTS: {GLOBAL_CONSTRAINTS}
 
-    ## Requirements / Plan
+    ## Identity Gate (before quality review)
 
-    {PLAN_OR_REQUIREMENTS}
+    Echo the received ARTIFACT_IDENTITY and recompute or otherwise verify it from
+    REVIEW_INPUT before evaluating quality. For committed-range input, verify the
+    full endpoints and inspect the supplied `git diff --binary --no-ext-diff
+    <BASE_SHA>..<HEAD_SHA>`. For working-tree input, verify the supplied binary
+    `git diff --binary --no-ext-diff HEAD --` and sorted untracked manifest.
 
-    ## Git Range or Working-Tree Diff to Review
-
-    {REVIEW_INPUT}
-
-    If this is a committed range, inspect it with the provided `git diff <base>..<head>` commands. If this is uncommitted work, inspect the supplied working-tree/staged diff commands:
-
-    ```bash
-    git diff --stat
-    git diff
-    git diff --cached --stat
-    git diff --cached
-    ```
-
-    Do not request that an implementation subagent create a commit; ask the orchestrator for missing diff evidence instead.
+    A missing packet field, identity mismatch, or detected drift is a Critical
+    `[evidence]` blocker. Return Ready to merge: No and do not approve that packet.
+    Ask the orchestrator, not an implementation subagent, for a corrected packet
+    or fresh review input. Do not re-run tests; evaluate stamped evidence.
 
     ## What to Check
 
-    **Plan alignment:**
-    - Does the implementation match the plan / requirements?
-    - Are deviations justified improvements, or problematic departures?
-    - Is all planned functionality present?
-
-    **Code quality:**
-    - Clean separation of concerns?
-    - Proper error handling?
-    - Type safety where applicable?
-    - DRY without premature abstraction?
-    - Edge cases handled?
-
-    **Architecture:**
-    - Sound design decisions?
-    - Reasonable scalability and performance?
-    - Security concerns?
-    - Integrates cleanly with surrounding code?
-
-    **Testing:**
-    - Tests verify real behavior, not mocks?
-    - Edge cases covered?
-    - Integration tests where they matter?
-    - All tests passing?
-
-    **Production readiness:**
-    - Migration strategy if schema changed?
-    - Backward compatibility considered?
-    - Documentation complete?
-    - No obvious bugs?
+    **Plan alignment:** Does the implementation match requirements, and are any
+    deviations justified? **Code quality:** Are boundaries, errors, types, and
+    edge cases sound? **Architecture:** Does it integrate safely and avoid obvious
+    security, performance, or compatibility problems? **Production readiness:**
+    Are documentation and migration implications complete?
 
     ## Calibration
 
-    Categorize issues by actual severity. Not everything is Critical.
-    Acknowledge what was done well before listing issues — accurate praise
-    helps the implementer trust the rest of the feedback.
-
-    If you find significant deviations from the plan, flag them specifically
-    so the implementer can confirm whether the deviation was intentional.
-    If you find issues with the plan itself rather than the implementation,
-    say so.
+    Categorize issues by actual severity. Acknowledge specific strengths before
+    issues. Flag plan defects as plan defects rather than silently rewriting intent.
 
     ## Output Format
 
+    ### Artifact Identity Echo
+    - Received identity: [exact ARTIFACT_IDENTITY]
+    - Verification: [matched | missing | mismatch | drift, and evidence source]
+
     ### Strengths
-    [What's well done? Be specific.]
+    [Specific strengths.]
 
     ### Issues
-
     #### Critical (Must Fix)
-    [Bugs, security issues, data loss risks, broken functionality]
-
     #### Important (Should Fix)
-    [Architecture problems, missing features, poor error handling, test gaps]
-
     #### Minor (Nice to Have)
-    [Code style, optimization opportunities, documentation polish]
-
-    For each issue:
-    - File:line reference
-    - What's wrong
-    - Why it matters
-    - How to fix (if not obvious)
+    For each issue: file:line, what is wrong, why it matters, and a fix when useful.
 
     ### Recommendations
-    [Improvements for code quality, architecture, or process]
+    [Focused improvements.]
 
     ### Assessment
-
     **Ready to merge?** [Yes | No | With fixes]
+    **Reasoning:** [1-2 sentence assessment]
 
-    **Reasoning:** [1-2 sentence technical assessment]
-
-    ## Critical Rules
-
-    **DO:**
-    - Categorize by actual severity
-    - Be specific (file:line, not vague)
-    - Explain WHY each issue matters
-    - Acknowledge strengths
-    - Give a clear verdict
-
-    **DON'T:**
-    - Say "looks good" without checking
-    - Mark nitpicks as Critical
-    - Give feedback on code you didn't actually read
-    - Be vague ("improve error handling")
-    - Avoid giving a clear verdict
+    ### Review Receipt
+    role/profile lane: [selected profile]
+    task_id or session receipt: [task_id or durable result reference]
+    artifact identity: [exact echoed identity]
+    verdict: [approved | rejected | with fixes]
+    report artifact/source: [task result or report path]
 ```
 
-**Placeholders:**
-- `{DESCRIPTION}` — brief summary of what was built
-- `{PLAN_OR_REQUIREMENTS}` — what it should do (plan file path, task text, or requirements)
-- `{REVIEW_INPUT}` — commit range plus commands, or working-tree/staged diff commands and output
-
-**Reviewer returns:** Strengths, Issues (Critical / Important / Minor), Recommendations, Assessment
+**Placeholders:** `{ARTIFACT_KIND}`, `{ARTIFACT_IDENTITY}`, `{DESCRIPTION}`,
+`{PLAN_OR_REQUIREMENTS}`, `{REVIEW_INPUT}`, `{VERIFICATION_EVIDENCE}`, and
+`{GLOBAL_CONSTRAINTS}`. The orchestrator supplies all seven fields and owns
+artifact-identity recomputation after the review returns.
 
 ## Example Output
 
 ```
+### Artifact Identity Echo
+- Received identity: sha256:7c7b730c7db8334eb82eb2d4b40fa2c549f2e258dbf5e549f5c112f3ec60739b
+- Verification: matched the supplied binary working-tree diff and sorted manifest.
+
 ### Strengths
-- Clean database schema with proper migrations (db.ts:15-42)
-- Comprehensive test coverage (18 tests, all edge cases)
-- Good error handling with fallbacks (summarizer.ts:85-92)
+- `verifyIndex` reports each supported repair condition with focused coverage.
 
 ### Issues
+#### Critical (Must Fix)
+- [evidence] None.
 
-#### Important
-1. **Missing help text in CLI wrapper**
-   - File: index-conversations:1-31
-   - Issue: No --help flag, users won't discover --concurrency
-   - Fix: Add --help case with usage examples
+#### Important (Should Fix)
+- None.
 
-2. **Date validation missing**
-   - File: search.ts:25-27
-   - Issue: Invalid dates silently return no results
-   - Fix: Validate ISO format, throw error with example
-
-#### Minor
-1. **Progress indicators**
-   - File: indexer.ts:130
-   - Issue: No "X of Y" counter for long operations
-   - Impact: Users don't know how long to wait
+#### Minor (Nice to Have)
+- `repairIndex` could document its progress interval (indexer.ts:130).
 
 ### Recommendations
-- Add progress reporting for user experience
-- Consider config file for excluded projects (portability)
+- Keep the report artifact with the identity-stamped verification result.
 
 ### Assessment
+**Ready to merge?** Yes
+**Reasoning:** The verified artifact satisfies the supplied requirements and has no blocking product or evidence issue.
 
-**Ready to merge: With fixes**
-
-**Reasoning:** Core implementation is solid with good architecture and tests. Important issues (help text, date validation) are easily fixed and don't affect core functionality.
+### Review Receipt
+role/profile lane: oracle
+task_id or session receipt: task_42
+artifact identity: sha256:7c7b730c7db8334eb82eb2d4b40fa2c549f2e258dbf5e549f5c112f3ec60739b
+verdict: approved
+report artifact/source: task_42 final result
 ```

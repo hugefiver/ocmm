@@ -8,9 +8,11 @@ description: Use after all implementation tasks complete, after major features a
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); added
      Reviewer Selection section for ordered Oracle slot semantics and logical
-     tiers (oracle slots = external-model priority ordering, reviewer =
-     primary-lane self-review, tiers = low/normal/high/max). See docs/v1-maintenance.md for sync
-     rules. -->
+      tiers (oracle slots = external-model priority ordering, reviewer =
+      primary-lane self-review, tiers = low/normal/high/max). Project 5 adaptation:
+      canonical review-artifact identity binds review packets and receipts without
+      a ledger, runtime, hash CLI, or Git-write requirement. See docs/v1-maintenance.md for sync
+      rules. -->
 
 # Requesting Code Review
 
@@ -31,38 +33,202 @@ Dispatch a code reviewer subagent to catch issues before they cascade. The revie
 
 ## How to Request
 
-**1. Choose the review input:**
+**1. Construct one identity-bound review packet before dispatch.**
 
-Use a committed range only when an orchestrator-owned, user-authorized commit already exists:
+Set `ARTIFACT_KIND` to exactly `committed-range` or `working-tree`. Its mandatory
+`ARTIFACT_IDENTITY` is an opaque comparison value, not proof that a test or review
+is correct.
+
+For an orchestrator-owned, user-authorized committed range, resolve full endpoint
+hashes and use exactly:
+
+```text
+committed-range:BASE_SHA=<40-or-64-hex>;HEAD_SHA=<40-or-64-hex>
+```
 
 ```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
+BASE_SHA=$(git rev-parse HEAD~1) # or origin/main
+if [ $? -ne 0 ]; then exit 1; fi
 HEAD_SHA=$(git rev-parse HEAD)
-git diff --stat $BASE_SHA..$HEAD_SHA
-git diff $BASE_SHA..$HEAD_SHA
+if [ $? -ne 0 ]; then exit 1; fi
+sha_pattern='^([0-9a-f]{40}|[0-9a-f]{64})$'
+[[ "$BASE_SHA" =~ $sha_pattern ]] || exit 1
+[[ "$HEAD_SHA" =~ $sha_pattern ]] || exit 1
+ARTIFACT_IDENTITY="committed-range:BASE_SHA=$BASE_SHA;HEAD_SHA=$HEAD_SHA"
+git diff --binary --no-ext-diff "$BASE_SHA..$HEAD_SHA" || exit $?
 ```
 
-Working-tree diff review (use this when implementation subagents returned uncommitted changes):
+```powershell
+$baseShaLines = @(git rev-parse HEAD~1) # or origin/main
+if ($LASTEXITCODE -ne 0) { throw "cannot resolve BASE_SHA" }
+$baseSha = ($baseShaLines -join "`n").Trim()
+if ($baseSha -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') { throw "BASE_SHA must be a full lowercase Git object ID" }
+$headShaLines = @(git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0) { throw "cannot resolve HEAD_SHA" }
+$headSha = ($headShaLines -join "`n").Trim()
+if ($headSha -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') { throw "HEAD_SHA must be a full lowercase Git object ID" }
+$artifactIdentity = "committed-range:BASE_SHA=$baseSha;HEAD_SHA=$headSha"
+git diff --binary --no-ext-diff "$baseSha..$headSha"
+if ($LASTEXITCODE -ne 0) { throw "cannot produce committed review diff" }
+```
 
+For a working tree, calculate the canonical lowercase `sha256:<64-lowercase-hex>`
+identity immediately before dispatch. This module is authoritative: it records raw
+`HEAD` bytes, one final combined binary tracked diff, and bytewise-sorted,
+non-ignored untracked entries. It is read-only and fails closed for Git errors,
+unreadable files, malformed NUL output, and unsupported entry types.
+
+<!-- ocmm-review-artifact-identity-js -->
+```js
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+
+const runGit = (...args) =>
+  execFileSync("git", args, { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024 });
+const nul = Buffer.from([0]);
+const hash = createHash("sha256");
+
+function record(tag, bytes) {
+  const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, "utf8");
+  hash.update(Buffer.from(tag, "ascii"));
+  hash.update(nul);
+  hash.update(Buffer.from(String(body.length), "ascii"));
+  hash.update(nul);
+  hash.update(body);
+  hash.update(nul);
+}
+
+function nulFields(bytes) {
+  const fields = [];
+  let start = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] === 0) {
+      if (index === start) throw new Error("git NUL output contained an empty field");
+      fields.push(bytes.subarray(start, index));
+      start = index + 1;
+    }
+  }
+  if (start !== bytes.length) throw new Error("git NUL output was not terminated");
+  return fields;
+}
+
+record("ocmm-review-artifact-v1", "");
+record("head", runGit("rev-parse", "HEAD"));
+record("tracked-diff", runGit("diff", "--binary", "--no-ext-diff", "HEAD", "--"));
+
+const untracked = nulFields(
+  runGit("ls-files", "--others", "--exclude-standard", "-z"),
+).sort(Buffer.compare);
+
+for (const path of untracked) {
+  const stat = lstatSync(path);
+  record("untracked-path", path);
+  if (stat.isFile()) {
+    record("untracked-type", "file");
+    record("untracked-bytes", readFileSync(path));
+  } else if (stat.isSymbolicLink()) {
+    record("untracked-type", "symlink");
+    record("untracked-bytes", readlinkSync(path, { encoding: "buffer" }));
+  } else {
+    throw new Error(`unsupported untracked entry type: ${path.toString("utf8")}`);
+  }
+}
+
+process.stdout.write(`sha256:${hash.digest("hex")}\n`);
+```
+
+The shell wrappers extract and execute the exact fenced module from this current
+skill file. They intentionally do not reproduce the algorithm.
+
+<!-- ocmm-review-artifact-identity-bash -->
 ```bash
-git diff --stat
-git diff
-git diff --cached --stat
-git diff --cached
+# Substitute the installed/generated skill copy when this source-relative default is unavailable.
+skill_path='skills/v1/requesting-code-review/SKILL.md'
+extract_script() {
+  node -e 'const { readFileSync } = require("node:fs"); const text = readFileSync(process.argv[1], "utf8"); const marker = "<!-- ocmm-review-artifact-" + "identity-js -->"; const at = text.indexOf(marker); if (at < 0 || text.indexOf(marker, at + marker.length) !== -1) throw new Error("canonical marker missing or duplicate"); const following = text.slice(at + marker.length); const fence = /^\r?\n```js\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/.exec(following); if (!fence) throw new Error("canonical fence missing or not adjacent"); process.stdout.write(fence[1]);' "$skill_path"
+}
+script="$(extract_script)" || exit $?
+artifact_identity="$(
+  node --input-type=module -e "$script"
+)" || exit $?
+if ! node -e 'process.exit(/^sha256:[0-9a-f]{64}$/.test(process.argv[1]) ? 0 : 1)' "$artifact_identity"; then exit 1; fi
+printf '%s\n' "$artifact_identity"
 ```
 
-Do not require implementation subagents to commit, stage, or push merely to create a review range. The orchestrator owns any Git write and performs it only after explicit user authorization.
+<!-- ocmm-review-artifact-identity-powershell -->
+```powershell
+# Substitute the installed/generated skill copy when this source-relative default is unavailable.
+$skillPath = Join-Path (Get-Location) "skills/v1/requesting-code-review/SKILL.md"
+$extractor = @'
+const { readFileSync } = require("node:fs");
+const text = readFileSync(process.argv[1], "utf8");
+const marker = "<!-- ocmm-review-artifact-" + "identity-js -->";
+const at = text.indexOf(marker);
+if (at < 0 || text.indexOf(marker, at + marker.length) !== -1) throw new Error("canonical marker missing or duplicate");
+const following = text.slice(at + marker.length);
+const fence = /^\r?\n```js\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/.exec(following);
+if (!fence) throw new Error("canonical fence missing or not adjacent");
+process.stdout.write(fence[1]);
+'@
+$scriptLines = @(node -e $extractor $skillPath)
+if ($LASTEXITCODE -ne 0 -or $scriptLines.Count -eq 0) { throw "cannot extract canonical review identity module" }
+$script = $scriptLines -join "`n"
+$artifactIdentityLines = @(node --input-type=module -e $script)
+if ($LASTEXITCODE -ne 0 -or $artifactIdentityLines.Count -eq 0) { throw "cannot calculate review artifact identity" }
+$artifactIdentity = $artifactIdentityLines -join "`n"
+if ($artifactIdentity -notmatch '^sha256:[0-9a-f]{64}$') { throw "canonical review artifact identity has an invalid format" }
+$artifactIdentity
+```
 
-**2. Dispatch code reviewer subagent:**
+<!-- ocmm-review-artifact-identity-packet -->
+```text
+ARTIFACT_KIND: committed-range | working-tree
+ARTIFACT_IDENTITY: <committed range identity or canonical working identity>
+DESCRIPTION: <implemented change summary>
+PLAN_OR_REQUIREMENTS: <path or supplied requirements>
+REVIEW_INPUT: <binary range diff, or binary working diff plus sorted manifest>
+VERIFICATION_EVIDENCE: <command, concise result, source/artifact, identity at capture>
+GLOBAL_CONSTRAINTS: <verbatim task constraints>
+```
 
-Use Task tool with `general-purpose` type, fill template at `code-reviewer.md`
+For a working tree, `REVIEW_INPUT` contains the current
+`git diff --binary --no-ext-diff HEAD --` output and the sorted untracked manifest
+with entry types. If raw output is unsafe or large, cite a sanitized report
+artifact/path and digest instead. Stamp each evidence capture with the packet
+identity; hash equality proves artifact identity, not quality.
 
-**Placeholders:**
-- `{DESCRIPTION}` - Brief summary of what you built
-- `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{REVIEW_INPUT}` - Commit range plus commands, or working-tree/staged diff commands and output
+Send the same packet to every deliberately selected lane, apart from its intended
+role/profile designation. Each Reviewer or Oracle verifies the input, echoes its
+identity before evaluating quality, and returns a receipt. Parent recompute occurs immediately after each lane return. A `[evidence]` missing identity,
+mismatch, drift, or incomplete receipt is a blocker: reject the verdict and do not
+approve the packet.
 
-**3. Act on feedback:**
+Continue fixes in the same `task_id` during the same review stage, but create a
+new packet and new artifact identity after every changed input. Re-run only
+affected evidence, then finish final acceptance only when all required receipts
+share one common current identity. If a receipt is lost or cannot be reread, it is
+absent: re-review; no memory reconstruction. No ledger, review runtime, hash CLI,
+or implementation-subagent Git requirement is introduced. Do not require
+implementation subagents to commit, stage, or push merely to create review input.
+
+Every receipt contains exactly these five fields, in order:
+
+```text
+role/profile lane: <selected reviewer or Oracle profile>
+task_id or session receipt: <task_id or durable session/result reference>
+artifact identity: <received and verified identity>
+verdict: <approved | rejected | with fixes>
+report artifact/source: <review report path or task-result source>
+```
+
+**2. Dispatch the selected code-review lane(s).**
+
+Use the applicable Task tool and fill `code-reviewer.md` with the complete packet.
+The selection table below still determines which intentionally selected Oracle and
+Reviewer lanes receive it; configured profiles never cause automatic fan-out.
+
+**3. Act on feedback.**
 - Fix Critical issues immediately
 - Fix Important issues before declaring done
 - Note Minor issues for later
@@ -110,31 +276,30 @@ Reviewer and Oracle profiles do not review implementation plans; `plan-critic` o
 ## Example
 
 ```
-[All implementation tasks complete: Add verification and repair workflow]
+[All implementation tasks complete: Add verification and repair workflow.]
 
-You: Let me request final acceptance review before declaring this done.
+You: I will capture one identity-bound final-review packet before dispatch.
 
-[Implementation subagents returned uncommitted changes, so review the working tree:]
-git diff --stat
-git diff
-git diff --cached --stat
-git diff --cached
+Identity-Bound Review Packet
+ARTIFACT_KIND: working-tree
+ARTIFACT_IDENTITY: sha256:7c7b730c7db8334eb82eb2d4b40fa2c549f2e258dbf5e549f5c112f3ec60739b
+DESCRIPTION: Added verifyIndex() and repairIndex() with four issue types.
+PLAN_OR_REQUIREMENTS: docs/superpowers/plans/deployment-plan.md
+REVIEW_INPUT: current binary working-tree diff and sorted untracked manifest in artifacts/review-input.txt (digest recorded)
+VERIFICATION_EVIDENCE: node --test ... => 18 passed; artifacts/verify-index.txt; stamped sha256:7c7b730c7db8334eb82eb2d4b40fa2c549f2e258dbf5e549f5c112f3ec60739b
+GLOBAL_CONSTRAINTS: no implementation-subagent Git writes; preserve the requested API.
 
-[Dispatch code reviewer subagent]
-  DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
-  PLAN_OR_REQUIREMENTS: docs/superpowers/plans/deployment-plan.md
-  REVIEW_INPUT: working-tree diff commands and output above
+[Dispatch the intentionally selected Oracle with that packet.]
+[Parent recomputes the identity after the result; it still matches.]
 
-[Subagent returns]:
-  Strengths: Clean architecture, real tests
-  Issues:
-    Important: Missing progress indicators
-    Minor: Magic number (100) for reporting interval
-  Assessment: Not approved until progress indicators are fixed
+Review Receipt
+role/profile lane: oracle
+task_id or session receipt: task_42
+artifact identity: sha256:7c7b730c7db8334eb82eb2d4b40fa2c549f2e258dbf5e549f5c112f3ec60739b
+verdict: approved
+report artifact/source: task_42 final result
 
-You: [Fix progress indicators]
-[Re-run final acceptance review]
-[Declare done only after reviewer approval]
+You: The required receipt has the common current identity; final acceptance may complete.
 ```
 
 ## Red Flags

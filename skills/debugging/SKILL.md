@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: "MUST USE for any real runtime debugging across ANY language or binary — crashes, silent failures, wrong responses, stuck processes, memory leaks, async misbehavior, unexplained timing, reverse engineering. Runs a hypothesis-driven loop: form ≥3 hypotheses, investigate in parallel, after 2 failed evidence rounds allow one hard-reasoning escalation only when the task is genuinely difficult, confirm root cause, lock with a failing test, fix minimally, QA by actually USING the system, scrub artifacts. The actual HOW lives in `references/` — READ THEM. Triggers: 'debug this', 'why is X not working', 'hanging', 'attach a debugger', 'reverse engineer', 'pwndbg', 'gdb', 'lldb', 'node inspect', 'tsx debug', 'pdb', 'dlv', 'delve', 'rust-gdb', 'set a breakpoint', 'context window exploded', 'why is the response empty', 'attach the debugger', 'debug it', 'why is this happening', 'trace this bug', 'reproduce and fix', 'silent failure', 'HTTP 200 but empty', 'why did it stop', 'inspect the binary', 'reverse engineering', 'playwright'."
+description: "MUST USE for any real runtime debugging across ANY language or binary — crashes, silent failures, wrong responses, stuck processes, memory leaks, async misbehavior, unexplained timing, flaky tests, intermittent failures, passes in isolation, different test fails, order-dependent behavior, CI-only failures, reverse engineering. Runs a hypothesis-driven loop: form ≥3 hypotheses, investigate in parallel, after 2 failed evidence rounds allow one hard-reasoning escalation only when the task is genuinely difficult, confirm root cause, lock with a failing test, fix minimally, QA by actually USING the system, scrub artifacts. The actual HOW lives in `references/` — READ THEM. Triggers: 'debug this', 'why is X not working', 'hanging', 'attach a debugger', 'reverse engineer', 'pwndbg', 'gdb', 'lldb', 'node inspect', 'tsx debug', 'pdb', 'dlv', 'delve', 'rust-gdb', 'set a breakpoint', 'context window exploded', 'why is the response empty', 'attach the debugger', 'debug it', 'why is this happening', 'trace this bug', 'reproduce and fix', 'silent failure', 'HTTP 200 but empty', 'why did it stop', 'inspect the binary', 'reverse engineering', 'playwright', 'flaky test', 'intermittent failure', 'passes in isolation', 'different test fails', 'order-dependent', 'CI-only failure'."
 ---
 
 # Debugging
@@ -84,6 +84,7 @@ These are not phases — read them when the situation calls for them:
 
 | Situation | Reference |
 |---|---|
+| A test is flaky/intermittent, a different test fails, it passes in isolation, it is order-dependent, or it fails only in CI | 📖 **[references/methodology/03-flaky-triage.md](references/methodology/03-flaky-triage.md)** — establish the three-run signature and classify shared state before Phase 2. |
 | You cannot run the actual operation (paid API, blocked network, missing hardware) but still need runtime evidence | 📖 **[references/methodology/partial-runtime-evidence.md](references/methodology/partial-runtime-evidence.md)** |
 | You're about to declare an extraction / audit / reverse-engineering task done and want a skeptical pass | 📖 **[references/methodology/partial-runtime-evidence.md#independent-verification-for-non-debug-artifacts](references/methodology/partial-runtime-evidence.md#independent-verification-for-non-debug-artifacts)** |
 
@@ -108,9 +109,10 @@ These are not phases — read them when the situation calls for them:
 
 1. Read the user's bug description.
 2. Identify the runtime.
-3. **Open `references/runtimes/<runtime>.md`.** Read it.
-4. Identify which specialist tools apply. **Open each matching `references/tools/*.md`.** Read them.
-5. Open `references/methodology/00-setup.md` and start Phase 0.
-6. Follow the phase loop. Read each methodology reference as you enter the phase.
+3. If the report is a flaky test, intermittent failure, passes in isolation, different test fails, order-dependent, or CI-only failure, **open `references/methodology/03-flaky-triage.md` before forming hypotheses.**
+4. **Open `references/runtimes/<runtime>.md`.** Read it.
+5. Identify which specialist tools apply. **Open each matching `references/tools/*.md`.** Read them.
+6. Open `references/methodology/00-setup.md` and start Phase 0.
+7. Follow the phase loop. Read each methodology reference as you enter the phase.
 
 **The references are the skill. This file is an index.**
