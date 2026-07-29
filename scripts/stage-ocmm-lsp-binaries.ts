@@ -30,6 +30,7 @@ export function stageOcmmLspBinaries(options: StageOcmmLspBinariesOptions): void
   for (const name of expectedNames) {
     const target = join(options.outDir, name)
     let targetBytes: Buffer | undefined
+    // Missing or unreadable targets require replacement; replacement and mode errors propagate.
     try {
       targetBytes = readFileSync(target)
     } catch {

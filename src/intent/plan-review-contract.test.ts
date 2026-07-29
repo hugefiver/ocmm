@@ -242,6 +242,19 @@ test("review artifact identity contract binds packets, receipts, and shell wrapp
   assert.match(skill, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
   assert.match(reviewerTemplate, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
   assert.match(subagentSkill, new RegExp(receiptFields.map((field) => `${field}:`).join("[\\s\\S]*")))
+  for (const text of [skill, reviewerTemplate, subagentSkill]) {
+    assert.doesNotMatch(text, /\bwith fixes\b/i)
+    assert.match(text, /verdict:\s*(?:<|\[)approved \| rejected(?:>|\])/i)
+  }
+  assert.match(reviewerTemplate, /\*\*Ready to merge\?\*\*\s*\[Yes \| No\]/)
+  assert.match(
+    skill,
+    /final acceptance only when every required receipt\s+has the same common current identity and `verdict: approved`/i,
+  )
+  assert.match(
+    subagentSkill,
+    /completion only when every required receipt has all five fields, the same\s+common current identity, and `verdict: approved`/i,
+  )
   assert.match(skill, /parent recompute.*after.*return/i)
   assert.match(skill, /\[evidence\].*(?:missing|mismatch|drift).*blocker/i)
   assert.match(skill, /same.*task_id.*new packet.*identity/is)

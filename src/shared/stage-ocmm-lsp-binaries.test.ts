@@ -148,7 +148,7 @@ test("copied non-Windows target is executable", () => {
   })
 })
 
-test("default replacement failure propagates instead of accepting a stale target", () => {
+test("target read failure enters injected replacement and propagates its sentinel", () => {
   withTempDir((dir) => {
     const source = join(dir, "source.exe")
     const outDir = join(dir, "bin")
@@ -175,5 +175,33 @@ test("default replacement failure propagates instead of accepting a stale target
       names: ["ocmm-lsp.exe"],
       platform: "win32",
     }))
+  })
+})
+
+test("propagates chmod errors when injected replacement leaves a non-Windows target absent", () => {
+  withTempDir((dir) => {
+    const source = join(dir, "source")
+    const outDir = join(dir, "bin")
+    writeFileSync(source, "fresh binary")
+    mkdirSync(outDir, { recursive: true })
+    let replacements = 0
+
+    assert.throws(
+      () => stageOcmmLspBinaries({
+        source,
+        outDir,
+        names: ["ocmm-lsp"],
+        platform: "linux",
+        replaceTarget() {
+          replacements += 1
+        },
+      }),
+      (error: unknown) => {
+        assert.equal((error as NodeJS.ErrnoException).code, "ENOENT")
+        return true
+      },
+    )
+
+    assert.equal(replacements, 1)
   })
 })

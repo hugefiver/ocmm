@@ -206,8 +206,8 @@ approve the packet.
 
 Continue fixes in the same `task_id` during the same review stage, but create a
 new packet and new artifact identity after every changed input. Re-run only
-affected evidence, then finish final acceptance only when all required receipts
-share one common current identity. If a receipt is lost or cannot be reread, it is
+affected evidence, then finish final acceptance only when every required receipt
+has the same common current identity and `verdict: approved`. If a receipt is lost or cannot be reread, it is
 absent: re-review; no memory reconstruction. No ledger, review runtime, hash CLI,
 or implementation-subagent Git requirement is introduced. Do not require
 implementation subagents to commit, stage, or push merely to create review input.
@@ -218,7 +218,7 @@ Every receipt contains exactly these five fields, in order:
 role/profile lane: <selected reviewer or Oracle profile>
 task_id or session receipt: <task_id or durable session/result reference>
 artifact identity: <received and verified identity>
-verdict: <approved | rejected | with fixes>
+verdict: <approved | rejected>
 report artifact/source: <review report path or task-result source>
 ```
 

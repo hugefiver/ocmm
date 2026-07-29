@@ -191,7 +191,7 @@ For working-tree review, `REVIEW_INPUT` includes the current output of `git diff
 
 Before examining quality, a Reviewer or Oracle must echo the received `ARTIFACT_IDENTITY` and recompute or otherwise verify the declared input identity. Missing identity, an identity mismatch, a missing required receipt field, or detected drift is an `[evidence]` blocker. The lane must return no approval for that packet.
 
-When each lane returns, the parent recomputes the identity before accepting its verdict. If it differs, the verdict is stale. Fixes continue in the same task ID during the same review stage under the existing local efficiency policy, but each changed artifact gets a new packet and identity. Re-run only evidence affected by the change, then complete final acceptance at one common current identity. Do not add lanes merely because a packet changed.
+When each lane returns, the parent recomputes the identity before accepting its verdict. If it differs, the verdict is stale. A receipt verdict is binary: exactly `approved` or `rejected`. Fixes continue in the same task ID during the same review stage under the existing local efficiency policy, but each changed artifact gets a new packet and identity. Re-run only evidence affected by the change, then complete final acceptance only when every required receipt has the same common current identity and verdict `approved`. Do not add lanes merely because a packet changed.
 
 Each returned review receipt records exactly:
 
@@ -199,7 +199,7 @@ Each returned review receipt records exactly:
 role/profile lane
 task_id or session receipt
 artifact identity
-verdict
+verdict: approved | rejected
 report artifact/source
 ```
 
@@ -251,7 +251,7 @@ Before implementation, classify every diff hunk by project. Do not discard, refo
 2. A dirty review packet produces a lowercase `sha256:<64hex>` identity from HEAD, the binary tracked diff, and bytewise-sorted non-ignored untracked final state.
 3. The documented Bash and PowerShell invocations run the same canonical Node module and print the same identity for the same snapshot.
 4. Reviewer and Oracle packets require identity echo/verification; missing, mismatch, or drift blocks approval as `[evidence]`.
-5. Parent recomputation rejects stale PASS results, and final acceptance has all required lane approvals at one common current identity.
+5. Parent recomputation rejects stale PASS results, and final acceptance has every required lane receipt at one common current identity with verdict `approved`.
 6. Receipts have all five required fields and missing recoverable evidence causes re-review, never memory reconstruction.
 7. Evidence is identity-stamped when captured and cannot be relabeled after edits.
 8. Source prompts only mandate use of the review skill. The canonical skill owns algorithm detail and shell examples.

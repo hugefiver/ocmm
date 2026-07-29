@@ -259,7 +259,7 @@ Every lane must return exactly this five-field receipt:
 role/profile lane: <selected reviewer or Oracle profile>
 task_id or session receipt: <task_id or durable session/result reference>
 artifact identity: <received and verified identity>
-verdict: <approved | rejected | with fixes>
+verdict: <approved | rejected>
 report artifact/source: <review report path or task-result source>
 ```
 
@@ -277,8 +277,9 @@ implementation-subagent commit requirement is introduced. Do not require impleme
   packet and artifact identity after the fix.
 - Re-run affected evidence and the required final pass, then re-dispatch only the
   selected lanes whose prior receipt no longer covers the changed artifact.
-- Accept completion only when every required receipt has the same common current
-  identity. A previous approval for any different identity is stale.
+- Accept completion only when every required receipt has all five fields, the same
+  common current identity, and `verdict: approved`. A previous approval for any
+  different identity is stale.
 
 **4. When to skip:**
 

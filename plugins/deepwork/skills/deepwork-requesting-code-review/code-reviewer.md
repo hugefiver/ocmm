@@ -69,14 +69,14 @@ Task tool (general-purpose):
     [Focused improvements.]
 
     ### Assessment
-    **Ready to merge?** [Yes | No | With fixes]
+    **Ready to merge?** [Yes | No]
     **Reasoning:** [1-2 sentence assessment]
 
     ### Review Receipt
     role/profile lane: [selected profile]
     task_id or session receipt: [task_id or durable result reference]
     artifact identity: [exact echoed identity]
-    verdict: [approved | rejected | with fixes]
+    verdict: [approved | rejected]
     report artifact/source: [task result or report path]
 ```
 
