@@ -19,6 +19,7 @@ const fastModels = (overrides: Partial<FastModelsConfig> = {}): FastModelsConfig
 })
 
 const metadataRequirement = (): ModelRequirement => ({
+  reasoning: "high",
   variant: "max",
   requiresModel: "gpt-5.5",
   requiresAnyModel: false,
@@ -40,7 +41,7 @@ const metadataRequirement = (): ModelRequirement => ({
 
 test("fast activation accepts only exact 1 and true values", () => {
   for (const value of [undefined, "", "0", "false", "TRUE", " true", "1 ", "yes"]) {
-    assert.equal(parseFastModeValue(value), false, value)
+    assert.equal(parseFastModeValue(value), false)
   }
   assert.equal(parseFastModeValue("1"), true)
   assert.equal(parseFastModeValue("true"), true)
@@ -212,12 +213,12 @@ test("materializing a boundary-prefix primary retains its controls and removes o
   ])
 })
 
-test("materializing an unmatched primary synthesizes it with the native requirement variant and keeps every baseline", () => {
+test("materializing an unmatched primary synthesizes it with native requirement reasoning and variant and keeps every baseline", () => {
   const requirement = metadataRequirement()
   const materialized = materializeSelectedPrimary(requirement, "openai/gpt-6")
 
   assert.deepEqual(materialized.fallbackChain, [
-    { providers: ["openai"], model: "gpt-6", variant: "max" },
+    { providers: ["openai"], model: "gpt-6", reasoning: "high", variant: "max" },
     { ...requirement.fallbackChain[0]!, providers: ["openai", "github-copilot"] },
     { ...requirement.fallbackChain[1]!, providers: ["anthropic"] },
   ])
@@ -287,6 +288,7 @@ test("an effective fast route prepends the copied fast primary and retains disti
       {
         providers: ["openai", "github-copilot"],
         model: "original",
+        reasoning: "off",
         variant: "high",
         reasoningEffort: "high",
         temperature: 0.2,

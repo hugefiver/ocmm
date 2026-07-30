@@ -42,7 +42,7 @@ test("materialization emits normal plus explicit tiers without sharing mutable s
     base: source,
     variants: {
       low: "low",
-      high: { model: "openai/gpt-5.6-sol" },
+      high: { model: "openai/gpt-5.6-sol:high" },
       max: { model: "openai/gpt-5.6-sol", variant: "max" },
     },
     isDisabled: () => false,
@@ -60,6 +60,7 @@ test("materialization emits normal plus explicit tiers without sharing mutable s
   const high = profiles[2]!
   assert.equal(high.requirement.fallbackChain[0]!.model, "gpt-5.6-sol")
   assert.deepEqual(high.requirement.fallbackChain[0]!.providers, ["openai"])
+  assert.equal(high.requirement.fallbackChain[0]!.reasoning, "high")
   assert.equal(high.requirement.fallbackChain[0]!.variant, "xhigh")
   assert.equal(high.requirement.fallbackChain[0]!.temperature, 0.2)
   assert.equal(high.requirement.fallbackChain[1]!.model, "claude-opus-4-7")

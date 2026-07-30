@@ -1,7 +1,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { normalizeVariantForModel, translateVariant } from "./variant-translator.ts"
+import {
+  normalizeReasoningForModel,
+  normalizeVariantForModel,
+  translateReasoning,
+  translateVariant,
+} from "./variant-translator.ts"
 
 test("non-mini gpt family clamps below-high variants to high", () => {
   assert.deepEqual(translateVariant("gpt", "low", { modelID: "gpt-5.5" }), { reasoningEffort: "high" })
@@ -82,4 +87,68 @@ test("none variant is a true no-op across all families", () => {
   assert.deepEqual(translateVariant("gemini", "none", { modelID: "gemini-3.1-pro" }), {})
   assert.deepEqual(translateVariant("kimi", "none", { modelID: "kimi-k2.6" }), {})
   assert.deepEqual(translateVariant("unknown", "none", { modelID: "totally-unknown" }), {})
+})
+
+test("canonical off actively disables only supported family controls", () => {
+  assert.deepEqual(translateReasoning("gpt", "off"), { reasoningEffort: "none" })
+  assert.deepEqual(translateReasoning("codex", "off"), { reasoningEffort: "none" })
+  assert.deepEqual(translateReasoning("deepseek", "off"), { reasoningEffort: "none" })
+  assert.deepEqual(translateReasoning("claude", "off"), { thinking: { type: "disabled" } })
+  assert.deepEqual(translateReasoning("claude-opus-47-plus", "off"), {})
+  assert.deepEqual(translateReasoning("gemini", "off"), {
+    reasoningEffort: "none",
+    thinking: { type: "disabled" },
+  })
+  assert.deepEqual(translateReasoning("glm", "off"), {
+    reasoningEffort: "none",
+    thinking: { type: "disabled" },
+  })
+  assert.deepEqual(translateReasoning("kimi", "off"), {})
+  assert.deepEqual(translateReasoning("kimi-k27", "off"), {})
+  assert.deepEqual(translateReasoning("minimax", "off"), {})
+  assert.deepEqual(translateReasoning("unknown", "off"), {})
+})
+
+test("canonical auto injects no reasoning controls", () => {
+  for (const family of [
+    "gpt",
+    "codex",
+    "claude",
+    "claude-opus-47-plus",
+    "gemini",
+    "glm",
+    "deepseek",
+    "unknown",
+  ] as const) {
+    assert.deepEqual(translateReasoning(family, "auto", { modelID: "test-model" }), {}, family)
+  }
+})
+
+test("canonical normalization bridges the ladder through model minimums and caps", () => {
+  const normalizeGpt55 = (reasoning: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "off" | "auto") =>
+    normalizeReasoningForModel({ family: "gpt", modelID: "gpt-5.5", reasoning })
+
+  assert.equal(normalizeGpt55("minimal"), "high")
+  assert.equal(normalizeGpt55("low"), "high")
+  assert.equal(normalizeGpt55("medium"), "high")
+  assert.equal(normalizeGpt55("high"), "high")
+  assert.equal(normalizeGpt55("xhigh"), "xhigh")
+  assert.equal(normalizeGpt55("max"), "xhigh")
+  assert.equal(normalizeGpt55("off"), "high")
+  assert.equal(normalizeGpt55("auto"), "auto")
+})
+
+test("canonical reasoning respects explicit user values while retaining GPT max caps", () => {
+  assert.deepEqual(translateReasoning("gpt", "low", {
+    modelID: "gpt-5.5",
+    respectExplicit: true,
+  }), { reasoningEffort: "low" })
+  assert.deepEqual(translateReasoning("gpt", "max", {
+    modelID: "gpt-5.5",
+    respectExplicit: true,
+  }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateReasoning("gpt", "max", {
+    modelID: "gpt-5.6-sol",
+    respectExplicit: true,
+  }), { reasoningEffort: "max" })
 })

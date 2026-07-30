@@ -110,7 +110,7 @@ export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean
       parts,
     }
     if (agent) body.agent = agent
-    if (newEntry.variant) body.variant = newEntry.variant
+    if (newEntry.variant && newEntry.reasoning === undefined) body.variant = newEntry.variant
     if (newEntry.reasoningEffort) body.reasoningEffort = newEntry.reasoningEffort
 
     try {

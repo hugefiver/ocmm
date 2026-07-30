@@ -7,7 +7,7 @@ import { parseReviewAgentName } from "../review-agents/names.ts"
 import { expandedPlanningAgentMap } from "../planning-agents/profiles.ts"
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import type { AgentEntry, CategoryEntry } from "../config/schema.ts"
-import type { FallbackEntry, ModelRequirement, RequirementSource, Variant } from "../shared/types.ts"
+import type { FallbackEntry, ModelRequirement, Reasoning, RequirementSource, Variant } from "../shared/types.ts"
 
 export type EffectiveRequirementOverride = {
   requirement: ModelRequirement
@@ -27,8 +27,14 @@ export type ResolveOpts = {
 
 export type Resolution = {
   entry: FallbackEntry
+  reasoning?: Reasoning
   variant?: Variant
   source: "user-config" | "agent-default" | "category-default" | "input-variant"
+}
+
+type EffectiveIntent = {
+  reasoning?: Reasoning
+  variant?: Variant
 }
 
 const VARIANT_SET = new Set<Variant>([
@@ -87,31 +93,30 @@ function pickFromChain(
   req: ModelRequirement,
   providerID: string | undefined,
   modelID: string,
-): { entry: FallbackEntry; effectiveVariant?: Variant } | null {
+): { entry: FallbackEntry; intent: EffectiveIntent } | null {
   for (const e of req.fallbackChain) {
     if (entryExactlyMatchesModel(e, providerID, modelID)) {
-      const v = (e.variant ?? req.variant) as Variant | undefined
-      const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: e }
-      if (v) out.effectiveVariant = v
-      return out
+      return { entry: e, intent: effectiveIntent(e, req) }
     }
   }
   const successor = matchRequirementSuccessor(req, providerID, modelID)
   if (successor) {
-    const v = (successor.variant ?? req.variant) as Variant | undefined
-    const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: successor }
-    if (v) out.effectiveVariant = v
-    return out
+    return { entry: successor, intent: effectiveIntent(successor, req) }
   }
   for (const e of req.fallbackChain) {
     if (entryMatchesModel(e, providerID, modelID)) {
-      const v = (e.variant ?? req.variant) as Variant | undefined
-      const out: { entry: FallbackEntry; effectiveVariant?: Variant } = { entry: e }
-      if (v) out.effectiveVariant = v
-      return out
+      return { entry: e, intent: effectiveIntent(e, req) }
     }
   }
   return null
+}
+
+function effectiveIntent(entry: FallbackEntry, requirement: ModelRequirement): EffectiveIntent {
+  const reasoning = entry.reasoning ?? requirement.reasoning
+  if (reasoning !== undefined) return { reasoning }
+
+  const variant = entry.variant ?? requirement.variant
+  return variant === undefined ? {} : { variant }
 }
 
 function isValidVariant(v: string): v is Variant {
@@ -150,14 +155,15 @@ function userCategoryRequirement(
 
 function buildResolution(
   entry: FallbackEntry,
-  effectiveVariant: Variant | undefined,
+  intent: EffectiveIntent,
   inputVariant: string | undefined,
   source: Resolution["source"],
 ): Resolution {
-  let variant: Variant | undefined = effectiveVariant
-  if (inputVariant && isValidVariant(inputVariant)) variant = inputVariant
+  if (inputVariant && isValidVariant(inputVariant)) return { entry, variant: inputVariant, source }
+
   const out: Resolution = { entry, source }
-  if (variant) out.variant = variant
+  if (intent.reasoning !== undefined) out.reasoning = intent.reasoning
+  else if (intent.variant !== undefined) out.variant = intent.variant
   return out
 }
 
@@ -167,10 +173,15 @@ function applyCategoryVariantPolicy(
   inputVariant: string | undefined,
 ): Resolution {
   if (!agentName || !MAX_REASONING_CATEGORIES.has(agentName)) return resolution
-  if (resolution.source === "user-config" || resolution.source === "input-variant" || inputVariant) {
+  if (resolution.source === "user-config" || resolution.source === "input-variant" || (inputVariant && isValidVariant(inputVariant))) {
     return resolution
   }
-  return { ...resolution, variant: "max" }
+  if (resolution.reasoning !== undefined) {
+    const { variant: _variant, ...canonicalResolution } = resolution
+    return { ...canonicalResolution, reasoning: "max" }
+  }
+  const { reasoning: _reasoning, ...legacyResolution } = resolution
+  return { ...legacyResolution, variant: "max" }
 }
 
 function resolveAgainstRequirement(
@@ -182,12 +193,11 @@ function resolveAgainstRequirement(
 ): Resolution | null {
   const matched = pickFromChain(req, providerID, modelID)
   if (matched) {
-    return buildResolution(matched.entry, matched.effectiveVariant, inputVariant, source)
+    return buildResolution(matched.entry, matched.intent, inputVariant, source)
   }
   const fallback = req.fallbackChain[0]
   if (fallback) {
-    const v = (fallback.variant ?? req.variant) as Variant | undefined
-    return buildResolution(fallback, v, inputVariant, source)
+    return buildResolution(fallback, effectiveIntent(fallback, req), inputVariant, source)
   }
   return null
 }

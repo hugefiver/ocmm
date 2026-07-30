@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { isReservedPlanningAgentName, parsePlanningAgentName } from "../planning-agents/names.ts"
 import { isReservedReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
+import { REASONING_INPUT_VALUES } from "../shared/reasoning.ts"
 
 export const VariantEnum = z.enum([
   "low",
@@ -15,6 +16,8 @@ export const VariantEnum = z.enum([
   "thinking",
 ])
 
+export const ReasoningInputEnum = z.enum(REASONING_INPUT_VALUES)
+
 const LocaleCodeSchema = z
   .string()
   .trim()
@@ -27,6 +30,7 @@ export const FallbackEntrySchema = z.object({
   providers: z.array(z.string().min(1)).min(1),
   model: z.string().min(1),
   variant: VariantEnum.optional(),
+  reasoning: ReasoningInputEnum.optional(),
   reasoningEffort: z.string().optional(),
   temperature: z.number().optional(),
   topP: z.number().optional(),
@@ -42,6 +46,7 @@ export const FallbackEntrySchema = z.object({
 export const ModelRequirementSchema = z.object({
   fallbackChain: z.array(FallbackEntrySchema).min(1),
   variant: VariantEnum.optional(),
+  reasoning: ReasoningInputEnum.optional(),
   requiresModel: z.string().optional(),
   requiresAnyModel: z.boolean().optional(),
   requiresProvider: z.array(z.string()).optional(),
@@ -53,6 +58,7 @@ const ShorthandFields = {
   description: z.string().optional(),
   alias: z.string().optional(),
   variant: VariantEnum.optional(),
+  reasoning: ReasoningInputEnum.optional(),
   model: z.string().optional(),
   fallbackModels: z.array(ModelStringOrEntrySchema).optional(),
   requirement: ModelRequirementSchema.optional(),

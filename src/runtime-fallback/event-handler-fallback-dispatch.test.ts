@@ -25,11 +25,12 @@ function publishRoute(
   agent: string,
   model: string,
   fallbackChain: ModelRequirement["fallbackChain"],
+  requirementOptions: Omit<ModelRequirement, "fallbackChain"> = {},
 ): void {
   const generation = registry.beginBuild()
   registry.publish(generation, new Map<string, EffectiveModelRoute>([[agent, {
     model,
-    requirement: { fallbackChain },
+    requirement: { fallbackChain, ...requirementOptions },
     requirementSource: "user-config",
     primarySource: "user-requirement",
     fastPath: { kind: "off" },
@@ -129,6 +130,34 @@ test("dispatches fallback on retryable 503 error", async () => {
   assert.equal(calls[0]?.body.providerID, "hoo")
   assert.equal(calls[0]?.body.agent, "orchestrator")
   assert.deepEqual(calls[0]?.body.parts, [{ type: "text", text: "hello" }])
+})
+
+test("published canonical reasoning suppresses a lower-priority fallback variant in the prompt", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(
+    registry,
+    "builder",
+    "openai/gpt-5.6-sol",
+    [
+      { providers: ["openai"], model: "gpt-5.6-sol" },
+      { providers: ["anthropic"], model: "claude-opus-4-6", variant: "max" },
+    ],
+    { reasoning: "high" },
+  )
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_published_reasoning", { status: 503 }, {
+    agent: "builder",
+    model: { providerID: "openai", modelID: "gpt-5.6-sol" },
+  }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.providerID, "anthropic")
+  assert.equal(calls[0]?.body.modelID, "claude-opus-4-6")
+  assert.equal(calls[0]?.body.reasoning, undefined)
+  assert.equal(calls[0]?.body.variant, undefined)
 })
 
 test("skips non-retryable errors without dispatching", async () => {

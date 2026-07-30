@@ -7,9 +7,11 @@ import { createEffectiveRouteRegistry } from "./route-registry.ts"
 const route = (model: string): EffectiveModelRoute => ({
   model,
   requirement: {
+    reasoning: "high",
     fallbackChain: [{
       providers: ["openai"],
       model: "fallback",
+      reasoning: "off",
       thinking: { type: "enabled", budgetTokens: 32 },
     }],
     requiresProvider: ["openai"],
@@ -141,8 +143,10 @@ test("published snapshots cannot be mutated through runtime casts", () => {
   const entry = publishedRoute.requirement.fallbackChain[0]!
   const mutableRoutes = snapshot.routes as Map<string, EffectiveModelRoute>
 
-  inputRoute.model = "openai/input-mutated"
+  ;(inputRoute as { model: string }).model = "openai/input-mutated"
+  inputRoute.requirement.reasoning = "auto"
   inputRoute.requirement.fallbackChain[0]!.providers.push("input-provider")
+  inputRoute.requirement.fallbackChain[0]!.reasoning = "max"
   inputRoute.requirement.fallbackChain[0]!.thinking!.budgetTokens = 16
   inputRoute.requirement.requiresProvider!.push("input-provider")
 

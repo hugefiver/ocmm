@@ -7,7 +7,12 @@
  */
 
 import { resolveModelRouting } from "../routing/resolver.ts"
-import { normalizeVariantForModel, translateVariant } from "../routing/variant-translator.ts"
+import {
+  normalizeReasoningForModel,
+  normalizeVariantForModel,
+  translateReasoning,
+  translateVariant,
+} from "../routing/variant-translator.ts"
 import { recordResolution as defaultRecordResolution } from "../routing/ledger.ts"
 import {
   mergeFastOptionRules,
@@ -19,9 +24,16 @@ import { classifyModelFamily, isMiniModel, supportsNativeGptMaxReasoning } from 
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
+import { reasoningToVariant } from "../shared/reasoning.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
-import type { EffectiveModelRoute, Variant, ResolutionEntry } from "../shared/types.ts"
+import type {
+  EffectiveModelRoute,
+  Reasoning,
+  ReasoningLevel,
+  ResolutionEntry,
+  Variant,
+} from "../shared/types.ts"
 
 const BELOW_HIGH_REASONING = new Set(["none", "minimal", "low", "medium", "auto"])
 const REVIEW_VARIANT_FLOOR_FAMILIES = new Set([
@@ -59,11 +71,26 @@ function floorReviewVariant(variant: Variant | undefined): Variant {
   return variant === "xhigh" || variant === "max" ? variant : "xhigh"
 }
 
+function floorReviewReasoning(reasoning: Reasoning | undefined): ReasoningLevel {
+  return reasoning === "xhigh" || reasoning === "max" ? reasoning : "xhigh"
+}
+
 function capUnsupportedNativeMaxVariant(family: string, modelID: string, variant: Variant | undefined): Variant | undefined {
   if ((family === "gpt" || family === "codex") && variant === "max" && !supportsNativeGptMaxReasoning(modelID)) {
     return "xhigh"
   }
   return variant
+}
+
+function capUnsupportedNativeMaxReasoning(
+  family: string,
+  modelID: string,
+  reasoning: Reasoning | undefined,
+): Reasoning | undefined {
+  if ((family === "gpt" || family === "codex") && reasoning === "max" && !supportsNativeGptMaxReasoning(modelID)) {
+    return "xhigh"
+  }
+  return reasoning
 }
 
 function thinkingBudget(value: unknown): number | undefined {
@@ -347,7 +374,7 @@ export function createChatParamsHandler(args: {
         if (cfg.debug) {
           log.debug(
             `routed agent=${agentName ?? "<none>"} model=${input.model.providerID}/${input.model.modelID} ` +
-              `variant=${hostFloor.appliedVariant} source=host-profile-floor`,
+              `reasoning=<none> variant=${hostFloor.appliedVariant} source=host-profile-floor`,
           )
         }
         return
@@ -372,10 +399,19 @@ export function createChatParamsHandler(args: {
       modelID: input.model.modelID,
     })
 
-    // Variant translation
+    // Canonical reasoning and legacy variants are separate intent tracks.
+    const explicitIntent = resolution.source === "user-config" || !!input.message.variant
+    let appliedReasoning: Reasoning | undefined = resolution.reasoning
     let appliedVariant: Variant | undefined = resolution.variant
-    if (appliedVariant) {
-      if (resolution.source !== "user-config" && !input.message.variant) {
+    if (!explicitIntent) {
+      if (appliedReasoning !== undefined) {
+        appliedReasoning = normalizeReasoningForModel({
+          family,
+          modelID: input.model.modelID,
+          reasoning: appliedReasoning,
+        })
+      }
+      if (appliedVariant !== undefined) {
         appliedVariant = normalizeVariantForModel({
           family,
           modelID: input.model.modelID,
@@ -384,23 +420,34 @@ export function createChatParamsHandler(args: {
       }
     }
     if (requiresReviewVariantFloor(agentName, family)) {
-      appliedVariant = floorReviewVariant(appliedVariant)
+      if (appliedReasoning !== undefined) {
+        appliedReasoning = floorReviewReasoning(appliedReasoning)
+      } else {
+        appliedVariant = floorReviewVariant(appliedVariant)
+      }
     }
+    appliedReasoning = capUnsupportedNativeMaxReasoning(family, input.model.modelID, appliedReasoning)
     appliedVariant = capUnsupportedNativeMaxVariant(family, input.model.modelID, appliedVariant)
-    if (appliedVariant) {
-      const effect = translateVariant(family, appliedVariant, {
-        modelID: input.model.modelID,
-        respectExplicit: resolution.source === "user-config" || !!input.message.variant,
-      })
-      if (effect.reasoningEffort !== undefined) {
-        output.options.reasoningEffort = effect.reasoningEffort
-      }
-      if (effect.thinking !== undefined) {
-        output.options.thinking = effect.thinking
-      }
-      if (effect.temperature !== undefined && output.temperature === undefined) {
-        output.temperature = effect.temperature
-      }
+
+    const effect = appliedReasoning !== undefined
+      ? translateReasoning(family, appliedReasoning, {
+          modelID: input.model.modelID,
+          respectExplicit: true,
+        })
+      : appliedVariant !== undefined
+        ? translateVariant(family, appliedVariant, {
+            modelID: input.model.modelID,
+            respectExplicit: explicitIntent,
+          })
+        : {}
+    if (effect.reasoningEffort !== undefined) {
+      output.options.reasoningEffort = effect.reasoningEffort
+    }
+    if (effect.thinking !== undefined) {
+      output.options.thinking = effect.thinking
+    }
+    if (effect.temperature !== undefined && output.temperature === undefined) {
+      output.temperature = effect.temperature
     }
 
     if (resolution.entry.reasoningEffort !== undefined) {
@@ -429,7 +476,16 @@ export function createChatParamsHandler(args: {
       output.maxOutputTokens = resolution.entry.maxTokens
     }
     applyFastOptionRoute({ route, input, output })
-    applyReviewOutputFloor({ agentName, family, modelID: input.model.modelID, appliedVariant, outputOptions: output.options })
+    const reviewFloorVariant = appliedReasoning !== undefined
+      ? reasoningToVariant(appliedReasoning)
+      : appliedVariant
+    applyReviewOutputFloor({
+      agentName,
+      family,
+      modelID: input.model.modelID,
+      appliedVariant: reviewFloorVariant,
+      outputOptions: output.options,
+    })
 
     record({
       ts: Date.now(),
@@ -441,7 +497,11 @@ export function createChatParamsHandler(args: {
         variant: input.message.variant,
       },
       applied: {
-        ...(appliedVariant ? { variant: appliedVariant } : {}),
+        ...(appliedReasoning !== undefined
+          ? { reasoning: appliedReasoning }
+          : appliedVariant !== undefined
+            ? { variant: appliedVariant }
+            : {}),
         ...(typeof output.options.reasoningEffort === "string"
           ? { reasoningEffort: output.options.reasoningEffort }
           : {}),
@@ -467,7 +527,7 @@ export function createChatParamsHandler(args: {
     if (cfg.debug) {
       log.debug(
         `routed agent=${agentName ?? "<none>"} model=${input.model.providerID}/${input.model.modelID} ` +
-          `variant=${appliedVariant ?? "<none>"} source=${resolution.source}`,
+          `reasoning=${appliedReasoning ?? "<none>"} variant=${appliedVariant ?? "<none>"} source=${resolution.source}`,
       )
     }
   }

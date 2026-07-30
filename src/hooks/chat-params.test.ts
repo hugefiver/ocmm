@@ -655,7 +655,7 @@ test("chat.params enforces review-agent GPT/Codex xhigh floors after every overr
           makeInput({
             agentName,
             modelID,
-            ...(testCase.variant ? { variant: testCase.variant } : {}),
+            ...("variant" in testCase ? { variant: testCase.variant } : {}),
           }),
           output,
         )
@@ -1262,4 +1262,245 @@ test("chat.params host-profile floor preserves ordinary unknown-agent no-op", as
   const last = recentResolutions().at(-1)!
   assert.equal(last.source, "no-op")
   assert.deepEqual(last.applied, {})
+})
+
+test("chat.params keeps canonical off and auto distinct from legacy none and auto on GPT mini", async () => {
+  const cases = [
+    {
+      label: "canonical off",
+      requirement: { reasoning: "off" as const },
+      expectedOutput: { reasoningEffort: "none" },
+      expectedApplied: { reasoning: "off", reasoningEffort: "none" },
+    },
+    {
+      label: "canonical auto",
+      requirement: { reasoning: "auto" as const },
+      expectedOutput: {},
+      expectedApplied: { reasoning: "auto" },
+    },
+    {
+      label: "legacy none",
+      requirement: { variant: "none" as const },
+      expectedOutput: {},
+      expectedApplied: { variant: "none" },
+    },
+    {
+      label: "legacy auto",
+      requirement: { variant: "auto" as const },
+      expectedOutput: { reasoningEffort: "medium" },
+      expectedApplied: { variant: "auto", reasoningEffort: "medium" },
+    },
+  ] as const
+
+  for (const testCase of cases) {
+    clearResolutions()
+    const registry = createEffectiveRouteRegistry()
+    publishRoutes(registry, new Map([["builder", {
+      model: "openai/gpt-5.4-mini",
+      requirement: {
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini" }],
+        ...testCase.requirement,
+      },
+      requirementSource: "user-config",
+      primarySource: "user-requirement",
+      fastPath: { kind: "off" },
+    }]]))
+    const output = { options: {} as Record<string, unknown> }
+
+    await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+      makeInput({ agentName: "builder", modelID: "gpt-5.4-mini" }),
+      output,
+    )
+
+    assert.deepEqual(output.options, testCase.expectedOutput, testCase.label)
+    assert.deepEqual(recentResolutions().at(-1)!.applied, testCase.expectedApplied, testCase.label)
+  }
+})
+
+test("chat.params lets a request-local variant suppress configured canonical reasoning", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini",
+    requirement: {
+      reasoning: "off",
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.4-mini" }],
+    },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const output = { options: {} as Record<string, unknown> }
+
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "builder", modelID: "gpt-5.4-mini", variant: "low" }),
+    output,
+  )
+
+  assert.deepEqual(output.options, { reasoningEffort: "low" })
+  assert.deepEqual(recentResolutions().at(-1)!.applied, { variant: "low", reasoningEffort: "low" })
+})
+
+test("chat.params lowers published canonical reasoning through each actual fallback family", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini",
+    requirement: {
+      reasoning: "high",
+      fallbackChain: [
+        { providers: ["openai"], model: "gpt-5.4-mini" },
+        { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+        { providers: ["google"], model: "gemini-3.1-pro" },
+      ],
+    },
+    requirementSource: "agent-default",
+    primarySource: "builtin-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  for (const testCase of [
+    {
+      providerID: "openai",
+      modelID: "gpt-5.4-mini",
+      expectedOptions: { reasoningEffort: "high" },
+    },
+    {
+      providerID: "anthropic",
+      modelID: "claude-sonnet-4-6",
+      expectedOptions: { thinking: { type: "enabled", budgetTokens: 12_288 } },
+    },
+    {
+      providerID: "google",
+      modelID: "gemini-3.1-pro",
+      expectedOptions: { reasoningEffort: "high", thinking: { type: "enabled" } },
+    },
+  ] as const) {
+    const output = { options: {} as Record<string, unknown> }
+    await handler(makeInput({ agentName: "builder", ...testCase }), output)
+    assert.deepEqual(output.options, testCase.expectedOptions, testCase.modelID)
+    assert.deepEqual(recentResolutions().at(-1)!.applied, {
+      reasoning: "high",
+      ...testCase.expectedOptions,
+    }, testCase.modelID)
+  }
+})
+
+test("chat.params applies concrete controls after canonical reasoning", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini",
+    requirement: {
+      fallbackChain: [{
+        providers: ["openai"],
+        model: "gpt-5.4-mini",
+        reasoning: "high",
+        reasoningEffort: "low",
+        thinking: { type: "disabled" },
+        temperature: 0.2,
+        topP: 0.8,
+        maxTokens: 4096,
+      }],
+    },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const output = { options: {} as Record<string, unknown> }
+
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "builder", modelID: "gpt-5.4-mini" }),
+    output,
+  )
+
+  assert.deepEqual(output, {
+    options: { reasoningEffort: "low", thinking: { type: "disabled" } },
+    temperature: 0.2,
+    topP: 0.8,
+    maxOutputTokens: 4096,
+  })
+  assert.deepEqual(recentResolutions().at(-1)!.applied, {
+    reasoning: "high",
+    reasoningEffort: "low",
+    thinking: { type: "disabled" },
+    temperature: 0.2,
+    topP: 0.8,
+    maxOutputTokens: 4096,
+  })
+})
+
+test("chat.params restores the canonical review floor after concrete and fast overrides", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["reviewer", {
+    model: "openai/gpt-5.5",
+    requirement: {
+      fallbackChain: [{
+        providers: ["openai"],
+        model: "gpt-5.5",
+        reasoning: "off",
+        reasoningEffort: "low",
+      }],
+    },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: {
+      kind: "options",
+      defaultRules: false,
+      rules: [{
+        match: { provider: "openai", model: "gpt-5.5" },
+        options: { reasoningEffort: "minimal" },
+      }],
+    },
+  }]]))
+  const output = { options: {} as Record<string, unknown> }
+
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "reviewer", modelID: "gpt-5.5" }),
+    output,
+  )
+
+  assert.deepEqual(output.options, { reasoningEffort: "xhigh" })
+  assert.deepEqual(recentResolutions().at(-1)!.applied, {
+    reasoning: "xhigh",
+    reasoningEffort: "xhigh",
+  })
+})
+
+test("chat.params applies canonical minimums and GPT native-max caps by route source", async () => {
+  const cases = [
+    { label: "builtin GPT-5.5 low", source: "agent-default" as const, modelID: "gpt-5.5", reasoning: "low" as const, expected: "high" },
+    { label: "user GPT-5.5 low", source: "user-config" as const, modelID: "gpt-5.5", reasoning: "low" as const, expected: "low" },
+    { label: "user GPT-5.5 max", source: "user-config" as const, modelID: "gpt-5.5", reasoning: "max" as const, expected: "xhigh" },
+    { label: "user GPT-5.6 max", source: "user-config" as const, modelID: "gpt-5.6-sol", reasoning: "max" as const, expected: "max" },
+  ] as const
+
+  for (const testCase of cases) {
+    clearResolutions()
+    const registry = createEffectiveRouteRegistry()
+    publishRoutes(registry, new Map([["builder", {
+      model: `openai/${testCase.modelID}`,
+      requirement: {
+        reasoning: testCase.reasoning,
+        fallbackChain: [{ providers: ["openai"], model: testCase.modelID }],
+      },
+      requirementSource: testCase.source,
+      primarySource: testCase.source === "user-config" ? "user-requirement" : "builtin-requirement",
+      fastPath: { kind: "off" },
+    }]]))
+    const output = { options: {} as Record<string, unknown> }
+
+    await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+      makeInput({ agentName: "builder", modelID: testCase.modelID }),
+      output,
+    )
+
+    assert.deepEqual(output.options, { reasoningEffort: testCase.expected }, testCase.label)
+    assert.deepEqual(recentResolutions().at(-1)!.applied, {
+      reasoning: testCase.expected,
+      reasoningEffort: testCase.expected,
+    }, testCase.label)
+  }
 })

@@ -14,8 +14,15 @@ test("normalizeDirectRequirement gives requirement precedence over shorthand mod
     fallbackModels: ["google/gemini-pro"],
   }
 
-  assert.equal(normalizeDirectRequirement(entry), requirement)
-  assert.equal(normalizeShorthand(entry)?.requirement, requirement)
+  const direct = normalizeDirectRequirement(entry)!
+  const shorthand = normalizeShorthand(entry)?.requirement!
+
+  assert.deepEqual(direct, requirement)
+  assert.notEqual(direct, requirement)
+  assert.notEqual(direct.fallbackChain, requirement.fallbackChain)
+  assert.notEqual(direct.fallbackChain[0], requirement.fallbackChain[0])
+  assert.deepEqual(shorthand, requirement)
+  assert.notEqual(shorthand, requirement)
 })
 
 test("normalizeDirectRequirement creates the existing model and fallback chain", () => {
@@ -91,6 +98,71 @@ test("normalizeShorthand transitive alias A->B->C", () => {
   assert.equal(result!.requirement!.fallbackChain[0]!.model, "glm-5.1")
 })
 
+test("normalization handles canonical fields, aliases, suffixes, and max ambiguity", () => {
+  const requirement = normalizeDirectRequirement({
+    model: "openai/gpt-5.6-sol:high",
+    reasoning: "none",
+    variant: "auto",
+    fallbackModels: [
+      "anthropic/claude-sonnet-4-6:max",
+      "gpt-5.6-sol:max",
+      "provider/model:custom",
+      { providers: ["google"], model: "gemini-3.1-pro:max" },
+      { providers: ["zhipu"], model: "glm-5.2:max", reasoning: "low" },
+    ],
+  })
+
+  assert.deepEqual(requirement, {
+    reasoning: "off",
+    variant: "auto",
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "off", variant: "auto" },
+      { providers: ["anthropic"], model: "claude-sonnet-4-6", reasoning: "max" },
+      { providers: [], model: "gpt-5.6-sol:max" },
+      { providers: ["provider"], model: "model:custom" },
+      { providers: ["google"], model: "gemini-3.1-pro", reasoning: "max" },
+      { providers: ["zhipu"], model: "glm-5.2", reasoning: "low" },
+    ],
+  })
+})
+
+test("normalization recursively copies requirement objects and canonicalizes reasoning", () => {
+  const source = {
+    reasoning: "none" as const,
+    requiresProvider: ["openai", "anthropic"],
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol:max" },
+      {
+        providers: ["anthropic"],
+        model: "claude-sonnet-4-6:low",
+        reasoning: "none" as const,
+        thinking: { type: "enabled" as const, budgetTokens: 4_096 },
+      },
+    ],
+  }
+  const requirement = normalizeDirectRequirement({ requirement: source })!
+
+  assert.deepEqual(requirement, {
+    reasoning: "off",
+    requiresProvider: ["openai", "anthropic"],
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "max" },
+      {
+        providers: ["anthropic"],
+        model: "claude-sonnet-4-6",
+        reasoning: "off",
+        thinking: { type: "enabled", budgetTokens: 4_096 },
+      },
+    ],
+  })
+  assert.notEqual(requirement, source)
+  assert.notEqual(requirement.requiresProvider, source.requiresProvider)
+  assert.notEqual(requirement.fallbackChain, source.fallbackChain)
+  assert.notEqual(requirement.fallbackChain[0], source.fallbackChain[0])
+  assert.notEqual(requirement.fallbackChain[1]!.providers, source.fallbackChain[1]!.providers)
+  assert.notEqual(requirement.fallbackChain[1]!.thinking, source.fallbackChain[1]!.thinking)
+})
+
 test("normalizeShorthand no alias and no model returns undefined requirement", () => {
   const result = normalizeShorthand({ description: "just a desc" })
   assert.equal(result!.requirement, undefined)
@@ -102,10 +174,12 @@ test("normalizeAgentShorthand resolves arbitrary depth and rejects cycles", () =
     reviewer: { alias: "policy-a", description: "outer metadata" },
     "policy-a": { alias: "policy-b" },
     "policy-b": { alias: "model" },
-    model: { model: "openai/gpt-5.6-sol" },
+    model: { model: "openai/gpt-5.6-sol:high", reasoning: "none" },
   })
   assert.equal(resolved?.description, "outer metadata")
   assert.equal(resolved?.requirement?.fallbackChain[0]?.model, "gpt-5.6-sol")
+  assert.equal(resolved?.requirement?.reasoning, "off")
+  assert.equal(resolved?.requirement?.fallbackChain[0]?.reasoning, "off")
 
   assert.throws(
     () => normalizeAgentShorthand("a", {

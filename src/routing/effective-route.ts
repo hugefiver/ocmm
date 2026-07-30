@@ -117,6 +117,7 @@ export function materializeSelectedPrimary(
     primary = {
       providers: [selected.providerID],
       model: selected.modelID,
+      ...(requirement.reasoning !== undefined ? { reasoning: requirement.reasoning } : {}),
       ...(requirement.variant !== undefined ? { variant: requirement.variant } : {}),
     }
   }

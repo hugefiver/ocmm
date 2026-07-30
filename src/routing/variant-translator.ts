@@ -15,7 +15,8 @@
  */
 
 import { isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
-import type { ThinkingMode, Variant } from "../shared/types.ts"
+import { reasoningToVariant, variantToReasoningLevel } from "../shared/reasoning.ts"
+import type { Reasoning, ThinkingMode, Variant } from "../shared/types.ts"
 
 export type VariantEffect = {
   reasoningEffort?: string
@@ -209,6 +210,64 @@ export function normalizeVariantForModel(opts: {
     return atLeastHigh(variant)
   }
   return variant
+}
+
+/** Normalize canonical reasoning through the legacy model-family variant rules. */
+export function normalizeReasoningForModel(opts: {
+  family: ModelFamily
+  modelID: string
+  reasoning: Reasoning
+}): Reasoning {
+  const { family, modelID, reasoning } = opts
+  if (reasoning === "auto") return reasoning
+
+  if (reasoning === "off") {
+    const normalized = normalizeVariantForModel({ family, modelID, variant: "none" })
+    return normalized === "none" ? "off" : variantToReasoningLevel(normalized) ?? reasoning
+  }
+
+  const variant = reasoningToVariant(reasoning)
+  if (!variant) return reasoning
+  const normalized = normalizeVariantForModel({ family, modelID, variant })
+  return variantToReasoningLevel(normalized) ?? reasoning
+}
+
+/** Translate canonical reasoning without changing legacy variant semantics. */
+export function translateReasoning(
+  family: ModelFamily,
+  reasoning: Reasoning,
+  opts?: { modelID?: string; respectExplicit?: boolean },
+): VariantEffect {
+  const effectiveReasoning = opts?.modelID && !opts.respectExplicit
+    ? normalizeReasoningForModel({ family, modelID: opts.modelID, reasoning })
+    : reasoning
+
+  if (effectiveReasoning === "auto") return NEUTRAL
+
+  if (effectiveReasoning === "off") {
+    switch (family) {
+      case "gpt":
+      case "codex":
+      case "deepseek":
+        return { reasoningEffort: "none" }
+      case "claude":
+        return { thinking: { type: "disabled" } }
+      case "gemini":
+      case "glm":
+        return { reasoningEffort: "none", thinking: { type: "disabled" } }
+      case "claude-opus-47-plus":
+      case "kimi":
+      case "kimi-k27":
+      case "minimax":
+      case "unknown":
+      default:
+        return NEUTRAL
+    }
+  }
+
+  const variant = reasoningToVariant(effectiveReasoning)
+  if (!variant) return NEUTRAL
+  return translateVariant(family, variant, { ...opts, respectExplicit: true })
 }
 
 export function translateVariant(

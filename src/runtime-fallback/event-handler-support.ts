@@ -68,9 +68,14 @@ export function applyRequirementDefaults(
   requirement: ModelRequirement | null | undefined,
   entry: FallbackEntry,
 ): FallbackEntry {
-  return entry.variant === undefined && requirement?.variant !== undefined
-    ? { ...entry, variant: requirement.variant }
-    : entry
+  let resolved = entry
+  if (resolved.reasoning === undefined && requirement?.reasoning !== undefined) {
+    resolved = { ...resolved, reasoning: requirement.reasoning }
+  }
+  if (resolved.variant === undefined && requirement?.variant !== undefined) {
+    resolved = { ...resolved, variant: requirement.variant }
+  }
+  return resolved
 }
 
 /**

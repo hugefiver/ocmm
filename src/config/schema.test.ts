@@ -5,7 +5,10 @@ import { join } from "node:path"
 
 import {
   AgentEntrySchema,
+  CategoryEntrySchema,
   defaultConfig,
+  FallbackEntrySchema,
+  ModelRequirementSchema,
   OcmmConfigSchema,
   ReviewVariantOverrideSchema,
   ShimConfigSchema,
@@ -290,6 +293,39 @@ test("tolerantParse preserves an agent fallback entry when its union object has 
   })
   assert.equal(result.success, true)
   assert.deepEqual(result.success && result.data.fallbackModels, [{ providers: ["openai"], model: "gpt-5.6" }])
+})
+
+test("canonical reasoning is accepted at every declared configuration boundary", () => {
+  const reasoningInputs = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto", "none"] as const
+
+  for (const reasoning of reasoningInputs) {
+    assert.equal(AgentEntrySchema.parse({ reasoning }).reasoning, reasoning)
+    assert.equal(CategoryEntrySchema.parse({ reasoning }).reasoning, reasoning)
+    assert.equal(
+      ModelRequirementSchema.parse({
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol" }],
+        reasoning,
+      }).reasoning,
+      reasoning,
+    )
+    assert.equal(
+      FallbackEntrySchema.parse({ providers: ["openai"], model: "gpt-5.6-sol", reasoning }).reasoning,
+      reasoning,
+    )
+  }
+})
+
+test("invalid canonical reasoning is pruned while valid siblings survive tolerant parsing", () => {
+  const result = tolerantParse(AgentEntrySchema, {
+    model: "openai/gpt-5.6-sol",
+    reasoning: "extreme",
+    variant: "high",
+  })
+  assert.equal(result.success, true)
+  assert.deepEqual(result.success && result.data, {
+    model: "openai/gpt-5.6-sol",
+    variant: "high",
+  })
 })
 
 test("logical tier variants accept canonical review and planning roles", () => {

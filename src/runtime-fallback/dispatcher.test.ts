@@ -329,6 +329,30 @@ test("variant and reasoningEffort are passed through to prompt body", async () =
   assert.equal(calls[0]?.body.reasoningEffort, "high")
 })
 
+test("canonical reasoning suppresses the legacy variant while preserving concrete effort", async () => {
+  const { client, calls } = makeClient({
+    messages: [{ role: "user", parts: [{ type: "text", text: "hi" }] }],
+  })
+  const reasoningEntry: FallbackEntry = {
+    providers: ["anthropic"],
+    model: "claude-opus-4-6",
+    reasoning: "high",
+    variant: "max",
+    reasoningEffort: "low",
+  }
+
+  await dispatchFallbackRetry({
+    client,
+    sessionID: "ses_canonical_reasoning",
+    newEntry: reasoningEntry,
+    reason: "rate_limit",
+  })
+
+  assert.equal(calls[0]?.body.reasoning, undefined)
+  assert.equal(calls[0]?.body.variant, undefined)
+  assert.equal(calls[0]?.body.reasoningEffort, "low")
+})
+
 test("returns false when messages fetch throws", async () => {
   let messagesCalls = 0
   const client: OcmmClient = {

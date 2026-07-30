@@ -9,6 +9,10 @@ import type { FastOptionRule } from "../config/schema.ts"
 
 export type ThinkingMode = "enabled" | "disabled"
 
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+
+export type Reasoning = ReasoningLevel | "auto"
+
 /** Reasoning intensity / variant a model entry asks for. */
 export type Variant =
   | "low"
@@ -44,6 +48,8 @@ export type FallbackEntry = {
   model: string
   /** Effort/intensity tier; translated to provider-specific params. */
   variant?: Variant
+  /** Canonical reasoning level; translated to provider-specific params. */
+  reasoning?: Reasoning
   /** Direct override for OpenAI-style reasoning effort if you need to bypass the variant table. */
   reasoningEffort?: string
   /** Inference knobs. */
@@ -62,6 +68,8 @@ export type ModelRequirement = {
   fallbackChain: FallbackEntry[]
   /** Default variant if a fallback entry doesn't set one. */
   variant?: Variant
+  /** Default canonical reasoning level if a fallback entry doesn't set one. */
+  reasoning?: Reasoning
   /** When set, only an exact match is acceptable (no fuzzy fallback). */
   requiresModel?: string
   /** When true, any model from the connected providers is acceptable. */
@@ -118,6 +126,7 @@ export type ResolutionEntry = {
   /** What we ended up applying to output (variant + flat option keys). */
   applied: {
     variant?: Variant
+    reasoning?: Reasoning
     reasoningEffort?: string
     thinking?: { type: ThinkingMode; budgetTokens?: number }
     temperature?: number

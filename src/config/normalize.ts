@@ -1,4 +1,9 @@
-import type { FallbackEntry, ModelRequirement, Variant } from "../shared/types.ts"
+import {
+  normalizeReasoning,
+  splitReasoningSuffix,
+  type ReasoningInput,
+} from "../shared/reasoning.ts"
+import type { FallbackEntry, ModelRequirement, Reasoning, Variant } from "../shared/types.ts"
 import type {
   AgentEntry,
   CategoryEntry,
@@ -11,15 +16,19 @@ export type PermissionValue = "ask" | "allow" | "deny"
 export function parseModelString(
   modelStr: string,
   variant?: Variant,
+  reasoningInput?: ReasoningInput,
 ): FallbackEntry {
-  const slash = modelStr.indexOf("/")
-  const provider = slash >= 0 ? modelStr.slice(0, slash) : ""
-  const model = slash >= 0 ? modelStr.slice(slash + 1) : modelStr
+  const parsed = splitReasoningSuffix(modelStr)
+  const slash = parsed.model.indexOf("/")
+  const provider = slash >= 0 ? parsed.model.slice(0, slash) : ""
+  const model = slash >= 0 ? parsed.model.slice(slash + 1) : parsed.model
+  const reasoning = normalizeReasoning(reasoningInput) ?? parsed.reasoning
   const entry: FallbackEntry = {
     providers: provider ? [provider] : [],
     model,
   }
-  if (variant) entry.variant = variant
+  if (reasoning !== undefined) entry.reasoning = reasoning
+  if (variant !== undefined) entry.variant = variant
   return entry
 }
 
@@ -27,13 +36,44 @@ function normalizeFallbackEntryConfig(
   raw: string | FallbackEntryConfig,
 ): FallbackEntry {
   if (typeof raw === "string") return parseModelString(raw)
-  return raw as FallbackEntry
+  const {
+    reasoning: reasoningInput,
+    providers,
+    model,
+    thinking,
+    variant,
+    ...rest
+  } = raw
+  const parsed = splitReasoningSuffix(model, { providerContext: providers.length > 0 })
+  const reasoning = normalizeReasoning(reasoningInput) ?? parsed.reasoning
+  return {
+    ...rest,
+    providers: [...providers],
+    model: parsed.model,
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    ...(variant !== undefined ? { variant } : {}),
+    ...(thinking ? { thinking: { ...thinking } } : {}),
+  }
 }
 
 function normalizeRequirementConfig(
   req: ModelRequirementConfig,
 ): ModelRequirement {
-  return req as ModelRequirement
+  const {
+    fallbackChain,
+    reasoning: reasoningInput,
+    requiresProvider,
+    variant,
+    ...rest
+  } = req
+  const reasoning = normalizeReasoning(reasoningInput)
+  return {
+    ...rest,
+    fallbackChain: fallbackChain.map(normalizeFallbackEntryConfig),
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    ...(variant !== undefined ? { variant } : {}),
+    ...(requiresProvider !== undefined ? { requiresProvider: [...requiresProvider] } : {}),
+  }
 }
 
 export type NormalizedShorthand = {
@@ -50,14 +90,16 @@ export function normalizeDirectRequirement(
   if (entry.requirement) return normalizeRequirementConfig(entry.requirement)
 
   const chain: FallbackEntry[] = []
-  if (entry.model) chain.push(parseModelString(entry.model, entry.variant))
+  if (entry.model) chain.push(parseModelString(entry.model, entry.variant, entry.reasoning))
   if (entry.fallbackModels) {
     for (const model of entry.fallbackModels) chain.push(normalizeFallbackEntryConfig(model))
   }
   if (chain.length === 0) return undefined
 
   const requirement: ModelRequirement = { fallbackChain: chain }
-  if (entry.variant) requirement.variant = entry.variant
+  const reasoning: Reasoning | undefined = normalizeReasoning(entry.reasoning)
+  if (reasoning !== undefined) requirement.reasoning = reasoning
+  if (entry.variant !== undefined) requirement.variant = entry.variant
   return requirement
 }
 
@@ -102,7 +144,7 @@ export function normalizeShorthand(
     if (resolveAlias) {
       const target = resolveAlias(entry.alias)
       if (target?.requirement) {
-        out.requirement = target.requirement
+        out.requirement = normalizeRequirementConfig(target.requirement)
       }
     }
   }

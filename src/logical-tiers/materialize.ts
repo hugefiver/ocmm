@@ -78,7 +78,12 @@ function replacePrimaryModel(requirement: ModelRequirement, model: string): Mode
   const parsed = parseModelString(model)
   const primary = cloned.fallbackChain[0]
   if (!primary) throw new Error("logical tier profile has no primary fallback entry")
-  cloned.fallbackChain[0] = { ...primary, providers: [...parsed.providers], model: parsed.model }
+  cloned.fallbackChain[0] = {
+    ...primary,
+    providers: [...parsed.providers],
+    model: parsed.model,
+    ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
+  }
   if (cloned.requiresModel !== undefined) cloned.requiresModel = parsed.model
   if (cloned.requiresProvider !== undefined) {
     if (parsed.providers.length === 0) delete cloned.requiresProvider

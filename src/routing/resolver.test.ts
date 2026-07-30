@@ -247,6 +247,103 @@ test("input variant overrides chain variant", () => {
   assert.equal(r!.variant, "low")
 })
 
+test("request-local variants suppress canonical reasoning", () => {
+  const r = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.6-sol",
+    providerID: "openai",
+    inputVariant: "low",
+    effectiveRequirement: {
+      requirement: {
+        reasoning: "off",
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol", reasoning: "high" }],
+      },
+      source: "agent-default",
+    },
+  })
+
+  assert.equal(r?.reasoning, undefined)
+  assert.equal(r?.variant, "low")
+})
+
+test("canonical reasoning outranks legacy variants at entry and requirement levels", () => {
+  const effectiveRequirement = {
+    requirement: {
+      reasoning: "medium" as const,
+      variant: "max" as const,
+      fallbackChain: [
+        { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "low" as const, variant: "xhigh" as const },
+        { providers: ["openai"], model: "gpt-5.5", variant: "low" as const },
+      ],
+    },
+    source: "agent-default" as const,
+  }
+
+  const entryCanonical = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.6-sol",
+    providerID: "openai",
+    effectiveRequirement,
+  })
+  const requirementCanonical = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.5",
+    providerID: "openai",
+    effectiveRequirement,
+  })
+
+  assert.equal(entryCanonical?.reasoning, "low")
+  assert.equal(entryCanonical?.variant, undefined)
+  assert.equal(requirementCanonical?.reasoning, "medium")
+  assert.equal(requirementCanonical?.variant, undefined)
+})
+
+test("fallback head and successors preserve canonical entry reasoning", () => {
+  const effectiveRequirement = {
+    requirement: {
+      reasoning: "high" as const,
+      fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol", reasoning: "max" as const }],
+    },
+    source: "agent-default" as const,
+  }
+  const fallback = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "foreign-model",
+    providerID: "openai",
+    effectiveRequirement,
+  })
+  const successor = resolveModelRouting({
+    agentName: "reviewer",
+    modelID: "gpt-5.7-sol",
+    providerID: "openai",
+    effectiveRequirement,
+  })
+
+  assert.equal(fallback?.entry.model, "gpt-5.6-sol")
+  assert.equal(fallback?.reasoning, "max")
+  assert.equal(fallback?.variant, undefined)
+  assert.equal(successor?.entry.model, "gpt-5.7-sol")
+  assert.equal(successor?.reasoning, "max")
+  assert.equal(successor?.variant, undefined)
+})
+
+test("protected categories promote canonical default reasoning without selecting a legacy variant", () => {
+  const r = resolveModelRouting({
+    agentName: "coding",
+    modelID: "gpt-5.6-sol",
+    providerID: "openai",
+    effectiveRequirement: {
+      requirement: {
+        fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol", reasoning: "low" }],
+      },
+      source: "category-default",
+    },
+  })
+
+  assert.equal(r?.reasoning, "max")
+  assert.equal(r?.variant, undefined)
+})
+
 test("user agent override beats built-in", () => {
   const r = resolveModelRouting({
     agentName: "reviewer",
@@ -425,11 +522,12 @@ test("multi-hop aliases resolve the same effective requirement as direct config"
       reviewer: { alias: "review-policy-a" },
       "review-policy-a": { alias: "review-policy-b" },
       "review-policy-b": { alias: "review-model" },
-      "review-model": { model: "openai/gpt-5.6-sol", variant: "xhigh" },
+      "review-model": { model: "openai/gpt-5.6-sol", variant: "xhigh", reasoning: "off" },
     },
   })
 
   assert.equal(result?.source, "user-config")
   assert.equal(result?.entry.model, "gpt-5.6-sol")
-  assert.equal(result?.variant, "xhigh")
+  assert.equal(result?.reasoning, "off")
+  assert.equal(result?.variant, undefined)
 })
