@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, watch, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { ChildProcess, spawn } from "node:child_process"
 import test from "node:test"
@@ -45,6 +45,231 @@ const MCP_FIXTURE = join(FIXTURES_ROOT, "codemode-execute-probe-mcp.mjs")
 const TRACE_PLUGIN_FIXTURE = join(FIXTURES_ROOT, "codemode-execute-hook-trace-plugin.mjs")
 const PROCESS_WRAPPER_FIXTURE = join(FIXTURES_ROOT, "codemode-execute-process-wrapper.mjs")
 const BARRIER_XDG_LABELS = ["data", "bin", "log", "repos", "cache", "config", "state"]
+const EVENT_TIMEOUT_MS = 1500
+
+type CompletionEventSubscription = {
+  waitFor(event: string): Promise<void>
+  close(): void
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
+function subscribeToCompletionEvents(path: string): CompletionEventSubscription {
+  type Waiter = { resolve(): void; reject(error: Error): void }
+
+  const completedEvents = new Set<string>()
+  const waiters = new Map<string, Waiter[]>()
+  const directory = dirname(path)
+  let consumedOffset = 0
+  let partialLine = Buffer.alloc(0)
+  let drainQueued = false
+  let terminalError: Error | null = null
+  let watcher: ReturnType<typeof watch> | null = null
+
+  const rejectWaiters = (error: Error): void => {
+    for (const eventWaiters of waiters.values()) {
+      for (const waiter of eventWaiters) waiter.reject(error)
+    }
+    waiters.clear()
+  }
+
+  const terminate = (error: Error): void => {
+    if (terminalError !== null) return
+    terminalError = error
+    watcher?.close()
+    rejectWaiters(error)
+  }
+
+  const complete = (event: string): void => {
+    if (completedEvents.has(event)) return
+    completedEvents.add(event)
+    const eventWaiters = waiters.get(event)
+    if (!eventWaiters) return
+    waiters.delete(event)
+    for (const waiter of eventWaiters) waiter.resolve()
+  }
+
+  const parseEvent = (row: Buffer): string => {
+    let value: unknown
+    try {
+      value = JSON.parse(row.toString("utf8"))
+    } catch {
+      throw new Error("invalid completion event row")
+    }
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("invalid completion event row")
+    }
+    const record = value as Record<string, unknown>
+    if (
+      Object.keys(record).length !== 1
+      || !Object.hasOwn(record, "event")
+      || typeof record.event !== "string"
+      || record.event.trim().length === 0
+    ) {
+      throw new Error("invalid completion event row")
+    }
+    return record.event
+  }
+
+  const drain = (): void => {
+    if (terminalError !== null) return
+    try {
+      const contents = readFileSync(path)
+      if (contents.length < consumedOffset) throw new Error("completion event stream truncated")
+
+      const unread = contents.subarray(consumedOffset)
+      consumedOffset = contents.length
+      const buffered = Buffer.concat([partialLine, unread])
+      let lineStart = 0
+      for (let index = 0; index < buffered.length; index += 1) {
+        if (buffered[index] !== 0x0a) continue
+        const lineEnd = buffered[index - 1] === 0x0d ? index - 1 : index
+        complete(parseEvent(buffered.subarray(lineStart, lineEnd)))
+        lineStart = index + 1
+      }
+      partialLine = buffered.subarray(lineStart)
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+        && consumedOffset === 0
+        && partialLine.length === 0
+      ) return
+      terminate(error instanceof Error ? error : new Error("completion event read failed"))
+    }
+  }
+
+  const queueDrain = (): void => {
+    if (terminalError !== null || drainQueued) return
+    drainQueued = true
+    queueMicrotask(() => {
+      drainQueued = false
+      drain()
+    })
+  }
+
+  try {
+    const watchDirectory = process.platform === "win32" ? realpathSync.native(directory) : directory
+    watcher = watch(watchDirectory, { persistent: false }, () => queueDrain())
+    watcher.on("error", () => terminate(new Error("completion event watcher failed")))
+    queueDrain()
+  } catch {
+    terminate(new Error("completion event watcher failed"))
+  }
+
+  return {
+    waitFor(event: string): Promise<void> {
+      if (terminalError !== null) return Promise.reject(terminalError)
+      if (completedEvents.has(event)) return Promise.resolve()
+      return new Promise<void>((resolveWaiter, rejectWaiter) => {
+        const eventWaiters = waiters.get(event) ?? []
+        eventWaiters.push({ resolve: resolveWaiter, reject: rejectWaiter })
+        waiters.set(event, eventWaiters)
+      })
+    },
+    close(): void {
+      terminate(new Error("completion event subscription closed"))
+    },
+  }
+}
+
+test("completion event subscription replays buffered events, deduplicates, and closes idempotently", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-completion-events-replay-"))
+  const path = join(root, "events.jsonl")
+  try {
+    writeFileSync(path, '{"event":"started"}\n{"event":"stopped"}')
+    const subscription = subscribeToCompletionEvents(path)
+    await withTimeout(subscription.waitFor("started"), EVENT_TIMEOUT_MS, "started replay timed out")
+
+    const stopped = subscription.waitFor("stopped")
+    writeFileSync(path, '\n{"event":"stopped"}\n', { flag: "a" })
+    await withTimeout(stopped, EVENT_TIMEOUT_MS, "stopped notification timed out")
+    await subscription.waitFor("stopped")
+
+    const pending = subscription.waitFor("pending")
+    subscription.close()
+    subscription.close()
+    await assert.rejects(pending, /subscription closed/)
+    await assert.rejects(subscription.waitFor("future"), /subscription closed/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("completion event subscription accepts later creation and rejects truncation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-completion-events-create-"))
+  const path = join(root, "events.jsonl")
+  let subscription: CompletionEventSubscription | undefined
+  try {
+    subscription = subscribeToCompletionEvents(path)
+    const started = subscription.waitFor("started")
+    writeFileSync(path, '{"event":"started"}\n')
+    await withTimeout(started, EVENT_TIMEOUT_MS, "started creation notification timed out")
+
+    const missing = subscription.waitFor("missing")
+    writeFileSync(path, "")
+    await assert.rejects(
+      withTimeout(missing, EVENT_TIMEOUT_MS, "truncation notification timed out"),
+      /completion event stream truncated/,
+    )
+  } finally {
+    subscription?.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("completion event subscription rejects malformed or whitespace-only terminated rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-completion-events-malformed-"))
+  try {
+    for (const [name, row] of [
+      ["not-json", "not-json\n"],
+      ["whitespace-event", '{"event":"   "}\n'],
+    ] as const) {
+      const subscription = subscribeToCompletionEvents(join(root, `${name}.jsonl`))
+      try {
+        const waiting = subscription.waitFor("started")
+        writeFileSync(join(root, `${name}.jsonl`), row)
+        await assert.rejects(
+          withTimeout(waiting, EVENT_TIMEOUT_MS, `${name} notification timed out`),
+          /invalid completion event row/,
+        )
+      } finally {
+        subscription.close()
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("completion event subscription rejects CR-only empty terminated rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-completion-events-cr-only-"))
+  const path = join(root, "events.jsonl")
+  let subscription: CompletionEventSubscription | undefined
+  try {
+    subscription = subscribeToCompletionEvents(path)
+    const waiting = subscription.waitFor("started")
+    writeFileSync(path, "\r\n")
+    await assert.rejects(
+      withTimeout(waiting, EVENT_TIMEOUT_MS, "CR-only notification timed out"),
+      /invalid completion event row/,
+    )
+  } finally {
+    subscription?.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 function validProviderConfig(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -251,31 +476,6 @@ async function waitForExit(child: ReturnType<typeof spawn>): Promise<{ code: num
 
 function parseJsonLines(path: string): unknown[] {
   return readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line))
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH"
-  }
-}
-
-async function waitForProcessExit(pid: number): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (!processExists(pid)) return
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25))
-  }
-  assert.fail(`process ${pid} survived wrapper exit`)
-}
-
-async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (existsSync(path)) return
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25))
-  }
-  assert.fail(`file was not created: ${path}`)
 }
 
 function passingFacts(): NormalizedFacts {
@@ -1843,9 +2043,15 @@ test("MCP fixture serves deterministic newline JSON-RPC probes without marker le
   const pidDirectory = join(root, "pid")
   const pidPath = join(pidDirectory, "fixture.jsonl")
   mkdirSync(pidDirectory)
+  let child: ReturnType<typeof spawn> | undefined
+  let completion: ReturnType<typeof waitForExit> | undefined
+  let subscription: CompletionEventSubscription | undefined
 
   try {
-    const child = spawn(process.execPath, [MCP_FIXTURE], {
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const stopped = subscription.waitFor("stopped")
+    child = spawn(process.execPath, [MCP_FIXTURE], {
       env: {
         ...process.env,
         OCMM_CODEMODE_PROBE_EVENTS: eventsPath,
@@ -1854,20 +2060,28 @@ test("MCP fixture serves deterministic newline JSON-RPC probes without marker le
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     })
+    const stdin = child.stdin
+    assert.ok(stdin)
+    completion = waitForExit(child)
+    await withTimeout(started, EVENT_TIMEOUT_MS, "MCP fixture did not report started")
     const fixedMarker = "OCMM_CODEMODE_EXECUTE_PROBE"
-    child.stdin.write(`${JSON.stringify({
+    stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" },
     })}\n`)
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`)
-    child.stdin.write(`${JSON.stringify({
+    stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`)
+    stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "identity", arguments: { marker: fixedMarker } },
     })}\n`)
-    child.stdin.write(`${JSON.stringify({
+    stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "json_error", arguments: {} },
     })}\n`)
-    child.stdin.end()
+    stdin.end()
 
-    const { code, stdout, stderr } = await waitForExit(child)
+    const { code, stdout, stderr } = await withTimeout(
+      Promise.all([stopped, completion]).then(([, completed]) => completed),
+      EVENT_TIMEOUT_MS,
+      "MCP fixture did not stop",
+    )
     assert.equal(code, 0, stderr)
     const responses = stdout.trim().split("\n").map((line) => JSON.parse(line)) as Array<{
       id: number
@@ -1893,6 +2107,11 @@ test("MCP fixture serves deterministic newline JSON-RPC probes without marker le
       "started", "tools/list", "tools/call:identity", "tools/call:json_error", "stopped",
     ])
   } finally {
+    if (child?.exitCode === null) {
+      child.stdin?.end()
+      await completion?.catch(() => undefined)
+    }
+    subscription?.close()
     rmSync(root, { recursive: true, force: true })
     assert.equal(existsSync(root), false)
   }
@@ -1904,8 +2123,14 @@ test("MCP identity rejects wrong or missing markers without emitting the success
   const pidDirectory = join(root, "pid")
   const pidPath = join(pidDirectory, "fixture.jsonl")
   mkdirSync(pidDirectory)
+  let child: ReturnType<typeof spawn> | undefined
+  let completion: ReturnType<typeof waitForExit> | undefined
+  let subscription: CompletionEventSubscription | undefined
   try {
-    const child = spawn(process.execPath, [MCP_FIXTURE], {
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const stopped = subscription.waitFor("stopped")
+    child = spawn(process.execPath, [MCP_FIXTURE], {
       env: {
         ...process.env,
         OCMM_CODEMODE_PROBE_EVENTS: eventsPath,
@@ -1914,14 +2139,22 @@ test("MCP identity rejects wrong or missing markers without emitting the success
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     })
-    child.stdin.write(`${JSON.stringify({
+    const stdin = child.stdin
+    assert.ok(stdin)
+    completion = waitForExit(child)
+    await withTimeout(started, EVENT_TIMEOUT_MS, "MCP fixture did not report started")
+    stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "identity", arguments: { marker: "wrong" } },
     })}\n`)
-    child.stdin.write(`${JSON.stringify({
+    stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "identity", arguments: {} },
     })}\n`)
-    child.stdin.end()
-    const completed = await waitForExit(child)
+    stdin.end()
+    const completed = await withTimeout(
+      Promise.all([stopped, completion]).then(([, completed]) => completed),
+      EVENT_TIMEOUT_MS,
+      "MCP fixture did not stop",
+    )
     assert.equal(completed.code, 0, completed.stderr)
     assert.doesNotMatch(completed.stdout, /OCMM_CODEMODE_EXECUTE_PROBE/)
     const responses = completed.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line)) as Array<{
@@ -1931,6 +2164,11 @@ test("MCP identity rejects wrong or missing markers without emitting the success
     assert.deepEqual(responses.map((response) => response.error?.code), [-32602, -32602])
     assert.doesNotMatch(readFileSync(eventsPath, "utf8"), /wrong|OCMM_CODEMODE_EXECUTE_PROBE/)
   } finally {
+    if (child?.exitCode === null) {
+      child.stdin?.end()
+      await completion?.catch(() => undefined)
+    }
+    subscription?.close()
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -1942,31 +2180,46 @@ test("MCP fixture exits on its attempt-local stop signal", async () => {
   const pidPath = join(pidDirectory, "fixture.jsonl")
   const stopPath = join(pidDirectory, "stop")
   mkdirSync(pidDirectory)
-  const child = spawn(process.execPath, [MCP_FIXTURE], {
-    env: {
-      ...process.env,
-      OCMM_CODEMODE_PROBE_EVENTS: eventsPath,
-      OCMM_CODEMODE_PROBE_PID_FILE: pidPath,
-      OCMM_CODEMODE_STOP_PATH: stopPath,
-    },
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  })
-  const completion = waitForExit(child)
+  let child: ReturnType<typeof spawn> | undefined
+  let completion: ReturnType<typeof waitForExit> | undefined
+  let subscription: CompletionEventSubscription | undefined
   try {
-    await waitForFile(pidPath)
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const stopped = subscription.waitFor("stopped")
+    child = spawn(process.execPath, [MCP_FIXTURE], {
+      env: {
+        ...process.env,
+        OCMM_CODEMODE_PROBE_EVENTS: eventsPath,
+        OCMM_CODEMODE_PROBE_PID_FILE: pidPath,
+        OCMM_CODEMODE_STOP_PATH: stopPath,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    })
+    assert.ok(child.stdin)
+    completion = waitForExit(child)
+    await withTimeout(started, EVENT_TIMEOUT_MS, "MCP fixture did not report started")
+    const pidRows = parseJsonLines(pidPath) as Array<{ fixturePid: unknown }>
+    assert.equal(pidRows.length, 1)
+    assert.equal(typeof pidRows[0]?.fixturePid, "number")
+    assert.ok(Number.isInteger(pidRows[0]?.fixturePid))
+    const fixturePid = pidRows[0]?.fixturePid as number
+    assert.equal(testPidAlive(fixturePid), true)
     writeFileSync(stopPath, "stop\n")
     const completed = await Promise.race([
-      completion,
+      Promise.all([stopped, completion]).then(([, result]) => result),
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("MCP fixture ignored stop signal")), 1500)),
     ])
     assert.equal(completed.code, 0, completed.stderr)
+    assert.equal(testPidAlive(fixturePid), false)
     assert.match(readFileSync(eventsPath, "utf8"), /"event":"stopped"/)
   } finally {
-    if (child.exitCode === null) {
-      child.stdin.end()
-      await completion.catch(() => undefined)
+    if (child?.exitCode === null) {
+      child.stdin?.end()
+      await completion?.catch(() => undefined)
     }
+    subscription?.close()
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -2146,18 +2399,27 @@ test("process wrapper records real native child exit and leaves no survivor", as
   const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-wrapper-"))
   const pidDirectory = join(root, "pid")
   const pidPath = join(pidDirectory, "lsp.jsonl")
+  const eventsPath = join(root, "events.jsonl")
   mkdirSync(pidDirectory)
+  let child: ReturnType<typeof spawn> | undefined
+  let completion: ReturnType<typeof waitForExit> | undefined
+  let subscription: CompletionEventSubscription | undefined
 
   try {
-    const child = spawn(process.execPath, [
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const nativeExited = subscription.waitFor("native-exited")
+    child = spawn(process.execPath, [
       PROCESS_WRAPPER_FIXTURE,
       pidPath,
+      "--events",
+      eventsPath,
       process.execPath,
       "-e",
       "setTimeout(() => process.exit(0), 25)",
     ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true })
-    const { code, stderr } = await waitForExit(child)
-    assert.equal(code, 0, stderr)
+    completion = waitForExit(child)
+    await withTimeout(started, EVENT_TIMEOUT_MS, "process wrapper did not report started")
 
     const pidRows = parseJsonLines(pidPath) as Array<{ wrapperPid: unknown; nativePid: unknown }>
     assert.equal(pidRows.length, 1)
@@ -2165,8 +2427,24 @@ test("process wrapper records real native child exit and leaves no survivor", as
     assert.ok(Number.isInteger(pidRows[0]?.wrapperPid))
     assert.equal(typeof pidRows[0]?.nativePid, "number")
     assert.ok(Number.isInteger(pidRows[0]?.nativePid))
-    await waitForProcessExit(pidRows[0]?.nativePid as number)
+
+    const { code, stderr } = await withTimeout(
+      Promise.all([nativeExited, completion]).then(([, completed]) => completed),
+      EVENT_TIMEOUT_MS,
+      "process wrapper did not report native exit",
+    )
+    assert.equal(code, 0, stderr)
+    assert.deepEqual((parseJsonLines(eventsPath) as Array<{ event: string }>).map((row) => row.event), [
+      "started", "native-exited",
+    ])
+    assert.equal(testPidAlive(pidRows[0]?.nativePid as number), false)
+    assert.equal(testPidAlive(pidRows[0]?.wrapperPid as number), false)
   } finally {
+    if (child?.exitCode === null) {
+      child.kill("SIGTERM")
+      await completion?.catch(() => undefined)
+    }
+    subscription?.close()
     rmSync(root, { recursive: true, force: true })
     assert.equal(existsSync(root), false)
   }
@@ -2177,14 +2455,22 @@ test("process wrapper stop signal terminates and reaps its owned native child", 
   const pidDirectory = join(root, "pid")
   const pidPath = join(pidDirectory, "lsp.jsonl")
   const stopPath = join(pidDirectory, "stop")
+  const eventsPath = join(root, "events.jsonl")
   mkdirSync(pidDirectory)
   let child: ReturnType<typeof spawn> | null = null
   let completion: ReturnType<typeof waitForExit> | null = null
+  let subscription: CompletionEventSubscription | undefined
   let nativePid: number | null = null
+  let wrapperPid: number | null = null
   try {
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const nativeExited = subscription.waitFor("native-exited")
     child = spawn(process.execPath, [
       PROCESS_WRAPPER_FIXTURE,
       pidPath,
+      "--events",
+      eventsPath,
       process.execPath,
       "-e",
       "setInterval(() => {}, 1000)",
@@ -2194,21 +2480,28 @@ test("process wrapper stop signal terminates and reaps its owned native child", 
       windowsHide: true,
     })
     completion = waitForExit(child)
-    await waitForFile(pidPath)
-    nativePid = (parseJsonLines(pidPath)[0] as { nativePid: number }).nativePid
+    await withTimeout(started, EVENT_TIMEOUT_MS, "process wrapper did not report started")
+    const pidRecord = parseJsonLines(pidPath)[0] as { wrapperPid: number; nativePid: number }
+    wrapperPid = pidRecord.wrapperPid
+    nativePid = pidRecord.nativePid
     assert.equal(testPidAlive(nativePid), true)
     writeFileSync(stopPath, "stop\n")
     const completed = await Promise.race([
-      completion,
+      Promise.all([nativeExited, completion]).then(([, result]) => result),
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("wrapper ignored stop signal")), 1500)),
     ])
     assert.equal(completed.code, 0, completed.stderr)
-    await waitForProcessExit(nativePid)
+    assert.deepEqual((parseJsonLines(eventsPath) as Array<{ event: string }>).map((row) => row.event), [
+      "started", "native-exited",
+    ])
+    assert.equal(testPidAlive(nativePid), false)
+    assert.equal(testPidAlive(wrapperPid), false)
   } finally {
     if (child && child.exitCode === null) {
       child.kill("SIGTERM")
       if (completion) await completion.catch(() => undefined)
     }
+    subscription?.close()
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -2850,18 +3143,26 @@ test("timeout kills a long-lived wrapper child and cleanup removes the real dire
   const pidDir = join(root, "pid")
   mkdirSync(pidDir, { recursive: true })
   const pidFile = join(pidDir, "lsp.jsonl")
+  const eventsPath = join(root, "events.jsonl")
   const wrapper = resolve("scripts/fixtures/codemode-execute-process-wrapper.mjs")
   let observedPids: number[] = []
+  let subscription: CompletionEventSubscription | undefined
   try {
-    const completed = await runCommand(
+    subscription = subscribeToCompletionEvents(eventsPath)
+    const started = subscription.waitFor("started")
+    const nativeExited = subscription.waitFor("native-exited")
+    const completion = runCommand(
       process.execPath,
-      [wrapper, pidFile, process.execPath, "-e", "setInterval(() => {}, 1000)"],
+      [wrapper, pidFile, "--events", eventsPath, process.execPath, "-e", "setInterval(() => {}, 1000)"],
       {
         cwd: root,
         env: { ...process.env, OCMM_CODEMODE_STOP_PATH: join(pidDir, "stop") },
         timeoutMs: 1000,
       },
     )
+    await withTimeout(started, EVENT_TIMEOUT_MS, "process wrapper did not report started")
+    const completed = await completion
+    await withTimeout(nativeExited, EVENT_TIMEOUT_MS, "process wrapper did not report native exit")
     assert.equal(completed.timedOut, true)
     assert.equal(existsSync(pidFile), true)
     const recorded = JSON.parse(readFileSync(pidFile, "utf8")) as { wrapperPid: number; nativePid: number }
@@ -2869,8 +3170,11 @@ test("timeout kills a long-lived wrapper child and cleanup removes the real dire
     assert.ok(Number.isInteger(recorded.nativePid))
     observedPids = [recorded.wrapperPid, recorded.nativePid, completed.pid].filter((value): value is number =>
       typeof value === "number" && value > 0)
-    await waitForProcessExit(recorded.wrapperPid)
-    await waitForProcessExit(recorded.nativePid)
+    assert.deepEqual((parseJsonLines(eventsPath) as Array<{ event: string }>).map((row) => row.event), [
+      "started", "native-exited",
+    ])
+    assert.equal(testPidAlive(recorded.wrapperPid), false)
+    assert.equal(testPidAlive(recorded.nativePid), false)
 
     const baseline = nonPassingBaseline()
     const attempt: AttemptRecord = {
@@ -2896,6 +3200,7 @@ test("timeout kills a long-lived wrapper child and cleanup removes the real dire
     assert.equal(cleanup.aggregate.attemptRootsRemoved, 1)
     assert.equal(cleanup.aggregate.parentRootRemoved, true)
   } finally {
+    subscription?.close()
     rmSync(parentRoot, { recursive: true, force: true })
   }
   for (const pid of observedPids) {

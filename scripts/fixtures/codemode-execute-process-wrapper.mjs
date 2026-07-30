@@ -1,9 +1,12 @@
 import { spawn } from "node:child_process"
 import { appendFileSync, existsSync } from "node:fs"
 
-const [pidFile, command, ...args] = process.argv.slice(2)
-if (!pidFile || !command) {
-  process.stderr.write("usage: node codemode-execute-process-wrapper.mjs <pid-file> <command> [args...]\n")
+const [pidFile, firstArgument, ...remainingArguments] = process.argv.slice(2)
+const eventsPath = firstArgument === "--events" ? remainingArguments[0] : undefined
+const command = firstArgument === "--events" ? remainingArguments[1] : firstArgument
+const args = firstArgument === "--events" ? remainingArguments.slice(2) : remainingArguments
+if (!pidFile || !command || (firstArgument === "--events" && !eventsPath)) {
+  process.stderr.write("usage: node codemode-execute-process-wrapper.mjs <pid-file> [--events <events-file>] <command> [args...]\n")
   process.exit(64)
 }
 
@@ -12,9 +15,25 @@ const child = spawn(command, args, { stdio: "inherit", windowsHide: true })
 let stopping = false
 let requestedStop = false
 let ownershipWriteFailed = false
+let eventWriteFailed = false
+let spawnFailed = false
+let nativeExitRecorded = false
 let forceTimer
 let stopTimer
 const stopPath = process.env.OCMM_CODEMODE_STOP_PATH
+
+function event(name) {
+  if (!eventsPath) return true
+  try {
+    appendFileSync(eventsPath, `${JSON.stringify({ event: name })}\n`)
+    return true
+  } catch (error) {
+    eventWriteFailed = true
+    process.stderr.write(`failed to record process event: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+    return false
+  }
+}
 
 function stop(signal, requested = true) {
   if (stopping) return
@@ -43,15 +62,20 @@ process.on("exit", () => {
 child.once("error", (error) => {
   if (stopTimer) clearInterval(stopTimer)
   if (forceTimer) clearTimeout(forceTimer)
+  spawnFailed = true
   stopping = true
   process.stderr.write(`${error.message}\n`)
   process.exitCode = 1
 })
 child.once("exit", (code, signal) => {
+  if (!spawnFailed && !nativeExitRecorded) {
+    nativeExitRecorded = true
+    event("native-exited")
+  }
   if (stopTimer) clearInterval(stopTimer)
   if (forceTimer) clearTimeout(forceTimer)
   stopping = true
-  process.exitCode = ownershipWriteFailed ? 1 : requestedStop ? 0 : typeof code === "number" ? code : signal ? 1 : 0
+  process.exitCode = ownershipWriteFailed || eventWriteFailed ? 1 : requestedStop ? 0 : typeof code === "number" ? code : signal ? 1 : 0
 })
 
 try {
@@ -61,6 +85,8 @@ try {
   process.stderr.write(`failed to record process ownership: ${error instanceof Error ? error.message : String(error)}\n`)
   stop("SIGTERM", false)
 }
+
+if (!ownershipWriteFailed && !event("started")) stop("SIGTERM", false)
 
 if (!stopping && stopPath) {
   stopTimer = setInterval(() => {
