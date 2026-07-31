@@ -1,9 +1,9 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { normalizeOcmmPackage } from "../scripts/normalize-ocmm-package.ts"
 
@@ -44,7 +44,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object"
 }
 
+function sanitizedNpmFailure(error: Error | undefined, stderr: string): string {
+  const details = [error?.message, stderr].filter((value): value is string => Boolean(value)).join("\n")
+  const sanitized = details
+    .replace(/\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/((?:["']?(?:credential|token|password|secret|authorization|api[-_]?key)["']?)\s*(?:=|:)\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "$1[REDACTED]")
+  return (sanitized || "(no executable error or stderr captured)").slice(0, 2048)
+}
+
+test("npm pack failure diagnostics redact credentials and cap output", () => {
+  const failure = sanitizedNpmFailure(
+    new Error("api-key=error-secret"),
+    `authorization: Bearer stderr-secret\npassword: "password-secret"\n${"x".repeat(4096)}`,
+  )
+  assert.doesNotMatch(failure, /error-secret|stderr-secret|password-secret/i)
+  assert.match(failure, /\[REDACTED\]/)
+  assert.ok(failure.length <= 2048)
+})
+
 function npmPackDryRun(root: string): string[] {
+  assert.notEqual(resolve(root), resolve(process.cwd()), "npm pack dry-run must run outside the source workspace")
+  const manifest: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  assert.ok(isRecord(manifest), "npm pack fixture must have an object package manifest")
+  for (const field of ["devEngines", "workspaces", "dependencies", "optionalDependencies"] as const) {
+    assert.equal(field in manifest, false, `npm pack fixture manifest must omit ${field}`)
+  }
+  assert.equal(JSON.stringify(manifest).includes("workspace:"), false, "npm pack fixture manifest must omit workspace: specs")
   const artifactsBefore = packageArtifacts(root)
   const executable = process.platform === "win32" ? "npm.cmd" : "npm"
   const args = ["pack", "--dry-run", "--json", "--ignore-scripts"]
@@ -55,10 +80,11 @@ function npmPackDryRun(root: string): string[] {
     encoding: "utf8",
     windowsHide: true,
   })
-  const stderr = result.stderr
+  const stderr = result.stderr ?? ""
+  const failure = sanitizedNpmFailure(result.error, stderr)
   assert.deepEqual(packageArtifacts(root), artifactsBefore, "npm pack dry-run must not create a tarball")
-  assert.equal(result.error, undefined, "npm executable must be available")
-  assert.equal(result.status, 0, `npm pack dry-run failed; captured ${Buffer.byteLength(stderr)} stderr bytes`)
+  assert.equal(result.error, undefined, `npm executable must be available:\n${failure}`)
+  assert.equal(result.status, 0, `npm pack dry-run failed:\n${failure}`)
 
   let payload: unknown
   try {
@@ -147,15 +173,31 @@ test("normalizeOcmmPackage stages the deepwork Codex bundle and omits npm binari
 
 test("npm pack dry-run emits exact canonical coding-agent session inventories", () => {
   assert.equal(CODING_AGENT_RUNTIME_FILES.length, 26)
-  const files = npmPackDryRun(process.cwd())
-  const expected = [...CODING_AGENT_RUNTIME_FILES].sort()
-
-  for (const prefix of ["skills/coding-agent-sessions", "plugins/deepwork/skills/coding-agent-sessions"]) {
-    const inventory = inventoryUnderPrefix(files, prefix)
-    assert.deepEqual(inventory, expected, `${prefix} exact runtime inventory`)
-    assertNoDevelopmentFiles(files, prefix)
-    for (const required of ["LICENSE-UPSTREAM.md", "NOTICE.md", "scripts/find-agent-sessions.py", "scripts/agent_sessions/cli.py"] as readonly string[]) {
-      assert.ok((inventory as readonly string[]).includes(required), `${prefix} must include ${required}`)
+  const root = mkdtempSync(join(tmpdir(), "ocmm-coding-agent-sessions-pack-"))
+  try {
+    writeJson(join(root, "package.json"), {
+      name: "ocmm-coding-agent-sessions-inventory-fixture",
+      version: "0.0.0",
+      private: true,
+      files: ["skills", "plugins"],
+    })
+    for (const path of ["skills/coding-agent-sessions", "plugins/deepwork/skills/coding-agent-sessions"]) {
+      cpSync(join(process.cwd(), path), join(root, path), { recursive: true })
     }
+
+    const files = npmPackDryRun(root)
+    const expected = [...CODING_AGENT_RUNTIME_FILES].sort()
+    for (const prefix of ["skills/coding-agent-sessions", "plugins/deepwork/skills/coding-agent-sessions"]) {
+      const inventory = inventoryUnderPrefix(files, prefix)
+      assert.deepEqual(inventory, expected, `${prefix} exact runtime inventory`)
+      assertNoDevelopmentFiles(files, prefix)
+      for (const required of ["LICENSE-UPSTREAM.md", "NOTICE.md", "scripts/find-agent-sessions.py", "scripts/agent_sessions/cli.py"] as readonly string[]) {
+        assert.ok((inventory as readonly string[]).includes(required), `${prefix} must include ${required}`)
+      }
+    }
+    assert.deepEqual(packageArtifacts(root), [], "temporary pack fixture must not contain tarballs")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    assert.equal(existsSync(root), false, "temporary pack fixture must be removed")
   }
 })
