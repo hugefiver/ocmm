@@ -398,7 +398,7 @@ Drop a config file in either of these locations (project wins on conflicts):
 - `<project>/.opencode/ocmm.jsonc`
 - `~/.config/opencode/ocmm.jsonc` (all platforms, including Windows — follows opencode's convention)
 
-Schema (Zod-validated; unknown keys rejected). All fields optional:
+Schema (Zod-validated; unknown object keys are stripped). Declared invalid fields fail direct schema parsing and are pruned locally by runtime loading so valid siblings and lower-priority values can survive. All fields optional:
 
 ```jsonc
 {
@@ -445,11 +445,16 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
       "variant": "max",
     },
     "orchestrator": {
-      "model": "<provider>/<primary-reasoning-model>",
-      "variant": "max",
-      "fallbackModels": [
-        "<provider>/<fallback-reasoning-model>",
-        { "providers": ["<provider>"], "model": "<fallback-model>", "variant": "high" },
+      "reasoning": "high",
+      "models": [
+        "openai/gpt-5.6-sol:high",
+        {
+          "model": "anthropic/claude-sonnet-4-6:max",
+          "reasoning": "max",
+          "temperature": 0.2,
+          "top_p": 0.8,
+          "max_tokens": 8192
+        }
       ],
     },
     "builder": {
@@ -465,8 +470,7 @@ Schema (Zod-validated; unknown keys rejected). All fields optional:
 
   "categories": {
     "hard-reasoning": {
-      "model": "<provider>/<primary-reasoning-model>",
-      "variant": "xhigh",
+      "models": ["openai/gpt-5.6-sol:xhigh"],
     },
   },
 
@@ -637,12 +641,16 @@ Both `agents.*` and `categories.*` accept either shape:
 
 | Field            | Type                                                                                             | Meaning                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `model`          | `"provider/model"` string                                                                        | Primary model. Split into `providers: [provider]` + `model`.                                                                |
-| `variant`        | `"low" \| "medium" \| "high" \| "xhigh" \| "max" \| "minimal" \| "none" \| "auto" \| "thinking"` | Promoted onto the first chain entry.                                                                                        |
-| `fallbackModels` | array of `string \| FallbackEntry`                                                               | Strings are parsed as `provider/model`; objects pass through. Prepended after the primary entry to form the fallback chain. |
-| `requirement`    | full `ModelRequirement` object                                                                   | If present, shorthand fields are ignored. Use this when you need `requiresProvider` / `requiresAnyModel` / `requiresModel`. |
+| `models`         | non-empty array of `string \| { model, reasoning?, temperature?, top_p?, max_tokens? }`         | Preferred canonical fallback chain. Objects validate `temperature` `0..2`, `top_p` `0..1`, and positive integer `max_tokens`; unknown keys are stripped. |
+| `model`          | `"provider/model"` string                                                                        | Legacy primary shorthand. Split into `providers: [provider]` plus `model`.                                                  |
+| `variant`        | `"low" \| "medium" \| "high" \| "xhigh" \| "max" \| "minimal" \| "none" \| "auto" \| "thinking"` | Requirement default; with legacy `model`, also promoted onto the first chain entry.                                        |
+| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max" \| "auto"`; deprecated input alias `"none"` | Canonical requirement default. An individual `models` object value is entry-local and wins its model suffix. |
+| `fallbackModels` | array of `string \| FallbackEntry`                                                               | Legacy fallback shorthand appended after legacy `model`; its ordinary user/project accumulation behavior is unchanged.     |
+| `requirement`    | full `ModelRequirement` object                                                                   | Full guards/defaults. With `models`, only its chain is replaced; otherwise it outranks legacy `model`/`fallbackModels`.    |
 | `disabled`       | `true`                                                                                           | (Agents only.) Removes the agent from registration.                                                                         |
 | `description`    | string                                                                                           | Overrides the built-in description (used in agent registration).                                                            |
+
+`models[0]` is the primary model; the remaining entries are ordered runtime fallbacks. Internally, ocmm normalizes the array to the existing route/fallback chain. Direct model-source precedence is `models` → `requirement` chain → `model` plus `fallbackModels` → alias; chains are never merged. When `models` and `requirement` coexist, ocmm replaces only `fallbackChain` while preserving cloned requirement guards and defaults. Explicit top-level `reasoning`/`variant` overrides requirement defaults; per-entry fields remain local. `provider_options` is unsupported and, like other unknown object fields, is stripped before runtime. Legacy forms remain supported.
 
 ## Hook defaults
 
@@ -833,10 +841,11 @@ The import is requirement-only: it copies the normalized `ModelRequirement` — 
 | --------------------------------------------------- | ---------------------------------------------- |
 | Scalars (`debug`, `workflow`, ...)                  | Replaced                                       |
 | Objects (`agents`, `categories`, `runtimeFallback`, `subagent`) | Deep-merged (profile field wins per-key)       |
+| Nested `agents.*.models`, `categories.*.models`     | **Replaced** (the overlay owns the complete canonical chain; no index merge or union) |
 | `fallbackModels`, `disabledAgents`                  | **Replaced** (profile fully owns these arrays) |
 | Other arrays (`retryOnStatusCodes`, ...)            | Replaced                                       |
 
-`fallbackModels` and `disabledAgents` are unioned across user and project configs (NOT profiles). Profiles are the one layer that replaces.
+Nested canonical `models` arrays replace across both ordinary user/project layers and profiles. Root `fallbackModels` and `disabledAgents` remain unioned across user/project configs and replaced by profiles.
 
 ### Fast model routing
 

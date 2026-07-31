@@ -46,6 +46,52 @@
           "model": {
             "type": "string"
           },
+          "models": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string"
+                    },
+                    "reasoning": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "auto",
+                        "none"
+                      ]
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "top_p": {
+                      "type": "number"
+                    },
+                    "max_tokens": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "model"
+                  ]
+                }
+              ]
+            },
+            "minItems": 1
+          },
           "fallbackModels": {
             "type": "array",
             "items": {
@@ -60,7 +106,8 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "minItems": 1
                     },
                     "model": {
                       "type": "string"
@@ -146,7 +193,8 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "minItems": 1
                     },
                     "model": {
                       "type": "string"
@@ -216,7 +264,8 @@
                     "providers",
                     "model"
                   ]
-                }
+                },
+                "minItems": 1
               },
               "variant": {
                 "type": "string",
@@ -310,6 +359,52 @@
           "model": {
             "type": "string"
           },
+          "models": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string"
+                    },
+                    "reasoning": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "auto",
+                        "none"
+                      ]
+                    },
+                    "temperature": {
+                      "type": "number"
+                    },
+                    "top_p": {
+                      "type": "number"
+                    },
+                    "max_tokens": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "model"
+                  ]
+                }
+              ]
+            },
+            "minItems": 1
+          },
           "fallbackModels": {
             "type": "array",
             "items": {
@@ -324,7 +419,8 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "minItems": 1
                     },
                     "model": {
                       "type": "string"
@@ -410,7 +506,8 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "minItems": 1
                     },
                     "model": {
                       "type": "string"
@@ -480,7 +577,8 @@
                     "providers",
                     "model"
                   ]
-                }
+                },
+                "minItems": 1
               },
               "variant": {
                 "type": "string",
@@ -1139,7 +1237,8 @@
                         "type": "array",
                         "items": {
                           "type": "string"
-                        }
+                        },
+                        "minItems": 1
                       }
                     ]
                   },
@@ -1315,6 +1414,52 @@
                 "model": {
                   "type": "string"
                 },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "string"
+                          },
+                          "reasoning": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "auto",
+                              "none"
+                            ]
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "top_p": {
+                            "type": "number"
+                          },
+                          "max_tokens": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "model"
+                        ]
+                      }
+                    ]
+                  },
+                  "minItems": 1
+                },
                 "fallbackModels": {
                   "type": "array",
                   "items": {
@@ -1329,7 +1474,8 @@
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "minItems": 1
                           },
                           "model": {
                             "type": "string"
@@ -1415,7 +1561,8 @@
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "minItems": 1
                           },
                           "model": {
                             "type": "string"
@@ -1485,7 +1632,8 @@
                           "providers",
                           "model"
                         ]
-                      }
+                      },
+                      "minItems": 1
                     },
                     "variant": {
                       "type": "string",
@@ -1579,6 +1727,52 @@
                 "model": {
                   "type": "string"
                 },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "string"
+                          },
+                          "reasoning": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "auto",
+                              "none"
+                            ]
+                          },
+                          "temperature": {
+                            "type": "number"
+                          },
+                          "top_p": {
+                            "type": "number"
+                          },
+                          "max_tokens": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "model"
+                        ]
+                      }
+                    ]
+                  },
+                  "minItems": 1
+                },
                 "fallbackModels": {
                   "type": "array",
                   "items": {
@@ -1593,7 +1787,8 @@
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "minItems": 1
                           },
                           "model": {
                             "type": "string"
@@ -1679,7 +1874,8 @@
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "minItems": 1
                           },
                           "model": {
                             "type": "string"
@@ -1749,7 +1945,8 @@
                           "providers",
                           "model"
                         ]
-                      }
+                      },
+                      "minItems": 1
                     },
                     "variant": {
                       "type": "string",
@@ -2400,7 +2597,8 @@
                               "type": "array",
                               "items": {
                                 "type": "string"
-                              }
+                              },
+                              "minItems": 1
                             }
                           ]
                         },

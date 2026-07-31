@@ -5,6 +5,8 @@ import { join } from "node:path"
 
 import {
   AgentEntrySchema,
+  CanonicalModelEntrySchema,
+  CanonicalModelEntryObjectSchema,
   CategoryEntrySchema,
   defaultConfig,
   FallbackEntrySchema,
@@ -315,6 +317,96 @@ test("canonical reasoning is accepted at every declared configuration boundary",
   }
 })
 
+test("canonical models accept mixed string and object entries on agents and categories", () => {
+  const models = [
+    "openai/gpt-5.6-sol",
+    {
+      model: "anthropic/claude-sonnet-4",
+      reasoning: "none",
+      temperature: 0.2,
+      top_p: 0.9,
+      max_tokens: 1024,
+    },
+  ]
+
+  assert.deepEqual(AgentEntrySchema.parse({ models }).models, models)
+  assert.deepEqual(CategoryEntrySchema.parse({ models }).models, models)
+})
+
+test("canonical model entries strip provider options and other unknown fields", () => {
+  const parsed = CanonicalModelEntryObjectSchema.parse({
+    model: "openai/gpt-5.6-sol",
+    provider_options: { cache_control: "ephemeral" },
+    ignored: true,
+  })
+
+  assert.deepEqual(parsed, { model: "openai/gpt-5.6-sol" })
+  assert.equal("provider_options" in parsed, false)
+  assert.equal("ignored" in parsed, false)
+})
+
+test("canonical model entries reject invalid arrays and field values", () => {
+  for (const schema of [AgentEntrySchema, CategoryEntrySchema]) {
+    assert.equal(schema.safeParse({ models: [] }).success, false)
+  }
+
+  for (const entry of [
+    "",
+    { model: "" },
+    { model: "openai/gpt-5.6-sol", reasoning: "extreme" },
+    { model: "openai/gpt-5.6-sol", temperature: -0.01 },
+    { model: "openai/gpt-5.6-sol", temperature: 2.01 },
+    { model: "openai/gpt-5.6-sol", top_p: -0.01 },
+    { model: "openai/gpt-5.6-sol", top_p: 1.01 },
+    { model: "openai/gpt-5.6-sol", max_tokens: 0 },
+    { model: "openai/gpt-5.6-sol", max_tokens: -1 },
+    { model: "openai/gpt-5.6-sol", max_tokens: 1.5 },
+  ]) {
+    assert.equal(CanonicalModelEntrySchema.safeParse(entry).success, false, JSON.stringify(entry))
+  }
+})
+
+test("canonical model entries accept every canonical reasoning input", () => {
+  const reasoningInputs = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto", "none"] as const
+
+  for (const reasoning of reasoningInputs) {
+    assert.equal(
+      CanonicalModelEntryObjectSchema.parse({ model: "openai/gpt-5.6-sol", reasoning }).reasoning,
+      reasoning,
+    )
+  }
+})
+
+test("generated JSON Schema preserves canonical model boundaries", () => {
+  const asRecord = (value: unknown): Record<string, unknown> => {
+    assert.ok(value !== null && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>
+  }
+  const expectedProperties = ["max_tokens", "model", "reasoning", "temperature", "top_p"]
+  const expectedReasoning = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto", "none"]
+  const schema = asRecord(JSON.parse(readFileSync(join(process.cwd(), "schema.json"), "utf8")))
+  const properties = asRecord(schema.properties)
+
+  for (const boundary of ["agents", "categories"]) {
+    const entry = asRecord(asRecord(properties[boundary]).additionalProperties)
+    const models = asRecord(asRecord(entry.properties).models)
+    const branches = asRecord(models.items).oneOf ?? asRecord(models.items).anyOf
+    assert.equal(models.type, "array", `${boundary}: models must be an array`)
+    assert.equal(models.minItems, 1, `${boundary}: models must require at least one entry`)
+    assert.ok(Array.isArray(branches), `${boundary}: models items must be a union`)
+    assert.ok(branches.some((branch) => asRecord(branch).type === "string"), `${boundary}: missing string branch`)
+
+    const objectBranch = branches.find((branch) => asRecord(branch).type === "object")
+    assert.ok(objectBranch, `${boundary}: missing object branch`)
+    const objectSchema = asRecord(objectBranch)
+    const objectProperties = asRecord(objectSchema.properties)
+    assert.deepEqual(Object.keys(objectProperties).sort(), expectedProperties, `${boundary}: canonical object property names`)
+    assert.deepEqual(objectSchema.required, ["model"], `${boundary}: canonical object requires model`)
+    assert.deepEqual(asRecord(objectProperties.reasoning).enum, expectedReasoning, `${boundary}: canonical reasoning enum`)
+    assert.equal("provider_options" in objectProperties, false, `${boundary}: provider_options must be absent`)
+  }
+})
+
 test("invalid canonical reasoning is pruned while valid siblings survive tolerant parsing", () => {
   const result = tolerantParse(AgentEntrySchema, {
     model: "openai/gpt-5.6-sol",
@@ -441,6 +533,7 @@ test("direct schema rejects later Oracle slots without a resolved normal require
     { "oracle-5th": { alias: "missing-model" } },
     { "oracle-7th": { model: "" } },
     { "oracle-8th": { fallbackModels: [] } },
+    { "oracle-9th": { models: [] } },
     {
       "oracle-6th": { alias: "alias-a" },
       "alias-a": { alias: "alias-b" },
@@ -456,6 +549,7 @@ test("direct schema rejects later Oracle slots without a resolved normal require
     { "oracle-3rd": { model: "openai/gpt-5.6-sol" } },
     { "oracle-4th": { fallbackModels: ["openai/gpt-5.6-sol"] } },
     { "oracle-5th": { requirement: { fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-sol" }] } } },
+    { "oracle-9th": { models: ["openai/gpt-5.6-sol"] } },
     {
       "oracle-6th": { alias: "review-model" },
       "review-model": { model: "openai/gpt-5.6-sol" },

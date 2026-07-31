@@ -311,6 +311,33 @@ test("deepMerge: scalars and objects override; key-aware arrays union", () => {
   assert.deepEqual(merged.other, [3])
 })
 
+test("loadConfig replaces canonical agent models arrays across ordinary layers", () => {
+  withUserAndProjectConfigs(
+    {
+      agents: {
+        orchestrator: {
+          models: [
+            { model: "openai/BASE", reasoning: "high", temperature: 0.2 },
+            "anthropic/BASE-FALLBACK",
+          ],
+        },
+      },
+    },
+    {
+      agents: {
+        orchestrator: {
+          models: [{ model: "zhipu/PROJECT", top_p: 0.8, max_tokens: 2048 }],
+        },
+      },
+    },
+    (config) => {
+      assert.deepEqual(config.agents?.orchestrator?.models, [
+        { model: "zhipu/PROJECT", top_p: 0.8, max_tokens: 2048 },
+      ])
+    },
+  )
+})
+
 test("workflow field defaults to v1", () => {
   const cfg = defaultConfig()
   assert.equal(cfg.workflow, "v1")
@@ -555,6 +582,34 @@ test("loadConfig restores a lower-priority agent field after dropping an invalid
       assert.equal(config.agents?.orchestrator?.description, "project")
     },
   )
+})
+
+test("loadConfig restores lower canonical models after pruning an invalid project override", () => {
+  withUserAndProjectConfigs(
+    { agents: { orchestrator: { models: ["openai/LOWER", "anthropic/LOWER-FALLBACK"] } } },
+    { agents: { orchestrator: { description: "project", models: [] } } },
+    (config) => {
+      assert.deepEqual(config.agents?.orchestrator?.models, ["openai/LOWER", "anthropic/LOWER-FALLBACK"])
+      assert.equal(config.agents?.orchestrator?.description, "project")
+    },
+  )
+})
+
+test("loadConfig prunes unrecoverable canonical models while preserving legacy siblings", () => {
+  withProjectConfig({
+    agents: {
+      orchestrator: {
+        models: [],
+        model: "openai/LEGACY",
+        fallbackModels: ["anthropic/LEGACY-FALLBACK"],
+      },
+    },
+  }, (config) => {
+    const entry = config.agents?.orchestrator
+    assert.equal(entry?.models, undefined)
+    assert.equal(entry?.model, "openai/LEGACY")
+    assert.deepEqual(entry?.fallbackModels, ["anthropic/LEGACY-FALLBACK"])
+  })
 })
 
 test("loadConfig restores profile selection and inline profile provenance", () => {

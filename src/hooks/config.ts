@@ -529,7 +529,7 @@ function selectRoutePrimary(args: {
 
 function hasExplicitRouteSelection(cfg: OcmmConfig, name: string): boolean {
   return [cfg.agents?.[name], cfg.categories?.[name]].some((entry) =>
-    entry !== undefined && ["model", "fallbackModels", "requirement", "alias"].some((field) =>
+    entry !== undefined && ["model", "models", "fallbackModels", "requirement", "alias"].some((field) =>
       Object.prototype.hasOwnProperty.call(entry, field)
     )
   )

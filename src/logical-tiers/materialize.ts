@@ -126,7 +126,7 @@ function registrationFrom(
 }
 
 function hasExplicitModelSelection(entry: AgentEntry | undefined): boolean {
-  return !!entry && ["model", "fallbackModels", "requirement", "alias"]
+  return !!entry && ["model", "models", "fallbackModels", "requirement", "alias"]
     .some((key) => entry[key as keyof AgentEntry] !== undefined)
 }
 

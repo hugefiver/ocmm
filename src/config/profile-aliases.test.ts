@@ -180,6 +180,57 @@ test("materialization deep-clones a complete target requirement without leaking 
   assert.deepEqual(targetRequirement.requiresProvider, ["openai", "fallback"])
 })
 
+test("qualified aliases materialize and isolate canonical target model chains", () => {
+  const target = {
+    models: [
+      {
+        model: "openai/gpt-5.6-sol",
+        reasoning: "high" as const,
+        temperature: 0.25,
+        top_p: 0.8,
+        max_tokens: 4096,
+      },
+      { model: "anthropic/claude-opus-4-7", reasoning: "max" as const, temperature: 0.1 },
+    ],
+  }
+  const config = configWithAgents({ source: { alias: "precision:reviewer" } })
+  const result = materializeQualifiedAgentAliases({
+    config,
+    baseAgents: config.agents ?? {},
+    profiles: profiles({ precision: { agents: { reviewer: target } } }),
+  })
+
+  const requirement = result.agents?.source?.requirement
+  assert.deepEqual(requirement?.fallbackChain, [
+    {
+      providers: ["openai"],
+      model: "gpt-5.6-sol",
+      reasoning: "high",
+      temperature: 0.25,
+      topP: 0.8,
+      maxTokens: 4096,
+    },
+    {
+      providers: ["anthropic"],
+      model: "claude-opus-4-7",
+      reasoning: "max",
+      temperature: 0.1,
+    },
+  ])
+
+  requirement!.fallbackChain[0]!.providers.push("mutated")
+  requirement!.fallbackChain[0]!.temperature = 1
+  target.models[1]!.temperature = 0.9
+  assert.deepEqual(target.models[0], {
+    model: "openai/gpt-5.6-sol",
+    reasoning: "high",
+    temperature: 0.25,
+    top_p: 0.8,
+    max_tokens: 4096,
+  })
+  assert.equal(requirement!.fallbackChain[1]!.temperature, 0.1)
+})
+
 test("source direct requirements and shorthand models override a qualified alias", () => {
   const config = configWithAgents({
     modelSource: { alias: "precision:reviewer", model: "SOURCE" },
@@ -190,6 +241,10 @@ test("source direct requirements and shorthand models override a qualified alias
     requirementSource: {
       alias: "precision:reviewer",
       requirement: { fallbackChain: [{ providers: ["source"], model: "REQUIREMENT" }] },
+    },
+    modelsSource: {
+      alias: "precision:reviewer",
+      models: ["source/MODELS"],
     },
   })
   const result = materializeQualifiedAgentAliases({
@@ -203,6 +258,8 @@ test("source direct requirements and shorthand models override a qualified alias
   assert.equal(result.agents?.fallbackSource?.requirement, undefined)
   assert.equal(result.agents?.fallbackSource?.fallbackModels?.[0] instanceof Object, true)
   assert.equal(result.agents?.requirementSource?.requirement?.fallbackChain[0]?.model, "REQUIREMENT")
+  assert.equal(result.agents?.modelsSource?.requirement, undefined)
+  assert.deepEqual(result.agents?.modelsSource?.models, ["source/MODELS"])
 })
 
 test("referenced invalid profiles, targets, and requirement-less aliases fail materialization", () => {

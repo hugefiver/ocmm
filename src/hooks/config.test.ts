@@ -66,6 +66,11 @@ const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
 const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
 
+type ConfigTarget = {
+  agent: Record<string, unknown>
+  provider?: Record<string, unknown>
+}
+
 function countText(text: string, needle: string): number {
   return text.split(needle).length - 1
 }
@@ -648,7 +653,7 @@ test("configured planning profiles register canonical prompts, policies, permiss
       "plan-critic": { variants: { low: "low" as const } },
     },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {},
     provider: { openai: { models: { "gpt-5.7-sol": {} } } },
   }
@@ -701,6 +706,56 @@ test("configured planning profiles register canonical prompts, policies, permiss
   }
 })
 
+test("canonical models are explicit user selections for ordinary and planning routes", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      orchestrator: {
+        models: [
+          { model: "openai/gpt-5.6-sol", reasoning: "high" as const, temperature: 0.25 },
+          "anthropic/claude-opus-4-7",
+        ],
+      },
+      planner: {
+        models: [
+          { model: "openai/gpt-5.6-sol", reasoning: "max" as const, top_p: 0.8 },
+          "anthropic/claude-opus-4-7",
+        ],
+        variants: { high: "high" as const },
+      },
+    },
+  }
+  const target: ConfigTarget = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  for (const name of ["orchestrator", "planner", "planner-high"] as const) {
+    assert.equal((target.agent[name] as Record<string, unknown>).model, "openai/gpt-5.6-sol", name)
+    assert.deepEqual(
+      {
+        requirementSource: publishedRoute(routeRegistry, name).requirementSource,
+        primarySource: publishedRoute(routeRegistry, name).primarySource,
+      },
+      { requirementSource: "user-config", primarySource: "user-requirement" },
+      name,
+    )
+  }
+  assert.deepEqual(publishedRoute(routeRegistry, "planner").requirement.fallbackChain[0], {
+    providers: ["openai"],
+    model: "gpt-5.6-sol",
+    reasoning: "max",
+    topP: 0.8,
+  })
+})
+
 test("managed variant-only tiers may catalog-upgrade without weakening explicit precedence", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
   const config = {
@@ -717,7 +772,7 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
       reviewer: { variants: { high: "high" as const } },
     },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {
       "planner-low": { model: "host/existing-planner-low" },
     },
@@ -1045,7 +1100,7 @@ test("omo and v1 compose default plus Opus 5 exactly once for orchestrator only"
         workflow,
         agents: opus5Agents,
       }
-      const target = {
+      const target: ConfigTarget = {
         agent: {},
         provider: { anthropic: { models: { "claude-opus-5": {} } } },
       }
@@ -1087,7 +1142,7 @@ test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", a
         planner: { model: "anthropic/claude-opus-5", variants: { high: "max" as const } },
       },
     }
-    const target = {
+    const target: ConfigTarget = {
       agent: {},
       provider: { anthropic: { models: { "claude-opus-5": {} } } },
     }
@@ -1134,7 +1189,7 @@ test("description-only oracle inherits the explicit reviewer model before catalo
     },
   }
   const registeredAgentModels = new Map<string, string>()
-  const target = {
+  const target: ConfigTarget = {
     agent: {},
     provider: { openai: { models: { "gpt-5.6-terra": {} } } },
   }
@@ -1416,11 +1471,11 @@ test("config registers shared skill paths and preserves existing urls", async ()
 test("config registers v1 injected skills as slash commands in v1 workflow", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-hook-v1-skills-"))
   try {
-    writeSkill(root, join("v1", "brainstorming"), "brainstorming", "Brainstorm")
-    writeSkill(root, join("v1", "writing-plans"), "writing-plans", "Plans")
-    writeSkill(root, join("v1", "subagent-driven-development"), "subagent-driven-development", "Subagents")
-    writeSkill(root, join("v1", "requesting-code-review"), "requesting-code-review", "Request review")
-    writeSkill(root, join("v1", "receiving-code-review"), "receiving-code-review", "Receive review")
+    writeSkill(root, join("v1", "brainstorming"), "brainstorming")
+    writeSkill(root, join("v1", "writing-plans"), "writing-plans")
+    writeSkill(root, join("v1", "subagent-driven-development"), "subagent-driven-development")
+    writeSkill(root, join("v1", "requesting-code-review"), "requesting-code-review")
+    writeSkill(root, join("v1", "receiving-code-review"), "receiving-code-review")
 
     const c = { ...defaultConfig(), workflow: "v1" as const, disabledCommands: ["writing-plans"] }
     const handler = createConfigHandler({ getConfig: () => c, skillsRoot: root })
@@ -1483,6 +1538,67 @@ test("config registers MCP servers and preserves user-disabled entries", async (
   assert.equal((cfg.mcp.local_docs as Record<string, unknown>).type, "remote")
 })
 
+test("config publishes canonical agent and category models as complete fallback routes", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      "canonical-worker": {
+        models: [
+          "openai/gpt-5.6-sol:high",
+          {
+            model: "anthropic/claude-sonnet-4-6",
+            reasoning: "low" as const,
+            temperature: 0.2,
+            top_p: 0.8,
+            max_tokens: 4_096,
+          },
+        ],
+      },
+    },
+    categories: {
+      "canonical-category": {
+        models: ["google/gemini-3.1-pro", "openai/gpt-5.6-sol"],
+      },
+    },
+  }
+  const target: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
+    agent: {},
+    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.equal((target.agent["canonical-worker"] as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((target.agent["canonical-category"] as Record<string, unknown>).model, "google/gemini-3.1-pro")
+  assert.deepEqual(
+    {
+      requirementSource: publishedRoute(routeRegistry, "canonical-worker").requirementSource,
+      primarySource: publishedRoute(routeRegistry, "canonical-worker").primarySource,
+    },
+    { requirementSource: "user-config", primarySource: "user-requirement" },
+  )
+  assert.deepEqual(publishedRoute(routeRegistry, "canonical-worker").requirement.fallbackChain, [
+    { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "high" },
+    {
+      providers: ["anthropic"],
+      model: "claude-sonnet-4-6",
+      reasoning: "low",
+      temperature: 0.2,
+      topP: 0.8,
+      maxTokens: 4_096,
+    },
+  ])
+  assert.deepEqual(publishedRoute(routeRegistry, "canonical-category").requirement.fallbackChain, [
+    { providers: ["google"], model: "gemini-3.1-pro" },
+    { providers: ["openai"], model: "gpt-5.6-sol" },
+  ])
+})
+
 test("registry-managed registration publishes orthogonal route provenance for selected primaries", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
   const config = {
@@ -1492,7 +1608,7 @@ test("registry-managed registration publishes orthogonal route provenance for se
       builder: { model: "openai/user-builder" },
     },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {
       reviewer: { model: "openai/host-reviewer" },
       orchestrator: { model: "openai/host-orchestrator" },
@@ -1668,7 +1784,7 @@ test("registry-managed registration publishes option fast paths without promotin
     agents: { "option-worker": { model: "outside/model" } },
   }
   const unrelated = { model: "unmanaged/model", nested: { untouched: true } }
-  const target = {
+  const target: ConfigTarget = {
     agent: { unrelated: structuredClone(unrelated) },
     provider: { outside: { models: { "model-fast": {} } } },
   }
@@ -1713,7 +1829,7 @@ test("registry-managed registration samples fast activation once for each config
 
 test("registry rebuilds atomically, materializes selected primaries, and retains a prior snapshot on failure", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
-  let config = {
+  let config: ReturnType<typeof defaultConfig> = {
     ...defaultConfig(),
     agents: { "deleted-worker": { model: "openai/deleted-worker" } },
   }
@@ -1722,7 +1838,7 @@ test("registry rebuilds atomically, materializes selected primaries, and retains
     routeRegistry,
     getFastMode: () => false,
   })
-  const target = {
+  const target: ConfigTarget = {
     agent: { reviewer: { model: "openai/host-reviewer" } },
     provider: { openai: { models: { "gpt-5.7-sol": {} } } },
   }
@@ -1779,7 +1895,7 @@ test("compatibility mode stays non-fast and rebuilds only registeredAgentModels"
     },
     agents: { "compat-worker": { model: "openai/compat-worker" } },
   }
-  const target = { agent: {}, provider: { openai: { models: {} } } }
+  const target: ConfigTarget = { agent: {}, provider: { openai: { models: {} } } }
 
   await createConfigHandler({
     getConfig: () => config,
@@ -1804,7 +1920,7 @@ test("compatibility mode registers a same-name custom agent over its category", 
     agents: { collision: { model: "openai/agent-wins" } },
     categories: { collision: { model: "openai/category-loses" } },
   }
-  const target = { agent: {}, provider: { openai: { models: { "agent-wins-fast": {} } } } }
+  const target: ConfigTarget = { agent: {}, provider: { openai: { models: { "agent-wins-fast": {} } } } }
 
   await createConfigHandler({ getConfig: () => config, registeredAgentModels })(target, undefined)
 
@@ -1837,7 +1953,7 @@ test("registry mode omits routes when disabled overrides skip registration", asy
 
 test("registry mode keeps host-disabled builtin agents unregistered and unpublished", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
-  const target = {
+  const target: ConfigTarget = {
     agent: {
       builder: {
         model: "host/model",
@@ -1853,7 +1969,7 @@ test("registry mode keeps host-disabled builtin agents unregistered and unpublis
     getFastMode: () => false,
   })(target, undefined)
 
-  const builder = target.agent.builder
+  const builder = target.agent.builder as Record<string, unknown>
   assert.equal(builder.disable, true)
   assert.equal(builder.model, "host/model")
   assert.deepEqual(builder.permission, { custom: "allow", task: "allow", question: "allow", "task_*": "allow" })
@@ -1867,7 +1983,7 @@ test("compatibility mode suppresses catalog upgrades for unresolved qualified al
     ...defaultConfig(),
     agents: { reviewer: { alias: "precision:reviewer" } },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {},
     provider: { openai: { models: { "gpt-5.7-sol": {} } } },
   }
@@ -1882,7 +1998,7 @@ test("compatibility mode suppresses category catalog upgrades for unresolved qua
     ...defaultConfig(),
     categories: { "hard-reasoning": { alias: "precision:hard-reasoning" } },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {},
     provider: { openai: { models: { "gpt-5.7-sol": {} } } },
   }
@@ -1909,7 +2025,7 @@ test("a malformed registry-managed invocation invalidates an older in-progress g
     getFastMode: () => false,
   })
 
-  const target = {
+  const target: ConfigTarget = {
     agent: {
       host: { model: "host/model", nested: { preserved: true } },
     },
@@ -1939,7 +2055,7 @@ test("compatibility aliases receive independently materialized final routes", as
     fastModels: { providers: ["openai"], mappings: {}, defaultRules: false, rules: [] },
     agents: { "code-search": { model: "openai/code-search-original" } },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: { explore: { model: "openai/explore-original" } },
     provider: {
       openai: {
@@ -1979,7 +2095,7 @@ test("registry mode does not resurrect a compatibility alias disabled in agents 
     ...defaultConfig(),
     agents: { explore: { disabled: true } },
   }
-  const target = {
+  const target: ConfigTarget = {
     agent: {
       explore: { model: "host/stale-explore" },
     },

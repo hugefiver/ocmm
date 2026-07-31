@@ -830,6 +830,60 @@ test("profile overlay applies agent override from activeProfile", () => {
   }
 })
 
+test("profile overlay replaces canonical agent models arrays", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: {
+        orchestrator: {
+          models: [
+            { model: "openai/BASE", reasoning: "high", temperature: 0.2 },
+            "anthropic/BASE-FALLBACK",
+          ],
+        },
+      },
+      profiles: {
+        strict: {
+          agents: {
+            orchestrator: {
+              models: [{ model: "zhipu/PROFILE", top_p: 0.8, max_tokens: 2048 }],
+            },
+          },
+        },
+      },
+      activeProfile: "strict",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+    assert.deepEqual(loaded.config.agents?.orchestrator?.models, [
+      { model: "zhipu/PROFILE", top_p: 0.8, max_tokens: 2048 },
+    ])
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("profile loading restores base canonical models after pruning an invalid overlay", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { orchestrator: { models: ["openai/BASE", "anthropic/BASE-FALLBACK"] } },
+      profiles: {
+        strict: {
+          agents: { orchestrator: { description: "profile", models: [] } },
+        },
+      },
+      activeProfile: "strict",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+    assert.deepEqual(loaded.config.agents?.orchestrator?.models, ["openai/BASE", "anthropic/BASE-FALLBACK"])
+    assert.equal(loaded.config.agents?.orchestrator?.description, "profile")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("OCMM_PROFILE env var overrides config activeProfile", () => {
   const xdg = makeTempXdg()
   try {

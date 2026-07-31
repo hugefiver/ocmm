@@ -165,6 +165,41 @@ test("resolveLogicalTierBase clones direct configured requirements and registrat
   assert.equal(configured.thinking?.budgetTokens, 1_000)
 })
 
+test("resolveLogicalTierBase treats canonical models as an explicit user-configured base", () => {
+  const configured: AgentEntry = {
+    models: [
+      {
+        model: "openai/gpt-5.6-sol",
+        reasoning: "high",
+        temperature: 0.25,
+        top_p: 0.8,
+        max_tokens: 4096,
+      },
+      { model: "anthropic/claude-opus-4-7", reasoning: "max", temperature: 0.1 },
+    ],
+  }
+  const resolved = resolveLogicalTierBase({ baseName: "custom", agents: { custom: configured } })!
+
+  assert.equal(resolved.resolutionSource, "user-config")
+  assert.equal(resolved.suppressCatalogUpgrade, true)
+  assert.deepEqual(resolved.requirement.fallbackChain, [
+    {
+      providers: ["openai"],
+      model: "gpt-5.6-sol",
+      reasoning: "high",
+      temperature: 0.25,
+      topP: 0.8,
+      maxTokens: 4096,
+    },
+    {
+      providers: ["anthropic"],
+      model: "claude-opus-4-7",
+      reasoning: "max",
+      temperature: 0.1,
+    },
+  ])
+})
+
 test("resolveLogicalTierBase resolves configured builtin default aliases as user config", () => {
   const builtin: Agent = {
     name: "oracle",

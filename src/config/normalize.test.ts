@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { normalizeAgentShorthand, normalizeDirectRequirement, normalizeShorthand } from "./normalize.ts"
+import type { AgentEntry } from "./schema.ts"
 
 test("normalizeDirectRequirement gives requirement precedence over shorthand models", () => {
   const requirement = {
@@ -23,6 +24,145 @@ test("normalizeDirectRequirement gives requirement precedence over shorthand mod
   assert.notEqual(direct.fallbackChain[0], requirement.fallbackChain[0])
   assert.deepEqual(shorthand, requirement)
   assert.notEqual(shorthand, requirement)
+})
+
+test("canonical models map to fallback entries and override every legacy chain source", () => {
+  const source = {
+    models: [
+      "openai/gpt-5.6-sol:high",
+      {
+        model: "anthropic/claude-sonnet-4-6:max",
+        reasoning: "none" as const,
+        temperature: 0.2,
+        top_p: 0.8,
+        max_tokens: 8_192,
+      },
+    ],
+    reasoning: "high" as const,
+    variant: "max" as const,
+    model: "legacy/primary",
+    fallbackModels: ["legacy/fallback"],
+    alias: "qualified:target",
+    requirement: {
+      reasoning: "low" as const,
+      variant: "medium" as const,
+      requiresModel: "guarded-model",
+      requiresAnyModel: true,
+      requiresProvider: ["openai", "anthropic"],
+      fallbackChain: [{ providers: ["legacy"], model: "requirement-chain" }],
+    },
+  } satisfies AgentEntry
+
+  const result = normalizeDirectRequirement(source)!
+
+  assert.deepEqual(result, {
+    reasoning: "high",
+    variant: "max",
+    requiresModel: "guarded-model",
+    requiresAnyModel: true,
+    requiresProvider: ["openai", "anthropic"],
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "high" },
+      {
+        providers: ["anthropic"],
+        model: "claude-sonnet-4-6",
+        reasoning: "off",
+        temperature: 0.2,
+        topP: 0.8,
+        maxTokens: 8_192,
+      },
+    ],
+  })
+  assert.notEqual(result.requiresProvider, source.requirement.requiresProvider)
+  result.requiresProvider!.push("mutated")
+  assert.deepEqual(source.requirement.requiresProvider, ["openai", "anthropic"])
+})
+
+test("canonical models preserve requirement defaults when shorthand defaults are absent", () => {
+  const result = normalizeDirectRequirement({
+    models: [{ model: "openai/gpt-5.6-sol:max", temperature: 2, top_p: 0, max_tokens: 1 }],
+    requirement: {
+      reasoning: "low",
+      variant: "medium",
+      requiresAnyModel: false,
+      fallbackChain: [{ providers: ["legacy"], model: "discarded" }],
+    },
+  })
+
+  assert.deepEqual(result, {
+    reasoning: "low",
+    variant: "medium",
+    requiresAnyModel: false,
+    fallbackChain: [{
+      providers: ["openai"],
+      model: "gpt-5.6-sol",
+      reasoning: "max",
+      temperature: 2,
+      topP: 0,
+      maxTokens: 1,
+    }],
+  })
+})
+
+test("direct canonical models suppress aliases and keep entry fields local", () => {
+  let aliasCalls = 0
+  const result = normalizeShorthand(
+    {
+      alias: "target",
+      reasoning: "medium",
+      models: [
+        { model: "openai/gpt-5.6-sol:high", reasoning: "none", temperature: 0.4 },
+        "anthropic/claude-sonnet-4-6:low",
+      ],
+    },
+    {
+      selfName: "source",
+      resolveAlias: () => {
+        aliasCalls++
+        return normalizeShorthand({ model: "legacy/target" })
+      },
+    },
+  )
+
+  assert.equal(aliasCalls, 0)
+  assert.deepEqual(result?.requirement, {
+    reasoning: "medium",
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "off", temperature: 0.4 },
+      { providers: ["anthropic"], model: "claude-sonnet-4-6", reasoning: "low" },
+    ],
+  })
+  assert.equal(result?.requirement?.fallbackChain[1]?.temperature, undefined)
+})
+
+test("canonical models do not retain caller entry objects", () => {
+  const source: AgentEntry = {
+    models: [{
+      model: "openai/gpt-5.6-sol:high",
+      reasoning: "none" as const,
+      temperature: 0.2,
+      top_p: 0.8,
+      max_tokens: 8_192,
+    }],
+  }
+
+  const result = normalizeDirectRequirement(source)!
+  const sourceModel = source.models?.[0]
+  assert.ok(sourceModel && typeof sourceModel !== "string")
+  sourceModel.model = "changed/model"
+  sourceModel.reasoning = "high"
+  sourceModel.temperature = 1
+  sourceModel.top_p = 0
+  sourceModel.max_tokens = 1
+
+  assert.deepEqual(result.fallbackChain, [{
+    providers: ["openai"],
+    model: "gpt-5.6-sol",
+    reasoning: "off",
+    temperature: 0.2,
+    topP: 0.8,
+    maxTokens: 8_192,
+  }])
 })
 
 test("normalizeDirectRequirement creates the existing model and fallback chain", () => {
@@ -161,6 +301,23 @@ test("normalization recursively copies requirement objects and canonicalizes rea
   assert.notEqual(requirement.fallbackChain[0], source.fallbackChain[0])
   assert.notEqual(requirement.fallbackChain[1]!.providers, source.fallbackChain[1]!.providers)
   assert.notEqual(requirement.fallbackChain[1]!.thinking, source.fallbackChain[1]!.thinking)
+
+  source.requiresProvider[0] = "mutated"
+  source.fallbackChain[0]!.providers[0] = "mutated"
+  source.fallbackChain[1]!.thinking!.budgetTokens = 1
+  assert.deepEqual(requirement, {
+    reasoning: "off",
+    requiresProvider: ["openai", "anthropic"],
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", reasoning: "max" },
+      {
+        providers: ["anthropic"],
+        model: "claude-sonnet-4-6",
+        reasoning: "off",
+        thinking: { type: "enabled", budgetTokens: 4_096 },
+      },
+    ],
+  })
 })
 
 test("normalizeShorthand no alias and no model returns undefined requirement", () => {

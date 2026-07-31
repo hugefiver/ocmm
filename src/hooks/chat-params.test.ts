@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createChatParamsHandler as createProductionChatParamsHandler } from "./chat-params.ts"
+import { normalizeDirectRequirement } from "../config/normalize.ts"
 import { defaultConfig, OcmmConfigSchema } from "../config/schema.ts"
 import { clearResolutions, recentResolutions } from "../routing/ledger.ts"
 import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
@@ -1428,6 +1429,53 @@ test("chat.params applies concrete controls after canonical reasoning", async ()
     temperature: 0.2,
     topP: 0.8,
     maxOutputTokens: 4096,
+  })
+})
+
+test("chat.params lowers canonical models entry controls for each actual family", async () => {
+  clearResolutions()
+  const requirement = normalizeDirectRequirement({
+    models: [
+      {
+        model: "openai/gpt-5.4-mini:high",
+        temperature: 0.2,
+        top_p: 0.8,
+        max_tokens: 4_096,
+      },
+      {
+        model: "anthropic/claude-sonnet-4-6:low",
+        temperature: 0.4,
+        top_p: 0.6,
+        max_tokens: 2_048,
+      },
+    ],
+  })!
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.4-mini",
+    requirement,
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const handler = createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })
+
+  const gpt = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", providerID: "openai", modelID: "gpt-5.4-mini" }), gpt)
+  assert.deepEqual(gpt, {
+    options: { reasoningEffort: "high" },
+    temperature: 0.2,
+    topP: 0.8,
+    maxOutputTokens: 4_096,
+  })
+
+  const claude = { options: {} as Record<string, unknown> }
+  await handler(makeInput({ agentName: "builder", providerID: "anthropic", modelID: "claude-sonnet-4-6" }), claude)
+  assert.deepEqual(claude, {
+    options: { thinking: { type: "enabled", budgetTokens: 2_048 } },
+    temperature: 0.4,
+    topP: 0.6,
+    maxOutputTokens: 2_048,
   })
 })
 

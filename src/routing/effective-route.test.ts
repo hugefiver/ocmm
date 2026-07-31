@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
+import { normalizeDirectRequirement } from "../config/normalize.ts"
 import type { FastModelsConfig } from "../config/schema.ts"
 import type { EffectiveModelRoute, ModelRequirement } from "../shared/types.ts"
 import {
@@ -335,4 +336,52 @@ test("an effective fast route prepends the copied fast primary and retains disti
   })
   assert.notEqual(route.requirement.fallbackChain[0]!.thinking, requirement.fallbackChain[0]!.thinking)
   assert.notEqual(route.requirement.fallbackChain[1]!.thinking, requirement.fallbackChain[0]!.thinking)
+})
+
+test("effective routes preserve normalized canonical controls and requirement guards", () => {
+  const requirement = normalizeDirectRequirement({
+    models: [
+      { model: "openai/gpt-5.6-sol:high", temperature: 0.2, top_p: 0.8, max_tokens: 4_096 },
+      "anthropic/claude-sonnet-4-6:low",
+    ],
+    requirement: {
+      requiresModel: "gpt-5.6-sol",
+      requiresAnyModel: true,
+      requiresProvider: ["openai", "anthropic"],
+      fallbackChain: [{ providers: ["discarded"], model: "discarded" }],
+    },
+  })!
+  const route = buildEffectiveModelRoute({
+    selectedModel: "openai/gpt-5.6-sol",
+    requirement,
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastMode: false,
+    fastModels: fastModels(),
+  })
+
+  assert.deepEqual(route.requirement, {
+    requiresModel: "gpt-5.6-sol",
+    requiresAnyModel: true,
+    requiresProvider: ["openai", "anthropic"],
+    fallbackChain: [
+      {
+        providers: ["openai"],
+        model: "gpt-5.6-sol",
+        reasoning: "high",
+        temperature: 0.2,
+        topP: 0.8,
+        maxTokens: 4_096,
+      },
+      { providers: ["anthropic"], model: "claude-sonnet-4-6", reasoning: "low" },
+    ],
+  })
+  assert.notEqual(route.requirement, requirement)
+  assert.notEqual(route.requirement.fallbackChain, requirement.fallbackChain)
+  assert.notEqual(route.requirement.requiresProvider, requirement.requiresProvider)
+
+  route.requirement.fallbackChain[0]!.providers.push("mutated")
+  route.requirement.requiresProvider!.push("mutated")
+  assert.deepEqual(requirement.fallbackChain[0]!.providers, ["openai"])
+  assert.deepEqual(requirement.requiresProvider, ["openai", "anthropic"])
 })

@@ -6,6 +6,7 @@ import {
 import type { FallbackEntry, ModelRequirement, Reasoning, Variant } from "../shared/types.ts"
 import type {
   AgentEntry,
+  CanonicalModelEntryConfig,
   CategoryEntry,
   FallbackEntryConfig,
   ModelRequirementConfig,
@@ -56,6 +57,16 @@ function normalizeFallbackEntryConfig(
   }
 }
 
+function normalizeCanonicalModelEntry(raw: CanonicalModelEntryConfig): FallbackEntry {
+  if (typeof raw === "string") return parseModelString(raw)
+
+  const entry = parseModelString(raw.model, undefined, raw.reasoning)
+  if (raw.temperature !== undefined) entry.temperature = raw.temperature
+  if (raw.top_p !== undefined) entry.topP = raw.top_p
+  if (raw.max_tokens !== undefined) entry.maxTokens = raw.max_tokens
+  return entry
+}
+
 function normalizeRequirementConfig(
   req: ModelRequirementConfig,
 ): ModelRequirement {
@@ -87,6 +98,18 @@ export function normalizeDirectRequirement(
   entry: AgentEntry | CategoryEntry | undefined,
 ): ModelRequirement | undefined {
   if (!entry) return undefined
+
+  if (entry.models?.length) {
+    const fallbackChain = entry.models.map(normalizeCanonicalModelEntry)
+    const requirement: ModelRequirement = entry.requirement
+      ? { ...normalizeRequirementConfig(entry.requirement), fallbackChain }
+      : { fallbackChain }
+    const reasoning: Reasoning | undefined = normalizeReasoning(entry.reasoning)
+    if (reasoning !== undefined) requirement.reasoning = reasoning
+    if (entry.variant !== undefined) requirement.variant = entry.variant
+    return requirement
+  }
+
   if (entry.requirement) return normalizeRequirementConfig(entry.requirement)
 
   const chain: FallbackEntry[] = []

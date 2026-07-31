@@ -18,6 +18,21 @@ export const VariantEnum = z.enum([
 
 export const ReasoningInputEnum = z.enum(REASONING_INPUT_VALUES)
 
+export const CanonicalModelEntryObjectSchema = z.object({
+  model: z.string().min(1),
+  reasoning: ReasoningInputEnum.optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  max_tokens: z.number().int().positive().optional(),
+})
+
+export const CanonicalModelEntrySchema = z.union([
+  z.string().min(1),
+  CanonicalModelEntryObjectSchema,
+])
+
+export type CanonicalModelEntryConfig = z.infer<typeof CanonicalModelEntrySchema>
+
 const LocaleCodeSchema = z
   .string()
   .trim()
@@ -60,6 +75,7 @@ const ShorthandFields = {
   variant: VariantEnum.optional(),
   reasoning: ReasoningInputEnum.optional(),
   model: z.string().optional(),
+  models: z.array(CanonicalModelEntrySchema).min(1).optional(),
   fallbackModels: z.array(ModelStringOrEntrySchema).optional(),
   requirement: ModelRequirementSchema.optional(),
 }
@@ -367,6 +383,7 @@ const LATER_ORACLE_SLOT_NAMES = new Set([
 function hasDirectNormalRequirement(entry: z.infer<typeof AgentEntrySchema>): boolean {
   return entry.requirement !== undefined
     || (typeof entry.model === "string" && entry.model.trim().length > 0)
+    || (Array.isArray(entry.models) && entry.models.length > 0)
     || (Array.isArray(entry.fallbackModels) && entry.fallbackModels.length > 0)
 }
 
@@ -432,7 +449,7 @@ export const AgentsConfigSchema = z.record(z.string(), AgentEntrySchema).superRe
       ctx.addIssue({
         code: "custom",
         path: [name],
-        message: "later Oracle slots must resolve a normal model requirement through model, fallbackModels, requirement, or alias",
+        message: "later Oracle slots must resolve a normal model requirement through model, models, fallbackModels, requirement, or alias",
       })
     }
   }

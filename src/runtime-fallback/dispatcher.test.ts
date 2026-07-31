@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 
 import { dispatchFallbackRetry } from "./dispatcher.ts"
 import type { OcmmClient } from "./dispatcher.ts"
+import { normalizeDirectRequirement } from "../config/normalize.ts"
 import type { FallbackEntry } from "../shared/types.ts"
 
 type PromptCall = {
@@ -351,6 +352,39 @@ test("canonical reasoning suppresses the legacy variant while preserving concret
   assert.equal(calls[0]?.body.reasoning, undefined)
   assert.equal(calls[0]?.body.variant, undefined)
   assert.equal(calls[0]?.body.reasoningEffort, "low")
+})
+
+test("dispatcher selects a canonical models fallback without leaking entry controls", async () => {
+  const { client, calls } = makeClient({
+    messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }],
+  })
+  const requirement = normalizeDirectRequirement({
+    models: [
+      "openai/gpt-5.6-sol:high",
+      {
+        model: "anthropic/claude-sonnet-4-6:low",
+        temperature: 0.2,
+        top_p: 0.8,
+        max_tokens: 4_096,
+      },
+    ],
+  })!
+  const fallback = requirement.fallbackChain[1]!
+
+  const ok = await dispatchFallbackRetry({
+    client,
+    sessionID: "ses_canonical_models",
+    newEntry: { ...fallback, variant: "max", reasoningEffort: "low" },
+    reason: "rate_limit",
+  })
+
+  assert.equal(ok, true)
+  assert.equal(calls[0]?.body.providerID, "anthropic")
+  assert.equal(calls[0]?.body.modelID, "claude-sonnet-4-6")
+  assert.equal(calls[0]?.body.reasoningEffort, "low")
+  for (const field of ["reasoning", "variant", "temperature", "topP", "maxTokens", "maxOutputTokens"]) {
+    assert.equal(calls[0]?.body[field], undefined, field)
+  }
 })
 
 test("returns false when messages fetch throws", async () => {
