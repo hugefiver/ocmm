@@ -27,6 +27,7 @@ import { expandPlanningAgents, isExpandedPlanningAgentDisabled } from "../planni
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { expandReviewAgents, isExpandedReviewAgentDisabled } from "../review-agents/expand.ts"
 import { isReviewAgentName, parseReviewAgentName } from "../review-agents/names.ts"
+import { createCategoryAvailabilityDiagnosticReporter } from "./category-availability-diagnostics.ts"
 import { createSubagentDepthDiagnosticReporter, type SubagentDepthDiagnosticLogger } from "./subagent-depth-diagnostics.ts"
 
 const COMPAT_AGENT_ALIASES = [
@@ -637,6 +638,7 @@ export function createConfigHandler(
 ): (input: unknown, output: unknown) => Promise<void> {
   const logger = args.logger ?? log
   const reportSubagentDepth = createSubagentDepthDiagnosticReporter(logger)
+  const reportCategoryAvailability = createCategoryAvailabilityDiagnosticReporter(logger)
 
   return async (rawInput, _output) => {
     const registryManaged = hasRouteRegistry(args)
@@ -863,6 +865,14 @@ export function createConfigHandler(
           requirementSource: effective.source,
           primary,
         })
+        reportCategoryAvailability({
+          name: c.name,
+          target,
+          requirement: effective.requirement,
+          requirementSource: effective.source,
+          primarySource: primary.source,
+          selectedModel: primary.model,
+        })
       }
     }
 
@@ -945,6 +955,14 @@ export function createConfigHandler(
             requirement: effective.requirement,
             requirementSource: effective.source,
             primary,
+          })
+          reportCategoryAvailability({
+            name,
+            target,
+            requirement: effective.requirement,
+            requirementSource: effective.source,
+            primarySource: primary.source,
+            selectedModel: primary.model,
           })
         }
       }

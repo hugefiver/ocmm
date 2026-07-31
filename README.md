@@ -733,6 +733,18 @@ Rows above describe built-in selection lanes, not required provider channels or 
 
 The primary review structure is primary-model or primary-lane self-review through `reviewer`, plus external-model cross-checks through canonical Oracle slots (`oracle`, `oracle-2nd`, optional `oracle-3rd` ... `oracle-9th` when explicitly configured). Runtime logical tier names such as `oracle-high` and `oracle-max` are derived from configured `variants` and stay within slot 1; they are not separate slot registrations. `oracle` is the first external cross-check slot and shares implementation-review semantics via `promptSource: "reviewer"`; `oracle-2nd` is the second-priority external slot. Explicit user model configuration remains authoritative and may remove model heterogeneity. `agents.oracle-high` is a deprecated config spelling migrated to `agents.oracle-2nd` during config load so legacy config keeps working while canonical keys remain slot-based. Supporting utility agents (`builder`, `doc-search`, `code-search`, `media-reader`) still use the workflow/model-family deepwork prompt without an additional role prompt. `builder` is registered with `mode:"primary"`; `planner` is registered with `mode:"all"` so it can be selected directly and used as a delegated task agent. Each category has a prompt under `prompts/<workflow>/category/<name>.md` that is set as the category-subagent's system prompt. Callers invoke categories via `task(category="deep", ...)` or direct subagent names such as `@deep` and `@quick`. The upstream-style compatibility alias `@explore` maps to local `code-search`; `@oracle` selects the independent local `oracle` agent rather than aliasing `reviewer`.
 
+### Category model-availability diagnostics
+
+With `OCMM_DEBUG=1`, the config hook emits one deduplicated availability diagnostic for each successfully registered built-in or custom category and each distinct observed diagnostic state. Every message includes the category name, requirement/primary provenance, selected model, candidate summaries, and `routePreserved=true`.
+
+| Status | Meaning |
+| --- | --- |
+| `available` | The current host catalog contains an exact eligible provider/model key, or `requiresAnyModel` is active and an eligible observed provider exposes at least one model. |
+| `dead` | The normalized fallback chain is empty, or every candidate is structurally impossible because it conflicts with `requiresModel` or `requiresProvider`. |
+| `unknown` | At least one candidate is structurally eligible, but the host catalog is missing, malformed, incomplete, or does not currently show the provider/model. |
+
+These diagnostics are read-only. `target.provider[*].models` is observation evidence, not proof of credentials or runtime access, and catalog absence never disables a category. A `dead` or `unknown` category remains registered; diagnostics do not change selected primaries, catalog upgrades, provider defaults, canonical `models[]`, effective-route snapshots, or runtime fallback. Messages contain provider IDs and model keys only—never provider options, API keys, URLs, response bodies, or the full host config. The existing logger keeps all of this output silent unless `OCMM_DEBUG` is enabled.
+
 ## Prompt architecture
 
 Prompts are organized by workflow:

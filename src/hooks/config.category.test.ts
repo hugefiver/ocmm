@@ -52,6 +52,28 @@ function publishedCategoryRoute(
   return route
 }
 
+type CategoryDiagnosticLog = { level: "info" | "warn"; message: string }
+
+function categoryDiagnosticLogger(logs: CategoryDiagnosticLog[]) {
+  return {
+    info(...args: unknown[]) {
+      logs.push({ level: "info", message: String(args[0]) })
+    },
+    warn(...args: unknown[]) {
+      logs.push({ level: "warn", message: String(args[0]) })
+    },
+  }
+}
+
+function categoryDiagnosticMessages(
+  logs: readonly CategoryDiagnosticLog[],
+  name: string,
+): CategoryDiagnosticLog[] {
+  return logs.filter(({ message }) =>
+    message.startsWith(`category availability: name=${JSON.stringify(name)} `)
+  )
+}
+
 test("config registers all 10 categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
@@ -151,7 +173,10 @@ test("Opus 5 category selections never attach the orchestrator calibration", asy
       BUILTIN_CATEGORIES.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
     ),
   }
-  const target = {
+  const target: {
+    agent: Record<string, unknown>
+    provider: Record<string, unknown>
+  } = {
     agent: {},
     provider: { anthropic: { models: { "claude-opus-5": {} } } },
   }
@@ -254,7 +279,10 @@ test("every category receives only the common compression policy", async () => {
 
 test("registry-managed categories publish category provenance and write final route models", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
-  const target = {
+  const target: {
+    agent: Record<string, unknown>
+    provider: Record<string, unknown>
+  } = {
     agent: {},
     provider: { openai: { models: { "gpt-5.7-sol": {} } } },
   }
@@ -369,4 +397,148 @@ test("registry-managed host-disabled custom categories remain unpublished", asyn
   assert.equal("mode" in category, false)
   assert.equal("prompt" in category, false)
   assert.equal(routeRegistry.snapshot().routes.has("custom-category"), false)
+})
+
+test("category diagnostics report built-in and custom registrations once per handler", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    categories: {
+      "custom-observed": { models: ["qa/custom-model"] },
+    },
+  }
+  const logs: CategoryDiagnosticLog[] = []
+  const handler = createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+    logger: categoryDiagnosticLogger(logs),
+  })
+  const createTarget = () => ({
+    agent: {},
+    provider: {
+      openai: { models: { "gpt-5.7-sol": {} } },
+      qa: { models: { "custom-model": {} } },
+    },
+  })
+
+  const firstTarget = createTarget()
+  await handler(firstTarget, undefined)
+  await handler(createTarget(), undefined)
+
+  const builtin = categoryDiagnosticMessages(logs, "hard-reasoning")
+  const custom = categoryDiagnosticMessages(logs, "custom-observed")
+  assert.equal(builtin.length, 1)
+  assert.equal(custom.length, 1)
+  assert.equal(builtin[0]?.level, "info")
+  assert.equal(custom[0]?.level, "info")
+  assert.match(builtin[0]!.message, /status=available .*primarySource=catalog-upgrade .*routePreserved=true/)
+  assert.match(custom[0]!.message, /status=available .*primarySource=user-requirement .*routePreserved=true/)
+  assert.equal(publishedCategoryRoute(routeRegistry, "hard-reasoning").model, "openai/gpt-5.7-sol")
+  assert.equal(publishedCategoryRoute(routeRegistry, "custom-observed").model, "qa/custom-model")
+})
+
+test("category diagnostics omit disabled, host-disabled, and category-shadowed registrations", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    disabledAgents: ["frontend"],
+    agents: {
+      "agent-owned": { model: "qa/agent-model" },
+    },
+    categories: {
+      "host-disabled": { model: "qa/category-model" },
+      "metadata-only": { description: "no route requirement" },
+      "agent-owned": { model: "qa/category-must-not-own" },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = {
+    agent: {
+      "host-disabled": { model: "host/existing", disable: true },
+    },
+  }
+  const logs: CategoryDiagnosticLog[] = []
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+    logger: categoryDiagnosticLogger(logs),
+  })(target, undefined)
+
+  for (const name of ["frontend", "host-disabled", "metadata-only", "agent-owned"]) {
+    assert.deepEqual(categoryDiagnosticMessages(logs, name), [], name)
+  }
+  assert.equal(routeRegistry.snapshot().routes.has("frontend"), false)
+  assert.equal(routeRegistry.snapshot().routes.has("host-disabled"), false)
+  assert.equal(routeRegistry.snapshot().routes.has("metadata-only"), false)
+  assert.equal(publishedCategoryRoute(routeRegistry, "agent-owned").model, "qa/agent-model")
+})
+
+test("diagnostics preserve canonical, legacy, and structurally dead explicit routes and snapshots", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    categories: {
+      "canonical-route": { models: ["qa/observed", "missing/fallback"] },
+      "legacy-route": { model: "missing/legacy" },
+      "dead-route": {
+        requirement: {
+          requiresProvider: ["qa"],
+          fallbackChain: [{ providers: ["blocked"], model: "conflict" }],
+        },
+      },
+    },
+  }
+  const target: {
+    agent: Record<string, unknown>
+    provider: Record<string, unknown>
+  } = {
+    agent: {},
+    provider: { qa: { models: { observed: {} } } },
+  }
+  const providerBefore = structuredClone(target.provider)
+  const logs: CategoryDiagnosticLog[] = []
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+    logger: categoryDiagnosticLogger(logs),
+  })(target, undefined)
+
+  assert.match(categoryDiagnosticMessages(logs, "canonical-route")[0]!.message, /status=available/)
+  assert.match(categoryDiagnosticMessages(logs, "legacy-route")[0]!.message, /status=unknown/)
+  assert.match(categoryDiagnosticMessages(logs, "dead-route")[0]!.message, /status=dead/)
+  assert.equal(categoryDiagnosticMessages(logs, "dead-route")[0]?.level, "warn")
+
+  const canonical = publishedCategoryRoute(routeRegistry, "canonical-route")
+  const legacy = publishedCategoryRoute(routeRegistry, "legacy-route")
+  const dead = publishedCategoryRoute(routeRegistry, "dead-route")
+  assert.equal((target.agent["canonical-route"] as Record<string, unknown>).model, "qa/observed")
+  assert.equal((target.agent["legacy-route"] as Record<string, unknown>).model, "missing/legacy")
+  assert.equal((target.agent["dead-route"] as Record<string, unknown>).model, "blocked/conflict")
+  assert.deepEqual(canonical.requirement.fallbackChain, [
+    { providers: ["qa"], model: "observed" },
+    { providers: ["missing"], model: "fallback" },
+  ])
+  assert.deepEqual(legacy.requirement.fallbackChain, [
+    { providers: ["missing"], model: "legacy" },
+  ])
+  assert.deepEqual(dead.requirement, {
+    requiresProvider: ["qa"],
+    fallbackChain: [{ providers: ["blocked"], model: "conflict" }],
+  })
+  for (const route of [canonical, legacy, dead]) {
+    assert.deepEqual(
+      Object.keys(route).sort(),
+      ["fastPath", "model", "primarySource", "requirement", "requirementSource"],
+    )
+    assert.equal(route.requirementSource, "user-config")
+    assert.equal(route.primarySource, "user-requirement")
+    assert.deepEqual(route.fastPath, { kind: "off" })
+    assert.equal(Object.hasOwn(route, "availability"), false)
+    assert.equal(Object.hasOwn(route, "diagnostic"), false)
+  }
+  assert.deepEqual(target.provider, providerBefore)
 })
