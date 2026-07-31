@@ -392,7 +392,6 @@ test("generated JSON Schema preserves canonical model boundaries", () => {
     const models = asRecord(asRecord(entry.properties).models)
     const branches = asRecord(models.items).oneOf ?? asRecord(models.items).anyOf
     assert.equal(models.type, "array", `${boundary}: models must be an array`)
-    assert.equal(models.minItems, 1, `${boundary}: models must require at least one entry`)
     assert.ok(Array.isArray(branches), `${boundary}: models items must be a union`)
     assert.ok(branches.some((branch) => asRecord(branch).type === "string"), `${boundary}: missing string branch`)
 

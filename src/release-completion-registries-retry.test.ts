@@ -209,7 +209,7 @@ test("checkReleaseCompletion returns UNRESOLVED when GitHub Packages token is mi
     const fixture = createHttpFixture(fullMainRoutes(root))
     const receipt = await checkReleaseCompletion(remoteOptions(root, MAIN_TAG, clock, fixture.http))
     assert.equal(receipt.outcome, "UNRESOLVED")
-    assert.equal(receipt.surfaces.githubPackages.code, "github_packages_permission_unproven")
+    assert.equal(receipt.surfaces.githubPackages.code, "github_packages_token_missing")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

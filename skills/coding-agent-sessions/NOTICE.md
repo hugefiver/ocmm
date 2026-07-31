@@ -10,8 +10,10 @@ Relevant upstream history includes initial commit
 `aaaba202bcf2cd8ed84020f9dda31ef7ab309cc2`, and
 `cb8d15136bb395af7368cc8ce2528f12ac277c5e`.
 
-The upstream copyright holder and Sustainable Use License 1.0 are stated in
-the copied license at [LICENSE-UPSTREAM.md](LICENSE-UPSTREAM.md).
+Upstream attribution: Copyright (c) Yeongyu Kim and contributors.
+
+The Sustainable Use License 1.0 is reproduced in
+[LICENSE-UPSTREAM.md](LICENSE-UPSTREAM.md).
 
 The imported upstream files are raw-byte preserved in this source tree. The
 ocmm additions are this notice and the license copy; later distribution

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:p
 const SOURCE_SKILL_ROOT = join(process.cwd(), "skills", "coding-agent-sessions")
 const FINDER = join(SOURCE_SKILL_ROOT, "scripts", "find-agent-sessions.py")
 const FIXTURE_SENTINEL = "OCMM_FIXTURE_SENTINEL_MUST_NOT_LEAK"
-const CREDENTIAL_ENV = /API_KEY|TOKEN|SECRET|PASSWORD|AUTH/i
+const CREDENTIAL_ENV = /API_KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL/i
 const SANDBOX_ENV_KEYS = [
   "HOME",
   "USERPROFILE",

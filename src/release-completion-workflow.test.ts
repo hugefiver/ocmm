@@ -70,6 +70,25 @@ test("release workflow publishes a GitHub Release only for one exact lane pair",
   assert.doesNotMatch(condition, /needs\.lsp-package\.result == 'success' \|\| needs\.ocmm-package\.result == 'success'/)
 })
 
+test("release workflow aligns GitHub Packages with receipt events and refuses existing Releases", () => {
+  const ocmmPackage = sliceReleaseWorkflowJobs("ocmm-package", "github-release")
+  const githubRelease = releaseWorkflowSource.slice(exactUniqueJobBoundary("github-release"))
+
+  assert.doesNotMatch(releaseWorkflowSource, /publish_github_package/)
+  assert.doesNotMatch(releaseWorkflowSource, /inputs\.publish_github_package/)
+  assert.match(
+    ocmmPackage,
+    /- name: Publish scoped package to GitHub Packages\r?\n\s+if: \$\{\{ github\.event_name == 'push' \}\}/,
+  )
+  assert.match(githubRelease, /if gh release view "\$RELEASE_TAG" >\/dev\/null 2>&1; then/)
+  assert.match(githubRelease, /GitHub Release \$RELEASE_TAG already exists; refusing to modify it\./)
+  assert.match(githubRelease, /GitHub Release \$RELEASE_TAG already exists; refusing to modify it\." >&2\r?\n\s+exit 1/)
+  assert.doesNotMatch(githubRelease, /gh release delete-asset/)
+  assert.doesNotMatch(githubRelease, /gh api --method PATCH/)
+  assert.doesNotMatch(githubRelease, /gh release upload[^\n]*--clobber/)
+  assert.match(githubRelease, /gh release upload "\$RELEASE_TAG" release-assets\/\*/)
+})
+
 test("release workflow preserves publication invariants", () => {
   for (const marker of [
     "id-token: write",

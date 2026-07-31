@@ -166,7 +166,7 @@ export async function observeGithubPackagesProof(
   const name = `@${owner}/ocmm`
   if (options.githubToken === undefined || options.githubToken.length === 0) {
     setPackageStatus(receipt, "github", name, target.version, "UNRESOLVED")
-    addUnresolved(receipt, "githubPackages", "github_packages_permission_unproven", "GitHub Packages read permission is not proven")
+    addUnresolved(receipt, "githubPackages", "github_packages_token_missing", "GitHub token is required to prove GitHub Packages publication")
     return
   }
   const result = await observeRegistryPackage(

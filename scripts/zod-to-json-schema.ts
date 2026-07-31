@@ -1,37 +1,6 @@
-import type { ZodTypeAny } from "zod"
+import type { ZodTypeAny, ZodObject, ZodArray, ZodString, ZodNumber, ZodBoolean, ZodEnum, ZodOptional, ZodDefault, ZodUnion, ZodRecord, ZodLiteral } from "zod"
 
 type JsonSchema = Record<string, unknown>
-
-type ZodArrayCheck = {
-  _zod?: {
-    def?: {
-      check?: unknown
-      minimum?: unknown
-    }
-  }
-}
-
-type ZodDefinition = {
-  typeName?: unknown
-  type?: unknown
-  shape?: unknown
-  element?: unknown
-  checks?: readonly ZodArrayCheck[]
-  minName?: { value?: unknown }
-  minLength?: { value?: unknown }
-  maxName?: { value?: unknown }
-  maxLength?: { value?: unknown }
-  values?: readonly unknown[]
-  entries?: Record<string, string>
-  value?: unknown
-  options?: readonly unknown[]
-  valueType?: unknown
-  innerType?: unknown
-  schema?: unknown
-  in?: unknown
-  left?: unknown
-  right?: unknown
-}
 
 export function zodToJsonSchema(
   schema: ZodTypeAny,
@@ -46,12 +15,13 @@ export function zodToJsonSchema(
 }
 
 function convert(schema: ZodTypeAny): JsonSchema {
-  const def = zodDefinition(schema)
+  const def = schema._def as Record<string, unknown>
   const typeName = getTypeName(def)
 
   switch (typeName) {
     case "ZodObject": {
-      const shapeDef = def.shape
+      const obj = schema as unknown as ZodObject<Record<string, ZodTypeAny>>
+      const shapeDef = obj._def.shape as unknown
       const shape =
         typeof shapeDef === "function"
           ? (shapeDef() as Record<string, ZodTypeAny>)
@@ -67,23 +37,17 @@ function convert(schema: ZodTypeAny): JsonSchema {
       return result
     }
     case "ZodArray": {
-      const element = def.element ?? def.type
-      const result: JsonSchema = { type: "array", items: convert(element as ZodTypeAny) }
-      const checks = def.checks ?? []
-      for (const check of checks) {
-        const checkDef = check._zod?.def
-        if (checkDef?.check === "min_length" && typeof checkDef.minimum === "number") {
-          result["minItems"] = checkDef.minimum
-        }
-      }
-      return result
+      const arr = schema as unknown as ZodArray<ZodTypeAny>
+      const element = (arr._def as unknown as { element?: ZodTypeAny; type?: ZodTypeAny }).element ?? arr._def.type
+      return { type: "array", items: convert(element) }
     }
     case "ZodString":
       return { type: "string" }
     case "ZodNumber": {
+      const num = schema as unknown as ZodNumber
       const r: JsonSchema = { type: "number" }
-      const min = def.minName?.value ?? def.minLength?.value
-      const max = def.maxName?.value ?? def.maxLength?.value
+      const min = num._def.minName?.value ?? num._def.minLength?.value
+      const max = num._def.maxName?.value ?? num._def.maxLength?.value
       if (typeof min === "number") r["minimum"] = min
       if (typeof max === "number") r["maximum"] = max
       return r
@@ -91,38 +55,48 @@ function convert(schema: ZodTypeAny): JsonSchema {
     case "ZodBoolean":
       return { type: "boolean" }
     case "ZodEnum": {
-      const values = def.values ?? Object.values(def.entries ?? {})
+      const en = schema as unknown as ZodEnum<string[]>
+      const enumDef = en._def as unknown as { values?: string[]; entries?: Record<string, string> }
+      const values = enumDef.values ?? Object.values(enumDef.entries ?? {})
       return { type: "string", enum: values }
     }
     case "ZodLiteral": {
-      const val = def.value ?? def.values?.[0]
+      const lit = schema as unknown as ZodLiteral<unknown>
+      const literalDef = lit._def as unknown as { value?: unknown; values?: unknown[] }
+      const val = literalDef.value ?? literalDef.values?.[0]
       if (typeof val === "string") return { type: "string", const: val }
       if (typeof val === "number") return { type: "number", const: val }
       if (typeof val === "boolean") return { type: "boolean", const: val }
       return {}
     }
     case "ZodUnion": {
-      const options = (def.options as readonly ZodTypeAny[]).map((option) => convert(option))
+      const u = schema as unknown as ZodUnion<ZodTypeAny[]>
+      const options = u._def.options.map((o: ZodTypeAny) => convert(o))
       return { oneOf: options }
     }
     case "ZodRecord": {
+      const rec = schema as unknown as ZodRecord<ZodTypeAny, ZodTypeAny>
       return {
         type: "object",
-        additionalProperties: convert(def.valueType as ZodTypeAny),
+        additionalProperties: convert(rec._def.valueType),
       }
     }
     case "ZodOptional": {
-      return convert(def.innerType as ZodTypeAny)
+      const opt = schema as unknown as ZodOptional<ZodTypeAny>
+      return convert(opt._def.innerType)
     }
     case "ZodDefault": {
-      return convert(def.innerType as ZodTypeAny)
+      const def = schema as unknown as ZodDefault<ZodTypeAny>
+      return convert(def._def.innerType)
     }
     case "ZodEffects": {
-      return convert((def.schema ?? def.in) as ZodTypeAny)
+      const eff = schema as unknown as { _def: { schema?: ZodTypeAny; in?: ZodTypeAny } }
+      return convert(eff._def.schema ?? eff._def.in)
     }
     case "ZodIntersection": {
-      const l = convert(def.left as ZodTypeAny)
-      const r = convert(def.right as ZodTypeAny)
+      const inter = schema as unknown as { _def: { left: ZodTypeAny; right: ZodTypeAny } }
+      const l = convert(inter._def.left)
+      const r = convert(inter._def.right)
       return { allOf: [l, r] }
     }
     default:
@@ -130,11 +104,7 @@ function convert(schema: ZodTypeAny): JsonSchema {
   }
 }
 
-function zodDefinition(schema: ZodTypeAny): ZodDefinition {
-  return schema._def as unknown as ZodDefinition
-}
-
-function getTypeName(def: ZodDefinition): string {
+function getTypeName(def: Record<string, unknown>): string {
   if (typeof def.typeName === "string") return def.typeName
   switch (def.type) {
     case "object":
@@ -170,6 +140,7 @@ function getTypeName(def: ZodDefinition): string {
 }
 
 function isOptional(schema: ZodTypeAny): boolean {
-  const typeName = getTypeName(zodDefinition(schema))
+  const def = schema._def as Record<string, unknown>
+  const typeName = getTypeName(def)
   return typeName === "ZodOptional" || typeName === "ZodDefault"
 }

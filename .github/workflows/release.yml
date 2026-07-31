@@ -18,11 +18,6 @@ on:
         description: "Existing tag to publish, for example v0.3.1 or ocmm-lsp-v0.3.1"
         required: true
         type: string
-      publish_github_package:
-        description: "Also publish @owner/ocmm to GitHub Packages"
-        required: false
-        default: true
-        type: boolean
       prerelease:
         description: "Mark the GitHub Release as a prerelease"
         required: false
@@ -508,7 +503,7 @@ jobs:
           fi
 
       - name: Publish scoped package to GitHub Packages
-        if: ${{ github.event_name == 'push' || inputs.publish_github_package }}
+        if: ${{ github.event_name == 'push' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -566,21 +561,14 @@ jobs:
       - name: Publish GitHub Release
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            while IFS= read -r asset; do
-              [ -n "$asset" ] || continue
-              gh release delete-asset "$RELEASE_TAG" "$asset" --yes
-            done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
-
-            release_id="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq '.id')"
-            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
-              -f name="$RELEASE_TAG" \
-              -F prerelease="$PRERELEASE" >/dev/null
-          else
-            release_args=(release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --verify-tag)
-            if [ "$PRERELEASE" = "true" ]; then
-              release_args+=(--prerelease)
-            fi
-            gh "${release_args[@]}"
+            echo "GitHub Release $RELEASE_TAG already exists; refusing to modify it." >&2
+            exit 1
           fi
 
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          release_args=(release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            release_args+=(--prerelease)
+          fi
+          gh "${release_args[@]}"
+
+          gh release upload "$RELEASE_TAG" release-assets/*

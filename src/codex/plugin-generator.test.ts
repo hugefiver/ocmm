@@ -1356,6 +1356,18 @@ test("Codex generated coding-agent-sessions runtime tree has the exact filtered 
     ] as const) {
       assert.deepEqual(listRelativeFiles(skillRoot), CODING_AGENT_SESSIONS_RUNTIME_FILES, `${label} coding-agent-sessions inventory`)
       const generatedSkill = readFileSync(join(skillRoot, "SKILL.md"), "utf8")
+      const notice = readFileSync(join(skillRoot, "NOTICE.md"), "utf8")
+      assert.match(
+        notice,
+        /Upstream attribution: Copyright \(c\) Yeongyu Kim and contributors\./,
+        `${label} coding-agent-sessions upstream attribution`,
+      )
+      assert.match(
+        notice,
+        /The Sustainable Use License 1\.0 is reproduced in\s+\[LICENSE-UPSTREAM\.md\]\(LICENSE-UPSTREAM\.md\)\./,
+        `${label} coding-agent-sessions license notice`,
+      )
+      assert.doesNotMatch(notice, /The upstream copyright holder and Sustainable Use License 1\.0 are stated in/)
       const sourceSkill = readFileSync(join(sourceRoot, "SKILL.md"), "utf8")
         .replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
         .trimEnd()

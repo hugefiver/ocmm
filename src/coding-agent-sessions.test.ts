@@ -30,6 +30,8 @@ test("sanitized coding-agent child environments stay inside the sandbox and omit
       GITHUB_TOKEN: "synthetic-value",
       PASSWORD: "synthetic-value",
       AUTH_MODE: "synthetic-value",
+      GOOGLE_APPLICATION_CREDENTIALS: "synthetic-value",
+      AWS_SHARED_CREDENTIALS_FILE: "synthetic-value",
       SAFE_FIXTURE_FLAG: "retained",
     })
     assertSandboxedChildEnv(sandbox, env)
@@ -39,6 +41,8 @@ test("sanitized coding-agent child environments stay inside the sandbox and omit
     assert.equal(env.GITHUB_TOKEN, undefined)
     assert.equal(env.PASSWORD, undefined)
     assert.equal(env.AUTH_MODE, undefined)
+    assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined)
+    assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, undefined)
     assert.equal(env.SAFE_FIXTURE_FLAG, "retained")
     assert.equal(env.PYTHONUTF8, "1")
   } finally {

@@ -40,7 +40,7 @@ Tags matching `v*` (but NOT `ocmm-lsp-v*`) trigger the main package lane:
 6. Normalizes the package (strips native binaries from npmjs package, keeps them in GitHub Release staging).
 7. Generates checksums and validates the staged exact asset set before any registry publish or artifact upload.
 8. Publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
-9. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
+9. On tag pushes, publishes `@<owner>/ocmm` to GitHub Packages.
 10. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
 
 The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `deepwork-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/deepwork/dist/bin/`.
