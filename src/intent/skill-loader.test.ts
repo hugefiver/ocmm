@@ -89,6 +89,31 @@ test("shared publish skill is discovered outside v1 with the ocmm completion con
   assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes("publish"), false)
 })
 
+test("shared coding-agent-sessions skill is discovered and remains outside v1 injection", () => {
+  const skills = loadSharedSkills()
+  const skill = skills.find((item) => item.name === "coding-agent-sessions")
+
+  assert.ok(skill, "shared coding-agent-sessions skill must be discovered")
+  assert.equal(skill.path, join(process.cwd(), "skills", "coding-agent-sessions"))
+  assert.equal(relative(join(process.cwd(), "skills", "v1"), skill.path).startsWith(".."), true)
+  assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes(skill.name), false)
+  assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes(skill.name), false)
+  assert.equal(loadV1Skills().includes("# Coding Agent Sessions"), false)
+
+  const command = buildSkillCommand(skill)
+  assert.equal(command?.name, "coding-agent-sessions")
+  assert.match(command?.description ?? "", /^\(ocmm - Skill\)/)
+  assert.match(command?.template ?? "", /<skill-instruction>/)
+})
+
+test("shared coding-agent-sessions skill follows configured allow-list and disable filters", () => {
+  const allowed = loadSharedSkills({ enable: ["coding-agent-sessions"] })
+  const disabled = loadSharedSkills({ disable: ["coding-agent-sessions"] })
+
+  assert.deepEqual(allowed.map((skill) => skill.name), ["coding-agent-sessions"])
+  assert.equal(disabled.some((skill) => skill.name === "coding-agent-sessions"), false)
+})
+
 test("loadSharedSkills applies enable and disable filters", () => {
   const root = makeSkillsRoot()
   try {

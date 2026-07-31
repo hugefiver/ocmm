@@ -761,6 +761,7 @@ prompts/
     category/*.md (10 files)
 skills/
   ast-grep/                          # shared skills registered as OpenCode skills + slash commands
+  coding-agent-sessions/             # local session-history finder shared skill
   debugging/
   frontend/
   git-master/
@@ -790,7 +791,7 @@ For v1 workflow, superpowers skills are injected on the first message per sessio
 
 ocmm registers OpenCode `config.command` entries for:
 
-- Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/frontend`, `/debugging`, and `/init-deep` by default.
+- Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/coding-agent-sessions`, `/frontend`, `/debugging`, and `/init-deep` by default.
 - v1 injected deepwork skills when `workflow:"v1"` is active, available as `/brainstorming`, `/writing-plans`, `/subagent-driven-development`, `/requesting-code-review`, and `/receiving-code-review`. In v1, ocmm also adds `skills/v1` to OpenCode skill paths so native skill slash resolution works without "skill not found" noise.
 - Loop protocol commands `/ralph-loop`, `/audit-loop`, and `/dwloop` (`/dwloop` is the deepwork-loop alias for `/audit-loop`).
 
@@ -799,6 +800,19 @@ Interactive OpenCode uses its native slash-command parser. For noninteractive `o
 The loop commands are command-template entry points only. The full upstream omo idle continuation engine, verifier orchestration, Boulder/Atlas state, and cancel/stop hooks are not yet migrated; the templates explicitly tell the model to run the loop inside the current session and not claim hidden auto-continuation. The Ralph Loop runtime and related hooks are tracked as follow-up work in `docs/kb/omo-features/loops.md`.
 
 ocmm does not ship a separate `/lsp-setup` command. OpenCode already provides LSP setup guidance, while ocmm's responsibility is to register and distribute the default `lsp` MCP backed by `ocmm-lsp`. Configure external language servers through `.opencode/ocmm-lsp.json`, `.opencode/lsp.json`, or `.codex/lsp-client.json` when overrides are needed.
+
+### Coding-agent session search
+
+`/coding-agent-sessions` searches local coding-agent session stores, including Aside, through its bundled finder. It supports JSON `list`, `search`/`find`, and `get`/`read` output with child-session linkage; it reads local stores only and implies no network request. Runtime needs Python 3.11+ and the standard library only; the source retains pytest development tests, but they are not distributed.
+
+Use explicit platform and root constraints when reading history. Omitting either broadens known-store discovery and may inspect local session history:
+
+```powershell
+$sessionRoot = "C:\exports\coding-agent-session-fixture"
+python skills/coding-agent-sessions/scripts/find-agent-sessions.py find "ambassador" --platform aside --root "$sessionRoot"
+```
+
+The imported subtree has its separate license in `skills/coding-agent-sessions/LICENSE-UPSTREAM.md`.
 
 ## Profiles
 

@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { isAbsolute, join, relative } from "node:path"
+import { dirname, isAbsolute, join, relative } from "node:path"
 
 import { defaultConfig } from "../config/schema.ts"
 import {
@@ -203,6 +203,105 @@ function listRelativeFiles(root: string): string[] {
   }
 
   return visit(root).sort()
+}
+
+const RUNTIME_FILTER_MARKERS = [
+  ".gitignore",
+  "pyrightconfig.json",
+  "scripts/tests/",
+  "*.py[cod]",
+] as const
+
+const CODING_AGENT_SESSIONS_RUNTIME_FILES = [
+  "SKILL.md",
+  "LICENSE-UPSTREAM.md",
+  "NOTICE.md",
+  "agents/openai.yaml",
+  "references/all-platforms.md",
+  "references/claude.md",
+  "references/codex.md",
+  "references/opencode.md",
+  "references/senpi.md",
+  "scripts/find-agent-sessions.py",
+  "scripts/agent_sessions/__init__.py",
+  "scripts/agent_sessions/aside_scanner.py",
+  "scripts/agent_sessions/claude.py",
+  "scripts/agent_sessions/cli.py",
+  "scripts/agent_sessions/codex.py",
+  "scripts/agent_sessions/file_scanners.py",
+  "scripts/agent_sessions/jsonio.py",
+  "scripts/agent_sessions/kiro_scanner.py",
+  "scripts/agent_sessions/opencode.py",
+  "scripts/agent_sessions/pi_family.py",
+  "scripts/agent_sessions/scanners.py",
+  "scripts/agent_sessions/sqlite_optional_scanners.py",
+  "scripts/agent_sessions/sqlite_scanners.py",
+  "scripts/agent_sessions/timeparse.py",
+  "scripts/agent_sessions/transcript.py",
+  "scripts/agent_sessions/types.py",
+].sort()
+
+function writeFixtureFile(root: string, file: string, contents: string): void {
+  const path = join(root, ...file.split("/"))
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, contents)
+}
+
+function writeRuntimeFilterFixture(
+  root: string,
+  name: string,
+  npmignore?: readonly string[],
+): string {
+  const skillDir = join(root, name)
+  writeFixtureFile(skillDir, "SKILL.md", `---\nname: ${name}\ndescription: Runtime filtering fixture\n---\n# ${name}\n`)
+  if (npmignore) writeFixtureFile(skillDir, ".npmignore", `${npmignore.join("\n")}\n`)
+  for (const [file, contents] of [
+    [".gitignore", "source-gitignore\n"],
+    ["pyrightconfig.json", "{\"typeCheckingMode\":\"strict\"}\n"],
+    ["keep.txt", "runtime-keep\n"],
+    ["scripts/runtime.py", "runtime = True\n"],
+    ["scripts/tests/test_dev.py", "test = True\n"],
+    ["nested/__pycache__/module.pyc", "bytecode\n"],
+    [".mypy_cache/cache.json", "mypy\n"],
+    [".pytest_cache/cache.json", "pytest\n"],
+    [".ruff_cache/cache.json", "ruff\n"],
+    ["compiled.pyc", "pyc\n"],
+    ["compiled.pyo", "pyo\n"],
+    ["compiled.pyd", "pyd\n"],
+  ] as const) {
+    writeFixtureFile(skillDir, file, contents)
+  }
+  return skillDir
+}
+
+async function generateFixtureSkill(sourceRoot: string, outputRoot: string, name: string): Promise<string> {
+  const result = await generateCodexPlugin({
+    projectRoot: process.cwd(),
+    pluginRoot: join(outputRoot, "plugins", "deepwork"),
+    marketplacePath: join(outputRoot, ".agents", "plugins", "marketplace.json"),
+    projectAgentsRoot: false,
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      skills: { ...defaultConfig().skills, sources: [sourceRoot], enable: [name] },
+    },
+    packageVersion: "9.9.9",
+  })
+  return join(result.pluginRoot, "skills", name)
+}
+
+function assertFullSkillCopyExceptRouter(label: string, sourceRoot: string, generatedRoot: string): void {
+  const sourceFiles = listRelativeFiles(sourceRoot)
+  assert.deepEqual(listRelativeFiles(generatedRoot), sourceFiles, `${label} inventory`)
+  for (const file of sourceFiles) {
+    const source = readFileSync(join(sourceRoot, file))
+    const generated = readFileSync(join(generatedRoot, file))
+    if (file === "SKILL.md") {
+      assert.ok(generated.toString("utf8").startsWith(source.toString("utf8").trimEnd()), `${label} router body`)
+    } else {
+      assert.deepEqual(generated, source, `${label}/${file} byte copy`)
+    }
+  }
 }
 
 function assertGeneratedSharedSkillTree(
@@ -1189,7 +1288,100 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
   }
 })
 
-test("Codex generated debugging, frontend, and publish skill trees mirror source inventory and bytes", async () => {
+test("Codex runtime filtering activates only for a complete .npmignore marker signature", async () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-runtime-filter-source-"))
+  const outputRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-runtime-filter-output-"))
+  try {
+    const completeName = "runtime-filter-complete"
+    writeRuntimeFilterFixture(sourceRoot, completeName, [
+      "# comments and whitespace must not affect signature detection",
+      "",
+      " .gitignore \r",
+      "./pyrightconfig.json ",
+      ".\\scripts\\tests\\",
+      " *.py[cod]",
+    ])
+    const completeGenerated = await generateFixtureSkill(sourceRoot, outputRoot, completeName)
+    assert.deepEqual(
+      listRelativeFiles(completeGenerated),
+      ["SKILL.md", "keep.txt", "scripts/runtime.py"],
+      "complete signature keeps only runtime files",
+    )
+
+    for (const missingMarker of RUNTIME_FILTER_MARKERS) {
+      const name = `runtime-filter-without-${RUNTIME_FILTER_MARKERS.indexOf(missingMarker)}`
+      const source = writeRuntimeFilterFixture(
+        sourceRoot,
+        name,
+        RUNTIME_FILTER_MARKERS.filter((marker) => marker !== missingMarker),
+      )
+      const generated = await generateFixtureSkill(sourceRoot, outputRoot, name)
+      assertFullSkillCopyExceptRouter(`missing ${missingMarker}`, source, generated)
+      assert.deepEqual(
+        readFileSync(join(generated, ".npmignore")),
+        readFileSync(join(source, ".npmignore")),
+        `missing ${missingMarker} preserves .npmignore`,
+      )
+    }
+
+    const unmarkedName = "runtime-filter-unmarked"
+    const unmarkedSource = writeRuntimeFilterFixture(sourceRoot, unmarkedName)
+    const unmarkedGenerated = await generateFixtureSkill(sourceRoot, outputRoot, unmarkedName)
+    assertFullSkillCopyExceptRouter("unmarked skill", unmarkedSource, unmarkedGenerated)
+    assert.equal(existsSync(join(unmarkedGenerated, ".npmignore")), false, "unmarked skill has no generated .npmignore")
+  } finally {
+    rmSync(sourceRoot, { recursive: true, force: true })
+    rmSync(outputRoot, { recursive: true, force: true })
+  }
+})
+
+test("Codex generated coding-agent-sessions runtime tree has the exact filtered inventory and source bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-coding-agent-sessions-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: false,
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
+    })
+    const sourceRoot = join(process.cwd(), "skills", "coding-agent-sessions")
+    const temporaryRoot = join(result.pluginRoot, "skills", "coding-agent-sessions")
+    const trackedRoot = join(process.cwd(), CODEX_PLUGIN_DIR, "skills", "coding-agent-sessions")
+
+    for (const [label, skillRoot] of [
+      ["temporary", temporaryRoot],
+      ["tracked", trackedRoot],
+    ] as const) {
+      assert.deepEqual(listRelativeFiles(skillRoot), CODING_AGENT_SESSIONS_RUNTIME_FILES, `${label} coding-agent-sessions inventory`)
+      const generatedSkill = readFileSync(join(skillRoot, "SKILL.md"), "utf8")
+      const sourceSkill = readFileSync(join(sourceRoot, "SKILL.md"), "utf8")
+        .replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
+        .trimEnd()
+      assert.ok(generatedSkill.startsWith(sourceSkill), `${label} source SKILL.md body`)
+      assert.equal(countOccurrences(generatedSkill, "## Codex Compatibility"), 1, `${label} compatibility suffix count`)
+      assert.equal(countOccurrences(generatedSkill, "### Callable Dispatch Contract"), 1, `${label} dispatch suffix count`)
+      assertCanonicalCodexDispatchContract(
+        extractCallableDispatchContract(generatedSkill, `${label} coding-agent-sessions SKILL.md`),
+        `${label} coding-agent-sessions SKILL.md`,
+      )
+    }
+
+    for (const file of CODING_AGENT_SESSIONS_RUNTIME_FILES) {
+      const source = readFileSync(join(sourceRoot, file))
+      const temporary = readFileSync(join(temporaryRoot, file))
+      const tracked = readFileSync(join(trackedRoot, file))
+      if (file === "SKILL.md") continue
+      assert.deepEqual(temporary, source, `${file} temporary raw-byte copy`)
+      assert.deepEqual(tracked, source, `${file} tracked raw-byte copy`)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("Codex generated debugging, frontend, ast-grep, and publish skill trees mirror source inventory and bytes", async () => {
   const root = mkdtempSync(join(tmpdir(), "deepwork-codex-shared-skills-"))
   try {
     const result = await generateCodexPlugin({
@@ -1203,6 +1395,7 @@ test("Codex generated debugging, frontend, and publish skill trees mirror source
 
     const suffixes = new Map<string, string>()
     for (const [name, requiredFile] of [
+      ["ast-grep", "tests/smoke.ps1"],
       ["debugging", "references/methodology/03-flaky-triage.md"],
       ["frontend", "references/design/interaction-skill.md"],
       ["publish", "SKILL.md"],

@@ -38,6 +38,13 @@ const CODEX_RUNTIME_DIRS = [
   join("dist", "shared"),
   join("dist", "bin"),
 ]
+const CODEX_RUNTIME_NPMIGNORE_SIGNATURE = [
+  ".gitignore",
+  "pyrightconfig.json",
+  "scripts/tests",
+  "*.py[cod]",
+] as const
+const CODEX_RUNTIME_CACHE_DIRS = new Set(["__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"])
 
 const CODEX_COMPATIBLE_PROVIDERS = new Set([
   "openai",
@@ -765,7 +772,51 @@ function formatFallbackEntry(entry: FallbackEntry): string {
 
 function copySkillDirectory(source: string, target: string): void {
   rmSync(target, { recursive: true, force: true })
-  cpSync(source, target, { recursive: true })
+  if (!hasCodexRuntimeFilterSignature(source)) {
+    cpSync(source, target, { recursive: true })
+    return
+  }
+  cpSync(source, target, {
+    recursive: true,
+    filter: (path) => !isCodexRuntimeExcludedPath(source, path),
+  })
+}
+
+function hasCodexRuntimeFilterSignature(skillDir: string): boolean {
+  const npmignorePath = join(skillDir, ".npmignore")
+  if (!existsSync(npmignorePath)) return false
+
+  let text: string
+  try {
+    text = readFileSync(npmignorePath, "utf8")
+  } catch {
+    return false
+  }
+  const rules = new Set(
+    text
+      .split(/\r?\n/)
+      .map(normalizeNpmIgnoreRule)
+      .filter((rule): rule is string => rule !== ""),
+  )
+  return CODEX_RUNTIME_NPMIGNORE_SIGNATURE.every((marker) => rules.has(marker))
+}
+
+function normalizeNpmIgnoreRule(line: string): string {
+  const normalized = line.trim().replaceAll("\\", "/")
+  if (!normalized || normalized.startsWith("#")) return ""
+  return normalized.replace(/^(?:\.\/)+/, "").replace(/\/+$/, "")
+}
+
+function isCodexRuntimeExcludedPath(skillDir: string, path: string): boolean {
+  const relativePath = relative(skillDir, path).replaceAll("\\", "/")
+  if (!relativePath) return false
+
+  const normalizedPath = relativePath.replace(/^(?:\.\/)+/, "").replace(/\/+$/, "")
+  const parts = normalizedPath.split("/")
+  if (parts.some((part) => CODEX_RUNTIME_CACHE_DIRS.has(part))) return true
+  if ([".gitignore", ".npmignore", "pyrightconfig.json"].includes(normalizedPath)) return true
+  if (normalizedPath === "scripts/tests" || normalizedPath.startsWith("scripts/tests/")) return true
+  return normalizedPath.endsWith(".pyc") || normalizedPath.endsWith(".pyo") || normalizedPath.endsWith(".pyd")
 }
 
 function normalizeSkillForCodex(skillDir: string, name?: string): void {
