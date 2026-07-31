@@ -17,7 +17,7 @@ All three must pass before committing. TypeScript tests use `node --test --exper
 The `.github/workflows/release.yml` workflow has two independent lanes:
 
 - **`ocmm-lsp-vA.B.C`** — publishes 8 native `ocmm-lsp` npm platform packages to npmjs.org and GitHub Release assets.
-- **`vX.Y.Z`** — publishes the main `ocmm` package to npmjs.org, GitHub Packages (`@<owner>/ocmm`), and self-contained GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `ocmm-codex-plugin-<version>.tgz`) plus checksums.
+- **`vX.Y.Z`** — publishes the main `ocmm` package to npmjs.org, GitHub Packages (`@<owner>/ocmm`), and self-contained GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `deepwork-codex-plugin-<version>.tgz`) plus checksums.
 
 ### ocmm-lsp lane
 
@@ -25,8 +25,9 @@ Tags matching `ocmm-lsp-v*` trigger the LSP-only lane:
 1. Verifies the tag matches `crates/ocmm-lsp/Cargo.toml` version.
 2. Builds 8 native binaries (Linux glibc x64/arm64, Linux musl x64/arm64, macOS x64/arm64, Windows x64/arm64).
 3. Stages platform packages under `packages/ocmm-lsp-*`, generates `package.json` manifests.
-4. Publishes 8 platform packages to npmjs.org through npm Trusted Publishing (GitHub Actions OIDC).
-5. Publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
+4. Generates checksums and validates the staged exact asset set before any registry publish or artifact upload.
+5. Publishes 8 platform packages to npmjs.org through npm Trusted Publishing (GitHub Actions OIDC).
+6. Publishes standalone native binaries, platform package tarballs (`ocmm-lsp-<platform-package>-<version>.tgz`), and `SHA256SUMS.txt` to the GitHub Release.
 
 ### ocmm lane
 
@@ -37,15 +38,18 @@ Tags matching `v*` (but NOT `ocmm-lsp-v*`) trigger the main package lane:
 4. Downloads pinned `ocmm-lsp-v<lspVersion>` release assets from the `package.json.ocmm.lspVersion` release.
 5. Generates the Codex plugin bundle and smoke-tests LSP wrappers.
 6. Normalizes the package (strips native binaries from npmjs package, keeps them in GitHub Release staging).
-7. Publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
-8. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
-9. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
+7. Generates checksums and validates the staged exact asset set before any registry publish or artifact upload.
+8. Publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
+9. On tag pushes (or manual opt-in), publishes `@<owner>/ocmm` to GitHub Packages.
+10. Publishes self-contained OpenCode and Codex plugin tarballs plus `SHA256SUMS.txt` to the GitHub Release.
 
 The npm tarball excludes native LSP binaries (platform-agnostic, relies on optional dependency resolution). GitHub Release tarballs (`ocmm-opencode-plugin-<version>.tgz`, `deepwork-codex-plugin-<version>.tgz`) bundle all 8 native binaries under `dist/bin/` and `plugins/deepwork/dist/bin/`.
 
 The GitHub Packages package is staged as `@<owner>/ocmm` because GitHub's npm registry requires scoped package names. The workflow uses GitHub-hosted x64 and arm64 runners; ARM runner labels are public preview on GitHub-hosted runners, so investigate runner availability before changing the matrix.
 
 Before npmjs.org publishing works without tokens, configure npm Trusted Publishing for `ocmm` and every `ocmm-lsp-*` platform package. Use provider GitHub Actions, repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and allow publish. The release workflow grants `id-token: write`, uses Node/npm versions that support Trusted Publishing, and intentionally does not require `NPM_TOKEN` for npmjs.org. GitHub Packages publishing still uses the GitHub-provided token.
+
+After the run terminates, `check:release-completion` is the only completion authority. A successful run conclusion is necessary but insufficient: the receipt must bind the tag and peeled commit, fixed run/attempt, and every exact lane job conclusion before it can prove assets, checksums, registries, and required additional surfaces. Do not report completion from a workflow conclusion alone. After any partial publication, do not move, delete, or recreate the immutable tag, overwrite a package or Release asset, or repair the release in place; report the receipt and use a separately authorized new version/tag or an explicitly authorized same-identity rerun.
 
 ### npm optional platform packages
 
@@ -110,6 +114,17 @@ git push origin vX.Y.W
 Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin` produces from the current `package.json` version.
 
 `package.json.ocmm.lspVersion` pins the default LSP version for the main package release. This must match an already-published `ocmm-lsp-vA.B.C` release — the `stage-pinned-lsp` job downloads the pinned release assets by constructing `ocmm-lsp-v${lspVersion}`. The `ocmm` and `ocmm-lsp` versions are independent and do not need to be equal.
+
+#### Release-stage completion proof (do not run during feature implementation)
+
+After the authorized main `v0.6.6` tag push and matching workflow run exist, run this from the exact released checkout. It is a release-stage command, not a development check:
+
+```powershell
+if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw "GITHUB_TOKEN with Actions and package read access is required" }
+pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
+```
+
+Use the actual authorized tag for later releases; manually dispatched runs also require their numeric `--run-id`. Exit `0` with receipt outcome `COMPLETED` is the only completion result. Exit `1` (`FAILED`) and exit `2` (`UNRESOLVED`) preserve the immutable tag and require reporting rather than an in-place repair.
 
 ## Hook defaults
 

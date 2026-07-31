@@ -1015,6 +1015,34 @@ The npm tarball excludes native LSP binaries (platform-agnostic, relies on optio
 Required npm configuration:
 - Configure npm Trusted Publishing for `ocmm` and each `ocmm-lsp-*` platform package, with GitHub repository `hugefiver/ocmm`, workflow filename `release.yml` (the file at `.github/workflows/release.yml`), and publish permission enabled. The workflow uses GitHub Actions OIDC (`id-token: write`) and does not require an npm token for npmjs.org publishes.
 
+### Completion proof
+
+Workflow terminal success is an intermediate signal, not release completion. The post-run checker is the completion authority: report a release complete only when its JSON receipt has `outcome: "COMPLETED"` and the command exits `0`.
+
+For a main tag push, run this from the exact released checkout after the tag and matching run exist. This is a release-stage command, not a feature-development command:
+
+```powershell
+if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw "GITHUB_TOKEN with Actions and package read access is required" }
+pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
+```
+
+Use the authorized later tag in place of `v0.6.6`. A manually dispatched run also requires its numeric `--run-id`.
+
+| Exit | Receipt outcome | Meaning |
+| --- | --- | --- |
+| `0` | `COMPLETED` | Every required surface is proven; this is the only completion outcome. |
+| `1` | `FAILED` | At least one definite identity, workflow, asset, checksum, registry, or content invariant failed. |
+| `2` | `UNRESOLVED` | No definite failure won, but a required surface could not be proven before the deadline. |
+
+| Lane | Required surfaces | Explicitly non-applicable surfaces |
+| --- | --- | --- |
+| Main `vX.Y.Z` tag push | Peeled tag commit; fixed `release.yml` run/attempt and exact job conclusions; exact nonempty GitHub Release assets with downloaded SHA-256 verification; `ocmm@X.Y.Z` on npmjs.org; `@hugefiver/ocmm@X.Y.Z` on GitHub Packages; and the non-draft pinned `ocmm-lsp` Release. | None of the main surfaces are skipped on a tag push. |
+| LSP `ocmm-lsp-vA.B.C` | Peeled tag commit; fixed `release.yml` run/attempt and exact job conclusions; exact nonempty GitHub Release assets with downloaded SHA-256 verification; and all eight `ocmm-lsp-*` npm platform packages at `A.B.C`. | Main npm package, GitHub Packages, and pinned-LSP-release proof are skipped. |
+
+GitHub Packages proof is required for a main tag push; a manually dispatched main run records that surface as skipped because run metadata cannot prove the publication input. Keep tokens, authorization headers, registry bodies, and signed asset URLs out of terminal captures, receipts, and chat.
+
+After any partial publication, the tag is immutable: never move, delete, or recreate it, and never overwrite packages or Release assets from a workstation. Report the `FAILED` or `UNRESOLVED` receipt, preserve its bound identity, and use a separately authorized new commit/version/tag or an explicitly authorized same-identity rerun.
+
 ### Live integration test
 
 See `AGENTS.md` for the full live test procedure using isolated XDG dirs.

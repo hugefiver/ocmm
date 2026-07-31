@@ -1,8 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 
 import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1Skills, V1_COMMAND_SKILLS, V1_INJECTED_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
 
@@ -17,7 +17,6 @@ function makeSkillsRoot(): string {
 test("loadV1Skills injects only brainstorming (HARD-GATE)", () => {
   const root = makeSkillsRoot()
   try {
-    let i = 0
     for (const dir of V1_COMMAND_SKILLS) {
       writeFileSync(join(root, "v1", dir, "SKILL.md"), `# Skill ${dir}`)
     }
@@ -70,6 +69,24 @@ test("loadSharedSkills scans top-level skills and excludes v1", () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("shared publish skill is discovered outside v1 with the ocmm completion contract", () => {
+  const skills = loadSharedSkills()
+  const publish = skills.find((skill) => skill.name === "publish")
+
+  assert.ok(publish, "shared publish skill must be discovered")
+  assert.equal(relative(join(process.cwd(), "skills", "v1"), publish.path).startsWith(".."), true)
+
+  const source = readFileSync(join(publish.path, "SKILL.md"), "utf8")
+  assert.match(source, /^---\nname: publish\n/)
+  assert.match(source, /workflow terminal success is not release completion/i)
+  assert.match(source, /check:release-completion/)
+  assert.match(source, /\bCOMPLETED\b.*\bFAILED\b.*\bUNRESOLVED\b/s)
+  assert.match(source, /never move, delete, or recreate (?:the )?immutable tag/i)
+  assert.doesNotMatch(source, /discord|lazycodex|oh-my-opencode|oh-my-openagent|agent-discord/i)
+  assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes("publish"), false)
+  assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes("publish"), false)
 })
 
 test("loadSharedSkills applies enable and disable filters", () => {

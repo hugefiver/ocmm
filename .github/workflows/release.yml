@@ -240,7 +240,7 @@ jobs:
           pnpm run stage:lsp-packages -- dist/bin
           cp dist/bin/ocmm-lsp-* release-assets/
 
-      - name: Pack and publish npmjs.org platform packages
+      - name: Pack npmjs.org platform packages
         run: |
           for pkg in packages/ocmm-lsp-*; do
             [ -d "$pkg" ] || continue
@@ -256,6 +256,29 @@ jobs:
               cd "$publish_dir"
               npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets" --json > "$(mktemp)"
             )
+          done
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - name: Validate staged release assets
+        shell: pwsh
+        run: |
+          pnpm --silent run check:release-completion -- --mode staged --tag "${{ env.RELEASE_TAG }}" --assets-dir release-assets
+          if ($LASTEXITCODE -ne 0) {
+            throw "LSP staged release assets failed the completion contract"
+          }
+
+      - name: Publish npmjs.org platform packages
+        run: |
+          for pkg in packages/ocmm-lsp-*; do
+            [ -d "$pkg" ] || continue
+
+            name="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.name)' "$pkg/package.json")"
+            version="$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version)' "$pkg/package.json")"
+            publish_dir="$RUNNER_TEMP/npm-publish/$name"
 
             if npm view "$name@$version" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "$name@$version is already published to npmjs.org; skipping publish."
@@ -266,11 +289,6 @@ jobs:
               )
             fi
           done
-
-      - name: Generate checksums
-        run: |
-          cd release-assets
-          shasum -a 256 * > SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v7
         with:
@@ -458,6 +476,19 @@ jobs:
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.zh\.md$'
           tar -tzf "release-assets/deepwork-codex-plugin-${version}.tgz" | grep -Eq '^(\./)?LICENSE\.bilingual\.md$'
 
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - name: Validate staged release assets
+        shell: pwsh
+        run: |
+          pnpm --silent run check:release-completion -- --mode staged --tag "${{ env.RELEASE_TAG }}" --assets-dir release-assets
+          if ($LASTEXITCODE -ne 0) {
+            throw "Main staged release assets failed the completion contract"
+          }
+
       - name: Publish ocmm to npmjs.org
         run: |
           npm_pkg="dist/package/ocmm-npm"
@@ -509,11 +540,6 @@ jobs:
             fi
           )
 
-      - name: Generate checksums
-        run: |
-          cd release-assets
-          shasum -a 256 * > SHA256SUMS.txt
-
       - uses: actions/upload-artifact@v7
         with:
           name: github-release-assets
@@ -522,7 +548,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    if: ${{ always() && !failure() && !cancelled() && (needs.lsp-package.result == 'success' || needs.ocmm-package.result == 'success') }}
+    if: ${{ always() && !cancelled() && ((((github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm-lsp') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'ocmm-lsp-v'))) && needs.lsp-package.result == 'success' && needs.ocmm-package.result == 'skipped') || (((github.event_name == 'workflow_dispatch' && inputs.release_kind == 'ocmm') || (github.event_name != 'workflow_dispatch' && startsWith(github.ref_name, 'v') && !startsWith(github.ref_name, 'ocmm-lsp-v'))) && needs.lsp-package.result == 'skipped' && needs.ocmm-package.result == 'success')) }}
     runs-on: ubuntu-latest
     needs:
       - lsp-package

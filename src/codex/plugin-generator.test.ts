@@ -881,7 +881,7 @@ test("temporary Codex generation writes configured planning tiers to plugin and 
     for (const sourceName of ["planner-high", "plan-critic-low", "plan-critic-max"] as const) {
       const filename = `${CODEX_AGENT_PREFIX}-${sourceName}.toml`
       const pluginCopy = readFileSync(join(pluginAgents, filename), "utf8")
-      const projectCopy = readFileSync(join(projectAgents, filename), "utf8")
+      const projectCopy: string = readFileSync(join(projectAgents, filename), "utf8")
       assert.equal(projectCopy, pluginCopy, `${sourceName} project/plugin copies`)
     }
     for (const sourceName of ["planner-low", "planner-max", "plan-critic-high"] as const) {
@@ -1189,7 +1189,7 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
   }
 })
 
-test("Codex generated debugging and frontend skill trees mirror source inventory and bytes", async () => {
+test("Codex generated debugging, frontend, and publish skill trees mirror source inventory and bytes", async () => {
   const root = mkdtempSync(join(tmpdir(), "deepwork-codex-shared-skills-"))
   try {
     const result = await generateCodexPlugin({
@@ -1205,6 +1205,7 @@ test("Codex generated debugging and frontend skill trees mirror source inventory
     for (const [name, requiredFile] of [
       ["debugging", "references/methodology/03-flaky-triage.md"],
       ["frontend", "references/design/interaction-skill.md"],
+      ["publish", "SKILL.md"],
     ] as const) {
       suffixes.set(
         name,
@@ -1220,7 +1221,7 @@ test("Codex generated debugging and frontend skill trees mirror source inventory
 
     assert.equal(
       suffixes.get("debugging"),
-      suffixes.get("frontend"),
+      suffixes.get("publish"),
       "normalized shared-skill routers must carry the same canonical compatibility suffix",
     )
   } finally {
@@ -1374,7 +1375,7 @@ test("generated Codex bundle shares one callable-schema contract across workflow
     assert.equal(agentFiles.length, result.agentCount)
     for (const file of agentFiles) {
       const bundled = readFileSync(join(bundledAgentsRoot, file), "utf8")
-      const project = readFileSync(join(projectAgentsRoot, file), "utf8")
+      const project: string = readFileSync(join(projectAgentsRoot, file), "utf8")
       assert.equal(project, bundled, `${file} project/plugin copies differ`)
       const instructions = parseGeneratedDeveloperInstructions(bundled, file)
       const contract = extractCallableDispatchContract(instructions, file)
