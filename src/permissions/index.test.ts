@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
@@ -394,6 +394,27 @@ test("after guards add task/json/readme/plan/fsync/truncation notices", async ()
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("empty task response detector preserves OpenCode background running acknowledgement", async () => {
+  const guards = createPermissionGuards({
+    getConfig: configWithReadme,
+    projectRoot: process.cwd(),
+  })
+  const acknowledgement = `<task id="child-session" state="running">
+  <summary>Background task started</summary>
+  <task_result>
+  The task is working in the background. You will be notified automatically when it finishes.
+  DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.
+  Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.
+  </task_result>
+  </task>`
+  const output = { output: acknowledgement }
+
+  await guards.after({ tool: "task" }, output)
+
+  assert.equal(output.output, acknowledgement)
+  assert.doesNotMatch(output.output, /Task Empty Response Warning/)
 })
 
 test("definition guard overrides todowrite description and disabledHooks gates guards", async () => {

@@ -11,15 +11,24 @@ prompts/<workflow>/
   agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
   deepwork/{default,gpt,gpt-5.6,claude-opus-5,gemini,glm,codex,planner}.md
   category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
+prompts/shared/shell-safety.md
 ```
 
 `workflow: "omo"` is the default local prompt set. `workflow: "v1"` is the deepwork skill-driven workflow that keeps the `v1` config/path label while model-visible text calls it the deepwork workflow.
+
+`prompts/shared/shell-safety.md` is a local, workflow-independent composition
+layer. The prompt loader reads it once and config assembly appends it exactly
+once to every built-in agent and category for omo, v1, and Codex, independent
+of model family. It keeps commands short and inspectable, forbids PowerShell
+`$home` case variants as custom variables, and requires recursive or batch
+deletion to reject unassigned/empty, root, user-home, workspace,
+workspace-ancestor, and unexpected-parent targets.
 
 ## Functional Agent Mapping
 
 | Local agent | Upstream omo role/file | Local adaptation |
 |-------------|------------------------|------------------|
-| `orchestrator` | Sisyphus dynamic prompt (`packages/omo-opencode/src/agents/sisyphus-*`) | Local role-descriptive names, category dispatch, and upstream-style intent verbalization before routing; **2026-07-21 planning logical-tier adaptation:** before fresh planner or plan-critic dispatch, inspect current callable/registered availability and select only the first available candidate (`low -> normal` for explicit cost/latency, normal for small/clear, `high -> normal` for complex/cross-module, `max -> high -> normal` for high-risk), never invent a profile, preserve role policy/receipts, and keep the `plan-critic-low` `xhigh`-equivalent floor. **2026-07-29 review-artifact identity adaptation:** omo/v1/codex orchestrator-owned identity-bound skill mandate: common packet, parent recompute, and current receipts. |
+| `orchestrator` | Sisyphus dynamic prompt (`packages/omo-opencode/src/agents/sisyphus-*`) | Local role-descriptive names, category dispatch, and upstream-style intent verbalization before routing; **2026-07-21 planning logical-tier adaptation:** before fresh planner or plan-critic dispatch, inspect current callable/registered availability and select only the first available candidate (`low -> normal` for explicit cost/latency, normal for small/clear, `high -> normal` for complex/cross-module, `max -> high -> normal` for high-risk), never invent a profile, preserve role policy/receipts, and keep the `plan-critic-low` `xhigh`-equivalent floor. **2026-07-29 review-artifact identity adaptation:** omo/v1/codex orchestrator-owned identity-bound skill mandate: common packet, parent recompute, and current receipts. **2026-08-01 OpenCode background-subagent adaptation:** omo and v1 orchestrators use native `background: true` only when the active Task schema exposes it, keep immediate dependencies foreground, rely on automatic host completion/error injection without polling, preserve child-session `task_id` semantics, and keep the OpenCode-only contract out of Codex. |
 | `reviewer` | Oracle (`packages/omo-opencode/src/agents/oracle.ts`) | Primary-model or primary-lane read-only self-review for software implementation acceptance and focused code-quality verification; never research, ideation, pre-implementation architecture, root-cause debugging, general-answer validation, or routine confidence. **2026-07-18 bounded nested-delegation adjustment:** review profiles use direct tools first and allow only leaf read-only lookup for evidence verification; they never delegate planner/reviewer/oracle/clarifier/plan-critic/implementation judgment. |
 | `oracle` + `oracle-2nd` (+ configured `oracle-3rd`…`oracle-9th`) | (derived from reviewer prompt) | Ordered external-model implementation cross-check slots; built-ins are `oracle` and `oracle-2nd`; configured later slots and logical-tier profiles reuse implementation-review semantics via expansion (`promptSource: "reviewer"`); later slots mean lower selection priority, not stronger capability. Explicit user model configuration may remove heterogeneity. |
 | `planner` | Prometheus (`packages/omo-opencode/src/agents/prometheus/*`, `packages/prompts-core/prompts/prometheus/default.md`) | Local docs/superpowers plan path and writing-plans skill contract; planner returns completed plans to the orchestrator and never dispatches plan-critic, Reviewer, Oracle, implementation, or decision agents. Repository-evidence-blocked decisions that are genuinely difficult return to the orchestrator for optional `hard-reasoning`; strict or high-risk conditions alone do not qualify, and ordinary planning judgment stays direct. |
@@ -56,6 +65,7 @@ prompts/<workflow>/
 12. GPT-5.6-specific additive calibration belongs only in `deepwork/gpt-5.6.md`. Do not copy its outcome/waiting/revalidation layer into generic GPT/Gemini/GLM/Codex/default prompts. Conversely, do not restore generic discovery, planner-trigger, answerability, scope, shell, review-label, workflow-role matrix, or detailed allowlist copies inside the specialization; those remain authoritative in effective base/role/category/skill prompts and terminal delegation contracts.
 13. Claude Opus 5-specific calibration belongs only in `deepwork/claude-opus-5.md`. It is additive and orchestrator-only, with one guarded ahead-of-runtime Codex copy; do not copy upstream provider inventory, branding, or a complete role prompt into the local sources.
 14. Nested delegation boundaries for functional agents are strict invariants across `prompts/{omo,v1,codex}/agents/*`: planner keeps direct planning and returns genuinely difficult decision blockers to the orchestrator; strict or high-risk conditions alone do not qualify. Reviewer/Oracle profiles perform only implementation acceptance or focused code-quality verification with read-only evidence lookup; clarifier keeps direct evidence and judgment ownership; plan-critic keeps direct lookup and receipt-verdict ownership.
+15. Workflow-independent shell safety belongs in `prompts/shared/shell-safety.md` and is composed once into every built-in agent and category. Do not duplicate it across model-family or category source files.
 
 ## Last Upstream Prompt Check
 

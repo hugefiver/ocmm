@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, isGpt56Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type {
@@ -199,10 +199,12 @@ function prependPromptPrefix(prompt: string, prefix: string): string {
 const DELEGATION_CONTRACT_TAG = "ocmm-delegation-contract"
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_EFFICIENCY_POLICY_TAG = "ocmm-review-session-efficiency-policy"
+const SHELL_SAFETY_TAG = "ocmm-shell-command-safety"
 const TERMINAL_POLICY_TAGS = [
   DELEGATION_CONTRACT_TAG,
   COMPRESSION_POLICY_TAG,
   REVIEW_SESSION_EFFICIENCY_POLICY_TAG,
+  SHELL_SAFETY_TAG,
 ].join("|")
 const TERMINAL_POLICY_BLOCK = new RegExp(
   `(?:\\n\\n---\\n\\n)?(?:<(${TERMINAL_POLICY_TAGS})>(?:(?!<\\/\\1>)[\\s\\S])*<\\/\\1>(?:\\s*---\\s*|\\s*))+\\s*$`,
@@ -294,6 +296,11 @@ function reviewSessionEfficiencyPolicy(): string {
   ])
 }
 
+function shellSafetyPolicy(): string {
+  const prompt = getShellSafetyPrompt().trim()
+  return prompt ? `<${SHELL_SAFETY_TAG}>\n${prompt}\n</${SHELL_SAFETY_TAG}>` : ""
+}
+
 function terminalPromptSuffixFor({
   name,
   includeCompressionPolicy,
@@ -306,6 +313,7 @@ function terminalPromptSuffixFor({
   compressionIdentity?: string
 }): string {
   const policies = [
+    shellSafetyPolicy(),
     includeCompressionPolicy ? compressionPolicyFor(compressionIdentity) : "",
     includeReviewSessionEfficiency ? reviewSessionEfficiencyPolicy() : "",
     delegationContractFor(name),
@@ -420,9 +428,12 @@ function promptForBuiltinAgent(
   const promptName = agent.promptSource ?? agent.name
   const rolePrompt = getAgentPrompt(promptName).trim()
   const modelPrompt = deepworkPromptForAgent(agent, override, workflow, selectedModel, promptName).trim()
-  if (!rolePrompt) return modelPrompt
-  if (!modelPrompt) return rolePrompt
-  return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+  const prompt = !rolePrompt
+    ? modelPrompt
+    : !modelPrompt
+      ? rolePrompt
+      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+  return prompt
 }
 
 function promptForBuiltinCategory(
@@ -433,9 +444,12 @@ function promptForBuiltinCategory(
   const rolePrompt = getCategoryPrompt(categoryName).trim()
   const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel)
   const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""
-  if (!rolePrompt) return modelPrompt
-  if (!modelPrompt) return rolePrompt
-  return `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for GPT-5.6 calibration when it does not conflict with the category role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+  const prompt = !rolePrompt
+    ? modelPrompt
+    : !modelPrompt
+      ? rolePrompt
+      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for GPT-5.6 calibration when it does not conflict with the category role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+  return prompt
 }
 
 function categoryAsAgent(c: Category, override?: ModelRequirement): Agent {

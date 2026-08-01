@@ -137,6 +137,38 @@ test("idle continuation: continues for OpenCode todowrite tool-invocation todos"
   assert.equal(idleState.sessionData.get("ses_1")?.continuationCount, 1)
 })
 
+test("idle continuation: completed background child without unfinished todos emits no prompt", async () => {
+  const childSessionID = "ses_background_child"
+  const parentSessionID = "ses_background_parent"
+  const completedChildMessages = {
+    data: [{
+      role: "assistant",
+      parts: [{
+        type: "text",
+        text: "Inspection complete.",
+      }],
+    }],
+  }
+  const mock = makeControlledClient([], {
+    messagesResults: [Promise.resolve(completedChildMessages)],
+  })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => makeConfig({ enabled: true }),
+    client: mock.client,
+    idleState,
+  })
+
+  await handler(makeCreatedEvent(childSessionID, { parentID: parentSessionID }))
+  await handler(makeIdleEvent(childSessionID))
+
+  assert.equal(mock.messages, 1)
+  assert.equal(continuationCalls(mock.calls).length, 0)
+  assert.equal(idleState.sessionData.has(childSessionID), false)
+  assert.equal(idleState.activeLeases.has(childSessionID), false)
+})
+
 test("idle continuation: session.deleted clears idle state", async () => {
   const idleState = createIdleContinuationState()
   idleState.globalEnabled = true

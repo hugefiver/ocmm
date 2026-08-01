@@ -73,6 +73,37 @@ test("preserves exclusions and ordinary empty output", async () => {
   }
 })
 
+test("native background lifecycle envelopes do not trigger interruption recovery", async () => {
+  const adapter = createSubagentInterruptionOutputAdapter({
+    getConfig: () => defaultConfig(),
+    controller: controller(),
+  })
+  const envelopes = [
+    `<task id="child" state="running">
+  <summary>Background task started</summary>
+  <task_result>The task is working in the background. You will be notified automatically when it finishes.</task_result>
+  </task>`,
+    `<task id="child" state="completed">
+  <summary>Background task completed: inspect files</summary>
+  <task_result>Inspection complete.</task_result>
+  </task>`,
+    `<task id="child" state="error">
+  <summary>Background task failed: inspect files</summary>
+  <task_error>Child returned exit code 1.</task_error>
+  </task>`,
+  ]
+
+  for (const envelope of envelopes) {
+    const output = { output: envelope, metadata: { sessionId: "child" } }
+    await adapter(
+      { tool: "task", sessionID: "parent", callID: "background-result" },
+      output,
+    )
+    assert.equal(output.output, envelope)
+    assert.equal(output.output.includes(SUBAGENT_CONTINUATION_NOTICE_PREFIX), false)
+  }
+})
+
 test("disabled hook leaves interrupted task output unchanged", async () => {
   const config = OcmmConfigSchema.parse({ disabledHooks: ["subagent-interruption-recovery"] })
   const output = { output: "Tool execution aborted", metadata: { sessionId: "child" } }
@@ -90,8 +121,9 @@ test("real controller appends one notice from after-hook task evidence without a
       dispatches += 1
       return true
     },
+    isCurrentSnapshot: () => true,
   })
-  realController.onSessionCreated("child", true)
+  realController.onSessionCreated("child", true, 0)
   realController.recordSessionLineage({ childSessionID: "child", parentSessionID: "parent" })
   const adapter = createSubagentInterruptionOutputAdapter({
     getConfig: () => defaultConfig(),

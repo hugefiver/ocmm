@@ -9,6 +9,7 @@ import {
   getDeepworkPrompt,
   getAgentPrompt,
   getCategoryPrompt,
+  getShellSafetyPrompt,
   pickDeepworkVariantForAgent,
   isGpt56Model,
 } from "./prompt-loader.ts"
@@ -18,6 +19,7 @@ const CLAUDE_OPUS5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
 
 function makeTempRoot(workflow: "omo" | "v1"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
+  mkdirSync(join(root, "shared"), { recursive: true })
   mkdirSync(join(root, workflow, "deepwork"), { recursive: true })
   mkdirSync(join(root, workflow, "agents"), { recursive: true })
   mkdirSync(join(root, workflow, "category"), { recursive: true })
@@ -75,6 +77,17 @@ test("loadAllPrompts loads files from the workflow subdir", () => {
   }
 })
 
+test("loadAllPrompts loads the workflow-independent shell safety prompt", () => {
+  const root = makeTempRoot("omo")
+  try {
+    writeFileSync(join(root, "shared", "shell-safety.md"), "shell-safety-content")
+    loadAllPrompts(root, "omo")
+    assert.equal(getShellSafetyPrompt(), "shell-safety-content")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("loadAllPrompts defaults to v1 workflow", () => {
   const root = makeTempRoot("v1")
   try {
@@ -98,6 +111,7 @@ test("reload clears stale cache so removed files disappear", () => {
     loadAllPrompts(rootB, "v1")
     assert.equal(getDeepworkPrompt("default"), "", "stale default.md must be gone after reload")
     assert.equal(getDeepworkPrompt("gpt"), "from-v1")
+    assert.equal(getShellSafetyPrompt(), "", "stale shell safety prompt must be gone after reload")
   } finally {
     rmSync(rootA, { recursive: true, force: true })
     rmSync(rootB, { recursive: true, force: true })
@@ -705,6 +719,31 @@ test("orchestrator prompts load the concise identity-bound review mandate", () =
     const mandateOffset = prompt.indexOf(mandate)
     assert.doesNotMatch(prompt.slice(mandateOffset, mandateOffset + mandate.length), /\bv1\b/i, `${workflow} mandate has visible v1 leakage`)
   }
+})
+
+test("OpenCode orchestrators load capability-gated native background guidance", () => {
+  const heading = "## Native OpenCode Background Subagents"
+  for (const workflow of ["v1", "omo"] as const) {
+    const prompt = readFileSync(
+      join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"),
+      "utf8",
+    )
+    assert.equal(countOccurrences(prompt, heading), 1, `${workflow}: heading count`)
+    assert.match(prompt, /currently callable `task` schema exposes `background`/i, `${workflow}: capability gate`)
+    assert.match(prompt, /use `background: true` only/i, `${workflow}: native field`)
+    assert.match(prompt, /useful independent work/i, `${workflow}: independent work`)
+    assert.match(prompt, /foreground mode.*requires? the result immediately/is, `${workflow}: foreground dependency`)
+    assert.match(prompt, /automatically injects? completion or error.*do not (?:sleep, )?poll/is, `${workflow}: notification`)
+    assert.match(prompt, /`task_id` continues? the child session.*not a polling job ID/is, `${workflow}: continuation semantics`)
+    assert.match(prompt, /do not invent `task_status`, `background_output`, or `background_cancel`/i, `${workflow}: no invented tools`)
+    assert.match(prompt, /`run_in_background`.*schema.*do not mix/is, `${workflow}: wrapper schema`)
+    assert.match(prompt, /process-local.*not restart-durable/is, `${workflow}: lifecycle`)
+  }
+
+  const v1Maintenance = readFileSync(join(process.cwd(), "docs", "v1-maintenance.md"), "utf8")
+  const omoMaintenance = readFileSync(join(process.cwd(), "docs", "prompt-sync.md"), "utf8")
+  assert.match(v1Maintenance, /2026-08-01 OpenCode background-subagent adaptation/i)
+  assert.match(omoMaintenance, /2026-08-01 OpenCode background-subagent adaptation/i)
 })
 
 test("GPT run contract defines bounded tracking and parent stop ownership", () => {

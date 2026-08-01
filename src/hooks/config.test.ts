@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
+import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
@@ -30,6 +31,8 @@ const READ_ONLY_TASK_RULES = {
   research: "allow",
   "media-reader": "allow",
 } as const
+
+const SHELL_SAFETY_MARKER = "# Shell Command Safety"
 
 const PLANNER_TASK_RULES = READ_ONLY_TASK_RULES
 
@@ -1084,6 +1087,61 @@ test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async 
   const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
   assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
   assert.match(prompt, /Outcome-first/)
+})
+
+test("every workflow composes shell safety once into every builtin agent and category", async () => {
+  const promptsRoot = join(process.cwd(), "prompts")
+  try {
+    for (const workflow of ["omo", "v1", "codex"] as const) {
+      loadAllPrompts(promptsRoot, workflow)
+      const configured = { ...defaultConfig(), workflow }
+      const target: ConfigTarget = { agent: {} }
+      await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+      for (const name of [
+        ...BUILTIN_AGENTS.map((agent) => agent.name),
+        ...BUILTIN_CATEGORIES.map((category) => category.name),
+      ]) {
+        const prompt = String((target.agent[name] as Record<string, unknown>).prompt ?? "")
+        assert.equal(countText(prompt, SHELL_SAFETY_MARKER), 1, `${workflow}/${name}`)
+        assert.match(prompt, /do not use `\$home` or any case variant/i, `${workflow}/${name}: PowerShell collision`)
+        assert.match(prompt, /explicitly assigned and non-empty/i, `${workflow}/${name}: assigned target`)
+        assert.match(prompt, /filesystem root.*user home.*workspace.*unexpected parent/is, `${workflow}/${name}: protected paths`)
+      }
+    }
+  } finally {
+    loadAllPrompts(promptsRoot, "omo")
+  }
+})
+
+test("shell safety preserves existing prompts and remains idempotent across config passes", async () => {
+  const promptsRoot = join(process.cwd(), "prompts")
+  const names = [
+    ...BUILTIN_AGENTS.map((agent) => agent.name),
+    ...BUILTIN_CATEGORIES.map((category) => category.name),
+  ]
+
+  try {
+    for (const workflow of ["omo", "v1", "codex"] as const) {
+      loadAllPrompts(promptsRoot, workflow)
+      const configured = { ...defaultConfig(), workflow }
+      const target: ConfigTarget = {
+        agent: Object.fromEntries(names.map((name) => [name, { prompt: `Custom prompt for ${name}.` }])),
+      }
+      const handler = createConfigHandler({ getConfig: () => configured })
+
+      await handler(target, undefined)
+      await handler(target, undefined)
+
+      for (const name of names) {
+        const prompt = String((target.agent[name] as Record<string, unknown>).prompt ?? "")
+        assert.match(prompt, new RegExp(`Custom prompt for ${name}\\.`), `${workflow}/${name}: custom prompt`)
+        assert.equal(countText(prompt, SHELL_SAFETY_MARKER), 1, `${workflow}/${name}: shell safety`)
+      }
+    }
+  } finally {
+    loadAllPrompts(promptsRoot, "omo")
+  }
 })
 
 test("omo and v1 compose default plus Opus 5 exactly once for orchestrator only", async () => {

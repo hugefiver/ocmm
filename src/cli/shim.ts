@@ -7,7 +7,7 @@
  * global opencode.json so you don't redefine providers.
  *
  * USAGE:
- *   ocmm [-p <name>] [-n] [--fast] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+ *   ocmm [-p <name>] [-n] [--fast] [--background-subagents] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
  *        [--config-dir <path>] [--opencode <path-or-name>]
  *        [--keep-omo] [--reset] [-- <opencode args...>]
  *   ocmm --help
@@ -20,7 +20,7 @@
  *   config-dir   OPENCODE_CONFIG_DIR env var (redirects config dir, uses --config-dir)
  *   xdg          XDG_CONFIG_HOME env var (full isolation, uses --config-dir, can strip plugins)
  *
- * All flags except -p/--profile, --fast, --reset, and --help can also be set in
+ * All flags except -p/--profile, --fast, --background-subagents, --reset, and --help can also be set in
  * the \`shim\` section of ocmm.json[c]. CLI flags override config values.
  */
 
@@ -38,6 +38,7 @@ interface ShimArgs {
   profile?: string
   noProfile: boolean
   fast: boolean
+  backgroundSubagents: boolean
   mode?: IsolationMode
   noProviders: boolean
   noPlugins: boolean
@@ -208,6 +209,7 @@ export function parseArgs(argv: string[]): ShimArgs {
     noPlugins: false,
     noProfile: false,
     fast: false,
+    backgroundSubagents: false,
     keepOmo: false,
     reset: false,
     help: false,
@@ -249,6 +251,9 @@ export function parseArgs(argv: string[]): ShimArgs {
         break
       case "--fast":
         args.fast = true
+        break
+      case "--background-subagents":
+        args.backgroundSubagents = true
         break
       case "--no-providers":
         args.noProviders = true
@@ -319,6 +324,13 @@ function nonEmptyEnvironmentValue(value: string | undefined): string | undefined
   return value?.trim() ? value : undefined
 }
 
+function deleteEnvironmentVariableCaseInsensitive(env: NodeJS.ProcessEnv, name: string): void {
+  const normalizedName = name.toUpperCase()
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === normalizedName) delete env[key]
+  }
+}
+
 export function resolveOpencodeBin(
   args: Pick<ShimArgs, "opencodeBin">,
   defaults: Pick<Partial<ShimConfig>, "opencode">,
@@ -346,6 +358,10 @@ export function buildChildEnv(parent: NodeJS.ProcessEnv, args: ShimArgs): NodeJS
   } else {
     delete env.OCMM_FAST
   }
+  deleteEnvironmentVariableCaseInsensitive(env, "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS")
+  if (args.backgroundSubagents) {
+    env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = "true"
+  }
 
   return env
 }
@@ -354,7 +370,7 @@ function printHelp(): void {
   console.log(`ocmm — launch opencode with isolated config
 
 USAGE:
-  ocmm [-p <name>] [-n] [--fast] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
+  ocmm [-p <name>] [-n] [--fast] [--background-subagents] [--mode <m>] [--no-providers] [--no-plugins] [--ocmm-only]
         [--config-dir <path>] [--opencode <path-or-name>]
         [--keep-omo] [--reset] [-- <opencode args...>]
   ocmm --help
@@ -363,6 +379,9 @@ OCMM FLAGS:
   -p, --profile <name>  Select ocmm profile at startup (sets OCMM_PROFILE)
   -n, --no-profile      Start without loading any profile (overrides activeProfile)
       --fast            Enable fast model routing (requires an allowlisted provider)
+      --background-subagents
+                        Experimental, OpenCode-only background subagents
+                        (sets child-process env OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true)
       --mode <m>         Isolation method: none|inline|config-file|config-dir|xdg
                          (default: none, or 'shim.mode' in ocmm.jsonc)
       --no-providers     Don't merge providers from global opencode config
@@ -398,7 +417,7 @@ PASSTHROUGH:
     ocmm --mode inline run "hello"      # inline config injection
     ocmm --mode config-file -c run "x"  # config-file mode + continue
 
-All flags except -p/--profile, --fast, --reset, and --help can also be set in the \`shim\`
+All flags except -p/--profile, --fast, --background-subagents, --reset, and --help can also be set in the \`shim\`
 section of ocmm.json[c]. CLI flags override config values.`)
 }
 

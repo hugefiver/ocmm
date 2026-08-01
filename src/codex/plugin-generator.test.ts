@@ -522,6 +522,12 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   const reviewer = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-reviewer`)
   const creative = agents.find((agent) => agent.name === `${CODEX_AGENT_PREFIX}-creative`)
 
+  for (const agent of agents) {
+    assert.equal(countOccurrences(agent.developerInstructions, "# Shell Command Safety"), 1, agent.name)
+    assert.match(agent.developerInstructions, /do not use `\$home` or any case variant/i, agent.name)
+    assert.match(agent.developerInstructions, /explicitly assigned and non-empty/i, agent.name)
+  }
+
   assert.ok(orchestrator)
   const orchestratorContract = extractCallableDispatchContract(
     orchestrator.developerInstructions,
@@ -589,6 +595,64 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
     planner.developerInstructions,
     /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
   )
+})
+
+test("OpenCode native background guidance stays out of Codex orchestrators", async () => {
+  const heading = "## Native OpenCode Background Subagents"
+  const envKey = "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS"
+  for (const workflow of ["v1", "omo"] as const) {
+    const source = readFileSync(
+      join(process.cwd(), "prompts", workflow, "agents", "orchestrator.md"),
+      "utf8",
+    )
+    assert.match(source, /currently callable `task` schema exposes `background`/i, workflow)
+    assert.equal(countOccurrences(source, heading), 1, workflow)
+  }
+
+  const assertCodexIsolated = (text: string, label: string): void => {
+    assert.doesNotMatch(text, new RegExp(envKey), `${label}: environment key`)
+    assert.equal(text.includes(heading), false, `${label}: OpenCode heading`)
+    assert.doesNotMatch(text, /use `background: true` only when the currently callable `task` schema/i, `${label}: native field contract`)
+  }
+
+  const codexSource = readFileSync(
+    join(process.cwd(), "prompts", "codex", "agents", "orchestrator.md"),
+    "utf8",
+  )
+  assertCodexIsolated(codexSource, "Codex source orchestrator")
+
+  const agents = await buildCodexAgents({
+    config: { ...defaultConfig(), workflow: "codex" },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const inMemory = agents.find((agent) => agent.sourceName === "orchestrator")
+  assert.ok(inMemory)
+  assertCodexIsolated(inMemory.developerInstructions, "in-memory Codex orchestrator")
+
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-background-isolation-"))
+  try {
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, CODEX_PROJECT_AGENTS_DIR),
+      config: { ...defaultConfig(), workflow: "codex" },
+      packageVersion: "9.9.9",
+    })
+    for (const [label, file] of [
+      ["temporary plugin", join(result.pluginRoot, "agents", "dw-orchestrator.toml")],
+      ["temporary project", join(root, CODEX_PROJECT_AGENTS_DIR, "dw-orchestrator.toml")],
+      ["tracked plugin", join(process.cwd(), CODEX_PLUGIN_DIR, "agents", "dw-orchestrator.toml")],
+      ["tracked project", join(process.cwd(), CODEX_PROJECT_AGENTS_DIR, "dw-orchestrator.toml")],
+    ] as const) {
+      const instructions = parseGeneratedDeveloperInstructions(readFileSync(file, "utf8"), label)
+      assertCodexIsolated(instructions, label)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    assert.equal(existsSync(root), false, "temporary Codex generation must be removed")
+  }
 })
 
 test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is fresh", async () => {

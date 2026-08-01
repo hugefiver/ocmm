@@ -1,9 +1,10 @@
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs"
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync, chmodSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
+import { spawnSync } from "node:child_process"
 
 // We test the pure logic functions by importing them from the shim module.
 // The shim's main() spawns a child process, so we test the helpers directly.
@@ -11,8 +12,8 @@ import {
   parseArgs,
   buildIsolatedConfig,
   resolvePluginPath,
-  readShimDefaults,
   resolveOpencodeBin,
+  buildChildEnv,
 } from "./shim.ts"
 
 function dedupArray<T>(arr: T[]): T[] {
@@ -51,6 +52,18 @@ describe("shim parseArgs", () => {
     const args = parseArgs(["--", "--fast", "run", "hello"])
     assert.equal(args.fast, false)
     assert.deepEqual(args.passthrough, ["--fast", "run", "hello"])
+  })
+
+  it("consumes --background-subagents before the passthrough separator", () => {
+    const args = parseArgs(["--background-subagents", "run", "hello"])
+    assert.equal(args.backgroundSubagents, true)
+    assert.deepEqual(args.passthrough, ["run", "hello"])
+  })
+
+  it("passes --background-subagents through after the passthrough separator", () => {
+    const args = parseArgs(["--", "--background-subagents", "run", "hello"])
+    assert.equal(args.backgroundSubagents, false)
+    assert.deepEqual(args.passthrough, ["--background-subagents", "run", "hello"])
   })
 
   it("parses -n as shorthand for --no-profile", () => {
@@ -147,6 +160,7 @@ describe("shim parseArgs", () => {
     assert.equal(args.profile, undefined)
     assert.equal(args.mode, undefined)
     assert.equal(args.fast, false)
+    assert.equal(args.backgroundSubagents, false)
     assert.equal(args.noProviders, false)
     assert.deepEqual(args.passthrough, [])
   })
@@ -206,6 +220,180 @@ describe("shim buildChildEnv", () => {
     assert.deepEqual(parent, originalParent)
     assert.equal(child.OCMM_FAST, undefined)
     assert.equal("OCMM_FAST" in child, false)
+  })
+
+  it("enables experimental background subagents only on the cloned child env", () => {
+    const parent = {
+      PATH: "parent-path",
+      OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "ambient",
+    }
+    const originalParent = { ...parent }
+
+    const child = buildChildEnv(parent, parseArgs(["--background-subagents"]))
+
+    assert.notEqual(child, parent)
+    assert.deepEqual(parent, originalParent)
+    assert.equal(child.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, "true")
+  })
+
+  it("removes ambient background-subagent activation when the flag is absent", () => {
+    const parent = {
+      PATH: "parent-path",
+      OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "ambient",
+    }
+    const originalParent = { ...parent }
+
+    const child = buildChildEnv(parent, parseArgs([]))
+
+    assert.deepEqual(parent, originalParent)
+    assert.equal(child.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, undefined)
+    assert.equal("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS" in child, false)
+  })
+
+  it("removes every case variant of ambient background-subagent activation", () => {
+    const parent = {
+      PATH: "parent-path",
+      opencode_experimental_background_subagents: "ambient",
+      OpenCode_Experimental_Background_Subagents: "also-ambient",
+    }
+
+    const disabled = buildChildEnv(parent, parseArgs([]))
+    const enabled = buildChildEnv(parent, parseArgs(["--background-subagents"]))
+    const matchingKeys = (env: NodeJS.ProcessEnv) => Object.keys(env).filter(
+      (key) => key.toUpperCase() === "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS",
+    )
+
+    assert.deepEqual(matchingKeys(disabled), [])
+    assert.deepEqual(matchingKeys(enabled), ["OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS"])
+    assert.equal(enabled.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, "true")
+  })
+})
+
+describe("shim help", () => {
+  it("documents the experimental OpenCode-only background-subagent switch", () => {
+    const shimPath = fileURLToPath(new URL("./shim.ts", import.meta.url))
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", shimPath, "--help"], {
+      encoding: "utf8",
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /--background-subagents/)
+    assert.match(result.stdout, /experimental/i)
+    assert.match(result.stdout, /OpenCode-only/i)
+    assert.match(result.stdout, /OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true/)
+  })
+})
+
+describe("shim background-subagent process surface", () => {
+  it("uses an isolated, sanitized fake OpenCode process without forwarding credentials", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "ocmm-background-subagents-"))
+    const fakeScript = join(sandbox, "fake-opencode.cjs")
+    const fakeCommand = join(sandbox, process.platform === "win32" ? "fake-opencode.cmd" : "fake-opencode")
+    const shimPath = join(dirname(fileURLToPath(import.meta.url)), "shim.ts")
+    const backgroundBefore = process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+    const sentinelBefore = process.env.OCMM_BACKGROUND_TEST_SECRET
+
+    try {
+      writeFileSync(
+        fakeScript,
+        [
+          'const { writeFileSync } = require("node:fs")',
+          "const capture = {",
+          "  argv: process.argv.slice(2),",
+          "  backgroundEnv: process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ?? null,",
+          '  backgroundKeys: Object.keys(process.env).filter((key) => key.toUpperCase() === "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS").sort(),',
+          "  credentialSentinel: process.env.OCMM_BACKGROUND_TEST_SECRET ?? null,",
+          "}",
+          'writeFileSync(process.env.OCMM_BACKGROUND_CAPTURE, JSON.stringify(capture), "utf8")',
+        ].join("\n"),
+        "utf8",
+      )
+      if (process.platform === "win32") {
+        writeFileSync(fakeCommand, `@echo off\r\n"${process.execPath}" "${fakeScript}" %*\r\n`, "utf8")
+      } else {
+        writeFileSync(fakeCommand, `#!/usr/bin/env node\nrequire(${JSON.stringify(fakeScript)})\n`, "utf8")
+        chmodSync(fakeCommand, 0o755)
+      }
+
+      const sourceEnv = {
+        ...process.env,
+        OCMM_BACKGROUND_TEST_SECRET: "must-not-reach-fake-child",
+      }
+
+      const runShim = (caseName: string, shimArgs: string[]) => {
+        const capturePath = join(sandbox, `${caseName}.json`)
+        const env: NodeJS.ProcessEnv = Object.fromEntries(
+          Object.entries(sourceEnv).filter(([key]) => !/API_KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL/i.test(key)),
+        )
+        const home = join(sandbox, `${caseName}-home`)
+        const xdgConfig = join(sandbox, `${caseName}-xdg-config`)
+        const xdgData = join(sandbox, `${caseName}-xdg-data`)
+        const xdgState = join(sandbox, `${caseName}-xdg-state`)
+        const xdgCache = join(sandbox, `${caseName}-xdg-cache`)
+        const configDir = join(sandbox, `${caseName}-isolated-config`)
+
+        for (const path of [home, xdgConfig, xdgData, xdgState, xdgCache, configDir]) {
+          mkdirSync(path, { recursive: true })
+        }
+        env.HOME = home
+        env.USERPROFILE = home
+        env.APPDATA = join(sandbox, `${caseName}-appdata`)
+        env.XDG_CONFIG_HOME = xdgConfig
+        env.XDG_DATA_HOME = xdgData
+        env.XDG_STATE_HOME = xdgState
+        env.XDG_CACHE_HOME = xdgCache
+        env.CODEX_HOME = join(sandbox, `${caseName}-codex-home`)
+        env.OPENCODE_HOME = join(sandbox, `${caseName}-opencode-home`)
+        env.OPENCODE_CONFIG = join(sandbox, `${caseName}-opencode-config.json`)
+        env.OPENCODE_CONFIG_DIR = join(sandbox, `${caseName}-opencode-config-dir`)
+        env.OCMM_BACKGROUND_CAPTURE = capturePath
+        for (const key of Object.keys(env)) {
+          if (key.toUpperCase() === "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS") delete env[key]
+        }
+        env.opencode_experimental_background_subagents = "ambient"
+        delete env.OPENCODE_CONFIG_CONTENT
+
+        const result = spawnSync(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            shimPath,
+            "--opencode",
+            fakeCommand,
+            "--mode",
+            "xdg",
+            "--config-dir",
+            configDir,
+            "--no-providers",
+            "--no-plugins",
+            ...shimArgs,
+          ],
+          { encoding: "utf8", env },
+        )
+
+        assert.equal(result.status, 0, result.stderr)
+        return JSON.parse(readFileSync(capturePath, "utf8")) as Record<string, unknown>
+      }
+
+      const enabled = runShim("enabled", ["--background-subagents", "run", "--model", "test/model", "hello"])
+      assert.deepEqual(Object.keys(enabled).sort(), ["argv", "backgroundEnv", "backgroundKeys", "credentialSentinel"])
+      assert.deepEqual(enabled.argv, ["run", "--model", "test/model", "hello"])
+      assert.equal(enabled.backgroundEnv, "true")
+      assert.deepEqual(enabled.backgroundKeys, ["OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS"])
+      assert.equal(enabled.credentialSentinel, null)
+
+      const separator = runShim("separator", ["--", "--background-subagents", "run", "--model", "test/model", "hello"])
+      assert.deepEqual(Object.keys(separator).sort(), ["argv", "backgroundEnv", "backgroundKeys", "credentialSentinel"])
+      assert.deepEqual(separator.argv, ["--background-subagents", "run", "--model", "test/model", "hello"])
+      assert.equal(separator.backgroundEnv, null)
+      assert.deepEqual(separator.backgroundKeys, [])
+      assert.equal(separator.credentialSentinel, null)
+      assert.equal(process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, backgroundBefore)
+      assert.equal(process.env.OCMM_BACKGROUND_TEST_SECRET, sentinelBefore)
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true })
+      assert.equal(existsSync(sandbox), false)
+    }
   })
 })
 

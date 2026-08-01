@@ -909,6 +909,7 @@ The `ocmm` binary launches opencode with configurable config isolation. It merge
 ocmm                              # start opencode (no isolation by default)
 ocmm -p work run "hello"          # select profile + run
 ocmm --fast run "Review this change" # opt into fast model routing
+ocmm --background-subagents run "Delegate this work" # experimental OpenCode background subagents
 ocmm --mode xdg run "hello"       # full config isolation
 ocmm --mode config-file -c run x  # config-file mode + continue
 ocmm --help
@@ -919,6 +920,9 @@ ocmm --help
 ```
 -p, --profile <name>     Select ocmm profile (sets OCMM_PROFILE)
     --fast               Enable opt-in fast model routing
+    --background-subagents
+                         Experimental, OpenCode-only background subagents
+                         (sets child-process env OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true)
     --mode <m>            Isolation: none|inline|config-file|config-dir|xdg (default: none)
     --no-providers        Don't merge providers from global config
     --no-plugins          Don't merge plugins from global config
@@ -934,6 +938,18 @@ ocmm --help
 
 All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass through to opencode. Before the explicit `--` separator, `--fast` is an ocmm shim flag; after it, `ocmm -- --fast` passes that token through to OpenCode.
 
+### Experimental OpenCode background subagents
+
+Use the CLI-only switch when launching a new OpenCode process:
+
+```bash
+ocmm --background-subagents ...
+```
+
+The experimental, OpenCode-only switch sets `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` only in the spawned child process. Without it, the shim removes any ambient inherited value for that variable so background subagents cannot activate accidentally. Before the first exact `--`, ocmm consumes the switch; `ocmm -- --background-subagents ...` forwards it unchanged to OpenCode and does not set the child environment variable.
+
+This is a startup opt-in: direct `opencode` use or direct plugin loading bypasses it, and an existing process needs to be restarted through `ocmm --background-subagents ...` to activate it. OpenCode owns its background child sessions, jobs, completion, and cancellation. It automatically injects completion into the parent conversation, so ocmm does not poll. Jobs are process-local and non-durable; after a restart they are gone. Use OpenCode's returned `task_id` to continue the related session.
+
 ### Isolation modes
 
 | Mode             | Env var                   | Isolation                           | Notes |
@@ -944,7 +960,7 @@ All non-ocmm args (including `-c`, `--continue`, `--model`, `run`, etc.) pass th
 | `config-dir`     | `OPENCODE_CONFIG_DIR`     | Generated config directory          | Uses `~/.config/opencode/ocmm-opencode/` unless `--config-dir` overrides it. |
 | `xdg`            | `XDG_CONFIG_HOME`         | Full OpenCode config-dir isolation  | Uses the same default isolated directory and can strip global plugins. |
 
-Config defaults can be set in the `shim` section of `ocmm.jsonc`. CLI flags override config values.
+Supported config defaults can be set in the `shim` section of `ocmm.jsonc`. CLI flags override config values; `--background-subagents` is CLI-only.
 
 ## `ocmm-profiles` CLI
 

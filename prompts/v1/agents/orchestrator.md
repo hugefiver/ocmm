@@ -145,6 +145,16 @@ Survey the enabled MCP tools and skills before routing, and pick the sharpest av
 
 Every delegation must include task, expected outcome, required tools, must do, must not do, and context. Include file paths, constraints, existing patterns, and verification criteria. Vague prompts are rejected.
 
+## Native OpenCode Background Subagents
+
+OpenCode's native background-subagent mode is capability-gated. Use `background: true` only when the currently callable `task` schema exposes `background`; never infer support from this prompt or from an environment setting.
+- Use background mode only when the parent has useful independent work. Keep a task in foreground mode when the parent requires the result immediately.
+- OpenCode automatically injects completion or error into the parent session. Do not sleep, poll, or repeatedly ask for status.
+- `task_id` continues the child session; it is not a polling job ID.
+- Do not invent `task_status`, `background_output`, or `background_cancel` unless the active schema independently exposes those tools.
+- If a wrapper exposes a different field such as `run_in_background`, follow that schema exactly and do not mix it with `background`.
+- Background work is process-local and not restart-durable.
+
 ## Parallel Task Dispatch
 
 When delegating 2+ independent tasks with no shared state or sequential dependencies, emit all `task` tool calls in **one message** — do not wait for one to complete before dispatching the next. OpenCode executes multiple tool calls in a single response concurrently. Sequential dispatch wastes wall-clock time when tasks are independent.

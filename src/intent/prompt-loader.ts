@@ -55,6 +55,7 @@ const CATEGORY_NAMES: CategoryName[] = [
 const deepworkPrompts = new Map<DeepworkVariant, string>()
 const agentPrompts = new Map<string, string>()
 const categoryPrompts = new Map<string, string>()
+let shellSafetyPrompt = ""
 
 function loadFile(absPath: string): string | null {
   try {
@@ -71,6 +72,7 @@ export function loadAllPrompts(
   deepworkPrompts.clear()
   agentPrompts.clear()
   categoryPrompts.clear()
+  shellSafetyPrompt = loadFile(join(rootDir, "shared", "shell-safety.md")) ?? ""
   const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
     const text = loadFile(join(base, "deepwork", `${v}.md`))
@@ -141,6 +143,10 @@ export function getAgentPrompt(name: string): string {
 }
 export function getCategoryPrompt(name: string): string {
   return categoryPrompts.get(name) ?? ""
+}
+
+export function getShellSafetyPrompt(): string {
+  return shellSafetyPrompt
 }
 
 export const _internals = { classifyModelFamily } as {
