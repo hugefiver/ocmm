@@ -280,6 +280,96 @@ test("system.transform appends commit guard to string system when enabled", asyn
   assert.ok((output.system as string).includes("git commit"))
 })
 
+test("system.transform builds array systems idempotently", async () => {
+  const sessionID = "ses_idempotent_array"
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
+  const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
+  clearSessionIntent(sessionID)
+  await msgHandler(makeInput({ sessionID }), makeOutput())
+  const output = { system: ["ORIGINAL"] }
+
+  await handler({ sessionID }, output)
+  const once = [...output.system]
+  await handler({ sessionID }, output)
+
+  assert.deepEqual(output.system, once)
+  assert.equal(output.system.filter((part) => part.includes("SKILL TEXT")).length, 1)
+  assert.equal(output.system.filter((part) => part.includes("## Commit Guard")).length, 1)
+})
+
+test("system.transform builds string systems idempotently", async () => {
+  const sessionID = "ses_idempotent_string"
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
+  const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
+  clearSessionIntent(sessionID)
+  await msgHandler(makeInput({ sessionID }), makeOutput())
+  const output: Record<string, unknown> = { system: "ORIGINAL" }
+
+  await handler({ sessionID }, output)
+  const once = output.system
+  await handler({ sessionID }, output)
+
+  assert.equal(output.system, once)
+  assert.equal((output.system as string).split("SKILL TEXT").length - 1, 1)
+  assert.equal((output.system as string).split("## Commit Guard").length - 1, 1)
+})
+
+test("system.transform independently builds distinct outputs for one session", async () => {
+  const sessionID = "ses_distinct_outputs"
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
+  const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
+  clearSessionIntent(sessionID)
+  await msgHandler(makeInput({ sessionID }), makeOutput())
+  const first = { system: ["FIRST"] }
+  const second = { system: ["SECOND"] }
+
+  await handler({ sessionID }, first)
+  await handler({ sessionID }, second)
+
+  for (const output of [first, second]) {
+    assert.equal(output.system.filter((part) => part.includes("SKILL TEXT")).length, 1)
+    assert.equal(output.system.filter((part) => part.includes("## Commit Guard")).length, 1)
+  }
+})
+
+test("system.transform only treats exact array boundaries as owned blocks", async () => {
+  const sessionID = "ses_middle_blocks"
+  const cfg = { ...defaultConfig(), workflow: "v1" as const }
+  const msgHandler = createChatMessageHandler({
+    getConfig: () => cfg,
+    getV1Skills: () => "SKILL TEXT",
+  })
+  const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
+  clearSessionIntent(sessionID)
+  await msgHandler(makeInput({ sessionID }), makeOutput())
+  const prompt = getSessionPrompt(sessionID)
+  assert.ok(prompt)
+  const guardOutput = { system: ["HOST"] }
+  await handler({ sessionID: "no-prompt" }, guardOutput)
+  const guard = guardOutput.system.at(-1)
+  assert.ok(guard)
+  const output = { system: ["BEFORE", prompt, guard, "AFTER"] }
+
+  await handler({ sessionID }, output)
+
+  assert.equal(output.system[0], prompt)
+  assert.equal(output.system.at(-1), guard)
+  assert.equal(output.system.filter((part) => part === prompt).length, 2)
+  assert.equal(output.system.filter((part) => part === guard).length, 2)
+})
+
 test("system.transform does not append commit guard when disabled", async () => {
   const sessionID = "ses_test_guard_off"
   clearSessionIntent(sessionID)

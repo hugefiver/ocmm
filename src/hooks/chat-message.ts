@@ -213,6 +213,41 @@ isolated tests, repros, and fixtures. If a task needs committing outside a temp
 repository, state what should be committed and ask the user to approve or
 perform it.`
 
+type SystemMutation = "array" | "string" | "initialized" | null
+
+function prependExactSystemBlock(output: Record<string, unknown>, block: string): SystemMutation {
+  const system = output.system
+  if (Array.isArray(system)) {
+    if (system[0] === block) return null
+    system.unshift(block)
+    return "array"
+  }
+  if (typeof system === "string") {
+    if (system === block || system.startsWith(`${block}\n\n`)) return null
+    output.system = `${block}\n\n${system}`
+    return "string"
+  }
+  output.system = [block]
+  return "initialized"
+}
+
+function appendExactSystemBlock(output: Record<string, unknown>, block: string): SystemMutation {
+  const system = output.system
+  if (Array.isArray(system)) {
+    if (system.at(-1) === block) return null
+    system.push(block)
+    return "array"
+  }
+  if (typeof system === "string") {
+    if (system === block || system.endsWith(`\n\n${block}`)) return null
+    output.system = `${system}\n\n${block}`
+    return "string"
+  }
+  if (system !== undefined) return null
+  output.system = [block]
+  return "initialized"
+}
+
 export function createSystemTransformHandler(opts: {
   getConfig: () => OcmmConfig
   store?: SessionIntentStore
@@ -225,19 +260,16 @@ export function createSystemTransformHandler(opts: {
     const merged = store.getSessionPrompt(sessionID)
     if (merged) {
       if (!isRecord(rawOutput)) return
-      const sys = rawOutput.system
-      if (Array.isArray(sys)) {
-        sys.unshift(merged)
+      const mutation = prependExactSystemBlock(rawOutput, merged)
+      if (mutation === "array") {
         log.info(
           `system.transform: prepended ${merged.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
         )
-      } else if (typeof sys === "string") {
-        rawOutput.system = `${merged}\n\n${sys}`
+      } else if (mutation === "string") {
         log.info(
           `system.transform: prepended ${merged.length} chars to string system`,
         )
-      } else {
-        rawOutput.system = [merged]
+      } else if (mutation === "initialized") {
         log.info(
           `system.transform: initialized system with ${merged.length} chars`,
         )
@@ -249,15 +281,10 @@ export function createSystemTransformHandler(opts: {
     try {
       const config = opts.getConfig()
       if (!hookDisabled(config, "commit-guard-injector", "commitGuardInjector")) {
-        const sys = rawOutput.system
-        if (Array.isArray(sys)) {
-          sys.push(COMMIT_GUARD_TEXT)
+        const mutation = appendExactSystemBlock(rawOutput, COMMIT_GUARD_TEXT)
+        if (mutation === "array" || mutation === "string") {
           log.info(`system.transform: appended commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
-        } else if (typeof sys === "string") {
-          rawOutput.system = `${sys}\n\n${COMMIT_GUARD_TEXT}`
-          log.info(`system.transform: appended commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
-        } else if (sys === undefined) {
-          rawOutput.system = [COMMIT_GUARD_TEXT]
+        } else if (mutation === "initialized") {
           log.info(`system.transform: initialized system with commit guard (${COMMIT_GUARD_TEXT.length} chars)`)
         }
       }
