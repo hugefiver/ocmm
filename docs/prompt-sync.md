@@ -132,6 +132,13 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - Delegation keeps `TASK`, `EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and `CONTEXT`, and adds observable `GOAL`, `STOP WHEN`, and `EVIDENCE`; the parent verifies evidence, and a child's stop condition never replaces whole-user-goal completion.
 - Prompt policy is separate from generated Codex MultiAgent V1/V2 compatibility. `src/codex/plugin-generator.ts` and its compatibility tests remain unchanged; the existing generator path does not consume `prompts/codex/deepwork/codex.md`, so tracked bundle regeneration is expected to be a no-op.
 
+## Bounded Research Adaptation (2026-08-02)
+
+- Reviewed OMO baseline `b072d2791`. `prompts/{omo,v1,codex}/category/research.md` now carry one aligned, conditional `## BOUNDED RESEARCH` section after operating posture.
+- For complex research, it requires a stated branch question, a small evidence or time budget, an up-front exit condition, fold-back to the caller's main question, and stopping after repeated excursions yield no decision-relevant evidence. A concise count of sources, checks, or unresolved gaps is optional when useful.
+- The existing Answer-When-Answerable rule remains authoritative: bounded research is an optional excursion, not permission for open-ended lookup or extra research cycles after the answer is supported.
+- This adaptation explicitly rejects persistence, team, and mandatory-document requirements, and adds no journals, ledgers, new tools, or fixed runtime timers.
+
 ## Observation-Only Upstream Items (2026-07-13)
 
 The following upstream omo prompt/behavior items were reviewed and are intentionally recorded as observation-only. They are not implemented in this change and will only be reconsidered when a concrete trigger appears:

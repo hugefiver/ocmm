@@ -4,7 +4,7 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 ---
 
 <!-- v1 fork of superpowers/dispatching-parallel-agents.
-     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
+     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
      Adjustments: synced upstream platform-agnostic dispatch pseudocode
      (TS Task() → text Subagent (general-purpose) + parallel/sequential
      dispatch rule). No references to excluded skills.
@@ -166,15 +166,6 @@ Agent 3 → Fix tool-approval-race-conditions.test.ts
 
 **Integration:** All fixes independent, no conflicts, full suite green
 
-**Time saved:** 3 problems solved in parallel vs sequentially
-
-## Key Benefits
-
-1. **Parallelization** - Multiple investigations happen simultaneously
-2. **Focus** - Each agent has narrow scope, less context to track
-3. **Independence** - Agents don't interfere with each other
-4. **Speed** - 3 problems solved in time of 1
-
 ## Verification
 
 After agents return:
@@ -185,15 +176,6 @@ After agents return:
 5. **Spot check** - Agents can make systematic errors
 
 Treat this as a completion/integration check across the parallel tasks, not as a per-agent full reviewer loop. The parent workflow (e.g., subagent-driven-development) performs the final acceptance review after all tasks are integrated.
-
-## Real-World Impact
-
-From debugging session (2025-10-03):
-- 6 failures across 3 files
-- 3 agents dispatched in parallel
-- All investigations completed concurrently
-- All fixes integrated successfully
-- Zero conflicts between agent changes
 
 ## Codex Compatibility
 

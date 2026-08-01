@@ -164,6 +164,67 @@ test("main never serializes GITHUB_TOKEN", async () => {
   assert.equal(output.join("").includes(token), false)
 })
 
+test("remote main accepts an empty environment and reports missing GitHub Packages proof as UNRESOLVED", async () => {
+  const checkedAt = new Date("2027-02-03T04:05:06.000Z")
+  const receipt = makeCliReceipt("UNRESOLVED", checkedAt)
+  const output: string[] = []
+  let checkOptions: Parameters<CliRuntime["check"]>[0] | undefined
+  const runtime: CliRuntime = {
+    clock: { now: () => checkedAt, sleep: async () => {} },
+    check: async (options) => {
+      checkOptions = options
+      return receipt
+    },
+    validateStaged: () => {
+      throw new Error("staged validation must not run for remote mode")
+    },
+    writeStdout: (value) => { output.push(value) },
+  }
+
+  const exitCode = await main(
+    ["--mode", "remote", "--repository", "octo/ocmm", "--tag", "v1.2.3"],
+    {},
+    runtime,
+  )
+
+  assert.equal(exitCode, 2)
+  assert.ok(checkOptions)
+  assert.equal("githubToken" in checkOptions, false)
+  assert.deepEqual(output, [`${JSON.stringify(receipt, null, 2)}\n`])
+  assert.equal((JSON.parse(output[0] ?? "") as ReleaseCompletionReceipt).outcome, "UNRESOLVED")
+})
+
+test("release instructions make GitHub Packages proof optional without local token preflights", () => {
+  const sources = [
+    "skills/publish/SKILL.md",
+    "AGENTS.md",
+    "README.md",
+  ].map((path) => ({ path, source: readFileSync(join(process.cwd(), path), "utf8") }))
+
+  for (const { path, source } of sources) {
+    assert.doesNotMatch(
+      source,
+      /IsNullOrWhiteSpace\(\$env:GITHUB_TOKEN\)[\s\S]{0,200}throw/,
+      `${path} must not block release work on a local token preflight`,
+    )
+    assert.match(
+      source,
+      /No local `?GITHUB_TOKEN`? is needed to bump, tag, push, or trigger CI/i,
+      `${path} must allow authorized tag publication without a local token`,
+    )
+    assert.match(
+      source,
+      /optional authentication for GitHub Packages proof/i,
+      `${path} must describe the token as optional GitHub Packages proof authentication`,
+    )
+    assert.match(
+      source,
+      /UNRESOLVED.*exit `?2`?.*(?:does not|never) block.*authorized tag.*CI/is,
+      `${path} must preserve fail-closed proof without blocking authorized tag/CI publication`,
+    )
+  }
+})
+
 test("real staged package-script smoke is network-free and machine-readable", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-release-cli-smoke-"))
   const token = "github-token-secret-sentinel"

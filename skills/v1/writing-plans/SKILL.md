@@ -4,7 +4,7 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 ---
 
 <!-- v1 fork of superpowers/writing-plans.
-     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
+     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
      Adjustments: removed executing-plans cross-reference (excluded from v1);
      removed using-git-worktrees reference (not in v1); subagent-driven is the
      only execution path in v1; added mandatory plan-critic review loop with
@@ -143,12 +143,6 @@ Every step must contain the actual content an engineer needs. These are **plan f
 - "Similar to Task N" (repeat the code — the engineer may be reading tasks out of order)
 - Steps that describe what to do without showing how (code blocks required for code steps)
 - References to types, functions, or methods not defined in any task
-
-## Remember
-- Exact file paths always
-- Complete code in every step — if a step changes code, show the code
-- Exact commands with expected output
-- DRY, YAGNI, TDD, frequent commits
 
 ## Self-Review
 

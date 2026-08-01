@@ -4,7 +4,7 @@ description: "Use before any creative work - creating features, building compone
 ---
 
 <!-- v1 fork of superpowers/brainstorming.
-     Upstream: obra/superpowers v6.0.3.
+     Upstream: obra/superpowers v6.2.0.
      Adjustments: removed visual-companion section (not applicable to ocmm's
      declarative prompt model); removed spec-document-reviewer-prompt reference
      (spec review is handled by receiving-code-review skill in v1); replaced
@@ -81,6 +81,7 @@ You MUST create a task for each of these items and complete them in order:
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
+- YAGNI ruthlessly: remove features and complexity that do not serve the stated goal
 
 **Presenting the design:**
 
@@ -135,12 +136,3 @@ After the spec self-review loop passes, determine whether user approval is requi
 **Implementation:**
 
 - Proceed to the writing-plans skill to create a detailed implementation plan
-
-## Key Principles
-
-- **One question at a time** - Don't overwhelm with multiple questions
-- **Multiple choice preferred** - Easier to answer than open-ended when possible
-- **YAGNI ruthlessly** - Remove unnecessary features from all designs
-- **Explore alternatives** - Always propose 2-3 approaches before settling
-- **Incremental validation** - Present design, obtain approval before moving on
-- **Be flexible** - Go back and clarify when something doesn't make sense

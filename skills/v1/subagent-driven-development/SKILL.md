@@ -4,7 +4,7 @@ description: Use when executing implementation plans with independent tasks in t
 ---
 
 <!-- v1 fork of superpowers/subagent-driven-development.
-     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
+     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
      Adjustments: removed executing-plans comparison (excluded from v1);
      removed using-git-worktrees and finishing-a-development-branch references
      (not in v1); removed test-driven-development reference (TDD is described
@@ -22,7 +22,9 @@ description: Use when executing implementation plans with independent tasks in t
       section (reviewer "Cannot verify from diff" items). Did NOT sync:
      review-package/task-brief bash scripts (Windows incompatible); progress
      ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
-     (depend on scripts).
+      (depend on scripts). v1 also rejects automatic workspace creation, progress
+      ledgers, automatic cleanup, routine per-task full reviews, and subagent Git
+      writes.
      See docs/v1-maintenance.md for sync rules. -->
 
 # Subagent-Driven Development
@@ -58,6 +60,22 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
 3. **After all tasks:** Dispatch final code reviewer subagent for the entire implementation (use requesting-code-review skill)
 
 **Git ownership:** Subagents do not commit, stage, push, or run any Git write command. They return changed files and a suggested commit message to the orchestrator, along with verification evidence. The orchestrator performs any Git write only after explicit user authorization.
+
+**Local workflow boundaries:** No automatic workspace or ledger scripts, automatic
+cleanup, routine full review after each task, or subagent Git write is permitted.
+
+### Same-Task Correction Boundaries
+
+Continue the **same implementer** using its existing `task_id`, or the current
+callable schema's equivalent same-session continuation handle, only for a
+correction to the same planned task and the same artifact objective. If the host
+does not expose a continuation surface, start a fresh implementer and provide the
+bounded correction context explicitly. Also start fresh when the task, goal,
+stage, or artifact objective changes, or when the existing session context is
+stale or unavailable.
+
+After a correction, recheck only the affected blocker, changed files, and affected
+evidence; do not restart a full review loop for a bounded correction. After two correction rounds without progress on the same blocker, the controller must adjudicate the next step before another dispatch. It may clarify the requirement, change the task boundary, or report the blocker rather than retrying blindly. After five correction rounds, the hard ceiling stops automatic correction; do not accept the task while any blocker remains open.
 
 ## Model Selection
 
@@ -109,20 +127,6 @@ Each implementation task follows TDD:
 3. **REFACTOR**: Clean up the code while keeping tests green
 4. **REGRESSION**: Run the full test suite to verify no regressions
 
-## Advantages
-
-- Subagents follow TDD naturally
-- Fresh context per task (no confusion)
-- Parallel-safe (subagents don't interfere)
-- Subagent can ask questions (before AND during work)
-- Same session (no handoff)
-- Continuous progress (no waiting)
-- Completion checkpoints automatic
-- No file reading overhead (controller provides full text)
-- Controller curates exactly what context is needed
-- Questions surfaced before work begins (not after)
-- One final acceptance review covers the whole change instead of repeating full reviews per subtask
-
 ## Red Flags
 
 **Never:**
@@ -146,9 +150,9 @@ Each implementation task follows TDD:
 - Don't rush them into implementation
 
 **If the completion check finds issues:**
-- Re-dispatch the same implementer to fix them
-- Re-run the completion check after fixes
-- Repeat until the task is actually done
+- Apply the Same-Task Correction Boundaries above before dispatching a correction
+- Recheck only the affected blocker, files, and evidence after the correction
+- Do not move on or accept the task while a blocker remains open
 
 **If a reviewer is consulted early (only for an implemented diff with DONE_WITH_CONCERNS, user-requested strict step-by-step code review, or an obvious high-risk integration conflict):**
 - Implementer (same subagent) fixes the findings

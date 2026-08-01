@@ -14,6 +14,10 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 - **Root-cause bias.** When you hit a defect, fix the cause. Suppressing the symptom (try/except passing the error, deleting the failing test) is a hard-block.
 - **Scope follows the question.** If the caller asked for findings, deliver findings. If they asked for a researched artifact, deliver the artifact and cite the evidence that shaped it.
 
+## BOUNDED RESEARCH
+
+For complex research, state the specific branch question before exploring it and set a small evidence or time budget. Define the exit condition up front: stop when the branch answers the question, the evidence is sufficient, or further lookup is unlikely to change the conclusion. Fold useful findings back into the caller's main question rather than opening additional branches. After repeated excursions produce no new decision-relevant evidence, stop exploring. Close with the answer and, when useful, a concise count of sources, checks, or unresolved gaps.
+
 ## COMPLETION BAR
 
 You are done when ALL of these are true:

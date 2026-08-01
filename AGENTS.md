@@ -120,11 +120,10 @@ Critical: step 2 (regenerate Codex bundle) must run **after** the version bump a
 After the authorized main `v0.6.6` tag push and matching workflow run exist, run this from the exact released checkout. It is a release-stage command, not a development check:
 
 ```powershell
-if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw "GITHUB_TOKEN with Actions and package read access is required" }
 pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
 ```
 
-Use the actual authorized tag for later releases; manually dispatched runs also require their numeric `--run-id`. Exit `0` with receipt outcome `COMPLETED` is the only completion result. Exit `1` (`FAILED`) and exit `2` (`UNRESOLVED`) preserve the immutable tag and require reporting rather than an in-place repair.
+Use the actual authorized tag for later releases; manually dispatched runs also require their numeric `--run-id`. No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. It is optional authentication for GitHub Packages proof; the release workflow uses its own `${{ github.token }}`. If that proof cannot be obtained, the checker returns `UNRESOLVED` with exit `2`; this does not block the authorized tag or CI publication. Exit `0` with receipt outcome `COMPLETED` is the only completion result. Exit `1` (`FAILED`) and exit `2` (`UNRESOLVED`) preserve the immutable tag and require reporting rather than an in-place repair.
 
 ## Hook defaults
 

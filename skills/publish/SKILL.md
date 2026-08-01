@@ -28,11 +28,12 @@ Never describe `FAILED`, `UNRESOLVED`, a nonterminal run, terminal workflow succ
 For a main tag push, run from the exact released checkout after the tag and matching run exist:
 
 ```powershell
-if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw "GITHUB_TOKEN with Actions and package read access is required" }
 pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
 ```
 
 Use the actual authorized tag for releases after `v0.6.6`. For a manually dispatched run, also pass its numeric `--run-id`; the run must itself be bound to the tag branch and peeled SHA.
+
+No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. It is optional authentication for GitHub Packages proof; the release workflow uses its own `${{ github.token }}`. If that proof cannot be obtained, the checker returns `UNRESOLVED` with exit `2`; this does not block the authorized tag or CI publication.
 
 Do not echo the token. Do not paste registry bodies, Authorization headers, or signed asset URLs into chat or evidence.
 

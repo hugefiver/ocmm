@@ -171,6 +171,39 @@ test("loadV1SkillCommands wraps v1 skills and applies disable filters", () => {
   }
 })
 
+test("v1 Superpowers sources retain local boundaries and include v6.2.0 guidance", () => {
+  const skillsRoot = join(process.cwd(), "skills", "v1")
+  const source = (skill: string) => readFileSync(join(skillsRoot, skill, "SKILL.md"), "utf8")
+  const syncedSkills = [
+    "brainstorming",
+    "writing-plans",
+    "requesting-code-review",
+    "receiving-code-review",
+    "dispatching-parallel-agents",
+  ]
+
+  for (const skill of syncedSkills) {
+    assert.match(source(skill), /Upstream: obra\/superpowers v6\.2\.0/)
+  }
+
+  const sdd = source("subagent-driven-development")
+  const implementer = readFileSync(join(skillsRoot, "subagent-driven-development", "implementer-prompt.md"), "utf8")
+
+  assert.match(sdd, /Upstream: obra\/superpowers v6\.2\.0/)
+  assert.match(sdd, /same implementer.*task_id.*equivalent same-session continuation handle/is)
+  assert.match(sdd, /host.*does not expose a continuation surface.*fresh implementer/is)
+  assert.match(sdd, /two correction rounds.*same blocker|two.*no.*progress/is)
+  assert.match(sdd, /five correction rounds.*hard ceiling/is)
+  assert.match(sdd, /recheck only.*affected blocker|affected evidence/is)
+  assert.doesNotMatch(sdd, /(?:must|require(?:d)?)\s+(?:create|maintain|use).*?(?:automatic workspace|ledger|cleanup script|subagent commit)/is)
+
+  assert.match(implementer, /observable input, action, and output/i)
+  assert.match(implementer, /production change.*make the test fail/i)
+  assert.match(implementer, /expected values.*not.*derived.*implementation/i)
+  assert.match(implementer, /mutation check/i)
+  assert.match(implementer, /structural contract tests/i)
+})
+
 test("loadSharedSkills scans additional sources recursively", () => {
   const root = makeSkillsRoot()
   const extra = mkdtempSync(join(tmpdir(), "ocmm-extra-skills-"))

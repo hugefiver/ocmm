@@ -4,11 +4,11 @@ description: Use when receiving code review feedback, before implementing sugges
 ---
 
 <!-- v1 fork of superpowers/receiving-code-review.
-     Upstream: obra/superpowers v6.1.1+ (synced 2026-07-03).
-     Adjustments: no content changes needed — this skill is already
-     self-contained and does not reference excluded skills. Upstream v6.1.1+
-     changes (de-CLAUDE.md hardcoding, "Circle K" → direct expression) were
-     already absent from this fork's base; no merge required.
+     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
+     Adjustments: this skill is self-contained and does not reference excluded
+     skills. Upstream v6.1.1+ changes (de-CLAUDE.md hardcoding, "Circle K" →
+     direct expression) were already absent from this fork's base; v6.2.0's
+     redundant final summary was removed.
      See docs/v1-maintenance.md for sync rules. -->
 
 # Code Review Reception
@@ -173,11 +173,3 @@ State the correction factually and move on.
 | Avoiding pushback | Technical correctness > comfort |
 | Partial implementation | Clarify all items first |
 | Can't verify, proceed anyway | State limitation, ask for direction |
-
-## The Bottom Line
-
-**External feedback = suggestions to evaluate, not orders to follow.**
-
-Verify. Question. Then implement.
-
-No performative agreement. Technical rigor always.

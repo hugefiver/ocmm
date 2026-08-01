@@ -194,23 +194,45 @@ const defaultSubagent429Config = () => ({
   providerScopes: {},
 })
 
+export const DEFAULT_RUNTIME_FALLBACK_RETRY_PATTERNS = [
+  "rate.?limit",
+  "too.?many.?requests",
+  "usage.?quota.{0,20}?(?:exceeded|exhausted|reached)",
+  "quota.?exceeded",
+  "(?:exceeded|exhausted|reached).{0,20}?quota",
+  "free.?usage.{0,20}?(?:exceeded|exhausted|limit)",
+  "usage.?exceeded",
+  "(?:usage|quota)\\s+limit\\s+exhausted",
+  "exhausted\\s+your\\s+capacity",
+  "all\\s+credentials\\s+for\\s+model",
+  "cool(?:ing)?\\s+down",
+  "model.{0,20}?not.{0,10}?supported",
+  "model_not_supported",
+  "service.?unavailable",
+  "temporarily.?unavailable",
+  "overloaded",
+  "internal server error",
+  "gateway timeout",
+  "bad gateway",
+  "try\\s+again\\s+(?:later|shortly|in\\s+\\d+\\s*(?:seconds?|minutes?))",
+  "\\b429\\b",
+  "\\b503\\b",
+  "\\b529\\b",
+  "使用上限",
+  "频率限制",
+  "请求过于频繁",
+  "暂时不可用",
+  "服务不可用",
+  "请稍后重试",
+] as const
+
 const defaultRuntimeFallbackConfig = () => ({
   enabled: true,
   dispatch: true,
   maxAttempts: 3,
   cooldownSeconds: 60,
   retryOnStatusCodes: [429, 500, 502, 503, 504],
-  retryOnPatterns: [
-    "rate limit",
-    "overloaded",
-    "temporarily unavailable",
-    "service unavailable",
-    "internal server error",
-    "gateway timeout",
-    "bad gateway",
-    "capacity",
-    "try again",
-  ],
+  retryOnPatterns: [...DEFAULT_RUNTIME_FALLBACK_RETRY_PATTERNS],
   subagent429: defaultSubagent429Config(),
 })
 
@@ -495,17 +517,7 @@ export const RuntimeFallbackConfigSchema = z
     /** Regex patterns matched against the error message; match => retryable. */
     retryOnPatterns: z
       .array(z.string())
-      .default([
-        "rate limit",
-        "overloaded",
-        "temporarily unavailable",
-        "service unavailable",
-        "internal server error",
-        "gateway timeout",
-        "bad gateway",
-        "capacity",
-        "try again",
-      ]),
+      .default([...DEFAULT_RUNTIME_FALLBACK_RETRY_PATTERNS]),
     subagent429: Subagent429ConfigSchema,
   })
   .default(defaultRuntimeFallbackConfig)

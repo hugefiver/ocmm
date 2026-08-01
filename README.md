@@ -481,15 +481,35 @@ Schema (Zod-validated; unknown object keys are stripped). Declared invalid field
     "cooldownSeconds": 60,
     "retryOnStatusCodes": [429, 500, 502, 503, 504],
     "retryOnPatterns": [
-      "rate limit",
+      "rate.?limit",
+      "too.?many.?requests",
+      "usage.?quota.{0,20}?(?:exceeded|exhausted|reached)",
+      "quota.?exceeded",
+      "(?:exceeded|exhausted|reached).{0,20}?quota",
+      "free.?usage.{0,20}?(?:exceeded|exhausted|limit)",
+      "usage.?exceeded",
+      "(?:usage|quota)\\s+limit\\s+exhausted",
+      "exhausted\\s+your\\s+capacity",
+      "all\\s+credentials\\s+for\\s+model",
+      "cool(?:ing)?\\s+down",
+      "model.{0,20}?not.{0,10}?supported",
+      "model_not_supported",
+      "service.?unavailable",
+      "temporarily.?unavailable",
       "overloaded",
-      "temporarily unavailable",
-      "service unavailable",
       "internal server error",
       "gateway timeout",
       "bad gateway",
-      "capacity",
-      "try again",
+      "try\\s+again\\s+(?:later|shortly|in\\s+\\d+\\s*(?:seconds?|minutes?))",
+      "\\b429\\b",
+      "\\b503\\b",
+      "\\b529\\b",
+      "使用上限",
+      "频率限制",
+      "请求过于频繁",
+      "暂时不可用",
+      "服务不可用",
+      "请稍后重试",
     ],
     "subagent429": {
       "enabled": true,
@@ -1005,7 +1025,37 @@ While a dedicated dispatch is active, the first queued provider outcome takes pr
   "maxAttempts": 3,
   "cooldownSeconds": 60,
   "retryOnStatusCodes": [429, 500, 502, 503, 504],
-  "retryOnPatterns": ["rate limit", "overloaded", "..."],
+  "retryOnPatterns": [
+    "rate.?limit",
+    "too.?many.?requests",
+    "usage.?quota.{0,20}?(?:exceeded|exhausted|reached)",
+    "quota.?exceeded",
+    "(?:exceeded|exhausted|reached).{0,20}?quota",
+    "free.?usage.{0,20}?(?:exceeded|exhausted|limit)",
+    "usage.?exceeded",
+    "(?:usage|quota)\\s+limit\\s+exhausted",
+    "exhausted\\s+your\\s+capacity",
+    "all\\s+credentials\\s+for\\s+model",
+    "cool(?:ing)?\\s+down",
+    "model.{0,20}?not.{0,10}?supported",
+    "model_not_supported",
+    "service.?unavailable",
+    "temporarily.?unavailable",
+    "overloaded",
+    "internal server error",
+    "gateway timeout",
+    "bad gateway",
+    "try\\s+again\\s+(?:later|shortly|in\\s+\\d+\\s*(?:seconds?|minutes?))",
+    "\\b429\\b",
+    "\\b503\\b",
+    "\\b529\\b",
+    "使用上限",
+    "频率限制",
+    "请求过于频繁",
+    "暂时不可用",
+    "服务不可用",
+    "请稍后重试"
+  ],
   "subagent429": {
     "enabled": true,
     "maxRetries": 5,
@@ -1073,11 +1123,12 @@ Workflow terminal success is an intermediate signal, not release completion. The
 For a main tag push, run this from the exact released checkout after the tag and matching run exist. This is a release-stage command, not a feature-development command:
 
 ```powershell
-if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw "GITHUB_TOKEN with Actions and package read access is required" }
 pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
 ```
 
 Use the authorized later tag in place of `v0.6.6`. A manually dispatched run also requires its numeric `--run-id`.
+
+No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. It is optional authentication for GitHub Packages proof; the release workflow uses its own `${{ github.token }}`. If that proof cannot be obtained, the checker returns `UNRESOLVED` with exit `2`; this does not block the authorized tag or CI publication.
 
 | Exit | Receipt outcome | Meaning |
 | --- | --- | --- |

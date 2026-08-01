@@ -65,6 +65,63 @@ test("classifyError handles string errors", () => {
   assert.equal(r.retryable, true)
 })
 
+test("classifyError matches bounded default retry patterns", () => {
+  for (const message of [
+    "rate-limit reached",
+    "too many requests",
+    "usage quota exceeded",
+    "quota exceeded",
+    "exhausted available quota",
+    "free usage limit reached",
+    "usage exceeded",
+    "usage limit exhausted",
+    "exhausted your capacity",
+    "all credentials for model are unavailable",
+    "service is cool down before retry",
+    "model alpha is not supported",
+    "model_not_supported",
+    "service unavailable",
+    "temporarily unavailable",
+    "overloaded",
+    "internal server error",
+    "gateway timeout",
+    "bad gateway",
+    "try again in 30 seconds",
+    "provider returned 429",
+    "provider returned 503",
+    "provider returned 529",
+    "使用上限已达到",
+    "频率限制",
+    "请求过于频繁",
+    "暂时不可用",
+    "服务不可用",
+    "请稍后重试",
+  ]) {
+    assert.equal(classifyError(message, cfg).retryable, true, message)
+  }
+})
+
+test("classifyError rejects unbounded or non-transient default messages", () => {
+  for (const message of [
+    "quota",
+    "4290",
+    "503abc",
+    "5299",
+    "context limit exhausted",
+    "input exceeds the context window; reduce it and try again",
+    "supported-model documentation",
+    "invalid request payload; correct it and try again",
+  ]) {
+    assert.equal(classifyError(message, cfg).retryable, false, message)
+  }
+})
+
+test("classifyError uses explicit retry pattern overrides as replacements", () => {
+  const override = { ...cfg, retryOnPatterns: ["provider-specific failure"] }
+  assert.equal(classifyError("provider-specific failure", override).retryable, true)
+  assert.equal(classifyError("rate limit", override).retryable, false)
+})
+
 test("classifyError handles unknown shapes without throwing", () => {
   const r = classifyError(null, cfg)
   assert.equal(r.retryable, false)

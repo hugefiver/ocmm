@@ -98,9 +98,15 @@ Task tool (general-purpose):
     - Did I follow existing patterns in the codebase?
 
     **Testing:**
-    - Do tests actually verify behavior (not just mock behavior)?
-    - Did I follow TDD if required?
-    - Are tests comprehensive?
+    - For each behavior test, state the observable input, action, and output it proves.
+    - Name a production change (mutation) that would make the test fail; tests that
+      cannot name one are not falsifiable enough.
+    - Expected values must not be derived from the implementation under test; use
+      independently determined values or an independent oracle.
+    - For high-risk or subtle behavior, run a lightweight mutation check by making
+      the named production change and confirming the test fails, then restore it.
+    - Marker, inventory, and generated-file tests are valid structural contract tests,
+      but cannot be the only runtime-behavior evidence for a behavior change.
 
     If you find issues during self-review, fix them now before reporting.
 

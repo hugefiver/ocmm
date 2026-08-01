@@ -794,6 +794,28 @@ test("GPT-5.6 prompts scale process and constrain subagent use", () => {
   }
 })
 
+test("research category prompts align lightweight bounded research", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    const prompt = getCategoryPrompt("research")
+    const label = `${workflow}/research`
+    const posture = prompt.indexOf("## OPERATING POSTURE")
+    const boundedResearch = prompt.indexOf("## BOUNDED RESEARCH")
+    const completion = prompt.indexOf("## COMPLETION BAR")
+
+    assert.equal(countOccurrences(prompt, "## BOUNDED RESEARCH"), 1, `${label} bounded-research heading count`)
+    assert.ok(posture < boundedResearch && boundedResearch < completion, `${label} bounded-research placement`)
+    const section = prompt.slice(boundedResearch, completion)
+    assert.match(section, /specific branch question/i, `${label} branch question`)
+    assert.match(section, /small evidence or time budget/i, `${label} small budget`)
+    assert.match(section, /Define the exit condition up front/i, `${label} exit condition`)
+    assert.match(section, /Fold useful findings back into the caller's main question/i, `${label} fold-back`)
+    assert.match(section, /repeated excursions produce no new decision-relevant evidence, stop exploring/i, `${label} no-value stop`)
+    assert.match(section, /when useful, a concise count of sources, checks, or unresolved gaps/i, `${label} optional evidence count`)
+  }
+})
+
 test("GPT-5.6 specializations are compact additive calibrations synchronized across workflows", () => {
   const shared = new Map<Gpt56Workflow, string>()
 

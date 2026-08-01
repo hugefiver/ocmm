@@ -4,7 +4,7 @@ description: Use after all implementation tasks complete, after major features a
 ---
 
 <!-- v1 fork of superpowers/requesting-code-review.
-     Upstream: obra/superpowers v6.0.3.
+     Upstream: obra/superpowers v6.2.0.
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); added
      Reviewer Selection section for ordered Oracle slot semantics and logical
