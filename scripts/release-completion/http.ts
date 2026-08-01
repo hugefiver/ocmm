@@ -12,8 +12,6 @@ const POSITIVE_DECIMAL = /^[1-9]\d*$/
 const REPOSITORY_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 export const GITHUB_API_ORIGIN = "https://api.github.com"
-export const NPMJS_REGISTRY = "https://registry.npmjs.org"
-export const GITHUB_PACKAGES_REGISTRY = "https://npm.pkg.github.com"
 
 export class HttpContractError extends Error {}
 
@@ -114,9 +112,6 @@ export function classifyHttp(
 ): HttpDisposition {
   if (!Number.isInteger(response.status)) return "failed"
   if (response.status === 200) return "success"
-  if (context.service === "github-packages" && (response.status === 401 || response.status === 403)) {
-    return "github-packages-unresolved"
-  }
   if (response.status === 429 || response.status === 404 || (response.status >= 500 && response.status <= 599)) {
     return "retry"
   }
@@ -124,10 +119,6 @@ export function classifyHttp(
     return "retry"
   }
   return "failed"
-}
-
-export function registryMetadataUrl(registry: string, packageName: string): string {
-  return `${registry}/${encodeURIComponent(packageName)}`
 }
 
 export function decodeJson(body: Uint8Array): unknown {

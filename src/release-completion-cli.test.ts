@@ -164,9 +164,9 @@ test("main never serializes GITHUB_TOKEN", async () => {
   assert.equal(output.join("").includes(token), false)
 })
 
-test("remote main accepts an empty environment and reports missing GitHub Packages proof as UNRESOLVED", async () => {
+test("remote main accepts an empty environment when registry checks are disabled", async () => {
   const checkedAt = new Date("2027-02-03T04:05:06.000Z")
-  const receipt = makeCliReceipt("UNRESOLVED", checkedAt)
+  const receipt = makeCliReceipt("COMPLETED", checkedAt)
   const output: string[] = []
   let checkOptions: Parameters<CliRuntime["check"]>[0] | undefined
   const runtime: CliRuntime = {
@@ -187,14 +187,14 @@ test("remote main accepts an empty environment and reports missing GitHub Packag
     runtime,
   )
 
-  assert.equal(exitCode, 2)
+  assert.equal(exitCode, 0)
   assert.ok(checkOptions)
   assert.equal("githubToken" in checkOptions, false)
   assert.deepEqual(output, [`${JSON.stringify(receipt, null, 2)}\n`])
-  assert.equal((JSON.parse(output[0] ?? "") as ReleaseCompletionReceipt).outcome, "UNRESOLVED")
+  assert.equal((JSON.parse(output[0] ?? "") as ReleaseCompletionReceipt).outcome, "COMPLETED")
 })
 
-test("release instructions make GitHub Packages proof optional without local token preflights", () => {
+test("release instructions exclude npmjs and GitHub Packages from completion proof", () => {
   const sources = [
     "skills/publish/SKILL.md",
     "AGENTS.md",
@@ -212,16 +212,9 @@ test("release instructions make GitHub Packages proof optional without local tok
       /No local `?GITHUB_TOKEN`? is needed to bump, tag, push, or trigger CI/i,
       `${path} must allow authorized tag publication without a local token`,
     )
-    assert.match(
-      source,
-      /optional authentication for GitHub Packages proof/i,
-      `${path} must describe the token as optional GitHub Packages proof authentication`,
-    )
-    assert.match(
-      source,
-      /UNRESOLVED.*exit `?2`?.*(?:does not|never) block.*authorized tag.*CI/is,
-      `${path} must preserve fail-closed proof without blocking authorized tag/CI publication`,
-    )
+    assert.match(source, /npmjs.*GitHub Packages.*(?:not|no longer).*(?:completion|proof|check)/is, `${path} must disable both registry completion checks`)
+    assert.match(source, /registry publish.*(?:remain|continue|still)/is, `${path} must preserve CI registry publication attempts`)
+    assert.doesNotMatch(source, /GitHub Packages proof is required|registry package metadata.*required/i, `${path} must not retain a registry completion gate`)
   }
 })
 

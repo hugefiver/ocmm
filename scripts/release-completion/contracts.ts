@@ -85,7 +85,7 @@ export interface CheckReleaseCompletionOptions {
   clock: Clock
 }
 
-export type HttpService = "github-api" | "github-packages" | "npmjs" | "release-asset"
-export type HttpDisposition = "success" | "retry" | "failed" | "github-packages-unresolved"
+export type HttpService = "github-api" | "release-asset"
+export type HttpDisposition = "success" | "retry" | "failed"
 export type SurfaceName = keyof ReleaseCompletionReceipt["surfaces"]
 export type RunEvent = "push" | "workflow_dispatch"

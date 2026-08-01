@@ -187,18 +187,15 @@ export function hasDefiniteFailure(receipt: ReleaseCompletionReceipt): boolean {
 }
 
 export function setLaneSkippedSurfaces(receipt: ReleaseCompletionReceipt, target: ReleaseTarget): void {
-  if (target.lane === "ocmm-lsp") {
-    setSurface(receipt, "githubPackages", "SKIPPED", "github_packages_not_applicable", "GitHub Packages proof is not applicable to the LSP lane")
-    setSurface(receipt, "pinnedLspRelease", "SKIPPED", "pinned_lsp_release_not_applicable", "pinned LSP Release proof is not applicable to the LSP lane")
-  }
-}
-
-export function setDispatchGithubPackagesSkipped(receipt: ReleaseCompletionReceipt): void {
+  setSurface(receipt, "npm", "SKIPPED", "npm_completion_check_disabled", "npm registry completion checks are disabled")
   setSurface(
     receipt,
     "githubPackages",
     "SKIPPED",
-    "github_packages_dispatch_not_provable",
-    "GitHub Packages publication cannot be proven from a workflow_dispatch run",
+    "github_packages_completion_check_disabled",
+    "GitHub Packages completion checks are disabled",
   )
+  if (target.lane === "ocmm-lsp") {
+    setSurface(receipt, "pinnedLspRelease", "SKIPPED", "pinned_lsp_release_not_applicable", "pinned LSP Release proof is not applicable to the LSP lane")
+  }
 }

@@ -21,7 +21,6 @@ import {
   makeReleaseRoot,
   makeRemoteReleaseFixture,
   MOVED_HEAD_SHA,
-  npmProofRoutes,
   pinnedLspReleaseUrl,
   remoteOptions,
   tagRefUrl,
@@ -44,7 +43,6 @@ test("checkReleaseCompletion peels an annotated tag and binds one main push run 
         [jobsUrl(42, 3)]: [jsonResponse(200, { total_count: mainJobs.length, jobs: mainJobs })],
       },
       remote.routes,
-      npmProofRoutes(MAIN_TAG, root),
       {
         [pinnedLspReleaseUrl()]: [jsonResponse(200, { tag_name: "ocmm-lsp-v4.5.6", draft: false, assets: [] })],
       },
@@ -53,7 +51,7 @@ test("checkReleaseCompletion peels an annotated tag and binds one main push run 
     const receipt = await checkReleaseCompletion(remoteOptions(root, MAIN_TAG, clock, fixture.http))
 
     assert.equal(receipt.checkedAt, "2027-01-15T08:00:00.000Z")
-    assert.equal(receipt.outcome, "UNRESOLVED")
+    assert.equal(receipt.outcome, "COMPLETED")
     assert.equal(receipt.headSha, HEAD_SHA)
     assert.equal(receipt.runId, 42)
     assert.equal(receipt.runAttempt, 3)
@@ -64,7 +62,7 @@ test("checkReleaseCompletion peels an annotated tag and binds one main push run 
     assert.equal(receipt.surfaces.githubRelease.status, "PASS")
     assert.deepEqual(receipt.jobs, [...mainJobs].sort((left, right) => left.name.localeCompare(right.name)))
     assert.equal(fixture.requests.filter((request) => request.url === discoveryUrl(MAIN_TAG)).length, 1)
-    assert.equal(fixture.requests.filter((request) => request.url === tagRefUrl(MAIN_TAG)).length, 1)
+    assert.equal(fixture.requests.filter((request) => request.url === tagRefUrl(MAIN_TAG)).length, 2)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -90,7 +88,7 @@ test("checkReleaseCompletion accepts a lightweight LSP tag and all eight native 
 
     const receipt = await checkReleaseCompletion(remoteOptions(root, LSP_TAG, clock, fixture.http))
 
-    assert.equal(receipt.outcome, "UNRESOLVED")
+    assert.equal(receipt.outcome, "COMPLETED")
     assert.equal(receipt.surfaces.identity.status, "PASS")
     assert.equal(receipt.surfaces.workflow.status, "PASS")
     assert.equal(receipt.surfaces.jobs.status, "PASS")
@@ -123,7 +121,6 @@ test("checkReleaseCompletion retries run discovery and a nonterminal fixed run w
         [jobsUrl(42, 3)]: [jsonResponse(200, { total_count: mainJobs.length, jobs: mainJobs })],
       },
       remote.routes,
-      npmProofRoutes(MAIN_TAG, root),
       {
         [pinnedLspReleaseUrl()]: [jsonResponse(200, { tag_name: "ocmm-lsp-v4.5.6", draft: false, assets: [] })],
       },

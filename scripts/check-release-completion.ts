@@ -24,7 +24,6 @@ export {
   classifyHttp,
   createProductionHttpClient,
   normalizeResponseHeaders,
-  registryMetadataUrl,
 } from "./release-completion/http.ts"
 export { checkReleaseCompletion } from "./release-completion/remote.ts"
 export { validateStagedReleaseAssets } from "./release-completion/staged.ts"

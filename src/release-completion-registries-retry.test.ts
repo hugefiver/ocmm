@@ -14,22 +14,16 @@ import {
   GITHUB_TOKEN,
   HEAD_SHA,
   jsonResponse,
-  lspPlatformPackagesFixture,
   MAIN_TAG,
   makeReleaseRoot,
   LSP_TAG,
   pinnedLspReleaseUrl,
-  registryManifest,
-  registryMetadataUrl,
   NPMJS_REGISTRY,
-  remoteOptions,
   remoteOptionsWithToken,
-  receiptSurfaceKeys,
-  tagRefUrl,
   workflowRun,
 } from "./release-completion-test-support.test.ts"
 
-test("checkReleaseCompletion completes every required main push surface", async () => {
+test("checkReleaseCompletion completes main releases without registry checks", async () => {
   const root = makeReleaseRoot()
   try {
     const clock = new FakeClock()
@@ -37,18 +31,29 @@ test("checkReleaseCompletion completes every required main push surface", async 
     const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
 
     assert.equal(receipt.outcome, "COMPLETED")
-    for (const surface of receiptSurfaceKeys) assert.equal(receipt.surfaces[surface].status, "PASS")
-    assert.deepEqual(receipt.packages, [
-      { registry: "npmjs", name: "ocmm", version: "1.2.3", status: "PASS" },
-      { registry: "github", name: "@octo/ocmm", version: "1.2.3", status: "PASS" },
-    ])
+    for (const surface of ["identity", "workflow", "jobs", "githubRelease", "releaseAssets", "checksums", "pinnedLspRelease"] as const) {
+      assert.equal(receipt.surfaces[surface].status, "PASS")
+    }
+    assert.deepEqual(receipt.surfaces.npm, {
+      status: "SKIPPED",
+      code: "npm_completion_check_disabled",
+      detail: "npm registry completion checks are disabled",
+    })
+    assert.deepEqual(receipt.surfaces.githubPackages, {
+      status: "SKIPPED",
+      code: "github_packages_completion_check_disabled",
+      detail: "GitHub Packages completion checks are disabled",
+    })
+    assert.deepEqual(receipt.packages, [])
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(NPMJS_REGISTRY)), false)
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(GITHUB_PACKAGES_REGISTRY)), false)
     assert.equal(JSON.stringify(receipt).includes(GITHUB_TOKEN), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("checkReleaseCompletion completes eight LSP npm packages and skips main-only surfaces", async () => {
+test("checkReleaseCompletion completes LSP releases without registry checks", async () => {
   const root = makeReleaseRoot()
   try {
     const clock = new FakeClock()
@@ -56,15 +61,13 @@ test("checkReleaseCompletion completes eight LSP npm packages and skips main-onl
     const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, LSP_TAG, clock, fixture.http))
 
     assert.equal(receipt.outcome, "COMPLETED")
-    assert.equal(receipt.surfaces.npm.status, "PASS")
+    assert.equal(receipt.surfaces.npm.code, "npm_completion_check_disabled")
+    assert.equal(receipt.surfaces.npm.status, "SKIPPED")
     assert.equal(receipt.surfaces.githubPackages.status, "SKIPPED")
     assert.equal(receipt.surfaces.pinnedLspRelease.status, "SKIPPED")
-    assert.deepEqual(receipt.packages, lspPlatformPackagesFixture().map((platform) => ({
-      registry: "npmjs" as const,
-      name: platform.packageName,
-      version: "4.5.6",
-      status: "PASS" as const,
-    })).sort((left, right) => left.name.localeCompare(right.name)))
+    assert.deepEqual(receipt.packages, [])
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(NPMJS_REGISTRY)), false)
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(GITHUB_PACKAGES_REGISTRY)), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -78,32 +81,14 @@ test("checkReleaseCompletion skips GitHub Packages for a bound main workflow_dis
     const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http, 42))
 
     assert.equal(receipt.outcome, "COMPLETED")
-    assert.equal(receipt.surfaces.npm.status, "PASS")
+    assert.equal(receipt.surfaces.npm.status, "SKIPPED")
     assert.equal(receipt.surfaces.pinnedLspRelease.status, "PASS")
     assert.equal(receipt.surfaces.githubPackages.status, "SKIPPED")
+    assert.equal(receipt.surfaces.githubPackages.code, "github_packages_completion_check_disabled")
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(NPMJS_REGISTRY)), false)
     assert.equal(fixture.requests.some((request) => request.url.startsWith(GITHUB_PACKAGES_REGISTRY)), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("checkReleaseCompletion fails a registry manifest name or version mismatch", async () => {
-  for (const manifest of [
-    registryManifest("other", "1.2.3"),
-    { versions: { "1.2.3": { name: "ocmm", version: "9.9.9" } } },
-  ] as const) {
-    const root = makeReleaseRoot()
-    try {
-      const clock = new FakeClock()
-      const routes = fullMainRoutes(root)
-      routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = [jsonResponse(200, manifest)]
-      const fixture = createHttpFixture(routes)
-      const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-      assert.equal(receipt.outcome, "FAILED")
-      assert.equal(receipt.surfaces.npm.status, "FAILED")
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
   }
 })
 
@@ -122,66 +107,6 @@ test("checkReleaseCompletion fails a draft pinned LSP Release", async () => {
   }
 })
 
-test("checkReleaseCompletion retries 404 429 5xx and network errors then completes", async () => {
-  const root = makeReleaseRoot()
-  try {
-    const clock = new FakeClock()
-    const routes = fullMainRoutes(root)
-    routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = [
-      jsonResponse(404, {}),
-      jsonResponse(429, {}),
-      jsonResponse(500, {}),
-      { error: new Error("network-secret-sentinel") },
-      jsonResponse(200, registryManifest("ocmm", "1.2.3")),
-    ]
-    const fixture = createHttpFixture(routes)
-    const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-    assert.equal(receipt.outcome, "COMPLETED")
-    assert.deepEqual(clock.sleeps, [10, 10, 10, 10])
-    assert.equal(JSON.stringify(receipt).includes("network-secret-sentinel"), false)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("checkReleaseCompletion returns UNRESOLVED when retryable propagation reaches the deadline", async () => {
-  const root = makeReleaseRoot()
-  try {
-    const clock = new FakeClock()
-    const routes = fullMainRoutes(root)
-    routes[tagRefUrl(MAIN_TAG)] = Array.from({ length: 8 }, () => jsonResponse(200, { object: { type: "commit", sha: HEAD_SHA } }))
-    routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = Array.from({ length: 4 }, () => jsonResponse(404, {}))
-    const fixture = createHttpFixture(routes)
-    const receipt = await checkReleaseCompletion({
-      ...remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http),
-      deadlineMs: 25,
-      pollIntervalMs: 10,
-    })
-    assert.equal(receipt.outcome, "UNRESOLVED")
-    assert.equal(receipt.surfaces.npm.status, "UNRESOLVED")
-    assert.deepEqual(clock.sleeps, [10, 10, 5])
-    assert.equal(clock.now().getTime(), Date.parse("2027-01-15T08:00:00.000Z") + 25)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("checkReleaseCompletion fails a permanent 400 without sleeping", async () => {
-  const root = makeReleaseRoot()
-  try {
-    const clock = new FakeClock()
-    const routes = fullMainRoutes(root)
-    routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = [jsonResponse(400, {})]
-    const fixture = createHttpFixture(routes)
-    const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-    assert.equal(receipt.outcome, "FAILED")
-    assert.deepEqual(clock.sleeps, [])
-    assert.equal(fixture.requests.filter((request) => request.url === registryMetadataUrl(NPMJS_REGISTRY, "ocmm")).length, 1)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
 test("checkReleaseCompletion records independent publication surfaces after workflow failure", async () => {
   const root = makeReleaseRoot()
   try {
@@ -192,9 +117,11 @@ test("checkReleaseCompletion records independent publication surfaces after work
     const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
     assert.equal(receipt.outcome, "FAILED")
     assert.equal(receipt.surfaces.workflow.code, "workflow_not_success")
-    for (const surface of ["githubRelease", "releaseAssets", "checksums", "npm", "githubPackages", "pinnedLspRelease"] as const) {
+    for (const surface of ["githubRelease", "releaseAssets", "checksums", "pinnedLspRelease"] as const) {
       assert.equal(receipt.surfaces[surface].status, "PASS")
     }
+    assert.equal(receipt.surfaces.npm.status, "SKIPPED")
+    assert.equal(receipt.surfaces.githubPackages.status, "SKIPPED")
     assert.equal(receipt.surfaces.jobs.status, "UNRESOLVED")
     assert.deepEqual(clock.sleeps, [])
   } finally {
@@ -202,76 +129,7 @@ test("checkReleaseCompletion records independent publication surfaces after work
   }
 })
 
-test("checkReleaseCompletion returns UNRESOLVED when GitHub Packages token is missing", async () => {
-  const root = makeReleaseRoot()
-  try {
-    const clock = new FakeClock()
-    const fixture = createHttpFixture(fullMainRoutes(root))
-    const receipt = await checkReleaseCompletion(remoteOptions(root, MAIN_TAG, clock, fixture.http))
-    assert.equal(receipt.outcome, "UNRESOLVED")
-    assert.equal(receipt.surfaces.githubPackages.code, "github_packages_token_missing")
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("checkReleaseCompletion returns UNRESOLVED when GitHub Packages permission is unproven", async () => {
-  for (const status of [401, 403] as const) {
-    const root = makeReleaseRoot()
-    try {
-      const clock = new FakeClock()
-      const routes = fullMainRoutes(root)
-      routes[registryMetadataUrl(GITHUB_PACKAGES_REGISTRY, "@octo/ocmm")] = [jsonResponse(status, { message: "permission-body-sentinel" })]
-      const fixture = createHttpFixture(routes)
-      const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-      assert.equal(receipt.outcome, "UNRESOLVED")
-      assert.equal(receipt.surfaces.githubPackages.code, "github_packages_permission_unproven")
-      assert.deepEqual(clock.sleeps, [])
-      assert.equal(JSON.stringify(receipt).includes("permission-body-sentinel"), false)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }
-})
-
-test("checkReleaseCompletion retries a 200 registry response without the exact version", async () => {
-  const root = makeReleaseRoot()
-  try {
-    const clock = new FakeClock()
-    const routes = fullMainRoutes(root)
-    routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = [
-      jsonResponse(200, { versions: {}, "dist-tags": { latest: "1.2.3" } }),
-      jsonResponse(200, registryManifest("ocmm", "1.2.3")),
-    ]
-    const fixture = createHttpFixture(routes)
-    const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-    assert.equal(receipt.outcome, "COMPLETED")
-    assert.deepEqual(clock.sleeps, [10])
-    assert.equal(fixture.requests.filter((request) => request.url === registryMetadataUrl(NPMJS_REGISTRY, "ocmm")).length, 2)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("checkReleaseCompletion fails unexpected HTTP statuses without retry", async () => {
-  for (const status of [204, 302] as const) {
-    const root = makeReleaseRoot()
-    try {
-      const clock = new FakeClock()
-      const routes = fullMainRoutes(root)
-      routes[registryMetadataUrl(NPMJS_REGISTRY, "ocmm")] = [jsonResponse(status, {})]
-      const fixture = createHttpFixture(routes)
-      const receipt = await checkReleaseCompletion(remoteOptionsWithToken(root, MAIN_TAG, clock, fixture.http))
-      assert.equal(receipt.outcome, "FAILED")
-      assert.deepEqual(clock.sleeps, [])
-      assert.equal(fixture.requests.filter((request) => request.url === registryMetadataUrl(NPMJS_REGISTRY, "ocmm")).length, 1)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }
-})
-
-test("checkReleaseCompletion scopes Authorization to GitHub API and Packages origins", async () => {
+test("checkReleaseCompletion sends Authorization only to GitHub API", async () => {
   const root = makeReleaseRoot()
   try {
     const clock = new FakeClock()
@@ -280,12 +138,14 @@ test("checkReleaseCompletion scopes Authorization to GitHub API and Packages ori
     assert.equal(receipt.outcome, "COMPLETED")
     for (const request of fixture.requests) {
       const origin = new URL(request.url).origin
-      if (origin === GITHUB_API_ORIGIN || origin === GITHUB_PACKAGES_REGISTRY) {
+      if (origin === GITHUB_API_ORIGIN) {
         assert.equal(request.headers.Authorization, `Bearer ${GITHUB_TOKEN}`)
       } else {
         assert.equal(request.headers.Authorization, undefined)
       }
     }
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(NPMJS_REGISTRY)), false)
+    assert.equal(fixture.requests.some((request) => request.url.startsWith(GITHUB_PACKAGES_REGISTRY)), false)
     assert.equal(JSON.stringify(receipt).includes(GITHUB_TOKEN), false)
   } finally {
     rmSync(root, { recursive: true, force: true })

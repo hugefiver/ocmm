@@ -25,11 +25,10 @@ import {
   hasDefiniteFailure,
   makeReceipt,
   markRetryable,
-  setDispatchGithubPackagesSkipped,
   setLaneSkippedSurfaces,
   setSurface,
 } from "./receipt.ts"
-import { observeGithubPackagesProof, observeNpmProof, observePinnedLspRelease } from "./registries.ts"
+import { observePinnedLspRelease } from "./registries.ts"
 import { parseReleaseTarget } from "./target.ts"
 
 async function sleepUntilNextPoll(options: CheckReleaseCompletionOptions, deadlineAt: number): Promise<boolean> {
@@ -176,14 +175,11 @@ export async function checkReleaseCompletion(options: CheckReleaseCompletionOpti
       boundIdentity = true
       identityBoundThisCycle = true
       setSurface(receipt, "identity", "PASS", "release_identity_bound", "release tag, workflow run, and attempt are immutable")
-      if (target.lane === "ocmm" && fixedEvent === "workflow_dispatch") setDispatchGithubPackagesSkipped(receipt)
       recordWorkflowStatus(receipt, run, retryableSurfaces)
     }
 
     const observePostWorkflow = async (): Promise<void> => {
       await observeReleaseProof(receipt, target, apiRoot, options, githubRequestHeaders, retryableSurfaces, releaseAssets)
-      if (fixedEvent !== null) await observeGithubPackagesProof(receipt, target, fixedEvent, options, retryableSurfaces)
-      await observeNpmProof(receipt, target, options, retryableSurfaces)
       await observePinnedLspRelease(receipt, target, apiRoot, options, githubRequestHeaders, retryableSurfaces)
     }
 

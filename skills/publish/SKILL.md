@@ -11,7 +11,7 @@ Use this skill only after the user explicitly authorizes an ocmm release action.
 
 Workflow terminal success is not release completion. A release is complete only when `pnpm --silent run check:release-completion` returns exit `0` and its JSON receipt has `outcome: "COMPLETED"`.
 
-The receipt must bind one lane, exact tag/version, peeled tag commit, fixed `release.yml` run and attempt, lane-correct job conclusions, exact non-empty Release assets, complete downloaded SHA-256 verification, npm visibility, and every lane-required additional surface. Main tag pushes require GitHub Packages proof. Main releases also require the pinned LSP Release to exist. LSP releases require all eight npm platform packages and skip main-only surfaces.
+The receipt must bind one lane, exact tag/version, peeled tag commit, fixed `release.yml` run and attempt, lane-correct job conclusions, exact non-empty Release assets, complete downloaded SHA-256 verification, and every lane-required non-registry surface. Main releases also require the pinned LSP Release to exist. npmjs and GitHub Packages are not completion checks or proof surfaces; registry publish jobs remain part of CI and their job conclusions remain covered by the workflow contract.
 
 Never describe `FAILED`, `UNRESOLVED`, a nonterminal run, terminal workflow success without post-publication proof, or a partial surface set as complete.
 
@@ -33,7 +33,7 @@ pnpm --silent run check:release-completion -- --mode remote --repository hugefiv
 
 Use the actual authorized tag for releases after `v0.6.6`. For a manually dispatched run, also pass its numeric `--run-id`; the run must itself be bound to the tag branch and peeled SHA.
 
-No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. It is optional authentication for GitHub Packages proof; the release workflow uses its own `${{ github.token }}`. If that proof cannot be obtained, the checker returns `UNRESOLVED` with exit `2`; this does not block the authorized tag or CI publication.
+No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. The completion checker does not request npmjs or GitHub Packages, while the release workflow continues its registry publication attempts with workflow-managed authentication.
 
 Do not echo the token. Do not paste registry bodies, Authorization headers, or signed asset URLs into chat or evidence.
 
@@ -41,7 +41,7 @@ Do not echo the token. Do not paste registry bodies, Authorization headers, or s
 
 ### COMPLETED
 
-Report the tag, peeled SHA, fixed run ID/attempt/URL, lane, exact asset names, package names/versions, and checksum status from the receipt. Only this outcome permits the phrase “release complete.”
+Report the tag, peeled SHA, fixed run ID/attempt/URL, lane, exact asset names, and checksum status from the receipt. Only this outcome permits the phrase “release complete.”
 
 ### FAILED
 
@@ -49,4 +49,4 @@ Report every surface status and safe error code. State that the immutable tag re
 
 ### UNRESOLVED
 
-Report every surface lacking proof, the retained tag/SHA/run-ID/run-attempt identity, and whether the cause is propagation, retryable HTTP/network state, deadline, missing token, or package-read permission. A later checker rerun may resume proof without changing the tag.
+Report every required non-registry surface lacking proof, the retained tag/SHA/run-ID/run-attempt identity, and whether the cause is propagation, retryable HTTP/network state, or deadline. A later checker rerun may resume proof without changing the tag.
