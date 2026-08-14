@@ -759,6 +759,35 @@ test("canonical models are explicit user selections for ordinary and planning ro
   })
 })
 
+test("config exposes canonical reasoning as OpenCode visible variants when concrete", async () => {
+  const routeRegistry = createEffectiveRouteRegistry()
+  const config = {
+    ...defaultConfig(),
+    agents: {
+      orchestrator: { model: "openai/gpt-5.6-sol", reasoning: "max" as const },
+      builder: { model: "openai/gpt-5.6-sol", reasoning: "auto" as const },
+      planner: { model: "openai/gpt-5.6-sol", reasoning: "off" as const },
+      "canonical-worker": { model: "openai/gpt-5.6-sol", reasoning: "high" as const },
+      "host-owned": { model: "openai/gpt-5.6-sol", reasoning: "low" as const },
+    },
+  }
+  const target: ConfigTarget = {
+    agent: { "host-owned": { variant: "max" } },
+  }
+
+  await createConfigHandler({
+    getConfig: () => config,
+    routeRegistry,
+    getFastMode: () => false,
+  })(target, undefined)
+
+  assert.equal((target.agent.orchestrator as Record<string, unknown>).variant, "max")
+  assert.equal((target.agent.builder as Record<string, unknown>).variant, undefined)
+  assert.equal((target.agent.planner as Record<string, unknown>).variant, undefined)
+  assert.equal((target.agent["canonical-worker"] as Record<string, unknown>).variant, "high")
+  assert.equal((target.agent["host-owned"] as Record<string, unknown>).variant, "max")
+})
+
 test("managed variant-only tiers may catalog-upgrade without weakening explicit precedence", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
   const config = {

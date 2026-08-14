@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -132,7 +132,8 @@ export function pickDeepworkVariantForAgent(opts: {
 
 /** GPT-5.6 family, including Sol, Terra, Luna, and provider-versioned aliases. */
 export function isGpt56Model(modelID: string): boolean {
-  return /(?:^|[\/_-])gpt[-.]5[._-]6(?:$|[._-])/i.test(modelID)
+  const version = parseGptVersion(modelID)
+  return version !== null && version[0] === 5 && version[1] === 6
 }
 
 export function getDeepworkPrompt(variant: DeepworkVariant): string {

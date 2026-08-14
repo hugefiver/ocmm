@@ -5,10 +5,36 @@
  * used by OpenCode plugins for variant routing decisions.
  */
 
-/** Strip the leading "providerId/" if present. */
+const DOTTED_VENDOR_MODEL_PREFIXES: Record<string, RegExp> = {
+  openai: /^(?:gpt-|o\d|chatgpt-|codex-)/,
+  anthropic: /^claude-/,
+  google: /^gemini-/,
+  zhipu: /^glm-/,
+  deepseek: /^deepseek-/,
+}
+
+function stripDottedVendorModelPrefix(name: string): string {
+  const parts = name.split(".")
+  const directVendor = parts[0]?.toLowerCase()
+  const directModelStart = parts.slice(1).join(".")
+  const directPattern = directVendor ? DOTTED_VENDOR_MODEL_PREFIXES[directVendor] : undefined
+  if (directPattern?.test(directModelStart.toLowerCase())) return directModelStart
+
+  const region = parts[0]?.toLowerCase()
+  const regionalVendor = parts[1]?.toLowerCase()
+  const regionalModelStart = parts.slice(2).join(".")
+  const regionalPattern = regionalVendor ? DOTTED_VENDOR_MODEL_PREFIXES[regionalVendor] : undefined
+  if (/^(?:[a-z]{2}|[a-z]{2}-[a-z]+-\d+)$/.test(region ?? "") && regionalPattern?.test(regionalModelStart.toLowerCase())) {
+    return regionalModelStart
+  }
+  return name
+}
+
+/** Strip the leading "providerId/" and known dotted vendor namespace if present. */
 export function extractModelName(fullId: string): string {
   const idx = fullId.lastIndexOf("/")
-  return idx >= 0 ? fullId.slice(idx + 1) : fullId
+  const name = idx >= 0 ? fullId.slice(idx + 1) : fullId
+  return stripDottedVendorModelPrefix(name)
 }
 
 export function isGptModel(modelID: string): boolean {
@@ -17,7 +43,7 @@ export function isGptModel(modelID: string): boolean {
 
 export function parseGptVersion(modelID: string): [number, number, number] | null {
   const name = extractModelName(modelID).toLowerCase()
-  const match = name.match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|[-_.])/)
+  const match = name.match(/^gpt-(\d+)(?:[-_.](\d+))?(?:[-_.](\d+))?(?:$|[-_.])/)
   if (!match) return null
   return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)]
 }

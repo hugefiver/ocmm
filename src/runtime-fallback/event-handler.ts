@@ -1,4 +1,4 @@
-import { classifyError, type ErrorClassification } from "./error-classifier.ts"
+import { classifyError, extractStatusCode, type ErrorClassification } from "./error-classifier.ts"
 import {
   markModelFailed,
   modelKey,
@@ -14,6 +14,7 @@ import { clearSessionIntent as defaultClearSessionIntent } from "../hooks/chat-m
 import {
   beginIdleSession,
   invalidateIdleSession,
+  markSessionIdleStoppedByNonRetryableRequest,
   markSessionAborted,
   type IdleContinuationState,
 } from "./idle-state.ts"
@@ -64,6 +65,22 @@ export type RuntimeFallbackRuntime = {
 
 export const SUPPRESSION_TOMBSTONE_GRACE_MS = 5 * 60_000
 export const MAX_SUPPRESSION_TOMBSTONES = 256
+
+function hasExplicitNonRetryableFalse(error: unknown): boolean {
+  if (!isRecord(error)) return false
+  if (error.isRetryable === false) return true
+  for (const nested of [error.error, error.cause]) {
+    if (isRecord(nested) && nested.isRetryable === false) return true
+  }
+  return false
+}
+
+function shouldStopIdleContinuationForNonRetryableRequest(error: unknown, classification: ErrorClassification): boolean {
+  const requestStatus = classification.statusCode ?? extractStatusCode(error)
+  return !classification.retryable
+    && (requestStatus === 400 || requestStatus === 422)
+    && hasExplicitNonRetryableFalse(error)
+}
 
 export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): RuntimeFallbackRuntime {
   const sessionStates = new Map<string, FallbackState>()
@@ -290,7 +307,15 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       log.debug(`session.error abort (likely our own); skipping`)
       return
     }
-    if (!cfg.runtimeFallback.enabled) return
+    if (!cfg.runtimeFallback.enabled) {
+      if (sessionID && deps.idleState) {
+        const classification = classifyError(earlyError, cfg.runtimeFallback, clock())
+        if (shouldStopIdleContinuationForNonRetryableRequest(earlyError, classification)) {
+          markSessionIdleStoppedByNonRetryableRequest(deps.idleState, sessionID)
+        }
+      }
+      return
+    }
     if (!sessionID) {
       log.debug("session.error without sessionID; skipping")
       return
@@ -307,6 +332,9 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
 
     const error = props.error
     const classification: ErrorClassification = classifyError(error, cfg.runtimeFallback, clock())
+    if (deps.idleState && shouldStopIdleContinuationForNonRetryableRequest(error, classification)) {
+      markSessionIdleStoppedByNonRetryableRequest(deps.idleState, sessionID)
+    }
     // Resolve the child agent from the event payload; if absent, fall back to
     // the durable correlation's recorded agent so a child session whose
     // session.error omits the agent can still be matched for retry.

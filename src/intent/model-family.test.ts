@@ -13,6 +13,8 @@ import {
   isMiniModel,
   isKimiK27Model,
   isKimiK2Model,
+  parseGptVersion,
+  supportsNativeGptMaxReasoning,
 } from "./model-family.ts"
 
 test("extractModelName strips provider prefix", () => {
@@ -21,10 +23,27 @@ test("extractModelName strips provider prefix", () => {
   assert.equal(extractModelName("plain-name"), "plain-name")
 })
 
+test("extractModelName strips known dotted vendor namespaces before model names", () => {
+  assert.equal(extractModelName("amazon-bedrock/openai.gpt-5.6"), "gpt-5.6")
+  assert.equal(extractModelName("amazon-bedrock/us.openai.gpt-5.4"), "gpt-5.4")
+  assert.equal(extractModelName("amazon-bedrock/us.anthropic.claude-opus-4-7"), "claude-opus-4-7")
+  assert.equal(extractModelName("unknown-vendor/openai.gpt-5.6"), "gpt-5.6")
+  assert.equal(extractModelName("unknown-vendor/custom.gpt-5.6"), "custom.gpt-5.6")
+  assert.equal(extractModelName("vendor/notgpt.openai.gpt-5.6"), "notgpt.openai.gpt-5.6")
+})
+
 test("isGptModel matches gpt family", () => {
   assert.equal(isGptModel("gpt-5.5"), true)
   assert.equal(isGptModel("openai/gpt-5.4-mini"), true)
+  assert.equal(isGptModel("amazon-bedrock/us.openai.gpt-5.4"), true)
   assert.equal(isGptModel("claude-opus-4-7"), false)
+})
+
+test("GPT version parsing supports vendor-prefixed dotted Bedrock aliases", () => {
+  assert.deepEqual(parseGptVersion("amazon-bedrock/openai.gpt-5.6"), [5, 6, 0])
+  assert.deepEqual(parseGptVersion("amazon-bedrock/us.openai.gpt-5.4"), [5, 4, 0])
+  assert.deepEqual(parseGptVersion("gpt-5_6-sol"), [5, 6, 0])
+  assert.equal(supportsNativeGptMaxReasoning("amazon-bedrock/openai.gpt-5.6"), true)
 })
 
 test("isCodexModel matches codex family without catching generic GPT", () => {
@@ -104,6 +123,7 @@ test("deepseek family detection", () => {
 test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "codex-mini-latest" }), "codex")
   assert.equal(classifyModelFamily({ modelID: "gpt-5.5" }), "gpt")
+  assert.equal(classifyModelFamily({ modelID: "amazon-bedrock/us.openai.gpt-5.4" }), "gpt")
   assert.equal(classifyModelFamily({ modelID: "claude-opus-4-7" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "anthropic/claude-opus-5" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "claude-sonnet-4-6" }), "claude")

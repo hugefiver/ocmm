@@ -28,6 +28,8 @@ export async function handleIdleContinuation(deps: IdleContinuationDeps, session
     const data = idleState.sessionData.get(sessionID)
     // ESC abort - never continue
     if (data?.aborted) return
+    // Explicit non-retryable request errors are terminal for idle continuation.
+    if (data?.idleStoppedByNonRetryableRequest) return
 
     // Not enabled - clean up
     if (!isIdleContinuationEnabled(idleState, sessionID)) {

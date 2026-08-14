@@ -86,6 +86,7 @@ test("classifyError matches bounded default retry patterns", () => {
     "internal server error",
     "gateway timeout",
     "bad gateway",
+    "Error from provider: Upstream request failed",
     "try again in 30 seconds",
     "provider returned 429",
     "provider returned 503",
@@ -120,6 +121,7 @@ test("classifyError uses explicit retry pattern overrides as replacements", () =
   const override = { ...cfg, retryOnPatterns: ["provider-specific failure"] }
   assert.equal(classifyError("provider-specific failure", override).retryable, true)
   assert.equal(classifyError("rate limit", override).retryable, false)
+  assert.equal(classifyError("upstream request failed", override).retryable, false)
 })
 
 test("classifyError handles unknown shapes without throwing", () => {

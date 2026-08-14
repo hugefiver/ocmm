@@ -9,7 +9,9 @@ description: Use when you have a spec or requirements for a multi-step task, bef
      removed using-git-worktrees reference (not in v1); subagent-driven is the
      only execution path in v1; added mandatory plan-critic review loop with
      three-state verdict (REJECT/OKAY/OKAY-UNAMBIGUOUS) after self-review;
-     plan approval now conditional (user delegation OR [OKAY-UNAMBIGUOUS]).
+     plan approval now conditional (user delegation OR [OKAY-UNAMBIGUOUS]);
+     added bounded convergence rules from upstream 13a034b83 adapted to local
+     plan-critic receipts without adding any second review role.
      Synced v6.1.1+: added Task Right-Sizing section, Global Constraints header
      field, and Interfaces block (Consumes/Produces) per task.
      See docs/v1-maintenance.md for sync rules. -->
@@ -173,23 +175,48 @@ After self-review passes, submit the plan to the `plan-critic` agent for a manda
 
 Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict, or a review of an older/incomplete plan are not approval. Wait for a complete verdict, follow up, or re-dispatch the critic for the current full plan. Dispatch success is not a receipt.
 
-**Loop procedure:**
+**Loop procedure and convergence policy:**
 
 1. Save the complete plan, then submit that exact plan path to the selected available plan-critic profile.
-2. Dispatch the selected available plan-critic profile and wait for one explicit verdict for the current revision.
-3. Branch on the verdict:
+2. Determine the review cap before dispatch:
+   - Default: at most 5 plan-critic review rounds.
+   - Explicit user delegation `review N 次就下一步` / `review N times then proceed`: cap at N rounds.
+   - Explicit user request for unlimited/infinite plan review: no cap. Do not infer unlimited review from risk, strictness, or repeated rejections.
+3. Dispatch the selected available plan-critic profile and wait for one explicit verdict for the current revision.
+4. Branch on the verdict:
 
    | Verdict | Meaning | Action |
    |---|---|---|
-   | `[REJECT]` | Critical blockers exist; plan not executable as-is | Apply the blocker fixes (max 3), re-run self-review, save the updated complete plan, then begin a fresh critic round. |
+   | `[REJECT]` | Eligible blockers exist; plan not executable as-is | Apply the smallest plan edit that fixes each eligible blocker without expanding scope (max 3), re-run self-review, save the updated complete plan, then begin a fresh critic round if the cap allows. |
    | `[OKAY]` | Plan is executable; residual uncertainty/ambiguity remains | Exit the loop. Proceed to user approval (unless delegation applies). |
    | `[OKAY-UNAMBIGUOUS]` | Plan is executable AND logically clear with no ambiguity | Exit the loop. Skip user approval. Proceed to Execution Handoff. |
 
-**Loop cap (user delegation "review N 次就下一步"):**
+**Blocker eligibility and notes:**
 
-If the user has delegated with "review N 次就下一步" / "review N times then proceed", cap the loop at N iterations. After N iterations:
-- If still `[REJECT]`, or no current receipt exists: record unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed only under the explicit status `delegated-without-plan-approval`. Do not call this approved, passed, or receipted.
-- If `[OKAY]` or `[OKAY-UNAMBIGUOUS]` reached before N: exit early.
+A plan-critic rejection may block the loop only when each blocker fits at least one eligibility class:
+- It contradicts an explicit requirement, global constraint, or accepted design/plan decision.
+- It exposes an existing failing regression that the plan would leave unaddressed.
+- It identifies a reproducible broken flow with concrete steps or a concrete missing prerequisite that prevents execution.
+- It identifies a concrete security, data-loss, compatibility, release-safety, or runtime-safety risk.
+- It conflicts with an external API, provider, protocol, platform, packaging, or release contract the plan relies on.
+
+Anything else is a non-blocking note. Approval-with-notes is still approval for the review loop: `[OKAY]` with notes exits the loop, and `[OKAY-UNAMBIGUOUS]` with purely stylistic notes exits and still skips user approval.
+
+**Blocker ledger freeze after round 1:**
+
+After the first `[REJECT]`, treat the listed eligible blockers as the blocker ledger. Later rounds may block only on:
+- verification that an existing ledger blocker remains unfixed;
+- a regression introduced by the plan edits made to fix those blockers; or
+- a newly introduced blocker that independently satisfies the eligibility classes above.
+
+Do not allow each round to discover unrelated improvements or expand the plan-review scope. Fix blockers with the smallest plan edit that resolves the defect; do not add new product scope, new architecture, or extra QA beyond what the blocker requires.
+
+**Cap exhaustion:**
+
+When the active cap is reached without `[OKAY]` or `[OKAY-UNAMBIGUOUS]`:
+- Default cap: stop and ask the user how to proceed. Record unresolved blockers in the plan only if doing so helps the handoff. Do not call the plan approved, passed, or receipted.
+- User-delegated `review N 次就下一步`: record unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed only under the explicit status `delegated-without-plan-approval`. Do not call this approved, passed, or receipted.
+- Unlimited explicit review: continue until a current `[OKAY]` or `[OKAY-UNAMBIGUOUS]` receipt exists, or until the user changes direction.
 
 **Plan approval conditionality:**
 

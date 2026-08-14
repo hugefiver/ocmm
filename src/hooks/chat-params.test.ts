@@ -1418,7 +1418,6 @@ test("chat.params applies concrete controls after canonical reasoning", async ()
 
   assert.deepEqual(output, {
     options: { reasoningEffort: "low", thinking: { type: "disabled" } },
-    temperature: 0.2,
     topP: 0.8,
     maxOutputTokens: 4096,
   })
@@ -1426,7 +1425,6 @@ test("chat.params applies concrete controls after canonical reasoning", async ()
     reasoning: "high",
     reasoningEffort: "low",
     thinking: { type: "disabled" },
-    temperature: 0.2,
     topP: 0.8,
     maxOutputTokens: 4096,
   })
@@ -1464,7 +1462,6 @@ test("chat.params lowers canonical models entry controls for each actual family"
   await handler(makeInput({ agentName: "builder", providerID: "openai", modelID: "gpt-5.4-mini" }), gpt)
   assert.deepEqual(gpt, {
     options: { reasoningEffort: "high" },
-    temperature: 0.2,
     topP: 0.8,
     maxOutputTokens: 4_096,
   })
@@ -1550,5 +1547,76 @@ test("chat.params applies canonical minimums and GPT native-max caps by route so
       reasoning: testCase.expected,
       reasoningEffort: testCase.expected,
     }, testCase.label)
+  }
+})
+
+test("chat.params strips temperature for known unsupported reasoning models only", async () => {
+  const cases = [
+    {
+      label: "GPT-5 reasoning model",
+      providerID: "openai",
+      modelID: "gpt-5.5",
+      expectTemperature: false,
+    },
+    {
+      label: "OpenAI o-series reasoning model",
+      providerID: "openai",
+      modelID: "o3-mini",
+      expectTemperature: false,
+    },
+    {
+      label: "Codex reasoning model",
+      providerID: "openai",
+      modelID: "codex-mini-latest",
+      expectTemperature: false,
+    },
+    {
+      label: "Claude Opus 4.7+",
+      providerID: "anthropic",
+      modelID: "claude-opus-4-7",
+      expectTemperature: false,
+    },
+    {
+      label: "ordinary GPT model",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      expectTemperature: true,
+    },
+    {
+      label: "ordinary Claude model",
+      providerID: "anthropic",
+      modelID: "claude-sonnet-4-6",
+      expectTemperature: true,
+    },
+  ] as const
+
+  for (const testCase of cases) {
+    clearResolutions()
+    const registry = createEffectiveRouteRegistry()
+    publishRoutes(registry, new Map([["builder", {
+      model: `${testCase.providerID}/${testCase.modelID}`,
+      requirement: {
+        fallbackChain: [{
+          providers: [testCase.providerID],
+          model: testCase.modelID,
+          temperature: 0.2,
+          topP: 0.8,
+          maxTokens: 1024,
+        }],
+      },
+      requirementSource: "user-config",
+      primarySource: "user-requirement",
+      fastPath: { kind: "off" },
+    }]]))
+    const output = { options: {} as Record<string, unknown> }
+
+    await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+      makeInput({ agentName: "builder", providerID: testCase.providerID, modelID: testCase.modelID }),
+      output,
+    )
+
+    assert.equal(output.temperature, testCase.expectTemperature ? 0.2 : undefined, testCase.label)
+    assert.equal(output.topP, 0.8, testCase.label)
+    assert.equal(output.maxOutputTokens, 1024, testCase.label)
   }
 })

@@ -1,6 +1,7 @@
 export type IdleSessionData = {
   aborted: boolean
   continuationCount: number
+  idleStoppedByNonRetryableRequest?: boolean
 }
 
 export type IdleContinuationState = {
@@ -107,6 +108,18 @@ export function markSessionAborted(state: IdleContinuationState, sessionID: stri
   if (kind === undefined) state.sessionLifecycleKinds.set(sessionID, "lazy")
   const data = getSessionData(state, sessionID)
   data.aborted = true
+}
+
+export function markSessionIdleStoppedByNonRetryableRequest(
+  state: IdleContinuationState,
+  sessionID: string,
+): void {
+  const kind = state.sessionLifecycleKinds.get(sessionID)
+  if (kind === "deleted") return
+  allocateGeneration(state, sessionID)
+  if (kind === undefined) state.sessionLifecycleKinds.set(sessionID, "lazy")
+  const data = getSessionData(state, sessionID)
+  data.idleStoppedByNonRetryableRequest = true
 }
 
 export function clearSession(state: IdleContinuationState, sessionID: string): void {

@@ -170,27 +170,26 @@ If a verification command is unavailable or not applicable, state the exact reas
 
 ## SCENARIO CONTRACT
 
-Before production changes, define scenarios covering:
+Before production changes, scale scenarios to the change size and risk:
 
-| Class | Required proof |
-|---|---|
-| Happy path | Requested behavior works on the real surface. |
-| Edge case | Boundary, empty, malformed, or concurrent condition behaves correctly. |
-| Adjacent regression | A nearby caller, route, command, or config path still works. |
+- Small single-surface changes: 1-2 targeted scenarios using an existing focused test, prompt/source-contract check, or direct command with a binary pass condition.
+- Moderate behavioral changes: happy path plus one adjacent regression or edge case.
+- Multi-surface, release-facing, security/data-loss/compatibility, or otherwise high-risk changes: 3+ scenarios covering happy path, edge/boundary behavior, and adjacent-surface regression.
+- Documentation, prompt text, and visual-only changes: source review plus the real surface that loads/renders/uses the changed text; do not invent irrelevant code tests.
 
-Each scenario needs a binary pass condition. "Looks good" is not a pass condition.
+Each selected scenario needs a binary pass condition. "Looks good" is not a pass condition.
 
 ## TDD WORKFLOW
 
-TDD is mandatory on production behavior changes.
+Use TDD when changing production behavior and a real test seam exists. For small single-surface changes, no-seam changes, documentation, prompts, visual-only edits, or version bumps with no behavior delta, use the smallest truthful focused check plus real-surface QA instead and justify the scaled verification in the final report.
 
-1. RED: write or identify a failing test that proves the needed behavior.
+1. RED: write or identify a failing test that proves the needed behavior when TDD applies.
 2. GREEN: make the smallest change that flips the test to passing.
 3. SURFACE: exercise the real user path and capture the artifact.
 4. REFACTOR: improve structure only while tests stay green.
 5. REGRESSION: rerun the scenario list.
 
-Exemptions: pure prompt text, formatting, comment-only edits, version bumps with no behavior delta, and rename-only moves. Justify every exemption in the final report.
+Exemptions: pure prompt/documentation text, visual-only changes, formatting, comment-only edits, version bumps with no behavior delta, rename-only moves, and tiny single-surface changes already covered by an existing focused check. Justify every exemption in the final report.
 
 ## MANUAL QA MANDATE
 

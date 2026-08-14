@@ -435,6 +435,66 @@ test("writing-plans selects only available plan-critic tiers without lowering re
   assert.match(skill, /`plan-critic-low`.*cheaper.*model.*xhigh-equivalent.*floor/is)
 })
 
+test("plan-critic review loop uses bounded convergence and eligible blockers", () => {
+  const skill = read("skills", "v1", "writing-plans", "SKILL.md")
+  const critics = [
+    read("prompts", "v1", "agents", "plan-critic.md"),
+    read("prompts", "omo", "agents", "plan-critic.md"),
+  ]
+
+  assert.match(skill, /Default: at most 5 plan-critic review rounds/i)
+  assert.match(skill, /review N 次就下一步.*cap at N rounds/is)
+  assert.match(skill, /unlimited\/infinite plan review: no cap/i)
+  assert.match(skill, /Blocker eligibility and notes/i)
+  assert.match(skill, /explicit requirement.*accepted design\/plan decision/is)
+  assert.match(skill, /existing failing regression/i)
+  assert.match(skill, /reproducible broken flow|reproducibly broken/i)
+  assert.match(skill, /security.*data-loss.*compatibility.*release-safety.*runtime-safety/is)
+  assert.match(skill, /external API.*provider.*release contract/is)
+  assert.match(skill, /non-blocking note/i)
+  assert.match(skill, /Approval-with-notes is still approval/i)
+  assert.match(skill, /Blocker ledger freeze after round 1/i)
+  assert.match(skill, /smallest plan edit.*without expanding scope/is)
+  assert.match(skill, /Default cap: stop and ask the user/i)
+  assert.doesNotMatch(skill, /Momus\+Oracle|dual Momus|dual.*Oracle/i)
+
+  for (const critic of critics) {
+    assert.match(critic, /## Blocker Eligibility/)
+    assert.match(critic, /explicit requirement.*accepted design\/plan decision/is)
+    assert.match(critic, /existing failing regression/i)
+    assert.match(critic, /reproducibly broken/i)
+    assert.match(critic, /security.*data-loss.*compatibility.*release-safety.*runtime-safety/is)
+    assert.match(critic, /external API.*provider.*release contract/is)
+    assert.match(critic, /non-blocking note/i)
+    assert.match(critic, /Approval with notes is approval/i)
+    assert.match(critic, /blocker ledger is frozen/i)
+    assert.match(critic, /smallest plan edits.*without expanding scope/is)
+    assert.match(critic, /\[REJECT\].*eligible blockers/is)
+    assert.match(critic, /\[OKAY-UNAMBIGUOUS\]/)
+    assert.doesNotMatch(critic, /Momus\+Oracle|dual Momus|dual.*Oracle/i)
+  }
+})
+
+test("Gemini and GLM verification requirements scale by change size", () => {
+  const prompts = [
+    read("prompts", "v1", "deepwork", "gemini.md"),
+    read("prompts", "omo", "deepwork", "gemini.md"),
+    read("prompts", "v1", "deepwork", "glm.md"),
+    read("prompts", "omo", "deepwork", "glm.md"),
+  ]
+
+  for (const prompt of prompts) {
+    assert.match(prompt, /Small single-surface changes.*1-2 targeted scenarios/is)
+    assert.match(prompt, /Moderate behavioral changes.*happy path.*adjacent regression/is)
+    assert.match(prompt, /high-risk changes.*3\+ scenarios/is)
+    assert.match(prompt, /Documentation, prompt text, and visual-only changes/is)
+    assert.match(prompt, /real test seam|test seam exists/i)
+    assert.doesNotMatch(prompt, /TDD \(MANDATORY, NO EXCEPTIONS\)/)
+    assert.doesNotMatch(prompt, /Define 3\+ scenarios, each with a binary pass condition/)
+    assert.doesNotMatch(prompt, /Every production change — features, fixes, refactors, perf, glue, config-with-logic — follows RED→GREEN→SURFACE/)
+  }
+})
+
 test("active docs describe canonical review variants and interruption recovery", () => {
   const files = ["README.md", "AGENTS.md", "docs/architecture.md", "examples/ocmm.example.jsonc"]
   const texts = new Map(files.map((path) => [path, readFileSync(join(process.cwd(), path), "utf8")]))

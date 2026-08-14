@@ -399,10 +399,19 @@ test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () 
     "gpt-5.6",
   )
   assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/openai.gpt-5.6" }),
+    "gpt-5.6",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/us.openai.gpt-5.4" }),
+    "gpt",
+  )
+  assert.equal(
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.7-sol" }),
     "gpt",
   )
   assert.equal(isGpt56Model("vercel/openai/gpt-5.6-terra"), true)
+  assert.equal(isGpt56Model("amazon-bedrock/openai.gpt-5.6"), true)
   assert.equal(isGpt56Model("gpt-5.7-sol"), false)
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "gpt-5.6-terra" }),

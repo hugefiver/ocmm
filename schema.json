@@ -1239,6 +1239,9 @@
                       "type": "string"
                     }
                   },
+                  "cwd": {
+                    "type": "string"
+                  },
                   "env": {
                     "type": "object",
                     "additionalProperties": {
@@ -2589,6 +2592,9 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "cwd": {
+                          "type": "string"
                         },
                         "env": {
                           "type": "object",

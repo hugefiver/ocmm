@@ -68,6 +68,90 @@ test("idle continuation: does not continue when aborted", async () => {
   assert.equal(calls.length, 0)
 })
 
+test("idle continuation: stops before reading todos for non-retryable 400 request errors", async () => {
+  const mock = makeControlledClient([], { messagesResults: [Promise.resolve(unfinishedTodoMessages)] })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = makeConfig({ enabled: true })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, idleState })
+  const sessionID = "ses_nonretry"
+
+  await handler(makeErrorEvent(sessionID, { status: 400, isRetryable: false }, { agent: "orchestrator" }))
+  await handler(makeIdleEvent(sessionID))
+
+  assert.equal(mock.messages, 0)
+  assert.equal(continuationCalls(mock.calls).length, 0)
+  assert.equal(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+})
+
+test("idle continuation: stops for nested non-retryable 422 request metadata", async () => {
+  const mock = makeControlledClient([], { messagesResults: [Promise.resolve(unfinishedTodoMessages)] })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = makeConfig({ enabled: true })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, idleState })
+  const sessionID = "ses_nonretry_nested"
+
+  await handler(makeErrorEvent(sessionID, { status: 422, error: { isRetryable: false } }, { agent: "orchestrator" }))
+  await handler(makeIdleEvent(sessionID))
+
+  assert.equal(mock.messages, 0)
+  assert.equal(continuationCalls(mock.calls).length, 0)
+  assert.equal(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+})
+
+test("idle continuation: disabled runtime fallback still marks non-retryable request errors terminal", async () => {
+  const mock = makeControlledClient([], { messagesResults: [Promise.resolve(unfinishedTodoMessages)] })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = {
+    ...makeConfig({ enabled: false }),
+    idleContinuation: { enabled: true, maxContinuations: 20 },
+  }
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, idleState })
+
+  for (const [sessionID, error] of [
+    ["ses_nonretry_fallback_disabled_direct", { status: 400, isRetryable: false }],
+    ["ses_nonretry_fallback_disabled_nested", { status: 422, cause: { isRetryable: false } }],
+  ] as const) {
+    await handler(makeErrorEvent(sessionID, error, { agent: "orchestrator" }))
+    await handler(makeIdleEvent(sessionID))
+    assert.equal(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+  }
+
+  assert.equal(mock.messages, 0)
+  assert.equal(continuationCalls(mock.calls).length, 0)
+})
+
+test("idle continuation: non-retryable 404 request errors do not set the stop marker", async () => {
+  const mock = makeControlledClient([], { messagesResults: [Promise.resolve(unfinishedTodoMessages)] })
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = makeConfig({ enabled: true })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, idleState })
+  const sessionID = "ses_nonretry_404"
+
+  await handler(makeErrorEvent(sessionID, { status: 404, isRetryable: false }, { agent: "orchestrator" }))
+  await handler(makeIdleEvent(sessionID))
+
+  assert.equal(mock.messages, 1)
+  assert.equal(continuationCalls(mock.calls).length, 1)
+  assert.notEqual(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+})
+
+test("idle continuation: retryable 400 request errors do not set the stop marker", async () => {
+  const { client } = makeMockClient()
+  const idleState = createIdleContinuationState()
+  idleState.globalEnabled = true
+  const cfg = makeConfig({ enabled: true, dispatch: false })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, idleState })
+  const sessionID = "ses_retryable_400"
+
+  await handler(makeErrorEvent(sessionID, { status: 400, message: "rate limit", isRetryable: false }, { agent: "orchestrator" }))
+
+  assert.notEqual(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+})
+
 test("idle continuation: does not continue when no client", async () => {
   const idleState = createIdleContinuationState()
   idleState.globalEnabled = true

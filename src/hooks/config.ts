@@ -21,6 +21,7 @@ import { buildEffectiveModelRoute } from "../routing/effective-route.ts"
 import { selectCatalogModel } from "../routing/model-upgrades.ts"
 import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import { resolveEffectiveRequirement } from "../routing/resolver.ts"
+import { reasoningToVariant } from "../shared/reasoning.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import type { AgentProfileRegistrationOverrides } from "../logical-tiers/materialize.ts"
 import { expandPlanningAgents, isExpandedPlanningAgentDisabled } from "../planning-agents/profiles.ts"
@@ -161,6 +162,11 @@ function applyAgentEntry(
           ? structuredClone(value)
           : value
     }
+  }
+  if (existing.variant === undefined) {
+    const reasoning = head.reasoning ?? agent.requirement.reasoning
+    const visibleVariant = reasoning === undefined ? undefined : reasoningToVariant(reasoning)
+    if (visibleVariant !== undefined) existing.variant = visibleVariant
   }
 
   agentMap[agent.name] = existing

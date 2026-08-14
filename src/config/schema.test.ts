@@ -56,6 +56,7 @@ test("defaultConfig applies the complete bounded runtime fallback retry patterns
     "internal server error",
     "gateway timeout",
     "bad gateway",
+    "upstream request failed",
     "try\\s+again\\s+(?:later|shortly|in\\s+\\d+\\s*(?:seconds?|minutes?))",
     "\\b429\\b",
     "\\b503\\b",
@@ -438,6 +439,39 @@ test("generated JSON Schema preserves canonical model boundaries", () => {
     assert.deepEqual(asRecord(objectProperties.reasoning).enum, expectedReasoning, `${boundary}: canonical reasoning enum`)
     assert.equal("provider_options" in objectProperties, false, `${boundary}: provider_options must be absent`)
   }
+})
+
+test("MCP local server config accepts cwd and generated JSON Schema exposes it", () => {
+  const cwd = "C:/project"
+  const parsed = OcmmConfigSchema.parse({
+    mcp: {
+      servers: {
+        lsp: { type: "local", command: "ocmm-lsp", args: ["mcp"], cwd },
+      },
+    },
+  })
+
+  assert.equal(parsed.mcp.servers.lsp?.type, "local")
+  assert.equal(parsed.mcp.servers.lsp?.type === "local" ? parsed.mcp.servers.lsp.cwd : undefined, cwd)
+
+  const asRecord = (value: unknown): Record<string, unknown> => {
+    assert.ok(value !== null && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>
+  }
+  const schema = asRecord(JSON.parse(readFileSync(join(process.cwd(), "schema.json"), "utf8")))
+  const properties = asRecord(schema.properties)
+  const mcp = asRecord(properties.mcp)
+  const servers = asRecord(asRecord(mcp.properties).servers)
+  const serverBranches = asRecord(servers.additionalProperties).oneOf ?? asRecord(servers.additionalProperties).anyOf
+  assert.ok(Array.isArray(serverBranches), "MCP server config must be a JSON-Schema union")
+  const localBranch = serverBranches.map(asRecord).find((branch) => {
+    const branchProperties = asRecord(branch.properties)
+    const type = asRecord(branchProperties.type)
+    const enumValues = Array.isArray(type.enum) ? type.enum : []
+    return type.const === "local" || enumValues.includes("local")
+  })
+  assert.ok(localBranch, "missing local MCP server branch")
+  assert.ok("cwd" in asRecord(asRecord(localBranch).properties), "local MCP server branch must expose cwd")
 })
 
 test("invalid canonical reasoning is pruned while valid siblings survive tolerant parsing", () => {

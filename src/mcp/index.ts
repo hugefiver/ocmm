@@ -41,6 +41,7 @@ export interface McpManager {
 }
 
 export interface BuiltinMcpOptions {
+  cwd?: string
   moduleUrl?: string
   packageRoot?: string
   exists?: (path: string) => boolean
@@ -78,6 +79,7 @@ export function createBuiltinMcps(
     const lsp = resolveOcmmLspCommand(options)
     servers.lsp = local(lsp.command, {
       enabled: lsp.enabled,
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       environment: { OCMM_LSP_PROJECT_CONFIG: OCMM_LSP_PROJECT_CONFIGS.join(delimiter) },
     })
   }
@@ -95,7 +97,7 @@ export function resolveMcpServers(config: McpConfig, options?: {
   }
   const mcpJson = filterDisabled(loadMcpJsonSync(options?.cwd ?? process.cwd()), disabled)
   return mergeMcpServers(
-    config.enabled ? createBuiltinMcps(config, [...disabled]) : {},
+    config.enabled ? createBuiltinMcps(config, [...disabled], options?.cwd === undefined ? {} : { cwd: options.cwd }) : {},
     mcpJson,
     explicit,
   )
@@ -315,11 +317,16 @@ function remote(url: string, headers?: Record<string, string>): McpServerConfig 
   }
 }
 
-function local(command: string[], options?: { enabled?: boolean; environment?: Record<string, string> }): McpServerConfig {
+function local(command: string[], options?: {
+  enabled?: boolean
+  cwd?: string
+  environment?: Record<string, string>
+}): McpServerConfig {
   return {
     type: "local",
     command,
     enabled: options?.enabled ?? true,
+    ...(options?.cwd ? { cwd: options.cwd } : {}),
     ...(options?.environment ? { environment: options.environment } : {}),
   }
 }
@@ -393,12 +400,14 @@ function serverFromUnknown(value: unknown): McpServerConfig | undefined {
     const command = commandValue(value.command)
     if (!command) return undefined
     const args = stringArray(value.args)
+    const cwd = typeof value.cwd === "string" && value.cwd ? value.cwd : undefined
     const env = stringRecord(value.env)
     const environment = stringRecord(value.environment)
     return {
       type: "local",
       command,
       ...(args ? { args } : {}),
+      ...(cwd ? { cwd } : {}),
       ...(env ? { env } : {}),
       ...(environment ? { environment } : {}),
       enabled,

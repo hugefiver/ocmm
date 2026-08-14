@@ -37,6 +37,21 @@ test("createBuiltinMcps returns enabled builtins and respects disabled list", ()
   assert.equal(servers["ast-grep"], undefined)
 })
 
+test("createBuiltinMcps sets cwd only on builtin LSP local server", () => {
+  const cwd = join(tmpdir(), "ocmm-builtin-mcp-cwd")
+  const servers = createBuiltinMcps(
+    { enabled: true, envAllowlist: [], websearch: { provider: "exa" }, servers: {} },
+    [],
+    { cwd, pathEnv: "", packageRoot: undefined },
+  )
+
+  assert.equal(servers.lsp?.type, "local")
+  assert.equal(servers.lsp?.type === "local" ? servers.lsp.cwd : undefined, cwd)
+  assert.equal("cwd" in (servers.websearch ?? {}), false)
+  assert.equal("cwd" in (servers.context7 ?? {}), false)
+  assert.equal("cwd" in (servers.grep_app ?? {}), false)
+})
+
 test("createBuiltinMcps registers project-owned ocmm-lsp when available", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-lsp-root-"))
   try {
@@ -360,6 +375,8 @@ test("resolveMcpServers merges builtins, mcp.json, and explicit config with disa
     assert.equal(servers.context7.type === "remote" ? servers.context7.url : "", "https://override.example/mcp")
     assert.equal(servers.local_docs?.type, "remote")
     assert.deepEqual(servers.custom?.type === "local" ? servers.custom.command : undefined, ["node", "server.js"])
+    assert.equal(servers.lsp?.type, "local")
+    assert.equal(servers.lsp?.type === "local" ? servers.lsp.cwd : undefined, cwd)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -375,10 +392,11 @@ test("resolveMcpServers lets explicit lsp config override builtin lsp", () => {
         lsp: { type: "local", command: "custom-lsp", args: ["mcp"] },
       },
     },
-    { disabledMcps: ["websearch"] },
+    { cwd: join(tmpdir(), "ocmm-explicit-lsp-cwd"), disabledMcps: ["websearch"] },
   )
 
   assert.deepEqual(servers.lsp?.type === "local" ? servers.lsp.command : undefined, ["custom-lsp", "mcp"])
+  assert.equal(servers.lsp?.type === "local" ? servers.lsp.cwd : undefined, undefined)
 })
 
 test("parseSkillMcpFrontmatter reads simple embedded MCP server config", () => {
