@@ -41,6 +41,10 @@ Task tool (general-purpose):
 
     Do not launch `planner`, `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), or any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants). Do not launch another implementation or coordination workflow agent. If a skill requests a disallowed review or handoff, report that need to the orchestrator instead of dispatching it.
 
+    ## You Do Not Dispatch Subagents
+
+    Do not spawn a peer implementer, a reviewer, or a second-opinion subagent. Never spawn a peer implementation or review seat. If the Task tool exposes utility leaves and a bounded lookup would materially improve this task, use at most that permitted leaf lookup; never delegate implementation, plan review, code review, or acceptance. Self-review means reading your own diff.
+
     After local verification, return status, changed files, commands, and evidence to the orchestrator. The orchestrator owns formal plan review and final acceptance review. It also owns planner, plan-critic, and review dispatch.
 
     Work from: [directory]

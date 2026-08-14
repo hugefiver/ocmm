@@ -4,7 +4,7 @@ description: Use when executing implementation plans with independent tasks in t
 ---
 
 <!-- v1 fork of superpowers/subagent-driven-development.
-     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
+     Upstream: obra/superpowers v6.3.0 (synced 2026-08-15).
      Adjustments: removed executing-plans comparison (excluded from v1);
      removed using-git-worktrees and finishing-a-development-branch references
      (not in v1); removed test-driven-development reference (TDD is described
@@ -24,7 +24,10 @@ description: Use when executing implementation plans with independent tasks in t
      ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
       (depend on scripts). v1 also rejects automatic workspace creation, progress
       ledgers, automatic cleanup, routine per-task full reviews, and subagent Git
-      writes.
+     writes. Synced v6.3.0 high-value workflow rules using local TodoWrite /
+     plan-note / notepad tracking instead of upstream ledgers: rulings not
+     stalls, spec pointer consumption, small same-shape task batching, bounded
+     waiting, and no worker-spawned implementation/review seats.
      See docs/v1-maintenance.md for sync rules. -->
 
 # Subagent-Driven Development
@@ -35,7 +38,9 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
 
 **Core principle:** Fresh subagent per task + per-agent completion/integration check + final acceptance review = high quality without drowning in per-subtask reviews
 
-**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are: BLOCKED status you cannot resolve, ambiguity that genuinely prevents progress, or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
+**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are: an irreversible or destructive operation; a security-sensitive action; a side effect outside this worktree that norms require asking about first (merge, push, publish, external service mutation); a plan so broken that every path forward is a guess; or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
+
+**Rulings, not stalls:** A running plan does not stop for non-catastrophic conflicts, small ambiguities, or plan defects you can resolve from the approved spec and current evidence. Make the smallest safe ruling, record it in the active tracking surface (TodoWrite item, plan note, notepad, or final report section), include why and what it costs if wrong, and keep going. The spec/design is the binding authority; the plan is its argument. Stop only for the four classes above.
 
 **Narration discipline:** Between tool calls, write at most one line of narration. The todo list and tool results carry the record — do not duplicate progress in prose. Reserve prose for decisions, blockers, and questions to your partner.
 
@@ -49,7 +54,9 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
 
 ## The Process
 
-1. **Read plan, extract all tasks with full text, note context, create TodoWrite**
+1. **Read plan, its `Spec:` source if present, extract all tasks with full text, note context, create TodoWrite**
+   - If the `Spec:` path is missing or unreachable, record that as a ruling context before execution; do not invent requirements.
+   - Before dispatching Task 1, scan task/file/interface overlaps and obvious contradictions against the spec/global constraints. Record what you checked, even when clean.
 2. **Per task:**
    a. Dispatch implementer subagent (use implementer-prompt.md template)
    b. If implementer asks questions, answer and re-dispatch
@@ -63,6 +70,22 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
 
 **Local workflow boundaries:** No automatic workspace or ledger scripts, automatic
 cleanup, routine full review after each task, or subagent Git write is permitted.
+Use the active todo list, plan notes, notepad, or final response for rulings and
+handoffs; do not introduce upstream ledger files or cleanup scripts.
+
+### Pre-Dispatch Spec/Plan Scan
+
+Before the first implementation dispatch, compare the plan against the `Spec:` source and global constraints:
+
+- For every pair of tasks that share a file or interface, check what one produces against what the other consumes.
+- For every task, check that its tests, files, and stated code changes agree with each other.
+- For every conflict, make a ruling from the spec/design and record `Ruling: <decision> — <why> — <cost if wrong>`.
+
+The scan output is a factual checklist, not a ceremonial blocker. If it is clean, proceed. If it finds non-catastrophic conflicts, rule and proceed. Stop only when the conflict leaves every path forward a guess or requires one of the stop-class side effects above.
+
+### Batch Small Same-Shape Work
+
+When several planned tasks are small, independent edits of the same kind — the same constant change, one-line field addition, wording update, or fixture update repeated across files — combine them into one dispatch brief listing every file and expected hunk. Review the returned diff file-by-file against that list. Keep one-dispatch-per-task for work that needs distinct judgment, tests, or integration risk.
 
 ### Same-Task Correction Boundaries
 
@@ -109,9 +132,13 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 1. If it's a context problem, provide more context and re-dispatch with the same model
 2. If the task requires more reasoning, re-dispatch with a more capable model
 3. If the task is too large, break it into smaller pieces
-4. If the plan itself is wrong, escalate to the human
+4. If the plan itself is wrong, rule on the smallest correction from the spec/design, record the ruling, and re-dispatch with that ruling unless every path forward is a guess or a stop-class action is required
 
 **Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
+
+### Waiting on Dispatched Subagents
+
+Do not poll aggressively, sleep, or repeatedly ask for status. While you have local work — preparing the next dispatch, inspecting returned diffs, updating todos, or packaging review input — keep working. If the host exposes background completion, let it notify you. If a wait surface exists and you are genuinely idle, wait in bounded stretches rather than short loops, then reconcile outstanding children once per stretch. A `task_id` continues a child session; it is not a polling job ID.
 
 ## Prompt Templates
 
@@ -134,6 +161,7 @@ Each implementation task follows TDD:
 - Skip the completion/integration check after an implementer returns
 - Treat a completion/integration check as a substitute for the final acceptance review
 - Dispatch spec-reviewer/code-quality-reviewer automatically after every DONE subtask
+- Accept or rely on an implementer-spawned reviewer, peer implementer, planner, or plan-critic as workflow evidence
 - Proceed with unfixed issues
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Make subagent read plan file (provide full text instead)
@@ -212,7 +240,7 @@ The reviewer must evaluate the diff on its merits. If you have context the revie
   - If a finding is labeled `[product]`, change the implementation to address it.
   - If a finding is labeled `[evidence]`, supply the missing evidence/proof; do not change product behavior unless the evidence exposes a real defect.
 - **Minor** → record in the todo list / ledger; the final acceptance review triages them. Do not dispatch per-Minor fix subagents.
-- **Plan-mandated behavior flagged as a defect** → the plan overrode a default. Do not auto-fix. Surface to your human partner for adjudication: "Reviewer flagged X, but the plan mandated Y. Which wins?"
+- **Plan-mandated behavior flagged as a defect** → the plan overrode a default. Do not auto-fix. Rule from the spec/design and global constraints, record the ruling, and carry it into the fix dispatch. Stop and ask only if the conflict leaves every path forward a guess or requires a stop-class action.
 - **Final review findings** → dispatch ONE fix subagent carrying all findings, not one subagent per finding.
 
 ## Final Acceptance Review

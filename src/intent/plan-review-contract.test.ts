@@ -132,6 +132,44 @@ test("review skills use ordered Oracle priority and logical tiers", () => {
   }
 })
 
+test("Superpowers v6.3 high-value skill sync is locally adapted", () => {
+  const brainstorming = read("skills", "v1", "brainstorming", "SKILL.md")
+  const writingPlans = read("skills", "v1", "writing-plans", "SKILL.md")
+  const subagent = read("skills", "v1", "subagent-driven-development", "SKILL.md")
+  const implementer = read("skills", "v1", "subagent-driven-development", "implementer-prompt.md")
+  const specReviewer = read("skills", "v1", "subagent-driven-development", "spec-reviewer-prompt.md")
+  const codeQualityReviewer = read("skills", "v1", "subagent-driven-development", "code-quality-reviewer-prompt.md")
+  const reviewerTemplate = read("skills", "v1", "requesting-code-review", "code-reviewer.md")
+  const maintenance = read("docs", "v1-maintenance.md")
+
+  assert.match(brainstorming, /Spike[\s\S]*Bounded[\s\S]*Architectural/)
+  assert.match(brainstorming, /short in-chat design/i)
+  assert.match(brainstorming, /The artifact scales with the task; the approval gate does not disappear/i)
+  assert.match(writingPlans, /\*\*Spec:\*\*/)
+  assert.match(writingPlans, /spec\/design doc this plan implements|inline\/chat design/i)
+
+  assert.match(subagent, /Rulings, not stalls/i)
+  assert.match(subagent, /Pre-Dispatch Spec\/Plan Scan/i)
+  assert.match(subagent, /Batch Small Same-Shape Work/i)
+  assert.match(subagent, /Waiting on Dispatched Subagents/i)
+  assert.match(subagent, /Ruling: <decision> — <why> — <cost if wrong>/)
+  assert.match(subagent, /Do not poll aggressively/i)
+  assert.match(subagent, /Accept or rely on an implementer-spawned reviewer/i)
+  const subagentBody = subagent.slice(subagent.indexOf("# Subagent-Driven Development"))
+  assert.doesNotMatch(subagentBody, /scripts\/review-package|scripts\/task-brief/i)
+  assert.match(subagentBody, /do not introduce upstream ledger files/i)
+  assert.doesNotMatch(subagentBody, /must.*(?:create|use).*upstream ledger/i)
+
+  for (const source of [implementer, specReviewer, codeQualityReviewer, reviewerTemplate]) {
+    assert.match(source, /Do Not Dispatch Subagents/i)
+    assert.match(source, /Never spawn|never spawn/i)
+  }
+  assert.match(codeQualityReviewer, /ARTIFACT_KIND:[\s\S]*ARTIFACT_IDENTITY:[\s\S]*REVIEW_INPUT:[\s\S]*GLOBAL_CONSTRAINTS:/)
+  assert.doesNotMatch(codeQualityReviewer, /BASE_SHA|HEAD_SHA/)
+  assert.match(maintenance, /selective Superpowers v6\.3\.0 sync/i)
+  assert.match(maintenance, /Devin, Hermes, `using-superpowers`, `finishing-a-development-branch`, `writing-skills\/render-graphs\.js`.*remain excluded/i)
+})
+
 test("review artifact identity contract binds packets, receipts, and shell wrappers", () => {
   const skill = read("skills", "v1", "requesting-code-review", "SKILL.md")
   const reviewerTemplate = read("skills", "v1", "requesting-code-review", "code-reviewer.md")

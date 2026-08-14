@@ -4,7 +4,7 @@ description: "Use before any creative work - creating features, building compone
 ---
 
 <!-- v1 fork of superpowers/brainstorming.
-     Upstream: obra/superpowers v6.2.0.
+     Upstream: obra/superpowers v6.3.0.
      Adjustments: removed visual-companion section (not applicable to ocmm's
      declarative prompt model); removed spec-document-reviewer-prompt reference
      (spec review is handled by receiving-code-review skill in v1); replaced
@@ -12,14 +12,16 @@ description: "Use before any creative work - creating features, building compone
      model; step 2 restructured to conditional clarifier consultation on
      ambiguity; step 7 spec approval made conditional (user delegation OR
      self-review unambiguous pass); HARD-GATE approval sources expanded to
-     three (user approval / self-review pass / user delegation). See
-     docs/v1-maintenance.md for sync rules. -->
+     three (user approval / self-review pass / user delegation); adapted v6.3.0
+     spike/bounded/architectural process scaling without importing visual
+     companion or upstream harness assumptions. See docs/v1-maintenance.md for
+     sync rules. -->
 
 # Brainstorming Ideas Into Designs
 
 Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
 
-Start by understanding the current project context, then resolve ambiguity (consulting the `clarifier` agent when needed). Once you understand what you're building, present the design and obtain approval.
+Start by understanding the current project context, then classify how much process the request needs. Resolve ambiguity (consulting the `clarifier` agent when needed), present the appropriately scaled design, and obtain approval before implementation.
 
 <HARD-GATE>
 Do NOT write any code, scaffold any project, or take any implementation action until the design has been approved. Approval is granted by ANY ONE of:
@@ -28,12 +30,22 @@ Do NOT write any code, scaffold any project, or take any implementation action u
   (c) explicit user delegation — "你自己决定" / "你看着办" / "you decide" (full session), OR
       "无需批准自行继续" / "proceed without approval" (current node only), OR
       "review N 次就下一步" / "review N times then proceed" (caps the plan-critic loop at N iterations).
-This applies to EVERY project regardless of perceived simplicity.
+This applies to EVERY path regardless of perceived simplicity. The artifact scales with the task; the approval gate does not disappear.
 </HARD-GATE>
 
-## Anti-Pattern: "This Is Too Simple To Need A Design"
+## Path Classification
 
-Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and obtain approval.
+Before detailed questions, classify the request and say the path out loud so the user can override it:
+
+- **Spike** — a feasibility probe or investigation whose durable output is an answer/recommendation, not kept production code. Present the question and probe plan in 2-3 sentences, obtain approval or use delegated approval, investigate as cheaply as correctness allows, and label any exploratory code as throwaway.
+- **Bounded** — a well-scoped change to an existing flow in this repository. The flow must already exist to read; familiarity with the kind of app is not enough. Ask only material clarifying questions, present a short in-chat design (approach, files touched, tests), obtain approval or use delegated/self-review approval, then proceed through the normal development workflow. No spec file or file-backed implementation plan is required unless complexity discovered during exploration upgrades the path.
+- **Architectural** — new projects, new subsystems, interface-shaping changes, cross-module work, or anything whose boundaries/dependencies remain unclear after discovery. Use the full design spec → plan → implementation flow.
+
+When in doubt between paths, take the heavier one. Hidden complexity discovered mid-task upgrades the path; stop, say so, and step up. Nothing downgrades mid-task.
+
+## Anti-Pattern: "Too Simple To Need Approval"
+
+Every path presents intent before implementation. A todo list, a single-function utility, a config change — the design may be two sentences in chat, but you MUST present it and obtain approval through one of this fork's allowed approval sources. "Simple" tasks are where unexamined assumptions cause the most wasted work.
 
 ## User Delegation Forms
 
@@ -47,17 +59,33 @@ The user may delegate approval authority at any point. Delegation is honored for
 
 ## Checklist
 
-You MUST create a task for each of these items and complete them in order:
+You MUST create tasks for the items on the selected path and complete them in order.
+
+**Common first steps:**
 
 1. **Explore project context** — check files, docs, recent commits
 2. **First discovery wave** — before deciding decomposition or whether a planner is needed, gather the facts that let you size the work: read the relevant files, search for related code/patterns, and surface unknowns. Discovery happens *before* decomposition and planner-trigger decisions, not after.
-3. **Ambiguity assessment + conditional clarifier consultation** — assess the requirement; if purpose/constraints/success criteria are all clear, skip to step 4; otherwise consult the `clarifier` agent and use its Questions for User to drive user Q&A
-4. **Propose 2-3 approaches** — with trade-offs and your recommendation
-5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-8. **Conditional spec approval** — skip user approval if delegation applies OR self-review passed with no ambiguity; otherwise present spec to user for approval
-9. **Transition to implementation** — proceed to the writing-plans skill
+3. **Classify path** — spike, bounded, or architectural; announce it and why.
+
+**Spike path:**
+4. **Present probe plan** — 2-3 sentences describing the question, cheapest valid check, and expected output
+5. **Obtain approval** — explicit, delegated, or unambiguous self-review approval as allowed by this fork
+6. **Investigate and report** — recommendation only; any code remains throwaway unless the user asks for a follow-up implementation
+
+**Bounded path:**
+4. **Ambiguity assessment + conditional clarifier consultation** — assess purpose/constraints/success criteria; if ambiguous, consult `clarifier` and use its Questions for User
+5. **Present short design in chat** — approach, files touched, data/error flow if relevant, and tests/verification
+6. **Conditional design approval** — proceed only under explicit approval, delegation, or self-review with no unresolved ambiguity
+7. **Transition to implementation** — use the normal development workflow; no spec or plan document unless the work upgraded
+
+**Architectural path:**
+4. **Ambiguity assessment + conditional clarifier consultation** — assess the requirement; if purpose/constraints/success criteria are all clear, skip to step 5; otherwise consult the `clarifier` agent and use its Questions for User to drive user Q&A
+5. **Propose 2-3 approaches** — with trade-offs and your recommendation
+6. **Present design** — in sections scaled to their complexity, get user approval after each section
+7. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
+9. **Conditional spec approval** — skip user approval if delegation applies OR self-review passed with no ambiguity; otherwise present spec to user for approval
+10. **Transition to implementation** — proceed to the writing-plans skill
 
 ## The Process
 
@@ -66,7 +94,7 @@ You MUST create a task for each of these items and complete them in order:
 - Check out the current project state first (files, docs, recent commits)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems, flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
-- For appropriately-scoped projects, proceed to ambiguity assessment (step 3)
+- For appropriately-scoped projects, classify the path after the first discovery wave and follow that path's remaining steps.
 
 **Ambiguity assessment + conditional clarifier consultation (step 3):**
 
@@ -104,7 +132,7 @@ You MUST create a task for each of these items and complete them in order:
 - Where existing code has problems that affect the work (e.g., a file that's grown too large, unclear boundaries, tangled responsibilities), include targeted improvements as part of the design - the way a good developer improves code they're working in.
 - Don't propose unrelated refactoring. Stay focused on what serves the current goal.
 
-## After the Design
+## After the Design (Architectural Path)
 
 **Documentation:**
 

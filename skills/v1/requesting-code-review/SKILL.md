@@ -4,15 +4,17 @@ description: Use after all implementation tasks complete, after major features a
 ---
 
 <!-- v1 fork of superpowers/requesting-code-review.
-     Upstream: obra/superpowers v6.2.0.
+     Upstream: obra/superpowers v6.3.0.
      Adjustments: removed executing-plans and subagent-driven-development
      cross-references (v1 uses subagent-driven as the only path); added
      Reviewer Selection section for ordered Oracle slot semantics and logical
       tiers (oracle slots = external-model priority ordering, reviewer =
       primary-lane self-review, tiers = low/normal/high/max). Project 5 adaptation:
       canonical review-artifact identity binds review packets and receipts without
-      a ledger, runtime, hash CLI, or Git-write requirement. See docs/v1-maintenance.md for sync
-      rules. -->
+      a ledger, runtime, hash CLI, or Git-write requirement. Synced v6.3.0
+      reviewer-seat discipline through the code-reviewer template: reviewers do
+      not spawn subagents or second-opinion reviewers. See
+      docs/v1-maintenance.md for sync rules. -->
 
 # Requesting Code Review
 

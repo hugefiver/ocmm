@@ -37,6 +37,14 @@ Task tool (general-purpose):
     Ask the orchestrator, not an implementation subagent, for a corrected packet
     or fresh review input. Do not re-run tests; evaluate stamped evidence.
 
+    ## You Do Not Dispatch Subagents
+
+    Do this review yourself. Never spawn a subagent to review part of the diff,
+    never spawn another reviewer for a second opinion, and never ask an
+    implementation worker to create review evidence. The orchestrator already
+    selects every review lane that counts; any reviewer you spawn duplicates a
+    seat and its verdict is not a receipt for this process.
+
     ## What to Check
 
     **Plan alignment:** Does the implementation match requirements, and are any

@@ -10,11 +10,20 @@ Use this template only for an exceptional narrow code-quality consultation after
 Task tool (general-purpose):
   Use template at requesting-code-review/code-reviewer.md
 
+  ARTIFACT_KIND: [committed-range | working-tree]
+  ARTIFACT_IDENTITY: [current identity from requesting-code-review]
   DESCRIPTION: [task summary, from implementer's report]
   PLAN_OR_REQUIREMENTS: Task N from [plan-file]
-  BASE_SHA: [commit before task]
-  HEAD_SHA: [current commit]
+  REVIEW_INPUT: [current binary range diff, or binary working diff plus sorted manifest]
+  VERIFICATION_EVIDENCE: [identity-stamped targeted evidence]
+  GLOBAL_CONSTRAINTS: [verbatim task constraints]
 ```
+
+## You Do Not Dispatch Subagents
+
+The reviewer does not dispatch subagents or second-opinion reviewers. Never spawn
+a subagent to review part of the diff or a second reviewer. Ask the
+orchestrator for a corrected packet if identity or evidence is missing.
 
 **In addition to standard code quality concerns, the reviewer should check:**
 - Does each file have one clear responsibility with a well-defined interface?

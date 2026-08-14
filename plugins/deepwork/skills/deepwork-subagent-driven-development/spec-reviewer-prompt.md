@@ -10,6 +10,13 @@ Task tool (general-purpose):
   prompt: |
     You are reviewing whether an implementation matches its specification.
 
+    ## You Do Not Dispatch Subagents
+
+    Do this review yourself. Never spawn a subagent to review part of the diff,
+    never spawn another reviewer for a second opinion, and never ask an
+    implementation worker to create review evidence. If the evidence is missing,
+    report that gap to the orchestrator.
+
     ## What Was Requested
 
     [FULL TEXT of task requirements]

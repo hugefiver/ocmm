@@ -4,14 +4,16 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 ---
 
 <!-- v1 fork of superpowers/writing-plans.
-     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
+     Upstream: obra/superpowers v6.3.0 (synced 2026-08-15).
      Adjustments: removed executing-plans cross-reference (excluded from v1);
      removed using-git-worktrees reference (not in v1); subagent-driven is the
      only execution path in v1; added mandatory plan-critic review loop with
      three-state verdict (REJECT/OKAY/OKAY-UNAMBIGUOUS) after self-review;
      plan approval now conditional (user delegation OR [OKAY-UNAMBIGUOUS]);
      added bounded convergence rules from upstream 13a034b83 adapted to local
-     plan-critic receipts without adding any second review role.
+     plan-critic receipts without adding any second review role; synced v6.3.0
+     Spec header pointer so implementation resolves plan questions against the
+     design artifact.
      Synced v6.1.1+: added Task Right-Sizing section, Global Constraints header
      field, and Interfaces block (Consumes/Produces) per task.
      See docs/v1-maintenance.md for sync rules. -->
@@ -83,6 +85,8 @@ A task is the smallest unit that has its own test cycle. Tasks that are too larg
 **Architecture:** [2-3 sentences about approach]
 
 **Tech Stack:** [Key technologies/libraries]
+
+**Spec:** [path to the spec/design doc this plan implements, or `inline/chat design` for an approved bounded design — the plan argues from this source of truth]
 
 **Global Constraints:** [Project-level constraints from the spec — version floors, dependency limits, naming/copy rules, platform requirements. Copy verbatim from the spec, one constraint per line. Each task implicitly includes these.]
 

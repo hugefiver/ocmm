@@ -620,6 +620,11 @@ test("v1 brainstorming skill enforces discovery-before-planning before decomposi
     /before decomposition|precede.{0,80}decomposition|before.{0,80}planner/i,
     "v1 brainstorming missing discovery-before-decomposition/planner wording",
   )
+  assert.match(skill, /Spike/i, "v1 brainstorming missing spike path")
+  assert.match(skill, /Bounded/i, "v1 brainstorming missing bounded path")
+  assert.match(skill, /Architectural/i, "v1 brainstorming missing architectural path")
+  assert.match(skill, /short in-chat design/i, "v1 brainstorming missing bounded in-chat design")
+  assert.match(skill, /approval gate does not disappear|approval.*does not disappear/i, "v1 brainstorming missing non-negotiable approval gate")
 })
 
 test("writing-plans skill describes contextual plan vs file-backed plan trigger", () => {
@@ -640,6 +645,8 @@ test("writing-plans skill describes contextual plan vs file-backed plan trigger"
     /relatively complex.*clear purpose|unclear boundaries|dependencies|success criteria/i,
     "writing-plans missing planner-trigger criteria",
   )
+  assert.match(skill, /\*\*Spec:\*\*/i, "writing-plans missing Spec header")
+  assert.match(skill, /plan argues from this source of truth/i, "writing-plans missing spec authority wording")
 })
 
 test("requesting-code-review and subagent-driven-development skills include [product]/[evidence] semantics", () => {
@@ -675,7 +682,17 @@ test("v1 implementer template and maintenance docs record flat workflow ownershi
   assert.match(implementer, /`quick`, `code-search`, `explore`, `doc-search`, `research`, and `media-reader`/)
   assert.match(implementer, /Do not launch `planner`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), or any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\)/)
   assert.match(implementer, /orchestrator owns formal plan review and final acceptance review/i)
+  assert.match(implementer, /Do not spawn a peer implementer, a reviewer, or a second-opinion subagent/i)
+  assert.match(implementer, /Self-review means reading your own diff/i)
   assert.doesNotMatch(implementer, /Commit your work/)
+
+  const codeQualityReviewer = readFileSync(
+    join(process.cwd(), "skills", "v1", "subagent-driven-development", "code-quality-reviewer-prompt.md"),
+    "utf8",
+  )
+  assert.match(codeQualityReviewer, /ARTIFACT_KIND:[\s\S]*ARTIFACT_IDENTITY:[\s\S]*DESCRIPTION:[\s\S]*PLAN_OR_REQUIREMENTS:[\s\S]*REVIEW_INPUT:[\s\S]*VERIFICATION_EVIDENCE:[\s\S]*GLOBAL_CONSTRAINTS:/)
+  assert.match(codeQualityReviewer, /does not dispatch subagents or second-opinion reviewers/i)
+  assert.doesNotMatch(codeQualityReviewer, /BASE_SHA:[\s\S]*HEAD_SHA:/)
 
   const requestingReview = readFileSync(
     join(process.cwd(), "skills", "v1", "requesting-code-review", "SKILL.md"),
@@ -693,6 +710,8 @@ test("v1 implementer template and maintenance docs record flat workflow ownershi
   assert.match(requestingReview, /Do not require\s+implementation subagents to commit/i)
   assert.match(reviewerTemplate, /Artifact Identity Echo/)
   assert.match(reviewerTemplate, /Review Receipt/)
+  assert.match(reviewerTemplate, /## You Do Not Dispatch Subagents/)
+  assert.match(reviewerTemplate, /never spawn another reviewer for a second opinion/i)
   assert.doesNotMatch(requestingReview, /git diff --stat\s+git diff/s)
   assert.doesNotMatch(reviewerTemplate, /Git Range or Working-Tree Diff to Review/)
 
