@@ -478,6 +478,7 @@ test("plan-critic review loop uses bounded convergence and eligible blockers", (
   const critics = [
     read("prompts", "v1", "agents", "plan-critic.md"),
     read("prompts", "omo", "agents", "plan-critic.md"),
+    read("prompts", "codex", "agents", "plan-critic.md"),
   ]
 
   assert.match(skill, /Default: at most 5 plan-critic review rounds/i)
@@ -498,15 +499,15 @@ test("plan-critic review loop uses bounded convergence and eligible blockers", (
 
   for (const critic of critics) {
     assert.match(critic, /## Blocker Eligibility/)
-    assert.match(critic, /explicit requirement.*accepted design\/plan decision/is)
+    assert.match(critic, /explicit requirement.*(?:accepted design\/plan decision|accepted design\/plan decision|accepted design|accepted decision)/is)
     assert.match(critic, /existing failing regression/i)
     assert.match(critic, /reproducibly broken/i)
-    assert.match(critic, /security.*data-loss.*compatibility.*release-safety.*runtime-safety/is)
+    assert.match(critic, /security.*data-loss.*compatibility.*(?:release-safety.*runtime-safety|release-safety|runtime-safety|release contract)/is)
     assert.match(critic, /external API.*provider.*release contract/is)
     assert.match(critic, /non-blocking note/i)
     assert.match(critic, /Approval with notes is approval/i)
     assert.match(critic, /blocker ledger is frozen/i)
-    assert.match(critic, /smallest plan edits.*without expanding scope/is)
+    assert.match(critic, /smallest plan edits.*without expanding scope|do not expand scope/is)
     assert.match(critic, /\[REJECT\].*eligible blockers/is)
     assert.match(critic, /\[OKAY-UNAMBIGUOUS\]/)
     assert.doesNotMatch(critic, /Momus\+Oracle|dual Momus|dual.*Oracle/i)

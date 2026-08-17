@@ -142,7 +142,7 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 ## Plan-Critic Convergence and Proportional Verification (2026-08-15)
 
 - Reviewed upstream concept commit `13a034b83` and adapted only the convergence rules that fit ocmm: default maximum 5 plan-critic rounds, explicit `review N 次就下一步` cap, explicit unlimited-review opt-in only, blocker eligibility classes, non-blocking notes, round-one blocker-ledger freeze, smallest-edit/no-scope-expansion fixes, and stop-and-ask-user behavior when the default cap is exhausted.
-- `prompts/{omo,v1}/agents/plan-critic.md` share the blocker eligibility and note policy. The v1 workflow keeps its three-state `[REJECT]`/`[OKAY]`/`[OKAY-UNAMBIGUOUS]` approval semantics. The omo prompt is kept aligned with the same local receipt semantics rather than reintroducing upstream-only binary review.
+- `prompts/{omo,v1,codex}/agents/plan-critic.md` share the blocker eligibility and note policy. The v1 workflow keeps its three-state `[REJECT]`/`[OKAY]`/`[OKAY-UNAMBIGUOUS]` approval semantics. The omo prompt is kept aligned with the same local receipt semantics rather than reintroducing upstream-only binary review.
 - This sync explicitly rejects importing OMO 5.0, Senpi, memory-core, omo-native runtime systems, dual Momus+Oracle plan review, and a full model-capability registry.
 - `prompts/{omo,v1,codex}/deepwork/{gemini,glm}.md` now scale verification: 1-2 focused checks for small single-surface changes, happy path plus one adjacent/edge scenario for moderate behavioral work, 3+ scenarios and RED/GREEN/SURFACE for multi-surface or high-risk changes, and review plus real-surface QA for documentation, prompt, and visual-only edits.
 

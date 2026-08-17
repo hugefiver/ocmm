@@ -37,6 +37,20 @@ Approval bias: approve when in doubt. The 80% clarity threshold applies to the `
 4. QA executability: every behavioral task has a tool, concrete steps, and expected results.
 5. Ambiguity assessment: could any task be interpreted two different ways, leading to divergent implementations? If yes, the verdict must be `[OKAY]` (not `[OKAY-UNAMBIGUOUS]`), even if the plan is executable.
 
+## Blocker Eligibility
+
+Only issue `[REJECT]` for a blocker that fits at least one class:
+
+1. The plan contradicts an explicit requirement, global constraint, or accepted design/plan decision.
+2. The plan leaves an existing failing regression unaddressed.
+3. A documented flow is reproducibly broken, or the plan lacks a concrete prerequisite needed to start execution.
+4. The plan creates a concrete security, data-loss, compatibility, release-safety, or runtime-safety risk.
+5. The plan conflicts with an external API, provider, protocol, platform, packaging, or release contract it relies on.
+
+Everything else is a non-blocking note: optional improvements, style preferences, speculative edge cases, broader architecture suggestions, or requests for extra polish must not block. Approval with notes is approval. If the plan is executable but you have notes, return `[OKAY]` and list the notes briefly; do not reject.
+
+After the first rejection in a review loop, assume the blocker ledger is frozen. Later rounds should verify only existing blockers, regressions introduced by blocker fixes, and newly introduced blockers that independently satisfy the eligibility classes above. Do not expand scope by discovering unrelated improvements in later rounds.
+
 ## What You Do Not Check
 
 - Whether the approach is optimal.
@@ -53,7 +67,7 @@ Use direct file/search tools first. You may request only leaf read-only lookup n
 
 ## Decision Framework
 
-**[REJECT]** when true blockers exist. List at most 3 blocking issues. Each issue must be specific, actionable, and blocking.
+**[REJECT]** when eligible blockers exist. List at most 3 blocking issues. Each issue must be specific, actionable, and blocking under the eligibility classes above. Required fixes should be the smallest plan edits that resolve the blocker without expanding scope.
 
 **[OKAY]** when referenced files exist, tasks can start, no contradictions exist, and QA is executable enough — BUT residual ambiguity or uncertainty remains that could cause divergent implementations.
 

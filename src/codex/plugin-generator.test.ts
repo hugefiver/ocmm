@@ -444,6 +444,31 @@ test("Codex MCP manifest uses Codex server shape", () => {
   assert.equal(manifest.mcpServers.websearch, undefined)
 })
 
+test("Codex MCP manifest preserves explicit local cwd", () => {
+  const cfg = {
+    ...defaultConfig(),
+    disabledMcps: ["websearch", "lsp"],
+    mcp: {
+      ...defaultConfig().mcp,
+      servers: {
+        local: {
+          type: "local" as const,
+          command: ["node", "server.js"],
+          cwd: "tools/mcp-server",
+          enabled: true,
+        },
+      },
+    },
+  }
+
+  const manifest = createCodexMcpManifest(cfg, process.cwd())
+  const local = manifest.mcpServers.local as Record<string, unknown>
+
+  assert.equal(local.command, "node")
+  assert.deepEqual(local.args, ["server.js"])
+  assert.equal(local.cwd, "tools/mcp-server")
+})
+
 test("Codex MCP manifest publishes plugin-local ocmm-lsp by default", () => {
   const manifest = createCodexMcpManifest(
     defaultConfig(),
@@ -491,7 +516,7 @@ test("Codex MCP manifest preserves explicit lsp overrides", () => {
     mcp: {
       ...defaultConfig().mcp,
       servers: {
-        lsp: { type: "local" as const, command: "custom-lsp", args: ["mcp"], enabled: true },
+        lsp: { type: "local" as const, command: "custom-lsp", args: ["mcp"], cwd: "tools/custom-lsp", enabled: true },
       },
     },
   }
@@ -501,6 +526,7 @@ test("Codex MCP manifest preserves explicit lsp overrides", () => {
 
   assert.equal(lsp.command, "custom-lsp")
   assert.deepEqual(lsp.args, ["mcp"])
+  assert.equal(lsp.cwd, "tools/custom-lsp")
 })
 
 test("Codex agents are generated from Deepwork prompts and Codex-compatible fallback models", async () => {

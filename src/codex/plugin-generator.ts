@@ -245,7 +245,7 @@ export function createCodexMcpManifest(config: OcmmConfig, cwd: string, pluginRo
       ...(args.length > 0 ? { args } : {}),
       ...(server.env ? { env: server.env } : {}),
       ...(server.environment ? { env: { ...(server.env ?? {}), ...server.environment } } : {}),
-      cwd: ".",
+      cwd: server.cwd ?? ".",
     }
   }
   return { mcpServers }

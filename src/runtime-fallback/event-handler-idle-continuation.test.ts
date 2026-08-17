@@ -152,6 +152,25 @@ test("idle continuation: retryable 400 request errors do not set the stop marker
   assert.notEqual(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
 })
 
+test("idle continuation: retryable upstream request failures do not set the stop marker", async () => {
+  for (const status of [400, 422]) {
+    const { client } = makeMockClient()
+    const idleState = createIdleContinuationState()
+    idleState.globalEnabled = true
+    const cfg = makeConfig({ enabled: true, dispatch: false })
+    const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, idleState })
+    const sessionID = `ses_retryable_upstream_request_failed_${status}`
+
+    await handler(makeErrorEvent(sessionID, {
+      status,
+      message: "Error from provider: upstream request failed",
+      isRetryable: false,
+    }, { agent: "orchestrator" }))
+
+    assert.notEqual(idleState.sessionData.get(sessionID)?.idleStoppedByNonRetryableRequest, true)
+  }
+})
+
 test("idle continuation: does not continue when no client", async () => {
   const idleState = createIdleContinuationState()
   idleState.globalEnabled = true
