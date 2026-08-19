@@ -148,6 +148,7 @@ Use the actual authorized tag for later releases; manually dispatched runs also 
 | `json-error-recovery` | Enabled | Appends recovery instructions when tool output contains JSON parse errors. |
 | `fsync-skip-warning` | Enabled | Appends drained fsync skip warnings from the fsync tracker. |
 | `tool-output-truncator` | Enabled | Truncates very large selected tool outputs. |
+| `history-cache-mitigation` | Disabled | Optional workaround that truncates older completed tool outputs in configured model histories before model-message conversion; prefer OpenCode native `tool_output` truncation for stable prefixes. |
 | `todo-description-override` | Enabled | Overrides the `todowrite` tool description with ocmm’s structured todo format. |
 | `commit-guard-injector` | Enabled | Injects the no-autonomous-git-write constraint into the system prompt. |
 | `subagent-git-guard` | Enabled | Blocks git write commands in subagent sessions except allowed temp-repo cases. |

@@ -70,6 +70,31 @@ test("defaultConfig applies the complete bounded runtime fallback retry patterns
   ])
 })
 
+test("history cache mitigation applies root and profile defaults", () => {
+  assert.deepEqual(defaultConfig().historyCacheMitigation, {
+    enabled: false,
+    models: ["gpt-5.6-sol"],
+    maxToolOutputChars: 16000,
+    preserveRecentToolResults: 24,
+  })
+  assert.deepEqual(OcmmConfigSchema.parse({ historyCacheMitigation: {} }).historyCacheMitigation, {
+    enabled: false,
+    models: ["gpt-5.6-sol"],
+    maxToolOutputChars: 16000,
+    preserveRecentToolResults: 24,
+  })
+  assert.deepEqual(OcmmConfigSchema.parse({ profiles: { tuned: { historyCacheMitigation: { enabled: false } } } }).profiles.tuned?.historyCacheMitigation, {
+    enabled: false,
+  })
+})
+
+test("history cache mitigation validates bounds", () => {
+  assert.equal(OcmmConfigSchema.safeParse({ disabledHooks: ["history-cache-mitigation"] }).success, true)
+  assert.equal(OcmmConfigSchema.safeParse({ historyCacheMitigation: { maxToolOutputChars: 999 } }).success, false)
+  assert.equal(OcmmConfigSchema.safeParse({ historyCacheMitigation: { preserveRecentToolResults: -1 } }).success, false)
+  assert.equal(OcmmConfigSchema.safeParse({ historyCacheMitigation: { models: [""] } }).success, false)
+})
+
 test("fast model policy applies root defaults", async () => {
   const mod = await import("./schema.ts")
   assert.equal(typeof mod.FastModelsConfigSchema?.parse, "function")

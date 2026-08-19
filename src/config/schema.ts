@@ -122,6 +122,7 @@ const HOOK_NAMES = [
   "subagent-git-guard",
   "subagent-depth-guard",
   "subagent-interruption-recovery",
+  "history-cache-mitigation",
 ] as const
 
 export type HookName = (typeof HOOK_NAMES)[number]
@@ -244,6 +245,13 @@ const defaultIdleContinuationConfig = () => ({
 
 const defaultHashlineConfig = () => ({
   enabled: false,
+})
+
+const defaultHistoryCacheMitigationConfig = () => ({
+  enabled: false,
+  models: ["gpt-5.6-sol"],
+  maxToolOutputChars: 16000,
+  preserveRecentToolResults: 24,
 })
 
 const defaultRulesConfig = () => ({
@@ -537,10 +545,26 @@ export const HashlineConfigSchema = z
   })
   .default(defaultHashlineConfig)
 
+export const HistoryCacheMitigationConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    models: z.array(z.string().min(1)).default(["gpt-5.6-sol"]),
+    maxToolOutputChars: z.number().int().min(1000).max(200000).default(16000),
+    preserveRecentToolResults: z.number().int().min(0).max(1000).default(24),
+  })
+  .default(defaultHistoryCacheMitigationConfig)
+
 const ProfileHashlineConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
   })
+
+const ProfileHistoryCacheMitigationConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  models: z.array(z.string().min(1)).optional(),
+  maxToolOutputChars: z.number().int().min(1000).max(200000).optional(),
+  preserveRecentToolResults: z.number().int().min(0).max(1000).optional(),
+})
 
 export const RulesConfigSchema = z
   .object({
@@ -662,6 +686,7 @@ export const ProfileEntrySchema = z
       })
       .optional(),
     hashline: ProfileHashlineConfigSchema.optional(),
+    historyCacheMitigation: ProfileHistoryCacheMitigationConfigSchema.optional(),
     rules: ProfileRulesConfigSchema.optional(),
     mcp: ProfileMcpConfigSchema.optional(),
     subagent: ProfileSubagentConfigSchema.optional(),
@@ -709,6 +734,7 @@ export const OcmmConfigSchema = z
     runtimeFallback: RuntimeFallbackConfigSchema,
     idleContinuation: IdleContinuationConfigSchema,
     hashline: HashlineConfigSchema,
+    historyCacheMitigation: HistoryCacheMitigationConfigSchema,
     rules: RulesConfigSchema,
     mcp: McpConfigSchema,
     subagent: SubagentConfigSchema,
@@ -739,6 +765,7 @@ export type RuntimeFallbackConfig = z.infer<typeof RuntimeFallbackConfigSchema>
 export type Subagent429Config = z.infer<typeof Subagent429ConfigSchema>
 export type IdleContinuationConfig = z.infer<typeof IdleContinuationConfigSchema>
 export type HashlineConfig = z.infer<typeof HashlineConfigSchema>
+export type HistoryCacheMitigationConfig = z.infer<typeof HistoryCacheMitigationConfigSchema>
 export type RulesConfig = z.infer<typeof RulesConfigSchema>
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
 export type McpConfig = z.infer<typeof McpConfigSchema>

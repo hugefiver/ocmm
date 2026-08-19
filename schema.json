@@ -969,7 +969,8 @@
               "commit-guard-injector",
               "subagent-git-guard",
               "subagent-depth-guard",
-              "subagent-interruption-recovery"
+              "subagent-interruption-recovery",
+              "history-cache-mitigation"
             ]
           },
           {
@@ -1168,6 +1169,27 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "historyCacheMitigation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxToolOutputChars": {
+          "type": "number"
+        },
+        "preserveRecentToolResults": {
+          "type": "number"
         }
       },
       "additionalProperties": false
@@ -2331,7 +2353,8 @@
                     "commit-guard-injector",
                     "subagent-git-guard",
                     "subagent-depth-guard",
-                    "subagent-interruption-recovery"
+                    "subagent-interruption-recovery",
+                    "history-cache-mitigation"
                   ]
                 },
                 {
@@ -2522,6 +2545,27 @@
             "properties": {
               "enabled": {
                 "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "historyCacheMitigation": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "maxToolOutputChars": {
+                "type": "number"
+              },
+              "preserveRecentToolResults": {
+                "type": "number"
               }
             },
             "additionalProperties": false

@@ -20,6 +20,7 @@ import { parseFastModeValue } from "./routing/effective-route.ts"
 import { createResolutionLedger } from "./routing/ledger.ts"
 import { createChatParamsHandler } from "./hooks/chat-params.ts"
 import { createChatMessageHandler, createSystemTransformHandler, createSessionIntentStore } from "./hooks/chat-message.ts"
+import { createHistoryCacheMitigationHandler } from "./hooks/history-cache-mitigation.ts"
 import { createEventRuntime } from "./hooks/event.ts"
 import { createDirectoryAgentsInjector } from "./hooks/directory-agents-injector.ts"
 import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
@@ -41,6 +42,7 @@ export type PluginInterface = {
   config?: (input: unknown, output: unknown) => Promise<void>
   "chat.params"?: (input: unknown, output: unknown) => Promise<void>
   "chat.message"?: (input: unknown, output: unknown) => Promise<void>
+  "experimental.chat.messages.transform"?: (input: unknown, output: unknown) => Promise<void>
   "experimental.chat.system.transform"?: (input: unknown, output: unknown) => Promise<void>
   "tool.execute.before"?: (input: unknown, output: unknown) => Promise<void>
   "tool.execute.after"?: (input: unknown, output: unknown) => Promise<void>
@@ -165,6 +167,7 @@ export function createPlugin(input?: ServerInput): {
       ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
       store: sessionIntentStore,
     }),
+    "experimental.chat.messages.transform": createHistoryCacheMitigationHandler({ getConfig }),
     "experimental.chat.system.transform": createSystemTransformHandler({
       getConfig,
       store: sessionIntentStore,

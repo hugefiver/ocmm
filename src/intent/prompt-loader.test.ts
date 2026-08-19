@@ -870,6 +870,15 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
     assert.match(text, /Rerun validation only when relevant inputs changed after the last green result/i, `${label} revalidation`)
     assert.match(text, /Lead with the outcome.*evidence.*residual risk.*unverified/is, `${label} reporting priority`)
     assert.match(text, /Do not infer permission to modify/i, `${label} authorization boundary`)
+    assert.match(text, /cache-stable.*targeted (?:grep\/glob\/LSP|search\/LSP).*bounded reads/is, `${label} cache-stable lookup`)
+    if (workflow === "codex") {
+      assert.doesNotMatch(text, /native `tool_output`|compression\/history rewrites/i, `${label} contains OpenCode-specific cache workaround`)
+      assert.match(text, /small stable outputs/is, `${label} stable output`)
+    } else {
+      assert.match(text, /native `tool_output`\/small stable outputs/is, `${label} stable tool output`)
+      assert.match(text, /avoid compression\/history rewrites unless context pressure is real.*session continues many turns/is, `${label} compression restraint`)
+    }
+    assert.match(text, /re-run focused lookups for exact old output/i, `${label} exact old output lookup`)
 
     for (const heading of REMOVED_GPT56_SECTION_HEADINGS) {
       assert.equal(text.includes(heading), false, `${label} duplicates ${heading}`)
@@ -893,7 +902,13 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
   }
 
   assert.equal(shared.get("v1"), shared.get("omo"), "v1 shared doctrine drifted from omo")
-  assert.equal(shared.get("codex"), shared.get("omo"), "Codex shared doctrine drifted from omo")
+  const codexShared = shared.get("codex") ?? ""
+  const omoShared = shared.get("omo") ?? ""
+  assert.equal(
+    codexShared.replace(/- Keep GPT-5\.6 cache-stable[^\n]+\n/, ""),
+    omoShared.replace(/- Keep GPT-5\.6 cache-stable[^\n]+\n/, ""),
+    "Codex shared doctrine drifted outside the environment-specific cache line",
+  )
 })
 
 test("orchestrator alone owns workflow-role composition in all prompt sets", () => {
