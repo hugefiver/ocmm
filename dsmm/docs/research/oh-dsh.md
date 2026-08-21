@@ -75,7 +75,7 @@ dsmm should adopt this split. Deepwork availability is composition; mode name, a
 
 oh-dsh tracks dsh mode/plan-mode design notes. The important behavior for dsmm is that a mode is session-scoped state, not a global prompt mutation. A mode contributes model-visible instructions while active and can be entered through commands or UI mode selection.
 
-dsmm should define `deepwork` as a dsh custom mode. This satisfies the requirement that deepwork should be opt-in rather than global.
+Current public dsh documentation exposes `@deepseek-ai/dsh-plan-mode`, not a generic arbitrary named `@deepseek-ai/dsh-mode` package. dsmm should therefore implement its own `deepwork` mode plugin using the same principles, or adapt to an upstream generic mode package if it becomes available. This satisfies the requirement that deepwork should be opt-in rather than global.
 
 ## Borrowed design decisions
 

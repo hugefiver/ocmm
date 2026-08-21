@@ -6,7 +6,7 @@ Date: 2026-08-21
 
 Build `dsmm` as a dsh-native subtree project that brings ocmm's deepwork workflow, role prompts, skills, model calibration, and safety conventions to DeepSeek Harness without globally enabling them for every session.
 
-The first deliverable is an MVP dsh bundle that installs into a profile, registers a `deepwork` custom mode, and makes the mode's behavior configurable. Later versions add full role/category coverage, guard hooks, MCP/LSP integration, model routing, and runtime recovery.
+The first deliverable is an MVP dsh bundle that installs into a profile, registers a `deepwork` mode through dsmm's own Host plugin, and makes the mode's behavior configurable. Later versions add full role/category coverage, guard hooks, MCP/LSP integration, model routing, and runtime recovery.
 
 ## Non-goals
 
@@ -21,7 +21,8 @@ The first deliverable is an MVP dsh bundle that installs into a profile, registe
 The design is based on:
 
 - dsh's Cordis architecture: plugin rows, reversible effects, profile bundles, and services such as `ctx.systemPrompt`, `ctx.tools`, `ctx.agents`, `ctx.llm`, and `ctx.sessions`.
-- `hust-open-atom-club/oh-dsh`: profile/bundle composition, Host/Client separation, surface contracts, settings seam, and dsh mode usage.
+- dsh's current plan-mode package: logged per-agent mode state, prompt-section activation, `/plan`, and `exit_plan_mode`. Current public docs expose `@deepseek-ai/dsh-plan-mode`, not a generic arbitrary named `dsh-mode` package.
+- `hust-open-atom-club/oh-dsh`: profile/bundle composition, Host/Client separation, surface contracts, settings seam, and archived mode notes.
 - ocmm's existing feature surface: deepwork prompts, v1 workflow skills, role/category metadata, model-family routing, MCP/LSP integration, runtime fallback, and safety guards.
 - DeepSeek API and DeepSeek V4 Pro public documentation: thinking mode, `reasoning_effort`, tool-call reasoning-content retention, and max-reasoning prompt implications.
 
@@ -78,7 +79,7 @@ The composition plane is `cordis.patch.yml` and profile bundle ordering. It deci
 MVP composition rows should cover:
 
 - a dsmm Host plugin row;
-- an `@deepseek-ai/dsh-mode` row or patch that defines the `deepwork` mode;
+- dsmm's own `deepwork` mode registration, modelled on dsh plan-mode semantics but not limited to planning;
 - optional prompt/skill provider rows if dsh expects separate providers;
 - default disabled rows for features that are not active in MVP.
 
@@ -122,23 +123,24 @@ Composition config should define availability. Settings should define preference
 
 The central requirement is that deepwork must be opt-in.
 
-MVP uses dsh mode semantics instead of global system-prompt injection. The default custom mode name is `deepwork`. Entering the mode should add a model-visible section that explains the deepwork routing, brainstorming gate, planning workflow, review gates, and scope discipline. Leaving the mode should restore ordinary dsh behavior.
+MVP uses dsh mode semantics instead of global system-prompt injection. Current public dsh docs expose a concrete `@deepseek-ai/dsh-plan-mode` package rather than a generic arbitrary-mode package. Therefore dsmm should implement a small Host plugin, `dsmm-deepwork-mode`, that follows the same dsh-native principles: mode state is session-scoped, prompt contribution is active only while the mode is active, and command/tool affordances are stable enough not to surprise the model.
+
+The default custom mode name is `deepwork`. Entering the mode should add a model-visible section that explains the deepwork routing, brainstorming gate, planning workflow, review gates, and scope discipline. Leaving the mode should restore ordinary dsh behavior.
 
 Conceptual dsh patch:
 
 ```yaml
-- id: dsmm-mode
-  name: '@deepseek-ai/dsh-mode'
+- id: dsmm-deepwork-mode
+  name: 'dsmm'
   config:
-    modes:
-      deepwork:
-        section: |
-          You are in dsmm deepwork mode. Use the dsmm workflow only for this session mode.
-          Classify the user's intent, use dsh tools deliberately, keep implementation scope exact,
-          and follow the configured design, plan, implementation, and review gates.
+    modeName: deepwork
+    section: |
+      You are in dsmm deepwork mode. Use the dsmm workflow only for this session mode.
+      Classify the user's intent, use dsh tools deliberately, keep implementation scope exact,
+      and follow the configured design, plan, implementation, and review gates.
 ```
 
-The real implementation should not hard-code the full prompt in YAML if dsh can load it from the dsmm plugin. The patch should remain readable and override-friendly.
+The real implementation should keep the default full prompt in source files and allow `section` or overlay settings to replace it. If dsh later exposes a generic mode package, dsmm can replace this plugin with configuration rows while preserving the public settings shape.
 
 ## Prompt architecture
 
@@ -174,7 +176,7 @@ dsmm should therefore treat "DeepSeek V4 Pro calibration" as a model-family over
 
 MVP v0.1 builds a minimal, installable dsh bundle with:
 
-- `deepwork` custom mode, disabled outside explicit mode activation;
+- `deepwork` custom mode implemented by dsmm, disabled outside explicit mode activation;
 - dsmm settings namespace with documented defaults;
 - core deepwork prompt section;
 - four workflow skills: brainstorming, writing-plans, requesting-code-review, receiving-code-review;

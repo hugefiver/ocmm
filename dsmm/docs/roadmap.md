@@ -5,7 +5,7 @@ Date: 2026-08-21
 ## Version principles
 
 - Each version must produce a working dsh-native increment.
-- Deepwork remains opt-in through a dsh custom mode unless the user explicitly enables auto-entry in settings.
+- Deepwork remains opt-in through a dsmm-provided dsh custom mode unless the user explicitly enables auto-entry in settings.
 - Configuration comes before breadth: every major feature must have an enable/disable or tuning surface.
 - ocmm parity is phased after the MVP proves dsh package, mode, and settings mechanics.
 
@@ -20,7 +20,8 @@ Create the smallest useful dsmm dsh bundle: installable, mode-scoped, configurab
 - `package.json` with `dsh.bundle.patch`.
 - `cordis.patch.yml` that inserts dsmm rows without replacing dsh base behavior.
 - Host plugin entry that registers dsmm settings and prompt/mode contributions.
-- `deepwork` custom mode section.
+- `deepwork` custom mode implementation, modelled on dsh plan-mode semantics because current public dsh docs expose `@deepseek-ai/dsh-plan-mode` rather than a generic arbitrary-mode package.
+- `/deepwork [off|message]` command if the current dsh command service supports it; otherwise documented profile-level activation fallback.
 - Minimal deepwork prompt text adapted from ocmm.
 - Minimal skill set:
   - brainstorming
@@ -35,6 +36,7 @@ Create the smallest useful dsmm dsh bundle: installable, mode-scoped, configurab
 - `dsh plugin add ./dsmm` or packed equivalent activates the dsmm bundle in a disposable profile.
 - A dsh session outside `deepwork` mode does not receive dsmm workflow instructions.
 - A dsh session inside `deepwork` mode receives the dsmm workflow section.
+- Switching the mode off restores ordinary dsh prompt behavior.
 - Settings can disable DeepSeek V4 Pro calibration without removing the bundle.
 
 ## v0.2 — Role and agent preset parity
