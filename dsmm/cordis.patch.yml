@@ -1,0 +1,8 @@
+- insert:
+    - id: dsmm
+      name: dsmm
+      config:
+        modeName: deepwork
+        defaultActive: false
+        promptOrder: 50
+        deepseekV4ProCalibration: auto

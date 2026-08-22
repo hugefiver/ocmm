@@ -1,0 +1,1 @@
+{"version":3,"file":"dsh-events.d.ts","sourceRoot":"","sources":["../src/dsh-events.ts"],"names":[],"mappings":"AAGA,OAAO,QAAQ,gCAAgC,CAAC;IAC9C,UAAU,eAAe;QACvB,eAAe,EAAE;YAAE,MAAM,EAAE,OAAO,CAAA;SAAE,CAAC;KACtC;CACF;AAED,MAAM,WAAW,uBAAuB;IACtC,eAAe,EAAE;QAAE,MAAM,EAAE,OAAO,CAAA;KAAE,CAAC;CACtC"}
