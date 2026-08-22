@@ -12,5 +12,6 @@ RUN cd dsmm && pnpm install --ignore-scripts && pnpm run build
 RUN npm install -g ${DSH_PACKAGE}
 
 ENV DSH_HOME=/tmp/dsmm-dsh-home
+ENV DSMM_MANAGED_PRESETS_ROOT=/tmp/dsmm-managed-agent-presets
 ENV DSMM_DOCKER_INNER=1
 CMD ["node", "dsmm/scripts/docker-smoke.mjs"]

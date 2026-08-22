@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DshContext, DshSettingsRegistry } from "../lib/dsh-types.js";
 import { apply } from "../lib/index.js";
+import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
+
+const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
@@ -15,6 +18,10 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
       "writing-plans": true,
       "requesting-code-review": true,
       "receiving-code-review": true
+    },
+    roles: DEFAULT_ROLE_SETTINGS,
+    presets: {
+      materialize: false
     }
   });
 });
@@ -30,6 +37,10 @@ test("resolveConfig overlays plugin config on defaults", () => {
       "writing-plans": true,
       "requesting-code-review": true,
       "receiving-code-review": true
+    },
+    roles: DEFAULT_ROLE_SETTINGS,
+    presets: {
+      materialize: false
     }
   });
 });
@@ -38,6 +49,23 @@ test("resolveConfig supports per-skill toggles", () => {
   const settings = resolveConfig({ skills: { "writing-plans": false } });
   assert.equal(settings.skills["writing-plans"], false);
   assert.equal(settings.skills.brainstorming, true);
+});
+
+test("resolveConfig supports per-role toggles", () => {
+  const settings = resolveConfig({ roles: { "dsmm-reviewer": false } });
+
+  assert.equal(settings.roles["dsmm-reviewer"], false);
+  assert.equal(settings.roles["dsmm-orchestrator"], true);
+});
+
+test("resolveConfig supports preset materialization settings", () => {
+  const settings = resolveConfig({ presets: { materialize: true, root: "/tmp/dsmm-presets" } });
+
+  assert.deepEqual(settings.presets, {
+    materialize: true,
+    root: "/tmp/dsmm-presets"
+  });
+  assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true });
 });
 
 test("registerSettings registers direct namespace dsmm with a callable schema and base settings", () => {
@@ -66,8 +94,77 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
       "writing-plans": true,
       "requesting-code-review": true,
       "receiving-code-review": true
+    },
+    roles: DEFAULT_ROLE_SETTINGS,
+    presets: {
+      materialize: false
     }
   });
+});
+
+test("registerSettings notifies only attached effective restart-scoped settings when service exists", () => {
+  const observed: string[] = [];
+  const attached = { ...DEFAULT_DSMM_SETTINGS, modeName: "attached" };
+  let registrationOptions: unknown;
+
+  const getSettings = registerSettings({
+    settings: {
+      register<T>(_namespace: string, _schema: unknown, options: unknown) {
+        registrationOptions = options;
+        return {
+          get: () => attached as T
+        };
+      }
+    }
+  }, { modeName: "base" }, {
+    onChange(settings) {
+      observed.push(settings.modeName);
+    }
+  });
+
+  assert.deepEqual(registrationOptions, { base: { ...DEFAULT_DSMM_SETTINGS, modeName: "base" }, applies: "restart" });
+  assert.equal(getSettings().modeName, "attached");
+  assert.deepEqual(observed, ["attached"]);
+});
+
+test("registerSettings notifies base settings only when no settings service attaches", () => {
+  const observed: string[] = [];
+
+  const getSettings = registerSettings({}, { modeName: "base-only" }, {
+    onChange(settings) {
+      observed.push(settings.modeName);
+    }
+  });
+
+  assert.equal(getSettings().modeName, "base-only");
+  assert.deepEqual(observed, ["base-only"]);
+});
+
+test("registerSettings does not notify a base root before an injected settings root attaches", () => {
+  const observedRoots: Array<string | undefined> = [];
+  let deferredInstaller: ((services: { settings?: DshSettingsRegistry }) => unknown) | undefined;
+
+  registerSettings({
+    inject(dependencies, installer) {
+      if (dependencies[0] !== "settings") return;
+      deferredInstaller = installer as typeof deferredInstaller;
+    }
+  }, { presets: { materialize: true, root: "base-root" } }, {
+    onChange(settings) {
+      observedRoots.push(settings.presets.root);
+    }
+  });
+
+  assert.deepEqual(observedRoots, []);
+  deferredInstaller?.({
+    settings: {
+      register<T>() {
+        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, presets: { materialize: true, root: "attached-root" } }) as T };
+      }
+    }
+  });
+
+  assert.deepEqual(observedRoots, ["attached-root"]);
 });
 
 test("registerSettings can wait for an injected settings service", () => {

@@ -1,0 +1,3 @@
+id: dsmm-planner
+name: 'DSMM Planner'
+description: 'Turns approved scope into ordered implementation steps with verification gates.'

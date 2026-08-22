@@ -14,6 +14,12 @@ v0.1 delivers the smallest useful local bundle:
 
 v0.1 intentionally excludes exit-tool approval, UI/client work, publishing, OpenCode hook parity, runtime fallback, idle continuation, and MCP/LSP packaging.
 
+## v0.2 role preset preview
+
+v0.2 adds dsh agent preset templates for dsmm's core deepwork roles: orchestrator, planner, plan critic, reviewer, code-search, doc-search, clarifier, and media-reader. Preset materialization remains opt-in and dsmm does not replace dsh's default `agent-presets` configuration or default preset automatically.
+
+See [`docs/agent-presets.md`](docs/agent-presets.md) for enabling materialization, disabling individual roles, and adding the managed preset root to dsh discovery with an explicit profile patch.
+
 ## Install into a disposable profile
 
 Build the local package, point dsh state at a disposable home, install the local bundle into a throwaway profile, and inspect the resulting config:

@@ -1,8 +1,15 @@
 import Schema from "@deepseek-ai/schemastery";
 import type { DshContext, DshSettingsRegistry } from "./dsh-types.js";
+import { DSMM_ROLE_IDS } from "./roles.js";
+import type { DsmmRoleId } from "./roles.js";
 
 export type DeepseekCalibration = "off" | "auto" | "strict";
 export type MvpSkillName = "brainstorming" | "writing-plans" | "requesting-code-review" | "receiving-code-review";
+
+export interface DsmmPresetSettings {
+  materialize: boolean;
+  root?: string;
+}
 
 export interface DsmmPluginConfig {
   modeName?: string;
@@ -11,6 +18,8 @@ export interface DsmmPluginConfig {
   defaultActive?: boolean;
   promptOrder?: number;
   skills?: Partial<Record<MvpSkillName, boolean>>;
+  roles?: Partial<Record<DsmmRoleId, boolean>>;
+  presets?: Partial<DsmmPresetSettings>;
 }
 
 export interface DsmmSettings {
@@ -19,9 +28,15 @@ export interface DsmmSettings {
   promptOrder: number;
   deepseekV4ProCalibration: DeepseekCalibration;
   skills: Record<MvpSkillName, boolean>;
+  roles: Record<DsmmRoleId, boolean>;
+  presets: DsmmPresetSettings;
 }
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
+
+export interface RegisterSettingsOptions {
+  onChange?: (settings: DsmmSettings) => void;
+}
 
 export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   modeName: "deepwork",
@@ -33,14 +48,38 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
     "writing-plans": true,
     "requesting-code-review": true,
     "receiving-code-review": true
+  },
+  roles: createDefaultRoleSettings(),
+  presets: {
+    materialize: false
   }
 };
+
+function createDefaultRoleSettings(): Record<DsmmRoleId, boolean> {
+  return Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true])) as Record<DsmmRoleId, boolean>;
+}
 
 const SKILLS_SCHEMA = Schema.object({
   brainstorming: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills.brainstorming),
   "writing-plans": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["writing-plans"]),
   "requesting-code-review": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["requesting-code-review"]),
   "receiving-code-review": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["receiving-code-review"])
+});
+
+const ROLES_SCHEMA = Schema.object({
+  "dsmm-orchestrator": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-orchestrator"]),
+  "dsmm-planner": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-planner"]),
+  "dsmm-plan-critic": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-plan-critic"]),
+  "dsmm-reviewer": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-reviewer"]),
+  "dsmm-code-search": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-code-search"]),
+  "dsmm-doc-search": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-doc-search"]),
+  "dsmm-clarifier": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-clarifier"]),
+  "dsmm-media-reader": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-media-reader"])
+});
+
+const PRESETS_SCHEMA = Schema.object({
+  materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
+  root: Schema.string()
 });
 
 const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
@@ -55,7 +94,9 @@ export const DSMM_CONFIG_SCHEMA = Schema.object({
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  skills: SKILLS_SCHEMA
+  skills: SKILLS_SCHEMA,
+  roles: ROLES_SCHEMA,
+  presets: PRESETS_SCHEMA
 });
 
 export const DSMM_SETTINGS_SCHEMA = Schema.object({
@@ -63,7 +104,9 @@ export const DSMM_SETTINGS_SCHEMA = Schema.object({
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  skills: SKILLS_SCHEMA
+  skills: SKILLS_SCHEMA,
+  roles: ROLES_SCHEMA,
+  presets: PRESETS_SCHEMA
 });
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
@@ -72,25 +115,46 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
     deepseekV4ProCalibration: config.deepseekV4ProCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration,
-    skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills }
+    skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
+    roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
+    presets: resolvePresetSettings(config.presets)
   };
 }
 
-export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {}): () => DsmmSettings {
+export function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean {
+  return settings.roles[role];
+}
+
+function resolvePresetSettings(config: DsmmPluginConfig["presets"]): DsmmPresetSettings {
+  return {
+    materialize: config?.materialize ?? DEFAULT_DSMM_SETTINGS.presets.materialize,
+    ...(config?.root === undefined ? {} : { root: config.root })
+  };
+}
+
+export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {}, options: RegisterSettingsOptions = {}): () => DsmmSettings {
   const base = resolveConfig(config);
   let getSettings = (): DsmmSettings => base;
+  let attached = false;
 
   const attach = (settings: DshSettingsRegistry | undefined): void => {
     if (settings === undefined) return;
     const scope = settings.register<DsmmSettings>(DSMM_SETTINGS_NAMESPACE, DSMM_SETTINGS_SCHEMA, { base, applies: "restart" });
     getSettings = () => scope.get();
+    attached = true;
+    options.onChange?.(scope.get());
   };
 
   if (ctx.inject !== undefined) {
     ctx.inject(["settings"], (services) => attach(services.settings));
-  } else if (Object.prototype.hasOwnProperty.call(ctx, "settings")) {
+    return () => getSettings();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(ctx, "settings")) {
     attach(Object.getOwnPropertyDescriptor(ctx, "settings")?.value as DshSettingsRegistry | undefined);
   }
+
+  if (!attached) options.onChange?.(base);
 
   return () => getSettings();
 }

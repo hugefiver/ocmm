@@ -1,0 +1,3 @@
+id: dsmm-orchestrator
+name: 'DSMM Orchestrator'
+description: 'Coordinates deepwork sessions and routes work to focused dsmm role presets.'

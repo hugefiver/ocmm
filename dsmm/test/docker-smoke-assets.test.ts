@@ -10,13 +10,22 @@ test("Docker smoke assets are documented and isolated", () => {
   const dockerfile = join(packageRoot, "docker", "Dockerfile.smoke");
   const script = join(packageRoot, "scripts", "docker-smoke.mjs");
   const localPlan = join(packageRoot, "docs", "implementation-plan-v0.1.md");
+  const agentPresetDocs = join(packageRoot, "docs", "agent-presets.md");
+  const examplePatch = join(packageRoot, "patches", "agent-presets-root.example.cordis.patch.yml");
+  const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
   const dockerfileText = readFileSync(dockerfile, "utf8");
   const scriptText = readFileSync(script, "utf8");
+  const docsText = readFileSync(agentPresetDocs, "utf8");
+  const patchText = readFileSync(examplePatch, "utf8");
 
   assert.equal(existsSync(dockerfile), true);
   assert.equal(existsSync(script), true);
   assert.equal(existsSync(localPlan), true);
+  assert.equal(existsSync(agentPresetDocs), true);
+  assert.equal(existsSync(examplePatch), true);
+  assert.ok(pkg.files.includes("agent-presets"));
+  assert.ok(pkg.files.includes("patches"));
   assert.match(dockerfileText, /FROM node:22-bookworm-slim/);
   assert.match(dockerfileText, /ARG DSH_PACKAGE=@deepseek-ai\/dsh@latest/);
   assert.match(dockerfileText, /COPY dsmm \.\/dsmm/);
@@ -26,6 +35,7 @@ test("Docker smoke assets are documented and isolated", () => {
   assert.match(dockerfileText, /pnpm run build/);
   assert.match(dockerfileText, /npm install -g \$\{DSH_PACKAGE\}/);
   assert.match(dockerfileText, /ENV DSH_HOME=\/tmp\/dsmm-dsh-home/);
+  assert.match(dockerfileText, /ENV DSMM_MANAGED_PRESETS_ROOT=\/tmp\/dsmm-managed-agent-presets/);
   assert.match(dockerfileText, /ENV DSMM_DOCKER_INNER=1/);
   assert.match(dockerfileText, /CMD \["node", "dsmm\/scripts\/docker-smoke\.mjs"\]/);
   assert.match(scriptText, /fileURLToPath\(new URL\("\.\.", import\.meta\.url\)\)/);
@@ -33,6 +43,16 @@ test("Docker smoke assets are documented and isolated", () => {
   assert.match(scriptText, /spawnSync\("docker"/);
   assert.match(scriptText, /"plugin", "--profile", "dsmm-smoke", "add"/);
   assert.match(scriptText, /--dump-config/);
+  assert.match(scriptText, /materializeRolePresets/);
+  assert.match(scriptText, /discoverPresets/);
+  assert.match(scriptText, /agent-presets-root/);
   assert.match(scriptText, /id: dsmm/);
   assert.match(readme, /pnpm --filter dsmm smoke:docker/);
+  assert.match(readme, /docs\/agent-presets\.md/);
+  assert.match(docsText, /materialization is disabled by default/i);
+  assert.match(docsText, /replace(?:s)? the whole `agent-presets` config/i);
+  assert.match(docsText, /default: standard/);
+  assert.match(patchText, /Example only/);
+  assert.match(patchText, /default: standard/);
+  assert.match(patchText, /includeUserRoot: true/);
 });

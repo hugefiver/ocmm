@@ -1,0 +1,3 @@
+id: dsmm-reviewer
+name: 'DSMM Reviewer'
+description: 'Reviews completed changes against requirements, tests, and regression risk.'
