@@ -17,7 +17,8 @@ export type { DeepworkSessionEventMap } from "./dsh-events.js";
 export type { DsmmRoleDefinition, DsmmRoleId } from "./roles.js";
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
-export { isRoleEnabled } from "./settings.js";
+export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, registerSettings } from "./settings.js";
+export type { DsmmFinalReviewPolicy, DsmmPluginConfig, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
 
 export function apply(ctx: DshContext, config: Config = {}): void {
   const getSettings = registerSettings(ctx, config, {

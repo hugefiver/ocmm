@@ -45,6 +45,11 @@ test("Docker smoke assets are documented and isolated", () => {
   assert.match(scriptText, /--dump-config/);
   assert.match(scriptText, /materializeRolePresets/);
   assert.match(scriptText, /discoverPresets/);
+  assert.match(scriptText, /registerBundledSkills/);
+  assert.match(scriptText, /DSMM_SKILL_NAMES\.length !== 7/);
+  assert.match(scriptText, /default skill registration expected 7 skills/);
+  assert.match(scriptText, /disabled skill registration expected 6 skills/);
+  assert.match(scriptText, /remove-ai-slops/);
   assert.match(scriptText, /agent-presets-root/);
   assert.match(scriptText, /id: dsmm/);
   assert.match(readme, /pnpm --filter dsmm smoke:docker/);

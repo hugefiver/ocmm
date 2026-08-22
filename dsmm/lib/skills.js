@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-export const MVP_SKILL_NAMES = ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review"];
+import { DSMM_SKILL_NAMES } from "./settings.js";
+export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export function parseSkillMarkdown(markdown) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/u.exec(markdown);
@@ -32,8 +33,8 @@ export function registerBundledSkills(ctx, getSettings) {
         if (skills === undefined)
             return;
         const settings = getSettings();
-        for (const name of MVP_SKILL_NAMES) {
-            if (settings.skills[name])
+        for (const name of DSMM_SKILL_NAMES) {
+            if (settings.skills[name] && existsSync(join(packageRoot, "skills", name, "SKILL.md")))
                 skills.register(loadSkill(name));
         }
     };

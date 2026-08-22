@@ -3,9 +3,15 @@ import { test } from "node:test";
 import type { DshContext, DshSettingsRegistry } from "../lib/dsh-types.js";
 import { apply } from "../lib/index.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
+import { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
 
 const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
+const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));
+const DEFAULT_WORKFLOW_SETTINGS = {
+  strictGates: true,
+  reviewCap: 5,
+  finalReviewPolicy: "simple-oracle-complex-reviewer"
+};
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
@@ -13,16 +19,12 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     defaultActive: false,
     promptOrder: 50,
     deepseekV4ProCalibration: "auto",
-    skills: {
-      brainstorming: true,
-      "writing-plans": true,
-      "requesting-code-review": true,
-      "receiving-code-review": true
-    },
+    skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
       materialize: false
-    }
+    },
+    workflow: DEFAULT_WORKFLOW_SETTINGS
   });
 });
 
@@ -32,23 +34,30 @@ test("resolveConfig overlays plugin config on defaults", () => {
     defaultActive: false,
     promptOrder: 60,
     deepseekV4ProCalibration: "off",
-    skills: {
-      brainstorming: true,
-      "writing-plans": true,
-      "requesting-code-review": true,
-      "receiving-code-review": true
-    },
+    skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
       materialize: false
-    }
+    },
+    workflow: DEFAULT_WORKFLOW_SETTINGS
   });
 });
 
 test("resolveConfig supports per-skill toggles", () => {
-  const settings = resolveConfig({ skills: { "writing-plans": false } });
+  const settings = resolveConfig({ skills: { "writing-plans": false, "remove-ai-slops": false } });
   assert.equal(settings.skills["writing-plans"], false);
+  assert.equal(settings.skills["remove-ai-slops"], false);
   assert.equal(settings.skills.brainstorming, true);
+});
+
+test("resolveConfig supports workflow setting overlays", () => {
+  const settings = resolveConfig({ workflow: { reviewCap: 2, finalReviewPolicy: "reviewer-only" } });
+
+  assert.deepEqual(settings.workflow, {
+    strictGates: true,
+    reviewCap: 2,
+    finalReviewPolicy: "reviewer-only"
+  });
 });
 
 test("resolveConfig supports per-role toggles", () => {
@@ -89,16 +98,12 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     defaultActive: true,
     promptOrder: 50,
     deepseekV4ProCalibration: "auto",
-    skills: {
-      brainstorming: true,
-      "writing-plans": true,
-      "requesting-code-review": true,
-      "receiving-code-review": true
-    },
+    skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
       materialize: false
-    }
+    },
+    workflow: DEFAULT_WORKFLOW_SETTINGS
   });
 });
 

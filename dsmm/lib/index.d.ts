@@ -14,11 +14,17 @@ export declare const Config: import("@deepseek-ai/schemastery").default<Schemast
         "writing-plans": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "requesting-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "receiving-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "subagent-driven-development": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "dispatching-parallel-agents": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "remove-ai-slops": import("@deepseek-ai/schemastery").default<boolean, boolean>;
     }>, Schemastery.ObjectT<{
         brainstorming: import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "writing-plans": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "requesting-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "receiving-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "subagent-driven-development": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "dispatching-parallel-agents": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "remove-ai-slops": import("@deepseek-ai/schemastery").default<boolean, boolean>;
     }>>;
     roles: import("@deepseek-ai/schemastery").default<Schemastery.ObjectS<{
         "dsmm-orchestrator": import("@deepseek-ai/schemastery").default<boolean, boolean>;
@@ -45,6 +51,15 @@ export declare const Config: import("@deepseek-ai/schemastery").default<Schemast
     }>, Schemastery.ObjectT<{
         materialize: import("@deepseek-ai/schemastery").default<boolean, boolean>;
         root: import("@deepseek-ai/schemastery").default<string, string>;
+    }>>;
+    workflow: import("@deepseek-ai/schemastery").default<Schemastery.ObjectS<{
+        strictGates: import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        reviewCap: import("@deepseek-ai/schemastery").default<number, number>;
+        finalReviewPolicy: import("@deepseek-ai/schemastery").default<"off" | "simple-oracle-complex-reviewer" | "reviewer-only", "off" | "simple-oracle-complex-reviewer" | "reviewer-only">;
+    }>, Schemastery.ObjectT<{
+        strictGates: import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        reviewCap: import("@deepseek-ai/schemastery").default<number, number>;
+        finalReviewPolicy: import("@deepseek-ai/schemastery").default<"off" | "simple-oracle-complex-reviewer" | "reviewer-only", "off" | "simple-oracle-complex-reviewer" | "reviewer-only">;
     }>>;
 }>, Schemastery.ObjectT<{
     modeName: import("@deepseek-ai/schemastery").default<string, string>;
@@ -57,11 +72,17 @@ export declare const Config: import("@deepseek-ai/schemastery").default<Schemast
         "writing-plans": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "requesting-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "receiving-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "subagent-driven-development": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "dispatching-parallel-agents": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "remove-ai-slops": import("@deepseek-ai/schemastery").default<boolean, boolean>;
     }>, Schemastery.ObjectT<{
         brainstorming: import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "writing-plans": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "requesting-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
         "receiving-code-review": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "subagent-driven-development": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "dispatching-parallel-agents": import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        "remove-ai-slops": import("@deepseek-ai/schemastery").default<boolean, boolean>;
     }>>;
     roles: import("@deepseek-ai/schemastery").default<Schemastery.ObjectS<{
         "dsmm-orchestrator": import("@deepseek-ai/schemastery").default<boolean, boolean>;
@@ -89,12 +110,22 @@ export declare const Config: import("@deepseek-ai/schemastery").default<Schemast
         materialize: import("@deepseek-ai/schemastery").default<boolean, boolean>;
         root: import("@deepseek-ai/schemastery").default<string, string>;
     }>>;
+    workflow: import("@deepseek-ai/schemastery").default<Schemastery.ObjectS<{
+        strictGates: import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        reviewCap: import("@deepseek-ai/schemastery").default<number, number>;
+        finalReviewPolicy: import("@deepseek-ai/schemastery").default<"off" | "simple-oracle-complex-reviewer" | "reviewer-only", "off" | "simple-oracle-complex-reviewer" | "reviewer-only">;
+    }>, Schemastery.ObjectT<{
+        strictGates: import("@deepseek-ai/schemastery").default<boolean, boolean>;
+        reviewCap: import("@deepseek-ai/schemastery").default<number, number>;
+        finalReviewPolicy: import("@deepseek-ai/schemastery").default<"off" | "simple-oracle-complex-reviewer" | "reviewer-only", "off" | "simple-oracle-complex-reviewer" | "reviewer-only">;
+    }>>;
 }>>;
 export type { DeepworkSessionEventMap } from "./dsh-events.js";
 export type { DsmmRoleDefinition, DsmmRoleId } from "./roles.js";
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
-export { isRoleEnabled } from "./settings.js";
+export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, registerSettings } from "./settings.js";
+export type { DsmmFinalReviewPolicy, DsmmPluginConfig, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
 export declare function apply(ctx: DshContext, config?: Config): void;
 export default apply;
 //# sourceMappingURL=index.d.ts.map

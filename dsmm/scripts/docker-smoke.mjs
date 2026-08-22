@@ -94,7 +94,35 @@ if (!dump.stdout.includes("id: dsmm")) throw new Error("dumped dsh config did no
 const managedRoot = process.env.DSMM_MANAGED_PRESETS_ROOT || join(home, "managed-agent-presets-smoke");
 const agentPresetRootPatch = join(home, "agent-presets-root.cordis.patch.yml");
 const dsmm = await import(pathToFileURL(join(root, "lib", "index.js")).href);
+const dsmmSkills = await import(pathToFileURL(join(root, "lib", "skills.js")).href);
 const roles = Object.fromEntries(dsmm.DSMM_ROLE_IDS.map((id) => [id, id !== disabledRole]));
+
+function collectBundledSkillRegistrations(settings) {
+  const registered = [];
+  dsmmSkills.registerBundledSkills({ skills: { register(skill) { registered.push(skill); } } }, () => settings);
+  return registered;
+}
+
+if (dsmm.DSMM_SKILL_NAMES.length !== 7) throw new Error(`expected 7 bundled dsmm skills, found ${String(dsmm.DSMM_SKILL_NAMES.length)}`);
+
+for (const skillName of dsmm.DSMM_SKILL_NAMES) {
+  if (!existsSync(join(root, "skills", skillName, "SKILL.md"))) throw new Error(`missing bundled skill asset ${skillName}`);
+}
+
+const defaultRegisteredSkills = collectBundledSkillRegistrations(dsmm.DEFAULT_DSMM_SETTINGS);
+if (defaultRegisteredSkills.length !== 7) throw new Error(`default skill registration expected 7 skills, found ${String(defaultRegisteredSkills.length)}`);
+
+const disabledSkillSettings = {
+  ...dsmm.DEFAULT_DSMM_SETTINGS,
+  skills: {
+    ...dsmm.DEFAULT_DSMM_SETTINGS.skills,
+    "remove-ai-slops": false
+  }
+};
+const disabledRegisteredSkills = collectBundledSkillRegistrations(disabledSkillSettings);
+const disabledRegisteredNames = disabledRegisteredSkills.map((skill) => skill.name);
+if (disabledRegisteredSkills.length !== 6) throw new Error(`disabled skill registration expected 6 skills, found ${String(disabledRegisteredSkills.length)}`);
+if (disabledRegisteredNames.includes("remove-ai-slops")) throw new Error("disabled skill remove-ai-slops was registered");
 
 dsmm.materializeRolePresets({
   root: managedRoot,
@@ -107,12 +135,20 @@ dsmm.materializeRolePresets({
       brainstorming: true,
       "writing-plans": true,
       "requesting-code-review": true,
-      "receiving-code-review": true
+      "receiving-code-review": true,
+      "subagent-driven-development": true,
+      "dispatching-parallel-agents": true,
+      "remove-ai-slops": true
     },
     roles,
     presets: {
       materialize: true,
       root: managedRoot
+    },
+    workflow: {
+      strictGates: true,
+      reviewCap: 5,
+      finalReviewPolicy: "simple-oracle-complex-reviewer"
     }
   }
 });

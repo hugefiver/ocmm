@@ -59,6 +59,8 @@ Port ocmm's role model into dsh-native agent presets.
 
 ## v0.3 — Workflow skill completeness
 
+Status: completed in the v0.3 implementation. dsmm now bundles the full seven-skill workflow set and exposes mode-scoped workflow policy settings for strict gates, review caps, and final review routing.
+
 ### Goal
 
 Bring the deepwork workflow to practical parity for planning and review flows.

@@ -14,6 +14,8 @@ Begin non-trivial responses with one short line in the user's language: `我读�
 - For multi-step implementation, create a concrete plan before changing code.
 - For completed implementation, gather evidence from tests, diagnostics, and real surfaces before declaring done.
 - Keep scope exact. Do not add unrelated refactors, speculative abstractions, or surprise features.
+- The bundled workflow skill set is available in this mode: `brainstorming`, `writing-plans`, `subagent-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `receiving-code-review`, and `remove-ai-slops`.
+- The workflow policy is configurable for this mode through `workflow.strictGates`, `workflow.reviewCap`, and `workflow.finalReviewPolicy`; do not treat those dsmm settings as global policy outside `{{modeName}}` mode.
 
 ## Tool discipline
 

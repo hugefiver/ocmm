@@ -3,16 +3,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { DSMM_SKILL_NAMES } from "../lib/skills.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const skills = ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review"];
 
-test("MVP skill files exist with required frontmatter", () => {
-  for (const skill of skills) {
+test("bundled skill files exist with matching frontmatter", () => {
+  for (const skill of DSMM_SKILL_NAMES) {
     const file = join(packageRoot, "skills", skill, "SKILL.md");
     assert.equal(existsSync(file), true, `${skill} skill file exists`);
     const text = readFileSync(file, "utf8");
-    assert.match(text, /^---\r?\nname: /, `${skill} has frontmatter name`);
+    assert.match(text, new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "mu"), `${skill} frontmatter name matches directory`);
     assert.match(text, /description: /, `${skill} has frontmatter description`);
   }
 });

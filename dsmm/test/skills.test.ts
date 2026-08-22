@@ -2,10 +2,22 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DshSkillRegistration } from "../lib/dsh-types.js";
 import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
-import { MVP_SKILL_NAMES, parseSkillMarkdown, registerBundledSkills } from "../lib/skills.js";
+import { DSMM_SKILL_NAMES, MVP_SKILL_NAMES, parseSkillMarkdown, registerBundledSkills } from "../lib/skills.js";
 
-test("MVP skill names are stable and kebab-case", () => {
-  assert.deepEqual(MVP_SKILL_NAMES, ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review"]);
+test("DSMM skill names are stable and kebab-case", () => {
+  assert.deepEqual(DSMM_SKILL_NAMES, [
+    "brainstorming",
+    "writing-plans",
+    "requesting-code-review",
+    "receiving-code-review",
+    "subagent-driven-development",
+    "dispatching-parallel-agents",
+    "remove-ai-slops"
+  ]);
+});
+
+test("MVP skill names remain as a compatibility alias", () => {
+  assert.equal(MVP_SKILL_NAMES, DSMM_SKILL_NAMES);
 });
 
 test("parseSkillMarkdown extracts frontmatter and body", () => {
@@ -16,14 +28,14 @@ test("parseSkillMarkdown extracts frontmatter and body", () => {
   });
 });
 
-test("registerBundledSkills registers four runtime skills by default", () => {
+test("registerBundledSkills registers existing runtime skills by default", () => {
   const registered: DshSkillRegistration[] = [];
   registerBundledSkills({ skills: { register(skill) { registered.push(skill); } } }, () => DEFAULT_DSMM_SETTINGS);
 
-  assert.equal(registered.length, 4);
-  assert.deepEqual(registered.map((skill) => skill.name), [...MVP_SKILL_NAMES]);
-  assert.deepEqual(registered.map((skill) => skill.source), ["bundled", "bundled", "bundled", "bundled"]);
-  assert.deepEqual(registered.map((skill) => skill.provider), ["dsmm", "dsmm", "dsmm", "dsmm"]);
+  assert.equal(registered.length, 7);
+  assert.deepEqual(registered.map((skill) => skill.name), DSMM_SKILL_NAMES);
+  assert.ok(registered.every((skill) => skill.source === "bundled"));
+  assert.ok(registered.every((skill) => skill.provider === "dsmm"));
   assert.ok(registered.every((skill) => skill.resourceBase?.kind === "directory"));
   assert.ok(registered.every((skill) => skill.invocation?.modelInvocable === true && skill.invocation.userInvocable === true));
 });
@@ -32,10 +44,10 @@ test("registerBundledSkills honors skill settings", () => {
   const registered: DshSkillRegistration[] = [];
   registerBundledSkills(
     { skills: { register(skill) { registered.push(skill); } } },
-    () => ({ ...DEFAULT_DSMM_SETTINGS, skills: { ...DEFAULT_DSMM_SETTINGS.skills, "writing-plans": false } })
+    () => ({ ...DEFAULT_DSMM_SETTINGS, skills: { ...DEFAULT_DSMM_SETTINGS.skills, "remove-ai-slops": false } })
   );
 
-  assert.deepEqual(registered.map((skill) => skill.name), ["brainstorming", "requesting-code-review", "receiving-code-review"]);
+  assert.deepEqual(registered.map((skill) => skill.name), DSMM_SKILL_NAMES.filter((skill) => skill !== "remove-ai-slops"));
 });
 
 test("registerBundledSkills can wait for an injected skills service", () => {
@@ -47,7 +59,7 @@ test("registerBundledSkills can wait for an injected skills service", () => {
     }
   }, () => DEFAULT_DSMM_SETTINGS);
 
-  assert.equal(registered.length, 4);
+  assert.equal(registered.length, 7);
 });
 
 test("registerBundledSkills does not read missing Cordis services directly", () => {

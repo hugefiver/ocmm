@@ -20,6 +20,20 @@ v0.2 adds dsh agent preset templates for dsmm's core deepwork roles: orchestrato
 
 See [`docs/agent-presets.md`](docs/agent-presets.md) for enabling materialization, disabling individual roles, and adding the managed preset root to dsh discovery with an explicit profile patch.
 
+## v0.3 workflow skill completeness
+
+v0.3 completes the bundled deepwork workflow skill set while keeping deepwork scoped and opt-in. The seven runtime skills are configurable under `settings.skills`:
+
+- `brainstorming`
+- `writing-plans`
+- `subagent-driven-development`
+- `dispatching-parallel-agents`
+- `requesting-code-review`
+- `receiving-code-review`
+- `remove-ai-slops`
+
+Workflow policy is configurable under `settings.workflow`: `workflow.strictGates` controls whether deepwork gates are strict, `workflow.reviewCap` caps review/planning loops, and `workflow.finalReviewPolicy` selects final review routing (`simple-oracle-complex-reviewer`, `reviewer-only`, or `off`). These settings apply to dsmm deepwork behavior only; they do not make dsmm global outside the active mode.
+
 ## Install into a disposable profile
 
 Build the local package, point dsh state at a disposable home, install the local bundle into a throwaway profile, and inspect the resulting config:
@@ -35,7 +49,7 @@ Expected result: the dumped config contains the `dsmm` bundle row from `cordis.p
 
 ## Optional Docker smoke
 
-The Docker smoke builds dsmm in a container, installs the requested dsh package, installs dsmm into an isolated `dsmm-smoke` profile, and checks that `dsh --profile dsmm-smoke --dump-config` includes `id: dsmm`.
+The Docker smoke builds dsmm in a container, installs the requested dsh package, installs dsmm into an isolated `dsmm-smoke` profile, checks that `dsh --profile dsmm-smoke --dump-config` includes `id: dsmm`, verifies bundled skill registration settings, and smoke-tests role preset materialization/discovery.
 
 ```powershell
 pnpm --filter dsmm smoke:docker
@@ -45,7 +59,7 @@ The Docker smoke is optional because it requires Docker and network access to fe
 
 ## Configuration sketch
 
-`cordis.patch.yml` installs dsmm with these v0.1 defaults:
+`cordis.patch.yml` installs dsmm with these defaults:
 
 ```yaml
 - insert:
@@ -56,13 +70,19 @@ The Docker smoke is optional because it requires Docker and network access to fe
         defaultActive: false
         promptOrder: 50
         deepseekV4ProCalibration: auto
+        workflow:
+          strictGates: true
+          reviewCap: 5
+          finalReviewPolicy: simple-oracle-complex-reviewer
 ```
 
-`modeName` controls the slash command and prompt label. The persisted v0.1 session event remains the fixed internal `deepwork/mode` event.
+`modeName` controls the slash command and prompt label. The persisted session event remains the fixed internal `deepwork/mode` event.
 
 ## Implementation plan
 
 - `docs/implementation-plan-v0.1.md` is the dsmm-local copy of the approved v0.1 MVP implementation plan.
+- `docs/implementation-plan-v0.3.md` is the dsmm-local copy of the approved v0.3 workflow skills implementation plan.
 - `../docs/superpowers/plans/2026-08-21-dsmm-mvp.md` remains the workflow-reviewed source plan artifact in this repository.
+- `../docs/superpowers/plans/2026-08-22-dsmm-workflow-skills.md` remains the workflow-reviewed source plan artifact for v0.3.
 
-Supporting design material remains in `docs/design.md`, `docs/roadmap.md`, and `docs/research/`.
+Supporting design material remains in `docs/design.md`, `docs/roadmap.md`, `docs/skill-sync.md`, and `docs/research/`.

@@ -1,6 +1,6 @@
 import type { DshContext } from "./dsh-types.js";
 import type { DsmmSettings } from "./settings.js";
-export declare const MVP_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review"];
+export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
 export declare function parseSkillMarkdown(markdown: string): {
     name: string;
     description: string;

@@ -18,6 +18,17 @@ test("prompt assets exist and contain activation boundaries", () => {
   assert.match(deepwork, /Intent routing/);
   assert.match(deepwork, /Workflow gates/);
   assert.match(deepwork, /Tool discipline/);
+  assert.match(deepwork, /brainstorming/);
+  assert.match(deepwork, /writing-plans/);
+  assert.match(deepwork, /subagent-driven-development/);
+  assert.match(deepwork, /dispatching-parallel-agents/);
+  assert.match(deepwork, /requesting-code-review/);
+  assert.match(deepwork, /receiving-code-review/);
+  assert.match(deepwork, /remove-ai-slops/);
+  assert.match(deepwork, /workflow\.strictGates/);
+  assert.match(deepwork, /workflow\.reviewCap/);
+  assert.match(deepwork, /workflow\.finalReviewPolicy/);
+  assert.match(deepwork, /global policy outside `\{\{modeName\}\}` mode/);
   assert.match(v4, /DeepSeek V4 Pro calibration/);
   assert.match(v4, /reasoning_effort/);
 });
@@ -49,6 +60,7 @@ test("buildDeepworkPrompt accepts composition section override", () => {
   assert.match(prompt, /Custom dsmm section for deepwork/);
   assert.doesNotMatch(prompt, /DEEPWORK MODE ENABLED/);
   assert.match(prompt, /DeepSeek V4 Pro calibration/);
+  assert.match(prompt, /finalReviewPolicy: simple-oracle-complex-reviewer/);
 });
 
 test("buildDeepworkPrompt renders the configured mode name", () => {
@@ -58,9 +70,38 @@ test("buildDeepworkPrompt renders the configured mode name", () => {
   assert.doesNotMatch(prompt, /`deepwork` mode is active/);
 });
 
+test("buildDeepworkPrompt renders effective workflow policy values", () => {
+  const prompt = buildDeepworkPrompt({
+    ...DEFAULT_DSMM_SETTINGS,
+    workflow: {
+      strictGates: false,
+      reviewCap: 2,
+      finalReviewPolicy: "reviewer-only"
+    }
+  });
+
+  assert.match(prompt, /strictGates: false/);
+  assert.match(prompt, /reviewCap: 2/);
+  assert.match(prompt, /finalReviewPolicy: reviewer-only/);
+});
+
 test("exported prompt constants match asset intent", () => {
   assert.match(BASE_DEEPWORK_PROMPT, /DEEPWORK MODE ENABLED/);
   assert.match(BASE_DEEPWORK_PROMPT, /\{\{modeName\}\}/);
+  assert.match(BASE_DEEPWORK_PROMPT, /brainstorming/);
+  assert.match(BASE_DEEPWORK_PROMPT, /writing-plans/);
+  assert.match(BASE_DEEPWORK_PROMPT, /subagent-driven-development/);
+  assert.match(BASE_DEEPWORK_PROMPT, /dispatching-parallel-agents/);
+  assert.match(BASE_DEEPWORK_PROMPT, /requesting-code-review/);
+  assert.match(BASE_DEEPWORK_PROMPT, /receiving-code-review/);
+  assert.match(BASE_DEEPWORK_PROMPT, /remove-ai-slops/);
+  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.strictGates/);
+  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.reviewCap/);
+  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.finalReviewPolicy/);
+  assert.match(BASE_DEEPWORK_PROMPT, /do not treat those dsmm settings as global policy outside/);
+  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /strictGates: true/);
+  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /reviewCap: 5/);
+  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /finalReviewPolicy: simple-oracle-complex-reviewer/);
   assert.match(DEEPSEEK_V4_PRO_OVERLAY, /DeepSeek V4 Pro calibration/);
   assert.match(DEEPSEEK_V4_PRO_OVERLAY, /reasoning_effort/);
 });

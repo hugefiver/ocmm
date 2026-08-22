@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DshContext, DshSkillRegistration, DshSkillRegistry } from "./dsh-types.js";
-import type { DsmmSettings, MvpSkillName } from "./settings.js";
+import { DSMM_SKILL_NAMES } from "./settings.js";
+import type { DsmmSettings, DsmmSkillName } from "./settings.js";
 
-export const MVP_SKILL_NAMES = ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review"] as const;
+export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -20,7 +21,7 @@ export function parseSkillMarkdown(markdown: string): { name: string; descriptio
   return { name, description, content: match[2].replace(/^\r?\n/u, "") };
 }
 
-function loadSkill(name: MvpSkillName): DshSkillRegistration {
+function loadSkill(name: DsmmSkillName): DshSkillRegistration {
   const directory = join(packageRoot, "skills", name);
   const parsed = parseSkillMarkdown(readFileSync(join(directory, "SKILL.md"), "utf8"));
 
@@ -40,8 +41,8 @@ export function registerBundledSkills(ctx: DshContext, getSettings: () => DsmmSe
     if (skills === undefined) return;
 
     const settings = getSettings();
-    for (const name of MVP_SKILL_NAMES) {
-      if (settings.skills[name]) skills.register(loadSkill(name));
+    for (const name of DSMM_SKILL_NAMES) {
+      if (settings.skills[name] && existsSync(join(packageRoot, "skills", name, "SKILL.md"))) skills.register(loadSkill(name));
     }
   };
 
