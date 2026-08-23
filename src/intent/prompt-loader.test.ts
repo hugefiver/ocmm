@@ -63,6 +63,10 @@ function sharedGpt56Doctrine(text: string): string {
   return text.slice(start, closingTag === -1 ? undefined : closingTag).trim()
 }
 
+function withoutGpt56CachePolicy(text: string): string {
+  return text.replace(/\n### Cache stability\n[\s\S]*?(?=\n## Context-efficient waiting and validation)/, "")
+}
+
 test("loadAllPrompts loads files from the workflow subdir", () => {
   const root = makeTempRoot("omo")
   try {
@@ -870,15 +874,21 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
     assert.match(text, /Rerun validation only when relevant inputs changed after the last green result/i, `${label} revalidation`)
     assert.match(text, /Lead with the outcome.*evidence.*residual risk.*unverified/is, `${label} reporting priority`)
     assert.match(text, /Do not infer permission to modify/i, `${label} authorization boundary`)
-    assert.match(text, /cache-stable.*targeted (?:grep\/glob\/LSP|search\/LSP).*bounded reads/is, `${label} cache-stable lookup`)
+    assert.match(text, /Cache stability.*(?:grep\/glob\/LSP|search\/LSP).*bounded (?:native `tool_output`|reads)/is, `${label} cache-stable lookup`)
+    assert.match(text, /<16,000 (?:characters|chars)\/result.*<32,000 new (?:characters|chars)\/turn/is, `${label} output budgets`)
+    assert.match(text, /avoid parallel large reads.*focused follow-ups/is, `${label} bounded retrieval`)
     if (workflow === "codex") {
-      assert.doesNotMatch(text, /native `tool_output`|compression\/history rewrites/i, `${label} contains OpenCode-specific cache workaround`)
-      assert.match(text, /small stable outputs/is, `${label} stable output`)
+      assert.doesNotMatch(text, /native `tool_output`|`compress`|`task_id`/i, `${label} contains OpenCode-specific cache workaround`)
+      assert.match(text, /Summarize here(?: without rewriting context|; do not rewrite context)/is, `${label} context stability`)
+      assert.match(text, /known context pressure blocks continuation.*keep model\/thread until pressure returns/is, `${label} context pressure gate`)
+      assert.match(text, /agent\/thread per role\/stage/is, `${label} continuation reuse`)
     } else {
-      assert.match(text, /native `tool_output`\/small stable outputs/is, `${label} stable tool output`)
-      assert.match(text, /avoid compression\/history rewrites unless context pressure is real.*session continues many turns/is, `${label} compression restraint`)
+      assert.match(text, /bounded native `tool_output`/is, `${label} stable tool output`)
+      assert.match(text, /never via phase-end `compress`/is, `${label} phase compression restraint`)
+      assert.match(text, /Compress only when known pressure blocks continuation/is, `${label} pressure gate`)
+      assert.match(text, /then keep the model\/session until pressure returns/is, `${label} compression recovery`)
+      assert.match(text, /subagent `task_id` within (?:one |a )role\/stage/is, `${label} continuation reuse`)
     }
-    assert.match(text, /re-run focused lookups for exact old output/i, `${label} exact old output lookup`)
 
     for (const heading of REMOVED_GPT56_SECTION_HEADINGS) {
       assert.equal(text.includes(heading), false, `${label} duplicates ${heading}`)
@@ -905,9 +915,9 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
   const codexShared = shared.get("codex") ?? ""
   const omoShared = shared.get("omo") ?? ""
   assert.equal(
-    codexShared.replace(/- Keep GPT-5\.6 cache-stable[^\n]+\n/, ""),
-    omoShared.replace(/- Keep GPT-5\.6 cache-stable[^\n]+\n/, ""),
-    "Codex shared doctrine drifted outside the environment-specific cache line",
+    withoutGpt56CachePolicy(codexShared),
+    withoutGpt56CachePolicy(omoShared),
+    "Codex shared doctrine drifted outside the environment-specific cache policy",
   )
 })
 

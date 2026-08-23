@@ -14,13 +14,18 @@ Apply this layer only when the selected model is GPT-5.6. Explicit user configur
 
 ## Retrieval and delegation
 
-- Prefer direct tools; stop retrieval when evidence is sufficient to act or answer.
-- Keep GPT-5.6 cache-stable without weakening work: locate first with targeted grep/glob/LSP, use bounded reads and native `tool_output`/small stable outputs, summarize closed bulky batches, avoid compression/history rewrites unless context pressure is real and this session continues many turns, and re-run focused lookups for exact old output.
+- Prefer direct tools; stop when evidence answers the request.
 - Use subagents only when the effective role/delegation contract permits it and they materially improve completion via parent-context savings, a required workflow stage, or parallel independent implementation.
 - Multiple steps, routine confirmation, or a desire for another opinion are insufficient reasons to delegate.
 - Reviewer is primary-lane self-review; Oracle slots are external-model cross-checks. They are only for implementation acceptance or code-quality verification, not research, ideation, architecture design, root-cause debugging, general answer validation, or routine confidence, and follow authoritative selection rules.
 - For multi-module work with independent, non-coupled tasks, consider parallel implementation subagents; serialize coupled work or costly delegation.
 - Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals. The parent verifies returned evidence instead of trusting a completion claim.
+
+### Cache stability
+
+- Target with grep/glob/LSP before bounded native `tool_output`. Prefer <16,000 chars/result and <32,000 new chars/turn; avoid parallel large reads; use focused follow-ups.
+- Summarize here, never via phase-end `compress`. Compress only when known pressure blocks continuation; then keep the model/session until pressure returns.
+- Reuse subagent `task_id` within a role/stage; start fresh only at boundaries or failed continuation.
 
 ## Context-efficient waiting and validation
 

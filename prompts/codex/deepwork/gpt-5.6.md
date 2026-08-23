@@ -14,13 +14,18 @@ Codex profiles may carry this layer ahead of runtime model selection; models out
 
 ## Retrieval and delegation
 
-- Prefer direct tools; stop retrieval when evidence is sufficient to act or answer.
-- Keep GPT-5.6 cache-stable without weakening work: locate first with targeted search/LSP, use bounded reads and small stable outputs, summarize closed bulky batches, and re-run focused lookups for exact old output.
+- Prefer direct tools; stop when evidence answers the request.
 - Use subagents only when the effective role/delegation contract permits it and they materially improve completion via parent-context savings, a required workflow stage, or parallel independent implementation.
 - Multiple steps, routine confirmation, or a desire for another opinion are insufficient reasons to delegate.
 - Reviewer is primary-lane self-review; Oracle slots are external-model cross-checks. They are only for implementation acceptance or code-quality verification, not research, ideation, architecture design, root-cause debugging, general answer validation, or routine confidence, and follow authoritative selection rules.
 - For multi-module work with independent, non-coupled tasks, consider parallel implementation subagents; serialize coupled work or costly delegation.
 - Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals. The parent verifies returned evidence instead of trusting a completion claim.
+
+### Cache stability
+
+- Search/LSP before bounded reads. Keep <16,000 chars/result; <32,000 new chars/turn; avoid parallel large reads; use focused follow-ups.
+- Summarize here; do not rewrite context. Reduce only if known context pressure blocks continuation; keep model/thread until pressure returns.
+- Reuse agent/thread per role/stage; fresh at boundary/failure.
 
 ## Context-efficient waiting and validation
 
