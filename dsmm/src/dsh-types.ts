@@ -74,10 +74,51 @@ export interface DshSkillRegistry {
   register(skill: DshSkillRegistration): unknown;
 }
 
+export interface DshContentBlock {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+export interface DshToolExecution {
+  callId?: unknown;
+  rootCallId?: unknown;
+  name: string;
+  arguments: unknown;
+  agent?: DshAgent;
+  parent?: unknown;
+  signal?: AbortSignal;
+}
+
+export type DshPreToolDecision =
+  | { kind: "allow" }
+  | { kind: "deny"; reason: string }
+  | { kind: "ask"; reason?: string };
+
+export type DshPostToolDecision =
+  | { kind: "accept"; content?: DshContentBlock[]; value?: never; additionalContexts?: unknown[] }
+  | { kind: "accept"; value: unknown; content?: never; additionalContexts?: unknown[] }
+  | { kind: "block"; feedback: DshContentBlock[]; additionalContexts?: unknown[] };
+
+export interface DshToolExecutionResult {
+  isError: boolean;
+  content: DshContentBlock[];
+  value?: unknown;
+  error?: unknown;
+  additionalContexts?: unknown[];
+}
+
+export interface DshToolRuntime {
+  guard?(guard: (execution: Readonly<DshToolExecution>) => string | undefined): () => void;
+}
+
+export type DshEventListener = (...args: any[]) => any;
+
 export interface DshInjectedServices {
   settings?: DshSettingsRegistry;
   skills?: DshSkillRegistry;
   commands?: DshCommandsRegistry;
+  tools?: DshToolRuntime;
   [key: string]: unknown;
 }
 
@@ -97,7 +138,9 @@ export interface DshContext {
   systemPrompt?: DshSystemPromptRegistry;
   skills?: DshSkillRegistry;
   commands?: DshCommandsRegistry;
+  tools?: DshToolRuntime;
   inject?(dependencies: string[], installer: (services: DshInjectedServices) => unknown): unknown;
-  on?(event: "agent/pre-step", listener: (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>): unknown;
+  on?(event: "agent/pre-step", listener: (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>, options?: unknown): unknown;
+  on?(event: string, listener: DshEventListener, options?: unknown): unknown;
   logger?: { warn(message: string, ...args: unknown[]): void };
 }

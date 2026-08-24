@@ -5,6 +5,8 @@ import type { DsmmRoleId } from "./roles.js";
 
 export type DeepseekCalibration = "off" | "auto" | "strict";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
+export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
+export type DsmmGitWritePolicy = "ask" | "deny" | "off";
 export const DSMM_SKILL_NAMES = [
   "brainstorming",
   "writing-plans",
@@ -29,6 +31,27 @@ export interface DsmmPresetSettings {
   root?: string;
 }
 
+export interface DsmmGuardSettings {
+  scope: DsmmGuardScope;
+  shellCommandSafety: boolean;
+  gitWriteGuard: DsmmGitWritePolicy;
+  toolOutputTruncation: {
+    enabled: boolean;
+    maxInlineBytes: number;
+  };
+  planFormatValidation: boolean;
+  questionLabelHelper: {
+    enabled: boolean;
+    maxLabelChars: number;
+  };
+  todoDisciplineHelper: boolean;
+}
+
+type DsmmGuardConfig = Partial<Omit<DsmmGuardSettings, "toolOutputTruncation" | "questionLabelHelper">> & {
+  toolOutputTruncation?: Partial<DsmmGuardSettings["toolOutputTruncation"]>;
+  questionLabelHelper?: Partial<DsmmGuardSettings["questionLabelHelper"]>;
+};
+
 export interface DsmmPluginConfig {
   modeName?: string;
   section?: string;
@@ -39,6 +62,7 @@ export interface DsmmPluginConfig {
   roles?: Partial<Record<DsmmRoleId, boolean>>;
   presets?: Partial<DsmmPresetSettings>;
   workflow?: Partial<DsmmWorkflowSettings>;
+  guards?: DsmmGuardConfig;
 }
 
 export interface DsmmSettings {
@@ -50,6 +74,7 @@ export interface DsmmSettings {
   roles: Record<DsmmRoleId, boolean>;
   presets: DsmmPresetSettings;
   workflow: DsmmWorkflowSettings;
+  guards: DsmmGuardSettings;
 }
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
@@ -72,6 +97,21 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
     strictGates: true,
     reviewCap: 5,
     finalReviewPolicy: "simple-oracle-complex-reviewer"
+  },
+  guards: {
+    scope: "deepwork-or-dsmm-agent",
+    shellCommandSafety: true,
+    gitWriteGuard: "ask",
+    toolOutputTruncation: {
+      enabled: true,
+      maxInlineBytes: 12000
+    },
+    planFormatValidation: true,
+    questionLabelHelper: {
+      enabled: true,
+      maxLabelChars: 30
+    },
+    todoDisciplineHelper: true
   }
 };
 
@@ -121,6 +161,38 @@ const WORKFLOW_SCHEMA = Schema.object({
   finalReviewPolicy: FINAL_REVIEW_POLICY_SCHEMA
 });
 
+const GUARD_SCOPE_SCHEMA = Schema.union([
+  Schema.const("deepwork-or-dsmm-agent"),
+  Schema.const("always"),
+  Schema.const("off")
+]).default(DEFAULT_DSMM_SETTINGS.guards.scope);
+
+const GIT_WRITE_POLICY_SCHEMA = Schema.union([
+  Schema.const("ask"),
+  Schema.const("deny"),
+  Schema.const("off")
+]).default(DEFAULT_DSMM_SETTINGS.guards.gitWriteGuard);
+
+const TOOL_OUTPUT_TRUNCATION_SCHEMA = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.toolOutputTruncation.enabled),
+  maxInlineBytes: Schema.number().default(DEFAULT_DSMM_SETTINGS.guards.toolOutputTruncation.maxInlineBytes)
+});
+
+const QUESTION_LABEL_HELPER_SCHEMA = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.questionLabelHelper.enabled),
+  maxLabelChars: Schema.number().default(DEFAULT_DSMM_SETTINGS.guards.questionLabelHelper.maxLabelChars)
+});
+
+const GUARDS_SCHEMA = Schema.object({
+  scope: GUARD_SCOPE_SCHEMA,
+  shellCommandSafety: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.shellCommandSafety),
+  gitWriteGuard: GIT_WRITE_POLICY_SCHEMA,
+  toolOutputTruncation: TOOL_OUTPUT_TRUNCATION_SCHEMA,
+  planFormatValidation: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.planFormatValidation),
+  questionLabelHelper: QUESTION_LABEL_HELPER_SCHEMA,
+  todoDisciplineHelper: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.todoDisciplineHelper)
+});
+
 const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
   Schema.const("off"),
   Schema.const("auto"),
@@ -136,7 +208,8 @@ export const DSMM_CONFIG_SCHEMA = Schema.object({
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
-  workflow: WORKFLOW_SCHEMA
+  workflow: WORKFLOW_SCHEMA,
+  guards: GUARDS_SCHEMA
 });
 
 export const DSMM_SETTINGS_SCHEMA = Schema.object({
@@ -147,7 +220,8 @@ export const DSMM_SETTINGS_SCHEMA = Schema.object({
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
-  workflow: WORKFLOW_SCHEMA
+  workflow: WORKFLOW_SCHEMA,
+  guards: GUARDS_SCHEMA
 });
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
@@ -159,7 +233,8 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     presets: resolvePresetSettings(config.presets),
-    workflow: resolveWorkflowSettings(config.workflow)
+    workflow: resolveWorkflowSettings(config.workflow),
+    guards: resolveGuardSettings(config.guards)
   };
 }
 
@@ -179,6 +254,33 @@ function resolveWorkflowSettings(config: DsmmPluginConfig["workflow"]): DsmmWork
     ...DEFAULT_DSMM_SETTINGS.workflow,
     ...config
   };
+}
+
+export function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings {
+  const defaults = DEFAULT_DSMM_SETTINGS.guards;
+
+  return {
+    ...defaults,
+    ...config,
+    toolOutputTruncation: {
+      ...defaults.toolOutputTruncation,
+      ...config?.toolOutputTruncation,
+      maxInlineBytes: normalizePositiveInteger(
+        config?.toolOutputTruncation?.maxInlineBytes,
+        defaults.toolOutputTruncation.maxInlineBytes
+      )
+    },
+    questionLabelHelper: {
+      ...defaults.questionLabelHelper,
+      ...config?.questionLabelHelper,
+      maxLabelChars: normalizePositiveInteger(config?.questionLabelHelper?.maxLabelChars, defaults.questionLabelHelper.maxLabelChars)
+    }
+  };
+}
+
+function normalizePositiveInteger(value: number | undefined, defaultValue: number): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return defaultValue;
+  return Math.floor(value);
 }
 
 export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {}, options: RegisterSettingsOptions = {}): () => DsmmSettings {

@@ -82,6 +82,8 @@ Bring the deepwork workflow to practical parity for planning and review flows.
 
 ## v0.4 — Safety and guard layer
 
+Status: implemented in the v0.4 implementation. The guard layer is covered by settings defaults/overrides, guard decision tests, prompt asset tests, Docker smoke asset checks, and the Docker smoke script.
+
 ### Goal
 
 Port the highest-value ocmm safety policies into dsh tool events.
@@ -96,8 +98,8 @@ Port the highest-value ocmm safety policies into dsh tool events.
 
 ### Acceptance
 
-- Guard behavior is scoped to dsmm mode or dsmm-managed agents by default.
-- Every guard has a settings toggle and a documented failure message.
+- Implemented guard behavior is scoped to dsmm mode or dsmm-managed agents by default, with `always` and `off` settings coverage.
+- Every implemented guard has a settings toggle and documented `[dsmm safety]` failure message in `docs/safety-guards.md`.
 
 ## v0.5 — MCP and LSP integration
 

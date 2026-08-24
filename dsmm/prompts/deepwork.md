@@ -21,4 +21,6 @@ Begin non-trivial responses with one short line in the user's language: `我读�
 
 Use repository tools for repository-specific claims. Prefer narrow reads and searches before broad exploration. Use external documentation for library, API, CLI, or cloud-service details.
 
+- DSMM safety guards may enforce shell dialect, git-write approval, output-size, plan-format, question-label, and todo-discipline policy inside this mode; treat `[dsmm safety]` messages as binding policy feedback.
+
 </dsmm-deepwork-mode>

@@ -97,6 +97,17 @@ const dsmm = await import(pathToFileURL(join(root, "lib", "index.js")).href);
 const dsmmSkills = await import(pathToFileURL(join(root, "lib", "skills.js")).href);
 const roles = Object.fromEntries(dsmm.DSMM_ROLE_IDS.map((id) => [id, id !== disabledRole]));
 
+const guardController = new dsmm.DeepworkModeController({});
+const guardExec = {
+  name: "bash",
+  arguments: { command: "git commit -m smoke" },
+  agent: { session: { events: [{ type: dsmm.DEEPWORK_MODE_EVENT, data: { active: true } }], append() {} } }
+};
+const guardDecision = dsmm.decidePreToolExecution(guardExec, dsmm.DEFAULT_DSMM_SETTINGS, guardController);
+if (guardDecision?.kind !== "ask") throw new Error("git write guard did not request approval in Docker smoke");
+const truncated = dsmm.truncateTextMiddle("x".repeat(200), 100, "bash");
+if (!truncated.includes("[dsmm safety] truncated") || Buffer.byteLength(truncated, "utf8") > 100) throw new Error("tool output truncation smoke failed");
+
 function collectBundledSkillRegistrations(settings) {
   const registered = [];
   dsmmSkills.registerBundledSkills({ skills: { register(skill) { registered.push(skill); } } }, () => settings);

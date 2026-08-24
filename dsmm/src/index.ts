@@ -1,5 +1,6 @@
 import type { DshContext } from "./dsh-types.js";
 import { registerDeepworkCommand } from "./commands.js";
+import { registerSafetyGuards } from "./guards.js";
 import { registerDeepworkPrompt } from "./mode.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
@@ -17,8 +18,10 @@ export type { DeepworkSessionEventMap } from "./dsh-events.js";
 export type { DsmmRoleDefinition, DsmmRoleId } from "./roles.js";
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
+export { DSMM_GUARD_PREFIX, decidePostToolExecution, decidePreToolExecution, isSafetyScopeActive, registerSafetyGuards, truncateTextMiddle } from "./guards.js";
 export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, registerSettings } from "./settings.js";
-export type { DsmmFinalReviewPolicy, DsmmPluginConfig, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export type { DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 
 export function apply(ctx: DshContext, config: Config = {}): void {
   const getSettings = registerSettings(ctx, config, {
@@ -29,6 +32,7 @@ export function apply(ctx: DshContext, config: Config = {}): void {
     }
   });
   const controller = new DeepworkModeController(ctx);
+  registerSafetyGuards(ctx, controller, getSettings);
   registerDeepworkPrompt(ctx, controller, getSettings, config);
   registerDeepworkCommand(ctx, controller, getSettings);
   registerBundledSkills(ctx, getSettings);

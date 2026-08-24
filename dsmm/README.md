@@ -34,6 +34,10 @@ v0.3 completes the bundled deepwork workflow skill set while keeping deepwork sc
 
 Workflow policy is configurable under `settings.workflow`: `workflow.strictGates` controls whether deepwork gates are strict, `workflow.reviewCap` caps review/planning loops, and `workflow.finalReviewPolicy` selects final review routing (`simple-oracle-complex-reviewer`, `reviewer-only`, or `off`). These settings apply to dsmm deepwork behavior only; they do not make dsmm global outside the active mode.
 
+## v0.4 safety guards
+
+- v0.4 safety guards: dsh-native `tools/pre-execute` / `tools/post-execute` policies for shell dialect mistakes, git writes, large tool output, plan checklist formatting, question labels, and todo discipline. See [`docs/safety-guards.md`](docs/safety-guards.md).
+
 ## Install into a disposable profile
 
 Build the local package, point dsh state at a disposable home, install the local bundle into a throwaway profile, and inspect the resulting config:
@@ -82,7 +86,9 @@ The Docker smoke is optional because it requires Docker and network access to fe
 
 - `docs/implementation-plan-v0.1.md` is the dsmm-local copy of the approved v0.1 MVP implementation plan.
 - `docs/implementation-plan-v0.3.md` is the dsmm-local copy of the approved v0.3 workflow skills implementation plan.
+- `docs/implementation-plan-v0.4.md` is the dsmm-local copy of the approved v0.4 safety guards implementation plan.
 - `../docs/superpowers/plans/2026-08-21-dsmm-mvp.md` remains the workflow-reviewed source plan artifact in this repository.
 - `../docs/superpowers/plans/2026-08-22-dsmm-workflow-skills.md` remains the workflow-reviewed source plan artifact for v0.3.
+- `../docs/superpowers/plans/2026-08-23-dsmm-safety-guards.md` remains the workflow-reviewed source plan artifact for v0.4.
 
 Supporting design material remains in `docs/design.md`, `docs/roadmap.md`, `docs/skill-sync.md`, and `docs/research/`.

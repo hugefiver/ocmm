@@ -46,6 +46,9 @@ test("Docker smoke assets are documented and isolated", () => {
   assert.match(scriptText, /materializeRolePresets/);
   assert.match(scriptText, /discoverPresets/);
   assert.match(scriptText, /registerBundledSkills/);
+  assert.match(scriptText, /decidePreToolExecution/);
+  assert.match(scriptText, /truncateTextMiddle/);
+  assert.match(scriptText, /git write guard did not request approval/);
   assert.match(scriptText, /DSMM_SKILL_NAMES\.length !== 7/);
   assert.match(scriptText, /default skill registration expected 7 skills/);
   assert.match(scriptText, /disabled skill registration expected 6 skills/);

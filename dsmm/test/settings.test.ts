@@ -12,6 +12,21 @@ const DEFAULT_WORKFLOW_SETTINGS = {
   reviewCap: 5,
   finalReviewPolicy: "simple-oracle-complex-reviewer"
 };
+const DEFAULT_GUARD_SETTINGS = {
+  scope: "deepwork-or-dsmm-agent",
+  shellCommandSafety: true,
+  gitWriteGuard: "ask",
+  toolOutputTruncation: {
+    enabled: true,
+    maxInlineBytes: 12000
+  },
+  planFormatValidation: true,
+  questionLabelHelper: {
+    enabled: true,
+    maxLabelChars: 30
+  },
+  todoDisciplineHelper: true
+};
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
@@ -24,8 +39,13 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     presets: {
       materialize: false
     },
-    workflow: DEFAULT_WORKFLOW_SETTINGS
+    workflow: DEFAULT_WORKFLOW_SETTINGS,
+    guards: DEFAULT_GUARD_SETTINGS
   });
+});
+
+test("default settings enable scoped safety guards", () => {
+  assert.deepEqual(DEFAULT_DSMM_SETTINGS.guards, DEFAULT_GUARD_SETTINGS);
 });
 
 test("resolveConfig overlays plugin config on defaults", () => {
@@ -39,8 +59,40 @@ test("resolveConfig overlays plugin config on defaults", () => {
     presets: {
       materialize: false
     },
-    workflow: DEFAULT_WORKFLOW_SETTINGS
+    workflow: DEFAULT_WORKFLOW_SETTINGS,
+    guards: DEFAULT_GUARD_SETTINGS
   });
+});
+
+test("resolveConfig supports partial guard setting overlays", () => {
+  const settings = resolveConfig({
+    guards: {
+      scope: "always",
+      gitWriteGuard: "deny",
+      toolOutputTruncation: { maxInlineBytes: 80 },
+      questionLabelHelper: { enabled: false }
+    }
+  });
+
+  assert.deepEqual(settings.guards, {
+    ...DEFAULT_GUARD_SETTINGS,
+    scope: "always",
+    gitWriteGuard: "deny",
+    toolOutputTruncation: {
+      enabled: true,
+      maxInlineBytes: 80
+    },
+    questionLabelHelper: {
+      enabled: false,
+      maxLabelChars: 30
+    }
+  });
+});
+
+test("resolveConfig normalizes guard positive integer limits", () => {
+  assert.equal(resolveConfig({ guards: { toolOutputTruncation: { maxInlineBytes: 0 } } }).guards.toolOutputTruncation.maxInlineBytes, 12000);
+  assert.equal(resolveConfig({ guards: { questionLabelHelper: { maxLabelChars: Number.NaN } } }).guards.questionLabelHelper.maxLabelChars, 30);
+  assert.equal(resolveConfig({ guards: { toolOutputTruncation: { maxInlineBytes: 80.9 } } }).guards.toolOutputTruncation.maxInlineBytes, 80);
 });
 
 test("resolveConfig supports per-skill toggles", () => {
@@ -103,7 +155,8 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     presets: {
       materialize: false
     },
-    workflow: DEFAULT_WORKFLOW_SETTINGS
+    workflow: DEFAULT_WORKFLOW_SETTINGS,
+    guards: DEFAULT_GUARD_SETTINGS
   });
 });
 

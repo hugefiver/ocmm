@@ -18,6 +18,7 @@ test("prompt assets exist and contain activation boundaries", () => {
   assert.match(deepwork, /Intent routing/);
   assert.match(deepwork, /Workflow gates/);
   assert.match(deepwork, /Tool discipline/);
+  assert.match(deepwork, /\[dsmm safety\]/);
   assert.match(deepwork, /brainstorming/);
   assert.match(deepwork, /writing-plans/);
   assert.match(deepwork, /subagent-driven-development/);
@@ -95,6 +96,7 @@ test("exported prompt constants match asset intent", () => {
   assert.match(BASE_DEEPWORK_PROMPT, /requesting-code-review/);
   assert.match(BASE_DEEPWORK_PROMPT, /receiving-code-review/);
   assert.match(BASE_DEEPWORK_PROMPT, /remove-ai-slops/);
+  assert.match(BASE_DEEPWORK_PROMPT, /\[dsmm safety\]/);
   assert.match(BASE_DEEPWORK_PROMPT, /workflow\.strictGates/);
   assert.match(BASE_DEEPWORK_PROMPT, /workflow\.reviewCap/);
   assert.match(BASE_DEEPWORK_PROMPT, /workflow\.finalReviewPolicy/);

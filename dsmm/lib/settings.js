@@ -25,6 +25,21 @@ export const DEFAULT_DSMM_SETTINGS = {
         strictGates: true,
         reviewCap: 5,
         finalReviewPolicy: "simple-oracle-complex-reviewer"
+    },
+    guards: {
+        scope: "deepwork-or-dsmm-agent",
+        shellCommandSafety: true,
+        gitWriteGuard: "ask",
+        toolOutputTruncation: {
+            enabled: true,
+            maxInlineBytes: 12000
+        },
+        planFormatValidation: true,
+        questionLabelHelper: {
+            enabled: true,
+            maxLabelChars: 30
+        },
+        todoDisciplineHelper: true
     }
 };
 function createDefaultSkillSettings() {
@@ -66,6 +81,33 @@ const WORKFLOW_SCHEMA = Schema.object({
     reviewCap: Schema.number().default(DEFAULT_DSMM_SETTINGS.workflow.reviewCap),
     finalReviewPolicy: FINAL_REVIEW_POLICY_SCHEMA
 });
+const GUARD_SCOPE_SCHEMA = Schema.union([
+    Schema.const("deepwork-or-dsmm-agent"),
+    Schema.const("always"),
+    Schema.const("off")
+]).default(DEFAULT_DSMM_SETTINGS.guards.scope);
+const GIT_WRITE_POLICY_SCHEMA = Schema.union([
+    Schema.const("ask"),
+    Schema.const("deny"),
+    Schema.const("off")
+]).default(DEFAULT_DSMM_SETTINGS.guards.gitWriteGuard);
+const TOOL_OUTPUT_TRUNCATION_SCHEMA = Schema.object({
+    enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.toolOutputTruncation.enabled),
+    maxInlineBytes: Schema.number().default(DEFAULT_DSMM_SETTINGS.guards.toolOutputTruncation.maxInlineBytes)
+});
+const QUESTION_LABEL_HELPER_SCHEMA = Schema.object({
+    enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.questionLabelHelper.enabled),
+    maxLabelChars: Schema.number().default(DEFAULT_DSMM_SETTINGS.guards.questionLabelHelper.maxLabelChars)
+});
+const GUARDS_SCHEMA = Schema.object({
+    scope: GUARD_SCOPE_SCHEMA,
+    shellCommandSafety: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.shellCommandSafety),
+    gitWriteGuard: GIT_WRITE_POLICY_SCHEMA,
+    toolOutputTruncation: TOOL_OUTPUT_TRUNCATION_SCHEMA,
+    planFormatValidation: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.planFormatValidation),
+    questionLabelHelper: QUESTION_LABEL_HELPER_SCHEMA,
+    todoDisciplineHelper: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.todoDisciplineHelper)
+});
 const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
     Schema.const("off"),
     Schema.const("auto"),
@@ -80,7 +122,8 @@ export const DSMM_CONFIG_SCHEMA = Schema.object({
     skills: SKILLS_SCHEMA,
     roles: ROLES_SCHEMA,
     presets: PRESETS_SCHEMA,
-    workflow: WORKFLOW_SCHEMA
+    workflow: WORKFLOW_SCHEMA,
+    guards: GUARDS_SCHEMA
 });
 export const DSMM_SETTINGS_SCHEMA = Schema.object({
     modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
@@ -90,7 +133,8 @@ export const DSMM_SETTINGS_SCHEMA = Schema.object({
     skills: SKILLS_SCHEMA,
     roles: ROLES_SCHEMA,
     presets: PRESETS_SCHEMA,
-    workflow: WORKFLOW_SCHEMA
+    workflow: WORKFLOW_SCHEMA,
+    guards: GUARDS_SCHEMA
 });
 export function resolveConfig(config = {}) {
     return {
@@ -101,7 +145,8 @@ export function resolveConfig(config = {}) {
         skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
         roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
         presets: resolvePresetSettings(config.presets),
-        workflow: resolveWorkflowSettings(config.workflow)
+        workflow: resolveWorkflowSettings(config.workflow),
+        guards: resolveGuardSettings(config.guards)
     };
 }
 export function isRoleEnabled(settings, role) {
@@ -118,6 +163,28 @@ function resolveWorkflowSettings(config) {
         ...DEFAULT_DSMM_SETTINGS.workflow,
         ...config
     };
+}
+export function resolveGuardSettings(config) {
+    const defaults = DEFAULT_DSMM_SETTINGS.guards;
+    return {
+        ...defaults,
+        ...config,
+        toolOutputTruncation: {
+            ...defaults.toolOutputTruncation,
+            ...config?.toolOutputTruncation,
+            maxInlineBytes: normalizePositiveInteger(config?.toolOutputTruncation?.maxInlineBytes, defaults.toolOutputTruncation.maxInlineBytes)
+        },
+        questionLabelHelper: {
+            ...defaults.questionLabelHelper,
+            ...config?.questionLabelHelper,
+            maxLabelChars: normalizePositiveInteger(config?.questionLabelHelper?.maxLabelChars, defaults.questionLabelHelper.maxLabelChars)
+        }
+    };
+}
+function normalizePositiveInteger(value, defaultValue) {
+    if (value === undefined || !Number.isFinite(value) || value <= 0)
+        return defaultValue;
+    return Math.floor(value);
 }
 export function registerSettings(ctx, config = {}, options = {}) {
     const base = resolveConfig(config);
