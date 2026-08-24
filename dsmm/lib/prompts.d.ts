@@ -8,5 +8,5 @@ export declare function isDeepseekV4ProModel(model?: {
 export declare function buildDeepworkPrompt(settings: DsmmSettings, model?: {
     id?: string;
     name?: string;
-}, overrideSection?: string): string;
+}, overrideSection?: string, skillPrompt?: string): string;
 //# sourceMappingURL=prompts.d.ts.map

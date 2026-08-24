@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DshAgent, PreStepDecision, PreStepFrame } from "../lib/dsh-types.js";
+import type { DshAgent, DshSessionEvent, PreStepDecision, PreStepFrame } from "../lib/dsh-types.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "../lib/state.js";
 
 test("isDeepworkActive folds the last deepwork mode event", () => {
@@ -56,6 +56,53 @@ test("DeepworkModeController defers selection during an open turn and commits at
   await listener({ agent, signal: new AbortController().signal }, async () => ({ kind: "accept", messages: [] }));
 
   assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: true } }]);
+});
+
+test("DeepworkModeController retries a failed boundary append without changing the accepted decision", async () => {
+  let listener: ((frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>) | undefined;
+  const warnings: unknown[][] = [];
+  const controller = new DeepworkModeController({
+    on(event, fn) {
+      assert.equal(event, "agent/pre-step");
+      listener = fn;
+    },
+    logger: { warn(...args) { warnings.push(args); } }
+  });
+  const events: DshSessionEvent[] = [{ type: "turn/start" }];
+  const cause = new Error("append failed");
+  let failAppend = true;
+  let appendAttempts = 0;
+  let successfulAppends = 0;
+  const agent: DshAgent = {
+    session: {
+      events,
+      async append(type, payload) {
+        appendAttempts += 1;
+        if (failAppend) {
+          failAppend = false;
+          throw cause;
+        }
+        successfulAppends += 1;
+        events.push({ type, data: payload });
+      }
+    }
+  };
+  const accepted: PreStepDecision = { kind: "accept", messages: [] };
+
+  assert.equal(await controller.select(agent, true), "pending");
+  assert.ok(listener);
+  assert.equal(await listener({ agent, signal: new AbortController().signal }, async () => accepted), accepted);
+  assert.equal(appendAttempts, 1);
+  assert.equal(successfulAppends, 0);
+  assert.deepEqual(warnings, [["dsmm failed to append deepwork mode event; pending intent will retry", cause]]);
+  assert.equal(controller.active(agent, false), true);
+
+  assert.equal(await listener({ agent, signal: new AbortController().signal }, async () => accepted), accepted);
+  assert.equal(appendAttempts, 2);
+  assert.equal(successfulAppends, 1);
+  assert.equal(events.filter((event) => event.type === DEEPWORK_MODE_EVENT).length, 1);
+  assert.equal(await controller.select(agent, true), "unchanged");
+  assert.equal(controller.active(agent, false), true);
 });
 
 test("DeepworkModeController can turn off a default-active mode", async () => {

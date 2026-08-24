@@ -94,12 +94,21 @@ Report uncertainty clearly and avoid inventing details that are not visible.`
 export function isDsmmRoleId(value) {
     return typeof value === "string" && DSMM_ROLE_IDS.includes(value);
 }
-export function renderAgentCordis(role) {
+export function renderAgentCordis(role, skills = DSMM_SKILL_NAMES) {
+    const presetSkills = DSMM_SKILL_NAMES
+        .filter((name) => skills.includes(name))
+        .map((name) => `      - ${name}`)
+        .join("\n");
+    const skillConfig = presetSkills === "" ? "    skills: []" : `    skills:\n${presetSkills}`;
     return `- id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     text: |-
 ${indentBlock(role.persona, 6)}
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+${skillConfig}
 `;
 }
 export function renderPresetMetadata(role) {
@@ -115,4 +124,5 @@ function indentBlock(value, spaces) {
 function quoteYamlString(value) {
     return `'${value.replace(/'/gu, "''")}'`;
 }
+import { DSMM_SKILL_NAMES } from "./skills.js";
 //# sourceMappingURL=roles.js.map

@@ -1,24 +1,19 @@
 import Schema from "@deepseek-ai/schemastery";
 import type { DshContext, DshSettingsRegistry } from "./dsh-types.js";
+import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
+import type { DsmmLspSettings } from "./lsp.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
+import { DSMM_SKILL_NAMES } from "./skills.js";
+import type { DsmmSkillName } from "./skills.js";
+
+export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
+export type { DsmmSkillName, MvpSkillName } from "./skills.js";
 
 export type DeepseekCalibration = "off" | "auto" | "strict";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
-export const DSMM_SKILL_NAMES = [
-  "brainstorming",
-  "writing-plans",
-  "requesting-code-review",
-  "receiving-code-review",
-  "subagent-driven-development",
-  "dispatching-parallel-agents",
-  "remove-ai-slops"
-] as const;
-export const MVP_SKILL_NAMES = DSMM_SKILL_NAMES;
-export type DsmmSkillName = (typeof DSMM_SKILL_NAMES)[number];
-export type MvpSkillName = DsmmSkillName;
 
 export interface DsmmWorkflowSettings {
   strictGates: boolean;
@@ -63,6 +58,7 @@ export interface DsmmPluginConfig {
   presets?: Partial<DsmmPresetSettings>;
   workflow?: Partial<DsmmWorkflowSettings>;
   guards?: DsmmGuardConfig;
+  lsp?: Partial<DsmmLspSettings>;
 }
 
 export interface DsmmSettings {
@@ -75,12 +71,14 @@ export interface DsmmSettings {
   presets: DsmmPresetSettings;
   workflow: DsmmWorkflowSettings;
   guards: DsmmGuardSettings;
+  lsp: DsmmLspSettings;
 }
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
 
 export interface RegisterSettingsOptions {
   onChange?: (settings: DsmmSettings) => void;
+  install?: (readyCtx: DshContext, getSettings: () => DsmmSettings) => void;
 }
 
 export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
@@ -112,7 +110,8 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
       maxLabelChars: 30
     },
     todoDisciplineHelper: true
-  }
+  },
+  lsp: DEFAULT_DSMM_LSP_SETTINGS
 };
 
 function createDefaultSkillSettings(): Record<DsmmSkillName, boolean> {
@@ -199,7 +198,18 @@ const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
   Schema.const("strict")
 ]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration);
 
-export const DSMM_CONFIG_SCHEMA = Schema.object({
+const LSP_SCHEMA = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.enabled),
+  serverName: Schema.string().default(DEFAULT_DSMM_SETTINGS.lsp.serverName),
+  command: Schema.string().default(DEFAULT_DSMM_SETTINGS.lsp.command),
+  args: Schema.array(String).default([...DEFAULT_DSMM_SETTINGS.lsp.args]),
+  cwd: Schema.string().default(DEFAULT_DSMM_SETTINGS.lsp.cwd),
+  env: Schema.dict(String).default({ ...DEFAULT_DSMM_SETTINGS.lsp.env }),
+  toolCallTimeoutMs: Schema.number().default(DEFAULT_DSMM_SETTINGS.lsp.toolCallTimeoutMs),
+  failOnStartupError: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.failOnStartupError)
+});
+
+export const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig> = Schema.object({
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   section: Schema.string(),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
@@ -209,10 +219,11 @@ export const DSMM_CONFIG_SCHEMA = Schema.object({
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
-  guards: GUARDS_SCHEMA
+  guards: GUARDS_SCHEMA,
+  lsp: LSP_SCHEMA
 });
 
-export const DSMM_SETTINGS_SCHEMA = Schema.object({
+export const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings> = Schema.object({
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
@@ -221,7 +232,8 @@ export const DSMM_SETTINGS_SCHEMA = Schema.object({
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
-  guards: GUARDS_SCHEMA
+  guards: GUARDS_SCHEMA,
+  lsp: LSP_SCHEMA
 });
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
@@ -234,7 +246,8 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     presets: resolvePresetSettings(config.presets),
     workflow: resolveWorkflowSettings(config.workflow),
-    guards: resolveGuardSettings(config.guards)
+    guards: resolveGuardSettings(config.guards),
+    lsp: resolveLspSettings(config.lsp)
   };
 }
 
@@ -287,25 +300,43 @@ export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {},
   const base = resolveConfig(config);
   let getSettings = (): DsmmSettings => base;
   let attached = false;
+  const installedSettingsByReadyContext = new WeakMap<DshContext, DshSettingsRegistry>();
 
-  const attach = (settings: DshSettingsRegistry | undefined): void => {
-    if (settings === undefined) return;
+  const ready = (readyCtx: DshContext, settings: DshSettingsRegistry | undefined): void => {
+    if (settings === undefined || installedSettingsByReadyContext.get(readyCtx) === settings) return;
     const scope = settings.register<DsmmSettings>(DSMM_SETTINGS_NAMESPACE, DSMM_SETTINGS_SCHEMA, { base, applies: "restart" });
+    const previousGetSettings = getSettings;
+    const previousAttached = attached;
     getSettings = () => scope.get();
-    attached = true;
-    options.onChange?.(scope.get());
+    try {
+      options.onChange?.(getSettings());
+      options.install?.(readyCtx, () => getSettings());
+      installedSettingsByReadyContext.set(readyCtx, settings);
+      readyCtx.effect?.(() => () => {
+        if (installedSettingsByReadyContext.get(readyCtx) === settings) installedSettingsByReadyContext.delete(readyCtx);
+      });
+      attached = true;
+    } catch (error) {
+      if (installedSettingsByReadyContext.get(readyCtx) === settings) installedSettingsByReadyContext.delete(readyCtx);
+      getSettings = previousGetSettings;
+      attached = previousAttached;
+      throw error;
+    }
   };
 
   if (ctx.inject !== undefined) {
-    ctx.inject(["settings"], (services) => attach(services.settings));
+    ctx.inject(["settings", "systemPrompt"], (readyCtx) => ready(readyCtx, readyCtx.settings));
     return () => getSettings();
   }
 
   if (Object.prototype.hasOwnProperty.call(ctx, "settings")) {
-    attach(Object.getOwnPropertyDescriptor(ctx, "settings")?.value as DshSettingsRegistry | undefined);
+    ready(ctx, Object.getOwnPropertyDescriptor(ctx, "settings")?.value as DshSettingsRegistry | undefined);
   }
 
-  if (!attached) options.onChange?.(base);
+  if (!attached) {
+    options.onChange?.(getSettings());
+    options.install?.(ctx, () => getSettings());
+  }
 
   return () => getSettings();
 }

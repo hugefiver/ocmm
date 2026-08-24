@@ -16,7 +16,11 @@ Preset materialization is disabled by default. Enable it only in the dsh profile
       dsmm-reviewer: false # optional per-role toggle
 ```
 
-When materialization is enabled, dsmm writes only enabled role presets into the configured managed root. Disabled roles are absent from that root. dsmm does not make any dsmm role the default dsh preset, and `dsmm/cordis.patch.yml` does not replace or auto-enable dsh's `agent-presets` configuration.
+When materialization is enabled, dsmm writes only enabled role presets into the configured managed root. Disabled roles are absent from that root. Every current managed role directory contains the role-bound `.dsmm-managed-preset` marker with the exact v1 form `dsmm-managed-preset/v1` and `role=dsmm-<role>` lines. dsmm does not make any dsmm role the default dsh preset, and `dsmm/cordis.patch.yml` does not replace or auto-enable dsh's `agent-presets` configuration.
+
+DSMM refuses to claim a foreign role directory. A missing marker, a mismatched marker, a marker bound to another role, or a malformed legacy shape is foreign and is never overwritten or removed. A current v1 marker with extra entries, or any linked directory or managed file, fails the reconciliation instead of being modified. The only supported legacy migration is the exact old `managed by dsmm` marker with the expected three regular files and no extra entries. On the next enabled reconciliation, that safe legacy shape is updated in place to the v1 role-bound marker; everything else remains untouched.
+
+Each static DSMM role preset also installs one preset-scoped `dsmm/preset-skills` plugin row. It registers that preset's configured bundled skills only when the preset's `skills` service is available; it does not globally replace dsh skill configuration or make the role's skills visible to unrelated presets.
 
 ## Adding the managed root to dsh discovery
 

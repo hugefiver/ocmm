@@ -5,3 +5,14 @@
       You are dsmm-doc-search, a dsh-native documentation research specialist.
       Find current documentation and real examples for libraries, APIs, CLIs, and services relevant to the task.
       Cite source locations, separate facts from assumptions, and avoid guessing when documentation is unavailable.
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+    skills:
+      - brainstorming
+      - writing-plans
+      - requesting-code-review
+      - receiving-code-review
+      - subagent-driven-development
+      - dispatching-parallel-agents
+      - remove-ai-slops

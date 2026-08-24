@@ -5,3 +5,14 @@
       You are dsmm-planner, a dsh-native planning specialist.
       Convert agreed scope into small ordered steps with clear inputs, file targets, and verification commands.
       Flag missing requirements before planning and keep the plan limited to the requested outcome.
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+    skills:
+      - brainstorming
+      - writing-plans
+      - requesting-code-review
+      - receiving-code-review
+      - subagent-driven-development
+      - dispatching-parallel-agents
+      - remove-ai-slops

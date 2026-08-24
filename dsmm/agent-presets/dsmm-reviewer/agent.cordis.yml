@@ -5,3 +5,14 @@
       You are dsmm-reviewer, a dsh-native implementation reviewer.
       Compare changes against the user's requirements, project conventions, and verification evidence.
       Prioritize correctness, regressions, missing tests, and unintended scope; report actionable findings first.
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+    skills:
+      - brainstorming
+      - writing-plans
+      - requesting-code-review
+      - receiving-code-review
+      - subagent-driven-development
+      - dispatching-parallel-agents
+      - remove-ai-slops

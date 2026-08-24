@@ -1,8 +1,16 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DSMM_SKILL_NAMES } from "./settings.js";
-export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
+export const DSMM_SKILL_NAMES = [
+    "brainstorming",
+    "writing-plans",
+    "requesting-code-review",
+    "receiving-code-review",
+    "subagent-driven-development",
+    "dispatching-parallel-agents",
+    "remove-ai-slops"
+];
+export const MVP_SKILL_NAMES = DSMM_SKILL_NAMES;
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export function parseSkillMarkdown(markdown) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/u.exec(markdown);
@@ -15,7 +23,10 @@ export function parseSkillMarkdown(markdown) {
         throw new Error("skill frontmatter needs name and description");
     return { name, description, content: match[2].replace(/^\r?\n/u, "") };
 }
-function loadSkill(name) {
+export function enabledSkillNames(settings) {
+    return DSMM_SKILL_NAMES.filter((name) => settings.skills[name]);
+}
+export function loadBundledSkill(name) {
     const directory = join(packageRoot, "skills", name);
     const parsed = parseSkillMarkdown(readFileSync(join(directory, "SKILL.md"), "utf8"));
     return {
@@ -28,21 +39,21 @@ function loadSkill(name) {
         invocation: { modelInvocable: true, userInvocable: true }
     };
 }
-export function registerBundledSkills(ctx, getSettings) {
-    const register = (skills) => {
-        if (skills === undefined)
-            return;
-        const settings = getSettings();
-        for (const name of DSMM_SKILL_NAMES) {
-            if (settings.skills[name] && existsSync(join(packageRoot, "skills", name, "SKILL.md")))
-                skills.register(loadSkill(name));
-        }
-    };
-    if (ctx.inject !== undefined) {
-        ctx.inject(["skills"], (services) => register(services.skills));
+export function registerBundledSkills(skills, names) {
+    if (skills === undefined)
+        return;
+    for (const name of DSMM_SKILL_NAMES) {
+        if (names.includes(name))
+            skills.register(loadBundledSkill(name));
     }
-    else if (Object.prototype.hasOwnProperty.call(ctx, "skills")) {
-        register(Object.getOwnPropertyDescriptor(ctx, "skills")?.value);
-    }
+}
+export function renderBundledSkillPrompt(names) {
+    return DSMM_SKILL_NAMES
+        .filter((name) => names.includes(name))
+        .map((name) => {
+        const body = loadBundledSkill(name).content.replace(/\r?\n$/u, "");
+        return `<dsmm-skill name="${name}">\n${body}\n</dsmm-skill>`;
+    })
+        .join("\n\n");
 }
 //# sourceMappingURL=skills.js.map

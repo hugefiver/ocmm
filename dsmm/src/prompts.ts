@@ -48,7 +48,8 @@ export function isDeepseekV4ProModel(model?: { id?: string; name?: string }): bo
 export function buildDeepworkPrompt(
   settings: DsmmSettings,
   model?: { id?: string; name?: string },
-  overrideSection?: string
+  overrideSection?: string,
+  skillPrompt = ""
 ): string {
   const base = (overrideSection?.trim() || BASE_DEEPWORK_PROMPT).replaceAll("{{modeName}}", settings.modeName);
   const workflowPolicy = `<dsmm-workflow-policy>
@@ -58,5 +59,6 @@ finalReviewPolicy: ${settings.workflow.finalReviewPolicy}
 </dsmm-workflow-policy>`;
   const shouldApplyOverlay = settings.deepseekV4ProCalibration !== "off" && isDeepseekV4ProModel(model);
   const calibrated = shouldApplyOverlay ? `${base}\n\n${DEEPSEEK_V4_PRO_OVERLAY}` : base;
-  return `${calibrated}\n\n${workflowPolicy}`;
+  const prompt = `${calibrated}\n\n${workflowPolicy}`;
+  return skillPrompt === "" ? prompt : `${prompt}\n\n${skillPrompt}`;
 }

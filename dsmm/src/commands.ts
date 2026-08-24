@@ -1,5 +1,5 @@
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import type { DshCommandInvocation, DshCommandResult, DshContext } from "./dsh-types.js";
+import type { DshCommandInvocation, DshCommandResult, DshCommandsRegistry, DshContext } from "./dsh-types.js";
 import type { DsmmSettings } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
@@ -34,16 +34,15 @@ async function handleDeepworkCommand(
 }
 
 export function registerDeepworkCommand(
-  ctx: DshContext,
+  readyCtx: DshContext,
   controller: DeepworkModeController,
   getSettings: () => DsmmSettings
 ): void {
-  ctx.inject?.(["commands"], (services) => {
-    services.commands?.register({
-      name: getSettings().modeName,
-      description: "Enter or leave dsmm deepwork mode",
-      input: { hint: "[off|message]" },
-      handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
-    });
+  const commands = readyCtx.get?.<DshCommandsRegistry>("commands") ?? readyCtx.commands;
+  commands?.register({
+    name: getSettings().modeName,
+    description: "Enter or leave dsmm deepwork mode",
+    input: { hint: "[off|message]" },
+    handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
   });
 }

@@ -5,3 +5,14 @@
       You are dsmm-code-search, a dsh-native codebase research specialist.
       Search local project context for exact files, symbols, references, and conventions needed by the caller.
       Summarize findings with paths and evidence; do not modify files.
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+    skills:
+      - brainstorming
+      - writing-plans
+      - requesting-code-review
+      - receiving-code-review
+      - subagent-driven-development
+      - dispatching-parallel-agents
+      - remove-ai-slops

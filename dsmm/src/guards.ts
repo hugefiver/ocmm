@@ -1,41 +1,15 @@
-import type { DshContentBlock, DshContext, DshPostToolDecision, DshPreToolDecision, DshToolExecution, DshToolExecutionResult } from "./dsh-types.js";
+import type { DshContentBlock, DshContext, DshPostToolDecision, DshPreToolDecision, DshSession, DshToolExecution, DshToolExecutionResult } from "./dsh-types.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmSettings } from "./settings.js";
+import { validatePlanMutation } from "./plan-validation.js";
+import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
+import type { ShellDialect, ShellDialectViolation } from "./shell-command.js";
 import type { DeepworkModeController } from "./state.js";
 
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 
 const STRUCTURED_TODO_PATTERN = /^\[[^\]]+\]\s+\[[^\]]+\]\s+to\s+.+\s+-\s+expect\s+.+/u;
-const GIT_WRITE_COMMANDS = new Set([
-  "add",
-  "am",
-  "apply",
-  "branch",
-  "checkout",
-  "cherry-pick",
-  "clean",
-  "clone",
-  "commit",
-  "fetch",
-  "init",
-  "merge",
-  "mv",
-  "pull",
-  "push",
-  "rebase",
-  "remote",
-  "reset",
-  "restore",
-  "revert",
-  "rm",
-  "stash",
-  "submodule",
-  "switch",
-  "tag",
-  "worktree"
-]);
-const GIT_GLOBAL_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--config-env", "--exec-path", "--git-dir", "--namespace", "--super-prefix", "--work-tree"]);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -60,107 +34,21 @@ function commandText(exec: DshToolExecution): string | undefined {
   return stringField(exec.arguments, ["command", "cmd", "script"]);
 }
 
-function splitShellSegments(command: string): string[] {
-  const segments: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-
-  for (const char of command) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-
-    if (char === "\\" && quote !== "'") {
-      escaped = true;
-      current += char;
-      continue;
-    }
-
-    if ((char === "'" || char === '"') && quote === undefined) {
-      quote = char;
-      current += char;
-      continue;
-    }
-
-    if (char === quote) {
-      quote = undefined;
-      current += char;
-      continue;
-    }
-
-    if (quote === undefined && (char === ";" || char === "&" || char === "|" || char === "\r" || char === "\n")) {
-      if (current.trim() !== "") segments.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.trim() !== "") segments.push(current.trim());
-  return segments;
-}
-
-function shellWords(segment: string): string[] {
-  const words: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-
-  for (const char of segment) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-
-    if (char === "\\" && quote !== "'") {
-      escaped = true;
-      continue;
-    }
-
-    if ((char === "'" || char === '"') && quote === undefined) {
-      quote = char;
-      continue;
-    }
-
-    if (char === quote) {
-      quote = undefined;
-      continue;
-    }
-
-    if (quote === undefined && /\s/u.test(char)) {
-      if (current !== "") {
-        words.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current !== "") words.push(current);
-  return words;
-}
-
 function isDsmmRole(value: unknown): value is DsmmRoleId {
   return typeof value === "string" && (DSMM_ROLE_IDS as readonly string[]).includes(value);
 }
 
-function selectedAgentPreset(events: readonly { type: string; data?: unknown }[]): string | undefined {
-  let selected: string | undefined;
-
-  for (const event of events) {
-    if (event.type !== "agent-preset/selected") continue;
+function selectedAgentPreset(session: DshSession | undefined): string | undefined {
+  const events = session?.events ?? [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = asRecord(events[index]);
+    if (event?.type !== "agent-preset/selected") continue;
     const data = asRecord(event.data);
-    if (typeof data?.agentPreset === "string") selected = data.agentPreset;
+    if (typeof data?.agentPreset === "string") return data.agentPreset;
   }
 
-  return selected;
+  const header = asRecord(session?.header);
+  return typeof header?.agentPreset === "string" ? header.agentPreset : undefined;
 }
 
 function allText(content: readonly DshContentBlock[]): string | undefined {
@@ -219,98 +107,57 @@ export function isSafetyScopeActive(exec: DshToolExecution, settings: DsmmSettin
   if (settings.guards.scope === "off") return false;
   if (settings.guards.scope === "always") return true;
   if (controller.active(exec.agent, settings.defaultActive)) return true;
-  return isDsmmRole(selectedAgentPreset(exec.agent?.session.events ?? []));
+  return isDsmmRole(selectedAgentPreset(exec.agent?.session));
+}
+
+function shellDialect(exec: DshToolExecution): ShellDialect | undefined {
+  const name = toolName(exec);
+  if (name === "bash" || name === "sh" || name === "zsh") return "posix";
+  if (name === "pwsh" || name === "powershell") return "powershell";
+  return undefined;
 }
 
 function shellSafetyDecision(exec: DshToolExecution): DshPreToolDecision | undefined {
-  const name = toolName(exec);
+  const dialect = shellDialect(exec);
   const command = commandText(exec);
-  if (command === undefined) return undefined;
+  if (dialect === undefined || command === undefined) return undefined;
 
-  if (name === "pwsh" || name === "powershell") {
-    if (/(^|[;&|\r\n]\s*)export\s+[A-Za-z_][A-Za-z0-9_]*=/u.test(command)) {
-      return {
-        kind: "deny",
-        reason: `${DSMM_GUARD_PREFIX} PowerShell command appears to use POSIX shell syntax (\`export\`). Use \`$env:NAME = "value"; command\` instead.`
-      };
-    }
-
-    if (/\/dev\/null/u.test(command)) {
-      return {
-        kind: "deny",
-        reason: `${DSMM_GUARD_PREFIX} PowerShell command uses POSIX null redirection (/dev/null). Use \`*> $null\` or omit redirection.`
-      };
-    }
-
-    if (/(^|[;&|\r\n]\s*)source\s+\S+/u.test(command)) {
-      return {
-        kind: "deny",
-        reason: `${DSMM_GUARD_PREFIX} PowerShell command uses POSIX \`source\`. Use dot-sourcing with a .ps1 file instead.`
-      };
-    }
-  }
-
-  if (name === "bash" && /\$env:/u.test(command)) {
-    return {
-      kind: "deny",
-      reason: `${DSMM_GUARD_PREFIX} bash command appears to use PowerShell syntax (\`$env:\`). Use POSIX environment syntax for bash.`
-    };
-  }
-
-  return undefined;
+  const violation = classifyShellDialectViolation(command, dialect);
+  if (violation === undefined) return undefined;
+  return shellDialectViolationDecision(violation);
 }
 
-function gitWriteOperation(command: string): string | undefined {
-  for (const segment of splitShellSegments(command)) {
-    const words = shellWords(segment);
-    let index = 0;
-    while (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[index] ?? "")) index += 1;
-
-    if ((words[index] ?? "").toLowerCase() !== "git") continue;
-    index += 1;
-
-    while (index < words.length) {
-      const option = words[index];
-      if (option === "--") {
-        index += 1;
-        break;
-      }
-      if (GIT_GLOBAL_OPTIONS_WITH_VALUE.has(option)) {
-        index += 2;
-        continue;
-      }
-      if ([...GIT_GLOBAL_OPTIONS_WITH_VALUE].some((name) => option.startsWith(`${name}=`))) {
-        index += 1;
-        continue;
-      }
-      if (/^-C.+/u.test(option) || /^-c.+/u.test(option)) {
-        index += 1;
-        continue;
-      }
-      if (option.startsWith("-")) {
-        index += 1;
-        continue;
-      }
-      break;
-    }
-
-    const subcommand = words[index]?.toLowerCase();
-    if (subcommand === "reset" && words.slice(index + 1).some((word) => word.toLowerCase() === "--hard")) return "reset --hard";
-    if (subcommand === "stash") {
-      const action = words[index + 1]?.toLowerCase();
-      if (action === "pop" || action === "drop" || action === "clear") return `stash ${action}`;
-    }
-    if (subcommand !== undefined && GIT_WRITE_COMMANDS.has(subcommand)) return subcommand;
+function shellDialectViolationDecision(violation: ShellDialectViolation): DshPreToolDecision {
+  if (violation === "powershell-export") {
+    return {
+      kind: "deny",
+      reason: `${DSMM_GUARD_PREFIX} PowerShell command appears to use POSIX shell syntax (\`export\`). Use \`$env:NAME = "value"; command\` instead.`
+    };
   }
-
-  return undefined;
+  if (violation === "powershell-source") {
+    return {
+      kind: "deny",
+      reason: `${DSMM_GUARD_PREFIX} PowerShell command uses POSIX \`source\`. Use dot-sourcing with a .ps1 file instead.`
+    };
+  }
+  if (violation === "powershell-dev-null") {
+    return {
+      kind: "deny",
+      reason: `${DSMM_GUARD_PREFIX} PowerShell command uses POSIX null redirection (/dev/null). Use \`*> $null\` or omit redirection.`
+    };
+  }
+  return {
+    kind: "deny",
+    reason: `${DSMM_GUARD_PREFIX} bash command appears to use PowerShell syntax (\`$env:\`). Use POSIX environment syntax for bash.`
+  };
 }
 
 function gitWriteDecision(exec: DshToolExecution, settings: DsmmSettings): DshPreToolDecision | undefined {
   if (settings.guards.gitWriteGuard === "off") return undefined;
 
   const command = commandText(exec);
-  const operation = command === undefined ? undefined : gitWriteOperation(command);
+  const dialect = shellDialect(exec);
+  const operation = command === undefined || dialect === undefined ? undefined : classifyKnownGitWrite(command, dialect);
   if (operation === undefined) return undefined;
 
   if (settings.guards.gitWriteGuard === "deny") {
@@ -323,37 +170,6 @@ function gitWriteDecision(exec: DshToolExecution, settings: DsmmSettings): DshPr
   return {
     kind: "ask",
     reason: `${DSMM_GUARD_PREFIX} git write command requires explicit user approval before running: git ${operation}`
-  };
-}
-
-function writePath(exec: DshToolExecution): string | undefined {
-  return stringField(exec.arguments, ["file_path", "path"]);
-}
-
-function writeContent(exec: DshToolExecution): string | undefined {
-  return stringField(exec.arguments, ["content", "new_string", "new_str", "file_text"]);
-}
-
-function isPlanPath(path: string): boolean {
-  const normalized = path.replace(/\\/gu, "/");
-  return /(?:^|\/)docs\/superpowers\/plans\/[^/]+\.md$/u.test(normalized) || /(?:^|\/)\.omo\/plans\/[^/]+\.md$/u.test(normalized);
-}
-
-function malformedChecklistLine(content: string): string | undefined {
-  return content.split(/\r?\n/u).find((line) => /^\s*[-*]\s+\[(?! |x|X\])/u.test(line) || /^\s*[-*]\s+\[\]/u.test(line));
-}
-
-function planFormatDecision(exec: DshToolExecution): DshPreToolDecision | undefined {
-  const path = writePath(exec);
-  const content = writeContent(exec);
-  if (path === undefined || content === undefined || !isPlanPath(path)) return undefined;
-
-  const malformed = malformedChecklistLine(content);
-  if (malformed === undefined) return undefined;
-
-  return {
-    kind: "deny",
-    reason: `${DSMM_GUARD_PREFIX} plan file contains a malformed checklist entry: ${malformed.trim()}`
   };
 }
 
@@ -421,7 +237,7 @@ export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSet
   if (git !== undefined) return git;
 
   if (settings.guards.planFormatValidation) {
-    const plan = planFormatDecision(exec);
+    const plan = validatePlanMutation(exec);
     if (plan !== undefined) return plan;
   }
 
@@ -460,7 +276,11 @@ export function decidePostToolExecution(
 export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void {
   ctx.on?.("tools/pre-execute", async (exec: DshToolExecution, next: () => Promise<DshPreToolDecision>) => {
     const decision = decidePreToolExecution(exec, getSettings(), controller);
-    return decision ?? next();
+    if (decision === undefined) return next();
+    if (decision.kind === "deny") return decision;
+
+    const downstream = await next();
+    return downstream.kind === "allow" ? decision : downstream;
   }, { prepend: true });
 
   ctx.on?.("tools/post-execute", async (exec: DshToolExecution, result: DshToolExecutionResult, next: () => Promise<DshPostToolDecision>) => {

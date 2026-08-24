@@ -10,6 +10,7 @@ export interface DsmmRoleDefinition {
 }
 export declare const DSMM_ROLES: readonly DsmmRoleDefinition[];
 export declare function isDsmmRoleId(value: unknown): value is DsmmRoleId;
-export declare function renderAgentCordis(role: DsmmRoleDefinition): string;
+export declare function renderAgentCordis(role: DsmmRoleDefinition, skills?: readonly DsmmSkillName[]): string;
 export declare function renderPresetMetadata(role: DsmmRoleDefinition): string;
+import type { DsmmSkillName } from "./skills.js";
 //# sourceMappingURL=roles.d.ts.map

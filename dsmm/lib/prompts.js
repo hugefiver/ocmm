@@ -40,7 +40,7 @@ export function isDeepseekV4ProModel(model) {
     const value = `${model?.id ?? ""} ${model?.name ?? ""}`.toLowerCase();
     return /deepseek[-_ ]?v4[-_ ]?pro/.test(value);
 }
-export function buildDeepworkPrompt(settings, model, overrideSection) {
+export function buildDeepworkPrompt(settings, model, overrideSection, skillPrompt = "") {
     const base = (overrideSection?.trim() || BASE_DEEPWORK_PROMPT).replaceAll("{{modeName}}", settings.modeName);
     const workflowPolicy = `<dsmm-workflow-policy>
 strictGates: ${String(settings.workflow.strictGates)}
@@ -49,6 +49,7 @@ finalReviewPolicy: ${settings.workflow.finalReviewPolicy}
 </dsmm-workflow-policy>`;
     const shouldApplyOverlay = settings.deepseekV4ProCalibration !== "off" && isDeepseekV4ProModel(model);
     const calibrated = shouldApplyOverlay ? `${base}\n\n${DEEPSEEK_V4_PRO_OVERLAY}` : base;
-    return `${calibrated}\n\n${workflowPolicy}`;
+    const prompt = `${calibrated}\n\n${workflowPolicy}`;
+    return skillPrompt === "" ? prompt : `${prompt}\n\n${skillPrompt}`;
 }
 //# sourceMappingURL=prompts.js.map

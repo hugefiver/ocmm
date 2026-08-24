@@ -108,12 +108,22 @@ export function isDsmmRoleId(value: unknown): value is DsmmRoleId {
   return typeof value === "string" && (DSMM_ROLE_IDS as readonly string[]).includes(value);
 }
 
-export function renderAgentCordis(role: DsmmRoleDefinition): string {
+export function renderAgentCordis(role: DsmmRoleDefinition, skills: readonly DsmmSkillName[] = DSMM_SKILL_NAMES): string {
+  const presetSkills = DSMM_SKILL_NAMES
+    .filter((name) => skills.includes(name))
+    .map((name) => `      - ${name}`)
+    .join("\n");
+  const skillConfig = presetSkills === "" ? "    skills: []" : `    skills:\n${presetSkills}`;
+
   return `- id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     text: |-
 ${indentBlock(role.persona, 6)}
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+${skillConfig}
 `;
 }
 
@@ -132,3 +142,5 @@ function indentBlock(value: string, spaces: number): string {
 function quoteYamlString(value: string): string {
   return `'${value.replace(/'/gu, "''")}'`;
 }
+import { DSMM_SKILL_NAMES } from "./skills.js";
+import type { DsmmSkillName } from "./skills.js";

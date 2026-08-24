@@ -1,8 +1,42 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { DSMM_ROLES, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 import { isRoleEnabled } from "./settings.js";
+import { enabledSkillNames } from "./skills.js";
 export const DSMM_MANAGED_PRESET_MARKER = ".dsmm-managed-preset";
+export const DSMM_MANAGED_PRESET_MARKER_VERSION = 1;
+const LEGACY_MANAGED_PRESET_MARKER = "managed by dsmm\n";
+const MANAGED_PRESET_FILES = ["agent.cordis.yml", "preset.yml", DSMM_MANAGED_PRESET_MARKER];
+const DEFAULT_PRESET_FILESYSTEM = {
+    lstatSync(path) {
+        return lstatSync(path);
+    },
+    mkdirSync(path, options) {
+        mkdirSync(path, options);
+    },
+    readFileSync(path, encoding) {
+        return readFileSync(path, encoding);
+    },
+    readdirSync(path) {
+        return readdirSync(path);
+    },
+    realpathSync(path) {
+        return realpathSync(path);
+    },
+    renameSync(from, to) {
+        renameSync(from, to);
+    },
+    rmSync(path, options) {
+        rmSync(path, options);
+    },
+    writeFileSync(path, data, encoding) {
+        writeFileSync(path, data, encoding);
+    }
+};
+export function renderManagedPresetMarker(role) {
+    return `dsmm-managed-preset/v${DSMM_MANAGED_PRESET_MARKER_VERSION}\nrole=${role}\n`;
+}
 export function resolveManagedPresetRoot(settings, env = process.env) {
     if (settings.presets.root !== undefined)
         return settings.presets.root;
@@ -11,54 +45,211 @@ export function resolveManagedPresetRoot(settings, env = process.env) {
 }
 export function materializeRolePresets(options) {
     reconcileRolePresets({
-        root: options.root,
+        ...options,
         settings: {
             ...options.settings,
             presets: { ...options.settings.presets, materialize: true }
         }
     });
 }
-export function reconcileRolePresets({ root, settings }) {
+export function reconcileRolePresets({ root, settings, filesystem: filesystemOverride }) {
     if (root.length === 0) {
         throw new Error("dsmm preset materialization root must not be empty");
     }
-    if (!settings.presets.materialize) {
-        removeAllManagedPresetDirectories(root);
+    const filesystem = { ...DEFAULT_PRESET_FILESYSTEM, ...filesystemOverride };
+    const canonicalRoot = prepareManagedRoot(root, settings.presets.materialize, filesystem);
+    if (canonicalRoot === undefined)
         return;
-    }
-    mkdirSync(root, { recursive: true });
-    for (const role of DSMM_ROLES) {
-        const presetDirectory = join(root, role.id);
-        if (isRoleEnabled(settings, role.id)) {
-            mkdirSync(presetDirectory, { recursive: true });
-            writeFileSync(join(presetDirectory, "agent.cordis.yml"), renderAgentCordis(role), "utf8");
-            writeFileSync(join(presetDirectory, "preset.yml"), renderPresetMetadata(role), "utf8");
-            writeFileSync(join(presetDirectory, DSMM_MANAGED_PRESET_MARKER), "managed by dsmm\n", "utf8");
+    const knownDirectories = DSMM_ROLES.map((role) => {
+        const directory = join(root, role.id);
+        return {
+            role,
+            directory,
+            ownership: inspectKnownRoleDirectory(canonicalRoot, directory, role.id, filesystem)
+        };
+    });
+    for (const knownDirectory of knownDirectories) {
+        if (settings.presets.materialize && isRoleEnabled(settings, knownDirectory.role.id) && knownDirectory.ownership === "foreign") {
+            throw new Error(`dsmm preset directory is foreign and will not be claimed: ${knownDirectory.directory}`);
         }
-        else {
-            removeDirectoryIfManaged(presetDirectory);
+    }
+    for (const knownDirectory of knownDirectories) {
+        if (settings.presets.materialize && isRoleEnabled(settings, knownDirectory.role.id)) {
+            if (knownDirectory.ownership === "absent") {
+                publishNewRoleDirectory(canonicalRoot, root, knownDirectory.role.id, settings, filesystem);
+            }
+            else {
+                updateOwnedRoleDirectory(canonicalRoot, knownDirectory, settings, filesystem);
+            }
+            continue;
+        }
+        if (knownDirectory.ownership === "current" || knownDirectory.ownership === "legacy") {
+            removeOwnedRoleDirectory(canonicalRoot, knownDirectory, filesystem);
         }
     }
 }
-function removeAllManagedPresetDirectories(root) {
-    if (!existsSync(root))
-        return;
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-        if (entry.isDirectory())
-            removeDirectoryIfManaged(join(root, entry.name));
+function prepareManagedRoot(root, materialize, filesystem) {
+    const rootStatus = lstatIfExists(root, filesystem);
+    if (rootStatus === undefined) {
+        if (!materialize)
+            return undefined;
+        filesystem.mkdirSync(root, { recursive: true });
+    }
+    else {
+        assertDirectoryNotLinked(root, rootStatus, "preset root");
+    }
+    const verifiedRootStatus = lstatIfExists(root, filesystem);
+    if (verifiedRootStatus === undefined) {
+        throw new Error(`dsmm preset root disappeared after creation: ${root}`);
+    }
+    assertDirectoryNotLinked(root, verifiedRootStatus, "preset root");
+    return filesystem.realpathSync(root);
+}
+function inspectKnownRoleDirectory(canonicalRoot, directory, role, filesystem) {
+    const directoryStatus = lstatIfExists(directory, filesystem);
+    if (directoryStatus === undefined)
+        return "absent";
+    assertDirectoryNotLinked(directory, directoryStatus, `preset directory for ${role}`);
+    assertCanonicalChild(canonicalRoot, filesystem.realpathSync(directory), `preset directory for ${role}`);
+    const entryNames = filesystem.readdirSync(directory).sort();
+    if (!entryNames.includes(DSMM_MANAGED_PRESET_MARKER))
+        return "foreign";
+    const markerPath = join(directory, DSMM_MANAGED_PRESET_MARKER);
+    assertRegularUnlinkedFile(markerPath, `marker for ${role}`, filesystem);
+    const marker = filesystem.readFileSync(markerPath, "utf8");
+    const expectedMarker = renderManagedPresetMarker(role);
+    if (marker === expectedMarker) {
+        if (!hasExactManagedShape(entryNames)) {
+            throw new Error(`dsmm current managed preset directory has unexpected entries and will not be claimed: ${directory}`);
+        }
+        assertManagedFilesAreRegular(directory, role, filesystem);
+        return "current";
+    }
+    if (marker !== LEGACY_MANAGED_PRESET_MARKER)
+        return "foreign";
+    if (!hasExactManagedShape(entryNames))
+        return "foreign";
+    assertManagedFilesAreRegular(directory, role, filesystem);
+    return "legacy";
+}
+function hasExactManagedShape(entryNames) {
+    return entryNames.length === MANAGED_PRESET_FILES.length
+        && MANAGED_PRESET_FILES.every((name) => entryNames.includes(name));
+}
+function assertManagedFilesAreRegular(directory, role, filesystem) {
+    for (const fileName of MANAGED_PRESET_FILES) {
+        assertRegularUnlinkedFile(join(directory, fileName), `${fileName} for ${role}`, filesystem);
     }
 }
-function removeDirectoryIfManaged(directory) {
-    if (!isManagedDirectory(directory))
-        return;
-    rmSync(directory, { recursive: true, force: true });
+function updateOwnedRoleDirectory(canonicalRoot, knownDirectory, settings, filesystem) {
+    if (knownDirectory.ownership !== "current" && knownDirectory.ownership !== "legacy") {
+        throw new Error(`dsmm preset directory is not owned and cannot be updated: ${knownDirectory.directory}`);
+    }
+    const files = [
+        ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings))],
+        ["preset.yml", renderPresetMetadata(knownDirectory.role)],
+        [DSMM_MANAGED_PRESET_MARKER, renderManagedPresetMarker(knownDirectory.role.id)]
+    ];
+    for (const [fileName, content] of files) {
+        assertOwnershipUnchanged(canonicalRoot, knownDirectory, filesystem);
+        filesystem.writeFileSync(join(knownDirectory.directory, fileName), content, "utf8");
+    }
 }
-function isManagedDirectory(directory) {
-    if (!existsSync(directory))
-        return false;
-    if (!statSync(directory).isDirectory())
-        return false;
-    const marker = join(directory, DSMM_MANAGED_PRESET_MARKER);
-    return existsSync(marker) && statSync(marker).isFile();
+function removeOwnedRoleDirectory(canonicalRoot, knownDirectory, filesystem) {
+    if (knownDirectory.ownership !== "current" && knownDirectory.ownership !== "legacy")
+        return;
+    assertOwnershipUnchanged(canonicalRoot, knownDirectory, filesystem);
+    filesystem.rmSync(knownDirectory.directory, { recursive: true, force: false });
+}
+function assertOwnershipUnchanged(canonicalRoot, knownDirectory, filesystem) {
+    const ownership = inspectKnownRoleDirectory(canonicalRoot, knownDirectory.directory, knownDirectory.role.id, filesystem);
+    if (ownership !== knownDirectory.ownership) {
+        throw new Error(`dsmm preset ownership changed before mutation: ${knownDirectory.directory}`);
+    }
+}
+function publishNewRoleDirectory(canonicalRoot, root, role, settings, filesystem) {
+    const finalDirectory = join(root, role);
+    const temporaryDirectory = join(root, `.${role}.dsmm-${randomUUID()}`);
+    let temporaryDirectoryCreated = false;
+    try {
+        if (lstatIfExists(finalDirectory, filesystem) !== undefined) {
+            throw new Error(`dsmm preset directory appeared before publication and will not be replaced: ${finalDirectory}`);
+        }
+        filesystem.mkdirSync(temporaryDirectory);
+        temporaryDirectoryCreated = true;
+        const temporaryStatus = lstatIfExists(temporaryDirectory, filesystem);
+        if (temporaryStatus === undefined) {
+            throw new Error(`dsmm temporary preset directory disappeared after creation: ${temporaryDirectory}`);
+        }
+        assertDirectoryNotLinked(temporaryDirectory, temporaryStatus, `temporary preset directory for ${role}`);
+        assertCanonicalChild(canonicalRoot, filesystem.realpathSync(temporaryDirectory), `temporary preset directory for ${role}`);
+        filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings)), "utf8");
+        filesystem.writeFileSync(join(temporaryDirectory, "preset.yml"), renderPresetMetadata(findRole(role)), "utf8");
+        filesystem.writeFileSync(join(temporaryDirectory, DSMM_MANAGED_PRESET_MARKER), renderManagedPresetMarker(role), "utf8");
+        if (lstatIfExists(finalDirectory, filesystem) !== undefined) {
+            throw new Error(`dsmm preset directory appeared before publication and will not be replaced: ${finalDirectory}`);
+        }
+        filesystem.renameSync(temporaryDirectory, finalDirectory);
+        temporaryDirectoryCreated = false;
+    }
+    finally {
+        if (temporaryDirectoryCreated) {
+            removePrivateTemporaryDirectory(canonicalRoot, temporaryDirectory, role, filesystem);
+        }
+    }
+}
+function removePrivateTemporaryDirectory(canonicalRoot, temporaryDirectory, role, filesystem) {
+    const temporaryStatus = lstatIfExists(temporaryDirectory, filesystem);
+    if (temporaryStatus === undefined)
+        return;
+    assertDirectoryNotLinked(temporaryDirectory, temporaryStatus, `temporary preset directory for ${role}`);
+    assertCanonicalChild(canonicalRoot, filesystem.realpathSync(temporaryDirectory), `temporary preset directory for ${role}`);
+    filesystem.rmSync(temporaryDirectory, { recursive: true, force: false });
+}
+function findRole(roleId) {
+    const role = DSMM_ROLES.find((candidate) => candidate.id === roleId);
+    if (role === undefined)
+        throw new Error(`unknown dsmm role: ${roleId}`);
+    return role;
+}
+function assertDirectoryNotLinked(path, status, label) {
+    if (status.isSymbolicLink()) {
+        throw new Error(`dsmm ${label} must not be a symbolic link or junction: ${path}`);
+    }
+    if (!status.isDirectory()) {
+        throw new Error(`dsmm ${label} must be a directory: ${path}`);
+    }
+}
+function assertRegularUnlinkedFile(path, label, filesystem) {
+    const status = filesystem.lstatSync(path);
+    if (status.isSymbolicLink()) {
+        throw new Error(`dsmm ${label} must not be a symbolic link: ${path}`);
+    }
+    if (!status.isFile()) {
+        throw new Error(`dsmm ${label} must be a regular file: ${path}`);
+    }
+}
+function assertCanonicalChild(canonicalRoot, canonicalChild, label) {
+    const childPath = relative(canonicalRoot, canonicalChild);
+    if (childPath.length === 0 || childPath === ".." || childPath.startsWith(`..${sep}`) || isAbsolute(childPath)) {
+        throw new Error(`dsmm ${label} escapes the canonical preset root: ${canonicalChild}`);
+    }
+}
+function lstatIfExists(path, filesystem) {
+    try {
+        const status = filesystem.lstatSync(path);
+        return status === undefined ? undefined : status;
+    }
+    catch (error) {
+        if (isMissingPathError(error))
+            return undefined;
+        throw error;
+    }
+}
+function isMissingPathError(error) {
+    return typeof error === "object"
+        && error !== null
+        && "code" in error
+        && error.code === "ENOENT";
 }
 //# sourceMappingURL=preset-materializer.js.map

@@ -37,6 +37,11 @@ Workflow policy is configurable under `settings.workflow`: `workflow.strictGates
 ## v0.4 safety guards
 
 - v0.4 safety guards: dsh-native `tools/pre-execute` / `tools/post-execute` policies for shell dialect mistakes, git writes, large tool output, plan checklist formatting, question labels, and todo discipline. See [`docs/safety-guards.md`](docs/safety-guards.md).
+- DSMM role presets expose bundled skills through the preset-scoped `dsmm/preset-skills` package export. This keeps skill registration role-bound instead of making it global; materialization ownership and safe legacy migration are documented in [`docs/agent-presets.md`](docs/agent-presets.md).
+
+## v0.5 MCP and LSP integration
+
+v0.5 adds disabled-by-default LSP/MCP settings and a copyable opt-in dsh MCP client patch for `ocmm-lsp mcp`. Users who want diagnostics, symbols, definitions, references, and rename tools can enable the `@deepseek-ai/dsh-mcp-client` row from [`docs/lsp.md`](docs/lsp.md) without changing the default dsmm prompt-only install path.
 
 ## Install into a disposable profile
 
@@ -51,15 +56,15 @@ dsh --profile dsmm-smoke --dump-config
 
 Expected result: the dumped config contains the `dsmm` bundle row from `cordis.patch.yml`, including `id: dsmm`. Remove the disposable `DSH_HOME` directory when finished if you no longer need it.
 
-## Optional Docker smoke
+## Required Docker smoke for safety remediation
 
-The Docker smoke builds dsmm in a container, installs the requested dsh package, installs dsmm into an isolated `dsmm-smoke` profile, checks that `dsh --profile dsmm-smoke --dump-config` includes `id: dsmm`, verifies bundled skill registration settings, and smoke-tests role preset materialization/discovery.
+The Docker smoke is mandatory acceptance for this safety remediation. It builds dsmm in a container, installs the pinned dsh package, installs dsmm into an isolated `dsmm-smoke` profile, checks that `dsh --profile dsmm-smoke --dump-config` includes `id: dsmm`, verifies bundled skill registration settings, and smoke-tests role preset materialization/discovery.
 
 ```powershell
 pnpm --filter dsmm smoke:docker
 ```
 
-The Docker smoke is optional because it requires Docker and network access to fetch `@deepseek-ai/dsh`. Normal development acceptance remains `pnpm --filter dsmm test`, `pnpm --filter dsmm typecheck:test`, and `pnpm --filter dsmm build`.
+The required Docker smoke needs Docker and network access to fetch `@deepseek-ai/dsh@0.1.1-rc.2`. Source-only development checks remain `pnpm --filter dsmm test`, `pnpm --filter dsmm typecheck:test`, and `pnpm --filter dsmm build`.
 
 ## Configuration sketch
 

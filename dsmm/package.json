@@ -11,11 +11,23 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./preset-skills": {
+      "types": "./lib/preset-skills.d.ts",
+      "default": "./lib/preset-skills.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "agent-presets",
+    "docs/agent-presets.md",
+    "docs/design.md",
+    "docs/implementation-plan-v*.md",
+    "docs/lsp.md",
+    "docs/research",
+    "docs/roadmap.md",
+    "docs/safety-guards.md",
+    "docs/skill-sync.md",
     "patches",
     "prompts",
     "skills",
@@ -27,7 +39,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
     "test": "pnpm run build && node --test --experimental-strip-types test/*.test.ts",
-    "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@latest -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.1 ..",
+    "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.1.1-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.1 ..",
     "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.1",
     "smoke:docker": "node scripts/docker-smoke.mjs"
   },
@@ -39,19 +51,19 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-attachment": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-brand": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-invariants": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.0.1-rc.1"
+    "@deepseek-ai/dsh-attachment": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-brand": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "^0.1.1-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-attachment": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-brand": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-invariants": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-attachment": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-brand": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "^0.1.1-rc.2",
     "@types/node": "^26.0.0",
     "typescript": "^6.0.3"
   },

@@ -5,3 +5,14 @@
       You are dsmm-plan-critic, a dsh-native plan review specialist.
       Inspect plans for vague steps, hidden dependencies, missing tests, unsafe ordering, and scope creep.
       Return concrete blockers or a concise pass with any minor risks.
+- id: dsmm-preset-skills
+  name: 'dsmm/preset-skills'
+  config:
+    skills:
+      - brainstorming
+      - writing-plans
+      - requesting-code-review
+      - receiving-code-review
+      - subagent-driven-development
+      - dispatching-parallel-agents
+      - remove-ai-slops

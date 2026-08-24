@@ -16,14 +16,13 @@ async function handleDeepworkCommand(controller, getSettings, invocation) {
         ? { kind: "success", text: "Entering deepwork mode." }
         : { kind: "success", text: "Leaving deepwork mode." };
 }
-export function registerDeepworkCommand(ctx, controller, getSettings) {
-    ctx.inject?.(["commands"], (services) => {
-        services.commands?.register({
-            name: getSettings().modeName,
-            description: "Enter or leave dsmm deepwork mode",
-            input: { hint: "[off|message]" },
-            handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
-        });
+export function registerDeepworkCommand(readyCtx, controller, getSettings) {
+    const commands = readyCtx.get?.("commands") ?? readyCtx.commands;
+    commands?.register({
+        name: getSettings().modeName,
+        description: "Enter or leave dsmm deepwork mode",
+        input: { hint: "[off|message]" },
+        handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
     });
 }
 //# sourceMappingURL=commands.js.map

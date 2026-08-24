@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DshPostToolDecision, DshPreToolDecision, DshToolExecution, DshToolExecutionResult } from "../lib/dsh-types.js";
+import type { DshPostToolDecision, DshPreToolDecision, DshSessionEvent, DshToolExecution, DshToolExecutionResult } from "../lib/dsh-types.js";
 import { DSMM_GUARD_PREFIX, decidePostToolExecution, decidePreToolExecution, isSafetyScopeActive, registerSafetyGuards, truncateTextMiddle } from "../lib/guards.js";
 import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
+import type { DsmmSettings } from "../lib/settings.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController } from "../lib/state.js";
 
 function controller(): DeepworkModeController {
@@ -22,22 +23,33 @@ function exec(name: string, args: unknown, active = true): DshToolExecution {
   };
 }
 
-test("safety scope is active for deepwork mode and dsmm preset sessions", () => {
+test("safety scope is active for deepwork mode and resolves persisted preset precedence", () => {
   assert.equal(isSafetyScopeActive(exec("bash", { command: "pwd" }), DEFAULT_DSMM_SETTINGS, controller()), true);
   assert.equal(isSafetyScopeActive(exec("bash", { command: "pwd" }, false), DEFAULT_DSMM_SETTINGS, controller()), false);
-  assert.equal(
-    isSafetyScopeActive({
+
+  const cases: readonly [string, string, readonly DshSessionEvent[], boolean][] = [
+    ["header reviewer without events", "dsmm-reviewer", [], true],
+    ["header standard with reviewer event", "standard", [{ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } }], true],
+    ["header reviewer with standard event", "dsmm-reviewer", [{ type: "agent-preset/selected", data: { agentPreset: "standard" } }], false],
+    ["newest valid standard event wins", "standard", [
+      { type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } },
+      { type: "agent-preset/selected", data: { agentPreset: "standard" } }
+    ], false],
+    ["malformed newest event does not mask older reviewer event", "standard", [
+      { type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } },
+      { type: "agent-preset/selected", data: { agentPreset: 3 } }
+    ], true],
+    ["malformed events fall back to header", "dsmm-reviewer", [{ type: "agent-preset/selected", data: { agentPreset: 3 } }], true]
+  ];
+
+  for (const [name, agentPreset, events, expected] of cases) {
+    assert.equal(isSafetyScopeActive({
       name: "bash",
       arguments: { command: "pwd" },
-      agent: {
-        session: {
-          events: [{ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } }],
-          append() {}
-        }
-      }
-    }, DEFAULT_DSMM_SETTINGS, controller()),
-    true
-  );
+      agent: { session: { header: { agentPreset }, events, append() {} } }
+    }, DEFAULT_DSMM_SETTINGS, controller()), expected, name);
+  }
+
   assert.equal(
     isSafetyScopeActive(exec("bash", { command: "pwd" }), {
       ...DEFAULT_DSMM_SETTINGS,
@@ -165,6 +177,52 @@ test("pwsh shell safety detects POSIX syntax after shell newlines", () => {
   assert.match(sourceDecision.reason ?? "", /POSIX `source`/);
 });
 
+test("shell safety ignores quoted prose and recognizes PowerShell source command positions", () => {
+  assert.equal(
+    decidePreToolExecution(exec("pwsh", { command: "Write-Output 'export CI=true source ./env > /dev/null'" }), DEFAULT_DSMM_SETTINGS, controller()),
+    undefined
+  );
+  const decision = decidePreToolExecution(exec("powershell", { command: "Write-Output ok\nSoUrCe ./env.ps1" }), DEFAULT_DSMM_SETTINGS, controller());
+
+  assert.equal(decision?.kind, "deny");
+  assert.match(decision?.reason ?? "", /POSIX `source`/);
+});
+
+test("git write guard uses dialect-aware parsing for call operators and known Git mutations", () => {
+  const cases: readonly [string, string, string][] = [
+    ["bash", "env -i CI=true git tag v1", "git tag"],
+    ["bash", "env -v git commit -m smoke", "git commit"],
+    ["bash", "env -vvC. git commit -m smoke", "git commit"],
+    ["bash", "env --file=NUL git commit -m smoke", "git commit"],
+    ["bash", "env --ignore-signal git commit -m smoke", "git commit"],
+    ["bash", "env -S 'git commit -m smoke'", "git commit"],
+    ["bash", "env env git commit -m smoke", "git commit"],
+    ["bash", "env - PATH=/bin git commit -m smoke", "git commit"],
+    ["bash", "env -C. git commit -m smoke", "git commit"],
+    ["bash", "env -- git commit -m smoke", "git commit"],
+    ["bash", "env -- CI=true git commit -m smoke", "git commit"],
+    ["bash", "env -- FOO-BAR=1 git commit -m smoke", "git commit"],
+    ["bash", "env -- =x git commit -m smoke", "git commit"],
+    ["bash", "git config user.name Alice", "git config"],
+    ["bash", "git symbolic-ref HEAD refs/heads/main", "git symbolic-ref"],
+    ["pwsh", '& "C:\\Program Files\\Git\\cmd\\git.exe" push origin main', "git push"],
+    ["pwsh", "Write-Output ok\ngit update-ref refs/heads/x HEAD", "git update-ref"]
+  ];
+
+  for (const [shell, command, operation] of cases) {
+    const decision = decidePreToolExecution(exec(shell, { command }), DEFAULT_DSMM_SETTINGS, controller());
+
+    assert.equal(decision?.kind, "ask", command);
+    assert.match(decision?.reason ?? "", new RegExp(operation));
+  }
+});
+
+test("git write guard leaves Git reads, unknown subcommands, and quoted prose unclassified", () => {
+  for (const command of ["git config user.name", "git symbolic-ref HEAD", "git publish", "printf '%s' 'git commit -m x'"]) {
+    assert.equal(decidePreToolExecution(exec("bash", { command }), DEFAULT_DSMM_SETTINGS, controller()), undefined, command);
+  }
+});
+
 test("plan format validation rejects malformed checklist entries", () => {
   const decision = decidePreToolExecution(exec("write", {
     file_path: "docs/superpowers/plans/example.md",
@@ -175,14 +233,17 @@ test("plan format validation rejects malformed checklist entries", () => {
   assert.match(decision?.reason ?? "", /malformed checklist/);
 });
 
-test("plan format validation also inspects fallback path and edit content keys", () => {
-  const decision = decidePreToolExecution(exec("edit", {
+test("plan format validation runs only when enabled", () => {
+  const disabled = {
+    ...DEFAULT_DSMM_SETTINGS,
+    guards: { ...DEFAULT_DSMM_SETTINGS.guards, planFormatValidation: false }
+  };
+  const decision = decidePreToolExecution(exec("write", {
     path: ".omo/plans/example.md",
-    new_string: "- [todo] Missing checkbox status\n"
-  }), DEFAULT_DSMM_SETTINGS, controller());
+    content: "- [todo] Missing checkbox status\n"
+  }), disabled, controller());
 
-  assert.equal(decision?.kind, "deny");
-  assert.match(decision?.reason ?? "", /malformed checklist/);
+  assert.equal(decision, undefined);
 });
 
 test("question label helper rejects overlong option labels", () => {
@@ -241,23 +302,49 @@ test("registerSafetyGuards wires tools/pre-execute and delegates when allowed", 
   assert.deepEqual(allowed, { kind: "allow" });
 });
 
-test("registerSafetyGuards returns pre-execute decisions before delegation", async () => {
+test("registerSafetyGuards composes pre-execute decisions monotonically", async () => {
   const listeners: Record<string, (...args: any[]) => unknown> = {};
-  let delegated = false;
+  const denySettings = {
+    ...DEFAULT_DSMM_SETTINGS,
+    guards: { ...DEFAULT_DSMM_SETTINGS.guards, gitWriteGuard: "deny" as const }
+  };
+  const askSettings = DEFAULT_DSMM_SETTINGS;
   registerSafetyGuards({
     on(event, listener) {
       listeners[event] = listener;
     }
-  }, controller(), () => DEFAULT_DSMM_SETTINGS);
+  }, controller(), () => askSettings);
 
   const preExecute = listeners["tools/pre-execute"] as (execution: DshToolExecution, next: () => Promise<DshPreToolDecision>) => Promise<DshPreToolDecision>;
-  const decision = await preExecute(exec("bash", { command: "git commit -m test" }), async (): Promise<DshPreToolDecision> => {
-    delegated = true;
-    return { kind: "allow" };
-  });
+  const cases: readonly [string, DshToolExecution, DsmmSettings, DshPreToolDecision, DshPreToolDecision, boolean][] = [
+    ["local deny short-circuits", exec("bash", { command: "git commit -m test" }), denySettings, { kind: "allow" }, {
+      kind: "deny",
+      reason: `${DSMM_GUARD_PREFIX} git write command is disabled by dsmm settings: git commit`
+    }, false],
+    ["local none returns downstream directly", exec("bash", { command: "pwd" }), askSettings, { kind: "ask" }, { kind: "ask" }, true],
+    ["downstream deny dominates local ask", exec("bash", { command: "git commit -m test" }), askSettings, { kind: "deny", reason: "downstream" }, { kind: "deny", reason: "downstream" }, true],
+    ["downstream ask dominates local ask", exec("bash", { command: "git commit -m test" }), askSettings, { kind: "ask", reason: "downstream" }, { kind: "ask", reason: "downstream" }, true],
+    ["local ask survives downstream allow", exec("bash", { command: "git commit -m test" }), askSettings, { kind: "allow" }, {
+      kind: "ask",
+      reason: `${DSMM_GUARD_PREFIX} git write command requires explicit user approval before running: git commit`
+    }, true]
+  ];
 
-  assert.equal(delegated, false);
-  assert.equal(decision.kind, "ask");
+  for (const [name, execution, settings, downstream, expected, callsNext] of cases) {
+    let nextCalls = 0;
+    registerSafetyGuards({
+      on(event, listener) {
+        listeners[event] = listener;
+      }
+    }, controller(), () => settings);
+    const result = await (listeners["tools/pre-execute"] as typeof preExecute)(execution, async () => {
+      nextCalls += 1;
+      return downstream;
+    });
+
+    assert.deepEqual(result, expected, name);
+    assert.equal(nextCalls === 1, callsNext, name);
+  }
 });
 
 test("truncateTextMiddle keeps head and tail with dsmm notice", () => {

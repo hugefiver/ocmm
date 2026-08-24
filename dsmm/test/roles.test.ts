@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DSMM_ROLE_IDS as EXPORTED_ROLE_IDS } from "../lib/index.js";
 import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "../lib/roles.js";
+import { DSMM_SKILL_NAMES } from "../lib/skills.js";
 
 const EXPECTED_ROLE_IDS = [
   "dsmm-orchestrator",
@@ -42,16 +43,31 @@ test("preset metadata renders id, name, and description", () => {
   }
 });
 
-test("agent cordis renders exactly one persona row", () => {
+test("agent cordis renders exactly one persona row and one preset-scoped skill row", () => {
+  const expectedSkills = DSMM_SKILL_NAMES.map((skill) => `      - ${skill}`).join("\n");
+
   for (const role of DSMM_ROLES) {
     const cordis = renderAgentCordis(role);
     const personaMarkers = cordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? [];
+    const presetSkillMarkers = cordis.match(/name: 'dsmm\/preset-skills'/gu) ?? [];
 
     assert.equal(personaMarkers.length, 1);
+    assert.equal(presetSkillMarkers.length, 1);
     assert.match(cordis, /^- id: persona\n  name: '@deepseek-ai\/dsh-persona'\n  config:\n    text: \|-\n/mu);
     assert.ok(cordis.includes(`      ${role.persona.split("\n")[0]}`));
+    assert.ok(cordis.includes(`- id: dsmm-preset-skills\n  name: 'dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
     assert.equal(cordis.endsWith("\n"), true);
   }
+});
+
+test("agent cordis renders an explicit empty preset skill list", () => {
+  const role = DSMM_ROLES[0];
+  assert.ok(role);
+  const cordis = renderAgentCordis(role, []);
+
+  assert.match(cordis, /  config:\n    skills: \[\]\n$/u);
+  assert.doesNotMatch(cordis, /    skills:\n\n$/u);
+  assert.ok(cordis.includes(`      ${role.persona.split("\n")[0]}`));
 });
 
 test("personas are role-scoped and avoid host-specific tool names", () => {

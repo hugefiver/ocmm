@@ -103,6 +103,8 @@ Port the highest-value ocmm safety policies into dsh tool events.
 
 ## v0.5 — MCP and LSP integration
 
+Status: implemented in v0.5 with disabled-by-default LSP settings, an opt-in `@deepseek-ai/dsh-mcp-client` patch for `ocmm-lsp mcp`, user documentation, direct MCP `tools/list`/diagnostics smoke coverage, and Docker dsh MCP bridge diagnostics smoke coverage.
+
 ### Goal
 
 Expose ocmm's LSP value through dsh MCP mechanisms.

@@ -12,8 +12,13 @@ export interface DshSessionEvent {
     type: string;
     data?: unknown;
 }
+export interface DshSessionHeader {
+    cwd?: string;
+    agentPreset?: string;
+}
 export interface DshSession {
     events: readonly DshSessionEvent[];
+    header?: DshSessionHeader;
     append(type: "deepwork/mode", payload: {
         active: boolean;
     }): unknown | Promise<unknown>;
@@ -152,7 +157,9 @@ export interface DshContext {
     skills?: DshSkillRegistry;
     commands?: DshCommandsRegistry;
     tools?: DshToolRuntime;
-    inject?(dependencies: string[], installer: (services: DshInjectedServices) => unknown): unknown;
+    get?<T = unknown>(name: string): T | undefined;
+    inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
+    effect?(callback: () => void | (() => void)): unknown;
     on?(event: "agent/pre-step", listener: (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>, options?: unknown): unknown;
     on?(event: string, listener: DshEventListener, options?: unknown): unknown;
     logger?: {

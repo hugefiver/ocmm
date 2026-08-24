@@ -6,5 +6,5 @@ export interface DeepworkCommandInput {
     message: string;
 }
 export declare function parseDeepworkCommandInput(rawInput: string): DeepworkCommandInput;
-export declare function registerDeepworkCommand(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void;
+export declare function registerDeepworkCommand(readyCtx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void;
 //# sourceMappingURL=commands.d.ts.map

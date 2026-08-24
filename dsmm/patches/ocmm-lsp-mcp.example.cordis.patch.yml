@@ -1,0 +1,15 @@
+# Example only: opt-in dsmm LSP MCP bridge.
+# Requires ocmm-lsp to be on PATH or command to be replaced with an absolute wrapper path.
+- insert:
+    - id: dsmm-lsp-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        transport: stdio
+        serverName: dsmm_lsp
+        command: ocmm-lsp
+        args:
+          - mcp
+        env: {}
+        cwd: ""
+        toolCallTimeoutMs: 60000
+        failOnStartupError: true

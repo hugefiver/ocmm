@@ -1,10 +1,16 @@
-import type { DshContext } from "./dsh-types.js";
+import type { DshSkillRegistration, DshSkillRegistry } from "./dsh-types.js";
 import type { DsmmSettings } from "./settings.js";
-export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
+export declare const DSMM_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops"];
+export declare const MVP_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops"];
+export type DsmmSkillName = (typeof DSMM_SKILL_NAMES)[number];
+export type MvpSkillName = DsmmSkillName;
 export declare function parseSkillMarkdown(markdown: string): {
     name: string;
     description: string;
     content: string;
 };
-export declare function registerBundledSkills(ctx: DshContext, getSettings: () => DsmmSettings): void;
+export declare function enabledSkillNames(settings: DsmmSettings): readonly DsmmSkillName[];
+export declare function loadBundledSkill(name: DsmmSkillName): DshSkillRegistration;
+export declare function registerBundledSkills(skills: DshSkillRegistry | undefined, names: readonly DsmmSkillName[]): void;
+export declare function renderBundledSkillPrompt(names: readonly DsmmSkillName[]): string;
 //# sourceMappingURL=skills.d.ts.map

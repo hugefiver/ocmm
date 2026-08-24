@@ -1,11 +1,21 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DshContext, DshSkillRegistration, DshSkillRegistry } from "./dsh-types.js";
-import { DSMM_SKILL_NAMES } from "./settings.js";
-import type { DsmmSettings, DsmmSkillName } from "./settings.js";
+import type { DshSkillRegistration, DshSkillRegistry } from "./dsh-types.js";
+import type { DsmmSettings } from "./settings.js";
 
-export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./settings.js";
+export const DSMM_SKILL_NAMES = [
+  "brainstorming",
+  "writing-plans",
+  "requesting-code-review",
+  "receiving-code-review",
+  "subagent-driven-development",
+  "dispatching-parallel-agents",
+  "remove-ai-slops"
+] as const;
+export const MVP_SKILL_NAMES = DSMM_SKILL_NAMES;
+export type DsmmSkillName = (typeof DSMM_SKILL_NAMES)[number];
+export type MvpSkillName = DsmmSkillName;
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -21,7 +31,11 @@ export function parseSkillMarkdown(markdown: string): { name: string; descriptio
   return { name, description, content: match[2].replace(/^\r?\n/u, "") };
 }
 
-function loadSkill(name: DsmmSkillName): DshSkillRegistration {
+export function enabledSkillNames(settings: DsmmSettings): readonly DsmmSkillName[] {
+  return DSMM_SKILL_NAMES.filter((name) => settings.skills[name]);
+}
+
+export function loadBundledSkill(name: DsmmSkillName): DshSkillRegistration {
   const directory = join(packageRoot, "skills", name);
   const parsed = parseSkillMarkdown(readFileSync(join(directory, "SKILL.md"), "utf8"));
 
@@ -36,19 +50,20 @@ function loadSkill(name: DsmmSkillName): DshSkillRegistration {
   };
 }
 
-export function registerBundledSkills(ctx: DshContext, getSettings: () => DsmmSettings): void {
-  const register = (skills: DshSkillRegistry | undefined): void => {
-    if (skills === undefined) return;
+export function registerBundledSkills(skills: DshSkillRegistry | undefined, names: readonly DsmmSkillName[]): void {
+  if (skills === undefined) return;
 
-    const settings = getSettings();
-    for (const name of DSMM_SKILL_NAMES) {
-      if (settings.skills[name] && existsSync(join(packageRoot, "skills", name, "SKILL.md"))) skills.register(loadSkill(name));
-    }
-  };
-
-  if (ctx.inject !== undefined) {
-    ctx.inject(["skills"], (services) => register(services.skills));
-  } else if (Object.prototype.hasOwnProperty.call(ctx, "skills")) {
-    register(Object.getOwnPropertyDescriptor(ctx, "skills")?.value as DshSkillRegistry | undefined);
+  for (const name of DSMM_SKILL_NAMES) {
+    if (names.includes(name)) skills.register(loadBundledSkill(name));
   }
+}
+
+export function renderBundledSkillPrompt(names: readonly DsmmSkillName[]): string {
+  return DSMM_SKILL_NAMES
+    .filter((name) => names.includes(name))
+    .map((name) => {
+      const body = loadBundledSkill(name).content.replace(/\r?\n$/u, "");
+      return `<dsmm-skill name="${name}">\n${body}\n</dsmm-skill>`;
+    })
+    .join("\n\n");
 }

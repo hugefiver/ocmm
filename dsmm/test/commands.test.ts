@@ -11,10 +11,7 @@ function captureCommand(settings = DEFAULT_DSMM_SETTINGS): RegisteredCommand {
   let command: RegisteredCommand | undefined;
   const controller = new DeepworkModeController({});
   const ctx: DshContext = {
-    inject(dependencies, installer) {
-      assert.deepEqual(dependencies, ["commands"]);
-      installer({ commands: { register(value) { command = value; } } });
-    }
+    commands: { register(value) { command = value; } }
   };
 
   registerDeepworkCommand(ctx, controller, () => settings);
@@ -31,6 +28,25 @@ test("parseDeepworkCommandInput handles off and message forms", () => {
 test("registerDeepworkCommand is optional when commands service is absent", () => {
   const controller = new DeepworkModeController({});
   assert.doesNotThrow(() => registerDeepworkCommand({}, controller, () => DEFAULT_DSMM_SETTINGS));
+});
+
+test("registerDeepworkCommand resolves the optional commands service without an inject declaration", () => {
+  let command: RegisteredCommand | undefined;
+  const controller = new DeepworkModeController({});
+  const ctx = new Proxy({
+    get(name: string) {
+      if (name !== "commands") return undefined;
+      return { register(value: RegisteredCommand) { command = value; } };
+    }
+  }, {
+    get(target, property, receiver) {
+      if (property === "commands") throw new Error("commands was read directly without inject");
+      return Reflect.get(target, property, receiver);
+    }
+  }) as unknown as DshContext;
+
+  assert.doesNotThrow(() => registerDeepworkCommand(ctx, controller, () => DEFAULT_DSMM_SETTINGS));
+  assert.equal(command?.name, "deepwork");
 });
 
 test("registered command name follows settings.modeName", () => {

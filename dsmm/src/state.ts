@@ -39,7 +39,11 @@ export class DeepworkModeController {
       const intent = this.pending.get(frame.agent.session);
       if (decision.kind === "reject" || frame.signal.aborted || intent === undefined) return decision;
 
-      await this.commit(frame.agent.session, intent.active);
+      try {
+        await this.commit(frame.agent.session, intent.active);
+      } catch (cause) {
+        ctx.logger?.warn("dsmm failed to append deepwork mode event; pending intent will retry", cause);
+      }
       return decision;
     });
   }
