@@ -76,7 +76,7 @@
     "ocmm-lsp-windows-arm64": "workspace:*"
   },
   "ocmm": {
-    "lspVersion": "0.3.2"
+    "lspVersion": "0.3.3"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
