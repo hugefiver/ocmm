@@ -148,6 +148,12 @@ Local adaptation of upstream omo workflow semantics into ocmm-native wording. Ap
 - This sync explicitly rejects importing OMO 5.0, Senpi, memory-core, omo-native runtime systems, dual Momus+Oracle plan review, and a full model-capability registry.
 - `prompts/{omo,v1,codex}/deepwork/{gemini,glm}.md` now scale verification: 1-2 focused checks for small single-surface changes, happy path plus one adjacent/edge scenario for moderate behavioral work, 3+ scenarios and RED/GREEN/SURFACE for multi-surface or high-risk changes, and review plus real-surface QA for documentation, prompt, and visual-only edits.
 
+## Proportional Default and GPT Scenario Contract (2026-08-28)
+
+- Reviewed upstream baseline `./omo@ef1c392f10eafb28913eb7815143c328d88aad47`. `prompts/omo/deepwork/default.md`, `prompts/omo/deepwork/gpt.md`, and `prompts/v1/deepwork/default.md` now use proportional scenario coverage: one or two targeted scenarios for a small single-surface change, at least three for multi-surface or security/runtime-safety/data-loss/migration/release/high-risk work, always a happy path, and edge or adjacent coverage only when risk warrants it.
+- Test-first applies only at a real deterministic test seam. Without one, the prompt requires the strongest real-surface verification rather than prose pinning; characterization tests are restricted to refactors where a behavior regression could otherwise be hidden.
+- This bounded adaptation excludes the beta multi-harness contract and leaves Gemini, GLM, Codex, and every other prompt source unchanged.
+
 ## Observation-Only Upstream Items (2026-07-13)
 
 The following upstream omo prompt/behavior items were reviewed and are intentionally recorded as observation-only. They are not implemented in this change and will only be reconsidered when a concrete trigger appears:
@@ -179,3 +185,9 @@ The following upstream omo prompt/behavior items were reviewed and are intention
 - Provenance reviewed: `1cc0be6c49269e1e7d85bd78e8af9cb7b6e430b4`, `ab0411bb7bbb805613e48724740a976ed263af8d`, `bf5f9d6a208c6fb483272d68f74a56418b488af6`, `ba0383d7bdee6755dcf6e7b50c6288978b3df229`, and `f2ae890b66de54f926befe674b363b616e93107c`.
 - **Orchestrator mapping clause:** `prompts/{omo,v1,codex}/agents/orchestrator.md` carries the same concise identity-bound-review mandate after its Reviewer/Oracle tier paragraph. It delegates canonical algorithm, field, and shell detail to the requesting-code-review skill while retaining orchestrator ownership of identity recomputation, one common packet for selected lanes, stale-verdict rejection, and completion at one current receipt identity.
 - The local adaptation binds either a full committed range or a dirty working-tree snapshot to packet and receipt evidence. It keeps selected-lane policy and generated-Codex consumer flow intact without copying upstream ledger, runtime, CLI, schema, MCP, or automatic Git behavior.
+
+## Research Provenance Alignment (2026-08-28)
+
+- Reviewed upstream baseline `./omo@ef1c392f10eafb28913eb7815143c328d88aad47`.
+- `prompts/{omo,v1,codex}/category/research.md` now share one minimal provenance contract: preserve a tool-provided route plus retrieval and publication dates; label archives and snapshots with their timestamp and never present them as live evidence; treat proxies, mirrors, caches, and explicitly untrusted sources as indirect evidence; corroborate material indirect-evidence claims through an independent route; and state missing provenance limits without inventing details.
+- The three-surface alignment is source-level only. It does not add exhaustive research, a second worker for every claim, citation graphs, persistent research assets, new tools, or generated Codex output changes.

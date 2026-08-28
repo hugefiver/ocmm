@@ -140,15 +140,57 @@ def skill_root() -> Path:
     return script_dir().parent
 
 
+def probe_ast_grep_candidate(
+    candidate: str | Path, timeout_seconds: float = 5.0
+) -> Optional[Path]:
+    """Return a resolved ast-grep executable only after a strict version probe."""
+    try:
+        path = Path(candidate).expanduser()
+        if path.is_absolute():
+            resolved = path.resolve()
+        else:
+            found = shutil.which(str(path))
+            if not found:
+                return None
+            resolved = Path(found).resolve()
+
+        if not resolved.is_file():
+            return None
+        if os.name != "nt" and not os.access(resolved, os.X_OK):
+            return None
+
+        result = subprocess.run(
+            [str(resolved), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode == 0 and "ast-grep" in output.lower():
+        return resolved
+    return None
+
+
+def _first_valid_candidate(candidates: list[str | Path] | tuple[str | Path, ...]) -> Optional[Path]:
+    """Probe candidates in order without persisting unsuccessful attempts."""
+    for candidate in candidates:
+        resolved = probe_ast_grep_candidate(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
 def cached_binary() -> Optional[Path]:
     """Look in <skill_root>/bin/ for a previously downloaded binary."""
     binname = "sg.exe" if os.name == "nt" else "sg"
     altname = "ast-grep.exe" if os.name == "nt" else "ast-grep"
-    for name in (binname, altname):
-        p = skill_root() / "bin" / name
-        if p.is_file() and os.access(p, os.X_OK):
-            return p
-    return None
+    return _first_valid_candidate(
+        (skill_root() / "bin" / binname, skill_root() / "bin" / altname)
+    )
 
 
 def npm_binary() -> Optional[Path]:
@@ -159,33 +201,8 @@ def npm_binary() -> Optional[Path]:
 
 
 def which_binary() -> Optional[Path]:
-    """Use shutil.which to find sg or ast-grep on PATH.
-
-    On Linux, plain `sg` collides with the setgroups command from util-linux
-    (sometimes called via /usr/bin/sg) which has flag --version that returns
-    non-zero, so we prefer `ast-grep` when both are on PATH and the `sg` we find
-    is the wrong one.
-    """
-    for name in ("ast-grep", "sg"):
-        found = shutil.which(name)
-        if found:
-            p = Path(found)
-            # On Linux, double-check by trying --version. The util-linux `sg`
-            # rejects --version, while ast-grep prints "ast-grep <version>".
-            if name == "sg" and platform.system() == "Linux":
-                try:
-                    out = subprocess.run(
-                        [str(p), "--version"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    if out.returncode != 0 or "ast-grep" not in (out.stdout + out.stderr).lower():
-                        continue
-                except Exception:
-                    continue
-            return p
-    return None
+    """Strictly probe ast-grep and sg candidates found through PATH."""
+    return _first_valid_candidate(("ast-grep", "sg"))
 
 
 def homebrew_binary() -> Optional[Path]:
@@ -196,10 +213,7 @@ def homebrew_binary() -> Optional[Path]:
         Path("/usr/local/bin/ast-grep"),
         Path("/usr/local/bin/sg"),
     ]
-    for p in candidates:
-        if p.is_file() and os.access(p, os.X_OK):
-            return p
-    return None
+    return _first_valid_candidate(tuple(candidates))
 
 
 # --- ocmm runtime resolution (vendored patch) ---
@@ -208,10 +222,7 @@ def ocmm_env_binary() -> Optional[Path]:
     raw_path = os.environ.get("OCMM_AST_GREP_SG_PATH")
     if not raw_path:
         return None
-    path = Path(raw_path).expanduser()
-    if path.is_file() and os.access(path, os.X_OK):
-        return path
-    return None
+    return _first_valid_candidate((Path(raw_path).expanduser(),))
 
 
 def ocmm_runtime_slug() -> str:
@@ -237,10 +248,7 @@ def ocmm_runtime_binary() -> Optional[Path]:
         candidates.append(Path(codex_home) / "runtime" / "ast-grep" / slug / binary_name)
     candidates.append(Path.home() / ".ocmm" / "runtime" / "ast-grep" / slug / binary_name)
 
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    return None
+    return _first_valid_candidate(tuple(candidates))
 
 
 def resolve_binary() -> Optional[Path]:
@@ -251,6 +259,10 @@ def resolve_binary() -> Optional[Path]:
     3. Cached binary in <skill>/bin/
     4. PATH (via shutil.which)
     5. Homebrew default paths
+
+    Every tier performs the same strict ``ast-grep --version`` probe. A failed
+    candidate is discarded and resolution continues without changing PATH,
+    downloading, installing, or caching the failed result.
     """
     for fn in (ocmm_env_binary, ocmm_runtime_binary, cached_binary, which_binary, homebrew_binary):
         result = fn()

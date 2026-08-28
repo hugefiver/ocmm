@@ -50,6 +50,22 @@ TodoWrite([
 
 **Mark "discovery" as in_progress.**
 
+### AST-shaped first probe (exactly once)
+
+Before decomposing project structure, entry points, dependencies, or hotspots,
+ask the ast-grep helper resolver for a validated binary. If it returns one, run
+exactly one read-only structural query with that path, such as:
+
+```
+<validated-sg> run -p 'function $VAR($$$) { $$$ }' .
+```
+
+Do not run another ast-grep probe during this baseline discovery phase. If no
+validated binary is available, report `ast-grep structural probe: unmeasured`
+and continue using read-only rg/LSP evidence; do not install, download, alter
+PATH, or cache a failure. The rg textual and LSP semantic roles below remain
+unchanged.
+
 ### Fire Background Explore Agents IMMEDIATELY
 
 Don't wait-these run async while main session works. **Equip every agent with the code graph**: any task touching structure, entry points, dependencies, or hotspots MUST query `codegraph_*` (explore/search/callers/callees/impact) and `lsp_symbols` when present, and ground its claims in that data instead of guessing from conventions. Richer real-graph context per agent = a more accurate project map.

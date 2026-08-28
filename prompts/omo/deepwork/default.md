@@ -205,22 +205,15 @@ task(category="quick", load_skills=["git-master"], run_in_background=true)
 
 **NOTHING is "done" without PROOF it works.**
 
-### Pre-Implementation: Scenario Contract (BINDING)
+### Pre-Implementation: Proportional Scenario Contract (BINDING)
 
-BEFORE writing ANY code, define **3+ realistic scenarios** covering:
+Before production changes, choose scenario coverage that fits the change:
 
-| Class | Required | Example |
-|-------|----------|---------|
-| **Happy path** | yes | Valid input → 200 OK with expected body |
-| **Edge** (boundary / empty / malformed / concurrent) | yes | Empty list, max-length input, two writers race |
-| **Adjacent-surface regression** | yes | Caller X still works, sibling endpoint Y unchanged |
+- For a small single-surface change, define **one or two targeted scenarios**.
+- For a multi-surface, security, runtime-safety, data-loss, migration, release, or other high-risk change, define **at least three scenarios**.
+- Include the happy path in every selected set. Add an edge or adjacent-surface regression scenario only when a relevant risk exists.
 
-Each scenario MUST specify, upfront:
-- Pass condition as a binary observable ("returns 200 + body matches schema"), not "should work".
-- The REAL surface that proves it: tmux transcript, curl status+body, browser/Playwright assertion, computer-use action log, CLI stdout, parsed config dump, DB state diff. Asserting "tests pass" alone is NOT evidence.
-- The automated test file + test id that exercises this scenario (written test-first — see TDD below).
-
-**These scenarios are the CONTRACT.** Record them in your TODO/notepad. You are not done until every one PASSES with both pieces of evidence captured (RED→GREEN proof + real-surface artifact).
+Each selected scenario MUST specify a binary pass condition and the real surface that proves it: tmux transcript, curl status+body, browser/Playwright assertion, computer-use action log, CLI stdout, parsed config dump, or DB state diff. Record the selected scenarios in the TODO/notepad and capture the proof appropriate to each one.
 
 ### Durable Notepad (survives context loss)
 
@@ -242,16 +235,16 @@ If context is lost, you re-read the notepad and resume. Do not skip this — it 
 
 ### Execution & Evidence Requirements
 
-Every scenario requires TWO captured artifacts — both mandatory:
+Every selected scenario requires the strongest applicable captured evidence:
 
 | Artifact | Source | Captures |
 |----------|--------|----------|
-| **RED→GREEN proof** | Test runner output before AND after the change | Test id + assertion message in both states |
+| **RED→GREEN proof** | Test runner output before AND after the change, when a real deterministic test seam exists | Test id + assertion message in both states |
 | **Real-surface artifact** | tmux / curl / browser / Playwright / computer-use / CLI / DB | What the user actually sees |
 
 Supporting (necessary, not sufficient): build exit 0, full suite green, lsp_diagnostics clean on changed files, regression scenarios still PASS.
 
-Tests are the FLOOR (always required). Surface artifact is the CEILING (also required). "tests pass" alone is NOT done.
+Test-first evidence is the floor when a real deterministic test seam exists. A surface artifact proves user-facing behavior; "tests pass" alone is not enough.
 
 <MANUAL_QA_MANDATE>
 ### YOU MUST EXECUTE MANUAL QA YOURSELF. THIS IS NOT OPTIONAL.
@@ -285,32 +278,26 @@ Tests are the FLOOR (always required). Surface artifact is the CEILING (also req
 **CLEANUP IS PART OF QA — TRACK IT AS TODOS.** The moment a QA scenario spawns any resource, add a teardown todo for it (QA scripts, tmux assets, browser / agent-browser sessions, PIDs, ports, containers, temp dirs). Execute every teardown todo and capture the receipt before declaring done. A leftover process / tmux session / browser context / bound port / temp dir = NOT done.
 </MANUAL_QA_MANDATE>
 
-### TDD Workflow (MANDATORY on every production change)
+### TDD and verification choice
 
-Test-first is not optional. Every behavior change — features, fixes, refactors, perf, glue, config-with-logic — follows RED → GREEN → SURFACE.
+Use test-first when code behavior has a real deterministic test seam: capture RED, make the smallest change, then capture GREEN. When no real deterministic test seam exists, use the strongest real-surface verification available, not a prose pin.
 
-1. **RED**: Write the failing test FIRST. Run it. Capture the assertion message proving it fails for the RIGHT reason (not syntax, not import). Paste RED output into the notepad. No production code yet.
-2. **GREEN**: Write the SMALLEST change that flips RED→GREEN. Re-run. Capture GREEN output. If GREEN required ~20+ lines, your test was too coarse — split it.
-3. **SURFACE**: Exercise the real user-facing surface named by the scenario. Capture artifact path into the notepad.
-4. **REFACTOR**: Optional, only if needed. Tests MUST stay green throughout.
-5. **REGRESSION**: Re-run the FULL scenario list. Record PASS/FAIL inline with both evidence paths.
-
-**Refactor exception**: Write characterization tests pinning current observable behavior FIRST, watch them go GREEN against old code, THEN refactor. They remain green throughout.
+Exercise the real user-facing surface named by each selected scenario and record the artifact path. Characterization tests are only appropriate before a refactor when a behavior regression might otherwise be hidden; pin current observable behavior first, then keep those tests green throughout the refactor.
 
 **Exemption whitelist** (no new test required): pure formatting, comment-only edits, dependency version bumps with no behavior delta, rename-only moves. Each exemption MUST be justified in `## Findings` with the exact reason. Unjustified exemption is rejection.
 
-**If you typed production code without a failing test preceding it in the notepad: STOP, revert, write the test, watch it fail, then redo.**
+**When a real deterministic test seam exists, do not skip its test-first evidence: stop, add the failing test, and then redo the change.**
 
 ### Verification Anti-Patterns (BLOCKING)
 
 | Violation | Why It Fails |
 |-----------|--------------|
 | "It should work now" | No evidence. Run it. |
-| "I added the tests" | Did they go RED first, then GREEN? Show both. |
+| "I added a test-first proof at a real seam" | Did it go RED first, then GREEN? Show both. |
 | "Fixed the bug" | What scenario proves it? Where's the artifact? |
-| "Implementation complete" | Every scenario PASS with both artifacts captured? |
-| Skipping test execution | Tests exist to be RUN, not just written |
-| Writing code before its failing test | TDD floor violated — revert, write test, redo |
+| "Implementation complete" | Does every selected scenario have its applicable evidence? |
+| Skipping applicable test execution | Tests at a real deterministic seam exist to be RUN, not just written |
+| Writing code before a required test-first proof | TDD floor at a real deterministic seam was skipped |
 
 **CLAIM NOTHING WITHOUT PROOF. EXECUTE. VERIFY. SHOW EVIDENCE.**
 

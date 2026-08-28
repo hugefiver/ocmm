@@ -66,6 +66,12 @@ Execute plan by dispatching a fresh subagent per task, running a completion/inte
    f. Mark task complete in TodoWrite
 3. **After all tasks:** Dispatch final code reviewer subagent for the entire implementation (use requesting-code-review skill)
 
+### Recommended Executor Dispatch Decision
+
+Before dispatching a task with a recommended profile, verify that the profile is currently callable. Check for an active task file ownership conflict, task dependencies, and the security and runtime rigor the task needs. Also decide whether direct execution is smaller than a dispatch for this task.
+
+The recommendation is evidence for that decision, not an instruction to obey blindly. It never overrides routing policy or explicit configuration. Do not create a goal/assumption ledger for these checks; keep only the normal active tracking and task context.
+
 **Git ownership:** Subagents do not commit, stage, push, or run any Git write command. They return changed files and a suggested commit message to the orchestrator, along with verification evidence. The orchestrator performs any Git write only after explicit user authorization.
 
 **Local workflow boundaries:** No automatic workspace or ledger scripts, automatic

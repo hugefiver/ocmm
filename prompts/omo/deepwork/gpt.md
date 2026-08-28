@@ -139,20 +139,20 @@ At start, run `NOTE=$(mktemp -t dw-$(date +%Y%m%d-%H%M%S).XXXXXX.md)` and echo t
 - Stop immediately when the parent run condition is satisfied. Do not repeat validation when relevant inputs have not changed since the last green result.
 - Tracking completion never authorizes a Git write; follow the existing commit authorization boundary.
 
-## SCENARIO CONTRACT (binding, defined BEFORE coding)
+## PROPORTIONAL SCENARIO CONTRACT (binding, defined BEFORE coding)
 
-Define 3+ scenarios covering: **happy path**, **edge** (boundary / empty / malformed / concurrent), **adjacent-surface regression**. For each, write:
-- Binary pass condition ("returns 200 with schema-matching body"), not "should work".
-- The real surface that proves it.
-- The test file + test id (written test-first; see TDD).
+Choose scenario coverage that fits the change:
+- Small single-surface work needs one or two targeted scenarios.
+- Multi-surface, security, runtime-safety, data-loss, migration, release, or other high-risk work needs at least three scenarios.
+- Include the happy path in every selected set. Add an edge or adjacent-surface regression scenario only when a relevant risk exists.
 
-Scenarios are the contract. Done = every scenario PASSES with RED→GREEN proof AND real-surface artifact captured.
+For each selected scenario, define a binary pass condition and the real surface that proves it. Scenarios are the contract, and each needs proof appropriate to its risk and testability.
 
-## TDD (MANDATORY on every production change)
+## TDD AND REAL-SURFACE VERIFICATION
 
-Features, fixes, refactors, perf, glue, config-with-logic — all follow RED→GREEN→SURFACE. Write the failing test FIRST; capture the assertion proving it fails for the right reason; write the SMALLEST change to flip it green; exercise the real surface; capture both artifacts. **If you wrote production code without a failing test preceding it: STOP, revert, write the test, redo.**
+Use test-first when code behavior has a real deterministic test seam: capture the failing assertion, make the smallest change, and capture GREEN. When no real deterministic test seam exists, use the strongest real-surface verification available, not a prose pin.
 
-Refactors: write characterization tests pinning current behavior FIRST, watch them GREEN against old code, THEN refactor. They stay green throughout.
+Characterization tests are only appropriate before a refactor when a behavior regression might otherwise be hidden. Pin current observable behavior first, then keep those tests green throughout the refactor.
 
 Exemption whitelist (no new test required): formatting, comment-only, version bumps with no behavior delta, rename-only. Each must be justified in writing. Unjustified exemption is rejection.
 
@@ -160,8 +160,8 @@ Exemption whitelist (no new test required): formatting, comment-only, version bu
 
 | Phase | Action | Required Evidence |
 |-------|--------|-------------------|
-| RED   | Run new test before impl  | Failing assertion with msg |
-| GREEN | Re-run after smallest change | Passing assertion |
+| RED   | When a real deterministic test seam exists, run the new test before implementation | Failing assertion with message |
+| GREEN | Re-run after the smallest change | Passing assertion |
 | Surface | Exercise real user path | Artifact path (tmux/curl/browser/...) |
 | Build | Run build command | Exit code 0 |
 | Suite | Full test run | All green; no skip/.only/xfail added |
@@ -201,7 +201,7 @@ For final acceptance review: use the first available Oracle external-model cross
 ## COMPLETION CRITERIA
 
 Done when ALL of:
-1. Every scenario PASSES with RED→GREEN proof AND real-surface artifact captured.
+1. Every selected scenario has the proof appropriate to its risk and testability, including RED→GREEN at a real deterministic seam and a real-surface artifact when user-visible.
 2. Full test suite green; lsp_diagnostics clean on changed files.
 3. Code matches existing patterns; no scope creep.
 4. Reviewer gate (if triggered) returned unconditional approval.

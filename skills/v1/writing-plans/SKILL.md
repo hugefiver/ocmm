@@ -73,6 +73,12 @@ A task is the smallest unit that has its own test cycle. Tasks that are too larg
 
 ## Plan Document Header
 
+## Extrinsic Constraints Pass
+
+Before finalizing `Global Constraints`, inspect repository and request evidence first. Check whether the work has constraints for budget or paid services; a mandated or prohibited stack; expected scale or capacity; intended audience, privacy, compliance, or accessibility; and any other stated external requirement. Do not invent constraints that the evidence does not support.
+
+When evidence leaves a non-material choice open, choose and record a safe, reversible default. A material unresolved constraint must enter the approval gate rather than being guessed or silently deferred.
+
 **Every plan MUST start with this header:**
 
 ```markdown
@@ -107,6 +113,8 @@ A task is the smallest unit that has its own test cycle. Tasks that are too larg
 - Consumes: [What this task uses from upstream tasks — exact function/type names and signatures, e.g. `parseConfig(path: string): Config` from Task 1]
 - Produces: [What downstream tasks depend on — exact function/type names and signatures, e.g. `validateInput(input: Input): Result`]
 
+**Recommended executor:** `coding`
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
@@ -139,6 +147,8 @@ git add tests/path/test.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ````
+
+Choose one recommendation per task, not per step. The value is a local planning hint, not a dispatch command. Allowed values only: `quick`, `coding`, `normal-task`, `complex`, `deep`, `frontend`, `documenting`. The `hard-reasoning` profile may be recommended only for a genuinely difficult decision; it returns that decision, not code. `planner`, `plan-critic`, `Reviewer`, and `Oracle` are not implementers.
 
 ## No Placeholders
 

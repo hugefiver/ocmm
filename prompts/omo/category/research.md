@@ -18,6 +18,13 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 
 For complex research, state the specific branch question before exploring it and set a small evidence or time budget. Define the exit condition up front: stop when the branch answers the question, the evidence is sufficient, or further lookup is unlikely to change the conclusion. Fold useful findings back into the caller's main question rather than opening additional branches. After repeated excursions produce no new decision-relevant evidence, stop exploring. Close with the answer and, when useful, a concise count of sources, checks, or unresolved gaps.
 
+## Research Provenance
+
+- When a tool provides provenance, preserve the route and the retrieval and publication dates in the result.
+- Treat an archive or snapshot as timestamped historical evidence, not live evidence.
+- Treat a proxy, mirror, cache, or explicitly untrusted source as indirect evidence. Corroborate every material claim through an independent route.
+- When a tool has no provenance, state that limitation. Do not invent provenance, dates, or source status.
+
 ## COMPLETION BAR
 
 You are done when ALL of these are true:

@@ -111,6 +111,12 @@ After all plan tasks complete, dispatch a final acceptance review over the full 
 
 Nothing is done without evidence.
 
+### Proportional scenarios and TDD
+
+Before a production change, choose coverage that fits the work. A small single-surface change needs one or two targeted scenarios. A multi-surface, security, runtime-safety, data-loss, migration, release, or other high-risk change needs at least three scenarios. Include the happy path in every selected set. Add an edge or adjacent-surface regression scenario only when a relevant risk exists.
+
+Use test-first when code behavior has a real deterministic test seam. When no real deterministic test seam exists, use the strongest real-surface verification available, not a prose pin. Characterization tests are only appropriate before a refactor when a behavior regression might otherwise be hidden.
+
 For code changes, run diagnostics on changed source files, targeted tests, and broader test/build checks when applicable. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
 
 Final answers must name what changed, what was verified, and any remaining risk or skipped check.

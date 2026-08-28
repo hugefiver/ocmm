@@ -66,6 +66,8 @@ The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory (parallel 
 
 The deepwork source inventory contains eight variants: `default`, `gpt`, `gpt-5.6`, `claude-opus-5`, `gemini`, `glm`, `codex`, and `planner`.
 
+**2026-08-28 proportional default verification:** `prompts/v1/deepwork/default.md` now asks for one or two targeted scenarios for a small single-surface change and at least three for multi-surface or security/runtime-safety/data-loss/migration/release/high-risk work. It always includes a happy path and adds edge or adjacent coverage only when risk exists. Test-first requires a real deterministic test seam; otherwise use the strongest real-surface verification, with no synthetic boundary or prose pin. Characterization tests are limited to refactors where a behavior regression could otherwise be hidden.
+
 **Shared shell-safety prompt (2026-08-01):**
 `prompts/shared/shell-safety.md` is a workflow-independent local prompt appended
 exactly once by the config composition layer to every built-in agent and
@@ -186,3 +188,17 @@ When syncing a v1 skill from upstream superpowers:
 4. Update the "Last synced" date and "Upstream version" in this doc
 5. Run `pnpm test` to verify nothing broke
 6. Commit with message: `chore: sync v1/<name> skill from superpowers <version>`
+
+## Research Provenance Alignment (2026-08-28)
+
+- Reviewed upstream baseline `./omo@ef1c392f10eafb28913eb7815143c328d88aad47`.
+- `prompts/{omo,v1,codex}/category/research.md` now share one minimal provenance contract: preserve a tool-provided route plus retrieval and publication dates; label archives and snapshots with their timestamp and never present them as live evidence; treat proxies, mirrors, caches, and explicitly untrusted sources as indirect evidence; corroborate material indirect-evidence claims through an independent route; and state missing provenance limits without inventing details.
+- The three-surface alignment is source-level only. It does not add exhaustive research, a second worker for every claim, citation graphs, persistent research assets, new tools, or generated Codex output changes.
+
+## Task 12 Planning Executor Contract (2026-08-28)
+
+- Reviewed upstream baseline `./omo@ef1c392f10eafb28913eb7815143c328d88aad47` before making this local v1 adaptation.
+- `writing-plans` now completes an extrinsic constraints pass before finalizing Global Constraints. It reads repository and request evidence for budget or paid-service limits, mandated or prohibited stacks, scale and capacity, and audience, privacy, compliance, and accessibility needs. It does not invent constraints, uses safe reversible defaults when appropriate, and moves material unresolved constraints to the approval gate.
+- Every planned task declares one local executor recommendation from the local executor allowlist: `quick`, `coding`, `normal-task`, `complex`, `deep`, `frontend`, or `documenting`. `hard-reasoning` returns a genuinely difficult decision only, never code. Planner, plan-critic, Reviewer, and Oracle remain non-implementer roles.
+- `subagent-driven-development` checks callable availability, active file ownership, dependencies, required security and runtime rigor, and whether direct execution is smaller before dispatching. Routing authority remains with routing policy and explicit configuration, so a recommendation is not a command.
+- This source-only change does not add persistent ledgers or automatic Git actions, and it does not hand-edit generated Codex copies. Those generated copies remain for their dedicated task.
