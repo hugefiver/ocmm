@@ -1,12 +1,14 @@
 use anyhow::{anyhow, bail, Context, Result};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -18,6 +20,7 @@ const LSP_CLIENT_ERROR_CODE: i64 = -32000;
 const LSP_EXIT_GRACE_MS: u64 = 500;
 const LSP_EXIT_POLL_MS: u64 = 10;
 const LSP_TERMINATION_WAIT_MS: u64 = 2_000;
+static NEXT_FORMAT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy)]
 enum WireMode {
@@ -41,6 +44,31 @@ struct ToolOutput {
     text: String,
     is_error: bool,
     details: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum FormatResult {
+    Unavailable {
+        reason: String,
+        #[serde(rename = "linesAdded")]
+        lines_added: usize,
+        #[serde(rename = "linesRemoved")]
+        lines_removed: usize,
+    },
+    Unchanged {
+        #[serde(rename = "linesAdded")]
+        lines_added: usize,
+        #[serde(rename = "linesRemoved")]
+        lines_removed: usize,
+    },
+    Formatted {
+        #[serde(rename = "linesAdded")]
+        lines_added: usize,
+        #[serde(rename = "linesRemoved")]
+        lines_removed: usize,
+        committed: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1066,6 +1094,19 @@ fn tool_descriptors() -> Value {
                 "required": ["filePath", "line", "character", "newName"],
                 "additionalProperties": false
             }
+        },
+        {
+            "name": "format",
+            "title": "LSP Format",
+            "description": "Format a source file through its language server.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filePath": { "type": "string" }
+                },
+                "required": ["filePath"],
+                "additionalProperties": false
+            }
         }
     ])
 }
@@ -1095,6 +1136,7 @@ fn execute_tool(name: &str, args: &Value) -> Result<ToolOutput> {
             position_request_tool(args, "textDocument/prepareRename", "prepare_rename")
         }
         "rename" => rename_tool(args),
+        "format" => format_tool(required_string(args, "filePath")?),
         other => Ok(ToolOutput {
             text: format!("Unknown LSP tool: {other}"),
             is_error: true,
@@ -1113,6 +1155,7 @@ fn normalize_tool_name(name: &str) -> &str {
         "lsp_symbols" => "symbols",
         "lsp_prepare_rename" => "prepare_rename",
         "lsp_rename" => "rename",
+        "lsp_format" => "format",
         other => other,
     }
 }
@@ -1449,6 +1492,92 @@ fn rename_tool(args: &Value) -> Result<ToolOutput> {
         text: result.format(),
         is_error: !result.success,
         details: Some(result.to_json()),
+    })
+}
+
+fn format_tool(file_path: &str) -> Result<ToolOutput> {
+    let mut session = LspSession::for_file(file_path)?;
+    session.initialize()?;
+    if !session.formatting_supported {
+        session.shutdown();
+        return format_tool_output(
+            "Document formatting is unavailable because the language server did not advertise support.",
+            false,
+            &FormatResult::Unavailable {
+                reason: "capability_not_advertised".to_string(),
+                lines_added: 0,
+                lines_removed: 0,
+            },
+        );
+    }
+
+    let original = fs::read(&session.file_path)
+        .with_context(|| format!("cannot read source file: {}", session.file_path.display()))?;
+    let original_text = String::from_utf8(original.clone()).context("source is not valid UTF-8")?;
+    let uri = session.open_document(original_text)?;
+    let edits = session.request_legacy(
+        "textDocument/formatting",
+        json!({
+            "textDocument": { "uri": uri },
+            "options": {
+                "tabSize": 4,
+                "insertSpaces": false,
+                "trimTrailingWhitespace": true,
+                "insertFinalNewline": true,
+                "trimFinalNewlines": true
+            }
+        }),
+    )?;
+
+    let unchanged = FormatResult::Unchanged {
+        lines_added: 0,
+        lines_removed: 0,
+    };
+    if edits.is_null() {
+        session.shutdown();
+        return format_tool_output("Formatting produced no changes.", false, &unchanged);
+    }
+    let edits = edits
+        .as_array()
+        .ok_or_else(|| anyhow!("formatting response must be null or an array of text edits"))?;
+    if edits.is_empty() {
+        session.shutdown();
+        return format_tool_output("Formatting produced no changes.", false, &unchanged);
+    }
+
+    let normalized = normalize_formatting_edits(&original, edits, session.position_encoding)?;
+    let replacement = apply_normalized_edits(&original, &normalized)?;
+    if replacement == original {
+        session.shutdown();
+        return format_tool_output("Formatting produced no changes.", false, &unchanged);
+    }
+
+    let (lines_added, lines_removed) = logical_line_delta(&original, &replacement)?;
+    atomic_replace_if_unchanged(&session.file_path, &original, &replacement)?;
+    let formatted = FormatResult::Formatted {
+        lines_added,
+        lines_removed,
+        committed: true,
+    };
+    if let Err(error) = session.resynchronize_committed_document(&uri, &replacement) {
+        session.shutdown();
+        return format_tool_output(
+            &format!(
+                "Formatting was committed, but LSP document resynchronization failed: {error}"
+            ),
+            true,
+            &formatted,
+        );
+    }
+    session.shutdown();
+    format_tool_output("Formatting committed atomically.", false, &formatted)
+}
+
+fn format_tool_output(text: &str, is_error: bool, result: &FormatResult) -> Result<ToolOutput> {
+    Ok(ToolOutput {
+        text: text.to_string(),
+        is_error,
+        details: Some(serde_json::to_value(result)?),
     })
 }
 
@@ -2023,6 +2152,405 @@ fn find_in_path(command: &str) -> Option<PathBuf> {
     None
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PositionEncoding {
+    Utf8,
+    Utf16,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NormalizedTextEdit {
+    start: usize,
+    end: usize,
+    new_text: Vec<u8>,
+}
+
+#[allow(dead_code)]
+fn normalize_formatting_edits(
+    source: &[u8],
+    edits: &[Value],
+    encoding: PositionEncoding,
+) -> Result<Vec<NormalizedTextEdit>> {
+    let source_text = std::str::from_utf8(source).context("source is not valid UTF-8")?;
+    let lines = formatting_line_ranges(source);
+    let mut normalized = Vec::with_capacity(edits.len());
+
+    for (index, edit) in edits.iter().enumerate() {
+        let edit = edit
+            .as_object()
+            .ok_or_else(|| anyhow!("formatting edit {index} must be an object"))?;
+        let range = edit
+            .get("range")
+            .and_then(Value::as_object)
+            .ok_or_else(|| anyhow!("formatting edit {index} range must be an object"))?;
+        let start = formatting_position_offset(
+            source_text,
+            &lines,
+            range
+                .get("start")
+                .ok_or_else(|| anyhow!("formatting edit {index} is missing range.start"))?,
+            encoding,
+            &format!("formatting edit {index} range.start"),
+        )?;
+        let end = formatting_position_offset(
+            source_text,
+            &lines,
+            range
+                .get("end")
+                .ok_or_else(|| anyhow!("formatting edit {index} is missing range.end"))?,
+            encoding,
+            &format!("formatting edit {index} range.end"),
+        )?;
+        if start > end {
+            bail!("formatting edit {index} has a reversed range");
+        }
+        let new_text = edit
+            .get("newText")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("formatting edit {index} newText must be a string"))?;
+        normalized.push(NormalizedTextEdit {
+            start,
+            end,
+            new_text: new_text.as_bytes().to_vec(),
+        });
+    }
+
+    canonicalize_normalized_edits(source.len(), &normalized)
+}
+
+#[allow(dead_code)]
+fn apply_normalized_edits(source: &[u8], edits: &[NormalizedTextEdit]) -> Result<Vec<u8>> {
+    let mut edits = canonicalize_normalized_edits(source.len(), edits)?;
+    edits.sort_by(|left, right| {
+        right
+            .start
+            .cmp(&left.start)
+            .then_with(|| right.end.cmp(&left.end))
+    });
+
+    let mut replacement = source.to_vec();
+    for edit in edits {
+        replacement.splice(edit.start..edit.end, edit.new_text);
+    }
+    Ok(replacement)
+}
+
+#[allow(dead_code)]
+fn logical_line_delta(original: &[u8], replacement: &[u8]) -> Result<(usize, usize)> {
+    if original == replacement {
+        return Ok((0, 0));
+    }
+
+    let original = std::str::from_utf8(original).context("original text is not valid UTF-8")?;
+    let replacement =
+        std::str::from_utf8(replacement).context("replacement text is not valid UTF-8")?;
+    let original_lines = original.lines().collect::<Vec<_>>();
+    let replacement_lines = replacement.lines().collect::<Vec<_>>();
+
+    let common_prefix = original_lines
+        .iter()
+        .zip(&replacement_lines)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let max_suffix = original_lines
+        .len()
+        .min(replacement_lines.len())
+        .saturating_sub(common_prefix);
+    let common_suffix = original_lines[common_prefix..]
+        .iter()
+        .rev()
+        .zip(replacement_lines[common_prefix..].iter().rev())
+        .take(max_suffix)
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    Ok((
+        replacement_lines.len() - common_prefix - common_suffix,
+        original_lines.len() - common_prefix - common_suffix,
+    ))
+}
+
+#[allow(dead_code)]
+fn formatting_line_ranges(source: &[u8]) -> Vec<(usize, usize)> {
+    let mut lines = Vec::new();
+    let mut line_start = 0;
+    let mut index = 0;
+    while index < source.len() {
+        match source[index] {
+            b'\r' => {
+                lines.push((line_start, index));
+                index += if source.get(index + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+                line_start = index;
+            }
+            b'\n' => {
+                lines.push((line_start, index));
+                index += 1;
+                line_start = index;
+            }
+            _ => index += 1,
+        }
+    }
+    lines.push((line_start, source.len()));
+    lines
+}
+
+#[allow(dead_code)]
+fn formatting_position_offset(
+    source: &str,
+    lines: &[(usize, usize)],
+    position: &Value,
+    encoding: PositionEncoding,
+    label: &str,
+) -> Result<usize> {
+    let position = position
+        .as_object()
+        .ok_or_else(|| anyhow!("{label} must be an object"))?;
+    let line = formatting_position_integer(position.get("line"), &format!("{label}.line"))?;
+    let character =
+        formatting_position_integer(position.get("character"), &format!("{label}.character"))?;
+    let &(line_start, line_end) = lines
+        .get(line)
+        .ok_or_else(|| anyhow!("{label}.line references nonexistent line {line}"))?;
+    let line_text = &source[line_start..line_end];
+
+    match encoding {
+        PositionEncoding::Utf8 => {
+            if character > line_text.len() {
+                bail!("{label}.character exceeds the UTF-8 line length");
+            }
+            if !line_text.is_char_boundary(character) {
+                bail!("{label}.character splits a UTF-8 code point");
+            }
+            Ok(line_start + character)
+        }
+        PositionEncoding::Utf16 => {
+            let mut code_units = 0;
+            for (byte_offset, value) in line_text.char_indices() {
+                if code_units == character {
+                    return Ok(line_start + byte_offset);
+                }
+                let next_code_units = code_units + value.len_utf16();
+                if character < next_code_units {
+                    bail!("{label}.character splits a UTF-16 surrogate pair");
+                }
+                code_units = next_code_units;
+            }
+            if code_units == character {
+                Ok(line_end)
+            } else {
+                bail!("{label}.character exceeds the UTF-16 line length")
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn formatting_position_integer(value: Option<&Value>, label: &str) -> Result<usize> {
+    let value = value
+        .and_then(Value::as_u64)
+        .ok_or_else(|| anyhow!("{label} must be a non-negative integer"))?;
+    usize::try_from(value).with_context(|| format!("{label} exceeds the supported integer range"))
+}
+
+#[allow(dead_code)]
+fn canonicalize_normalized_edits(
+    source_len: usize,
+    edits: &[NormalizedTextEdit],
+) -> Result<Vec<NormalizedTextEdit>> {
+    let mut canonical = edits.to_vec();
+    canonical.sort_by(|left, right| {
+        left.start
+            .cmp(&right.start)
+            .then_with(|| left.end.cmp(&right.end))
+            .then_with(|| left.new_text.cmp(&right.new_text))
+    });
+    canonical.dedup();
+
+    for (index, edit) in canonical.iter().enumerate() {
+        if edit.start > edit.end {
+            bail!("normalized formatting edit {index} has a reversed range");
+        }
+        if edit.end > source_len {
+            bail!("normalized formatting edit {index} exceeds the source length");
+        }
+    }
+
+    for left_index in 0..canonical.len() {
+        for right in &canonical[left_index + 1..] {
+            let left = &canonical[left_index];
+            if left.start == left.end && right.start == right.end && left.start == right.start {
+                bail!("conflicting formatting insertions at byte {}", left.start);
+            }
+            if normalized_edits_overlap(left, right) {
+                bail!(
+                    "overlapping formatting edits at byte ranges {}..{} and {}..{}",
+                    left.start,
+                    left.end,
+                    right.start,
+                    right.end
+                );
+            }
+        }
+    }
+
+    Ok(canonical)
+}
+
+#[allow(dead_code)]
+fn normalized_edits_overlap(left: &NormalizedTextEdit, right: &NormalizedTextEdit) -> bool {
+    match (left.start == left.end, right.start == right.end) {
+        (false, false) => left.start < right.end && right.start < left.end,
+        (true, false) => right.start < left.start && left.start < right.end,
+        (false, true) => left.start < right.start && right.start < left.end,
+        (true, true) => false,
+    }
+}
+
+fn atomic_replace_if_unchanged(path: &Path, original: &[u8], replacement: &[u8]) -> Result<()> {
+    atomic_replace_if_unchanged_with_hook(path, original, replacement, || Ok(()))
+}
+
+fn atomic_replace_if_unchanged_with_hook<F>(
+    path: &Path,
+    original: &[u8],
+    replacement: &[u8],
+    after_temp_sync: F,
+) -> Result<()>
+where
+    F: FnOnce() -> Result<()>,
+{
+    let permissions = fs::metadata(path)
+        .with_context(|| format!("cannot read target metadata: {}", path.display()))?
+        .permissions();
+    let (temp_path, mut temp_file) = create_format_temp(path)?;
+    let operation = (|| {
+        fs::set_permissions(&temp_path, permissions).with_context(|| {
+            format!(
+                "cannot copy target permissions to formatting temp: {}",
+                temp_path.display()
+            )
+        })?;
+        temp_file
+            .write_all(replacement)
+            .with_context(|| format!("cannot write formatting temp: {}", temp_path.display()))?;
+        temp_file
+            .flush()
+            .with_context(|| format!("cannot flush formatting temp: {}", temp_path.display()))?;
+        temp_file
+            .sync_all()
+            .with_context(|| format!("cannot sync formatting temp: {}", temp_path.display()))?;
+        after_temp_sync()?;
+
+        if fs::read(path)
+            .with_context(|| format!("cannot re-read formatting target: {}", path.display()))?
+            != original
+        {
+            bail!(
+                "stale formatting snapshot: target changed before atomic replacement: {}",
+                path.display()
+            );
+        }
+        platform_atomic_replace(&temp_path, path)
+    })();
+
+    if let Err(error) = operation {
+        drop(temp_file);
+        return match fs::remove_file(&temp_path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => Err(error),
+            Err(cleanup_error) => Err(error).with_context(|| {
+                format!(
+                    "failed to clean owned formatting temp {}: {cleanup_error}",
+                    temp_path.display()
+                )
+            }),
+        };
+    }
+    Ok(())
+}
+
+fn create_format_temp(path: &Path) -> Result<(PathBuf, fs::File)> {
+    let parent = path.parent().ok_or_else(|| {
+        anyhow!(
+            "formatting target has no parent directory: {}",
+            path.display()
+        )
+    })?;
+    let basename = path
+        .file_name()
+        .ok_or_else(|| anyhow!("formatting target has no file name: {}", path.display()))?
+        .to_string_lossy();
+
+    loop {
+        let id = NEXT_FORMAT_TEMP_ID.fetch_add(1, AtomicOrdering::Relaxed);
+        let temp_path = parent.join(format!(
+            ".{basename}.ocmm-format-{}-{id}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("cannot create formatting temp: {}", temp_path.display())
+                });
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn platform_atomic_replace(temp_path: &Path, target_path: &Path) -> Result<()> {
+    fs::rename(temp_path, target_path).with_context(|| {
+        format!(
+            "cannot atomically replace {} with {}",
+            target_path.display(),
+            temp_path.display()
+        )
+    })
+}
+
+#[cfg(windows)]
+fn platform_atomic_replace(temp_path: &Path, target_path: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let temp_wide = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target_wide = target_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+    // SAFETY: both paths are NUL-terminated UTF-16 buffers alive for the duration of the call.
+    let moved = unsafe { MoveFileExW(temp_wide.as_ptr(), target_wide.as_ptr(), flags) };
+    if moved == 0 {
+        return Err(io::Error::last_os_error()).with_context(|| {
+            format!(
+                "cannot atomically replace {} with {}",
+                target_path.display(),
+                temp_path.display()
+            )
+        });
+    }
+    Ok(())
+}
+
 struct LspSession {
     child: ManagedChild,
     stdin: ChildStdin,
@@ -2032,6 +2560,10 @@ struct LspSession {
     root: PathBuf,
     server: LspServer,
     diagnostics: HashMap<String, Vec<Value>>,
+    formatting_supported: bool,
+    position_encoding: PositionEncoding,
+    document_version: u64,
+    document_text: String,
     closed: bool,
 }
 
@@ -2101,6 +2633,10 @@ impl LspSession {
             root,
             server,
             diagnostics: HashMap::new(),
+            formatting_supported: false,
+            position_encoding: PositionEncoding::Utf16,
+            document_version: 1,
+            document_text: String::new(),
             closed: false,
         })
     }
@@ -2124,6 +2660,9 @@ impl LspSession {
                     "symbol": {},
                     "workspaceFolders": true,
                     "configuration": true
+                },
+                "general": {
+                    "positionEncodings": ["utf-8", "utf-16"]
                 }
             },
             "initializationOptions": self.server.initialization.clone().unwrap_or(Value::Null)
@@ -2134,26 +2673,66 @@ impl LspSession {
                 .unwrap()
                 .remove("initializationOptions");
         }
-        self.request_legacy("initialize", params)?;
+        let result = self.request_legacy("initialize", params)?;
+        let capabilities = result.get("capabilities").and_then(Value::as_object);
+        self.formatting_supported = matches!(
+            capabilities.and_then(|value| value.get("documentFormattingProvider")),
+            Some(Value::Bool(true)) | Some(Value::Object(_))
+        );
+        self.position_encoding = match capabilities.and_then(|value| value.get("positionEncoding"))
+        {
+            None => PositionEncoding::Utf16,
+            Some(Value::String(encoding)) if encoding == "utf-8" => PositionEncoding::Utf8,
+            Some(Value::String(encoding)) if encoding == "utf-16" => PositionEncoding::Utf16,
+            Some(encoding) => bail!("unsupported LSP position encoding: {encoding}"),
+        };
         self.notify("initialized", json!({}))?;
         Ok(())
     }
 
     fn open_file(&mut self) -> Result<String> {
         let text = fs::read_to_string(&self.file_path)?;
+        self.open_document(text)
+    }
+
+    fn open_document(&mut self, text: String) -> Result<String> {
         let uri = path_to_uri(&self.file_path);
+        self.document_text = text;
+        self.notify_did_open(&uri)?;
+        Ok(uri)
+    }
+
+    fn notify_did_open(&mut self, uri: &str) -> Result<()> {
         self.notify(
             "textDocument/didOpen",
             json!({
                 "textDocument": {
                     "uri": uri,
                     "languageId": language_id(&self.file_path),
-                    "version": 1,
-                    "text": text
+                    "version": self.document_version,
+                    "text": self.document_text
                 }
             }),
+        )
+    }
+
+    fn resynchronize_committed_document(&mut self, uri: &str, replacement: &[u8]) -> Result<()> {
+        self.notify(
+            "textDocument/didClose",
+            json!({ "textDocument": { "uri": uri } }),
         )?;
-        Ok(uri)
+        self.document_version = self
+            .document_version
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("LSP document version overflow"))?;
+        self.document_text = std::str::from_utf8(replacement)
+            .context("committed formatting result is not valid UTF-8")?
+            .to_string();
+        #[cfg(debug_assertions)]
+        if env::var_os("OCMM_LSP_TEST_FAIL_POST_COMMIT_DID_OPEN").is_some() {
+            bail!("injected post-commit didOpen failure");
+        }
+        self.notify_did_open(uri)
     }
 
     fn request(&mut self, method: &str, params: Value) -> LspRequestResult<Value> {
@@ -2508,6 +3087,237 @@ mod tests {
     #[cfg(windows)]
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    fn formatting_edit(
+        start_line: Value,
+        start_character: Value,
+        end_line: Value,
+        end_character: Value,
+        new_text: &str,
+    ) -> Value {
+        json!({
+            "range": {
+                "start": { "line": start_line, "character": start_character },
+                "end": { "line": end_line, "character": end_character }
+            },
+            "newText": new_text
+        })
+    }
+
+    #[test]
+    fn normalize_formatting_edits_handles_utf8_utf16_non_bmp_and_crlf() {
+        let source = "a😀b\r\nsecond\n".as_bytes();
+        let utf16_edits = json!([
+            formatting_edit(json!(1), json!(0), json!(1), json!(6), "SECOND"),
+            formatting_edit(json!(0), json!(1), json!(0), json!(3), "X"),
+            formatting_edit(json!(0), json!(1), json!(0), json!(3), "X")
+        ]);
+
+        let normalized = normalize_formatting_edits(
+            source,
+            utf16_edits.as_array().unwrap(),
+            PositionEncoding::Utf16,
+        )
+        .unwrap();
+        assert_eq!(normalized.len(), 2, "exact duplicates should be removed");
+        assert_eq!(normalized[0].start, 1);
+        assert_eq!(normalized[0].end, 5);
+        assert_eq!(
+            apply_normalized_edits(source, &normalized).unwrap(),
+            b"aXb\r\nSECOND\n"
+        );
+
+        let utf8_edits = json!([
+            formatting_edit(json!(0), json!(1), json!(0), json!(5), "Y"),
+            formatting_edit(json!(1), json!(0), json!(1), json!(6), "SECOND")
+        ]);
+        let normalized = normalize_formatting_edits(
+            source,
+            utf8_edits.as_array().unwrap(),
+            PositionEncoding::Utf8,
+        )
+        .unwrap();
+        assert_eq!(
+            apply_normalized_edits(source, &normalized).unwrap(),
+            b"aYb\r\nSECOND\n"
+        );
+    }
+
+    #[test]
+    fn normalize_formatting_edits_allows_adjacent_ranges_and_distinct_insertions() {
+        let source = b"abcdef";
+        let edits = json!([
+            formatting_edit(json!(0), json!(5), json!(0), json!(5), "+"),
+            formatting_edit(json!(0), json!(1), json!(0), json!(3), "BC"),
+            formatting_edit(json!(0), json!(4), json!(0), json!(4), "-"),
+            formatting_edit(json!(0), json!(0), json!(0), json!(1), "A")
+        ]);
+
+        let normalized =
+            normalize_formatting_edits(source, edits.as_array().unwrap(), PositionEncoding::Utf8)
+                .unwrap();
+
+        assert_eq!(normalized.len(), 4);
+        assert!(normalized.windows(2).all(|pair| {
+            (pair[0].start, pair[0].end, &pair[0].new_text)
+                <= (pair[1].start, pair[1].end, &pair[1].new_text)
+        }));
+        assert_eq!(
+            apply_normalized_edits(source, &normalized).unwrap(),
+            b"ABCd-e+f"
+        );
+    }
+
+    #[test]
+    fn normalize_formatting_edits_rejects_invalid_matrix_before_apply() {
+        let cases = [
+            (
+                "non-integer",
+                b"abc".as_slice(),
+                PositionEncoding::Utf8,
+                vec![formatting_edit(
+                    json!(0.5),
+                    json!(0),
+                    json!(0),
+                    json!(1),
+                    "X",
+                )],
+            ),
+            (
+                "negative",
+                b"abc".as_slice(),
+                PositionEncoding::Utf8,
+                vec![formatting_edit(
+                    json!(0),
+                    json!(-1),
+                    json!(0),
+                    json!(1),
+                    "X",
+                )],
+            ),
+            (
+                "nonexistent line",
+                b"abc".as_slice(),
+                PositionEncoding::Utf8,
+                vec![formatting_edit(json!(1), json!(0), json!(1), json!(0), "X")],
+            ),
+            (
+                "UTF-8 code point split",
+                "a😀b".as_bytes(),
+                PositionEncoding::Utf8,
+                vec![formatting_edit(json!(0), json!(2), json!(0), json!(5), "X")],
+            ),
+            (
+                "UTF-16 surrogate split",
+                "a😀b".as_bytes(),
+                PositionEncoding::Utf16,
+                vec![formatting_edit(json!(0), json!(2), json!(0), json!(3), "X")],
+            ),
+            (
+                "reversed range",
+                b"abc".as_slice(),
+                PositionEncoding::Utf8,
+                vec![formatting_edit(json!(0), json!(2), json!(0), json!(1), "X")],
+            ),
+            (
+                "overlap",
+                b"abcd".as_slice(),
+                PositionEncoding::Utf8,
+                vec![
+                    formatting_edit(json!(0), json!(0), json!(0), json!(2), "X"),
+                    formatting_edit(json!(0), json!(1), json!(0), json!(3), "Y"),
+                ],
+            ),
+            (
+                "same-point conflicting insertions",
+                b"abc".as_slice(),
+                PositionEncoding::Utf8,
+                vec![
+                    formatting_edit(json!(0), json!(1), json!(0), json!(1), "X"),
+                    formatting_edit(json!(0), json!(1), json!(0), json!(1), "Y"),
+                ],
+            ),
+        ];
+
+        for (name, source, encoding, edits) in cases {
+            let error = normalize_formatting_edits(source, &edits, encoding).expect_err(name);
+            assert!(
+                !error.to_string().is_empty(),
+                "{name} should explain failure"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_normalized_edits_uses_immutable_offsets_and_preserves_source() {
+        let source = b"0123456789";
+        let edits = vec![
+            NormalizedTextEdit {
+                start: 1,
+                end: 3,
+                new_text: b"A".to_vec(),
+            },
+            NormalizedTextEdit {
+                start: 7,
+                end: 9,
+                new_text: b"LONG".to_vec(),
+            },
+        ];
+
+        let replacement = apply_normalized_edits(source, &edits).unwrap();
+
+        assert_eq!(replacement, b"0A3456LONG9");
+        assert_eq!(source, b"0123456789");
+    }
+
+    #[test]
+    fn apply_normalized_edits_reports_logical_line_delta() {
+        assert_eq!(
+            logical_line_delta(b"a\r\nb\r\n", b"a\r\nx\r\ny\r\n").unwrap(),
+            (2, 1)
+        );
+        assert_eq!(
+            logical_line_delta(b"a\r\nb\r\n", b"a\nb\n").unwrap(),
+            (0, 0)
+        );
+        assert_eq!(logical_line_delta(b"same\n", b"same\n").unwrap(), (0, 0));
+        assert!(logical_line_delta(&[0xff], b"valid").is_err());
+    }
+
+    #[test]
+    fn atomic_replace_detects_mutation_after_temp_sync_and_cleans_owned_temp() {
+        let root = temp_dir("ocmm-lsp-format-stale");
+        fs::create_dir_all(&root).expect("create formatting test directory");
+        let path = root.join("subject.rs");
+        let original = b"fn subject() {}\n";
+        let concurrent = b"fn changed() {}\n";
+        fs::write(&path, original).expect("write original subject");
+
+        let error =
+            atomic_replace_if_unchanged_with_hook(&path, original, b"fn formatted() {}\n", || {
+                fs::write(&path, concurrent).context("inject concurrent mutation")?;
+                Ok(())
+            })
+            .expect_err("post-sync mutation must be stale");
+
+        assert!(error.to_string().contains("stale formatting snapshot"));
+        assert_eq!(
+            fs::read(&path).expect("read concurrent subject"),
+            concurrent
+        );
+        let names = fs::read_dir(&root)
+            .expect("read formatting test directory")
+            .map(|entry| {
+                entry
+                    .expect("read formatting test entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["subject.rs"]);
+        fs::remove_dir_all(root).expect("remove formatting test directory");
+    }
 
     #[test]
     fn lsp_response_error_preserves_code_message_and_data() {

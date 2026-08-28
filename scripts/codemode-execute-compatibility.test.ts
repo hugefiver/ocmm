@@ -430,13 +430,14 @@ const DIRECT_LSP_TOOL_NAMES = [
   "symbols",
   "prepare_rename",
   "rename",
+  "format",
 ]
 
-function directLspResponse(): string {
+function directLspResponse(toolNames = DIRECT_LSP_TOOL_NAMES): string {
   return JSON.stringify({
     jsonrpc: "2.0",
     id: 1,
-    result: { tools: DIRECT_LSP_TOOL_NAMES.map((name) => ({ name })) },
+    result: { tools: toolNames.map((name) => ({ name })) },
   })
 }
 
@@ -996,6 +997,9 @@ test("direct LSP smoke command owns the native binary directly", () => {
 
 test("direct LSP smoke parser accepts only the strict canonical JSON-RPC envelope", () => {
   assert.equal(parseDirectLspToolsList(directLspResponse()), true)
+  const oldEight = DIRECT_LSP_TOOL_NAMES.filter((name) => name !== "format")
+  assert.equal(parseDirectLspToolsList(directLspResponse(oldEight)), false, "old eight tools")
+  assert.equal(parseDirectLspToolsList(directLspResponse(DIRECT_LSP_TOOL_NAMES.filter((name) => name !== "format"))), false, "missing format")
   assert.equal(parseDirectLspToolsList(JSON.stringify({
     id: 1, result: { tools: DIRECT_LSP_TOOL_NAMES.map((name) => ({ name })) },
   })), false)
@@ -1011,13 +1015,13 @@ test("direct LSP smoke parser accepts only the strict canonical JSON-RPC envelop
     jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES.slice(0, 7).map((name) => ({ name })), {}] },
   })), false)
   assert.equal(parseDirectLspToolsList(JSON.stringify({
-    jsonrpc: "2.0", id: 1, result: { tools: DIRECT_LSP_TOOL_NAMES.filter((name) => name !== "find_symbol_related").map((name) => ({ name })) },
+    jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES, "format"].map((name) => ({ name })) },
   })), false)
   assert.equal(parseDirectLspToolsList(JSON.stringify({
     jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES, "unexpected_tool"].map((name) => ({ name })) },
   })), false)
   assert.equal(parseDirectLspToolsList(JSON.stringify({
-    jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES.slice(0, 7), "rename", "rename"].map((name) => ({ name })) },
+    jsonrpc: "2.0", id: 1, result: { tools: [...DIRECT_LSP_TOOL_NAMES.slice(0, 8), "rename", "rename"].map((name) => ({ name })) },
   })), false)
 })
 

@@ -31,7 +31,12 @@ impl MockWorkspace {
             .join("fixtures")
             .join("mock_lsp.mjs");
 
-        fs::write(&subject_path, "fn subject() {}\n").expect("write subject");
+        let subject = match scenario {
+            "format-utf8" | "format-resync-did-open-failure" => "fn  subject() {}\n",
+            "format_utf16_crlf" => "fn  subject() {}\r\n",
+            _ => "fn subject() {}\n",
+        };
+        fs::write(&subject_path, subject).expect("write subject");
         fs::write(&trace_path, "").expect("create trace");
         fs::write(
             &config_path,
@@ -43,7 +48,8 @@ impl MockWorkspace {
                         "priority": 10_000,
                         "env": {
                             "MOCK_LSP_SCENARIO": scenario,
-                            "MOCK_LSP_TRACE": trace_path.to_string_lossy()
+                            "MOCK_LSP_TRACE": trace_path.to_string_lossy(),
+                            "MOCK_LSP_SUBJECT": subject_path.to_string_lossy()
                         }
                     }
                 }
@@ -96,6 +102,9 @@ impl McpProcess {
             .current_dir(&workspace.root)
             .env("OCMM_LSP_PROJECT_CONFIG", &workspace.config_path)
             .env("OCMM_LSP_USER_CONFIG", &workspace.missing_user_config);
+        if scenario == "format-resync-did-open-failure" {
+            command.env("OCMM_LSP_TEST_FAIL_POST_COMMIT_DID_OPEN", "1");
+        }
         Self::spawn(command, Some(workspace))
     }
 
@@ -169,6 +178,8 @@ fn tools_list_exposes_lsp_tools() {
     assert!(names.contains(&"symbols"));
     assert!(names.contains(&"prepare_rename"));
     assert!(names.contains(&"rename"));
+    assert!(names.contains(&"format"));
+    assert_eq!(names.len(), 9);
 
     let related = tools
         .iter()
@@ -189,6 +200,20 @@ fn tools_list_exposes_lsp_tools() {
                 "character": { "type": "integer", "minimum": 0 }
             },
             "required": ["filePath", "line", "character"],
+            "additionalProperties": false
+        })
+    );
+
+    let format = tools
+        .iter()
+        .find(|tool| tool["name"] == "format")
+        .expect("format descriptor");
+    assert_eq!(
+        format["inputSchema"],
+        json!({
+            "type": "object",
+            "properties": { "filePath": { "type": "string" } },
+            "required": ["filePath"],
             "additionalProperties": false
         })
     );
@@ -242,6 +267,20 @@ fn trace_methods(proc: &McpProcess) -> Vec<String> {
         .collect()
 }
 
+fn formatting_temp_paths(proc: &McpProcess) -> Vec<PathBuf> {
+    fs::read_dir(&proc.workspace().root)
+        .expect("read mock workspace")
+        .filter_map(|entry| {
+            let path = entry.expect("read mock workspace entry").path();
+            let is_formatting_temp = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(".ocmm-format-"));
+            is_formatting_temp.then_some(path)
+        })
+        .collect()
+}
+
 fn call_symbol_related(proc: &mut McpProcess, name: &str) -> Value {
     let file_path = proc.workspace().subject_path.to_string_lossy().to_string();
     proc.request(json!({
@@ -253,6 +292,334 @@ fn call_symbol_related(proc: &mut McpProcess, name: &str) -> Value {
             "arguments": { "filePath": file_path, "line": 1, "character": 0 }
         }
     }))
+}
+
+fn call_format(proc: &mut McpProcess, name: &str) -> Value {
+    let file_path = proc.workspace().subject_path.to_string_lossy().to_string();
+    proc.request(json!({
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "tools/call",
+        "params": {
+            "name": name,
+            "arguments": { "filePath": file_path }
+        }
+    }))
+}
+
+fn assert_advertised_position_encodings(proc: &McpProcess) {
+    let trace = proc.workspace().trace();
+    let initialize = trace
+        .iter()
+        .find(|entry| entry["method"] == "initialize")
+        .expect("initialize request");
+    assert_eq!(
+        initialize["params"]["capabilities"]["general"]["positionEncodings"],
+        json!(["utf-8", "utf-16"])
+    );
+}
+
+fn assert_format_options(proc: &McpProcess) {
+    let trace = proc.workspace().trace();
+    let formatting = trace
+        .iter()
+        .find(|entry| entry["method"] == "textDocument/formatting")
+        .expect("formatting request");
+    assert_eq!(
+        formatting["params"]["options"],
+        json!({
+            "tabSize": 4,
+            "insertSpaces": false,
+            "trimTrailingWhitespace": true,
+            "insertFinalNewline": true,
+            "trimFinalNewlines": true
+        })
+    );
+}
+
+#[test]
+fn format_capability_and_encoding_negotiation() {
+    for (scenario, tool_name) in [
+        ("format-utf8", "format"),
+        ("format-options-utf16", "lsp_format"),
+        ("format-default-utf16", "format"),
+    ] {
+        let mut proc = McpProcess::start_with_mock(scenario);
+        let response = call_format(&mut proc, tool_name);
+
+        assert_eq!(response["result"]["isError"], false, "{scenario}");
+        assert_advertised_position_encodings(&proc);
+        let trace = proc.workspace().trace();
+        let did_open = trace
+            .iter()
+            .find(|entry| entry["method"] == "textDocument/didOpen")
+            .expect("didOpen notification");
+        assert_eq!(did_open["params"]["textDocument"]["version"], 1);
+        assert!(trace_methods(&proc).contains(&"textDocument/formatting".to_string()));
+    }
+
+    for scenario in ["format-missing-capability", "format-false-capability"] {
+        let mut proc = McpProcess::start_with_mock(scenario);
+        let before_bytes = fs::read(&proc.workspace().subject_path).expect("read subject before");
+        let before_modified = fs::metadata(&proc.workspace().subject_path)
+            .expect("subject metadata before")
+            .modified()
+            .expect("subject modified time before");
+        let response = call_format(&mut proc, "format");
+
+        assert_eq!(response["result"]["isError"], false, "{scenario}");
+        assert_eq!(
+            details(&response),
+            &json!({
+                "status": "unavailable",
+                "reason": "capability_not_advertised",
+                "linesAdded": 0,
+                "linesRemoved": 0
+            })
+        );
+        assert_advertised_position_encodings(&proc);
+        let methods = trace_methods(&proc);
+        assert!(!methods.contains(&"textDocument/formatting".to_string()));
+        assert!(!methods.contains(&"textDocument/didOpen".to_string()));
+        assert_eq!(
+            fs::read(&proc.workspace().subject_path).expect("read subject after"),
+            before_bytes
+        );
+        assert_eq!(
+            fs::metadata(&proc.workspace().subject_path)
+                .expect("subject metadata after")
+                .modified()
+                .expect("subject modified time after"),
+            before_modified
+        );
+    }
+
+    let mut proc = McpProcess::start_with_mock("format-unsupported-encoding");
+    let before_bytes = fs::read(&proc.workspace().subject_path).expect("read subject before");
+    let response = call_format(&mut proc, "format");
+    assert_eq!(response["result"]["isError"], true);
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool error text")
+        .contains("unsupported LSP position encoding"));
+    assert_advertised_position_encodings(&proc);
+    assert!(!trace_methods(&proc).contains(&"textDocument/formatting".to_string()));
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read subject after"),
+        before_bytes
+    );
+}
+
+#[test]
+fn format_null_empty_and_byte_identical_results_are_unchanged() {
+    for scenario in ["format-null", "format-empty", "format-byte-identical"] {
+        let mut proc = McpProcess::start_with_mock(scenario);
+        let before_bytes = fs::read(&proc.workspace().subject_path).expect("read subject before");
+        let before_modified = fs::metadata(&proc.workspace().subject_path)
+            .expect("subject metadata before")
+            .modified()
+            .expect("subject modified time before");
+
+        let response = call_format(&mut proc, "format");
+
+        assert_eq!(response["result"]["isError"], false, "{scenario}");
+        assert_eq!(
+            details(&response),
+            &json!({
+                "status": "unchanged",
+                "linesAdded": 0,
+                "linesRemoved": 0
+            }),
+            "{scenario}"
+        );
+        assert_eq!(
+            fs::read(&proc.workspace().subject_path).expect("read subject after"),
+            before_bytes,
+            "{scenario}"
+        );
+        assert_eq!(
+            fs::metadata(&proc.workspace().subject_path)
+                .expect("subject metadata after")
+                .modified()
+                .expect("subject modified time after"),
+            before_modified,
+            "{scenario}"
+        );
+        assert!(formatting_temp_paths(&proc).is_empty(), "{scenario}");
+        assert_format_options(&proc);
+    }
+}
+
+#[test]
+fn format_utf8_unordered_edits_commit_and_resynchronize() {
+    let mut proc = McpProcess::start_with_mock("format-utf8");
+
+    let response = call_format(&mut proc, "format");
+
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        details(&response),
+        &json!({
+            "status": "formatted",
+            "linesAdded": 2,
+            "linesRemoved": 1,
+            "committed": true
+        })
+    );
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read formatted subject"),
+        b"fn subject() {\n}\n"
+    );
+    assert_format_options(&proc);
+    assert_eq!(
+        trace_methods(&proc),
+        [
+            "initialize",
+            "initialized",
+            "textDocument/didOpen",
+            "textDocument/formatting",
+            "textDocument/didClose",
+            "textDocument/didOpen",
+            "shutdown",
+            "exit"
+        ]
+    );
+    let trace = proc.workspace().trace();
+    assert_eq!(trace[2]["params"]["textDocument"]["version"], 1);
+    assert_eq!(trace[5]["params"]["textDocument"]["version"], 2);
+    assert_eq!(
+        trace[5]["params"]["textDocument"]["text"],
+        "fn subject() {\n}\n"
+    );
+    assert_eq!(
+        trace[4]["params"]["textDocument"]["uri"],
+        trace[2]["params"]["textDocument"]["uri"]
+    );
+}
+
+#[test]
+fn format_utf16_crlf_commits_exact_bytes() {
+    let mut proc = McpProcess::start_with_mock("format_utf16_crlf");
+
+    let response = call_format(&mut proc, "format");
+
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        details(&response),
+        &json!({
+            "status": "formatted",
+            "linesAdded": 1,
+            "linesRemoved": 1,
+            "committed": true
+        })
+    );
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read formatted subject"),
+        b"fn subject() {}\r\n"
+    );
+    assert_format_options(&proc);
+}
+
+#[test]
+fn format_invalid_edit_matrix_preserves_existing_bytes() {
+    for scenario in [
+        "format-invalid-boundary",
+        "format-reversed",
+        "format-overlap",
+        "format-conflicting-insertions",
+    ] {
+        let mut proc = McpProcess::start_with_mock(scenario);
+        let before = fs::read(&proc.workspace().subject_path).expect("read subject before");
+
+        let response = call_format(&mut proc, "format");
+
+        assert_eq!(response["result"]["isError"], true, "{scenario}");
+        assert!(!response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("tool error text")
+            .is_empty());
+        assert_eq!(
+            fs::read(&proc.workspace().subject_path).expect("read subject after"),
+            before,
+            "{scenario}"
+        );
+    }
+}
+
+#[test]
+fn format_same_length_stale_snapshot_preserves_concurrent_bytes() {
+    let mut proc = McpProcess::start_with_mock("format-stale-same-length");
+
+    let response = call_format(&mut proc, "format");
+
+    assert_eq!(response["result"]["isError"], true);
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool error text")
+        .contains("stale"));
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read concurrent subject"),
+        b"fn changed() {}\n"
+    );
+    assert!(formatting_temp_paths(&proc).is_empty());
+}
+
+#[test]
+fn format_post_commit_did_open_failure_reports_committed() {
+    let mut proc = McpProcess::start_with_mock("format-resync-did-open-failure");
+
+    let response = call_format(&mut proc, "format");
+
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(details(&response)["status"], "formatted");
+    assert_eq!(details(&response)["committed"], true);
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool error text")
+        .contains("resynchronization"));
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read committed subject"),
+        b"fn subject() {\n}\n"
+    );
+    assert_eq!(
+        trace_methods(&proc),
+        [
+            "initialize",
+            "initialized",
+            "textDocument/didOpen",
+            "textDocument/formatting",
+            "textDocument/didClose",
+            "shutdown",
+            "exit"
+        ]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn format_windows_locked_target_preserves_existing_bytes() {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+
+    let mut proc = McpProcess::start_with_mock("format-utf8");
+    let before = fs::read(&proc.workspace().subject_path).expect("read subject before");
+    let _lock = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(&proc.workspace().subject_path)
+        .expect("lock target against replacement");
+
+    let response = call_format(&mut proc, "format");
+
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(
+        fs::read(&proc.workspace().subject_path).expect("read locked subject"),
+        before
+    );
+    assert!(formatting_temp_paths(&proc).is_empty());
 }
 
 #[test]

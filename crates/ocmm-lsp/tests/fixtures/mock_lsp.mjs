@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 const scenario = process.env.MOCK_LSP_SCENARIO ?? "success";
 const tracePath = process.env.MOCK_LSP_TRACE;
+const subjectPath = process.env.MOCK_LSP_SUBJECT;
 
 if (!tracePath) {
   throw new Error("MOCK_LSP_TRACE is required");
@@ -142,11 +143,88 @@ function semanticResponse(message) {
   respond(message.id, { result: results[method] });
 }
 
+function initializeCapabilities() {
+  switch (scenario) {
+    case "format-utf8":
+    case "format-resync-did-open-failure":
+      return { documentFormattingProvider: true, positionEncoding: "utf-8" };
+    case "format-options-utf16":
+      return {
+        documentFormattingProvider: { workDoneProgress: false },
+        positionEncoding: "utf-16",
+      };
+    case "format-false-capability":
+      return { documentFormattingProvider: false, positionEncoding: "utf-16" };
+    case "format-missing-capability":
+      return {};
+    case "format-default-utf16":
+      return { documentFormattingProvider: true };
+    case "format-unsupported-encoding":
+      return { documentFormattingProvider: true, positionEncoding: "utf-32" };
+    default:
+      return scenario.startsWith("format-") || scenario === "format_utf16_crlf"
+        ? { documentFormattingProvider: true, positionEncoding: "utf-16" }
+        : {};
+  }
+}
+
+function formattingResult() {
+  const edit = (start, end, newText) => ({
+    range: { start, end },
+    newText,
+  });
+  const position = (line, character) => ({ line, character });
+
+  switch (scenario) {
+    case "format-null":
+    case "format-options-utf16":
+    case "format-default-utf16":
+      return null;
+    case "format-empty":
+      return [];
+    case "format-byte-identical":
+      return [edit(position(0, 0), position(0, 15), "fn subject() {}")];
+    case "format-utf8":
+    case "format-resync-did-open-failure":
+      return [
+        edit(position(0, 13), position(0, 16), " {\n}"),
+        edit(position(0, 2), position(0, 4), " "),
+      ];
+    case "format_utf16_crlf":
+      return [edit(position(0, 2), position(0, 4), " ")];
+    case "format-invalid-boundary":
+      return [edit(position(0, 999), position(0, 999), "X")];
+    case "format-reversed":
+      return [edit(position(0, 5), position(0, 2), "X")];
+    case "format-overlap":
+      return [
+        edit(position(0, 0), position(0, 5), "X"),
+        edit(position(0, 3), position(0, 8), "Y"),
+      ];
+    case "format-conflicting-insertions":
+      return [
+        edit(position(0, 2), position(0, 2), "X"),
+        edit(position(0, 2), position(0, 2), "Y"),
+      ];
+    case "format-stale-same-length":
+      if (!subjectPath) throw new Error("MOCK_LSP_SUBJECT is required");
+      fs.writeFileSync(subjectPath, "fn changed() {}\n", "utf8");
+      return [edit(position(0, 2), position(0, 3), "  ")];
+    default:
+      return null;
+  }
+}
+
 function handle(message) {
   trace(message);
 
   if (message.method === "initialize") {
-    respond(message.id, { result: { capabilities: {} } });
+    respond(message.id, { result: { capabilities: initializeCapabilities() } });
+    return;
+  }
+
+  if (message.method === "textDocument/formatting") {
+    respond(message.id, { result: formattingResult() });
     return;
   }
 

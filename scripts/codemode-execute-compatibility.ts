@@ -1684,6 +1684,7 @@ const REQUIRED_DIRECT_LSP_TOOLS = [
   "symbols",
   "prepare_rename",
   "rename",
+  "format",
 ] as const
 
 export function parseDirectLspToolsList(output: string): boolean {
