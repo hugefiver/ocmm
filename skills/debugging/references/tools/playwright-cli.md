@@ -177,44 +177,110 @@ test.use({ ...devices['iPhone 14'] });
 
 ---
 
-## Profile safety — clone first, clear only the clone
+## Profile safety — run-owned empty user-data directory
 
 **Never clear cookies, cache, or site data on a user's real browser profile.** This includes Playwright's `context.clearCookies()`, CDP `Network.clearBrowserCookies` and `Storage.clearCookies`, and browser APIs such as `chrome.browsingData.remove`. These operations can erase the user's authenticated state across unrelated sites.
 
-If reproducing a bug needs the real profile's login state, first close the browser that owns the profile, copy its whole user-data directory into a unique temporary directory, and launch only that clone. Do not point `userDataDir`, `launchPersistentContext`, or a browser command-line profile flag at the original profile when any reset may occur.
+`launchPersistentContext` preserves cookies, local storage, and other browser state in its directory. It must use an **independent, run-owned empty user-data directory** made for this debug run; Chrome's main User Data directory and every other existing browser profile are off limits. Never copy a browser profile into the run directory or transfer authentication state from one. This is both safer and the supported Playwright model for persistent contexts.
 
-PowerShell example for a Chrome profile on Windows (adapt the source path for another browser; it creates a run-owned clone only):
+Do not load browser extensions or plugins. The clean profile and `--disable-extensions` are mandatory; `--load-extension` and `--disable-extensions-except` are prohibited. Never sign in to a browser or vendor account (Google, Microsoft, Firefox, or similar), never use a personal web account, and never enable browser setting sync. If the target application requires authentication, use only a disposable, one-time test account or injected target-site test state—never a browser-account login.
+
+Create the run-owned directories without referring to any existing browser data:
 
 ```powershell
-$sourceUserData = Join-Path $env:LOCALAPPDATA "Google\Chrome\User Data"
-if (-not (Test-Path -LiteralPath $sourceUserData)) { throw "Chrome user-data directory was not found" }
 if (-not (Test-Path -LiteralPath $env:TEMP)) { throw "Temporary directory was not found" }
 
 $runRoot = Join-Path $env:TEMP ("ocmm-playwright-" + [guid]::NewGuid().ToString("N"))
-$cloneUserData = Join-Path $runRoot "User Data"
+$userDataDir = Join-Path $runRoot "user-data"
+$logsDir = Join-Path $runRoot "logs"
 New-Item -ItemType Directory -Path $runRoot | Out-Null
-Copy-Item -LiteralPath $sourceUserData -Destination $cloneUserData -Recurse -Force
-$env:PW_USER_DATA_DIR = $cloneUserData
+New-Item -ItemType Directory -Path $userDataDir | Out-Null
+New-Item -ItemType Directory -Path $logsDir | Out-Null
+$env:PW_USER_DATA_DIR = $userDataDir
 ```
 
-Use the clone for the persistent context. A clear is permitted only after `PW_USER_DATA_DIR` is the temporary clone:
+Use that empty directory for the persistent context. Cookie clearing is permitted only for this run-owned empty profile:
 
 ```ts
 const context = await chromium.launchPersistentContext(process.env.PW_USER_DATA_DIR!, {
   channel: 'chrome',
   headless: false,
+  args: [
+    '--disable-extensions',
+    '--disable-sync',
+  ],
 });
-await context.clearCookies(); // safe only because this is the run-owned clone
+await context.clearCookies(); // safe only for this run-owned empty profile
 ```
 
-After closing the context, clean up only the directory created by this run. Resolve and validate the exact target before deleting it:
+## Non-blocking browser-debug launch
+
+Prefer the current agent platform's native background task or process tool when it actually exposes one. If no such durable native tool is available, the PowerShell fallback must start the Node browser-debug script with `Start-Process`, capture run-owned logs, record its PID, and return immediately:
 
 ```powershell
-$expectedPrefix = [IO.Path]::GetFullPath((Join-Path $env:TEMP "ocmm-playwright-"))
+$browserDebugScriptInput = $env:PW_BROWSER_DEBUG_SCRIPT
+if ([string]::IsNullOrWhiteSpace($browserDebugScriptInput)) {
+  throw "Set PW_BROWSER_DEBUG_SCRIPT to the existing project browser-debug script"
+}
+if (-not (Test-Path -LiteralPath $browserDebugScriptInput -PathType Leaf)) {
+  throw "Browser-debug script was not found"
+}
+$resolvedBrowserDebugScript = (Resolve-Path -LiteralPath $browserDebugScriptInput -ErrorAction Stop).Path
+$stdoutLog = Join-Path $logsDir "browser-debug.stdout.log"
+$stderrLog = Join-Path $logsDir "browser-debug.stderr.log"
+$pidFile = Join-Path $runRoot "browser-debug.pid"
+$browserArguments = @(
+  ('"{0}"' -f $resolvedBrowserDebugScript),
+  "--run-root",
+  ('"{0}"' -f $runRoot)
+)
+
+$process = Start-Process -FilePath "node" -ArgumentList $browserArguments -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
+$pidRecord = "$($process.Id):$($process.StartTime.ToUniversalTime().Ticks)"
+$pidRecord | Set-Content -LiteralPath $pidFile -NoNewline
+$launchReceipt = [ordered]@{
+  runRoot = $runRoot
+  pid = $process.Id
+  startTimeTicks = $process.StartTime.ToUniversalTime().Ticks
+  pidFile = $pidFile
+  stdoutLog = $stdoutLog
+  stderrLog = $stderrLog
+}
+Write-Output ($launchReceipt | ConvertTo-Json -Compress)
+```
+
+Do not add `-Wait`: launch must be nonblocking, and no tool call may wait for the entire browser session. `Start-Job` does not survive shell exit, so it does not meet this contract. In a later bounded tool call, confirm readiness through the script's readiness endpoint or bounded log polling (for example, a fixed number of reads with a deadline), then inspect only the recorded PID if the browser exits unexpectedly. Never use an unbounded poll.
+
+After closing the context, terminate only the recorded run-owned PID through that same verified Process object and clean up only the directory created by this run. Resolve and validate the exact target before deleting it:
+
+```powershell
+$resolvedTempRoot = (Resolve-Path -LiteralPath $env:TEMP -ErrorAction Stop).Path
 $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
-if (-not $resolvedRunRoot.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+$runRootParent = [IO.Directory]::GetParent($resolvedRunRoot)
+$runRootName = [IO.Path]::GetFileName($resolvedRunRoot)
+if (
+  $null -eq $runRootParent -or
+  $runRootParent.FullName -ne $resolvedTempRoot -or
+  $runRootName -notmatch '^ocmm-playwright-[0-9a-f]{32}$'
+) {
   throw "Refusing to remove a non-run-owned profile"
 }
+
+$pidRecord = (Get-Content -LiteralPath $pidFile -Raw).Trim().Split(":")
+if ($pidRecord.Count -ne 2) { throw "Refusing to terminate an invalid run-owned PID record" }
+$runOwnedPid = [int]$pidRecord[0]
+$expectedStartTicks = [long]$pidRecord[1]
+$runOwnedProcess = Get-Process -Id $runOwnedPid -ErrorAction SilentlyContinue
+if ($null -ne $runOwnedProcess) {
+  if ($runOwnedProcess.StartTime.ToUniversalTime().Ticks -ne $expectedStartTicks) {
+    throw "Refusing to terminate a PID that is no longer run-owned"
+  }
+  $runOwnedProcess.Kill()
+  if (-not $runOwnedProcess.WaitForExit(10000)) {
+    throw "Run-owned browser process did not exit before cleanup deadline"
+  }
+}
+
 Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
 ```
 
