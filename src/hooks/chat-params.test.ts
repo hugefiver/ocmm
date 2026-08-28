@@ -1620,3 +1620,28 @@ test("chat.params strips temperature for known unsupported reasoning models only
     assert.equal(output.maxOutputTokens, 1024, testCase.label)
   }
 })
+
+test("chat.params ignores an unproven raw model temperature capability field", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-5.5",
+    requirement: {
+      fallbackChain: [{
+        providers: ["openai"],
+        model: "gpt-5.5",
+        temperature: 0.2,
+      }],
+    },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: { kind: "off" },
+  }]]))
+  const rawInput = makeInput({ agentName: "builder", modelID: "gpt-5.5" })
+  Object.assign(rawInput.model, { supportsTemperature: true })
+  const output = { options: {} as Record<string, unknown> }
+
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(rawInput, output)
+
+  assert.equal(output.temperature, undefined)
+})

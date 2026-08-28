@@ -22,10 +22,6 @@ import {
 } from "../routing/fast-option-rules.ts"
 import {
   classifyModelFamily,
-  extractModelName,
-  isClaudeOpus5Model,
-  isClaudeOpus47OrLaterModel,
-  isCodexModel,
   isMiniModel,
   supportsNativeGptMaxReasoning,
 } from "../intent/model-family.ts"
@@ -33,6 +29,7 @@ import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { isRecord, log } from "../shared/logger.ts"
 import { reasoningToVariant } from "../shared/reasoning.ts"
+import { supportsModelTemperature, type ModelTemperatureCapability } from "./model-temperature-capability.ts"
 import type { OcmmConfig } from "../config/schema.ts"
 import type { EffectiveRouteRegistry } from "../routing/route-registry.ts"
 import type {
@@ -203,18 +200,8 @@ function protectedModelHasNoReasoningParam(family: string): boolean {
   return family === "claude-opus-47-plus"
 }
 
-function modelDoesNotSupportTemperature(modelID: string): boolean {
-  const name = extractModelName(modelID).toLowerCase()
-  return isCodexModel(modelID)
-    || isCodexModel(name)
-    || /^gpt-5(?:$|[-_.])/.test(name)
-    || /^o\d(?:$|[-_.])/.test(name)
-    || isClaudeOpus5Model(modelID)
-    || isClaudeOpus47OrLaterModel(modelID)
-}
-
-function stripUnsupportedTemperature(modelID: string, output: ChatParamsOutput): void {
-  if (output.temperature !== undefined && modelDoesNotSupportTemperature(modelID)) {
+function stripUnsupportedTemperature(capability: ModelTemperatureCapability, output: ChatParamsOutput): void {
+  if (output.temperature !== undefined && !supportsModelTemperature(capability)) {
     delete output.temperature
   }
 }
@@ -367,7 +354,10 @@ export function createChatParamsHandler(args: {
       // inventing a route. Ordinary unknown agents remain no-ops.
       const hostFloor = applyHostProfileReviewFloor({ agentName, input, output })
       if (hostFloor) {
-        stripUnsupportedTemperature(input.model.modelID, output)
+        stripUnsupportedTemperature({
+          providerID: input.model.providerID,
+          modelID: input.model.modelID,
+        }, output)
         record({
           ts: Date.now(),
           sessionID: input.sessionID,
@@ -511,7 +501,10 @@ export function createChatParamsHandler(args: {
       appliedVariant: reviewFloorVariant,
       outputOptions: output.options,
     })
-    stripUnsupportedTemperature(input.model.modelID, output)
+    stripUnsupportedTemperature({
+      providerID: input.model.providerID,
+      modelID: input.model.modelID,
+    }, output)
 
     record({
       ts: Date.now(),
