@@ -4,10 +4,14 @@ import assert from "node:assert/strict"
 import { createRuntimeFallbackEventHandler } from "./event-handler.ts"
 import type { OcmmClient } from "./dispatcher.ts"
 import { runGenericFallback } from "./event-handler-generic-fallback.ts"
-import { createRuntimeFallbackSessionLifecycle } from "./event-handler-support.ts"
+import {
+  createRuntimeFallbackDispatchReservations,
+  createRuntimeFallbackSessionLifecycle,
+} from "./event-handler-support.ts"
 import { createFallbackState } from "./fallback-state.ts"
 import { OcmmConfigSchema } from "../config/schema.ts"
 import {
+  FakeHandlerScheduler,
   deferred,
   flushHandler,
   makeControlledClient,
@@ -15,6 +19,8 @@ import {
   makeConfig,
   makeErrorEvent,
   makeCreatedEvent,
+  makeIdleEvent,
+  makeStatusEvent,
   type PromptCall,
 } from "./event-handler-test-fixtures.ts"
 import { createEffectiveRouteRegistry, type EffectiveRouteRegistry } from "../routing/route-registry.ts"
@@ -52,6 +58,7 @@ test("generic fallback does no client work when its snapshot is stale before dis
 
   await runGenericFallback({
     lifecycle,
+    reservations: createRuntimeFallbackDispatchReservations(),
     client: mock.client,
     clock: () => 1_000,
     isCurrentSnapshot: () => false,
@@ -74,6 +81,45 @@ test("generic fallback does no client work when its snapshot is stale before dis
   assert.equal(mock.aborts, 0)
   assert.equal(mock.messages, 0)
   assert.equal(mock.calls.length, 0)
+  assert.equal(state.attempts, 0)
+})
+
+test("pre-prompt stale rejection releases its exact generic reservation", async () => {
+  const mock = makeControlledClient()
+  const cfg = makeConfig()
+  const lifecycle = createRuntimeFallbackSessionLifecycle(mock.client)
+  const reservations = createRuntimeFallbackDispatchReservations()
+  const state = createFallbackState("provider/snapshot-primary", 1)
+  state.activeModel = "provider/snapshot-primary"
+  const sessionID = "ses_stale_before_prompt"
+  const generation = lifecycle.beginSession(sessionID)
+  let snapshotChecks = 0
+
+  await runGenericFallback({
+    lifecycle,
+    reservations,
+    client: mock.client,
+    clock: () => 1_000,
+    // Current through abort/messages; stale at dispatcher's final pre-prompt check.
+    isCurrentSnapshot: () => ++snapshotChecks < 7,
+  }, {
+    sessionID,
+    generation,
+    snapshotId: 1,
+    agent: "worker",
+    classification: { retryable: true, reason: "test", message: "test" },
+    requirement: { fallbackChain: snapshotChain },
+    state,
+    failedTarget: {
+      providerID: "provider",
+      modelID: "snapshot-primary",
+      entry: snapshotChain[0]!,
+    },
+    runtimeConfig: cfg.runtimeFallback,
+  })
+
+  assert.equal(mock.calls.length, 0)
+  assert.equal(reservations.get(sessionID), undefined)
   assert.equal(state.attempts, 0)
 })
 
@@ -178,6 +224,157 @@ test("skips AbortError (likely our own abort)", async () => {
   await handler(makeErrorEvent("ses_1", { name: "AbortError" }, { agent: "orchestrator" }))
 
   assert.equal(calls.length, 0)
+})
+
+for (const name of ["AbortError", "DOMException"] as const) {
+  test(`dispatches exactly once for a name-based ${name} with nested provider 402`, async () => {
+    const { client, calls } = makeMockClient()
+    const cfg = makeConfig()
+    const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+    await handler(makeErrorEvent("ses_quota_abort", {
+      name,
+      error: { data: { statusCode: 402 } },
+    }, {
+      agent: "orchestrator",
+      model: { providerID: "hoo", modelID: "primary-model" },
+    }))
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]?.body.modelID, "fallback-a")
+  })
+}
+
+test("name-based quota abort recovery preserves every final eligibility gate", async () => {
+  const cases: Array<{
+    name: string
+    cfg: ReturnType<typeof makeConfig>
+    event: unknown
+    routeRegistry?: EffectiveRouteRegistry
+  }> = [
+    {
+      name: "runtime fallback disabled",
+      cfg: makeConfig({ enabled: false }),
+      event: makeErrorEvent("ses_quota_disabled", { name: "AbortError", status: 402 }, { agent: "orchestrator" }),
+    },
+    {
+      name: "402 not configured",
+      cfg: makeConfig({ retryOnStatusCodes: [429, 500, 502, 503, 504] }),
+      event: makeErrorEvent("ses_quota_unconfigured", { name: "AbortError", status: 402 }, { agent: "orchestrator" }),
+    },
+    {
+      name: "missing session",
+      cfg: makeConfig(),
+      event: {
+        event: {
+          type: "session.error",
+          properties: { error: { name: "AbortError", status: 402 }, agent: "orchestrator" },
+        },
+      },
+    },
+    {
+      name: "missing effective agent requirement",
+      cfg: makeConfig(),
+      event: makeErrorEvent("ses_quota_no_agent", { name: "AbortError", status: 402 }, { agent: "unknown-agent" }),
+    },
+  ]
+
+  const singleRouteRegistry = createEffectiveRouteRegistry()
+  publishRoute(singleRouteRegistry, "orchestrator", "hoo/primary-model", [
+    { providers: ["hoo"], model: "primary-model" },
+  ])
+  cases.push({
+    name: "fallback chain has one entry",
+    cfg: makeConfig(),
+    event: makeErrorEvent("ses_quota_single", { name: "DOMException", status: 402 }, { agent: "orchestrator" }),
+    routeRegistry: singleRouteRegistry,
+  })
+
+  for (const scenario of cases) {
+    const { client, calls } = makeMockClient()
+    const handler = createRuntimeFallbackEventHandler({
+      getConfig: () => scenario.cfg,
+      client,
+      ...(scenario.routeRegistry === undefined ? {} : { routeRegistry: scenario.routeRegistry }),
+    })
+    await handler(scenario.event)
+    assert.equal(calls.length, 0, scenario.name)
+  }
+})
+
+test("concurrent eligible quota abort errors emit only one prompt", async () => {
+  const messagesGate = deferred<unknown>()
+  const mock = makeControlledClient([], { messagesResults: [messagesGate.promise] })
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client })
+  const event = makeErrorEvent("ses_quota_concurrent", { name: "AbortError", status: 402 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  })
+
+  const first = handler(event)
+  await flushHandler()
+  const second = handler(event)
+  await flushHandler()
+  assert.equal(mock.aborts, 1)
+  assert.equal(mock.messages, 1)
+  assert.equal(mock.calls.length, 0)
+
+  messagesGate.resolve({ messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }] })
+  await Promise.all([first, second])
+  assert.equal(mock.calls.length, 1)
+  assert.equal(mock.calls[0]?.body.modelID, "fallback-a")
+})
+
+test("messages rejection releases the generic reservation for a later retry", async () => {
+  const mock = makeControlledClient([], {
+    messagesResults: [
+      Promise.reject(new Error("messages unavailable")),
+      Promise.resolve({ messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }] }),
+    ],
+  })
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client })
+  const event = makeErrorEvent("ses_messages_rejected", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  })
+
+  await handler(event)
+  await handler(event)
+
+  assert.equal(mock.calls.length, 1)
+  assert.equal(mock.calls[0]?.body.modelID, "fallback-a")
+})
+
+test("stale pre-prompt rejection releases the reservation for the replacement route", async () => {
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/snapshot-primary", snapshotChain)
+  let replaceRoute = true
+  const mock = makeControlledClient([], {
+    onMessagesResolved: () => {
+      if (!replaceRoute) return
+      replaceRoute = false
+      publishRoute(registry, "orchestrator", "provider/replacement-primary", [
+        { providers: ["provider"], model: "replacement-primary" },
+        { providers: ["provider"], model: "replacement-next" },
+      ])
+    },
+  })
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client: mock.client, routeRegistry: registry })
+
+  await handler(makeErrorEvent("ses_stale_release", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "provider", modelID: "snapshot-primary" },
+  }))
+  await handler(makeErrorEvent("ses_stale_release", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "provider", modelID: "replacement-primary" },
+  }))
+
+  assert.equal(mock.calls.length, 1)
+  assert.equal(mock.calls[0]?.body.modelID, "replacement-next")
 })
 
 test("skips isAbort:true errors", async () => {
@@ -336,7 +533,7 @@ test("handles flat event shape (no nested event wrapper)", async () => {
 
 test("failed dispatch does not advance fallback state", async () => {
   // Mock client with messages that yield no user parts - dispatchFallbackRetry
-  // returns false because parts.length === 0.
+  // rejects with empty-parts because parts.length === 0.
   const calls: PromptCall[] = []
   const emptyMessagesResp = { messages: [] }
   const client: OcmmClient = {
@@ -355,14 +552,14 @@ test("failed dispatch does not advance fallback state", async () => {
   const cfg = makeConfig()
   const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
 
-  // First error triggers peek -> dispatch returns false (no user parts)
+  // First error triggers peek -> dispatch rejects before prompt (no user parts)
   await handler(makeErrorEvent("ses_1", { status: 503 }, {
     agent: "orchestrator",
     model: { providerID: "hoo", modelID: "primary-model" },
   }))
   // dispatch was called but returned false, so state was NOT committed
   // prompt should NOT have been called (dispatch failed before reaching it)
-  assert.equal(calls.length, 0, "prompt should not be called when dispatch returns false")
+  assert.equal(calls.length, 0, "prompt should not be called when dispatch is rejected")
 
   // Now give the mock real messages so the second error can dispatch
   client.session.messages = async () => ({
@@ -377,4 +574,245 @@ test("failed dispatch does not advance fallback state", async () => {
   }))
   assert.equal(calls.length, 1)
   assert.equal(calls[0]?.body.modelID, "fallback-a")
+})
+
+test("possibly-accepted dispatch commits state but waits for explicit target evidence", async () => {
+  const calls: PromptCall[] = []
+  let rejectPrompt = true
+  const client: OcmmClient = {
+    session: {
+      async abort() { return undefined },
+      async messages() {
+        return { messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] }
+      },
+      async prompt(args: { path: { id: string }; body: Record<string, unknown> }) {
+        calls.push({ sessionID: args.path.id, body: args.body })
+        if (rejectPrompt) {
+          rejectPrompt = false
+          throw new Error("transport failed after prompt invocation")
+        }
+        return undefined
+      },
+    },
+  }
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+
+  await handler(makeErrorEvent("ses_possibly_accepted", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+
+  await handler(makeErrorEvent("ses_possibly_accepted", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  await handler(makeErrorEvent("ses_possibly_accepted", { status: 503 }, {
+    agent: "orchestrator",
+  }))
+  assert.equal(calls.length, 1, "old and model-less evidence must not repeat an ambiguous prompt")
+
+  await handler(makeErrorEvent("ses_possibly_accepted", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
+  }))
+
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+})
+
+test("accepted dispatch remains pending until current target evidence arrives", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+  const sessionID = "ses_accepted_pending"
+
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  await handler(makeErrorEvent(sessionID, { status: 503 }, { agent: "orchestrator" }))
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
+  }))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
+})
+
+test("retry status target evidence advances an accepted session.error through the shared generic path", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
+  const sessionID = "ses_error_pending_status_target"
+
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  await handler(makeStatusEvent(sessionID, {
+    type: "retry",
+    model: { providerID: "hoo", modelID: "primary-model", variant: "high" },
+    attempt: 2,
+    message: "stale primary evidence",
+  }, { agent: "orchestrator" }))
+  await handler(makeStatusEvent(sessionID, {
+    type: "retry",
+    attempt: 2,
+    message: "model-less evidence",
+  }, { agent: "orchestrator" }))
+  assert.deepEqual(calls.map((call) => call.body.modelID), ["fallback-a"])
+
+  await handler(makeStatusEvent(sessionID, {
+    type: "retry",
+    model: { providerID: "hoo", modelID: "fallback-a", variant: "medium" },
+    attempt: 2,
+    message: "fallback target failed",
+  }, { agent: "orchestrator" }))
+
+  assert.deepEqual(calls.map((call) => call.body.modelID), ["fallback-a", "fallback-b"])
+})
+
+test("route replacement clears accepted pending ownership and dispatches from the replacement chain", async () => {
+  const { client, calls } = makeMockClient()
+  const cfg = makeConfig()
+  const registry = createEffectiveRouteRegistry()
+  publishRoute(registry, "orchestrator", "provider/snapshot-primary", snapshotChain)
+  const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, routeRegistry: registry })
+  const sessionID = "ses_pending_route_replacement"
+
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "provider", modelID: "snapshot-primary" },
+  }))
+  publishRoute(registry, "orchestrator", "provider/replacement-primary", [
+    { providers: ["provider"], model: "replacement-primary" },
+    { providers: ["provider"], model: "replacement-next" },
+  ])
+  await handler(makeErrorEvent(sessionID, { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "provider", modelID: "replacement-primary" },
+  }))
+
+  assert.deepEqual(calls.map((call) => call.body.modelID), ["snapshot-next", "replacement-next"])
+})
+
+test("stale snapshot completion cannot commit or clear a newer reservation owner", async () => {
+  const cfg = makeConfig()
+  const reservations = createRuntimeFallbackDispatchReservations()
+  let currentSnapshot = 1
+  const sessionID = "ses_stale_owner_completion"
+  let oldOwner!: { generation: number; routeSnapshotId: number; targetModel: string }
+  let newOwner!: { generation: number; routeSnapshotId: number; targetModel: string }
+  const state = createFallbackState("provider/snapshot-primary", 1)
+  state.activeModel = "provider/snapshot-primary"
+  const client: OcmmClient = {
+    session: {
+      async abort() { return undefined },
+      async messages() {
+        return { messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }] }
+      },
+      async prompt() {
+        assert.equal(reservations.clear(sessionID, oldOwner), true, "old owner must be acquired before prompt I/O")
+        assert.equal(reservations.acquire(sessionID, newOwner), true)
+        currentSnapshot = 2
+        return undefined
+      },
+    },
+  }
+  const lifecycle = createRuntimeFallbackSessionLifecycle(client)
+  const generation = lifecycle.beginSession(sessionID)
+  oldOwner = {
+    generation,
+    routeSnapshotId: 1,
+    targetModel: "provider/snapshot-next",
+  }
+  newOwner = {
+    generation,
+    routeSnapshotId: 2,
+    targetModel: "provider/replacement-next",
+  }
+
+  await runGenericFallback({
+    lifecycle,
+    reservations,
+    client,
+    clock: () => 1_000,
+    isCurrentSnapshot: (snapshotId) => snapshotId === currentSnapshot,
+  }, {
+    sessionID,
+    generation,
+    snapshotId: 1,
+    agent: "worker",
+    classification: { retryable: true, reason: "test", message: "test" },
+    requirement: { fallbackChain: snapshotChain },
+    state,
+    failedTarget: {
+      providerID: "provider",
+      modelID: "snapshot-primary",
+      entry: snapshotChain[0]!,
+    },
+    runtimeConfig: cfg.runtimeFallback,
+  })
+
+  assert.deepEqual(reservations.get(sessionID), { ...newOwner, state: "reserved" })
+  assert.equal(state.attempts, 0)
+  assert.equal(state.activeModel, "provider/snapshot-primary")
+})
+
+test("dedicated 429 treats possibly-accepted dispatch as successful", async () => {
+  const calls: PromptCall[] = []
+  let rejectPrompt = true
+  const client: OcmmClient = {
+    session: {
+      async abort() { return undefined },
+      async messages() {
+        return { messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] }
+      },
+      async prompt(args: { path: { id: string }; body: Record<string, unknown> }) {
+        calls.push({ sessionID: args.path.id, body: args.body })
+        if (rejectPrompt) {
+          rejectPrompt = false
+          throw new Error("transport failed after prompt invocation")
+        }
+        return undefined
+      },
+    },
+  }
+  const scheduler = new FakeHandlerScheduler()
+  const cfg = makeConfig({ subagent429: { maxRetries: 0 } })
+  const handler = createRuntimeFallbackEventHandler({
+    getConfig: () => cfg,
+    client,
+    scheduler,
+    clock: () => 1_000,
+    random: () => 0,
+  })
+
+  await handler(makeCreatedEvent("ses_dedicated_possibly", { parentID: "root" }))
+  await handler(makeErrorEvent("ses_dedicated_possibly", { status: 429 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "primary-model" },
+  }))
+  await handler(makeIdleEvent("ses_dedicated_possibly"))
+  await scheduler.run(0)
+  await flushHandler()
+  await handler(makeErrorEvent("ses_dedicated_possibly", { status: 503 }, {
+    agent: "orchestrator",
+  }))
+  await flushHandler()
+
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0]?.body.modelID, "fallback-a")
+  assert.equal(calls[1]?.body.modelID, "fallback-b")
 })

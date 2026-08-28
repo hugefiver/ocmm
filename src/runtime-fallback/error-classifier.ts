@@ -16,6 +16,64 @@ export type ErrorClassification = {
   recoveryDelayMs?: number
 }
 
+export type BoundedErrorShape = {
+  statusCodes: number[]
+  names: string[]
+  messages: string[]
+}
+
+/**
+ * Reads the error fields that classification trusts without following arbitrary
+ * provider object graphs. Values are root-first and deduplicated in encounter
+ * order so callers can retain deterministic diagnostics and precedence.
+ */
+export function readBoundedErrorShape(error: unknown, maxDepth = 4): BoundedErrorShape {
+  const output: BoundedErrorShape = {
+    statusCodes: [],
+    names: [],
+    messages: [],
+  }
+  const queue: Array<{ value: unknown; depth: number }> = [{ value: error, depth: 0 }]
+  const visited = new Set<object>()
+
+  const addUnique = <T>(values: T[], value: T) => {
+    if (!values.includes(value)) values.push(value)
+  }
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index]
+    if (!current) continue
+
+    if (typeof current.value === "string") {
+      addUnique(output.messages, current.value)
+      continue
+    }
+    if (!isRecord(current.value) || visited.has(current.value)) continue
+    visited.add(current.value)
+
+    const status = current.value.status ?? current.value.statusCode ?? current.value.code
+    const parsedStatus =
+      typeof status === "number"
+        ? status
+        : typeof status === "string" && /^\d+$/.test(status.trim())
+          ? Number(status)
+          : undefined
+    if (parsedStatus !== undefined && Number.isFinite(parsedStatus)) {
+      addUnique(output.statusCodes, parsedStatus)
+    }
+    if (typeof current.value.name === "string") addUnique(output.names, current.value.name)
+    if (typeof current.value.message === "string") addUnique(output.messages, current.value.message)
+
+    if (current.depth < maxDepth) {
+      for (const key of ["error", "data", "cause"] as const) {
+        queue.push({ value: current.value[key], depth: current.depth + 1 })
+      }
+    }
+  }
+
+  return output
+}
+
 const RECOVERY_FIELDS = [
   ["retryAfter", false],
   ["retry_after", false],
@@ -173,37 +231,33 @@ export function extractErrorName(error: unknown): string | undefined {
   return undefined
 }
 
-function extractMessage(error: unknown): string {
-  if (typeof error === "string") return error
-  if (isRecord(error)) {
-    if (typeof error.message === "string") return error.message
-    if (typeof error.error === "string") return error.error
-    if (isRecord(error.error) && typeof error.error.message === "string") {
-      return error.error.message
-    }
-    try {
-      return JSON.stringify(error)
-    } catch {
-      return "<unserializable>"
-    }
-  }
-  return String(error ?? "")
-}
-
 export function classifyError(
   error: unknown,
   cfg: RuntimeFallbackConfig,
   now = Date.now(),
 ): ErrorClassification {
-  const message = extractMessage(error)
-  const statusCode = extractStatusCode(error)
-  const errorName = extractErrorName(error)
-  const recoveryDelayMs = statusCode === 429 ? extractRecoveryDelayMs(error, now) : undefined
+  const shape = readBoundedErrorShape(error)
+  const statusCode = shape.statusCodes[0]
+  const errorName = shape.names[0]
+  const message = shape.messages[0] ?? ""
+  const recoveryDelayMs = shape.statusCodes.includes(429) ? extractRecoveryDelayMs(error, now) : undefined
 
-  if (statusCode !== undefined && cfg.retryOnStatusCodes.includes(statusCode)) {
+  if (shape.names.includes("ContextOverflowError")) {
+    return {
+      retryable: false,
+      reason: "context overflow",
+      statusCode,
+      errorName,
+      message,
+      ...(recoveryDelayMs === undefined ? {} : { recoveryDelayMs }),
+    }
+  }
+
+  for (const retryableStatus of shape.statusCodes) {
+    if (!cfg.retryOnStatusCodes.includes(retryableStatus)) continue
     return {
       retryable: true,
-      reason: `status ${statusCode}`,
+      reason: `status ${retryableStatus}`,
       statusCode,
       errorName,
       message,

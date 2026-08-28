@@ -70,6 +70,19 @@ export function makeIdleEvent(sessionID: string) {
   return { event: { type: "session.idle", properties: { sessionID } } }
 }
 
+export function makeStatusEvent(
+  sessionID: string,
+  status: Record<string, unknown>,
+  extras: Record<string, unknown> = {},
+) {
+  return {
+    event: {
+      type: "session.status",
+      properties: { sessionID, status, ...extras },
+    },
+  }
+}
+
 export type ScheduledHandlerTask = {
   delayMs: number
   run: () => Promise<void>

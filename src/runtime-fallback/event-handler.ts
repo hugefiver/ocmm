@@ -1,4 +1,9 @@
-import { classifyError, extractStatusCode, type ErrorClassification } from "./error-classifier.ts"
+import {
+  classifyError,
+  extractStatusCode,
+  readBoundedErrorShape,
+  type ErrorClassification,
+} from "./error-classifier.ts"
 import {
   markModelFailed,
   modelKey,
@@ -26,16 +31,20 @@ import {
 import {
   applyRequirementDefaults,
   chainHeadIdentity,
+  createRuntimeFallbackDispatchReservations,
+  createRuntimeFallbackRetryStatusTracker,
   createRuntimeFallbackSessionLifecycle,
   isExplicitRuntimeFallbackAbort,
   getOrCreateFallbackState,
   isRuntimeFallbackAbort,
   parseModelIdentity,
+  parseRetryStatusEvent,
   resolveParentSessionID,
   resolveEventModelIdentity,
   resolveRuntimeFallbackAgent,
   resolveRuntimeFallbackSessionID,
   resolveRetryTarget,
+  retryStatusKey,
 } from "./event-handler-support.ts"
 import { runGenericFallback, type GenericFallbackInput } from "./event-handler-generic-fallback.ts"
 import { handleIdleContinuation } from "./event-handler-idle-continuation.ts"
@@ -92,6 +101,18 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
   const interruptionRecoveryEnabled = (): boolean =>
     !deps.getConfig().disabledHooks.includes("subagent-interruption-recovery")
   const lifecycle = createRuntimeFallbackSessionLifecycle(deps.client)
+  const reservations = createRuntimeFallbackDispatchReservations()
+  const retryStatuses = createRuntimeFallbackRetryStatusTracker()
+  const retryStatusScopes = new Map<string, {
+    generation: number
+    routeSnapshotId: number
+    confirmedTarget?: string
+  }>()
+  const clearRetryStatusState = (sessionID: string): void => {
+    retryStatuses.clear(sessionID)
+    retryStatusScopes.delete(sessionID)
+    reservations.clear(sessionID)
+  }
   // Lifecycle-scoped suppression tombstone: an explicit abort or session.deleted
   // for a child blocks late retryable session.error events for the bounded grace
   // window, even when controller state is absent (hook disabled, onDeleted
@@ -140,7 +161,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
             const generation = lifecycle.currentGeneration(sessionID)
             await lifecycle.waitForStaleDispatches(sessionID, generation)
             if (!lifecycle.isCurrent(sessionID, generation) || !routeRegistry.isCurrentSnapshot(snapshotId)) return false
-            return lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
+            const outcome = await lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
               client: lifecycle.guardedClient(
                 sessionID,
                 generation,
@@ -153,12 +174,14 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
               reason,
               abortBeforeDispatch: false,
             }))
+            return outcome.status !== "rejected"
           },
         }),
   })
 
   const genericFallbackCtx = {
     lifecycle,
+    reservations,
     isCurrentSnapshot: routeRegistry.isCurrentSnapshot,
     ...(deps.client === undefined ? {} : { client: deps.client }),
     ...(deps.directory === undefined ? {} : { directory: deps.directory }),
@@ -174,6 +197,22 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
     const props = isRecord(event.properties) ? event.properties : event
     const sessionID = resolveRuntimeFallbackSessionID(props)
     const routeSnapshot = routeRegistry.snapshot()
+    if (sessionID) {
+      const retryScope = retryStatusScopes.get(sessionID)
+      if (retryScope && (
+        retryScope.routeSnapshotId !== routeSnapshot.snapshotId
+        || !lifecycle.isCurrent(sessionID, retryScope.generation)
+      )) {
+        clearRetryStatusState(sessionID)
+      }
+      const reservation = reservations.get(sessionID)
+      if (reservation && (
+        reservation.routeSnapshotId !== routeSnapshot.snapshotId
+        || !lifecycle.isCurrent(sessionID, reservation.generation)
+      )) {
+        reservations.clear(sessionID, reservation)
+      }
+    }
 
     if (eventType === "session.created") {
       // Decode lineage via the shared decoder so runtime fallback, permissions,
@@ -181,6 +220,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       const lineage = resolveSessionLineage(raw)
       if (lineage && lineage.sessionID) {
         const childSessionID = lineage.sessionID
+        clearRetryStatusState(childSessionID)
         if (deps.idleState) beginIdleSession(deps.idleState, childSessionID)
         if (!lifecycle.hasSession(childSessionID)) {
           // Legitimate (re)creation: this is either a fresh session or a
@@ -190,6 +230,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
           // branch and preserves the tombstone, matching the idempotent
           // duplicate-create semantics.
           clearSuppression(childSessionID)
+          reservations.clear(childSessionID)
           lifecycle.beginSession(childSessionID)
           sessionStates.delete(childSessionID)
           controller.onSessionCreated(
@@ -209,9 +250,11 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       } else if (sessionID) {
         // Fallback: sessionID resolved through the legacy path even if the
         // shared decoder did not produce a lineage. Preserve prior behavior.
+        clearRetryStatusState(sessionID)
         if (deps.idleState) beginIdleSession(deps.idleState, sessionID)
         if (!lifecycle.hasSession(sessionID)) {
           clearSuppression(sessionID)
+          reservations.clear(sessionID)
           lifecycle.beginSession(sessionID)
           sessionStates.delete(sessionID)
           controller.onSessionCreated(
@@ -229,6 +272,7 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
         // Call the existing controller.onDeleted() before other cache cleanup
         // so the durable correlation is invalidated before any idle continuations.
         lifecycle.invalidateSession(sessionID)
+        clearRetryStatusState(sessionID)
         controller.onDeleted(sessionID);
         (deps.clearSessionIntent ?? defaultClearSessionIntent)(sessionID)
         sessionStates.delete(sessionID)
@@ -282,17 +326,129 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       return
     }
 
+    if (eventType === "session.status") {
+      const retryStatus = parseRetryStatusEvent(props)
+      if (!retryStatus) return
+
+      const cfg = deps.getConfig()
+      if (!cfg.runtimeFallback.enabled || !sessionID || isSuppressed(sessionID)) return
+
+      const generation = lifecycle.currentGeneration(sessionID)
+      let retryScope = retryStatusScopes.get(sessionID)
+      if (retryScope && (
+        retryScope.generation !== generation
+        || retryScope.routeSnapshotId !== routeSnapshot.snapshotId
+      )) {
+        clearRetryStatusState(sessionID)
+        retryScope = undefined
+      }
+      if (!retryScope) {
+        retryScope = { generation, routeSnapshotId: routeSnapshot.snapshotId }
+        retryStatusScopes.set(sessionID, retryScope)
+      }
+
+      const statusModel = retryStatus.providerID === "unknown" || retryStatus.modelID === "unknown"
+        ? null
+        : { providerID: retryStatus.providerID, modelID: retryStatus.modelID }
+      const pending = reservations.get(sessionID)
+      if (pending) {
+        if (pending.state === "reserved") return
+        if (!statusModel || pending.targetModel !== modelKey(statusModel.providerID, statusModel.modelID)) return
+        reservations.clear(sessionID, pending)
+      }
+
+      if (statusModel) {
+        const confirmedTarget = `${modelKey(statusModel.providerID, statusModel.modelID)}|${retryStatus.variant}`
+        if (retryScope.confirmedTarget !== undefined && retryScope.confirmedTarget !== confirmedTarget) {
+          retryStatuses.clear(sessionID)
+          reservations.clear(sessionID)
+        }
+        retryScope.confirmedTarget = confirmedTarget
+      }
+      if (!retryStatuses.accept(sessionID, retryStatusKey(retryStatus), clock())) return
+
+      const classification: ErrorClassification = {
+        retryable: true,
+        reason: "session.status retry",
+        message: retryStatus.message,
+      }
+      const eventAgent = resolveRuntimeFallbackAgent(props)
+      const correlationAgent = controller.getInterruptionCorrelation({ childSessionID: sessionID })?.agent
+      const agent = eventAgent ?? correlationAgent
+      const publishedRoute = routeSnapshot.published && agent
+        ? routeSnapshot.routes.get(agent)
+        : undefined
+      const effective = !routeSnapshot.published && agent
+        ? resolveEffectiveRequirement({
+            agentName: agent,
+            agentsConfig: cfg.agents,
+            categoriesConfig: cfg.categories,
+            disabledAgents: cfg.disabledAgents,
+          })
+        : null
+      const requirement = routeSnapshot.published
+        ? publishedRoute?.requirement ?? null
+        : effective?.requirement ?? null
+      if (interruptionRecoveryEnabled() && requirement) controller.markRetryableChildError(sessionID)
+
+      let state = sessionStates.get(sessionID)
+      if (requirement && requirement.fallbackChain.length > 0 && statusModel) {
+        state = getOrCreateFallbackState(
+          sessionStates,
+          sessionID,
+          requirement,
+          statusModel,
+          routeSnapshot.snapshotId,
+        )
+      }
+      const failedTarget = statusModel ? resolveRetryTarget(requirement, statusModel) : undefined
+      const genericInput = (target = failedTarget): GenericFallbackInput => ({
+        sessionID,
+        generation,
+        ...(agent === undefined ? {} : { agent }),
+        classification,
+        requirement,
+        ...(state === undefined ? {} : { state }),
+        ...(target === undefined ? {} : { failedTarget: target }),
+        snapshotId: routeSnapshot.snapshotId,
+        runtimeConfig: cfg.runtimeFallback,
+      })
+      const inFlight = isDispatchInFlight(sessionID)
+      const decision = controller.onOtherError({
+        sessionID,
+        snapshotId: routeSnapshot.snapshotId,
+        runGenericFallback: async (activeTarget) => {
+          if (!routeRegistry.isCurrentSnapshot(routeSnapshot.snapshotId)) return
+          await runGenericFallback(genericFallbackCtx, genericInput(activeTarget))
+        },
+      })
+      if (decision.handled) return
+      if (inFlight) {
+        await lifecycle.waitForStaleDispatches(sessionID, generation)
+        if (!lifecycle.isCurrent(sessionID, generation) || isDispatchInFlight(sessionID)) return
+      }
+      await runGenericFallback(genericFallbackCtx, genericInput())
+      return
+    }
+
     if (eventType !== "session.error") return
 
     const cfg = deps.getConfig()
 
-    // Evaluate explicit abort BEFORE the runtimeFallback.enabled early return.
-    // This ensures that even when runtime fallback is disabled, an explicit
-    // abort cancels any pending 429 gate and records abort evidence so a
-    // misleading output notice cannot be produced for an aborted child.
     const earlyError = props.error
-    if (isRuntimeFallbackAbort(earlyError)) {
-      if (sessionID && isExplicitRuntimeFallbackAbort(earlyError)) {
+    const earlyShape = readBoundedErrorShape(earlyError)
+    const abortShaped = isRuntimeFallbackAbort(earlyError)
+      || earlyShape.names.some((name) => name === "AbortError" || name === "DOMException")
+    const explicitAbort = abortShaped && isExplicitRuntimeFallbackAbort(earlyError)
+    const quotaAbortCandidate = abortShaped
+      && !explicitAbort
+      && earlyShape.statusCodes.includes(402)
+    const eventModel = resolveEventModelIdentity(props)
+    const handleAbort = (): void => {
+      // Evaluate explicit abort BEFORE every runtime-fallback eligibility gate.
+      // Even when fallback is disabled or provider quota metadata is present,
+      // a user abort remains terminal and suppresses later recovery/idle work.
+      if (sessionID && explicitAbort) {
         if (interruptionRecoveryEnabled()) {
           controller.markExplicitAbort(sessionID)
         }
@@ -305,9 +461,27 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
         suppressSession(sessionID)
       }
       log.debug(`session.error abort (likely our own); skipping`)
+    }
+    if (abortShaped && !quotaAbortCandidate) {
+      handleAbort()
       return
     }
+    const reservation = sessionID ? reservations.get(sessionID) : undefined
+    if (
+      reservation
+      && reservation.state !== "reserved"
+      && eventModel
+      && reservation.routeSnapshotId === routeSnapshot.snapshotId
+      && lifecycle.isCurrent(sessionID, reservation.generation)
+      && reservation.targetModel === modelKey(eventModel.providerID, eventModel.modelID)
+    ) {
+      reservations.clear(sessionID, reservation)
+    }
     if (!cfg.runtimeFallback.enabled) {
+      if (abortShaped) {
+        handleAbort()
+        return
+      }
       if (sessionID && deps.idleState) {
         const classification = classifyError(earlyError, cfg.runtimeFallback, clock())
         if (shouldStopIdleContinuationForNonRetryableRequest(earlyError, classification)) {
@@ -317,6 +491,10 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       return
     }
     if (!sessionID) {
+      if (abortShaped) {
+        handleAbort()
+        return
+      }
       log.debug("session.error without sessionID; skipping")
       return
     }
@@ -360,6 +538,14 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       ? publishedRoute?.requirement ?? null
       : effective?.requirement ?? null
     const routeModel = routeSnapshot.published ? parseModelIdentity(publishedRoute?.model) : null
+    const eligibleQuotaAbort = quotaAbortCandidate
+      && cfg.runtimeFallback.retryOnStatusCodes.includes(402)
+      && requirement !== null
+      && requirement.fallbackChain.length > 1
+    if (abortShaped && !eligibleQuotaAbort) {
+      handleAbort()
+      return
+    }
     // Once the classification is retryable and a known effective agent
     // requirement exists, record durable retryable-child-error evidence. This
     // does NOT dispatch - the existing on429()/generic fallback paths below
@@ -369,7 +555,6 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
     if (interruptionRecoveryEnabled() && classification.retryable && requirement) {
       controller.markRetryableChildError(sessionID)
     }
-    const eventModel = resolveEventModelIdentity(props)
     const inFlight = isDispatchInFlight(sessionID)
     const activeDispatchTarget = !eventModel && inFlight
       ? controller.getActiveDispatchTarget(sessionID, routeSnapshot.snapshotId)
@@ -410,7 +595,9 @@ export function createRuntimeFallbackRuntime(deps: RuntimeFallbackDeps): Runtime
       snapshotId: routeSnapshot.snapshotId,
       runtimeConfig: cfg.runtimeFallback,
     })
-    const dedicated429 = classification.retryable && classification.statusCode === 429
+    const dedicated429 = !quotaAbortCandidate
+      && classification.retryable
+      && classification.statusCode === 429
 
     // A stale in-flight dispatch from an older generation may still hold the
     // global sessionID lock. Let it settle, confirm this generation is still

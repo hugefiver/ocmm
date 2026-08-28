@@ -2,8 +2,9 @@
  * Dispatches a fallback retry: aborts the failed session prompt, fetches
  * the last user parts, and re-prompts with the new model.
  *
- * Minimal — no prompt-async-gate, no reservation/backoff. Dedup via
- * `inFlightRetries` Set. Errors are logged + swallowed (never rethrown).
+ * Minimal — no prompt-async-gate, reservation, or backoff. Dedup via a
+ * per-session in-flight Set. Outcomes preserve whether prompt acceptance is
+ * known, ambiguous after invocation, or rejected before invocation.
  */
 import { isRecord, log } from "../shared/logger.ts"
 import type { FallbackEntry } from "../shared/types.ts"
@@ -32,7 +33,13 @@ export type DispatchArgs = {
   newEntry: FallbackEntry
   reason: string
   abortBeforeDispatch?: boolean
+  isCurrent?: () => boolean
 }
+
+export type DispatchFallbackOutcome =
+  | { status: "accepted" }
+  | { status: "possibly-accepted"; error: unknown }
+  | { status: "rejected"; reason: "in-flight" | "stale" | "messages" | "empty-parts" }
 
 const inFlight = new Set<string>()
 
@@ -71,11 +78,11 @@ function extractLastUserParts(messagesResp: unknown): unknown[] {
   return collected
 }
 
-export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean> {
+export async function dispatchFallbackRetry(args: DispatchArgs): Promise<DispatchFallbackOutcome> {
   const { client, sessionID, directory, agent, newEntry, reason } = args
   if (inFlight.has(sessionID)) {
     log.debug(`dispatch: already in flight for session ${sessionID.slice(0, 16)}…`)
-    return false
+    return { status: "rejected", reason: "in-flight" }
   }
   inFlight.add(sessionID)
   try {
@@ -96,11 +103,11 @@ export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean
       parts = extractLastUserParts(resp)
     } catch (err) {
       log.warn(`failed to fetch messages for retry: ${(err as Error).message}`)
-      return false
+      return { status: "rejected", reason: "messages" }
     }
     if (parts.length === 0) {
       log.warn(`no user parts to retry; skipping dispatch`)
-      return false
+      return { status: "rejected", reason: "empty-parts" }
     }
 
     const providerID = newEntry.providers[0] ?? ""
@@ -113,7 +120,14 @@ export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean
     if (newEntry.variant && newEntry.reasoning === undefined) body.variant = newEntry.variant
     if (newEntry.reasoningEffort) body.reasoningEffort = newEntry.reasoningEffort
 
+    if (args.isCurrent?.() === false) {
+      log.debug(`dispatch: session ${sessionID.slice(0, 16)}… became stale before prompt`)
+      return { status: "rejected", reason: "stale" }
+    }
+
+    let promptInvoked = false
     try {
+      promptInvoked = true
       await client.session.prompt({
         path: { id: sessionID },
         body,
@@ -123,13 +137,14 @@ export async function dispatchFallbackRetry(args: DispatchArgs): Promise<boolean
         `fallback dispatched: session=${sessionID.slice(0, 16)}… ` +
           `model=${providerID}/${newEntry.model} reason=${reason}`,
       )
-      return true
+      return { status: "accepted" }
     } catch (err) {
       log.warn(
         `prompt dispatch failed: ${(err as Error).message} ` +
           `(will rely on next session.error for further retries)`,
       )
-      return false
+      if (promptInvoked) return { status: "possibly-accepted", error: err }
+      return { status: "rejected", reason: "stale" }
     }
   } finally {
     inFlight.delete(sessionID)

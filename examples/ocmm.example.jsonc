@@ -191,7 +191,7 @@
     "dispatch": true,           // false = observe-only (classify + log, no retry)
     "maxAttempts": 3,           // cap committed model switches per session
     "cooldownSeconds": 60,      // skip a failed model for this long
-    "retryOnStatusCodes": [429, 500, 502, 503, 504],
+    "retryOnStatusCodes": [402, 429, 500, 502, 503, 504],
     "retryOnPatterns": [
       "rate.?limit",
       "too.?many.?requests",

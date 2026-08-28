@@ -68,6 +68,33 @@ test("idle continuation: does not continue when aborted", async () => {
   assert.equal(calls.length, 0)
 })
 
+for (const scenario of [
+  { label: "root 402", error: { name: "AbortError", isAbort: true, status: 402 } },
+  { label: "nested 402", error: { name: "DOMException", isAbort: true, error: { status: 402 } } },
+] as const) {
+  test(`idle continuation: explicit abort remains terminal with ${scenario.label}`, async () => {
+    const { client, calls } = makeMockClient()
+    const idleState = createIdleContinuationState()
+    idleState.globalEnabled = true
+    const cfg = makeConfig({ enabled: true })
+    const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client, idleState })
+    const sessionID = `ses_explicit_abort_${scenario.label.replace(" ", "_")}`
+
+    await handler(makeErrorEvent(sessionID, scenario.error, {
+      agent: "orchestrator",
+      model: { providerID: "hoo", modelID: "primary-model" },
+    }))
+    await handler(makeErrorEvent(sessionID, { status: 503 }, {
+      agent: "orchestrator",
+      model: { providerID: "hoo", modelID: "primary-model" },
+    }))
+    await handler(makeIdleEvent(sessionID))
+
+    assert.equal(calls.length, 0)
+    assert.equal(idleState.sessionData.get(sessionID)?.aborted, true)
+  })
+}
+
 test("idle continuation: stops before reading todos for non-retryable 400 request errors", async () => {
   const mock = makeControlledClient([], { messagesResults: [Promise.resolve(unfinishedTodoMessages)] })
   const idleState = createIdleContinuationState()
@@ -315,7 +342,7 @@ test("session.idle calls injected clearSessionIntent", async () => {
   assert.deepEqual(cleared, ["ses_idle"])
 })
 
-test("session.idle preserves fallback state for later session.error", async () => {
+test("session.idle preserves accepted pending fallback until target-model evidence", async () => {
   const { client, calls } = makeMockClient()
   const cfg = makeConfig()
   const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
@@ -331,9 +358,17 @@ test("session.idle preserves fallback state for later session.error", async () =
   // session.idle - must NOT delete fallback state
   await handler(makeIdleEvent("ses_1"))
 
-  // Second error: no model in event - should use activeModel (hoo/fallback-a)
-  // as the failed key and advance to fallback-b, NOT restart from primary.
+  // A model-less error is not proof that the accepted target ran, so it must
+  // preserve pending ownership and avoid a duplicate prompt.
   await handler(makeErrorEvent("ses_1", { status: 503 }, { agent: "orchestrator" }))
+  assert.equal(calls.length, 1)
+
+  // Explicit evidence for the pending target reconciles ownership and permits
+  // the next fallback transition.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
+  }))
   assert.equal(calls.length, 2)
   assert.equal(calls[1]?.body.modelID, "fallback-b")
 })

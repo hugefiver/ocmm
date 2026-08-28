@@ -191,7 +191,7 @@ test("event without model uses agent's primary model as failed key (not agent na
   assert.equal(calls[1]?.body.modelID, "fallback-b")
 })
 
-test("second error without model uses state.activeModel as failed key (chain advances)", async () => {
+test("model-less error does not advance an accepted pending target until explicit target evidence", async () => {
   const { client, calls } = makeMockClient()
   const cfg = makeConfig()
   const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
@@ -204,18 +204,24 @@ test("second error without model uses state.activeModel as failed key (chain adv
   assert.equal(calls.length, 1)
   assert.equal(calls[0]?.body.modelID, "fallback-a")
 
-  // Second error: NO model in event. The handler should use state.activeModel
-  // ("hoo/fallback-a") as the just-failed key, not fall back to the primary
-  // chain entry. This advances the chain to fallback-b.
+  // A model-less error can still resolve state.activeModel, but it cannot prove
+  // that the accepted pending target actually ran, so it must not re-prompt.
   await handler(makeErrorEvent("ses_1", { status: 503 }, {
     agent: "orchestrator",
-    // No model field - relies on activeModel tracking
+  }))
+  assert.equal(calls.length, 1)
+
+  // Explicit current-target evidence clears pending ownership and advances
+  // from fallback-a to fallback-b.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
   }))
   assert.equal(calls.length, 2)
   assert.equal(calls[1]?.body.modelID, "fallback-b")
 })
 
-test("third error without model continues to advance using activeModel", async () => {
+test("each accepted pending target requires explicit evidence before progression or exhaustion", async () => {
   const { client, calls } = makeMockClient()
   const cfg = makeConfig({ maxAttempts: 5 })
   const handler = createRuntimeFallbackEventHandler({ getConfig: () => cfg, client })
@@ -227,18 +233,32 @@ test("third error without model continues to advance using activeModel", async (
   }))
   assert.equal(calls[0]?.body.modelID, "fallback-a")
 
-  // Second error: no model -> activeModel (fallback-a) -> fallback-b
+  // Model-less evidence cannot prove fallback-a ownership and must not repeat.
   await handler(makeErrorEvent("ses_1", { status: 503 }, {
     agent: "orchestrator",
+  }))
+  assert.equal(calls.length, 1)
+
+  // Explicit fallback-a evidence advances to fallback-b.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-a" },
   }))
   assert.equal(calls[1]?.body.modelID, "fallback-b")
 
-  // Third error: no model -> activeModel (fallback-b) -> chain has only 2
-  // fallbacks (a, b), so this should exhaust with "no-next-model"
+  // The new accepted fallback-b target is pending too; model-less evidence
+  // cannot advance or exhaust it.
   await handler(makeErrorEvent("ses_1", { status: 503 }, {
     agent: "orchestrator",
   }))
-  // Only 2 calls, chain exhausted after fallback-b
+  assert.equal(calls.length, 2)
+
+  // Explicit fallback-b evidence clears pending, then the chain exhausts
+  // without emitting a third prompt.
+  await handler(makeErrorEvent("ses_1", { status: 503 }, {
+    agent: "orchestrator",
+    model: { providerID: "hoo", modelID: "fallback-b" },
+  }))
   assert.equal(calls.length, 2)
 })
 

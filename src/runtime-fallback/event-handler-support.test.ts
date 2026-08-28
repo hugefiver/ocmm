@@ -1,7 +1,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { applyRequirementDefaults, resolveRetryTarget } from "./event-handler-support.ts"
+import {
+  applyRequirementDefaults,
+  createRuntimeFallbackDispatchReservations,
+  resolveRetryTarget,
+  type DispatchReservationOwner,
+} from "./event-handler-support.ts"
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 
 test("requirement defaults retain canonical reasoning alongside a legacy variant", () => {
@@ -67,4 +72,69 @@ test("retry target pins the actual identity while retaining canonical reasoning"
       reasoning: "high",
     },
   })
+})
+
+const reservationOwner: DispatchReservationOwner = {
+  generation: 7,
+  routeSnapshotId: 11,
+  targetModel: "provider/fallback-a",
+}
+
+test("dispatch reservations keep one owner record per session and settle only that owner", () => {
+  const reservations = createRuntimeFallbackDispatchReservations()
+
+  assert.equal(reservations.acquire("ses_owner", reservationOwner), true)
+  assert.deepEqual(reservations.get("ses_owner"), {
+    ...reservationOwner,
+    state: "reserved",
+  })
+  assert.equal(reservations.acquire("ses_owner", {
+    generation: 8,
+    routeSnapshotId: 12,
+    targetModel: "provider/fallback-b",
+  }), false)
+  assert.equal(reservations.settle("ses_owner", reservationOwner, "accepted"), true)
+  assert.deepEqual(reservations.get("ses_owner"), {
+    ...reservationOwner,
+    state: "accepted",
+  })
+
+  assert.equal(reservations.acquire("ses_owner_ambiguous", reservationOwner), true)
+  assert.equal(reservations.settle("ses_owner_ambiguous", reservationOwner, "possibly-accepted"), true)
+  assert.deepEqual(reservations.get("ses_owner_ambiguous"), {
+    ...reservationOwner,
+    state: "possibly-accepted",
+  })
+})
+
+test("dispatch reservation owner fencing rejects every stale owner field", () => {
+  const staleOwners: DispatchReservationOwner[] = [
+    { ...reservationOwner, generation: reservationOwner.generation + 1 },
+    { ...reservationOwner, routeSnapshotId: reservationOwner.routeSnapshotId + 1 },
+    { ...reservationOwner, targetModel: "provider/fallback-b" },
+  ]
+
+  for (const [index, staleOwner] of staleOwners.entries()) {
+    const sessionID = `ses_stale_owner_${index}`
+    const reservations = createRuntimeFallbackDispatchReservations()
+    assert.equal(reservations.acquire(sessionID, reservationOwner), true)
+
+    assert.equal(reservations.settle(sessionID, staleOwner, "possibly-accepted"), false)
+    assert.deepEqual(reservations.get(sessionID), { ...reservationOwner, state: "reserved" })
+    assert.equal(reservations.clear(sessionID, staleOwner), false)
+    assert.deepEqual(reservations.get(sessionID), { ...reservationOwner, state: "reserved" })
+  }
+})
+
+test("lifecycle clear is unconditional and permits reacquisition", () => {
+  const reservations = createRuntimeFallbackDispatchReservations()
+  assert.equal(reservations.acquire("ses_lifecycle", reservationOwner), true)
+
+  assert.equal(reservations.clear("ses_lifecycle"), true)
+  assert.equal(reservations.get("ses_lifecycle"), undefined)
+  assert.equal(reservations.acquire("ses_lifecycle", {
+    generation: 8,
+    routeSnapshotId: 12,
+    targetModel: "provider/fallback-b",
+  }), true)
 })

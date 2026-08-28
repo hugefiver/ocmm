@@ -6,6 +6,7 @@ import {
   extractErrorName,
   extractRecoveryDelayMs,
   extractStatusCode,
+  readBoundedErrorShape,
 } from "./error-classifier.ts"
 import { defaultConfig } from "../config/schema.ts"
 
@@ -23,6 +24,90 @@ test("extractErrorName reads name or type", () => {
   assert.equal(extractErrorName({ name: "RateLimitError" }), "RateLimitError")
   assert.equal(extractErrorName({ type: "QuotaExceeded" }), "QuotaExceeded")
   assert.equal(extractErrorName({ foo: "bar" }), undefined)
+})
+
+test("readBoundedErrorShape extracts root and nested error fields in stable order", () => {
+  assert.deepEqual(
+    readBoundedErrorShape({
+      status: "429",
+      name: "RootError",
+      message: "root message",
+      error: "nested error string",
+      data: {
+        code: "402",
+        name: "DataError",
+        message: "data message",
+      },
+      cause: {
+        statusCode: "503",
+        name: "CauseError",
+        message: "cause message",
+      },
+    }),
+    {
+      statusCodes: [429, 402, 503],
+      names: ["RootError", "DataError", "CauseError"],
+      messages: ["root message", "nested error string", "data message", "cause message"],
+    },
+  )
+})
+
+test("readBoundedErrorShape follows error, data, and cause chains while preserving unique values", () => {
+  assert.deepEqual(
+    readBoundedErrorShape({
+      error: {
+        data: {
+          cause: {
+            statusCode: "402",
+            name: "QuotaError",
+            message: "quota",
+          },
+        },
+      },
+    }),
+    { statusCodes: [402], names: ["QuotaError"], messages: ["quota"] },
+  )
+  assert.deepEqual(readBoundedErrorShape("root string"), {
+    statusCodes: [],
+    names: [],
+    messages: ["root string"],
+  })
+})
+
+test("readBoundedErrorShape terminates cycles and excludes depth five by default", () => {
+  const cyclic: Record<string, unknown> = {
+    status: 429,
+    name: "RateLimitError",
+    message: "slow down",
+  }
+  cyclic.cause = cyclic
+  assert.deepEqual(readBoundedErrorShape(cyclic), {
+    statusCodes: [429],
+    names: ["RateLimitError"],
+    messages: ["slow down"],
+  })
+
+  const depthFive = {
+    error: {
+      data: {
+        cause: {
+          error: {
+            data: { status: 402, name: "TooDeep", message: "ignored" },
+          },
+        },
+      },
+    },
+  }
+  assert.deepEqual(readBoundedErrorShape(depthFive), {
+    statusCodes: [],
+    names: [],
+    messages: [],
+  })
+  assert.deepEqual(readBoundedErrorShape(depthFive, 5), {
+    statusCodes: [402],
+    names: ["TooDeep"],
+    messages: ["ignored"],
+  })
 })
 
 test("classifyError marks status code 429 retryable", () => {
@@ -142,6 +227,33 @@ test("status code takes priority over pattern matching", () => {
   assert.match(r.reason, /pattern/)
 })
 
+test("ContextOverflowError is non-retryable before configured statuses and patterns", () => {
+  const overflow = classifyError(
+    { status: 400, cause: { name: "ContextOverflowError", message: "rate limit" } },
+    { ...cfg, retryOnStatusCodes: [400] },
+  )
+  assert.equal(overflow.retryable, false)
+  assert.equal(overflow.reason, "context overflow")
+  assert.equal(overflow.statusCode, 400)
+  assert.equal(overflow.errorName, "ContextOverflowError")
+  assert.equal(overflow.message, "rate limit")
+})
+
+test("classifyError retries configured and nested status codes without provider retry booleans", () => {
+  const configured400 = { ...cfg, retryOnStatusCodes: [400] }
+  assert.equal(classifyError({ status: 400 }, configured400).retryable, true)
+  assert.equal(classifyError({ cause: { status: 402 } }, cfg).retryable, true)
+
+  for (const [error, retryable] of [
+    [{ isRetryable: true, message: "not retryable" }, false],
+    [{ isRetryable: false, message: "not retryable" }, false],
+    [{ error: { isRetryable: true, message: "not retryable" } }, false],
+    [{ cause: { isRetryable: false, status: 402 } }, true],
+  ] as const) {
+    assert.equal(classifyError(error, cfg).retryable, retryable)
+  }
+})
+
 test("extractRecoveryDelayMs reads bounded retry metadata", () => {
   assert.equal(extractRecoveryDelayMs({ retryAfter: 90 }, NOW), 90_000)
   assert.equal(extractRecoveryDelayMs({ error: { retry_after: "12m" } }, NOW), 720_000)
@@ -219,4 +331,10 @@ test("classifyError exposes recoveryDelayMs only for explicit status 429", () =>
   const patternOnly = classifyError("rate limit: retry after 90 seconds", cfg, NOW)
   assert.equal(patternOnly.recoveryDelayMs, undefined)
   assert.equal(Object.hasOwn(patternOnly, "recoveryDelayMs"), false)
+})
+
+test("classifyError preserves recoveryDelayMs for a bounded nested 429", () => {
+  const rateLimited = classifyError({ cause: { status: "429", retryAfter: 90 } }, cfg, NOW)
+  assert.equal(rateLimited.statusCode, 429)
+  assert.equal(rateLimited.recoveryDelayMs, 90_000)
 })

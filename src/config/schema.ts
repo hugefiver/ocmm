@@ -233,7 +233,7 @@ const defaultRuntimeFallbackConfig = () => ({
   dispatch: true,
   maxAttempts: 3,
   cooldownSeconds: 60,
-  retryOnStatusCodes: [429, 500, 502, 503, 504],
+  retryOnStatusCodes: [402, 429, 500, 502, 503, 504],
   retryOnPatterns: [...DEFAULT_RUNTIME_FALLBACK_RETRY_PATTERNS],
   subagent429: defaultSubagent429Config(),
 })
@@ -522,7 +522,7 @@ export const RuntimeFallbackConfigSchema = z
     /** HTTP status codes that trigger a retry. */
     retryOnStatusCodes: z
       .array(z.number().int())
-      .default([429, 500, 502, 503, 504]),
+      .default([402, 429, 500, 502, 503, 504]),
     /** Regex patterns matched against the error message; match => retryable. */
     retryOnPatterns: z
       .array(z.string())

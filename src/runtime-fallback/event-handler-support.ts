@@ -9,6 +9,103 @@ import type { OcmmClient } from "./dispatcher.ts"
 
 export type ModelIdentity = { providerID: string; modelID: string }
 
+export type RetryStatusEvent = {
+  providerID: string
+  modelID: string
+  variant: string
+  attempt: string
+  message: string
+}
+
+export type RuntimeFallbackRetryStatusTracker = {
+  accept(sessionID: string, key: string, now: number): boolean
+  clear(sessionID: string): void
+}
+
+const UNKNOWN_RETRY_STATUS_SEGMENT = "unknown"
+
+function normalizeRetryStatusIdentifier(value: unknown): string {
+  if (typeof value !== "string") return UNKNOWN_RETRY_STATUS_SEGMENT
+  const normalized = value.trim().toLowerCase()
+  return normalized || UNKNOWN_RETRY_STATUS_SEGMENT
+}
+
+function normalizeRetryStatusMessage(value: unknown): string {
+  if (typeof value !== "string") return UNKNOWN_RETRY_STATUS_SEGMENT
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ")
+  return normalized || UNKNOWN_RETRY_STATUS_SEGMENT
+}
+
+function retryStatusAttempt(value: unknown): string {
+  if (typeof value === "string") return normalizeRetryStatusIdentifier(value)
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) return String(value)
+  return UNKNOWN_RETRY_STATUS_SEGMENT
+}
+
+export function parseRetryStatusEvent(props: unknown): RetryStatusEvent | null {
+  if (!isRecord(props) || !isRecord(props.status) || props.status.type !== "retry") return null
+
+  const status = props.status
+  const statusModel = isRecord(status.model) ? status.model : undefined
+  const propsModel = isRecord(props.model) ? props.model : undefined
+  const providerID = statusModel && typeof statusModel.providerID === "string"
+    ? statusModel.providerID
+    : propsModel?.providerID
+  const modelID = statusModel && typeof statusModel.modelID === "string"
+    ? statusModel.modelID
+    : propsModel?.modelID
+  const variant = typeof status.variant === "string" ? status.variant : statusModel?.variant
+
+  return {
+    providerID: normalizeRetryStatusIdentifier(providerID),
+    modelID: normalizeRetryStatusIdentifier(modelID),
+    variant: normalizeRetryStatusIdentifier(variant),
+    attempt: retryStatusAttempt(status.attempt),
+    message: normalizeRetryStatusMessage(status.message),
+  }
+}
+
+export function retryStatusKey(status: RetryStatusEvent): string {
+  return `${normalizeRetryStatusIdentifier(status.providerID)}/${normalizeRetryStatusIdentifier(status.modelID)}`
+    + `|${normalizeRetryStatusIdentifier(status.variant)}`
+    + `|${retryStatusAttempt(status.attempt)}`
+    + `|${normalizeRetryStatusMessage(status.message)}`
+}
+
+export function createRuntimeFallbackRetryStatusTracker(
+  maxKeysPerSession = 256,
+  maxAgeMs = 30 * 60_000,
+): RuntimeFallbackRetryStatusTracker {
+  const sessions = new Map<string, Map<string, number>>()
+
+  return {
+    accept(sessionID, key, now) {
+      let keys = sessions.get(sessionID)
+      if (!keys) {
+        keys = new Map()
+        sessions.set(sessionID, keys)
+      }
+
+      for (const [candidate, insertedAt] of keys) {
+        if (now - insertedAt >= maxAgeMs) keys.delete(candidate)
+      }
+      if (keys.has(key)) return false
+
+      keys.set(key, now)
+      while (keys.size > maxKeysPerSession) {
+        const oldest = keys.keys().next().value
+        if (oldest === undefined) break
+        keys.delete(oldest)
+      }
+      if (keys.size === 0) sessions.delete(sessionID)
+      return true
+    },
+    clear(sessionID) {
+      sessions.delete(sessionID)
+    },
+  }
+}
+
 const ABORT_NAMES = new Set(["AbortError", "DOMException"])
 
 export function isExplicitRuntimeFallbackAbort(error: unknown): boolean {
@@ -120,6 +217,63 @@ export function getOrCreateFallbackState(
   state.fallbackIndex = matched ? requirement.fallbackChain.indexOf(matched) : -1
   sessionStates.set(sessionID, state)
   return state
+}
+
+export type DispatchReservationOwner = {
+  generation: number
+  routeSnapshotId: number
+  targetModel: string
+}
+
+export type DispatchReservationRecord = DispatchReservationOwner & {
+  state: "reserved" | "accepted" | "possibly-accepted"
+}
+
+export type RuntimeFallbackDispatchReservations = {
+  acquire(sessionID: string, owner: DispatchReservationOwner): boolean
+  settle(
+    sessionID: string,
+    owner: DispatchReservationOwner,
+    state: "accepted" | "possibly-accepted",
+  ): boolean
+  get(sessionID: string): DispatchReservationRecord | undefined
+  clear(sessionID: string, owner?: DispatchReservationOwner): boolean
+}
+
+function sameDispatchReservationOwner(
+  record: DispatchReservationRecord,
+  owner: DispatchReservationOwner,
+): boolean {
+  return record.generation === owner.generation
+    && record.routeSnapshotId === owner.routeSnapshotId
+    && record.targetModel === owner.targetModel
+}
+
+export function createRuntimeFallbackDispatchReservations(): RuntimeFallbackDispatchReservations {
+  const records = new Map<string, DispatchReservationRecord>()
+
+  return {
+    acquire(sessionID, owner) {
+      if (records.has(sessionID)) return false
+      records.set(sessionID, { ...owner, state: "reserved" })
+      return true
+    },
+    settle(sessionID, owner, state) {
+      const record = records.get(sessionID)
+      if (!record || !sameDispatchReservationOwner(record, owner)) return false
+      records.set(sessionID, { ...owner, state })
+      return true
+    },
+    get(sessionID) {
+      const record = records.get(sessionID)
+      return record === undefined ? undefined : { ...record }
+    },
+    clear(sessionID, owner) {
+      const record = records.get(sessionID)
+      if (!record || (owner !== undefined && !sameDispatchReservationOwner(record, owner))) return false
+      return records.delete(sessionID)
+    },
+  }
 }
 
 /**

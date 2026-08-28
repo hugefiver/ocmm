@@ -70,6 +70,14 @@ test("defaultConfig applies the complete bounded runtime fallback retry patterns
   ])
 })
 
+test("runtime fallback defaults include 402 and user status arrays replace them", () => {
+  assert.deepEqual(defaultConfig().runtimeFallback.retryOnStatusCodes, [402, 429, 500, 502, 503, 504])
+  assert.deepEqual(
+    OcmmConfigSchema.parse({ runtimeFallback: { retryOnStatusCodes: [400] } }).runtimeFallback.retryOnStatusCodes,
+    [400],
+  )
+})
+
 test("history cache mitigation applies root and profile defaults", () => {
   assert.deepEqual(defaultConfig().historyCacheMitigation, {
     enabled: false,

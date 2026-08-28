@@ -66,14 +66,14 @@ test("aborts by default before fetching messages and prompting", async () => {
     return originalPrompt(args)
   }
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_abort_default",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(abortCalls, 1)
   assert.equal(promptCalls, 1)
   assert.deepEqual(trace, ["abort", "messages", "prompt"])
@@ -96,7 +96,7 @@ test("skips abort only when abortBeforeDispatch is explicitly false", async () =
     return originalPrompt(args)
   }
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_abort_disabled",
     newEntry: entry,
@@ -104,7 +104,7 @@ test("skips abort only when abortBeforeDispatch is explicitly false", async () =
     abortBeforeDispatch: false,
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(abortCalls, 0)
   assert.equal(promptCalls, 1)
 })
@@ -118,14 +118,14 @@ test("extracts single user message parts", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0]?.body.parts, [{ type: "text", text: "hello" }])
 })
@@ -141,14 +141,14 @@ test("extracts latest contiguous user-message block (multiple adjacent user mess
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0]?.body.parts, [
     { type: "text", text: "second" },
@@ -168,14 +168,14 @@ test("stops collecting at first non-user after latest block", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   // The latest user block is empty because the last message is assistant.
   // Scanning backward: assistant (skip, no user collected yet) -> latest-b (user, collect) -> latest-a (user, collect) -> older-reply (assistant, break).
   assert.deepEqual(calls[0]?.body.parts, [
@@ -184,7 +184,7 @@ test("stops collecting at first non-user after latest block", async () => {
   ])
 })
 
-test("returns false when no user messages exist", async () => {
+test("rejects with empty-parts when no user messages exist", async () => {
   const messagesResp = {
     messages: [
       { role: "assistant", parts: [{ type: "text", text: "only assistant" }] },
@@ -192,14 +192,14 @@ test("returns false when no user messages exist", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, false)
+  assert.deepEqual(outcome, { status: "rejected", reason: "empty-parts" })
   assert.equal(calls.length, 0)
 })
 
@@ -213,14 +213,14 @@ test("does not cross assistant boundary when latest user block has no parts", as
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, false)
+  assert.deepEqual(outcome, { status: "rejected", reason: "empty-parts" })
   assert.equal(calls.length, 0)
 })
 
@@ -232,14 +232,14 @@ test("uses content field when parts is absent", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.deepEqual(calls[0]?.body.parts, [{ type: "text", text: "from-content" }])
 })
 
@@ -251,14 +251,14 @@ test("normalizes string content field when parts is absent", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.deepEqual(calls[0]?.body.parts, [{ type: "text", text: "hello" }])
 })
 
@@ -270,7 +270,7 @@ test("passes agent and directory through to prompt", async () => {
   }
   const { client, calls } = makeClient(messagesResp)
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_1",
     directory: "/wd",
@@ -279,7 +279,7 @@ test("passes agent and directory through to prompt", async () => {
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(calls[0]?.body.agent, "builder")
   assert.equal(calls[0]?.directory, "/wd")
 })
@@ -291,6 +291,18 @@ test("prevents concurrent dispatch for same session", async () => {
     ],
   }
   const { client, calls } = makeClient(messagesResp)
+  let abortCalls = 0
+  let messagesCalls = 0
+  const originalAbort = client.session.abort
+  const originalMessages = client.session.messages
+  client.session.abort = async (args) => {
+    abortCalls++
+    return originalAbort(args)
+  }
+  client.session.messages = async (args) => {
+    messagesCalls++
+    return originalMessages(args)
+  }
 
   // Launch two concurrently
   const [r1, r2] = await Promise.all([
@@ -298,9 +310,13 @@ test("prevents concurrent dispatch for same session", async () => {
     dispatchFallbackRetry({ client, sessionID: "ses_dup", newEntry: entry, reason: "rate_limit" }),
   ])
 
-  // One succeeds, one is skipped as in-flight
-  assert.equal(r1 || r2, true)
-  assert.equal(!r1 || !r2, true) // exactly one false
+  // One succeeds; the other is rejected before abort/messages I/O.
+  assert.deepEqual([r1, r2].sort((left, right) => left.status.localeCompare(right.status)), [
+    { status: "accepted" },
+    { status: "rejected", reason: "in-flight" },
+  ])
+  assert.equal(abortCalls, 1)
+  assert.equal(messagesCalls, 1)
   assert.equal(calls.length, 1)
 })
 
@@ -371,14 +387,14 @@ test("dispatcher selects a canonical models fallback without leaking entry contr
   })!
   const fallback = requirement.fallbackChain[1]!
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_canonical_models",
     newEntry: { ...fallback, variant: "max", reasoningEffort: "low" },
     reason: "rate_limit",
   })
 
-  assert.equal(ok, true)
+  assert.deepEqual(outcome, { status: "accepted" })
   assert.equal(calls[0]?.body.providerID, "anthropic")
   assert.equal(calls[0]?.body.modelID, "claude-sonnet-4-6")
   assert.equal(calls[0]?.body.reasoningEffort, "low")
@@ -387,7 +403,7 @@ test("dispatcher selects a canonical models fallback without leaking entry contr
   }
 })
 
-test("returns false when messages fetch throws", async () => {
+test("rejects with messages when message fetch throws", async () => {
   let messagesCalls = 0
   const client: OcmmClient = {
     session: {
@@ -400,19 +416,20 @@ test("returns false when messages fetch throws", async () => {
     },
   }
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_err",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, false)
+  assert.deepEqual(outcome, { status: "rejected", reason: "messages" })
   assert.equal(messagesCalls, 1)
 })
 
-test("returns false when prompt dispatch throws", async () => {
+test("returns possibly-accepted with the original error when invoked prompt rejects", async () => {
   let promptCalls = 0
+  const promptError = new Error("prompt rejected")
   const messagesResp = {
     messages: [
       { role: "user", parts: [{ type: "text", text: "hi" }] },
@@ -424,18 +441,48 @@ test("returns false when prompt dispatch throws", async () => {
       async messages() { return messagesResp },
       async prompt() {
         promptCalls++
-        throw new Error("prompt rejected")
+        throw promptError
       },
     },
   }
 
-  const ok = await dispatchFallbackRetry({
+  const outcome = await dispatchFallbackRetry({
     client,
     sessionID: "ses_prompt_err",
     newEntry: entry,
     reason: "rate_limit",
   })
 
-  assert.equal(ok, false)
+  assert.equal(outcome.status, "possibly-accepted")
+  assert.equal(outcome.status === "possibly-accepted" ? outcome.error : undefined, promptError)
   assert.equal(promptCalls, 1)
+})
+
+test("rejects stale immediately before prompt invocation", async () => {
+  let current = true
+  let promptCalls = 0
+  const { client } = makeClient({
+    messages: [{ role: "user", parts: [{ type: "text", text: "retry" }] }],
+  })
+  const originalMessages = client.session.messages
+  client.session.messages = async (args) => {
+    const response = await originalMessages(args)
+    current = false
+    return response
+  }
+  client.session.prompt = async () => {
+    promptCalls++
+    return undefined
+  }
+
+  const outcome = await dispatchFallbackRetry({
+    client,
+    sessionID: "ses_stale_pre_prompt",
+    newEntry: entry,
+    reason: "rate_limit",
+    isCurrent: () => current,
+  })
+
+  assert.deepEqual(outcome, { status: "rejected", reason: "stale" })
+  assert.equal(promptCalls, 0)
 })

@@ -10,7 +10,11 @@ import type { RuntimeFallbackConfig } from "../config/schema.ts"
 import type { ModelRequirement } from "../shared/types.ts"
 import type { ErrorClassification } from "./error-classifier.ts"
 import type { Subagent429Target } from "./subagent-429-controller.ts"
-import { applyRequirementDefaults, type RuntimeFallbackSessionLifecycle } from "./event-handler-support.ts"
+import {
+  applyRequirementDefaults,
+  type RuntimeFallbackDispatchReservations,
+  type RuntimeFallbackSessionLifecycle,
+} from "./event-handler-support.ts"
 import { log } from "../shared/logger.ts"
 
 export type GenericFallbackInput = {
@@ -27,6 +31,7 @@ export type GenericFallbackInput = {
 
 export type GenericFallbackContext = {
   lifecycle: RuntimeFallbackSessionLifecycle
+  reservations: RuntimeFallbackDispatchReservations
   isCurrentSnapshot: (snapshotId: number) => boolean
   client?: OcmmClient
   directory?: string
@@ -37,7 +42,7 @@ export async function runGenericFallback(
   ctx: GenericFallbackContext,
   input: GenericFallbackInput,
 ): Promise<void> {
-  const { lifecycle, client, directory, clock, isCurrentSnapshot } = ctx
+  const { lifecycle, reservations, client, directory, clock, isCurrentSnapshot } = ctx
   const { sessionID, generation, snapshotId, agent, classification, requirement, state, failedTarget, runtimeConfig } = input
   const isCurrent = (): boolean =>
     lifecycle.isCurrent(sessionID, generation) && isCurrentSnapshot(snapshotId)
@@ -82,17 +87,37 @@ export async function runGenericFallback(
     return
   }
 
+  const owner = {
+    generation,
+    routeSnapshotId: snapshotId,
+    targetModel: modelKey(entry.providers[0] ?? "", entry.model),
+  }
+  if (!reservations.acquire(sessionID, owner)) {
+    log.debug(`generic fallback already reserved for session ${sessionID.slice(0, 16)}…; skipping`)
+    return
+  }
+
   await lifecycle.waitForStaleDispatches(sessionID, generation)
-  if (!isCurrent()) return
-  const dispatched = await lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
+  if (!isCurrent()) {
+    reservations.clear(sessionID, owner)
+    return
+  }
+  const outcome = await lifecycle.trackDispatch(sessionID, generation, dispatchFallbackRetry({
     client: lifecycle.guardedClient(sessionID, generation, () => isCurrentSnapshot(snapshotId)),
     sessionID,
     ...(directory === undefined ? {} : { directory }),
     ...(agent === undefined ? {} : { agent }),
     newEntry: entry,
     reason: classification.reason,
+    isCurrent,
   }))
-  if (dispatched && isCurrent()) {
+  if (outcome.status === "rejected") {
+    reservations.clear(sessionID, owner)
+    return
+  }
+
+  const settled = reservations.settle(sessionID, owner, outcome.status)
+  if (settled && isCurrent()) {
     commitFallback(state, entry, peek.index)
   }
 }

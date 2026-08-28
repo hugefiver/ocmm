@@ -157,10 +157,10 @@ Runs when a session error is not handled by the dedicated subagent-429 controlle
 2. **Resolve requirement** — user `agents[name]` → user `categories[name]` → builtin agents → builtin categories.
 3. **Mark failed** — `markModelFailed` records a timestamp for the current model.
 4. **Find next** — from `fallbackIndex + 1`, skipping failed models and those still in cooldown.
-5. **Dispatch** — `client.session.prompt` reusing the latest contiguous user-message block. Best-effort `client.session.abort` first. Dedup via a module-level `Set<sessionID>` to prevent concurrent retries.
+5. **Dispatch** — `client.session.prompt` reusing the latest contiguous user-message block. Best-effort `client.session.abort` first. A lifecycle-generation, route-snapshot, and target-model reservation is acquired before I/O; the dispatcher also retains a module-level `Set<sessionID>` for the active prompt call.
 6. **Stop conditions** — `maxAttempts` reached, chain exhausted, or no next model.
 
-**Plugin-owned aborts are never retried:** `AbortError` and `DOMException` are treated as aborts under the existing plugin-owned abort rule. `MessageAbortedError` is an explicit abort only when `isAbort: true`; a name-only `MessageAbortedError` remains eligible for configured retry classification, such as transport-disconnect patterns.
+**Explicit user aborts are never retried:** an `isAbort: true` marker remains terminal even when the same error contains status `402`. Name-based provider `AbortError` and `DOMException` events are terminal unless every configured status-`402` recovery gate is satisfied. `MessageAbortedError` is explicit only when `isAbort: true`; a name-only `MessageAbortedError` remains eligible for configured retry classification, such as transport-disconnect patterns.
 
 **Observe-only mode:** `runtimeFallback.dispatch: false` — classifies and logs but does not dispatch.
 
@@ -178,6 +178,10 @@ Runs when a session error is not handled by the dedicated subagent-429 controlle
 It owns fallback position, committed model-switch attempts, the active model, and generic cooldown state. Idle never clears `FallbackState`; lifecycle cleanup occurs on session recreation or deletion.
 
 Generic fallback binds every `FallbackState` to its route `snapshotId`. Lifecycle and snapshot validity are checked before and after every generic I/O, commit, and handoff boundary. A stale snapshot therefore cannot commit a model switch after routes have been republished.
+
+Before prompt I/O, generic fallback acquires one per-session reservation owned by the lifecycle generation, route snapshot, and target model. An accepted or possibly accepted prompt remains pending until explicit target-model evidence or a lifecycle/route transition reconciles it; model-less or old-model evidence cannot produce a duplicate prompt, and pending state has no timer-based release. Retry-shaped `session.status` events share this path and use a bounded, normalized per-session dedupe set (256 keys, 30 minutes).
+
+A name-based provider `AbortError` or `DOMException` carrying configured status `402` may enter generic fallback. An explicit user abort marker remains terminal even when the same error also contains `402`.
 
 Code: `src/runtime-fallback/{error-classifier,fallback-state,dispatcher,event-handler}.ts`, `src/hooks/event.ts`.
 
@@ -230,7 +234,7 @@ Interruption recovery is a documentation-level name for the `subagent-interrupti
     "dispatch": true,
     "maxAttempts": 3,
     "cooldownSeconds": 60,
-    "retryOnStatusCodes": [429, 500, 502, 503, 504],
+    "retryOnStatusCodes": [402, 429, 500, 502, 503, 504],
     "retryOnPatterns": [/* 9 patterns */],
     "subagent429": {
       "enabled": true,
