@@ -218,7 +218,7 @@ multi_agent_v1.spawn_agent(agent_type="planner", prompt="<gathered context + use
 | Hard problem (non-conventional) | multi_agent_v1.spawn_agent(agent_type="dw-creative", ...) | Different approach needed |
 | Implementation | multi_agent_v1.spawn_agent(agent_type="dw-...", ...) | Domain-optimized models |
 
-**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with code-search agents, Read/Grep/Glob/LSP (via `lsp` MCP), and the ast-grep skill.
+**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with code-search agents, Read/Grep/Glob/LSP (via `lsp` MCP). Escalate to ast-grep only for an exact syntax-tree shape or deterministic codemod that those tools cannot express reliably.
 
 **YOU SHOULD DO IT YOURSELF WHEN:**
 - Task is trivially simple (1-2 lines, obvious change)

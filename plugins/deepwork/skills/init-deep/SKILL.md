@@ -11,7 +11,7 @@ Generate hierarchical AGENTS.md files. Root + complexity-scored subdirectories.
 - Use OpenCode `task(...)` delegation syntax where available.
 - `explore` is provided as a compatibility alias for local `code-search`.
 - Use `category="documenting"` for AGENTS.md writing tasks; upstream examples that say `category="writing"` should be translated to `documenting`.
-- Treat `codegraph_*` tools as optional. If they are unavailable, use LSP tools, `rg`, and the `ast-grep` skill as the fallback evidence path.
+- Treat `codegraph_*` tools as optional. If they are unavailable, use LSP tools and `rg` as the normal fallback evidence path. Use ast-grep only for a specific exact syntax-tree question that those tools cannot answer reliably.
 
 ## Usage
 
@@ -49,22 +49,6 @@ TodoWrite([
 ## Phase 1: Discovery + Analysis (Concurrent)
 
 **Mark "discovery" as in_progress.**
-
-### AST-shaped first probe (exactly once)
-
-Before decomposing project structure, entry points, dependencies, or hotspots,
-ask the ast-grep helper resolver for a validated binary. If it returns one, run
-exactly one read-only structural query with that path, such as:
-
-```
-<validated-sg> run -p 'function $VAR($$$) { $$$ }' .
-```
-
-Do not run another ast-grep probe during this baseline discovery phase. If no
-validated binary is available, report `ast-grep structural probe: unmeasured`
-and continue using read-only rg/LSP evidence; do not install, download, alter
-PATH, or cache a failure. The rg textual and LSP semantic roles below remain
-unchanged.
 
 ### Fire Background Explore Agents IMMEDIATELY
 
@@ -151,7 +135,7 @@ Highest-signal source for the CODE MAP and the Symbol/Export/Reference scoring r
 **codegraph** - when `codegraph_*` tools exist (check `codegraph_status`); a first-class peer to LSP, NOT a last resort:
 - `codegraph_explore` -> overview; `codegraph_callers`/`codegraph_callees`/`codegraph_impact` -> centrality + blast radius for the scoring matrix; `codegraph_search`/`codegraph_files` -> symbol/file inventory.
 
-Only if NEITHER exists: explore agents + the ast-grep skill (`sg`), and mark centrality unmeasured in the CODE MAP.
+Only if NEITHER exists: use explore agents plus `rg` evidence and mark centrality unmeasured in the CODE MAP. Do not run ast-grep as a baseline substitute; reserve it for a later, specific exact syntax-tree question that simpler evidence cannot answer reliably.
 
 ### Collect Background Results
 

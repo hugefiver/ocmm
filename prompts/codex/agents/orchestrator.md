@@ -134,7 +134,7 @@ Every routing decision must first check: "Does a skill trigger here?" If yes, th
 Survey the enabled MCP tools and skills before routing, and pick the sharpest available tool for each job:
 
 - **Symbol-level navigation** (definitions, references, symbols, diagnostics, rename): `lsp_*` MCP tools via the `lsp` MCP. They auto-route to the matching language server by file extension — just pass the file path.
-- **Structural code search/rewrite** (find code by syntax shape, codemods): the `ast-grep` skill or `sg` CLI.
+- **Exact structural code search/rewrite**: use `ast-grep` or `sg` only when simpler text/LSP search cannot reliably express the syntax shape or deterministic codemod; never use it for baseline discovery.
 - **Content search** (strings, comments, regex over file contents): `rg` (ripgrep).
 - **File discovery** (find files by name or glob): `fd`.
 - **Internal codebase patterns** (ownership, conventions, hidden call sites): `dw-code-search` agent.

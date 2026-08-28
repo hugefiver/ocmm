@@ -162,7 +162,7 @@ task(task_id="ses_abc123", load_skills=[], run_in_background=false, prompt="Here
 | Hard problem (non-conventional) | task(category="artistry", load_skills=[...], run_in_background=true) | Different approach needed |
 | Implementation | task(category="...", load_skills=[...], run_in_background=true) | Domain-optimized models |
 
-**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with code-search agents, Read/Grep/Glob/LSP, and the ast-grep skill.
+**CODEGRAPH-FIRST:** When `codegraph_*` tools exist, use `codegraph_explore` for codebase how/where/what/flow questions and before edits; if absent, inactive/uninitialized, or cold-start unavailable, continue with code-search agents, Read/Grep/Glob/LSP. Escalate to ast-grep only for an exact syntax-tree shape or deterministic codemod that those tools cannot express reliably.
 
 **CATEGORY + SKILL DELEGATION:**
 ```

@@ -236,7 +236,7 @@ serialize only when one output strictly feeds the next.
 - CodeGraph, when `codegraph_*` tools exist -> use `codegraph_explore`
   first for how/where/what/flow questions and before edits; if absent,
   inactive/uninitialized, or cold-start unavailable, keep moving with
-  Read/Grep/Glob/LSP (via the `lsp` MCP tool) and the ast-grep skill.
+  Read/Grep/Glob/LSP (via the `lsp` MCP tool). Do not use ast-grep for baseline discovery.
 - Repo-wide inspection, CLI smoke tests, git/history, bounded command
   output → use the harness shell tool with the active shell's syntax when the
   command itself is the evidence, honoring the platform declared by the runtime/tool description. Use `rg` for content search and `git`
@@ -247,8 +247,9 @@ serialize only when one output strictly feeds the next.
   `lsp_goto_definition`, `lsp_find_references`, `lsp_symbols`,
   LSP diagnostics via the `lsp` MCP tool. Use the LSP, not text search, for anything
   symbol-shaped.
-- Structural shapes — call/function/class/import patterns, codemods →
-  the `ast-grep` skill or `sg` CLI with `$VAR` / `$$$` metavars.
+- Exact structural shapes or deterministic codemods that simpler search cannot
+  express reliably → the `ast-grep` skill or `sg` CLI with `$VAR` / `$$$`
+  metavars.
 - Text / strings / comments / logs → `rg`. File-name discovery →
   `glob` / `find`. Verbatim content → `read`.
 When discovery needs multiple angles or the module layout is

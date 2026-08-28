@@ -130,7 +130,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 
 <tool_usage_rules>
 - Prefer tools over internal knowledge for fresh or user-specific data
-- Use `codegraph_explore` first when codegraph_* tools are available for how/where/what/flow questions and before edits; if absent or inactive/cold-start unavailable, continue with Grep/Read/LSP (via the `lsp` MCP tool) and the ast-grep skill.
+- Use `codegraph_explore` first when codegraph_* tools are available for how/where/what/flow questions and before edits; if absent or inactive/cold-start unavailable, continue with Grep/Read/LSP (via the `lsp` MCP tool). Escalate to ast-grep only for an exact syntax-tree shape or deterministic codemod that those tools cannot express reliably.
 - Parallelize independent reads (Read, grep, explore, doc-search) to reduce latency
 - After any write/update, briefly restate: What changed, Where (path), Follow-up needed
 </tool_usage_rules>
@@ -141,7 +141,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 
 | Track | Tools | Speed | Purpose |
 |-------|-------|-------|---------|
-| **Direct** | codegraph_explore (primary), Grep, Read, LSP via `lsp` MCP, ast-grep skill (`sg`) | Instant | Quick wins, known locations |
+| **Direct** | codegraph_explore (primary), Grep, Read, LSP via `lsp` MCP | Instant | Quick wins, known locations |
 | **Background** | dw-code-search, dw-doc-search agents | Async | Deep search, external docs |
 
 **Run both tracks in parallel only when the discovery need justifies it:**

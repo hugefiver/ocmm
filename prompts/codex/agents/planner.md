@@ -31,7 +31,7 @@ Use direct tools first. When direct tools are insufficient and a separate bounde
 When specifying how tasks should be executed, pick the sharpest available tool for each job:
 
 - **Symbol-level navigation**: `lsp_*` MCP tools via the `lsp` MCP. They auto-route to the matching language server by file extension — just pass the file path.
-- **Structural code search/rewrite**: `ast-grep` skill or `sg` CLI.
+- **Exact structural code search/rewrite**: use `ast-grep` or `sg` only when simpler text/LSP search cannot reliably express the syntax shape or deterministic codemod.
 - **Content search**: `rg` (ripgrep).
 - **File discovery**: `fd`.
 - **Internal codebase patterns**: `dw-code-search` agent.

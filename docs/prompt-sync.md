@@ -48,6 +48,8 @@ workspace-ancestor, and unexpected-parent targets.
 | `deepwork/codex.md` | `packages/prompts-core/prompts/ultrawork/codex.md` | Upstream-first; Codex harness-only commands adapted to OpenCode/ocmm; command-lens wording is shell-neutral and uses the active runtime shell; synced through `./omo@c6058d5` TUI visual QA and command-lens updates. **2026-07-20 local policy refresh:** all three workflow sources use touched/affected increment checks, changed-input broader gates, one final full pass, and a local-envelope-plus-`GOAL`/`STOP WHEN`/`EVIDENCE` delegation contract without weakening complex-task evidence or final acceptance. |
 | `deepwork/planner.md` | `packages/prompts-core/prompts/ultrawork/planner.md` and Prometheus prompt | Upstream-first planner doctrine with local planner naming and shell-adaptation guidance |
 
+**2026-08-28 AST tool-priority adaptation:** omo, v1, and Codex model-facing prompts no longer list ast-grep/`sg` as a routine baseline-discovery or direct-track fallback. Normal discovery uses CodeGraph when available, then code-search/LSP/Read/Grep/Glob. AST tooling remains available only as an explicit escalation for exact syntax-tree shapes or deterministic codemods that simpler tools cannot express reliably.
+
 ## Maintenance Rules
 
 1. Any change under `prompts/omo/` that changes upstream-derived behavior must update this document.

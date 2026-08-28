@@ -1,19 +1,19 @@
 ---
 name: ast-grep
-description: "Use ast-grep (sg) for AST-aware code search and rewrite across 25 languages. Trigger for structural code matching or deterministic codemods: find every function/call/class/import shaped like X, rewrite console.log to logger.info, strip `as any`, migrate require() to import, find empty catch blocks or missing await, and scan/apply YAML rules. Prefer this over rg/grep when the target is syntax shape rather than text; use rg for string contents, comments, filenames, or regex-style byte searches."
+description: "Use ast-grep (sg) only when the task explicitly requires exact syntax-tree matching or a deterministic codemod that simpler rg/LSP lookup cannot express reliably. Examples: rewrite a specific call/import shape, strip `as any`, find empty catch blocks, or scan/apply YAML rules. Do not trigger for ordinary repository discovery, symbol navigation, text search, or one-off lookups that rg/LSP can answer."
 ---
 
 # ast-grep
 
-`sg` (also installed as `ast-grep`) is an **AST-aware search and rewrite tool** across 25 languages. It treats your pattern as code, parses it the same way it parses your project, and matches structurally. It is the right tool whenever your question depends on **code shape** rather than text bytes.
+`sg` (also installed as `ast-grep`) is a specialized **AST-aware search and rewrite tool** across 25 languages. It treats your pattern as code, parses it the same way it parses your project, and matches structurally. It is an escalation for exact syntax-tree questions and deterministic codemods, not a default repository-discovery tool.
 
-This skill ships a Python wrapper at `scripts/ast_grep_helper.py` and platform install scripts at `install.sh` (POSIX) and `install.ps1` (Windows). The helper adds offline pattern validation, the two-pass write trick, and binary auto-resolution. Use it as your default entry point.
+This skill ships a Python wrapper at `scripts/ast_grep_helper.py` and platform install scripts at `install.sh` (POSIX) and `install.ps1` (Windows). The helper adds offline pattern validation, the two-pass write trick, and binary auto-resolution. Use it as the entry point after the task has met this skill's narrow trigger.
 
 ---
 
 ## When to use this skill
 
-Use it whenever the user's question is about **code structure**, not bytes:
+Use it only when the answer or rewrite depends on an **exact syntax-tree shape**, and simpler text search or LSP navigation cannot express the requirement reliably:
 
 - "Find every function that takes a `Request` parameter."
 - "Rewrite every `console.log(x)` to `logger.info(x)`."
@@ -24,7 +24,7 @@ Use it whenever the user's question is about **code structure**, not bytes:
 - "Apply this codemod across these 200 files."
 - "Run our YAML lint rules and surface violations."
 
-Switch to plain `grep` / `rg` when the question is text-shaped (string literal contents, comments, license headers, file names, cross-language regex). When in doubt, ask: "does the answer depend on the language's syntax tree, or just on the file's bytes?" If the former, ast-grep. If the latter, grep.
+Use LSP for symbols, references, definitions, types, and diagnostics. Use plain `grep` / `rg` for strings, comments, license headers, file names, identifier text, and regex-style searches. When in doubt, start with those simpler tools and do not load this skill unless exact AST shape becomes necessary.
 
 ---
 
@@ -189,7 +189,7 @@ USER asks for "find/rewrite/codemod"
    └→ a search engine + then ast-grep / rg / LSP per-repo
 ```
 
-If the user says "find all" or "every", default to ast-grep when the target is shaped (function, class, call, import, statement). Default to rg when the target is text (string content, comment, license header, file name, identifier substring).
+The words "find all" or "every" do not by themselves trigger ast-grep. Use it only when the target is an exact syntactic shape and simpler search cannot reliably distinguish it; use rg when the target is text (string content, comment, license header, file name, identifier substring).
 
 ---
 
