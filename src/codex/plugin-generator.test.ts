@@ -1498,7 +1498,7 @@ test("Codex generated debugging, frontend, ast-grep, and publish skill trees mir
     const suffixes = new Map<string, string>()
     for (const [name, requiredFile] of [
       ["ast-grep", "tests/smoke.ps1"],
-      ["debugging", "references/methodology/03-flaky-triage.md"],
+      ["debugging", "references/scripts/dap.mjs"],
       ["frontend", "references/design/interaction-skill.md"],
       ["publish", "SKILL.md"],
     ] as const) {

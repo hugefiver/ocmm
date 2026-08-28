@@ -171,9 +171,52 @@ test.use({ ...devices['iPhone 14'] });
 
 - **Wait for state, not for time.** `await page.waitForTimeout(2000)` is flaky. Use `await expect(locator).toBeVisible()` or `page.waitForResponse(urlPattern)`.
 - **Stale selectors re-resolve.** Playwright's locators re-find the element on each action, unlike Puppeteer's handles. Don't over-think it.
-- **Service workers persist across test runs in headed mode.** If you see cached behavior from a previous run, add `await context.clearCookies()` + clear storage before the test.
+- **Service workers persist across test runs in headed mode.** Use a run-owned temporary profile for a clean state; never clear a real profile in place. See the profile-safety procedure below.
 - **Installing on CI requires `--with-deps`** on Linux images that lack the browser's shared-library deps.
 - **Parallel tests share a browser process by default**; if one test polls a debugger port, others may interfere. Use `workers: 1` for debugging.
+
+---
+
+## Profile safety — clone first, clear only the clone
+
+**Never clear cookies, cache, or site data on a user's real browser profile.** This includes Playwright's `context.clearCookies()`, CDP `Network.clearBrowserCookies` and `Storage.clearCookies`, and browser APIs such as `chrome.browsingData.remove`. These operations can erase the user's authenticated state across unrelated sites.
+
+If reproducing a bug needs the real profile's login state, first close the browser that owns the profile, copy its whole user-data directory into a unique temporary directory, and launch only that clone. Do not point `userDataDir`, `launchPersistentContext`, or a browser command-line profile flag at the original profile when any reset may occur.
+
+PowerShell example for a Chrome profile on Windows (adapt the source path for another browser; it creates a run-owned clone only):
+
+```powershell
+$sourceUserData = Join-Path $env:LOCALAPPDATA "Google\Chrome\User Data"
+if (-not (Test-Path -LiteralPath $sourceUserData)) { throw "Chrome user-data directory was not found" }
+if (-not (Test-Path -LiteralPath $env:TEMP)) { throw "Temporary directory was not found" }
+
+$runRoot = Join-Path $env:TEMP ("ocmm-playwright-" + [guid]::NewGuid().ToString("N"))
+$cloneUserData = Join-Path $runRoot "User Data"
+New-Item -ItemType Directory -Path $runRoot | Out-Null
+Copy-Item -LiteralPath $sourceUserData -Destination $cloneUserData -Recurse -Force
+$env:PW_USER_DATA_DIR = $cloneUserData
+```
+
+Use the clone for the persistent context. A clear is permitted only after `PW_USER_DATA_DIR` is the temporary clone:
+
+```ts
+const context = await chromium.launchPersistentContext(process.env.PW_USER_DATA_DIR!, {
+  channel: 'chrome',
+  headless: false,
+});
+await context.clearCookies(); // safe only because this is the run-owned clone
+```
+
+After closing the context, clean up only the directory created by this run. Resolve and validate the exact target before deleting it:
+
+```powershell
+$expectedPrefix = [IO.Path]::GetFullPath((Join-Path $env:TEMP "ocmm-playwright-"))
+$resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
+if (-not $resolvedRunRoot.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "Refusing to remove a non-run-owned profile"
+}
+Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+```
 
 ---
 
