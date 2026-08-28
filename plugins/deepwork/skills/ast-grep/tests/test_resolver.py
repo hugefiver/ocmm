@@ -134,25 +134,20 @@ class ResolverFallbackTests(unittest.TestCase):
 
 
 class InitDeepSourceContractTests(unittest.TestCase):
-    def test_has_one_structural_ast_first_probe_before_decomposition(self) -> None:
-        source = INIT_DEEP_SKILL_PATH.read_text(encoding="utf-8")
-        marker = "AST-shaped first probe (exactly once)"
-
-        self.assertEqual(source.count(marker), 1)
-        probe_start = source.index(marker)
-        probe_end = source.index("### Fire Background Explore Agents", probe_start)
-        probe = source[probe_start:probe_end]
-        self.assertRegex(probe, r"\$[A-Z_][A-Z0-9_]*")
-        self.assertIn("$$$", probe)
-        self.assertLess(probe_start, source.index("### Fire Background Explore Agents"))
-
-    def test_reports_unmeasured_and_uses_read_only_rg_lsp_fallback_when_missing(self) -> None:
+    def test_normal_discovery_uses_lsp_codegraph_rg_not_an_ast_baseline(self) -> None:
         source = INIT_DEEP_SKILL_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("ast-grep structural probe: unmeasured", source)
-        self.assertIn("read-only rg/LSP evidence", source)
-        self.assertIn("rg textual", source)
-        self.assertIn("LSP semantic", source)
+        self.assertNotIn("AST-shaped first probe (exactly once)", source)
+        self.assertNotIn("ast-grep structural probe: unmeasured", source)
+        self.assertIn("Treat `codegraph_*` tools as optional", source)
+        self.assertIn("LSP tools and `rg` as the normal fallback evidence path", source)
+        self.assertIn("Do not run ast-grep as a baseline substitute", source)
+
+    def test_ast_grep_escalates_only_for_specific_unanswerable_syntax_questions(self) -> None:
+        source = INIT_DEEP_SKILL_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("specific exact syntax-tree question", source)
+        self.assertIn("simpler evidence cannot answer reliably", source)
 
 
 if __name__ == "__main__":
