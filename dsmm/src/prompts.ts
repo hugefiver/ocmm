@@ -1,10 +1,12 @@
+import type { DshLlmCallConfig } from "./dsh-types.js";
+import { desiredDeepseekEffort, isDeepseekV4ProRoute } from "./model-routing.js";
 import type { DsmmSettings } from "./settings.js";
 
 export const BASE_DEEPWORK_PROMPT = `<dsmm-deepwork-mode>
 
 DEEPWORK MODE ENABLED!
 
-Use this workflow only while the \`{{modeName}}\` mode is active. This is an opt-in boundary: outside this mode, do not apply dsmm-specific gates, intent routing, or tool-discipline requirements. The default mode name is \`deepwork\` unless configured.
+Use this workflow only while the \`{{modeName}}\` mode is active OR a DSMM-managed preset is selected. This is an opt-in boundary: outside both conditions, do not apply dsmm-specific gates, intent routing, or tool-discipline requirements. The default mode name is \`deepwork\` unless configured.
 
 ## Intent routing
 
@@ -17,7 +19,7 @@ Begin non-trivial responses with one short line in the user's language: \`我读
 - For completed implementation, gather evidence from tests, diagnostics, and real surfaces before declaring done.
 - Keep scope exact. Do not add unrelated refactors, speculative abstractions, or surprise features.
 - The bundled workflow skill set is available in this mode: \`brainstorming\`, \`writing-plans\`, \`subagent-driven-development\`, \`dispatching-parallel-agents\`, \`requesting-code-review\`, \`receiving-code-review\`, and \`remove-ai-slops\`.
-- The workflow policy is configurable for this mode through \`workflow.strictGates\`, \`workflow.reviewCap\`, and \`workflow.finalReviewPolicy\`; do not treat those dsmm settings as global policy outside \`{{modeName}}\` mode.
+- The workflow policy is configurable through \`workflow.strictGates\`, \`workflow.reviewCap\`, and \`workflow.finalReviewPolicy\`; do not treat those dsmm settings as global policy outside active \`{{modeName}}\` mode or DSMM-managed preset scope.
 
 ## Tool discipline
 
@@ -34,31 +36,41 @@ DeepSeek V4 Pro calibration is active.
 - Treat complex coding, architecture, migration, debugging, and review tasks as deliberate reasoning tasks.
 - First classify the task and identify the evidence needed.
 - Use tools before making repository-specific or API-specific claims.
-- Prefer \`reasoning_effort: high\` for ordinary deepwork tasks; reserve max reasoning for configured high-rigor work.
+- Runtime reasoning effort is enforced by \`agent/request\`, not this prompt.
+- In \`auto\` calibration, explicit upstream reasoning effort is preserved; \`strict\` overrides it with computed policy.
+- Only adapter-advertised reasoning efforts are emitted; \`max\` is selected only for configured DSMM presets.
 - Keep final answers concise and do not expose private chain-of-thought.
 - When tool calls are enabled through the provider, preserve the provider-required reasoning/tool-call continuity.
 
 </dsmm-deepseek-v4-pro-calibration>`;
 
-export function isDeepseekV4ProModel(model?: { id?: string; name?: string }): boolean {
-  const value = `${model?.id ?? ""} ${model?.name ?? ""}`.toLowerCase();
-  return /deepseek[-_ ]?v4[-_ ]?pro/.test(value);
+export interface DeepworkPromptOptions {
+  route?: Pick<DshLlmCallConfig, "provider" | "model">;
+  selectedPreset?: string;
+  overrideSection?: string;
+  skillPrompt?: string;
 }
 
 export function buildDeepworkPrompt(
   settings: DsmmSettings,
-  model?: { id?: string; name?: string },
-  overrideSection?: string,
-  skillPrompt = ""
+  options: DeepworkPromptOptions = {}
 ): string {
-  const base = (overrideSection?.trim() || BASE_DEEPWORK_PROMPT).replaceAll("{{modeName}}", settings.modeName);
+  const base = (options.overrideSection?.trim() || BASE_DEEPWORK_PROMPT).replaceAll("{{modeName}}", settings.modeName);
   const workflowPolicy = `<dsmm-workflow-policy>
 strictGates: ${String(settings.workflow.strictGates)}
 reviewCap: ${String(settings.workflow.reviewCap)}
 finalReviewPolicy: ${settings.workflow.finalReviewPolicy}
 </dsmm-workflow-policy>`;
-  const shouldApplyOverlay = settings.deepseekV4ProCalibration !== "off" && isDeepseekV4ProModel(model);
-  const calibrated = shouldApplyOverlay ? `${base}\n\n${DEEPSEEK_V4_PRO_OVERLAY}` : base;
+  const shouldApplyOverlay = settings.deepseekV4ProCalibration !== "off"
+    && options.route !== undefined
+    && isDeepseekV4ProRoute(options.route);
+  const calibrationPolicy = `<dsmm-deepseek-v4-pro-policy>
+calibrationMode: ${settings.deepseekV4ProCalibration}
+defaultReasoningEffort: ${settings.deepseekV4ProDefaultReasoningEffort}
+maxReasoningPresets: ${settings.deepseekV4ProMaxReasoningPresets.join(", ")}
+effectiveDesiredReasoningEffort: ${desiredDeepseekEffort(settings, options.selectedPreset)}
+</dsmm-deepseek-v4-pro-policy>`;
+  const calibrated = shouldApplyOverlay ? `${base}\n\n${DEEPSEEK_V4_PRO_OVERLAY}\n\n${calibrationPolicy}` : base;
   const prompt = `${calibrated}\n\n${workflowPolicy}`;
-  return skillPrompt === "" ? prompt : `${prompt}\n\n${skillPrompt}`;
+  return options.skillPrompt === undefined || options.skillPrompt === "" ? prompt : `${prompt}\n\n${options.skillPrompt}`;
 }

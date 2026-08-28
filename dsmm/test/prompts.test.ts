@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { BASE_DEEPWORK_PROMPT, DEEPSEEK_V4_PRO_OVERLAY, buildDeepworkPrompt, isDeepseekV4ProModel } from "../lib/prompts.js";
+import { BASE_DEEPWORK_PROMPT, DEEPSEEK_V4_PRO_OVERLAY, buildDeepworkPrompt } from "../lib/prompts.js";
 import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -29,34 +29,46 @@ test("prompt assets exist and contain activation boundaries", () => {
   assert.match(deepwork, /workflow\.strictGates/);
   assert.match(deepwork, /workflow\.reviewCap/);
   assert.match(deepwork, /workflow\.finalReviewPolicy/);
-  assert.match(deepwork, /global policy outside `\{\{modeName\}\}` mode/);
+  assert.match(deepwork, /global policy outside active `\{\{modeName\}\}` mode or DSMM-managed preset scope/);
+  assert.equal(deepwork.trimEnd(), BASE_DEEPWORK_PROMPT);
   assert.match(v4, /DeepSeek V4 Pro calibration/);
-  assert.match(v4, /reasoning_effort/);
+  assert.match(v4, /agent\/request/);
 });
 
-test("isDeepseekV4ProModel detects common model identifiers", () => {
-  assert.equal(isDeepseekV4ProModel({ id: "deepseek-v4-pro" }), true);
-  assert.equal(isDeepseekV4ProModel({ name: "DeepSeek V4 Pro" }), true);
-  assert.equal(isDeepseekV4ProModel({ id: "deepseek_v4_pro" }), true);
-  assert.equal(isDeepseekV4ProModel({ id: "deepseek-v4-flash" }), false);
-  assert.equal(isDeepseekV4ProModel({ id: "gpt-5.6", name: "DeepSeek Chat" }), false);
-  assert.equal(isDeepseekV4ProModel(), false);
-});
-
-test("buildDeepworkPrompt applies overlay only when enabled for DeepSeek V4 Pro", () => {
-  const enabled = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { id: "deepseek-v4-pro" });
-  const strict = buildDeepworkPrompt({ ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "strict" }, { id: "deepseek-v4-pro" });
-  const disabled = buildDeepworkPrompt({ ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "off" }, { id: "deepseek-v4-pro" });
-  const nonDeepseek = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { id: "gpt-5.6" });
+test("buildDeepworkPrompt applies calibration only to the exact official route", () => {
+  const route = { provider: "DEEPSEEK-OFFICIAL", model: "DeepSeek-V4-Pro" };
+  const enabled = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route });
+  const strict = buildDeepworkPrompt({ ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "strict" }, { route });
+  const disabled = buildDeepworkPrompt({ ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "off" }, { route });
 
   assert.match(enabled, /DeepSeek V4 Pro calibration/);
   assert.match(strict, /DeepSeek V4 Pro calibration/);
   assert.doesNotMatch(disabled, /DeepSeek V4 Pro calibration/);
-  assert.doesNotMatch(nonDeepseek, /DeepSeek V4 Pro calibration/);
+  for (const nonOfficialRoute of [
+    { provider: "deepseek", model: "deepseek-v4-pro" },
+    { provider: "openrouter", model: "deepseek-v4-pro" },
+    { provider: "deepseek-official", model: "deepseek-v4" },
+    { provider: "deepseek-official", model: "deepseek-v4-pro-preview" },
+    { provider: "openai", model: "gpt-5.6-deepseek-v4-pro" }
+  ]) {
+    assert.doesNotMatch(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route: nonOfficialRoute }), /DeepSeek V4 Pro calibration/);
+  }
+});
+
+test("buildDeepworkPrompt explains exact calibrated policy without changing runtime ownership", () => {
+  const route = { provider: "deepseek-official", model: "deepseek-v4-pro" };
+  const reviewer = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route, selectedPreset: "dsmm-reviewer" });
+  const ordinary = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route });
+
+  assert.match(reviewer, /<dsmm-deepseek-v4-pro-policy>\ncalibrationMode: auto\ndefaultReasoningEffort: high\nmaxReasoningPresets: dsmm-plan-critic, dsmm-reviewer\neffectiveDesiredReasoningEffort: max\n<\/dsmm-deepseek-v4-pro-policy>/u);
+  assert.match(ordinary, /effectiveDesiredReasoningEffort: high/u);
 });
 
 test("buildDeepworkPrompt accepts composition section override", () => {
-  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { id: "deepseek-v4-pro" }, "Custom dsmm section for {{modeName}}");
+  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, {
+    route: { provider: "deepseek-official", model: "deepseek-v4-pro" },
+    overrideSection: "Custom dsmm section for {{modeName}}"
+  });
 
   assert.match(prompt, /Custom dsmm section for deepwork/);
   assert.doesNotMatch(prompt, /DEEPWORK MODE ENABLED/);
@@ -88,11 +100,11 @@ test("buildDeepworkPrompt renders effective workflow policy values", () => {
 
 test("buildDeepworkPrompt appends a nonempty skill prompt after workflow policy", () => {
   const skillPrompt = "<dsmm-skill name=\"brainstorming\">\n# Brainstorming\n</dsmm-skill>";
-  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, undefined, undefined, skillPrompt);
+  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { skillPrompt });
 
   assert.equal(prompt.endsWith(skillPrompt), true);
   assert.match(prompt, /<\/dsmm-workflow-policy>\n\n<dsmm-skill/u);
-  assert.equal(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, undefined, undefined, ""), buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS));
+  assert.equal(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { skillPrompt: "" }), buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS));
 });
 
 test("exported prompt constants match asset intent", () => {
@@ -114,5 +126,5 @@ test("exported prompt constants match asset intent", () => {
   assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /reviewCap: 5/);
   assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /finalReviewPolicy: simple-oracle-complex-reviewer/);
   assert.match(DEEPSEEK_V4_PRO_OVERLAY, /DeepSeek V4 Pro calibration/);
-  assert.match(DEEPSEEK_V4_PRO_OVERLAY, /reasoning_effort/);
+  assert.match(DEEPSEEK_V4_PRO_OVERLAY, /agent\/request/);
 });

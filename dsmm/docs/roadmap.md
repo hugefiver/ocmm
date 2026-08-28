@@ -122,6 +122,8 @@ Expose ocmm's LSP value through dsh MCP mechanisms.
 
 ## v0.6 — Model routing and DeepSeek V4 Pro calibration
 
+Status: implemented in v0.6 with provider-aware family classification, exact-route DeepSeek V4 Pro prompt/request calibration, preset-derived max reasoning, adapter capability negotiation, and pinned DSH `agent/request` waterfall coverage.
+
 ### Goal
 
 Port ocmm's model-family routing and add dsh-native DeepSeek V4 Pro tuning.
@@ -145,6 +147,8 @@ Port ocmm's model-family routing and add dsh-native DeepSeek V4 Pro tuning.
 
 ## v0.7 — Runtime recovery
 
+Status: implemented in v0.7 with host-first request-error policy, bounded configured route fallback reconstructed from durable request headers, opt-in todo/goal continuation, documented subagent recovery boundaries, and pinned DSH rc.2 packaged-runtime coverage.
+
 ### Goal
 
 Rebuild ocmm's runtime recovery features using dsh-native sessions and events.
@@ -163,6 +167,8 @@ Rebuild ocmm's runtime recovery features using dsh-native sessions and events.
 
 ## v0.8 — UI/settings polish
 
+Status: implemented in v0.8 with a fixed `/dsmm-status [json]` host command, deterministic defensive status snapshots, normalized file-based settings documentation for Web/headless/future TUI use, and pinned DSH rc.2 packaged-command coverage.
+
 ### Goal
 
 Expose dsmm settings ergonomically in dsh web-compatible surfaces while keeping headless support.
@@ -179,6 +185,8 @@ Expose dsmm settings ergonomically in dsh web-compatible surfaces while keeping 
 - Web users can inspect effective dsmm settings without editing YAML manually.
 
 ## v1.0 — Stable dsmm release
+
+Status: release-ready as dsmm 1.0.0; publication is pending separate authorization.
 
 ### Goal
 

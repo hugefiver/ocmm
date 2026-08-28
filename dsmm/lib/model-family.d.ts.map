@@ -1,0 +1,1 @@
+{"version":3,"file":"model-family.d.ts","sourceRoot":"","sources":["../src/model-family.ts"],"names":[],"mappings":"AAAA,MAAM,MAAM,eAAe,GAAG,KAAK,GAAG,OAAO,GAAG,QAAQ,GAAG,QAAQ,GAAG,KAAK,GAAG,MAAM,GAAG,UAAU,GAAG,SAAS,CAAC;AAoC9G,wBAAgB,mBAAmB,CAAC,KAAK,EAAE;IAAE,UAAU,CAAC,EAAE,MAAM,CAAC;IAAC,OAAO,CAAC,EAAE,MAAM,CAAA;CAAE,GAAG,eAAe,CAarG"}

@@ -3,6 +3,8 @@ import { test } from "node:test";
 import type { DshAgent, DshSessionEvent, PreStepDecision, PreStepFrame } from "../lib/dsh-types.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "../lib/state.js";
 
+type PreStepListener = (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>;
+
 test("isDeepworkActive folds the last deepwork mode event", () => {
   assert.equal(isDeepworkActive([], false), false);
   assert.equal(isDeepworkActive([], true), true);
@@ -37,12 +39,12 @@ test("DeepworkModeController commits immediately outside an open turn", async ()
 });
 
 test("DeepworkModeController defers selection during an open turn and commits at pre-step", async () => {
-  let listener: ((frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>) | undefined;
+  let listener: PreStepListener | undefined;
   const controller = new DeepworkModeController({
     systemPrompt: { section() {} },
     on(event, fn) {
       assert.equal(event, "agent/pre-step");
-      listener = fn;
+      listener = fn as PreStepListener;
     }
   });
   const appended: unknown[] = [];
@@ -59,12 +61,12 @@ test("DeepworkModeController defers selection during an open turn and commits at
 });
 
 test("DeepworkModeController retries a failed boundary append without changing the accepted decision", async () => {
-  let listener: ((frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>) | undefined;
+  let listener: PreStepListener | undefined;
   const warnings: unknown[][] = [];
   const controller = new DeepworkModeController({
     on(event, fn) {
       assert.equal(event, "agent/pre-step");
-      listener = fn;
+      listener = fn as PreStepListener;
     },
     logger: { warn(...args) { warnings.push(args); } }
   });

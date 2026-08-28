@@ -1,24 +1,10 @@
 import { buildDeepworkPrompt } from "./prompts.js";
 import { isDsmmRoleId } from "./roles.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { enabledSkillNames, renderBundledSkillPrompt } from "./skills.js";
-function modelFromAgent(context) {
-    const model = context.agent?.options?.model;
-    if (model === undefined)
-        return undefined;
-    return { id: model, name: model };
-}
-function selectedAgentPreset(session) {
-    const events = session?.events ?? [];
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-        const event = events[index];
-        if (event?.type !== "agent-preset/selected")
-            continue;
-        const data = event.data;
-        if (typeof data === "object" && data !== null && "agentPreset" in data && typeof data.agentPreset === "string") {
-            return data.agentPreset;
-        }
-    }
-    return typeof session?.header?.agentPreset === "string" ? session.header.agentPreset : undefined;
+function routeFromAgent(context) {
+    const { provider, model } = context.agent?.options ?? {};
+    return typeof provider === "string" && typeof model === "string" ? { provider, model } : undefined;
 }
 export function registerDeepworkPrompt(readyCtx, controller, getSettings, config = {}) {
     readyCtx.systemPrompt?.section({
@@ -26,11 +12,17 @@ export function registerDeepworkPrompt(readyCtx, controller, getSettings, config
         order: getSettings().promptOrder,
         text(context) {
             const settings = getSettings();
-            if (!controller.active(context.agent, settings.defaultActive))
+            const preset = resolveSelectedAgentPreset(context.agent?.session);
+            const active = controller.active(context.agent, settings.defaultActive);
+            if (!active && !isDsmmRoleId(preset))
                 return "";
-            const preset = selectedAgentPreset(context.agent?.session);
             const skillPrompt = isDsmmRoleId(preset) ? "" : renderBundledSkillPrompt(enabledSkillNames(settings));
-            return buildDeepworkPrompt(settings, modelFromAgent(context), config.section, skillPrompt);
+            return buildDeepworkPrompt(settings, {
+                route: routeFromAgent(context),
+                selectedPreset: preset,
+                overrideSection: config.section,
+                skillPrompt
+            });
         }
     });
 }

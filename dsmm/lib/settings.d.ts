@@ -6,6 +6,7 @@ import type { DsmmSkillName } from "./skills.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export type { DsmmSkillName, MvpSkillName } from "./skills.js";
 export type DeepseekCalibration = "off" | "auto" | "strict";
+export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
@@ -33,14 +34,36 @@ export interface DsmmGuardSettings {
     };
     todoDisciplineHelper: boolean;
 }
+export interface DsmmRecoveryRoute {
+    provider: string;
+    model: string;
+}
+export interface DsmmRuntimeRecoverySettings {
+    enabled: boolean;
+    retryOnStatusCodes: number[];
+    retryOnCodes: string[];
+    fallbackRoutes: DsmmRecoveryRoute[];
+    maxFallbackAttempts: number;
+    idleContinuation: {
+        enabled: boolean;
+        maxContinuations: number;
+        prompt: string;
+    };
+}
 type DsmmGuardConfig = Partial<Omit<DsmmGuardSettings, "toolOutputTruncation" | "questionLabelHelper">> & {
     toolOutputTruncation?: Partial<DsmmGuardSettings["toolOutputTruncation"]>;
     questionLabelHelper?: Partial<DsmmGuardSettings["questionLabelHelper"]>;
+};
+type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fallbackRoutes" | "idleContinuation">> & {
+    fallbackRoutes?: Array<Partial<DsmmRecoveryRoute>>;
+    idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 export interface DsmmPluginConfig {
     modeName?: string;
     section?: string;
     deepseekV4ProCalibration?: DeepseekCalibration;
+    deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
+    deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
     defaultActive?: boolean;
     promptOrder?: number;
     skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -48,6 +71,7 @@ export interface DsmmPluginConfig {
     presets?: Partial<DsmmPresetSettings>;
     workflow?: Partial<DsmmWorkflowSettings>;
     guards?: DsmmGuardConfig;
+    runtimeRecovery?: DsmmRuntimeRecoveryConfig;
     lsp?: Partial<DsmmLspSettings>;
 }
 export interface DsmmSettings {
@@ -55,14 +79,18 @@ export interface DsmmSettings {
     defaultActive: boolean;
     promptOrder: number;
     deepseekV4ProCalibration: DeepseekCalibration;
+    deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
+    deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
     skills: Record<DsmmSkillName, boolean>;
     roles: Record<DsmmRoleId, boolean>;
     presets: DsmmPresetSettings;
     workflow: DsmmWorkflowSettings;
     guards: DsmmGuardSettings;
+    runtimeRecovery: DsmmRuntimeRecoverySettings;
     lsp: DsmmLspSettings;
 }
 export declare const DSMM_SETTINGS_NAMESPACE = "dsmm";
+export declare const DSMM_STATUS_COMMAND = "dsmm-status";
 export interface RegisterSettingsOptions {
     onChange?: (settings: DsmmSettings) => void;
     install?: (readyCtx: DshContext, getSettings: () => DsmmSettings) => void;

@@ -7,7 +7,7 @@ import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import { DSMM_SKILL_NAMES } from "../lib/skills.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController } from "../lib/state.js";
 
-test("registerDeepworkPrompt contributes text only when deepwork is active", () => {
+test("registerDeepworkPrompt contributes text when deepwork is active or a DSMM preset is selected", () => {
   const sections: DshSystemPromptSection[] = [];
   const ctx = { systemPrompt: { section: (section: DshSystemPromptSection) => sections.push(section) } };
   const controller = new DeepworkModeController(ctx);
@@ -25,9 +25,27 @@ test("registerDeepworkPrompt contributes text only when deepwork is active", () 
       session: { events: [{ type: DEEPWORK_MODE_EVENT, data: { active: true } }], append() {} }
     }
   }) ?? "", /DeepSeek V4 Pro calibration/);
+
+  const inactiveReviewer = sections[0]?.text({
+    agent: {
+      options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
+      session: { events: [{ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } }], append() {} }
+    }
+  }) ?? "";
+  assert.match(inactiveReviewer, /DEEPWORK MODE ENABLED!/u);
+  assert.match(inactiveReviewer, /DeepSeek V4 Pro calibration/u);
+  assert.match(inactiveReviewer, /effectiveDesiredReasoningEffort: max/u);
+  assert.doesNotMatch(inactiveReviewer, /<dsmm-skill name=/u);
+  const inactiveNonDsmm = sections[0]?.text({
+    agent: {
+      options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
+      session: { events: [{ type: "agent-preset/selected", data: { agentPreset: "standard" } }], append() {} }
+    }
+  }) ?? "";
+  assert.equal(inactiveNonDsmm, "");
 });
 
-test("registerDeepworkPrompt reads model identity from agent options", () => {
+test("registerDeepworkPrompt builds a route only from string provider and model options", () => {
   const sections: DshSystemPromptSection[] = [];
   const ctx = { systemPrompt: { section: (section: DshSystemPromptSection) => sections.push(section) } };
   const controller = new DeepworkModeController(ctx);
@@ -41,7 +59,7 @@ test("registerDeepworkPrompt reads model identity from agent options", () => {
     }
   }) ?? "";
 
-  assert.match(prompt, /DeepSeek V4 Pro calibration/);
+  assert.doesNotMatch(prompt, /DeepSeek V4 Pro calibration/);
 });
 
 test("generic active deepwork emits each enabled skill body exactly once", () => {
@@ -85,7 +103,7 @@ test("active dsmm role preset omits skill bodies using newest valid selection", 
         header: { agentPreset: "standard" },
         events: [
           { type: DEEPWORK_MODE_EVENT, data: { active: true } },
-          { type: "agent-preset/selected", data: { agentPreset: "dsmm-orchestrator" } },
+          { type: "agent-preset/selected", data: { agentPreset: "standard" } },
           { type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } },
           { type: "agent-preset/selected", data: { agentPreset: 3 } }
         ],

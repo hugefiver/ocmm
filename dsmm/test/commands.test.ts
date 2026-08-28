@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DshCommandInvocation, DshCommandsRegistry, DshContext } from "../lib/dsh-types.js";
-import { parseDeepworkCommandInput, registerDeepworkCommand } from "../lib/commands.js";
-import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
+import { DSMM_STATUS_COMMAND, parseDeepworkCommandInput, registerDeepworkCommand, registerDsmmStatusCommand } from "../lib/commands.js";
+import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
+import { createDsmmStatusSnapshot, formatDsmmStatus } from "../lib/status.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController } from "../lib/state.js";
 
 type RegisteredCommand = Parameters<DshCommandsRegistry["register"]>[0];
@@ -47,6 +48,132 @@ test("registerDeepworkCommand resolves the optional commands service without an 
 
   assert.doesNotThrow(() => registerDeepworkCommand(ctx, controller, () => DEFAULT_DSMM_SETTINGS));
   assert.equal(command?.name, "deepwork");
+});
+
+test("registerDsmmStatusCommand is optional and resolves commands through get without direct property access", () => {
+  const commands: RegisteredCommand[] = [];
+  const controller = new DeepworkModeController({});
+  const ctx = new Proxy({
+    get(name: string) {
+      if (name !== "commands") return undefined;
+      return { register(command: RegisteredCommand) { commands.push(command); } };
+    }
+  }, {
+    get(target, property, receiver) {
+      if (property === "commands") throw new Error("commands was read directly without inject");
+      return Reflect.get(target, property, receiver);
+    }
+  }) as unknown as DshContext;
+
+  assert.doesNotThrow(() => registerDsmmStatusCommand({}, controller, () => DEFAULT_DSMM_SETTINGS));
+  assert.doesNotThrow(() => registerDsmmStatusCommand(ctx, controller, () => DEFAULT_DSMM_SETTINGS));
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0]?.name, DSMM_STATUS_COMMAND);
+  assert.match(commands[0]?.description ?? "", /DSMM status/i);
+  assert.equal(commands[0]?.input?.hint, "[json]");
+});
+
+test("registered status command reads live settings and has no status-only session side effects", async () => {
+  const commands: RegisteredCommand[] = [];
+  const events: Array<{ type: string; data?: unknown }> = [];
+  const appended: unknown[] = [];
+  const steered: unknown[] = [];
+  let settingsCalls = 0;
+  let currentSettings = resolveConfig({
+    defaultActive: false,
+    deepseekV4ProCalibration: "auto",
+    runtimeRecovery: {
+      enabled: true,
+      fallbackRoutes: [{ provider: "first", model: "first-model" }],
+      idleContinuation: { enabled: false, maxContinuations: 2 }
+    }
+  });
+  const controller = new DeepworkModeController({});
+  const agent: DshCommandInvocation["agent"] = {
+    session: {
+      events,
+      append(type, data) {
+        events.push({ type, data });
+        appended.push({ type, data });
+      }
+    },
+    steer(message) {
+      steered.push(message);
+    }
+  };
+  const ctx: DshContext = {
+    commands: { register(command) { commands.push(command); } }
+  };
+
+  registerDsmmStatusCommand(ctx, controller, () => {
+    settingsCalls += 1;
+    return currentSettings;
+  });
+  const command = commands.find((candidate) => candidate.name === DSMM_STATUS_COMMAND);
+  assert.ok(command);
+
+  const humanBaseline = { appended: appended.length, steered: steered.length, events: events.length };
+  const expectedHuman = formatDsmmStatus(createDsmmStatusSnapshot({
+    agent,
+    settings: currentSettings,
+    modeActive: controller.active(agent, currentSettings.defaultActive)
+  }));
+  const human = await command.handler({ rawInput: "   ", agent });
+
+  assert.deepEqual(human, { kind: "success", text: expectedHuman });
+  assert.deepEqual({ appended: appended.length, steered: steered.length, events: events.length }, humanBaseline);
+
+  await controller.select(agent, true, currentSettings.defaultActive);
+  currentSettings = resolveConfig({
+    defaultActive: true,
+    deepseekV4ProCalibration: "strict",
+    runtimeRecovery: {
+      enabled: true,
+      fallbackRoutes: [
+        { provider: "second", model: "second-model" },
+        { provider: "third", model: "third-model" }
+      ],
+      idleContinuation: { enabled: true, maxContinuations: 7 }
+    }
+  });
+  const jsonBaseline = { appended: appended.length, steered: steered.length, events: events.length };
+  const json = await command.handler({ rawInput: "json", agent });
+
+  assert.equal(json.kind, "success");
+  const snapshot = JSON.parse(json.text ?? "") as ReturnType<typeof createDsmmStatusSnapshot>;
+  assert.equal(snapshot.mode.active, true);
+  assert.equal(snapshot.effectiveSettings.defaultActive, true);
+  assert.equal(snapshot.effectiveSettings.deepseekV4ProCalibration, "strict");
+  assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 2);
+  assert.deepEqual(snapshot.runtimeRecovery.idleContinuation, { enabled: true, maxContinuations: 7 });
+  assert.deepEqual({ appended: appended.length, steered: steered.length, events: events.length }, jsonBaseline);
+  assert.equal(settingsCalls, 2);
+});
+
+test("registered status command rejects invalid input without reading settings or mode state", async () => {
+  let command: RegisteredCommand | undefined;
+  let settingsCalls = 0;
+  const controller = {
+    active() {
+      throw new Error("status controller must not be read for invalid input");
+    }
+  } as unknown as DeepworkModeController;
+
+  registerDsmmStatusCommand({
+    commands: { register(value) { command = value; } }
+  }, controller, () => {
+    settingsCalls += 1;
+    return DEFAULT_DSMM_SETTINGS;
+  });
+  assert.ok(command);
+
+  for (const rawInput of ["JSON", "status", "json extra", "anything else"]) {
+    assert.deepEqual(await command.handler({
+      rawInput,
+      agent: { session: { events: [], append() {} } }
+    } satisfies DshCommandInvocation), { kind: "error", text: "Usage: /dsmm-status [json]" });
+  }
+  assert.equal(settingsCalls, 0);
 });
 
 test("registered command name follows settings.modeName", () => {

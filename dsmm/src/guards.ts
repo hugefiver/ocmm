@@ -1,7 +1,7 @@
-import type { DshContentBlock, DshContext, DshPostToolDecision, DshPreToolDecision, DshSession, DshToolExecution, DshToolExecutionResult } from "./dsh-types.js";
-import { DSMM_ROLE_IDS } from "./roles.js";
-import type { DsmmRoleId } from "./roles.js";
+import type { DshContentBlock, DshContext, DshPostToolDecision, DshPreToolDecision, DshToolExecution, DshToolExecutionResult } from "./dsh-types.js";
+import { isDsmmRoleId } from "./roles.js";
 import type { DsmmSettings } from "./settings.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
 import type { ShellDialect, ShellDialectViolation } from "./shell-command.js";
@@ -32,23 +32,6 @@ function toolName(exec: DshToolExecution): string {
 
 function commandText(exec: DshToolExecution): string | undefined {
   return stringField(exec.arguments, ["command", "cmd", "script"]);
-}
-
-function isDsmmRole(value: unknown): value is DsmmRoleId {
-  return typeof value === "string" && (DSMM_ROLE_IDS as readonly string[]).includes(value);
-}
-
-function selectedAgentPreset(session: DshSession | undefined): string | undefined {
-  const events = session?.events ?? [];
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = asRecord(events[index]);
-    if (event?.type !== "agent-preset/selected") continue;
-    const data = asRecord(event.data);
-    if (typeof data?.agentPreset === "string") return data.agentPreset;
-  }
-
-  const header = asRecord(session?.header);
-  return typeof header?.agentPreset === "string" ? header.agentPreset : undefined;
 }
 
 function allText(content: readonly DshContentBlock[]): string | undefined {
@@ -107,7 +90,7 @@ export function isSafetyScopeActive(exec: DshToolExecution, settings: DsmmSettin
   if (settings.guards.scope === "off") return false;
   if (settings.guards.scope === "always") return true;
   if (controller.active(exec.agent, settings.defaultActive)) return true;
-  return isDsmmRole(selectedAgentPreset(exec.agent?.session));
+  return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));
 }
 
 function shellDialect(exec: DshToolExecution): ShellDialect | undefined {

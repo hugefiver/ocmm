@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DshContext, DshSettingsRegistry, DshSystemPromptSection } from "../lib/dsh-types.js";
+import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
 import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
+import type { DsmmPluginConfig } from "../lib/settings.js";
 
 const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
 const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));
@@ -31,6 +33,18 @@ const DEFAULT_GUARD_SETTINGS = {
   },
   todoDisciplineHelper: true
 };
+const DEFAULT_RUNTIME_RECOVERY_SETTINGS = {
+  enabled: false,
+  retryOnStatusCodes: [429, 500, 502, 503, 504],
+  retryOnCodes: [],
+  fallbackRoutes: [],
+  maxFallbackAttempts: 2,
+  idleContinuation: {
+    enabled: false,
+    maxContinuations: 3,
+    prompt: "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work."
+  }
+};
 
 type DshEffectCallback = Parameters<NonNullable<DshContext["effect"]>>[0];
 
@@ -40,6 +54,8 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     defaultActive: false,
     promptOrder: 50,
     deepseekV4ProCalibration: "auto",
+    deepseekV4ProDefaultReasoningEffort: "high",
+    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
@@ -47,6 +63,7 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
+    runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
     lsp: DEFAULT_DSMM_LSP_SETTINGS
   });
 });
@@ -61,6 +78,8 @@ test("resolveConfig overlays plugin config on defaults", () => {
     defaultActive: false,
     promptOrder: 60,
     deepseekV4ProCalibration: "off",
+    deepseekV4ProDefaultReasoningEffort: "high",
+    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
@@ -68,8 +87,46 @@ test("resolveConfig overlays plugin config on defaults", () => {
     },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
+    runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
     lsp: DEFAULT_DSMM_LSP_SETTINGS
   });
+});
+
+test("resolveConfig reserves only the exact dsmm-status mode name", () => {
+  const cases: Array<readonly [string | undefined, string]> = [
+    [undefined, DEFAULT_DSMM_SETTINGS.modeName],
+    [DSMM_STATUS_COMMAND, DEFAULT_DSMM_SETTINGS.modeName],
+    ["custom", "custom"],
+    ["", ""],
+    ["DSMM-STATUS", "DSMM-STATUS"],
+    ["dsmm-status ", "dsmm-status "]
+  ];
+
+  for (const [modeName, expected] of cases) {
+    assert.equal(resolveConfig({ modeName }).modeName, expected);
+  }
+});
+
+test("resolveConfig supports every DeepSeek V4 Pro default reasoning effort", () => {
+  for (const effort of ["off", "low", "high"] as const) {
+    assert.equal(resolveConfig({ deepseekV4ProDefaultReasoningEffort: effort }).deepseekV4ProDefaultReasoningEffort, effort);
+  }
+});
+
+test("resolveConfig canonicalizes DeepSeek V4 Pro max reasoning presets", () => {
+  const normalized = resolveConfig({
+    deepseekV4ProDefaultReasoningEffort: "low",
+    deepseekV4ProMaxReasoningPresets: [
+      "dsmm-reviewer",
+      "invalid-role",
+      "dsmm-plan-critic",
+      "dsmm-reviewer"
+    ]
+  } as unknown as DsmmPluginConfig);
+
+  assert.equal(normalized.deepseekV4ProDefaultReasoningEffort, "low");
+  assert.deepEqual(normalized.deepseekV4ProMaxReasoningPresets, ["dsmm-plan-critic", "dsmm-reviewer"]);
+  assert.deepEqual(resolveConfig({ deepseekV4ProMaxReasoningPresets: [] }).deepseekV4ProMaxReasoningPresets, []);
 });
 
 test("resolveConfig supports partial lsp setting overlays", () => {
@@ -129,6 +186,101 @@ test("resolveConfig normalizes guard positive integer limits", () => {
   assert.equal(resolveConfig({ guards: { toolOutputTruncation: { maxInlineBytes: 80.9 } } }).guards.toolOutputTruncation.maxInlineBytes, 80);
 });
 
+test("resolveConfig normalizes runtime recovery settings", () => {
+  const settings = resolveConfig({
+    runtimeRecovery: {
+      retryOnStatusCodes: [429, 429, 99, 600, 500.5, 503],
+      retryOnCodes: [" ETIMEDOUT ", "etimedout", "", "ECONNRESET"],
+      fallbackRoutes: [
+        { provider: " primary ", model: " primary-model " },
+        { provider: "primary", model: "primary-model" },
+        { provider: " ", model: "discard" },
+        { provider: "discard", model: " " },
+        { provider: " secondary ", model: " fallback-model " }
+      ],
+      maxFallbackAttempts: 99,
+      idleContinuation: { maxContinuations: -4 }
+    }
+  });
+
+  assert.deepEqual(settings.runtimeRecovery, {
+    ...DEFAULT_RUNTIME_RECOVERY_SETTINGS,
+    retryOnStatusCodes: [429, 503],
+    retryOnCodes: ["etimedout", "econnreset"],
+    fallbackRoutes: [
+      { provider: "primary", model: "primary-model" },
+      { provider: "secondary", model: "fallback-model" }
+    ],
+    maxFallbackAttempts: 10,
+    idleContinuation: {
+      ...DEFAULT_RUNTIME_RECOVERY_SETTINGS.idleContinuation,
+      maxContinuations: 0
+    }
+  });
+});
+
+test("resolveConfig keeps explicit empty recovery lists and non-finite limits defaulted", () => {
+  const empty = resolveConfig({
+    runtimeRecovery: {
+      retryOnStatusCodes: [],
+      retryOnCodes: [],
+      fallbackRoutes: []
+    }
+  });
+  const nonFinite = resolveConfig({
+    runtimeRecovery: {
+      maxFallbackAttempts: Number.POSITIVE_INFINITY,
+      idleContinuation: { maxContinuations: Number.NaN }
+    }
+  });
+
+  assert.deepEqual(empty.runtimeRecovery.retryOnStatusCodes, []);
+  assert.deepEqual(empty.runtimeRecovery.retryOnCodes, []);
+  assert.deepEqual(empty.runtimeRecovery.fallbackRoutes, []);
+  assert.equal(nonFinite.runtimeRecovery.maxFallbackAttempts, 2);
+  assert.equal(nonFinite.runtimeRecovery.idleContinuation.maxContinuations, 3);
+});
+
+test("resolveConfig defensively copies normalized recovery settings", () => {
+  const input = {
+    runtimeRecovery: {
+      retryOnStatusCodes: [429],
+      retryOnCodes: ["ETIMEDOUT"],
+      fallbackRoutes: [{ provider: "primary", model: "primary-model" }],
+      idleContinuation: { prompt: "Keep going." }
+    }
+  } satisfies DsmmPluginConfig;
+  const first = resolveConfig(input);
+  const second = resolveConfig(input);
+
+  assert.notEqual(first.runtimeRecovery, second.runtimeRecovery);
+  assert.notEqual(first.runtimeRecovery.retryOnStatusCodes, second.runtimeRecovery.retryOnStatusCodes);
+  assert.notEqual(first.runtimeRecovery.retryOnCodes, second.runtimeRecovery.retryOnCodes);
+  assert.notEqual(first.runtimeRecovery.fallbackRoutes, second.runtimeRecovery.fallbackRoutes);
+  assert.notEqual(first.runtimeRecovery.fallbackRoutes[0], second.runtimeRecovery.fallbackRoutes[0]);
+  assert.notEqual(first.runtimeRecovery.idleContinuation, second.runtimeRecovery.idleContinuation);
+  assert.notEqual(first.runtimeRecovery.retryOnStatusCodes, DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnStatusCodes);
+  assert.notEqual(first.runtimeRecovery.retryOnCodes, DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnCodes);
+  assert.notEqual(first.runtimeRecovery.fallbackRoutes, DEFAULT_DSMM_SETTINGS.runtimeRecovery.fallbackRoutes);
+  assert.notEqual(first.runtimeRecovery.fallbackRoutes[0], input.runtimeRecovery.fallbackRoutes?.[0]);
+
+  first.runtimeRecovery.retryOnStatusCodes.push(503);
+  first.runtimeRecovery.retryOnCodes.push("econnreset");
+  first.runtimeRecovery.fallbackRoutes[0].provider = "changed";
+  first.runtimeRecovery.idleContinuation.prompt = "Changed.";
+
+  assert.deepEqual(second.runtimeRecovery, {
+    ...DEFAULT_RUNTIME_RECOVERY_SETTINGS,
+    retryOnStatusCodes: [429],
+    retryOnCodes: ["etimedout"],
+    fallbackRoutes: [{ provider: "primary", model: "primary-model" }],
+    idleContinuation: {
+      ...DEFAULT_RUNTIME_RECOVERY_SETTINGS.idleContinuation,
+      prompt: "Keep going."
+    }
+  });
+});
+
 test("resolveConfig supports per-skill toggles", () => {
   const settings = resolveConfig({ skills: { "writing-plans": false, "remove-ai-slops": false } });
   assert.equal(settings.skills["writing-plans"], false);
@@ -184,6 +336,8 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     defaultActive: true,
     promptOrder: 50,
     deepseekV4ProCalibration: "auto",
+    deepseekV4ProDefaultReasoningEffort: "high",
+    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
@@ -191,6 +345,7 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
+    runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
     lsp: DEFAULT_DSMM_LSP_SETTINGS
   });
 });
@@ -221,6 +376,95 @@ test("registerSettings notifies only attached effective restart-scoped settings 
   assert.deepEqual(registrationOptions, { base: { ...DEFAULT_DSMM_SETTINGS, modeName: "base" }, applies: "restart" });
   assert.equal(getSettings().modeName, "attached");
   assert.deepEqual(observed, ["attached", "install:attached"]);
+});
+
+test("registerSettings reserves attached dsmm-status mode names for getters and installs", () => {
+  const installed: string[] = [];
+  const getSettings = registerSettings({
+    settings: {
+      register<T>() {
+        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: DSMM_STATUS_COMMAND }) as T };
+      }
+    }
+  }, {}, {
+    install(_readyCtx, getReadySettings) {
+      installed.push(getReadySettings().modeName);
+    }
+  });
+
+  assert.equal(getSettings().modeName, DEFAULT_DSMM_SETTINGS.modeName);
+  assert.deepEqual(installed, [DEFAULT_DSMM_SETTINGS.modeName]);
+});
+
+test("registerSettings normalizes attached DeepSeek V4 Pro max reasoning presets for getters and installs", () => {
+  const installedPresets: string[][] = [];
+  const attached = {
+    ...DEFAULT_DSMM_SETTINGS,
+    deepseekV4ProMaxReasoningPresets: ["dsmm-reviewer", "invalid-role", "dsmm-plan-critic", "dsmm-reviewer"]
+  };
+
+  const getSettings = registerSettings({
+    settings: {
+      register<T>() {
+        return { get: () => attached as T };
+      }
+    }
+  }, {}, {
+    install(_readyCtx, getReadySettings) {
+      installedPresets.push(getReadySettings().deepseekV4ProMaxReasoningPresets);
+    }
+  });
+
+  assert.deepEqual(getSettings().deepseekV4ProMaxReasoningPresets, ["dsmm-plan-critic", "dsmm-reviewer"]);
+  assert.deepEqual(installedPresets, [["dsmm-plan-critic", "dsmm-reviewer"]]);
+});
+
+test("registerSettings normalizes attached runtime recovery settings for getters and installs", () => {
+  const installed: Array<ReturnType<typeof resolveConfig>["runtimeRecovery"]> = [];
+  const attached = {
+    ...DEFAULT_DSMM_SETTINGS,
+    runtimeRecovery: {
+      ...DEFAULT_DSMM_SETTINGS.runtimeRecovery,
+      retryOnStatusCodes: [429, 429, 99, 503],
+      retryOnCodes: [" RATE_LIMIT ", "rate_limit", ""],
+      fallbackRoutes: [
+        { provider: " fallback ", model: " model " },
+        { provider: "fallback", model: "model" },
+        { provider: "", model: "discard" }
+      ],
+      maxFallbackAttempts: 99,
+      idleContinuation: {
+        ...DEFAULT_DSMM_SETTINGS.runtimeRecovery.idleContinuation,
+        maxContinuations: -4
+      }
+    }
+  };
+
+  const getSettings = registerSettings({
+    settings: {
+      register<T>() {
+        return { get: () => attached as T };
+      }
+    }
+  }, {}, {
+    install(_readyCtx, getReadySettings) {
+      installed.push(getReadySettings().runtimeRecovery);
+    }
+  });
+
+  const expected = {
+    ...DEFAULT_RUNTIME_RECOVERY_SETTINGS,
+    retryOnStatusCodes: [429, 503],
+    retryOnCodes: ["rate_limit"],
+    fallbackRoutes: [{ provider: "fallback", model: "model" }],
+    maxFallbackAttempts: 10,
+    idleContinuation: {
+      ...DEFAULT_RUNTIME_RECOVERY_SETTINGS.idleContinuation,
+      maxContinuations: 0
+    }
+  };
+  assert.deepEqual(getSettings().runtimeRecovery, expected);
+  assert.deepEqual(installed, [expected]);
 });
 
 test("registerSettings notifies base settings only when no settings service attaches", () => {
@@ -456,17 +700,55 @@ test("apply defers prompt, command, and preset materialization until the setting
     const installer = settingsInstaller;
     assert.ok(installer);
     installer(child);
+    installer(child);
 
     assert.deepEqual(rootSections, []);
     assert.deepEqual(rootCommandNames, []);
     assert.deepEqual(childSections.map((section) => ({ name: section.name, order: section.order })), [{ name: "dsmm:deepwork", order: 77 }]);
-    assert.deepEqual(childCommandNames, ["attached-deepwork"]);
+    assert.deepEqual(childCommandNames, ["attached-deepwork", "dsmm-status"]);
     assert.equal(existsSync(join(baseRoot, "dsmm-orchestrator")), false);
     assert.equal(existsSync(join(attachedRoot, "dsmm-orchestrator")), true);
   } finally {
     rmSync(baseRoot, { recursive: true, force: true });
     rmSync(attachedRoot, { recursive: true, force: true });
   }
+});
+
+test("apply reserves dsmm-status for base and attached command registrations", () => {
+  const baseCommandNames: string[] = [];
+  apply({
+    systemPrompt: { section() {} },
+    commands: { register(command) { baseCommandNames.push(command.name); } }
+  }, { modeName: DSMM_STATUS_COMMAND });
+  assert.deepEqual(baseCommandNames, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
+
+  const rootCommandNames: string[] = [];
+  const childCommandNames: string[] = [];
+  let settingsInstaller: ((readyCtx: DshContext) => unknown) | undefined;
+  const child: DshContext = {
+    settings: {
+      register<T>() {
+        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: DSMM_STATUS_COMMAND }) as T };
+      }
+    },
+    systemPrompt: { section() {} },
+    commands: { register(command) { childCommandNames.push(command.name); } }
+  };
+
+  apply({
+    systemPrompt: { section() {} },
+    commands: { register(command) { rootCommandNames.push(command.name); } },
+    inject(dependencies, installer) {
+      if (dependencies[0] === "settings") settingsInstaller = installer;
+    }
+  }, { modeName: DSMM_STATUS_COMMAND });
+
+  assert.deepEqual(rootCommandNames, []);
+  const installer = settingsInstaller;
+  assert.ok(installer);
+  installer(child);
+  installer(child);
+  assert.deepEqual(childCommandNames, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
 });
 
 test("apply registers settings through host context", () => {
@@ -484,4 +766,33 @@ test("apply registers settings through host context", () => {
   });
 
   assert.deepEqual(namespaces, ["dsmm"]);
+});
+
+test("apply registers recovery request hooks before the existing llm model-routing injection", () => {
+  const injections: string[][] = [];
+  const registrations: Array<{ event: string; options: unknown }> = [];
+  const timeline: string[] = [];
+
+  apply({
+    on(event, _listener, options) {
+      registrations.push({ event, options });
+      timeline.push(`on:${event}`);
+      return () => {};
+    },
+    inject(dependencies) {
+      injections.push([...dependencies]);
+      timeline.push(`inject:${dependencies.join(",")}`);
+    }
+  });
+
+  assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "settings,systemPrompt"), [["settings", "systemPrompt"]]);
+  assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "llm"), [["llm"]]);
+  assert.deepEqual(registrations.slice(1, 4), [
+    { event: "agent/request", options: undefined },
+    { event: "agent/request-error", options: { prepend: true } },
+    { event: "agent/turn-stopping", options: undefined }
+  ]);
+  assert.ok(timeline.indexOf("on:agent/request") < timeline.indexOf("inject:llm"));
+  assert.ok(timeline.indexOf("on:agent/request-error") < timeline.indexOf("inject:llm"));
+  assert.ok(timeline.indexOf("on:agent/turn-stopping") < timeline.indexOf("inject:llm"));
 });

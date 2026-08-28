@@ -11,6 +11,7 @@ export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export type { DsmmSkillName, MvpSkillName } from "./skills.js";
 
 export type DeepseekCalibration = "off" | "auto" | "strict";
+export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
@@ -42,15 +43,40 @@ export interface DsmmGuardSettings {
   todoDisciplineHelper: boolean;
 }
 
+export interface DsmmRecoveryRoute {
+  provider: string;
+  model: string;
+}
+
+export interface DsmmRuntimeRecoverySettings {
+  enabled: boolean;
+  retryOnStatusCodes: number[];
+  retryOnCodes: string[];
+  fallbackRoutes: DsmmRecoveryRoute[];
+  maxFallbackAttempts: number;
+  idleContinuation: {
+    enabled: boolean;
+    maxContinuations: number;
+    prompt: string;
+  };
+}
+
 type DsmmGuardConfig = Partial<Omit<DsmmGuardSettings, "toolOutputTruncation" | "questionLabelHelper">> & {
   toolOutputTruncation?: Partial<DsmmGuardSettings["toolOutputTruncation"]>;
   questionLabelHelper?: Partial<DsmmGuardSettings["questionLabelHelper"]>;
+};
+
+type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fallbackRoutes" | "idleContinuation">> & {
+  fallbackRoutes?: Array<Partial<DsmmRecoveryRoute>>;
+  idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 
 export interface DsmmPluginConfig {
   modeName?: string;
   section?: string;
   deepseekV4ProCalibration?: DeepseekCalibration;
+  deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
+  deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
   defaultActive?: boolean;
   promptOrder?: number;
   skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -58,6 +84,7 @@ export interface DsmmPluginConfig {
   presets?: Partial<DsmmPresetSettings>;
   workflow?: Partial<DsmmWorkflowSettings>;
   guards?: DsmmGuardConfig;
+  runtimeRecovery?: DsmmRuntimeRecoveryConfig;
   lsp?: Partial<DsmmLspSettings>;
 }
 
@@ -66,15 +93,19 @@ export interface DsmmSettings {
   defaultActive: boolean;
   promptOrder: number;
   deepseekV4ProCalibration: DeepseekCalibration;
+  deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
+  deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
   skills: Record<DsmmSkillName, boolean>;
   roles: Record<DsmmRoleId, boolean>;
   presets: DsmmPresetSettings;
   workflow: DsmmWorkflowSettings;
   guards: DsmmGuardSettings;
+  runtimeRecovery: DsmmRuntimeRecoverySettings;
   lsp: DsmmLspSettings;
 }
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
+export const DSMM_STATUS_COMMAND = "dsmm-status";
 
 export interface RegisterSettingsOptions {
   onChange?: (settings: DsmmSettings) => void;
@@ -86,6 +117,8 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   defaultActive: false,
   promptOrder: 50,
   deepseekV4ProCalibration: "auto",
+  deepseekV4ProDefaultReasoningEffort: "high",
+  deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
   skills: createDefaultSkillSettings(),
   roles: createDefaultRoleSettings(),
   presets: {
@@ -111,8 +144,24 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
     },
     todoDisciplineHelper: true
   },
+  runtimeRecovery: {
+    enabled: false,
+    retryOnStatusCodes: [429, 500, 502, 503, 504],
+    retryOnCodes: [],
+    fallbackRoutes: [],
+    maxFallbackAttempts: 2,
+    idleContinuation: {
+      enabled: false,
+      maxContinuations: 3,
+      prompt: "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work."
+    }
+  },
   lsp: DEFAULT_DSMM_LSP_SETTINGS
 };
+
+function normalizeModeName(modeName: string | undefined): string {
+  return modeName === DSMM_STATUS_COMMAND ? DEFAULT_DSMM_SETTINGS.modeName : modeName ?? DEFAULT_DSMM_SETTINGS.modeName;
+}
 
 function createDefaultSkillSettings(): Record<DsmmSkillName, boolean> {
   return Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true])) as Record<DsmmSkillName, boolean>;
@@ -192,11 +241,38 @@ const GUARDS_SCHEMA = Schema.object({
   todoDisciplineHelper: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.guards.todoDisciplineHelper)
 });
 
+const RUNTIME_RECOVERY_IDLE_CONTINUATION_SCHEMA = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.idleContinuation.enabled),
+  maxContinuations: Schema.number().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.idleContinuation.maxContinuations),
+  prompt: Schema.string().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.idleContinuation.prompt)
+});
+
+const RUNTIME_RECOVERY_SCHEMA = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.enabled),
+  retryOnStatusCodes: Schema.array(Number).default([...DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnStatusCodes]),
+  retryOnCodes: Schema.array(String).default([...DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnCodes]),
+  fallbackRoutes: Schema.array(Schema.object({
+    provider: Schema.string(),
+    model: Schema.string()
+  })).default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route }))),
+  maxFallbackAttempts: Schema.number().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.maxFallbackAttempts),
+  idleContinuation: RUNTIME_RECOVERY_IDLE_CONTINUATION_SCHEMA
+});
+
 const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
   Schema.const("off"),
   Schema.const("auto"),
   Schema.const("strict")
 ]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration);
+
+const DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA = Schema.union([
+  Schema.const("off"),
+  Schema.const("low"),
+  Schema.const("high")
+]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort);
+
+const DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA = Schema.array(String)
+  .default([...DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets]) as Schema<DsmmRoleId[]>;
 
 const LSP_SCHEMA = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.enabled),
@@ -215,11 +291,14 @@ export const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig> = Schema.object({
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+  deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+  deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
   guards: GUARDS_SCHEMA,
+  runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
   lsp: LSP_SCHEMA
 });
 
@@ -228,27 +307,38 @@ export const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings> = Schema.object({
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+  deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+  deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
   guards: GUARDS_SCHEMA,
+  runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
   lsp: LSP_SCHEMA
 });
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
   return {
-    modeName: config.modeName ?? DEFAULT_DSMM_SETTINGS.modeName,
+    modeName: normalizeModeName(config.modeName),
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
     deepseekV4ProCalibration: config.deepseekV4ProCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration,
+    deepseekV4ProDefaultReasoningEffort: config.deepseekV4ProDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort,
+    deepseekV4ProMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekV4ProMaxReasoningPresets),
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     presets: resolvePresetSettings(config.presets),
     workflow: resolveWorkflowSettings(config.workflow),
     guards: resolveGuardSettings(config.guards),
+    runtimeRecovery: resolveRuntimeRecoverySettings(config.runtimeRecovery),
     lsp: resolveLspSettings(config.lsp)
   };
+}
+
+function resolveMaxReasoningPresets(input: readonly unknown[] | undefined): DsmmRoleId[] {
+  const requested = new Set(input ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets);
+  return DSMM_ROLE_IDS.filter((id) => requested.has(id));
 }
 
 export function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean {
@@ -291,6 +381,65 @@ export function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGu
   };
 }
 
+function resolveRuntimeRecoverySettings(config: DsmmPluginConfig["runtimeRecovery"]): DsmmRuntimeRecoverySettings {
+  const defaults = DEFAULT_DSMM_SETTINGS.runtimeRecovery;
+
+  return {
+    enabled: config?.enabled ?? defaults.enabled,
+    retryOnStatusCodes: normalizeStatusCodes(config?.retryOnStatusCodes, defaults.retryOnStatusCodes),
+    retryOnCodes: normalizeRetryCodes(config?.retryOnCodes, defaults.retryOnCodes),
+    fallbackRoutes: normalizeRecoveryRoutes(config?.fallbackRoutes, defaults.fallbackRoutes),
+    maxFallbackAttempts: normalizeBoundedInteger(config?.maxFallbackAttempts, defaults.maxFallbackAttempts),
+    idleContinuation: {
+      enabled: config?.idleContinuation?.enabled ?? defaults.idleContinuation.enabled,
+      maxContinuations: normalizeBoundedInteger(
+        config?.idleContinuation?.maxContinuations,
+        defaults.idleContinuation.maxContinuations
+      ),
+      prompt: config?.idleContinuation?.prompt ?? defaults.idleContinuation.prompt
+    }
+  };
+}
+
+function normalizeStatusCodes(input: readonly number[] | undefined, defaults: readonly number[]): number[] {
+  const normalized: number[] = [];
+
+  for (const status of input ?? defaults) {
+    if (Number.isInteger(status) && status >= 100 && status <= 599 && !normalized.includes(status)) normalized.push(status);
+  }
+
+  return normalized;
+}
+
+function normalizeRetryCodes(input: readonly string[] | undefined, defaults: readonly string[]): string[] {
+  const normalized: string[] = [];
+
+  for (const code of input ?? defaults) {
+    const normalizedCode = code.trim().toLowerCase();
+    if (normalizedCode !== "" && !normalized.includes(normalizedCode)) normalized.push(normalizedCode);
+  }
+
+  return normalized;
+}
+
+function normalizeRecoveryRoutes(input: readonly Partial<DsmmRecoveryRoute>[] | undefined, defaults: readonly DsmmRecoveryRoute[]): DsmmRecoveryRoute[] {
+  const normalized: DsmmRecoveryRoute[] = [];
+
+  for (const route of input ?? defaults) {
+    const provider = route.provider?.trim() ?? "";
+    const model = route.model?.trim() ?? "";
+    if (provider === "" || model === "" || normalized.some((candidate) => candidate.provider === provider && candidate.model === model)) continue;
+    normalized.push({ provider, model });
+  }
+
+  return normalized;
+}
+
+function normalizeBoundedInteger(value: number | undefined, defaultValue: number): number {
+  if (value === undefined || !Number.isFinite(value)) return defaultValue;
+  return Math.min(10, Math.max(0, Math.floor(value)));
+}
+
 function normalizePositiveInteger(value: number | undefined, defaultValue: number): number {
   if (value === undefined || !Number.isFinite(value) || value <= 0) return defaultValue;
   return Math.floor(value);
@@ -307,7 +456,7 @@ export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {},
     const scope = settings.register<DsmmSettings>(DSMM_SETTINGS_NAMESPACE, DSMM_SETTINGS_SCHEMA, { base, applies: "restart" });
     const previousGetSettings = getSettings;
     const previousAttached = attached;
-    getSettings = () => scope.get();
+    getSettings = () => resolveConfig(scope.get() as DsmmPluginConfig);
     try {
       options.onChange?.(getSettings());
       options.install?.(readyCtx, () => getSettings());

@@ -1,4 +1,5 @@
-import { DSMM_ROLE_IDS } from "./roles.js";
+import { isDsmmRoleId } from "./roles.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
@@ -21,22 +22,6 @@ function toolName(exec) {
 }
 function commandText(exec) {
     return stringField(exec.arguments, ["command", "cmd", "script"]);
-}
-function isDsmmRole(value) {
-    return typeof value === "string" && DSMM_ROLE_IDS.includes(value);
-}
-function selectedAgentPreset(session) {
-    const events = session?.events ?? [];
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-        const event = asRecord(events[index]);
-        if (event?.type !== "agent-preset/selected")
-            continue;
-        const data = asRecord(event.data);
-        if (typeof data?.agentPreset === "string")
-            return data.agentPreset;
-    }
-    const header = asRecord(session?.header);
-    return typeof header?.agentPreset === "string" ? header.agentPreset : undefined;
 }
 function allText(content) {
     let text = "";
@@ -95,7 +80,7 @@ export function isSafetyScopeActive(exec, settings, controller) {
         return true;
     if (controller.active(exec.agent, settings.defaultActive))
         return true;
-    return isDsmmRole(selectedAgentPreset(exec.agent?.session));
+    return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));
 }
 function shellDialect(exec) {
     const name = toolName(exec);

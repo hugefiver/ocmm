@@ -11,6 +11,7 @@ WORKDIR /workspace
 
 COPY --from=lsp-builder /workspace/target/release/ocmm-lsp /usr/local/bin/ocmm-lsp
 COPY dsmm ./dsmm
+COPY LICENSE ./LICENSE
 
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 RUN printf "packages:\n  - dsmm\nautoInstallPeers: false\n" > pnpm-workspace.yaml

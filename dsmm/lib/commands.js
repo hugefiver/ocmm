@@ -1,4 +1,7 @@
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { DSMM_STATUS_COMMAND } from "./settings.js";
+import { createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
+export { DSMM_STATUS_COMMAND };
 export function parseDeepworkCommandInput(rawInput) {
     const message = rawInput.trim();
     return message === "off" ? { action: "off", message: "" } : { action: "on", message };
@@ -16,6 +19,21 @@ async function handleDeepworkCommand(controller, getSettings, invocation) {
         ? { kind: "success", text: "Entering deepwork mode." }
         : { kind: "success", text: "Leaving deepwork mode." };
 }
+function handleDsmmStatusCommand(controller, getSettings, invocation) {
+    const input = invocation.rawInput.trim();
+    if (input !== "" && input !== "json")
+        return { kind: "error", text: "Usage: /dsmm-status [json]" };
+    const settings = getSettings();
+    const snapshot = createDsmmStatusSnapshot({
+        agent: invocation.agent,
+        settings,
+        modeActive: controller.active(invocation.agent, settings.defaultActive)
+    });
+    return {
+        kind: "success",
+        text: input === "json" ? JSON.stringify(snapshot, null, 2) : formatDsmmStatus(snapshot)
+    };
+}
 export function registerDeepworkCommand(readyCtx, controller, getSettings) {
     const commands = readyCtx.get?.("commands") ?? readyCtx.commands;
     commands?.register({
@@ -23,6 +41,15 @@ export function registerDeepworkCommand(readyCtx, controller, getSettings) {
         description: "Enter or leave dsmm deepwork mode",
         input: { hint: "[off|message]" },
         handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
+    });
+}
+export function registerDsmmStatusCommand(readyCtx, controller, getSettings) {
+    const commands = readyCtx.get?.("commands") ?? readyCtx.commands;
+    commands?.register({
+        name: DSMM_STATUS_COMMAND,
+        description: "Show DSMM status",
+        input: { hint: "[json]" },
+        handler: (invocation) => handleDsmmStatusCommand(controller, getSettings, invocation)
     });
 }
 //# sourceMappingURL=commands.js.map

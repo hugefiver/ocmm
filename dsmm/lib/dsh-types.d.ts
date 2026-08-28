@@ -19,6 +19,7 @@ export interface DshSessionHeader {
 export interface DshSession {
     events: readonly DshSessionEvent[];
     header?: DshSessionHeader;
+    requestHeader?(): DshEpochHeader | undefined;
     append(type: "deepwork/mode", payload: {
         active: boolean;
     }): unknown | Promise<unknown>;
@@ -32,6 +33,113 @@ export interface DshAgent {
     steer?(message: unknown): unknown | Promise<unknown>;
     inject?(message: unknown): unknown | Promise<unknown>;
 }
+export interface DshLlmCallConfig {
+    provider: string;
+    model: string;
+    reasoningEffort?: string;
+    temperature?: number;
+    maxTokens?: number;
+    stop?: unknown;
+    [key: string]: unknown;
+}
+export interface DshLlmFailure {
+    readonly message: string;
+    readonly code: string;
+    readonly status?: number;
+    readonly providerRetryAfterMs?: number;
+    readonly requestId?: unknown;
+}
+export interface DshEpochHeader {
+    config: DshLlmCallConfig;
+    [key: string]: unknown;
+}
+export interface DshReasoningEffortInfo {
+    id: string;
+    name: string;
+    [key: string]: unknown;
+}
+export interface DshModelReasoningInfo {
+    efforts: readonly DshReasoningEffortInfo[];
+    defaultEffort?: string;
+    [key: string]: unknown;
+}
+export interface DshResolvedModelInfo {
+    provider: string;
+    id: string;
+    name: string;
+    reasoning?: DshModelReasoningInfo;
+    [key: string]: unknown;
+}
+export interface DshLlmRuntime {
+    resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<DshResolvedModelInfo>;
+}
+export interface AgentRequestFrame {
+    agent: DshAgent;
+    turn: number;
+    step: number;
+    signal: AbortSignal;
+}
+export interface AgentRequestErrorFrame {
+    agent: DshAgent;
+    turn: number;
+    step: number;
+    provider: string;
+    failure: DshLlmFailure;
+    retryPolicy: unknown;
+    signal: AbortSignal;
+}
+export type DshRequestErrorAction = {
+    kind: "retry";
+} | undefined;
+export interface AgentTurnStoppingFrame {
+    agent: DshAgent;
+    turn: number;
+    signal: AbortSignal;
+}
+export interface DshStepBoundaryEventData {
+    turn: number;
+    step: number;
+}
+export interface DshRequestHeaderEventData {
+    header: DshEpochHeader;
+    reason: "initial" | "resume" | "change";
+}
+export interface DshTodoItem {
+    content: string;
+    status: "pending" | "in_progress" | "completed";
+}
+export interface DshTodoWriteEventData {
+    todos: DshTodoItem[];
+}
+export interface DshGoalSnapshot {
+    id: string;
+    revision: number;
+    objective: string;
+    phase: "active" | "paused" | "blocked" | "complete";
+    blockedReason?: {
+        code: string;
+        message: string;
+    };
+    maxGoalRounds: number;
+}
+export type DshGoalChangeEventData = {
+    kind: "goal/change";
+    version: 1;
+    operation: "create" | "edit" | "pause" | "resume" | "complete" | "block";
+    goal: DshGoalSnapshot;
+    roundsStarted: number;
+    createdAt: number;
+    updatedAt: number;
+} | {
+    kind: "goal/change";
+    version: 1;
+    operation: "clear";
+    cleared: {
+        id: string;
+        revision: number;
+    };
+    clearedAt: number;
+};
 export interface DshSystemPromptContext {
     agent?: DshAgent;
     [key: string]: unknown;
@@ -140,6 +248,7 @@ export interface DshInjectedServices {
     skills?: DshSkillRegistry;
     commands?: DshCommandsRegistry;
     tools?: DshToolRuntime;
+    llm?: DshLlmRuntime;
     [key: string]: unknown;
 }
 export interface PreStepFrame {
@@ -157,9 +266,22 @@ export interface DshContext {
     skills?: DshSkillRegistry;
     commands?: DshCommandsRegistry;
     tools?: DshToolRuntime;
+    llm?: DshLlmRuntime;
     get?<T = unknown>(name: string): T | undefined;
     inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
     effect?(callback: () => void | (() => void)): unknown;
+    on?(event: "agent/request", listener: (frame: AgentRequestFrame, next: () => Promise<DshLlmCallConfig>) => Promise<DshLlmCallConfig>, options?: boolean | {
+        prepend?: boolean;
+        global?: boolean;
+    }): unknown;
+    on?(event: "agent/request-error", listener: (frame: AgentRequestErrorFrame, next: () => Promise<DshRequestErrorAction>) => Promise<DshRequestErrorAction>, options?: boolean | {
+        prepend?: boolean;
+        global?: boolean;
+    }): unknown;
+    on?(event: "agent/turn-stopping", listener: (frame: AgentTurnStoppingFrame) => void | Promise<void>, options?: boolean | {
+        prepend?: boolean;
+        global?: boolean;
+    }): unknown;
     on?(event: "agent/pre-step", listener: (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>, options?: unknown): unknown;
     on?(event: string, listener: DshEventListener, options?: unknown): unknown;
     logger?: {

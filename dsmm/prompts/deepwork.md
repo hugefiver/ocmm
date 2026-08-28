@@ -2,7 +2,7 @@
 
 DEEPWORK MODE ENABLED!
 
-Use this workflow only while the `{{modeName}}` mode is active. This is an opt-in boundary: outside this mode, do not apply dsmm-specific gates, intent routing, or tool-discipline requirements. The default mode name is `deepwork` unless configured.
+Use this workflow only while the `{{modeName}}` mode is active OR a DSMM-managed preset is selected. This is an opt-in boundary: outside both conditions, do not apply dsmm-specific gates, intent routing, or tool-discipline requirements. The default mode name is `deepwork` unless configured.
 
 ## Intent routing
 
@@ -15,7 +15,7 @@ Begin non-trivial responses with one short line in the user's language: `我读�
 - For completed implementation, gather evidence from tests, diagnostics, and real surfaces before declaring done.
 - Keep scope exact. Do not add unrelated refactors, speculative abstractions, or surprise features.
 - The bundled workflow skill set is available in this mode: `brainstorming`, `writing-plans`, `subagent-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `receiving-code-review`, and `remove-ai-slops`.
-- The workflow policy is configurable for this mode through `workflow.strictGates`, `workflow.reviewCap`, and `workflow.finalReviewPolicy`; do not treat those dsmm settings as global policy outside `{{modeName}}` mode.
+- The workflow policy is configurable through `workflow.strictGates`, `workflow.reviewCap`, and `workflow.finalReviewPolicy`; do not treat those dsmm settings as global policy outside active `{{modeName}}` mode or DSMM-managed preset scope.
 
 ## Tool discipline
 
