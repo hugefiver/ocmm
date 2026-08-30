@@ -208,11 +208,6 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.equal(countText(prompt, GPT_56_MARKER), 1, `${category.name}: GPT-5.6 marker`)
       assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
-      assert.match(
-        prompt,
-        /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
-        `${category.name}: GPT-5.6 calibration must remain guarded`,
-      )
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "omo")

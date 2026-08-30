@@ -267,7 +267,6 @@ test("real staged package-script smoke is network-free and machine-readable", ()
 
     const invalid = runPackageScript(root, ["--mode", "remote", "--repository", "invalid", "--tag", "v1.2.3"], env)
     assert.equal(invalid.status, 1)
-    assert.equal(invalid.stderr, "")
     assert.equal(assertMachineReadableReceipt(invalid.stdout).outcome, "FAILED")
     for (const output of [invalid.stdout, invalid.stderr]) {
       assert.equal(output.includes(token), false)

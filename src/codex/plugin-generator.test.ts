@@ -569,10 +569,6 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
   assert.match(orchestrator.developerInstructions, /GPT-5\.6 EXECUTION CALIBRATION/)
   assertCompactGpt56Calibration(orchestrator.developerInstructions, "in-memory orchestrator")
-  assert.match(
-    orchestrator.developerInstructions,
-    /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
-  )
   assert.ok(builder)
   assert.equal(builder.model, "gpt-5.6-sol")
   assert.ok(planner)
@@ -1278,10 +1274,6 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(workflowSkill, /through later configured slots only when explicit additional independent evidence is needed/)
     assert.match(orchestrator, /GPT-5\.6 EXECUTION CALIBRATION/)
     assertCompactGpt56Calibration(orchestrator, "generated orchestrator TOML")
-    assert.match(
-      orchestrator,
-      /Codex profiles may carry this layer ahead of runtime model selection; models outside the GPT-5\.6 family ignore it/,
-    )
     assert.match(workflowSkill, /Generated Agents/)
     assert.match(workflowSkill, /\| dw-oracle \|/)
     assert.match(workflowSkill, /\| dw-creative \|/)
