@@ -275,17 +275,15 @@ Parallel-batch independent reads / searches / subagents within a step,
 but NEVER parallelise RED and GREEN of the same criterion.
 
 # OpenCode subagent reliability
-Every `task()` delegation prompt must preserve the local fields `TASK`,
-`EXPECTED OUTCOME`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, and
-`CONTEXT`, and add `GOAL`, `STOP WHEN`, and `EVIDENCE`. `GOAL` names the
-bounded child outcome; `STOP WHEN` names the child's observable completion
-condition; `EVIDENCE` names what the child must return. The parent verifies
-returned `EVIDENCE` against the delegated `GOAL` rather than trusting a
-completion claim.
+Every `task()` delegation prompt follows this rule: A clear, self-contained assignment may be a single imperative sentence. Labels and a fixed section
+order are never required. For complex or coordinated work, add scope or target
+files only when not obvious; constraints or non-goals only when scope expansion
+is plausible; completion conditions or requested evidence only when the result
+cannot be checked directly; and tools only when a specific tool is required.
+The parent verifies returned evidence rather than trusting a completion claim.
 
-A delegated `STOP WHEN` bounds only that child assignment. The parent run
-stops only when the entire user goal and all required verification are
-complete.
+A child's completion condition bounds only that child assignment. The parent
+stops only when the full user goal and required verification are complete.
 
 Use `run_in_background=true` only when the parent has independent work to do
 while the child runs; otherwise prefer blocking task calls so results return

@@ -8,27 +8,20 @@ Do not choose this category by model size or perceived task difficulty. Choose i
 
 Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
 
-## CALLER CONTRACT
+## ASSIGNMENT SHAPE
 
-The prompt you received SHOULD include all four sections below. If any are missing, write back ONE sentence asking the caller to re-issue with the missing pieces. Do not guess.
-
-```
-TASK:           one line, one verb, one location
-MUST DO:        bullet list of every action that must happen
-MUST NOT DO:    bullet list of forbidden actions / files / patterns
-EXPECTED OUTPUT: exactly what success looks like (file change? command output? diff?)
-```
+A clear, self-contained assignment may be a single imperative sentence. Labels and a fixed section order are never required. The mechanical action, target, and expected result must be clear. Ask one short question only when a missing target or result would change the deliverable. If design, investigation, coordination, or judgment is needed, report the category that fits the work shape.
 
 ## EXECUTION RULES
 
-- Touch only the file(s) named in TASK and MUST DO. Do not refactor adjacent code.
-- Read the named file before editing. Do not inspect unrelated files unless MUST DO instructs you to.
-- Do not introduce new dependencies, new files, or new functions unless MUST DO instructs you to.
+- Touch only the target file(s) and required mechanical action. Do not refactor adjacent code.
+- Read the target file before editing. Do not inspect unrelated files unless the assignment requires it.
+- Do not introduce new dependencies, new files, or new functions unless the assignment requires them.
 - If the change requires coordinated edits across files, behavior investigation, test design, or implementation choices, stop and report the category that fits the work shape.
 
 ## OUTPUT
 
-- The smallest possible diff that satisfies EXPECTED OUTPUT.
+- The smallest possible diff that satisfies the expected result.
 - One-sentence confirmation in plain English of what you changed.
 - Nothing else. No "summary" sections. No "next steps". No commentary on the codebase.
 

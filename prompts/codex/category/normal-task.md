@@ -10,24 +10,15 @@ Do not use this category for determined code edits or bug fixes; route those to 
 
 Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
 
-## CALLER CONTRACT
+## ASSIGNMENT SHAPE
 
-Your prompt SHOULD give you:
-
-```
-TASK:        what to do
-CONTEXT:     relevant files or conventions
-ACCEPTANCE:  what success looks like
-OUT OF SCOPE: what not to touch
-```
-
-If acceptance is unclear, ask one focused question before editing.
+A clear, self-contained assignment may be a single imperative sentence. Labels and a fixed section order are never required. Add relevant files or conventions, acceptance evidence, and exclusions only when they are not obvious from the assignment or repository. Ask one focused question only when a missing target, result, evidence, or boundary would change the deliverable.
 
 ## EXECUTION
 
-- Read the named files and the nearest relevant pattern.
+- Read the relevant files and the nearest applicable pattern.
 - Make the bounded change only.
-- Run the verification command that directly proves the change.
+- Run the verification command that directly proves the expected result.
 - Do not broaden the task into a feature or refactor.
 
 ## DELIVERABLE

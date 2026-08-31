@@ -19,7 +19,7 @@ Apply only to GPT-5.6. Explicit user configuration, role prompt, authorization, 
 - Multiple steps, routine confirmation, or a desire for another opinion are insufficient reasons to delegate.
 - Reviewer is primary-lane self-review; Oracle slots are external-model cross-checks, only for implementation acceptance or code-quality verification—not research, ideation, architecture design, root-cause debugging, general answer validation, or routine confidence. Follow authoritative selection rules.
 - For multi-module work with independent, non-coupled tasks, consider parallel implementation subagents.
-- Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals; verify the evidence.
+- One clear sentence may suffice; labels optional. Add scope, limits, proof, or tools only as needed; verify proof.
 
 ### Cache stability
 

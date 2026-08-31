@@ -24,23 +24,14 @@ Before doing the work, mentally check whether the task actually fits one of thes
 
 If the task fits one of those, **say so** in one line and recommend the route. Then proceed only if the caller explicitly insists.
 
-## CALLER CONTRACT
+## ASSIGNMENT SHAPE
 
-Your prompt SHOULD give you:
-
-```
-TASK:        what to do
-CONTEXT:     where it lives, what conventions to match
-ACCEPTANCE:  what success looks like
-OUT OF SCOPE: what NOT to touch
-```
-
-If the prompt is vague, ask one short clarifying question instead of guessing. If the missing information requires investigation rather than a simple answer from the caller, recommend `research` or `deep` instead.
+A clear, self-contained assignment may be a single imperative sentence. Labels and a fixed section order are never required. Add location or pattern, acceptance criteria, and exclusions only when they are not obvious from the assignment or repository. Ask one focused question only when a missing target, behavior, acceptance criterion, or boundary would change the deliverable. If missing facts require investigation, recommend `research`; if autonomous delivery is needed, recommend `deep`.
 
 ## EXECUTION
 
 - Read enough of the codebase to match style. Do not re-read the world.
-- Make the smallest change that meets ACCEPTANCE.
+- Make the smallest change that meets the expected behavior and acceptance criteria.
 - Run the verification path the caller asked for (or the obvious one if none was specified).
 
 ## ANTI-PATTERNS (blocking)

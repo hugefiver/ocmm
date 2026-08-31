@@ -28,6 +28,21 @@ function makeTempRoot(workflow: "omo" | "v1"): string {
 
 const GPT56_WORKFLOWS = ["omo", "v1", "codex"] as const
 type Gpt56Workflow = (typeof GPT56_WORKFLOWS)[number]
+const FUNCTIONAL_AGENT_NAMES = [
+  "orchestrator",
+  "planner",
+  "reviewer",
+  "clarifier",
+  "plan-critic",
+] as const
+
+const REQUIRED_ENVELOPE_PATTERNS = [
+  /Every delegation must include task, expected outcome, required tools, must do, must not do, and context/i,
+  /Every .*delegation prompt must preserve the local fields/is,
+  /Every delegated task must state `GOAL`, `STOP WHEN`, `EVIDENCE`, scope, and non-goals/i,
+  /If any are missing.*re-issue/is,
+  /Vague prompts are rejected/i,
+] as const
 
 const GPT56_BASELINE_CHARS: Record<Gpt56Workflow, number> = {
   omo: 6742,
@@ -65,6 +80,39 @@ function sharedGpt56Doctrine(text: string): string {
 
 function withoutGpt56CachePolicy(text: string): string {
   return text.replace(/\n### Cache stability\n[\s\S]*?(?=\n## Context-efficient waiting and validation)/, "")
+}
+
+function assertNoRequiredDelegationEnvelope(text: string, label: string): void {
+  for (const pattern of REQUIRED_ENVELOPE_PATTERNS) {
+    assert.doesNotMatch(text, pattern, `${label} requires a fixed delegation envelope`)
+  }
+}
+
+function assertConciseAssignmentAccepted(text: string, label: string): void {
+  assert.match(
+    text,
+    /(?:(?:clear,? self-contained assignment|one clear sentence).*(?:single|one) imperative sentence|one clear sentence.*(?:may|can) suffice)/is,
+    `${label} does not accept a concise unambiguous assignment`,
+  )
+  assert.match(
+    text,
+    /labels?.{0,100}(?:(?:never|not) required|optional)/is,
+    `${label} still implies labels or section order are required`,
+  )
+  assertNoRequiredDelegationEnvelope(text, label)
+}
+
+function assertConditionalDelegationContext(text: string, label: string): void {
+  assert.match(text, /(?:target files or )?scope.*(?:not obvious|unclear)/is, `${label} scope condition`)
+  assert.match(text, /constraints(?: or non-goals|\/non-goals).*scope expansion.*plausible/is, `${label} constraint condition`)
+  assert.match(text, /(?:completion conditions? or requested evidence|completion\/evidence).*(?:cannot be checked directly|direct checking.*unavailable)/is, `${label} evidence condition`)
+  assert.match(text, /(?:tool requirement|tools?).*only when.*(?:specific tool.*required|specifically required)/is, `${label} tool condition`)
+}
+
+function assertProportionalDelegationContext(text: string, label: string): void {
+  assert.match(text, /scope.*(?:limits|constraints).*proof|scope.*proof.*tools/is, `${label} context kinds`)
+  assert.match(text, /only as needed|only when.*(?:ambiguity|risk)/is, `${label} proportional context`)
+  assert.match(text, /verify (?:returned )?(?:proof|evidence|results)/is, `${label} verification`)
 }
 
 test("loadAllPrompts loads files from the workflow subdir", () => {
@@ -293,11 +341,10 @@ test("Codex deepwork prompts use incremental validation and evidence-bounded del
     assert.match(triage, /HEAVY —/, `${label} lacks HEAVY classification`)
     assert.ok(triage.indexOf("LIGHT —") < triage.indexOf("HEAVY —"), `${label} orders LIGHT after HEAVY`)
 
-    for (const field of ["TASK", "EXPECTED OUTCOME", "REQUIRED TOOLS", "MUST DO", "MUST NOT DO", "CONTEXT", "GOAL", "STOP WHEN", "EVIDENCE"]) {
-      assert.match(reliability, new RegExp("`" + field + "`"), `${label} reliability section lacks ${field}`)
-    }
-    assert.match(reliability, /parent verifies\s+returned `EVIDENCE` against the delegated `GOAL` rather\s+than trusting a\s+completion claim/i, `${label} does not require parent evidence verification`)
-    assert.match(reliability, /delegated `STOP WHEN` bounds only that child assignment/i, `${label} does not bound child stopping`)
+    assertConciseAssignmentAccepted(reliability, `${label} reliability`)
+    assertConditionalDelegationContext(reliability, `${label} reliability`)
+    assert.match(reliability, /parent verifies returned evidence.*rather than trusting a completion claim/is, `${label} does not require parent evidence verification`)
+    assert.match(reliability, /child(?:'s)? completion condition.*only that (?:child )?assignment/is, `${label} does not bound child stopping`)
 
     if (workflow === "codex") {
       assert.match(reliability, /Every `multi_agent_v1\.spawn_agent\(\)` delegation prompt/i, `${label} lacks Codex dispatch`)
@@ -351,6 +398,50 @@ test("agent-specific prompts enforce bounded leaf delegation", () => {
     const critic = readFileSync(join(root, "plan-critic.md"), "utf8")
     assert.match(critic, /read-only lookup.*verify.*plan claim/i, `${workflow}/plan-critic`)
     assert.match(critic, /never.*planner.*reviewer.*Oracle.*another plan-critic.*implementation/is, `${workflow}/plan-critic`)
+  }
+})
+
+test("functional agent prompts stay role-focused and synchronized across workflows", () => {
+  const roleContracts: Record<(typeof FUNCTIONAL_AGENT_NAMES)[number], readonly RegExp[]> = {
+    orchestrator: [
+      /exclusive owner.*workflow-agent composition/is,
+      /final implementation acceptance.*identity-bound requesting-code-review/is,
+      /complex.*configured high.*otherwise.*normal/is,
+    ],
+    planner: [
+      /never implement.*directly.*proxy/is,
+      /Return the completed plan to (?:the orchestrator|the caller)/i,
+      /leaf.*read-only/is,
+    ],
+    reviewer: [
+      /read-only.*implementation acceptance.*code-quality verification/is,
+      /\[APPROVED\].*\[REJECTED\]/s,
+      /Never return a qualified approval/i,
+    ],
+    clarifier: [
+      /Intent Classification/i,
+      /Questions for User/i,
+      /Directives for planner/i,
+    ],
+    "plan-critic": [
+      /current.*plan revision/is,
+      /Any plan edit invalidates.*receipt/is,
+      /\[REJECT\].*\[OKAY\].*\[OKAY-UNAMBIGUOUS\]/s,
+    ],
+  }
+
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    for (const name of FUNCTIONAL_AGENT_NAMES) {
+      const text = readFileSync(join(process.cwd(), "prompts", workflow, "agents", `${name}.md`), "utf8")
+      const label = `${workflow}/${name}`
+      for (const contract of roleContracts[name]) assert.match(text, contract, label)
+      assert.doesNotMatch(text, /<\/?deepwork-agent-layer>/, `${label} retains the repeated agent layer`)
+      assert.doesNotMatch(
+        text,
+        /Survey the enabled MCP tools|When specifying how tasks should be executed, pick the sharpest available tool|Terminal commands: the shell type is stated/is,
+        `${label} retains generic tool or shell strategy`,
+      )
+    }
   }
 })
 
@@ -867,7 +958,8 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
     assert.match(text, /Continue until.*required verification.*hold.*then stop/is, `${label} stopping rule`)
     assert.match(text, /subagents only when.*effective role\/delegation contract permits it.*materially improve completion/is, `${label} delegation threshold`)
     assert.match(text, /Multiple steps, routine confirmation, or (?:a desire for|wanting) another opinion are insufficient reasons to delegate/i, `${label} anti-speculation threshold`)
-    assert.match(text, /`GOAL`.*`STOP WHEN`.*`EVIDENCE`.*scope.*non-goals/is, `${label} bounded delegation`)
+    assertConciseAssignmentAccepted(text, `${label} delegation`)
+    assertProportionalDelegationContext(text, `${label} delegation`)
     assert.match(text, /suitable timeout.*completion signal/is, `${label} waiting`)
     assert.match(text, /do not repeatedly poll unchanged state|empty short-interval reads/i, `${label} polling restraint`)
     assert.match(text, /After two unchanged checks.*increase the wait|After two unchanged checks.*completion signal/is, `${label} backoff`)
@@ -919,6 +1011,31 @@ test("GPT-5.6 specializations are compact additive calibrations synchronized acr
     withoutGpt56CachePolicy(omoShared),
     "Codex shared doctrine drifted outside the environment-specific cache policy",
   )
+})
+
+test("delegation prompt sources accept concise assignments and request only material context", () => {
+  for (const workflow of ["v1", "omo", "codex"] as const) {
+    const root = join(process.cwd(), "prompts", workflow)
+    for (const relativePath of [join("agents", "orchestrator.md"), join("deepwork", "codex.md")]) {
+      const text = readFileSync(join(root, relativePath), "utf8")
+      assertConciseAssignmentAccepted(text, `${workflow}/${relativePath}`)
+      assertConditionalDelegationContext(text, `${workflow}/${relativePath}`)
+    }
+
+    const gpt56 = readFileSync(join(root, "deepwork", "gpt-5.6.md"), "utf8")
+    assertConciseAssignmentAccepted(gpt56, `${workflow}/deepwork/gpt-5.6.md`)
+    assertProportionalDelegationContext(gpt56, `${workflow}/deepwork/gpt-5.6.md`)
+
+    for (const category of ["quick", "coding", "normal-task"] as const) {
+      const text = readFileSync(join(root, "category", `${category}.md`), "utf8")
+      assertConciseAssignmentAccepted(text, `${workflow}/${category}`)
+      assert.match(
+        text,
+        /ask one (?:short|focused) question only when.*(?:target|deliverable|result|acceptance).*change/is,
+        `${workflow}/${category} does not bound clarification to material ambiguity`,
+      )
+    }
+  }
 })
 
 test("orchestrator alone owns workflow-role composition in all prompt sets", () => {
