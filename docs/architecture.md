@@ -371,7 +371,7 @@ The TypeScript plugin and Rust `ocmm-lsp` crate are built together for releases.
 
 - **Build:** `pnpm run build` — TypeScript into `dist/`, then Cargo release build copied into `dist/bin/` under both the target-triple release name and local fallback name.
 - **Typecheck:** `pnpm run typecheck` — `tsc --noEmit`, strict mode.
-- **Test:** `pnpm test` — TypeScript tests via `node --test --experimental-strip-types` (Node 22+) plus `cargo test -p ocmm-lsp`.
+- **Test:** `pnpm test` — TypeScript tests via `node --test --experimental-strip-types` (Node 22+) plus `cargo test -p ocmm-lsp --features test-hooks`. The non-default Cargo feature is test-only and is also enabled by the Nix derivation's release-profile checks; production LSP builds omit it.
 - **Runtime dep:** `zod ^4.4.3`.
 - **Dev deps:** `typescript ^6.0.3`, `@types/node ^26.0.0`, `rimraf ^6.1.3`.
 

@@ -6,12 +6,12 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "ocmm-lsp";
-  version = "0.3.2";
+  version = "0.3.3";
   inherit src;
 
   cargoLock.lockFile = "${src}/Cargo.lock";
   cargoBuildFlags = [ "-p" "ocmm-lsp" ];
-  cargoTestFlags = [ "-p" "ocmm-lsp" ];
+  cargoTestFlags = [ "-p" "ocmm-lsp" "--features" "test-hooks" ];
   doCheck = true;
   nativeCheckInputs = [ nodejs_24 ];
 

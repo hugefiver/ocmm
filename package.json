@@ -38,7 +38,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run test:ts && pnpm run test:lsp",
     "test:ts": "node --test --experimental-strip-types --test-reporter=spec \"src/**/*.test.ts\"",
-    "test:lsp": "cargo test -p ocmm-lsp",
+    "test:lsp": "cargo test -p ocmm-lsp --features test-hooks",
     "cli": "node --experimental-strip-types src/cli/profiles.ts",
     "clean": "rimraf dist target",
     "gen-schema": "node --experimental-strip-types scripts/gen-schema.ts",

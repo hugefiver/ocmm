@@ -565,6 +565,7 @@ fn format_same_length_stale_snapshot_preserves_concurrent_bytes() {
 }
 
 #[test]
+#[cfg(feature = "test-hooks")]
 fn format_post_commit_did_open_failure_reports_committed() {
     let mut proc = McpProcess::start_with_mock("format-resync-did-open-failure");
 

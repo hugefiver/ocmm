@@ -9,6 +9,9 @@ license = "LicenseRef-AAAPL"
 name = "ocmm-lsp"
 path = "src/main.rs"
 
+[features]
+test-hooks = []
+
 [dependencies]
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

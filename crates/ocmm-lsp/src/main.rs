@@ -2728,7 +2728,7 @@ impl LspSession {
         self.document_text = std::str::from_utf8(replacement)
             .context("committed formatting result is not valid UTF-8")?
             .to_string();
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "test-hooks")]
         if env::var_os("OCMM_LSP_TEST_FAIL_POST_COMMIT_DID_OPEN").is_some() {
             bail!("injected post-commit didOpen failure");
         }

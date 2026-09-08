@@ -33,9 +33,9 @@ in
   lsp-tools-list = pkgs.runCommand "ocmm-lsp-tools-list" { nativeBuildInputs = [ pkgs.jq ]; } ''
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
       | ${lib.getExe packages.ocmm-lsp} mcp > response.json
-    jq -e '.id == 1 and (.result.tools | length == 8)' response.json > /dev/null
+    jq -e '.id == 1 and (.result.tools | length == 9)' response.json > /dev/null
     jq -r '.result.tools[].name' response.json | sort > names
-    printf '%s\n' diagnostics find_references find_symbol_related goto_definition prepare_rename rename status symbols | sort > expected
+    printf '%s\n' diagnostics find_references find_symbol_related format goto_definition prepare_rename rename status symbols | sort > expected
     diff -u expected names
     touch "$out"
   '';
@@ -69,7 +69,7 @@ in
       test "$(ls -1 "$runtime/bin" | wc -l)" -eq 1
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
         | (cd "$(dirname "$runtime")" && node ./dist/cli/ocmm-lsp.js mcp) > plugin-response.json
-      jq -e '.id == 1 and (.result.tools | length == 8)' plugin-response.json > /dev/null
+      jq -e '.id == 1 and (.result.tools | length == 9)' plugin-response.json > /dev/null
     done
     grep -F ${lib.escapeShellArg (lib.getExe packages.ocmm-lsp)} ${packages.ocmm-unwrapped}/bin/ocmm > /dev/null
     grep -F ${lib.escapeShellArg (lib.getExe packages.ocmm-lsp)} ${packages.ocmm-unwrapped}/bin/ocmm-profiles > /dev/null
