@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGpt6OrLaterModel, parseGptVersion, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, parseGptVersion, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -60,7 +60,7 @@ const CATEGORY_NAMES: CategoryName[] = [
 const deepworkPrompts = new Map<DeepworkVariant, string>()
 const agentPrompts = new Map<string, string>()
 const categoryPrompts = new Map<string, string>()
-const categoryAstraAddendums = new Map<string, string>()
+const categoryModelCalibrations = new Map<string, Map<string, string>>()
 let shellSafetyPrompt = ""
 
 function loadFile(absPath: string): string | null {
@@ -78,7 +78,7 @@ export function loadAllPrompts(
   deepworkPrompts.clear()
   agentPrompts.clear()
   categoryPrompts.clear()
-  categoryAstraAddendums.clear()
+  categoryModelCalibrations.clear()
   shellSafetyPrompt = loadFile(join(rootDir, "shared", "shell-safety.md")) ?? ""
   const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
@@ -94,11 +94,9 @@ export function loadAllPrompts(
     if (text == null) {
       log.debug(`prompt missing: ${workflow}/category/${name}.md (root=${rootDir})`)
     } else {
-      categoryPrompts.set(name, text)
-    }
-    const addendum = loadFile(join(base, "category-astra", `${name}.md`))
-    if (addendum != null) {
-      categoryAstraAddendums.set(name, addendum)
+      const parsed = splitCategoryPrompt(text)
+      categoryPrompts.set(name, parsed.base)
+      if (parsed.calibrations.size > 0) categoryModelCalibrations.set(name, parsed.calibrations)
     }
   }
   for (const name of AGENT_PROMPT_NAMES) {
@@ -130,7 +128,7 @@ export function pickDeepworkVariantForAgent(opts: {
     return "claude-opus-5"
   }
   if (isGpt56Model(opts.preferenceModel)) return "gpt-5.6"
-  if (isGpt6OrLaterModel(opts.preferenceModel)) return "gpt-6-astra"
+  if (isGpt6AstraModel(opts.preferenceModel)) return "gpt-6-astra"
   const family = classifyModelFamily({
     providerID: "",
     modelID: opts.preferenceModel,
@@ -148,9 +146,9 @@ export function isGpt56Model(modelID: string): boolean {
   return version !== null && version[0] === 5 && version[1] === 6
 }
 
-/** GPT-6-and-later family (gpt-6-astra and successors). */
+/** Exact GPT-6 Astra family, including provider-prefixed and suffixed aliases. */
 export function isGpt6Model(modelID: string): boolean {
-  return isGpt6OrLaterModel(modelID)
+  return isGpt6AstraModel(modelID)
 }
 
 export function getDeepworkPrompt(variant: DeepworkVariant): string {
@@ -163,9 +161,13 @@ export function getCategoryPrompt(name: string): string {
   return categoryPrompts.get(name) ?? ""
 }
 
-/** GPT-6-Astra category addendum (category-astra/<name>.md), or "" when absent. */
-export function getCategoryAstraAddendum(name: string): string {
-  return categoryAstraAddendums.get(name) ?? ""
+export function getCategoryModelCalibration(
+  name: string,
+  modelID: string,
+  carryAhead = false,
+): string {
+  const calibration = categoryModelCalibrations.get(name)?.get("gpt-6-astra") ?? ""
+  return carryAhead || isGpt6AstraModel(modelID) ? calibration : ""
 }
 
 export function getShellSafetyPrompt(): string {
@@ -174,4 +176,16 @@ export function getShellSafetyPrompt(): string {
 
 export const _internals = { classifyModelFamily } as {
   classifyModelFamily: (o: { providerID?: string; modelID: string }) => ModelFamily
+}
+
+function splitCategoryPrompt(text: string): { base: string; calibrations: Map<string, string> } {
+  const calibrations = new Map<string, string>()
+  const base = text.replace(
+    /\r?\n?<model-calibration model="([^"]+)">\r?\n([\s\S]*?)\r?\n<\/model-calibration>\r?\n?/g,
+    (_block, model: string, calibration: string) => {
+      calibrations.set(model, calibration.trim())
+      return "\n"
+    },
+  ).trimEnd()
+  return { base, calibrations }
 }

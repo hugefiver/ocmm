@@ -9,7 +9,7 @@ import {
   getDeepworkPrompt,
   getAgentPrompt,
   getCategoryPrompt,
-  getCategoryAstraAddendum,
+  getCategoryModelCalibration,
   getShellSafetyPrompt,
   pickDeepworkVariantForAgent,
   isGpt56Model,
@@ -524,7 +524,7 @@ test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () 
   )
 })
 
-test("pickDeepworkVariantForAgent picks the Astra variant for GPT-6 models", () => {
+test("pickDeepworkVariantForAgent reserves the Astra variant for GPT-6 Astra", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-6-astra" }),
     "gpt-6-astra",
@@ -535,10 +535,13 @@ test("pickDeepworkVariantForAgent picks the Astra variant for GPT-6 models", () 
   )
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/openai.gpt-7-preview" }),
-    "gpt-6-astra",
+    "gpt",
   )
   assert.equal(isGpt56Model("gpt-6-astra"), false)
   assert.equal(isGpt6Model("gpt-6-astra"), true)
+  assert.equal(isGpt6Model("openai/gpt-6-astra-fast"), true)
+  assert.equal(isGpt6Model("gpt-6-preview"), false)
+  assert.equal(isGpt6Model("gpt-7-preview"), false)
   assert.equal(isGpt6Model("gpt-5.6-sol"), false)
 })
 
@@ -1218,17 +1221,25 @@ test("GPT-6 Astra specializations are compact additive calibrations synchronized
   )
 })
 
-test("Astra category addendums exist for exactly the three specialized categories across workflows", () => {
+test("category files expose exact GPT-6 Astra calibrations for only three categories", () => {
   const root = join(process.cwd(), "prompts")
   const expected = ["hard-reasoning", "deep", "cross-cutting"]
   for (const workflow of GPT56_WORKFLOWS) {
     loadAllPrompts(root, workflow)
     for (const name of expected) {
-      const addendum = getCategoryAstraAddendum(name)
-      assert.ok(addendum.length > 200, `${workflow}/category-astra/${name}.md addendum too short`)
+      const category = getCategoryPrompt(name)
+      const calibration = getCategoryModelCalibration(name, "gpt-6-astra")
+      assert.doesNotMatch(category, /<model-calibration/, `${workflow}/category/${name}.md base leaked marker`)
+      assert.ok(calibration.length > 200, `${workflow}/category/${name}.md Astra calibration too short`)
+      assert.match(calibration, /selected runtime model is GPT-6 Astra/i)
+      assert.equal(getCategoryModelCalibration(name, "openai/gpt-6-astra-fast"), calibration)
+      assert.equal(getCategoryModelCalibration(name, "gpt-6-preview"), "")
+      assert.equal(getCategoryModelCalibration(name, "gpt-7-preview"), "")
+      assert.equal(getCategoryModelCalibration(name, "gpt-5.6-sol"), "")
+      assert.equal(getCategoryModelCalibration(name, "gpt-5.6-sol", true), calibration)
     }
     for (const name of ["frontend", "creative", "research", "quick", "coding", "normal-task", "complex", "documenting"]) {
-      assert.equal(getCategoryAstraAddendum(name), "", `${workflow}/category-astra/${name}.md must not exist`)
+      assert.equal(getCategoryModelCalibration(name, "gpt-6-astra"), "", `${workflow}/category/${name}.md must have no Astra block`)
     }
   }
 })

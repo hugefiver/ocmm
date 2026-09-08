@@ -54,10 +54,9 @@ export function supportsNativeGptMaxReasoning(modelID: string): boolean {
   return (version[0] === 5 && version[1] >= 6) || version[0] >= 6
 }
 
-/** GPT-6 family (gpt-6-astra and successors), including gateway-prefixed aliases. */
-export function isGpt6OrLaterModel(modelID: string): boolean {
-  const version = parseGptVersion(modelID)
-  return version !== null && version[0] >= 6
+/** Exact GPT-6 Astra family, including provider prefixes and suffixed aliases such as -fast. */
+export function isGpt6AstraModel(modelID: string): boolean {
+  return /^gpt-6-astra(?:$|[-_.])/.test(extractModelName(modelID).toLowerCase())
 }
 
 export function isCodexModel(modelID: string, providerID?: string): boolean {

@@ -160,10 +160,7 @@ test("GPT-5.6 lane assignment, local aliases, and Oracle order remain static con
     const astraIndex = fallbackChain.findIndex((entry) => entry.model === "gpt-6-astra")
     if (astraIndex === -1) continue
     const successor = fallbackChain[astraIndex + 1]
-    assert.ok(
-      successor && (successor.model === "gpt-5.6-sol" || ASTRA_RECIPIENTS.includes(label)),
-      `${label} must place gpt-6-astra before its modern fallback`,
-    )
+    assert.equal(successor?.model, "gpt-5.6-sol", `${label} must place gpt-6-astra before its sol fallback`)
     const solEntry = fallbackChain.find((entry) => entry.model === "gpt-5.6-sol")
     if (solEntry) {
       assert.deepEqual(

@@ -186,6 +186,8 @@ test("successor matching materializes the GPT-6 no-lane flagship over any GPT ba
     model: "gpt-6-astra",
     variant: "high",
   })
+  assert.equal(matchRequirementSuccessor(requirement, "openai", "gpt-5.6"), null)
+  assert.equal(matchRequirementSuccessor(requirement, "openai", "gpt-5.7"), null)
 })
 
 test("catalog falls back to the newest no-lane GPT-6 flagship when no lane candidates exist", () => {

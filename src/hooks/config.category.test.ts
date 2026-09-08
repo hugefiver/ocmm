@@ -254,6 +254,28 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
   }
 })
 
+test("Codex carries the exact Astra category calibration behind its own runtime guard", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "codex")
+  try {
+    const config = {
+      ...defaultConfig(),
+      workflow: "codex" as const,
+      categories: { deep: { model: "openai/gpt-5.6-sol" } },
+    }
+    const target: { agent: Record<string, unknown> } = { agent: {} }
+    await createConfigHandler({ getConfig: () => config })(target, undefined)
+    const deep = target.agent.deep as Record<string, unknown>
+    const prompt = String(deep.prompt)
+
+    assert.equal(deep.model, "openai/gpt-5.6-sol")
+    assert.match(prompt, /Apply this section only when the selected runtime model is GPT-6 Astra/)
+    assert.match(prompt, /every other runtime model must ignore it/)
+    assert.doesNotMatch(getCategoryPrompt("deep"), /model-calibration|Astra/)
+  } finally {
+    loadAllPrompts(PROMPTS_ROOT, "omo")
+  }
+})
+
 test("category task permissions distinguish leaves, workflow roles, and local coordinators", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }

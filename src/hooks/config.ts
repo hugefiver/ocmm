@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryAstraAddendum, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type {
@@ -457,7 +457,7 @@ function promptForBuiltinCategory(
   const rolePrompt = getCategoryPrompt(categoryName).trim()
   const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel)
   const needsAstraCalibration = workflow === "codex" || isGpt6Model(selectedModel)
-  const astraAddendum = needsAstraCalibration ? getCategoryAstraAddendum(categoryName).trim() : ""
+  const astraAddendum = getCategoryModelCalibration(categoryName, selectedModel, workflow === "codex").trim()
   const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""
   const astraCalibration = needsAstraCalibration ? getDeepworkPrompt("gpt-6-astra").trim() : ""
   const calibration = [

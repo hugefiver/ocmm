@@ -253,7 +253,7 @@ export function matchRequirementSuccessorWithIndex(
   // exact entry; this branch materializes the successor for lane-first chains
   // whose catalog has moved to the next flagship.
   const gptVersion = parseGptVersion(modelID)
-  if (gptVersion && compareVersion(gptVersion, MIN_GPT_VERSION) >= 0 && parseGptLane(modelID) === null) {
+  if (gptVersion && gptVersion[0] >= 6 && parseGptLane(modelID) === null) {
     const gptBaseline = compatibleEntryWithIndex(requirement, providerID, (entry) => {
       const version = parseGptVersion(entry.model)
       return version !== null && compareVersion(gptVersion, version) >= 0
