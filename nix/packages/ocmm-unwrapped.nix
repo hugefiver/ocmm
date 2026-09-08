@@ -12,17 +12,18 @@
 let
   pnpm = pnpm_11.override { nodejs-slim = nodejs_24; };
   nativeLsp = lib.getExe ocmm-lsp;
+  packageJson = builtins.fromJSON (builtins.readFile "${src}/package.json");
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "ocmm-unwrapped";
-  version = "0.6.5";
+  version = packageJson.version;
   inherit src;
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
     inherit pnpm;
     fetcherVersion = 4;
-    hash = "sha256-EEPPTS0a9bQ5iVCdNu2MBSnVrEDZ1f9pcl7FF9zAaqI=";
+    hash = lib.fakeHash;
   };
 
   nativeBuildInputs = [
