@@ -177,6 +177,32 @@ export function selectCatalogModel(
     if (best) return `${best.provider}/${best.model}`
   }
 
+  // No lane candidates (or no lane): fall back to the newest no-lane GPT-6+
+  // flagship in the catalog (e.g. gpt-6-astra) before GLM successors. Only
+  // chains that already carry a no-lane GPT-6+ entry opt into this fallback:
+  // those chains upgrade when the catalog moves to the next flagship, while
+  // chains without one keep their own heads (quick stays on its cheap tier;
+  // coding/research keep their higher-priority chain heads).
+  const gpt6Baseline = compatibleEntry(requirement, undefined, (entry) => {
+    const version = parseGptVersion(entry.model)
+    return version !== null && version[0] >= 6 && parseGptLane(entry.model) === null
+  })
+  if (gpt6Baseline) {
+    const candidates: CatalogCandidate[] = []
+    for (const [providerIndex, provider] of gpt6Baseline.providers.entries()) {
+      const rawProvider = providers[provider]
+      if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
+      for (const model of Object.keys(rawProvider.models)) {
+        const version = parseGptVersion(model)
+        if (!version || version[0] < 6 || parseGptLane(model) !== null) continue
+        candidates.push({ provider, model, version, providerIndex })
+      }
+    }
+    candidates.sort(compareCatalogCandidates)
+    const best = candidates[0]
+    if (best) return `${best.provider}/${best.model}`
+  }
+
   const glmBaseline = compatibleEntry(
     requirement,
     undefined,
@@ -218,6 +244,24 @@ export function matchRequirementSuccessorWithIndex(
       return {
         entry: synthesizeSuccessor(baseline.entry, providerID, modelID),
         baselineIndex: baseline.baselineIndex,
+      }
+    }
+  }
+
+  // GPT-6+ flagship (no lane suffix, e.g. gpt-6-astra) upgrades any GPT
+  // baseline at or above the lane floor. Astra-first chains already carry an
+  // exact entry; this branch materializes the successor for lane-first chains
+  // whose catalog has moved to the next flagship.
+  const gptVersion = parseGptVersion(modelID)
+  if (gptVersion && compareVersion(gptVersion, MIN_GPT_VERSION) >= 0 && parseGptLane(modelID) === null) {
+    const gptBaseline = compatibleEntryWithIndex(requirement, providerID, (entry) => {
+      const version = parseGptVersion(entry.model)
+      return version !== null && compareVersion(gptVersion, version) >= 0
+    })
+    if (gptBaseline) {
+      return {
+        entry: synthesizeSuccessor(gptBaseline.entry, providerID, modelID),
+        baselineIndex: gptBaseline.baselineIndex,
       }
     }
   }

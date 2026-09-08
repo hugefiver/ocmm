@@ -160,6 +160,7 @@ const AGENT_NAMES = [
   "complex",
   "deep",
   "documenting",
+  "cross-cutting",
 ] as const
 
 const AgentNameSchema = z.enum(AGENT_NAMES)

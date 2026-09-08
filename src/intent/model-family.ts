@@ -50,7 +50,14 @@ export function parseGptVersion(modelID: string): [number, number, number] | nul
 
 export function supportsNativeGptMaxReasoning(modelID: string): boolean {
   const version = parseGptVersion(modelID)
-  return version !== null && version[0] === 5 && version[1] === 6
+  if (version === null) return false
+  return (version[0] === 5 && version[1] >= 6) || version[0] >= 6
+}
+
+/** GPT-6 family (gpt-6-astra and successors), including gateway-prefixed aliases. */
+export function isGpt6OrLaterModel(modelID: string): boolean {
+  const version = parseGptVersion(modelID)
+  return version !== null && version[0] >= 6
 }
 
 export function isCodexModel(modelID: string, providerID?: string): boolean {

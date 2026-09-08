@@ -9,13 +9,16 @@ import {
   getDeepworkPrompt,
   getAgentPrompt,
   getCategoryPrompt,
+  getCategoryAstraAddendum,
   getShellSafetyPrompt,
   pickDeepworkVariantForAgent,
   isGpt56Model,
+  isGpt6Model,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "claude-opus-5", "gemini", "glm", "codex", "planner"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner"] as const
 const CLAUDE_OPUS5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
+const GPT6_ASTRA_MARKER = "# GPT-6 ASTRA EXECUTION CALIBRATION"
 
 function makeTempRoot(workflow: "omo" | "v1"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -61,6 +64,10 @@ const REMOVED_GPT56_SECTION_HEADINGS = [
 
 function effectiveGpt56Prompt(base: "gpt" | "planner"): string {
   return `${getDeepworkPrompt(base)}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
+}
+
+function effectiveGpt6AstraPrompt(base: "gpt" | "planner"): string {
+  return `${getDeepworkPrompt(base)}\n\n---\n\n${getDeepworkPrompt("gpt-6-astra")}`
 }
 
 function effectiveClaudeOpus5Prompt(): string {
@@ -241,9 +248,11 @@ test("real workflows include shell adaptation in every effective prompt path", (
     for (const variant of DEEPWORK_VARIANTS) {
       const prompt = variant === "gpt-5.6"
         ? effectiveGpt56Prompt("gpt")
-        : variant === "claude-opus-5"
-          ? effectiveClaudeOpus5Prompt()
-        : getDeepworkPrompt(variant)
+        : variant === "gpt-6-astra"
+          ? effectiveGpt6AstraPrompt("gpt")
+          : variant === "claude-opus-5"
+            ? effectiveClaudeOpus5Prompt()
+          : getDeepworkPrompt(variant)
       assert.match(prompt, /## Shell Adaptation/, `${workflow}/${variant} missing effective shell adaptation`)
     }
     for (const category of [
@@ -257,6 +266,7 @@ test("real workflows include shell adaptation in every effective prompt path", (
       "complex",
       "deep",
       "documenting",
+      "cross-cutting",
     ]) {
       assert.match(getCategoryPrompt(category), /## Shell Adaptation/, `${workflow}/${category} missing shell adaptation`)
     }
@@ -514,6 +524,24 @@ test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () 
   )
 })
 
+test("pickDeepworkVariantForAgent picks the Astra variant for GPT-6 models", () => {
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-6-astra" }),
+    "gpt-6-astra",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "openai/gpt-6-astra-fast" }),
+    "gpt-6-astra",
+  )
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/openai.gpt-7-preview" }),
+    "gpt-6-astra",
+  )
+  assert.equal(isGpt56Model("gpt-6-astra"), false)
+  assert.equal(isGpt6Model("gpt-6-astra"), true)
+  assert.equal(isGpt6Model("gpt-5.6-sol"), false)
+})
+
 test("pickDeepworkVariantForAgent reserves the Opus 5 calibration for orchestrator", () => {
   for (const modelID of [
     "claude-opus-5",
@@ -575,14 +603,18 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
     for (const variant of DEEPWORK_VARIANTS) {
       const specialization = variant === "gpt-5.6"
         ? getDeepworkPrompt("gpt-5.6")
-        : variant === "claude-opus-5"
-          ? getDeepworkPrompt("claude-opus-5")
-          : ""
+        : variant === "gpt-6-astra"
+          ? getDeepworkPrompt("gpt-6-astra")
+          : variant === "claude-opus-5"
+            ? getDeepworkPrompt("claude-opus-5")
+            : ""
       const prompt = variant === "gpt-5.6"
         ? effectiveGpt56Prompt("gpt")
-        : variant === "claude-opus-5"
-          ? effectiveClaudeOpus5Prompt()
-        : getDeepworkPrompt(variant)
+        : variant === "gpt-6-astra"
+          ? effectiveGpt6AstraPrompt("gpt")
+          : variant === "claude-opus-5"
+            ? effectiveClaudeOpus5Prompt()
+          : getDeepworkPrompt(variant)
       const label = `${workflow}/${variant}`
 
       assert.match(
@@ -622,6 +654,12 @@ test("real effective deepwork prompts retain ocmm-native workflow semantics per 
         assert.equal(countOccurrences(prompt, "## Discovery Before Planning"), 1, `${label} duplicates discovery doctrine`)
         assert.equal(countOccurrences(prompt, "## Planner Trigger"), 1, `${label} duplicates planner doctrine`)
         assert.equal(countOccurrences(prompt, "## Answer-When-Answerable"), 1, `${label} duplicates answer doctrine`)
+        assert.equal(countOccurrences(prompt, "## Shell Adaptation"), 1, `${label} duplicates shell doctrine`)
+      } else if (variant === "gpt-6-astra") {
+        assert.match(specialization, /GPT-6 ASTRA EXECUTION CALIBRATION/)
+        assert.match(specialization, /subagents only when.*materially improve completion/is)
+        assert.equal(countOccurrences(prompt, "## Discovery Before Planning"), 1, `${label} duplicates discovery doctrine`)
+        assert.equal(countOccurrences(prompt, "## Planner Trigger"), 1, `${label} duplicates planner doctrine`)
         assert.equal(countOccurrences(prompt, "## Shell Adaptation"), 1, `${label} duplicates shell doctrine`)
       } else if (variant === "claude-opus-5") {
         assert.match(specialization, /CLAUDE OPUS 5 EXECUTION CALIBRATION/)
@@ -1123,5 +1161,74 @@ test("orchestrators select planning logical tiers only from current availability
     assert.match(text, /low.*only.*explicit.*cost.*latency/is, workflow)
     assert.match(text, /never.*(?:invent|synthesize|fabricate).*profile/is, workflow)
     assert.match(text, /plan-critic-low.*model.*(?:cost|latency).*not.*effort.*xhigh/is, workflow)
+  }
+})
+
+function sharedGpt6AstraDoctrine(text: string): string {
+  const start = text.indexOf("## Outcome-first execution")
+  assert.notEqual(start, -1, "missing shared GPT-6 Astra doctrine start")
+  const closingTag = text.indexOf("</deepwork-mode>", start)
+  return text.slice(start, closingTag === -1 ? undefined : closingTag).trim()
+}
+
+test("GPT-6 Astra specializations are compact additive calibrations synchronized across workflows", () => {
+  const shared = new Map<Gpt56Workflow, string>()
+
+  for (const workflow of GPT56_WORKFLOWS) {
+    const text = readFileSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-6-astra.md"), "utf8")
+    const label = `${workflow}/gpt-6-astra`
+    assert.ok(text.length <= 4200, `${label} is ${text.length} characters; expected <= 4200`)
+    assert.equal(countOccurrences(text, GPT6_ASTRA_MARKER), 1, `${label} marker count`)
+
+    assert.match(text, /GPT-6 Astra supports native `max`/i, `${label} native max`)
+    assert.match(text, /explicit user configuration.*authoritative/is, `${label} authority`)
+    assert.match(text, /concrete requested outcome.*observable completion condition/is, `${label} outcome`)
+    assert.match(text, /success criterion.*not effort spent.*decide when the work is done/is, `${label} outcome-first success criterion`)
+    assert.match(text, /Astra over-verifies small changes/is, `${label} over-verification counter`)
+    assert.match(text, /do not re-derive facts already proven by tool results/is, `${label} no re-derivation`)
+    assert.match(text, /record the assumption in the final message.*continue/is, `${label} recorded-assumption counter`)
+    assert.match(text, /A question ends your turn and returns the task unfinished/is, `${label} question-ends-turn`)
+    assert.match(text, /Delegate the moment a bounded child deliverable would materially improve completion/is, `${label} delegation counter`)
+    assert.match(text, /wanting to do everything yourself is also not a reason/is, `${label} delegates-less counter`)
+
+    for (const heading of REMOVED_GPT56_SECTION_HEADINGS) {
+      assert.equal(text.includes(heading), false, `${label} duplicates ${heading}`)
+    }
+
+    if (workflow === "omo") {
+      assert.doesNotMatch(text, /^<deepwork-mode>/, `${label} must remain unwrapped`)
+    } else {
+      assert.match(text, /^<deepwork-mode>\s*/, `${label} opening wrapper`)
+      assert.match(text, /<\/deepwork-mode>\s*$/, `${label} closing wrapper`)
+    }
+    if (workflow === "codex") {
+      assert.match(text, /Codex profiles may carry this layer ahead of runtime model selection/i)
+    }
+
+    shared.set(workflow, sharedGpt6AstraDoctrine(text))
+  }
+
+  assert.equal(shared.get("v1"), shared.get("omo"), "v1 shared Astra doctrine drifted from omo")
+  const codexShared = shared.get("codex") ?? ""
+  const omoShared = shared.get("omo") ?? ""
+  assert.equal(
+    withoutGpt56CachePolicy(codexShared),
+    withoutGpt56CachePolicy(omoShared),
+    "Codex shared Astra doctrine drifted outside the environment-specific cache policy",
+  )
+})
+
+test("Astra category addendums exist for exactly the three specialized categories across workflows", () => {
+  const root = join(process.cwd(), "prompts")
+  const expected = ["hard-reasoning", "deep", "cross-cutting"]
+  for (const workflow of GPT56_WORKFLOWS) {
+    loadAllPrompts(root, workflow)
+    for (const name of expected) {
+      const addendum = getCategoryAstraAddendum(name)
+      assert.ok(addendum.length > 200, `${workflow}/category-astra/${name}.md addendum too short`)
+    }
+    for (const name of ["frontend", "creative", "research", "quick", "coding", "normal-task", "complex", "documenting"]) {
+      assert.equal(getCategoryAstraAddendum(name), "", `${workflow}/category-astra/${name}.md must not exist`)
+    }
   }
 })

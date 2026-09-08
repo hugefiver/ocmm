@@ -103,6 +103,12 @@ export type Category = {
   name: string
   description: string
   requirement: ModelRequirement
+  /**
+   * Opt-in category: exists in the catalog but is never registered, routed, or
+   * resolvable by default. It activates only when the user explicitly names it
+   * in `categories` or `agents` config.
+   */
+  optIn?: boolean
 }
 
 export type Agent = {

@@ -63,6 +63,7 @@ const MAX_REASONING_CATEGORIES = new Set([
   "complex",
   "deep",
   "documenting",
+  "cross-cutting",
 ])
 
 function canonicalAgentName(name: string): string {
@@ -246,8 +247,17 @@ export function resolveEffectiveRequirement(opts: {
   const userCat = userCategoryRequirement(categoriesConfig?.[agentName])
   if (userCat) return { requirement: userCat, source: "user-config" }
 
+  // Opt-in categories activate when the user explicitly names them in
+  // `categories` or `agents` config; without a user model the builtin default
+  // chain applies. They never resolve implicitly.
   const builtinCat = BUILTIN_CATEGORY_INDEX.get(agentName)
-  if (builtinCat) return { requirement: builtinCat.requirement, source: "category-default" }
+  if (builtinCat) {
+    if (!builtinCat.optIn) return { requirement: builtinCat.requirement, source: "category-default" }
+    if (categoriesConfig?.[agentName] !== undefined || agentsConfig?.[agentName] !== undefined) {
+      return { requirement: builtinCat.requirement, source: "category-default" }
+    }
+    return null
+  }
 
   return null
 }

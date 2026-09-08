@@ -1129,7 +1129,7 @@ test("every workflow composes shell safety once into every builtin agent and cat
 
       for (const name of [
         ...BUILTIN_AGENTS.map((agent) => agent.name),
-        ...BUILTIN_CATEGORIES.map((category) => category.name),
+        ...BUILTIN_CATEGORIES.filter((category) => !category.optIn).map((category) => category.name),
       ]) {
         const prompt = String((target.agent[name] as Record<string, unknown>).prompt ?? "")
         assert.equal(countText(prompt, SHELL_SAFETY_MARKER), 1, `${workflow}/${name}`)
@@ -1147,7 +1147,7 @@ test("shell safety preserves existing prompts and remains idempotent across conf
   const promptsRoot = join(process.cwd(), "prompts")
   const names = [
     ...BUILTIN_AGENTS.map((agent) => agent.name),
-    ...BUILTIN_CATEGORIES.map((category) => category.name),
+    ...BUILTIN_CATEGORIES.filter((category) => !category.optIn).map((category) => category.name),
   ]
 
   try {
@@ -1350,7 +1350,7 @@ test("config keeps existing defaults without a matching GPT-5.6 catalog entry", 
   await handler(cfg, undefined)
 
   assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6-astra")
   assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.6-terra")
 })
 
@@ -1377,7 +1377,7 @@ test("config keeps GLM 5.1 baseline without a newer GLM catalog entry", async ()
   await handler(cfg, undefined)
 
   assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6-astra")
 })
 
 test("explicit and existing agent models suppress GLM catalog replacement and prompt specialization", async () => {
@@ -2092,7 +2092,7 @@ test("compatibility mode suppresses category catalog upgrades for unresolved qua
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 
-  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-6-astra")
 })
 
 test("a malformed registry-managed invocation invalidates an older in-progress generation", async () => {

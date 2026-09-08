@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryAstraAddendum, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type {
@@ -67,7 +67,7 @@ const STANDARD_WORKFLOW_SUBAGENTS = [
 const READ_ONLY_WORKFLOW_AGENTS = [
   "clarifier",
 ] as const
-const LOCAL_COORDINATORS = ["deep", "complex"] as const
+const LOCAL_COORDINATORS = ["deep", "complex", "cross-cutting"] as const
 const SPECIALIST_EXECUTION_AGENTS = [
   "coding",
   "frontend",
@@ -75,7 +75,7 @@ const SPECIALIST_EXECUTION_AGENTS = [
   "creative",
   "documenting",
 ] as const
-const QUESTION_ENABLED_WORKFLOW_AGENTS = ["deep", "complex", "coding", "normal-task"] as const
+const QUESTION_ENABLED_WORKFLOW_AGENTS = ["deep", "complex", "cross-cutting", "coding", "normal-task"] as const
 
 function taskAllowlist(allowed: readonly string[]): GranularPermission {
   const rules: GranularPermission = { "*": "deny" }
@@ -371,7 +371,7 @@ function delegationContractFor(name: string): string {
       "Multiple steps, routine confirmation, or wanting another opinion are not sufficient.",
       `Allowed utility targets: ${formatTargets(UTILITY_LEAF_AGENTS)}.`,
       `Allowed specialist targets: ${formatTargets(SPECIALIST_EXECUTION_AGENTS)}.`,
-      "Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants), `normal-task`, `deep`, or `complex`.",
+      "Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile (`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`), any Oracle profile (`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`/`high`/`max` tier variants), `normal-task`, `deep`, `complex`, or `cross-cutting`.",
       "Integrate and verify child results, then return to the parent. Formal planner dispatch, the `plan-critic` loop, review dispatch, and final acceptance review are orchestrator-owned.",
     ])
   }
@@ -401,13 +401,16 @@ function deepworkPromptForAgent(
       : agent.requirement.fallbackChain
   const prefModel = selectedModel ?? chain[0]?.model ?? ""
   const gpt56Specialization = isGpt56Model(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
+  const astraSpecialization = isGpt6Model(prefModel) ? getDeepworkPrompt("gpt-6-astra") : ""
   // Codex profiles are generated ahead of runtime model overrides. Carry the
-  // separately guarded GPT-5.6 layer in every Codex profile, and carry the
-  // separately guarded Opus 5 layer only for the orchestrator prompt identity.
+  // separately guarded GPT-5.6 and GPT-6 Astra layers in every Codex profile,
+  // and carry the separately guarded Opus 5 layer only for the orchestrator
+  // prompt identity.
   if (workflow === "codex") {
     return [
       getDeepworkPrompt("gpt"),
       getDeepworkPrompt("gpt-5.6"),
+      getDeepworkPrompt("gpt-6-astra"),
       promptName === "orchestrator" ? getDeepworkPrompt("claude-opus-5") : "",
     ].filter(Boolean).join("\n\n---\n\n")
   }
@@ -418,11 +421,15 @@ function deepworkPromptForAgent(
   if (variant === "gpt-5.6") {
     return `${getDeepworkPrompt("gpt")}\n\n---\n\n${getDeepworkPrompt("gpt-5.6")}`
   }
+  if (variant === "gpt-6-astra") {
+    return `${getDeepworkPrompt("gpt")}\n\n---\n\n${getDeepworkPrompt("gpt-6-astra")}`
+  }
   if (variant === "claude-opus-5") {
     return `${getDeepworkPrompt("default")}\n\n---\n\n${getDeepworkPrompt("claude-opus-5")}`
   }
   const base = getDeepworkPrompt(variant)
-  return gpt56Specialization ? `${base}\n\n---\n\n${gpt56Specialization}` : base
+  const specialization = gpt56Specialization || astraSpecialization
+  return specialization ? `${base}\n\n---\n\n${specialization}` : base
 }
 
 function promptForBuiltinAgent(
@@ -449,12 +456,23 @@ function promptForBuiltinCategory(
 ): string {
   const rolePrompt = getCategoryPrompt(categoryName).trim()
   const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel)
+  const needsAstraCalibration = workflow === "codex" || isGpt6Model(selectedModel)
+  const astraAddendum = needsAstraCalibration ? getCategoryAstraAddendum(categoryName).trim() : ""
   const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""
+  const astraCalibration = needsAstraCalibration ? getDeepworkPrompt("gpt-6-astra").trim() : ""
+  const calibration = [
+    modelPrompt,
+    astraCalibration,
+    astraAddendum,
+  ].filter(Boolean).join("\n\n---\n\n")
+  const calibrationIntro = calibration
+    ? "The category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for model calibration when it does not conflict with the category role prompt."
+    : ""
   const prompt = !rolePrompt
-    ? modelPrompt
-    : !modelPrompt
+    ? calibration
+    : !calibration
       ? rolePrompt
-      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for GPT-5.6 calibration when it does not conflict with the category role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\n${calibrationIntro}\n\n${calibration}\n</workflow-model-calibration>`
   return prompt
 }
 
@@ -842,7 +860,11 @@ export function createConfigHandler(
     for (const c of BUILTIN_CATEGORIES) {
       if (disabled.has(c.name)) continue
       const agentOverride = normalizeAgentShorthand(c.name, cfg.agents)
-      if (registryManaged && hasOwnAgentEntry(cfg, c.name) && !agentOverride?.requirement?.fallbackChain?.length) {
+      if (c.optIn) {
+        // Opt-in category: register only when the user explicitly names it in
+        // `categories` or `agents` config.
+        if (!hasOwnAgentEntry(cfg, c.name) && cfg.categories?.[c.name] === undefined) continue
+      } else if (registryManaged && hasOwnAgentEntry(cfg, c.name) && !agentOverride?.requirement?.fallbackChain?.length) {
         continue
       }
       const categoryOverride = normalizeShorthand(cfg.categories?.[c.name])

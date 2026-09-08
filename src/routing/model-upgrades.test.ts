@@ -3,6 +3,7 @@ import { test } from "node:test"
 
 import type { ModelRequirement } from "../shared/types.ts"
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
+import { BUILTIN_CATEGORY_INDEX } from "../data/categories.ts"
 import {
   matchRequirementSuccessor,
   matchRequirementSuccessorWithIndex,
@@ -160,4 +161,96 @@ test("successor matching exposes the chosen baseline index while preserving the 
     entry: { providers: ["openai"], model: "gpt-5.7-terra", temperature: 0.3 },
   })
   assert.deepEqual(matchRequirementSuccessor(requirement, "openai", "gpt-5.7-terra"), match?.entry)
+})
+
+test("successor matching materializes the GPT-6 no-lane flagship over any GPT baseline", () => {
+  const requirement: ModelRequirement = {
+    fallbackChain: [
+      { providers: ["openai"], model: "gpt-5.6-sol", variant: "xhigh", temperature: 0.3 },
+      { providers: ["openai"], model: "gpt-5.5", variant: "xhigh", temperature: 0.2 },
+    ],
+  }
+
+  assert.deepEqual(matchRequirementSuccessor(requirement, "openai", "gpt-6-astra"), {
+    providers: ["openai"],
+    model: "gpt-6-astra",
+    variant: "xhigh",
+    temperature: 0.3,
+  })
+
+  const laneOnly: ModelRequirement = {
+    fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra", variant: "high" }],
+  }
+  assert.deepEqual(matchRequirementSuccessor(laneOnly, "openai", "gpt-6-astra"), {
+    providers: ["openai"],
+    model: "gpt-6-astra",
+    variant: "high",
+  })
+})
+
+test("catalog falls back to the newest no-lane GPT-6 flagship when no lane candidates exist", () => {
+  const target = { provider: { openai: { models: { "gpt-6-astra": {} } } } }
+
+  // Chains that declare a GPT-6+ no-lane entry upgrade to the catalog flagship.
+  assert.equal(
+    selectCatalogModel(target, "deep", BUILTIN_CATEGORY_INDEX.get("deep")!.requirement),
+    "openai/gpt-6-astra",
+  )
+  assert.equal(
+    selectCatalogModel(target, "frontend", BUILTIN_CATEGORY_INDEX.get("frontend")!.requirement),
+    "openai/gpt-6-astra",
+  )
+})
+
+test("catalog no-lane GPT-6 fallback does not upgrade chains without a GPT-6 entry", () => {
+  const target = {
+    provider: {
+      openai: { models: { "gpt-6-astra": {}, "gpt-5.6-sol": {}, "gpt-5.5": {}, "gpt-5.4-mini": {} } },
+      anthropic: { models: { "claude-sonnet-4-6": {}, "claude-haiku-4-5": {} } },
+    },
+  }
+
+  // Chains without a no-lane GPT-6+ entry never receive the flagship from
+  // the catalog fallback: quick keeps its cheap tier, coding/research keep
+  // their chain heads via the requirement (selectCatalogModel returns
+  // undefined so the head-selection path applies), and lane-first synthetic
+  // chains and the reviewer chain do not opt in either.
+  assert.equal(
+    selectCatalogModel(target, "quick", BUILTIN_CATEGORY_INDEX.get("quick")!.requirement),
+    undefined,
+  )
+  assert.equal(
+    selectCatalogModel(target, "coding", BUILTIN_CATEGORY_INDEX.get("coding")!.requirement),
+    undefined,
+  )
+  // research's chain has no lane and no GPT-6 entry, so no catalog upgrade
+  // applies — the head-selection path keeps its gpt-5.6-sol chain head.
+  assert.equal(
+    selectCatalogModel(target, "research", BUILTIN_CATEGORY_INDEX.get("research")!.requirement),
+    undefined,
+  )
+  // reviewer (sol lane) and a lane-first synthetic deep chain still resolve
+  // through the existing lane-candidate scan — the flagship never replaces
+  // an available lane model.
+  assert.equal(
+    selectCatalogModel(target, "reviewer", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement),
+    "openai/gpt-5.6-sol",
+  )
+  assert.equal(
+    selectCatalogModel(target, "deep", { fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra" }] }),
+    "openai/gpt-5.6-sol",
+  )
+})
+
+test("catalog prefers lane candidates over the no-lane GPT-6 flagship fallback", () => {
+  const target = { provider: { openai: { models: { "gpt-6-astra": {}, "gpt-5.6-sol": {} } } } }
+
+  assert.equal(
+    selectCatalogModel(target, "reviewer", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement),
+    "openai/gpt-5.6-sol",
+  )
+  assert.equal(
+    selectCatalogModel(target, "deep", BUILTIN_CATEGORY_INDEX.get("deep")!.requirement),
+    "openai/gpt-5.6-sol",
+  )
 })

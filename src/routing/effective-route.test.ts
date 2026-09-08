@@ -216,11 +216,22 @@ test("materializing a boundary-prefix primary retains its controls and removes o
 
 test("materializing an unmatched primary synthesizes it with native requirement reasoning and variant and keeps every baseline", () => {
   const requirement = metadataRequirement()
-  const materialized = materializeSelectedPrimary(requirement, "openai/gpt-6")
+  const materialized = materializeSelectedPrimary(requirement, "openai/zzz-unmatched-model")
 
   assert.deepEqual(materialized.fallbackChain, [
-    { providers: ["openai"], model: "gpt-6", reasoning: "high", variant: "max" },
+    { providers: ["openai"], model: "zzz-unmatched-model", reasoning: "high", variant: "max" },
     { ...requirement.fallbackChain[0]!, providers: ["openai", "github-copilot"] },
+    { ...requirement.fallbackChain[1]!, providers: ["anthropic"] },
+  ])
+  assert.deepEqual(materialized.requiresProvider, ["openai", "github-copilot"])
+})
+
+test("materializing the GPT-6 no-lane flagship retains its matched baseline controls and removes that index only", () => {
+  const requirement = metadataRequirement()
+  const materialized = materializeSelectedPrimary(requirement, "openai/gpt-6-astra")
+
+  assert.deepEqual(materialized.fallbackChain, [
+    { ...requirement.fallbackChain[0]!, providers: ["openai"], model: "gpt-6-astra" },
     { ...requirement.fallbackChain[1]!, providers: ["anthropic"] },
   ])
   assert.deepEqual(materialized.requiresProvider, ["openai", "github-copilot"])

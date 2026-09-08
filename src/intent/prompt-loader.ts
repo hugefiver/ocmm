@@ -2,20 +2,23 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gpt-5.6,claude-opus-5,gemini,glm,codex,planner}.md
+ *     deepwork/{default,gpt,gpt-5.6,gpt-6-astra,claude-opus-5,gemini,glm,codex,planner}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
- *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting}.md
+ *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
  * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
  * Synchronous, runs once at plugin init, caches in memory. Missing files are
  * tolerated (skipped with a debug log).
+ *
+ * `cross-cutting` is an opt-in category: its prompt is loaded but the category
+ * is only registered when the user explicitly names it in config.
  */
 
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGpt6OrLaterModel, parseGptVersion, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -23,7 +26,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "omo" | "v1" | "codex"
 
-type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner"
+type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gpt-6-astra" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -36,8 +39,9 @@ type CategoryName =
   | "complex"
   | "deep"
   | "documenting"
+  | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "claude-opus-5", "gemini", "glm", "codex", "planner"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -50,11 +54,13 @@ const CATEGORY_NAMES: CategoryName[] = [
   "complex",
   "deep",
   "documenting",
+  "cross-cutting",
 ]
 
 const deepworkPrompts = new Map<DeepworkVariant, string>()
 const agentPrompts = new Map<string, string>()
 const categoryPrompts = new Map<string, string>()
+const categoryAstraAddendums = new Map<string, string>()
 let shellSafetyPrompt = ""
 
 function loadFile(absPath: string): string | null {
@@ -72,6 +78,7 @@ export function loadAllPrompts(
   deepworkPrompts.clear()
   agentPrompts.clear()
   categoryPrompts.clear()
+  categoryAstraAddendums.clear()
   shellSafetyPrompt = loadFile(join(rootDir, "shared", "shell-safety.md")) ?? ""
   const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
@@ -88,6 +95,10 @@ export function loadAllPrompts(
       log.debug(`prompt missing: ${workflow}/category/${name}.md (root=${rootDir})`)
     } else {
       categoryPrompts.set(name, text)
+    }
+    const addendum = loadFile(join(base, "category-astra", `${name}.md`))
+    if (addendum != null) {
+      categoryAstraAddendums.set(name, addendum)
     }
   }
   for (const name of AGENT_PROMPT_NAMES) {
@@ -119,6 +130,7 @@ export function pickDeepworkVariantForAgent(opts: {
     return "claude-opus-5"
   }
   if (isGpt56Model(opts.preferenceModel)) return "gpt-5.6"
+  if (isGpt6OrLaterModel(opts.preferenceModel)) return "gpt-6-astra"
   const family = classifyModelFamily({
     providerID: "",
     modelID: opts.preferenceModel,
@@ -136,6 +148,11 @@ export function isGpt56Model(modelID: string): boolean {
   return version !== null && version[0] === 5 && version[1] === 6
 }
 
+/** GPT-6-and-later family (gpt-6-astra and successors). */
+export function isGpt6Model(modelID: string): boolean {
+  return isGpt6OrLaterModel(modelID)
+}
+
 export function getDeepworkPrompt(variant: DeepworkVariant): string {
   return deepworkPrompts.get(variant) ?? ""
 }
@@ -144,6 +161,11 @@ export function getAgentPrompt(name: string): string {
 }
 export function getCategoryPrompt(name: string): string {
   return categoryPrompts.get(name) ?? ""
+}
+
+/** GPT-6-Astra category addendum (category-astra/<name>.md), or "" when absent. */
+export function getCategoryAstraAddendum(name: string): string {
+  return categoryAstraAddendums.get(name) ?? ""
 }
 
 export function getShellSafetyPrompt(): string {

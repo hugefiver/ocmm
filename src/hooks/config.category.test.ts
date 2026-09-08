@@ -74,12 +74,16 @@ function categoryDiagnosticMessages(
   )
 }
 
-test("config registers all 10 categories as subagents", async () => {
+test("config registers all 10 always-on categories as subagents", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
   for (const c of BUILTIN_CATEGORIES) {
+    if (c.optIn) {
+      assert.equal(cfg.agent[c.name], undefined, `opt-in category ${c.name} must not register by default`)
+      continue
+    }
     const entry = cfg.agent[c.name] as Record<string, unknown> | undefined
     assert.ok(entry, `missing category-subagent ${c.name}`)
     assert.equal(typeof entry!.model, "string")
@@ -88,6 +92,38 @@ test("config registers all 10 categories as subagents", async () => {
     assert.ok((entry!.prompt as string).length > 100, `category ${c.name} prompt too short`)
     assert.doesNotMatch(entry!.prompt as string, /Agent Role:/)
   }
+})
+
+test("cross-cutting registers only when explicitly configured and resolves the builtin default chain", async () => {
+  const off = { agent: {} }
+  await createConfigHandler({ getConfig: () => defaultConfig() })(off, undefined)
+  assert.equal(off.agent["cross-cutting"], undefined, "unconfigured cross-cutting must not register")
+
+  const viaCategories = { agent: {} }
+  await createConfigHandler({
+    getConfig: () => ({ ...defaultConfig(), categories: { "cross-cutting": {} } }),
+  })(viaCategories, undefined)
+  const entry = viaCategories.agent["cross-cutting"] as Record<string, unknown>
+  assert.ok(entry, "categories-key cross-cutting must register")
+  assert.equal(entry.mode, "subagent")
+  assert.equal(entry.model, "openai/gpt-6-astra")
+  assert.match(String(entry.prompt), /# Category: cross-cutting/)
+
+  const viaAgents = { agent: {} }
+  await createConfigHandler({
+    getConfig: () => ({ ...defaultConfig(), agents: { "cross-cutting": {} } }),
+  })(viaAgents, undefined)
+  assert.ok(viaAgents.agent["cross-cutting"], "agents-key cross-cutting must register")
+
+  const withModel = { agent: {} }
+  await createConfigHandler({
+    getConfig: () => ({ ...defaultConfig(), categories: { "cross-cutting": { model: "anthropic/claude-sonnet-4-6" } } }),
+  })(withModel, undefined)
+  assert.equal(
+    (withModel.agent["cross-cutting"] as Record<string, unknown>).model,
+    "anthropic/claude-sonnet-4-6",
+    "user model must win for activated cross-cutting",
+  )
 })
 
 test("disabledAgents skips a category-subagent", async () => {
@@ -201,6 +237,10 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
     const opus5 = getDeepworkPrompt("claude-opus-5").trim()
 
     for (const category of BUILTIN_CATEGORIES) {
+      if (category.optIn) {
+        assert.equal(cfg.agent[category.name], undefined, `${category.name}: opt-in category must stay unregistered in Codex generation by default`)
+        continue
+      }
       const entry = cfg.agent[category.name] as Record<string, unknown>
       const prompt = entry.prompt as string
       assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
@@ -253,7 +293,7 @@ test("category prompts receive role-specific terminal delegation contracts", asy
   const deep = contractFor("deep")
   assert.match(deep, /Allowed specialist targets: `coding`, `frontend`, `hard-reasoning`, `creative`, `documenting`\./)
   assert.match(deep, /Multiple steps, routine confirmation, or wanting another opinion are not sufficient/)
-  assert.match(deep, /Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\), `normal-task`, `deep`, or `complex`/)
+  assert.match(deep, /Do not call `orchestrator`, `builder`, `planner`, `clarifier`, `plan-critic`, any Reviewer profile \(`reviewer`, `reviewer-low`, `reviewer-high`, `reviewer-max`\), any Oracle profile \(`oracle`, `oracle-2nd`, configured `oracle-3rd`…`oracle-9th`, and their `low`\/`high`\/`max` tier variants\), `normal-task`, `deep`, `complex`, or `cross-cutting`/)
 })
 
 test("every category receives only the common compression policy", async () => {
@@ -261,6 +301,10 @@ test("every category receives only the common compression policy", async () => {
   await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
 
   for (const category of BUILTIN_CATEGORIES) {
+    if (category.optIn) {
+      assert.equal(cfg.agent[category.name], undefined, `${category.name}: opt-in category must stay unregistered by default`)
+      continue
+    }
     const prompt = String((cfg.agent[category.name] as Record<string, unknown>).prompt)
     assert.equal(prompt.match(/<ocmm-subagent-compression-policy>/g)?.length, 1, category.name)
     assert.match(prompt, /only when the current execution is a subagent session/i, category.name)

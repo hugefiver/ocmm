@@ -33,9 +33,24 @@ const SOL_RECIPIENTS = [
   "category:research",
   "category:coding",
   "category:deep",
+  "category:cross-cutting",
 ]
 
 const TERRA_RECIPIENTS = ["agent:oracle", "category:normal-task", "category:complex"]
+
+const GPT55_RECIPIENTS = [
+  ...SOL_RECIPIENTS.filter((label) => label !== "category:cross-cutting"),
+  ...TERRA_RECIPIENTS,
+]
+
+const ASTRA_RECIPIENTS = [
+  "category:hard-reasoning",
+  "category:deep",
+  "category:cross-cutting",
+  "agent:plan-critic",
+  "category:frontend",
+  "category:creative",
+]
 
 const OPUS_RECIPIENTS = [
   "agent:orchestrator",
@@ -51,6 +66,7 @@ const OPUS_RECIPIENTS = [
   "category:research",
   "category:complex",
   "category:deep",
+  "category:cross-cutting",
 ]
 
 const LOCAL_PROVIDERS: Record<string, string[]> = {
@@ -101,7 +117,7 @@ test("built-in chains retain legacy fallbacks beside their current local replace
   const chains = builtinChains()
 
   assert.deepEqual(labelsWithModel(chains, "claude-opus-4-7"), [...OPUS_RECIPIENTS].sort())
-  assert.deepEqual(labelsWithModel(chains, "gpt-5.5"), [...SOL_RECIPIENTS, ...TERRA_RECIPIENTS].sort())
+  assert.deepEqual(labelsWithModel(chains, "gpt-5.5"), [...GPT55_RECIPIENTS].sort())
   assert.deepEqual(labelsWithModel(chains, "kimi-k3"), [...LEGACY_KIMI_MODELS.keys()].sort())
 
   assertAdjacentReplacement(chains, "claude-opus-4-7", "claude-opus-5")
@@ -139,9 +155,27 @@ test("GPT-5.6 lane assignment, local aliases, and Oracle order remain static con
 
   assert.deepEqual(labelsWithModel(chains, "gpt-5.6-sol"), [...SOL_RECIPIENTS].sort())
   assert.deepEqual(labelsWithModel(chains, "gpt-5.6-terra"), [...TERRA_RECIPIENTS].sort())
+  assert.deepEqual(labelsWithModel(chains, "gpt-6-astra"), [...ASTRA_RECIPIENTS].sort())
+  for (const { label, fallbackChain } of chains) {
+    const astraIndex = fallbackChain.findIndex((entry) => entry.model === "gpt-6-astra")
+    if (astraIndex === -1) continue
+    const successor = fallbackChain[astraIndex + 1]
+    assert.ok(
+      successor && (successor.model === "gpt-5.6-sol" || ASTRA_RECIPIENTS.includes(label)),
+      `${label} must place gpt-6-astra before its modern fallback`,
+    )
+    const solEntry = fallbackChain.find((entry) => entry.model === "gpt-5.6-sol")
+    if (solEntry) {
+      assert.deepEqual(
+        { ...fallbackChain[astraIndex]!, model: "gpt-5.6-sol" },
+        solEntry,
+        `${label} must retain sol tuning on gpt-6-astra`,
+      )
+    }
+  }
 
   for (const { label, fallbackChain } of chains) {
-    for (const model of ["claude-opus-5", "kimi-k3", "gpt-5.6-sol", "gpt-5.6-terra"]) {
+    for (const model of ["claude-opus-5", "kimi-k3", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"]) {
       assert.ok(
         fallbackChain.filter((entry) => entry.model === model).length <= 1,
         `${label} must not duplicate ${model}`,

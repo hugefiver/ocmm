@@ -1,7 +1,7 @@
 /**
  * Built-in category catalog.
  *
- * 10 categories cover concrete work shapes:
+ * 11 categories cover concrete work shapes:
  *   frontend       - UI/UX, design, styling, animation
  *   creative       - unconventional / generative problem-solving
  *   hard-reasoning - local name for ultrabrain-style decisions
@@ -12,9 +12,12 @@
  *   complex       - multi-step ordinary tasks below autonomous deep delivery
  *   deep          - autonomous system development and feature delivery
  *   documenting   - standalone text/documentation that does not change product behavior
+ *   cross-cutting - opt-in: one logical change mirrored across many surfaces
  */
 
 import type { Category } from "../shared/types.ts"
+
+const OPENAI_GPT6 = ["openai", "github-copilot"] as const
 
 export const BUILTIN_CATEGORIES: Category[] = [
   {
@@ -27,6 +30,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-6-astra", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
@@ -42,6 +46,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["openai", "github-copilot"], model: "gpt-6-astra", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "high" },
       ],
@@ -54,6 +59,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "xhigh",
       fallbackChain: [
+        { providers: [...OPENAI_GPT6], model: "gpt-6-astra", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
@@ -138,6 +144,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
     requirement: {
       variant: "max",
       fallbackChain: [
+        { providers: [...OPENAI_GPT6], model: "gpt-6-astra", variant: "max" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "max" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
@@ -159,6 +166,22 @@ export const BUILTIN_CATEGORIES: Category[] = [
         { providers: ["kimi-for-coding", "moonshot"], model: "k2p5" },
         { providers: ["google", "google-vertex"], model: "gemini-3-flash" },
         { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+      ],
+    },
+  },
+  {
+    name: "cross-cutting",
+    description:
+      "Opt-in: one logical change whose reach spans systems or modules — surface-consistency work where what to change is known but where it must land is not. Survey every mirror surface (callers, tests, docs, schemas, config, scripts, CI), keep them all consistent, and leave no surface describing the old state.",
+    optIn: true,
+    requirement: {
+      variant: "high",
+      fallbackChain: [
+        { providers: [...OPENAI_GPT6], model: "gpt-6-astra", variant: "high" },
+        { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "high" },
+        { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
+        { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
+        { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },
       ],
     },
   },

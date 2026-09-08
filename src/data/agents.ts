@@ -165,6 +165,7 @@ export const BUILTIN_AGENTS: Agent[] = [
     requirement: {
       variant: "xhigh",
       fallbackChain: [
+        { providers: ["openai", "github-copilot"], model: "gpt-6-astra", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.6-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },

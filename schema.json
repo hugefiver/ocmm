@@ -932,7 +932,8 @@
               "normal-task",
               "complex",
               "deep",
-              "documenting"
+              "documenting",
+              "cross-cutting"
             ]
           },
           {
@@ -2316,7 +2317,8 @@
                     "normal-task",
                     "complex",
                     "deep",
-                    "documenting"
+                    "documenting",
+                    "cross-cutting"
                   ]
                 },
                 {

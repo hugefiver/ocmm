@@ -2,7 +2,32 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
-import { resolveModelRouting } from "./resolver.ts"
+import { resolveEffectiveRequirement, resolveModelRouting } from "./resolver.ts"
+
+test("opt-in category resolves to null unless explicitly configured", () => {
+  // Unconfigured: never resolvable implicitly.
+  assert.equal(resolveEffectiveRequirement({ agentName: "cross-cutting" }), null)
+  assert.equal(
+    resolveEffectiveRequirement({ agentName: "cross-cutting", agentsConfig: {}, categoriesConfig: {} }),
+    null,
+  )
+
+  // Key-presence activation via categories or agents config.
+  const viaCategories = resolveEffectiveRequirement({ agentName: "cross-cutting", categoriesConfig: { "cross-cutting": {} } })
+  assert.equal(viaCategories?.source, "category-default")
+  assert.equal(viaCategories?.requirement.fallbackChain[0]!.model, "gpt-6-astra")
+
+  const viaAgents = resolveEffectiveRequirement({ agentName: "cross-cutting", agentsConfig: { "cross-cutting": {} } })
+  assert.equal(viaAgents?.source, "category-default")
+
+  // User model wins over the builtin default chain.
+  const viaModel = resolveEffectiveRequirement({
+    agentName: "cross-cutting",
+    categoriesConfig: { "cross-cutting": { model: "anthropic/claude-opus-5" } },
+  })
+  assert.equal(viaModel?.source, "user-config")
+  assert.equal(viaModel?.requirement.fallbackChain[0]!.model, "claude-opus-5")
+})
 
 test("matches an entry in the built-in agent chain", () => {
   const r = resolveModelRouting({

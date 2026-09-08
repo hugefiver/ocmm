@@ -16,7 +16,9 @@ test("non-mini gpt family clamps below-high variants to high", () => {
   assert.deepEqual(translateVariant("gpt", "xhigh", { modelID: "gpt-5.5" }), { reasoningEffort: "xhigh" })
   assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.5" }), { reasoningEffort: "xhigh" })
   assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.6-sol" }), { reasoningEffort: "max" })
-  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.7-sol" }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.7-sol" }), { reasoningEffort: "max" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-6-astra" }), { reasoningEffort: "max" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.5" }), { reasoningEffort: "xhigh" })
 })
 
 test("mini gpt and codex models keep the full reasoning ladder", () => {
