@@ -563,20 +563,20 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   for (const legacy of LEGACY_CODEX_GENERIC_CONTRACTS) {
     assert.doesNotMatch(orchestrator.developerInstructions, legacy, `in-memory orchestrator retains ${legacy}`)
   }
-  assert.equal(orchestrator.model, "gpt-5.6-sol")
+  assert.equal(orchestrator.model, "gpt-6-astra")
   assert.equal(orchestrator.reasoningEffort, "high")
   assert.match(orchestrator.developerInstructions, /Agent Role: orchestrator|DEEPWORK MODE ENABLED/)
   assert.match(orchestrator.developerInstructions, /Codex tool compatibility/)
   assert.match(orchestrator.developerInstructions, /GPT-5\.6 EXECUTION CALIBRATION/)
   assertCompactGpt56Calibration(orchestrator.developerInstructions, "in-memory orchestrator")
   assert.ok(builder)
-  assert.equal(builder.model, "gpt-5.6-sol")
+  assert.equal(builder.model, "gpt-6-astra")
   assert.ok(planner)
-  assert.equal(planner.reasoningEffort, "max")
+  assert.equal(planner.reasoningEffort, "xhigh")
   assert.ok(deep)
-  assert.equal(deep.reasoningEffort, "max")
+  assert.equal(deep.reasoningEffort, "xhigh")
   assert.ok(documenting)
-  assert.equal(documenting.model, "gpt-5.5")
+  assert.equal(documenting.model, "gpt-5.6-terra")
   assert.ok(oracle)
   assert.equal(oracle.sourceName, "oracle")
   assert.equal(oracle.reasoningEffort, "xhigh")
@@ -616,6 +616,42 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.match(
     planner.developerInstructions,
     /Compatibility routing never relaxes role delegation permission, target allowlists, or workflow ownership/,
+  )
+})
+
+test("Codex subscription defaults cover every always-on role without activating opt-in roles", async () => {
+  const agents = await buildCodexAgents({
+    config: { ...defaultConfig(), workflow: "codex" },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const expected = {
+    orchestrator: ["gpt-6-astra", "high"],
+    planner: ["gpt-6-astra", "xhigh"],
+    builder: ["gpt-6-astra", "xhigh"],
+    reviewer: ["gpt-6-astra", "xhigh"],
+    clarifier: ["gpt-5.6-sol", "xhigh"],
+    "plan-critic": ["gpt-6-astra", "xhigh"],
+    oracle: ["gpt-5.6-terra", "xhigh"],
+    "oracle-2nd": ["gpt-5.6-sol", "xhigh"],
+    "doc-search": ["gpt-5.6-luna", "high"],
+    explore: ["gpt-5.6-luna", "high"],
+    "code-search": ["gpt-5.6-luna", "high"],
+    "media-reader": ["gpt-5.6-luna", "high"],
+    "hard-reasoning": ["gpt-6-astra", "max"],
+    deep: ["gpt-6-astra", "xhigh"],
+    complex: ["gpt-5.6-sol", "xhigh"],
+    creative: ["gpt-6-astra", "high"],
+    frontend: ["gpt-6-astra", "xhigh"],
+    research: ["gpt-5.6-terra", "xhigh"],
+    quick: ["gpt-5.6-terra", "high"],
+    coding: ["gpt-5.6-terra", "xhigh"],
+    "normal-task": ["gpt-5.6-terra", "xhigh"],
+    documenting: ["gpt-5.6-terra", "high"],
+  }
+  assert.deepEqual(
+    Object.fromEntries(agents.map((agent) => [agent.sourceName, [agent.model, agent.reasoningEffort]])),
+    expected,
   )
 })
 
@@ -690,8 +726,8 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
 
   assert.ok(orchestrator)
   assert.ok(planner)
-  assert.equal(orchestrator.model, "gpt-5.6-sol")
-  assert.equal(planner.model, "gpt-5.6-sol")
+  assert.equal(orchestrator.model, "gpt-6-astra")
+  assert.equal(planner.model, "gpt-6-astra")
   assert.equal(orchestrator.preferredChain[0], "anthropic/claude-opus-5")
   assert.equal(planner.preferredChain[0], "anthropic/claude-opus-5")
   assert.equal(countOccurrences(orchestrator.developerInstructions, CLAUDE_OPUS5_MARKER), 1)

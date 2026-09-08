@@ -363,6 +363,13 @@ test("review artifact identity authoritative mapping rows stay current", () => {
   assert.match(promptSyncOrchestratorRow, /common packet.*recompute.*current receipts/i)
 })
 
+test("orchestrators prohibit the general subagent", () => {
+  for (const workflow of ["omo", "v1", "codex"] as const) {
+    const orchestrator = read("prompts", workflow, "agents", "orchestrator.md")
+    assert.equal(orchestrator.match(/Never use `general`\./g)?.length, 1, workflow)
+  }
+})
+
 test("canonical review artifact identity parser rejects malformed NUL fields", () => {
   const skill = read("skills", "v1", "requesting-code-review", "SKILL.md")
   const canonical = extractMarkedFence(skill, "ocmm-review-artifact-identity-js", "js")

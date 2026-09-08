@@ -53,6 +53,44 @@ const CODEX_COMPATIBLE_PROVIDERS = new Set([
   "vercel",
   "codex",
 ])
+
+/**
+ * Default Codex subscription model assignment for generated dw-* profiles.
+ *
+ * When the effective requirement is not a user-config entry, the generator
+ * maps each built-in role to a model from the current Codex subscription
+ * catalog (gpt-5.4/5.5/5.6-sol/terra/luna, gpt-6-astra), preferring the
+ * 5.6/6 series, with the role's matched reasoning effort. Explicit user
+ * configuration (agents/categories entries) always wins and keeps its own
+ * chain selection. Roles absent from this table keep their builtin chain
+ * heads.
+ */
+const CODEX_DEFAULT_MODEL_BY_ROLE = new Map<string, { model: string; variant: Variant }>([
+  // Agents
+  ["orchestrator", { model: "gpt-6-astra", variant: "high" }],
+  ["planner", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["builder", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["reviewer", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["clarifier", { model: "gpt-5.6-sol", variant: "xhigh" }],
+  ["plan-critic", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["oracle", { model: "gpt-5.6-terra", variant: "xhigh" }],
+  ["oracle-2nd", { model: "gpt-5.6-sol", variant: "xhigh" }],
+  ["doc-search", { model: "gpt-5.6-luna", variant: "high" }],
+  ["explore", { model: "gpt-5.6-luna", variant: "medium" }],
+  ["code-search", { model: "gpt-5.6-luna", variant: "medium" }],
+  ["media-reader", { model: "gpt-5.6-luna", variant: "high" }],
+  // Categories
+  ["hard-reasoning", { model: "gpt-6-astra", variant: "max" }],
+  ["deep", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["complex", { model: "gpt-5.6-sol", variant: "xhigh" }],
+  ["creative", { model: "gpt-6-astra", variant: "high" }],
+  ["frontend", { model: "gpt-6-astra", variant: "xhigh" }],
+  ["research", { model: "gpt-5.6-terra", variant: "xhigh" }],
+  ["quick", { model: "gpt-5.6-terra", variant: "medium" }],
+  ["coding", { model: "gpt-5.6-terra", variant: "xhigh" }],
+  ["normal-task", { model: "gpt-5.6-terra", variant: "xhigh" }],
+  ["documenting", { model: "gpt-5.6-terra", variant: "high" }],
+])
 const CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"])
 
 export type CodexPluginGenerationResult = {
@@ -183,7 +221,10 @@ export async function buildCodexAgents(args: {
       disabledAgents: args.config.disabledAgents,
     })
     const requirement = effective?.requirement ?? null
-    const selected = selectCodexModel(requirement, args.config)
+    const selected = selectCodexModel(requirement, args.config, {
+      role: sourceName,
+      source: effective?.source,
+    })
     const model = selected.entry?.model ?? args.config.systemDefaultModel ?? "gpt-5.5"
     const reasoningEffort = codexReasoningEffort({
       sourceName,
@@ -715,7 +756,27 @@ function codexAgentInstructions(args: {
 function selectCodexModel(
   requirement: ModelRequirement | null,
   config: OcmmConfig,
+  opts?: { role?: string; source?: string },
 ): { entry?: FallbackEntry; variant?: Variant } {
+  // Codex subscription defaults: built-in roles (agent-default /
+  // category-default sources) map to the subscription catalog, preferring
+  // the 5.6/6 series. Explicit user configuration keeps its own chain.
+  if (opts?.role && opts.source !== "user-config") {
+    const subscriptionDefault = CODEX_DEFAULT_MODEL_BY_ROLE.get(opts.role)
+    if (subscriptionDefault) {
+      // Prefer the chain entry with the same model when it carries an
+      // explicit reasoningEffort; otherwise the table's variant is the
+      // role's Codex default effort.
+      const chainEntry = requirement?.fallbackChain.find((entry) => entry.model === subscriptionDefault.model)
+      const entry: FallbackEntry = chainEntry?.reasoningEffort !== undefined
+        ? chainEntry
+        : { providers: ["codex"], model: subscriptionDefault.model }
+      return {
+        entry,
+        variant: subscriptionDefault.variant,
+      }
+    }
+  }
   const chain = requirement?.fallbackChain ?? []
   const selected = chain.find(isCodexCompatibleEntry)
     ?? chain.find((entry) => classifyModelFamily({ modelID: entry.model, providerID: entry.providers[0] }) === "gpt")

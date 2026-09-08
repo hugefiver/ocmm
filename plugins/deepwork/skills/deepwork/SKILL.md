@@ -68,27 +68,27 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 
 | Codex agent | Profile effort | Deepwork source |
 |---|---|---|
-| dw-builder | high | builder |
-| dw-clarifier | high | clarifier |
+| dw-builder | xhigh | builder |
+| dw-clarifier | xhigh | clarifier |
 | dw-code-search | high | code-search |
-| dw-coding | high | coding |
-| dw-complex | high | complex |
+| dw-coding | xhigh | coding |
+| dw-complex | xhigh | complex |
 | dw-creative | high | creative |
-| dw-deep | max | deep |
+| dw-deep | xhigh | deep |
 | dw-doc-search | high | doc-search |
 | dw-documenting | high | documenting |
 | dw-explore | high | explore |
-| dw-frontend | high | frontend |
-| dw-hard-reasoning | xhigh | hard-reasoning |
+| dw-frontend | xhigh | frontend |
+| dw-hard-reasoning | max | hard-reasoning |
 | dw-media-reader | high | media-reader |
-| dw-normal-task | high | normal-task |
+| dw-normal-task | xhigh | normal-task |
 | dw-oracle | xhigh | oracle |
 | dw-oracle-2nd | xhigh | oracle-2nd |
 | dw-orchestrator | high | orchestrator |
 | dw-plan-critic | xhigh | plan-critic |
-| dw-planner | max | planner |
+| dw-planner | xhigh | planner |
 | dw-quick | high | quick |
-| dw-research | high | research |
+| dw-research | xhigh | research |
 | dw-reviewer | xhigh | reviewer |
 
 Generated profile defaults are installation metadata, not mandatory choices. Actual delegation must preserve explicit user configuration and select overrides only from the currently available model catalog.
