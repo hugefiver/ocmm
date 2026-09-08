@@ -20,6 +20,50 @@ export const ACCUMULATING_ARRAY_KEYS = new Set([
   "disabledMcps",
 ])
 
+const INHERITED_ALIAS_REQUIREMENT_KEYS = [
+  "model",
+  "models",
+  "fallbackModels",
+  "requirement",
+  "variant",
+  "reasoning",
+] as const
+
+function hasDirectRequirementSelector(entry: Record<string, unknown>): boolean {
+  return (typeof entry.model === "string" && entry.model.length > 0)
+    || (Array.isArray(entry.models) && entry.models.length > 0)
+    || (Array.isArray(entry.fallbackModels) && entry.fallbackModels.length > 0)
+    || isPlainObjectValue(entry.requirement)
+}
+
+function withoutInheritedAliasRequirement(
+  baseEntry: Record<string, unknown>,
+  overlayEntry: Record<string, unknown>,
+): Record<string, unknown> {
+  if (typeof overlayEntry.alias !== "string" || overlayEntry.alias.length === 0) return baseEntry
+  if (hasDirectRequirementSelector(overlayEntry)) return baseEntry
+
+  const cleaned = { ...baseEntry }
+  for (const key of INHERITED_ALIAS_REQUIREMENT_KEYS) delete cleaned[key]
+  return cleaned
+}
+
+function prepareAgentOverlayBase(
+  baseAgents: Record<string, unknown>,
+  overlayAgents: Record<string, unknown>,
+): Record<string, unknown> {
+  let prepared = baseAgents
+  for (const [name, overlayEntry] of Object.entries(overlayAgents)) {
+    const baseEntry = baseAgents[name]
+    if (!isPlainObjectValue(baseEntry) || !isPlainObjectValue(overlayEntry)) continue
+    const cleaned = withoutInheritedAliasRequirement(baseEntry, overlayEntry)
+    if (cleaned === baseEntry) continue
+    if (prepared === baseAgents) prepared = { ...baseAgents }
+    prepared[name] = cleaned
+  }
+  return prepared
+}
+
 function sanitizeMergeValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => sanitizeMergeValue(item))
   if (!isPlainObjectValue(value)) return value
@@ -79,4 +123,29 @@ export function deepMerge(
     parentKey,
     opts,
   )
+}
+
+/** Merge a profile overlay, replacing inherited model selection for alias-only agent entries. */
+export function mergeProfileOverlay(
+  base: unknown,
+  override: unknown,
+  opts: { agentMap?: boolean } = {},
+): unknown {
+  if (!isPlainObjectValue(base) || !isPlainObjectValue(override)) {
+    return deepMerge(base, override, undefined, { profileOverlay: true })
+  }
+
+  if (opts.agentMap) {
+    const prepared = prepareAgentOverlayBase(base, override)
+    return deepMerge(prepared, override, undefined, { profileOverlay: true })
+  }
+
+  const baseAgents = base.agents
+  const overlayAgents = override.agents
+  if (!isPlainObjectValue(baseAgents) || !isPlainObjectValue(overlayAgents)) {
+    return deepMerge(base, override, undefined, { profileOverlay: true })
+  }
+  const preparedAgents = prepareAgentOverlayBase(baseAgents, overlayAgents)
+  const preparedBase = preparedAgents === baseAgents ? base : { ...base, agents: preparedAgents }
+  return deepMerge(preparedBase, override, undefined, { profileOverlay: true })
 }

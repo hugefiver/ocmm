@@ -208,6 +208,31 @@ test("normalizeShorthand resolves alias target requirement", () => {
   assert.equal(result.requirement!.fallbackChain[0]!.model, "gpt-5.5")
 })
 
+test("normalizeShorthand applies source alias intensity over target requirement defaults", () => {
+  const target = {
+    requirement: {
+      fallbackChain: [{ providers: ["openai"], model: "gpt-6-astra", reasoning: "max" as const }],
+      reasoning: "xhigh" as const,
+    },
+  }
+  const resolveAlias = (name: string) => name === "reviewer" ? normalizeShorthand(target) : undefined
+
+  const variant = normalizeShorthand(
+    { alias: "reviewer", variant: "high" },
+    { resolveAlias, selfName: "source-variant" },
+  )
+  assert.equal(variant?.requirement?.variant, "high")
+  assert.equal(variant?.requirement?.reasoning, undefined)
+  assert.equal(variant?.requirement?.fallbackChain[0]?.reasoning, "max")
+
+  const reasoning = normalizeShorthand(
+    { alias: "reviewer", variant: "high", reasoning: "none" },
+    { resolveAlias, selfName: "source-reasoning" },
+  )
+  assert.equal(reasoning?.requirement?.reasoning, "off")
+  assert.equal(reasoning?.requirement?.variant, undefined)
+})
+
 test("normalizeShorthand direct config overrides alias", () => {
   const aliasEntry = { alias: "reviewer", model: "zhipu/glm-5.1" }
   const resolveAlias = (name: string) =>

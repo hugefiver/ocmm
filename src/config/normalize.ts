@@ -126,6 +126,24 @@ export function normalizeDirectRequirement(
   return requirement
 }
 
+export function applyAliasRequirementIntensity(
+  requirement: ModelRequirement,
+  entry: Pick<AgentEntry | CategoryEntry, "reasoning" | "variant">,
+): ModelRequirement {
+  const reasoning = normalizeReasoning(entry.reasoning)
+  if (reasoning !== undefined) {
+    const overridden = { ...requirement, reasoning }
+    delete overridden.variant
+    return overridden
+  }
+  if (entry.variant !== undefined) {
+    const overridden = { ...requirement, variant: entry.variant }
+    delete overridden.reasoning
+    return overridden
+  }
+  return requirement
+}
+
 export function normalizeShorthand(
   entry: AgentEntry | CategoryEntry | undefined,
   options?: {
@@ -167,7 +185,10 @@ export function normalizeShorthand(
     if (resolveAlias) {
       const target = resolveAlias(entry.alias)
       if (target?.requirement) {
-        out.requirement = normalizeRequirementConfig(target.requirement)
+        out.requirement = applyAliasRequirementIntensity(
+          normalizeRequirementConfig(target.requirement),
+          entry,
+        )
       }
     }
   }

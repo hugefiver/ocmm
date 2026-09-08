@@ -1,6 +1,6 @@
 import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
-import { deepMerge, isPlainObject } from "./merge.ts"
-import { normalizeDirectRequirement } from "./normalize.ts"
+import { isPlainObject, mergeProfileOverlay } from "./merge.ts"
+import { applyAliasRequirementIntensity, normalizeDirectRequirement } from "./normalize.ts"
 import type { ProfileDescriptorMap } from "./profile-types.ts"
 import type { AgentEntry, OcmmConfig } from "./schema.ts"
 
@@ -97,7 +97,7 @@ export function materializeQualifiedAgentAliases(args: {
     const overlay = isPlainObject(descriptor.value.agents)
       ? descriptor.value.agents as Record<string, AgentEntry>
       : undefined
-    const view = deepMerge(args.baseAgents, overlay, undefined, { profileOverlay: true }) as Record<string, AgentEntry>
+    const view = mergeProfileOverlay(args.baseAgents, overlay, { agentMap: true }) as Record<string, AgentEntry>
     targetViews.set(name, view)
     return view
   }
@@ -129,10 +129,10 @@ export function materializeQualifiedAgentAliases(args: {
         throw qualifiedAliasError(path, `qualified alias target ${formatScopedAgent(node)} has no requirement`)
       }
       const qualified = parseQualifiedAliasAtPath(alias, path)
-      if (qualified) {
-        return resolve({ kind: "profile", name: qualified.profile }, qualified.agent, stack, membership)
-      }
-      return resolve(scope, alias, stack, membership)
+      const target = qualified
+        ? resolve({ kind: "profile", name: qualified.profile }, qualified.agent, stack, membership)
+        : resolve(scope, alias, stack, membership)
+      return applyAliasRequirementIntensity(target, entry)
     } finally {
       stack.pop()
       membership.delete(nodeKey)

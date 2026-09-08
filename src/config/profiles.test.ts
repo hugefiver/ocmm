@@ -830,6 +830,103 @@ test("profile overlay applies agent override from activeProfile", () => {
   }
 })
 
+test("profile alias overlay replaces inherited model selectors and keeps source-local controls", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: {
+        planner: {
+          model: "hoo/BASE",
+          fallbackModels: ["hoo/FALLBACK"],
+          variant: "max",
+          tools: { bash: false },
+          permission: { edit: "ask" },
+          variants: { high: "max" },
+          temperature: 0.2,
+        },
+      },
+      profiles: {
+        oa: {
+          agents: {
+            planner: {
+              requirement: {
+                fallbackChain: [
+                  { providers: ["openai"], model: "gpt-6-astra" },
+                  { providers: ["openai"], model: "gpt-5.6-sol" },
+                ],
+                reasoning: "xhigh",
+              },
+            },
+          },
+        },
+        mix: {
+          agents: {
+            planner: {
+              alias: "oa:planner",
+              variant: "high",
+              permission: { bash: "deny" },
+            },
+          },
+        },
+      },
+      activeProfile: "mix",
+    })
+
+    const generic = loadWithXdg(xdg)
+    const genericPlanner = generic.config.agents?.planner
+    assert.equal(genericPlanner?.alias, "oa:planner")
+    assert.equal(genericPlanner?.model, undefined)
+    assert.equal(genericPlanner?.fallbackModels, undefined)
+    assert.equal(genericPlanner?.reasoning, undefined)
+    assert.equal(genericPlanner?.variant, "high")
+
+    const plugin = loadPluginWithXdg(xdg)
+    const planner = plugin.config.agents?.planner
+    assert.equal(planner?.model, undefined)
+    assert.equal(planner?.fallbackModels, undefined)
+    assert.deepEqual(planner?.requirement?.fallbackChain.map((entry) => entry.model), [
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+    ])
+    assert.equal(planner?.requirement?.variant, "high")
+    assert.equal(planner?.requirement?.reasoning, undefined)
+    assert.deepEqual(planner?.tools, { bash: false })
+    assert.deepEqual(planner?.permission, { edit: "ask", bash: "deny" })
+    assert.deepEqual(planner?.variants, { high: "max" })
+    assert.equal(planner?.temperature, 0.2)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
+test("profile entries with aliases and direct selectors keep direct requirement precedence", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfig(xdg, {
+      agents: { planner: { model: "hoo/BASE", variant: "max" } },
+      profiles: {
+        oa: { agents: { planner: { model: "openai/TARGET" } } },
+        mix: {
+          agents: {
+            planner: {
+              alias: "oa:planner",
+              model: "openai/DIRECT",
+              variant: "high",
+            },
+          },
+        },
+      },
+      activeProfile: "mix",
+    })
+
+    const loaded = loadPluginWithXdg(xdg)
+    assert.equal(loaded.config.agents?.planner?.model, "openai/DIRECT")
+    assert.equal(loaded.config.agents?.planner?.requirement, undefined)
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("profile overlay replaces canonical agent models arrays", () => {
   const xdg = makeTempXdg()
   try {

@@ -231,6 +231,35 @@ test("qualified aliases materialize and isolate canonical target model chains", 
   assert.equal(requirement!.fallbackChain[1]!.temperature, 0.1)
 })
 
+test("qualified aliases apply source intensity without importing target agent controls", () => {
+  const config = configWithAgents({
+    variantSource: { alias: "precision:reviewer", variant: "high" },
+    reasoningSource: { alias: "precision:reviewer", variant: "high", reasoning: "low" },
+  })
+  const result = materializeQualifiedAgentAliases({
+    config,
+    baseAgents: config.agents ?? {},
+    profiles: profiles({
+      precision: {
+        agents: {
+          reviewer: {
+            requirement: {
+              fallbackChain: [{ providers: ["openai"], model: "gpt-6-astra", variant: "max" }],
+              reasoning: "xhigh",
+            },
+          },
+        },
+      },
+    }),
+  })
+
+  assert.equal(result.agents?.variantSource?.requirement?.variant, "high")
+  assert.equal(result.agents?.variantSource?.requirement?.reasoning, undefined)
+  assert.equal(result.agents?.variantSource?.requirement?.fallbackChain[0]?.variant, "max")
+  assert.equal(result.agents?.reasoningSource?.requirement?.reasoning, "low")
+  assert.equal(result.agents?.reasoningSource?.requirement?.variant, undefined)
+})
+
 test("source direct requirements and shorthand models override a qualified alias", () => {
   const config = configWithAgents({
     modelSource: { alias: "precision:reviewer", model: "SOURCE" },

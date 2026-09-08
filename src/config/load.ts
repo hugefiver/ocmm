@@ -22,7 +22,7 @@ import { z } from "zod"
 import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, ProfileEntrySchema, type OcmmConfig } from "./schema.ts"
 import { tolerantParse, tolerantParseLayers, type TolerantParseLayer } from "./tolerant-parse.ts"
 import { log } from "../shared/logger.ts"
-import { deepMerge, isPlainObject } from "./merge.ts"
+import { deepMerge, isPlainObject, mergeProfileOverlay } from "./merge.ts"
 import { materializeQualifiedAgentAliases } from "./profile-aliases.ts"
 import type { ProfileDescriptor, ProfileDescriptorError, ProfileDescriptorMap, ProfileSource } from "./profile-types.ts"
 import {
@@ -615,13 +615,13 @@ function mergeConfigLayers(layers: readonly TolerantParseLayer[]): unknown {
   let hasProfile = false
   for (const layer of layers) {
     if (layer.profileOverlay) {
-      profile = deepMerge(profile, layer.value, undefined, { profileOverlay: true })
+      profile = mergeProfileOverlay(profile, layer.value)
       hasProfile = true
     } else {
       base = deepMerge(base, layer.value)
     }
   }
-  return hasProfile ? deepMerge(base, profile, undefined, { profileOverlay: true }) : base
+  return hasProfile ? mergeProfileOverlay(base, profile) : base
 }
 
 function selectedProfileLayers(selectedProfiles: readonly PreparedReviewProfile[]): TolerantParseLayer[] {
