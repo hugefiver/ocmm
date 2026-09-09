@@ -55,10 +55,12 @@ interface ShimArgs {
  *  to avoid collision with ocmm. Currently just the omo extension. */
 const DEFAULT_STRIPPED_PLUGINS = ["oh-my-openagent"]
 
+export type OpencodePluginEntry = string | [string, Record<string, unknown>]
+
 interface OpencodeConfig {
   provider?: Record<string, unknown>
   disabled_providers?: string[]
-  plugin?: string[]
+  plugin?: OpencodePluginEntry[]
   agent?: Record<string, unknown>
   compaction?: Record<string, unknown>
   [key: string]: unknown
@@ -158,7 +160,7 @@ export function buildIsolatedConfig(opts: {
   // Always add the ocmm plugin
   const pluginPath = resolvePluginPath()
   if (!out.plugin) out.plugin = []
-  if (!out.plugin.includes(pluginPath)) {
+  if (!out.plugin.some((entry) => pluginEntryName(entry) === pluginPath)) {
     out.plugin.push(pluginPath)
   }
 
@@ -169,11 +171,16 @@ export function buildIsolatedConfig(opts: {
  * Check if a plugin entry matches a stripped plugin name.
  * Handles bare names, scoped names, and name@version specifiers.
  */
-function isStrippedPlugin(pluginEntry: string): boolean {
+function pluginEntryName(pluginEntry: OpencodePluginEntry): string {
+  return typeof pluginEntry === "string" ? pluginEntry : pluginEntry[0]
+}
+
+function isStrippedPlugin(pluginEntry: OpencodePluginEntry): boolean {
+  const pluginName = pluginEntryName(pluginEntry)
   // Strip @version suffix: "oh-my-openagent@latest" -> "oh-my-openagent"
-  const baseName = pluginEntry.replace(/@[^/]+$/, "").replace(/^@[^/]+\//, "")
+  const baseName = pluginName.replace(/@[^/]+$/, "").replace(/^@[^/]+\//, "")
   return DEFAULT_STRIPPED_PLUGINS.some((stripped) => {
-    return baseName === stripped || pluginEntry.startsWith(stripped + "@")
+    return baseName === stripped || pluginName.startsWith(stripped + "@")
   })
 }
 

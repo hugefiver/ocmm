@@ -6,12 +6,11 @@ description: "(builtin) Initialize hierarchical AGENTS.md knowledge base"
 
 Generate hierarchical AGENTS.md files. Root + complexity-scored subdirectories.
 
-## Local ocmm/OpenCode Notes
+## Tool and Host Notes
 
-- Use OpenCode `task(...)` delegation syntax where available.
-- `explore` is provided as a compatibility alias for local `code-search`.
-- Use `category="documenting"` for AGENTS.md writing tasks; upstream examples that say `category="writing"` should be translated to `documenting`.
-- Treat `codegraph_*` tools as optional. If they are unavailable, use LSP tools and `rg` as the normal fallback evidence path. Use ast-grep only for a specific exact syntax-tree question that those tools cannot answer reliably.
+- Follow the current callable schema for delegation and task tracking; do not assume host-specific parameter names or profiles.
+- Use LSP for symbols, references, diagnostics, and rename. Use Grep, Read, and Glob for text and file discovery.
+- Use ast-grep only for a specific exact syntax-tree question or deterministic codemod that the other tools cannot express reliably.
 
 ## Usage
 
@@ -26,22 +25,14 @@ Generate hierarchical AGENTS.md files. Root + complexity-scored subdirectories.
 ## Workflow (High-Level)
 
 1. **Discovery + Analysis** (concurrent)
-   - Fire background explore agents immediately
-   - Main session: bash structure + LSP/codegraph code map + read existing AGENTS.md
+    - Dispatch independent exploration concurrently when the parent has useful work to do
+    - Main session: structure analysis + LSP code map + read existing AGENTS.md
 2. **Score & Decide** - Determine AGENTS.md locations from merged findings
 3. **Generate** - Root first, then subdirs in parallel
 4. **Review** - Deduplicate, trim, validate
 
 <critical>
-**TodoWrite ALL phases. Mark in_progress → completed in real-time.**
-```
-TodoWrite([
-  { id: "discovery", content: "Fire explore agents + LSP/codegraph map + read existing", status: "pending", priority: "high" },
-  { id: "scoring", content: "Score directories, determine locations", status: "pending", priority: "high" },
-  { id: "generate", content: "Generate AGENTS.md files (root + subdirs)", status: "pending", priority: "high" },
-  { id: "review", content: "Deduplicate, validate, trim", status: "pending", priority: "medium" }
-])
-```
+Track discovery, scoring, generation, and review in the host's available task-tracking surface; update each phase as it starts and completes.
 </critical>
 
 ---
@@ -50,19 +41,9 @@ TodoWrite([
 
 **Mark "discovery" as in_progress.**
 
-### Fire Background Explore Agents IMMEDIATELY
+### Dispatch Independent Exploration
 
-Don't wait-these run async while main session works. **Equip every agent with the code graph**: any task touching structure, entry points, dependencies, or hotspots MUST query `codegraph_*` (explore/search/callers/callees/impact) and `lsp_symbols` when present, and ground its claims in that data instead of guessing from conventions. Richer real-graph context per agent = a more accurate project map.
-
-```
-// Fire all at once, collect results later
-task(subagent_type="explore", load_skills=[], description="Explore project structure", run_in_background=true, prompt="Project structure: map real layout via codegraph_explore/codegraph_files → REPORT deviations from standard patterns")
-task(subagent_type="explore", load_skills=[], description="Find entry points", run_in_background=true, prompt="Entry points: FIND main files, trace reach via codegraph_callees + lsp_symbols → REPORT non-standard organization")
-task(subagent_type="explore", load_skills=[], description="Find conventions", run_in_background=true, prompt="Conventions: FIND config files (.eslintrc, pyproject.toml, .editorconfig) → REPORT project-specific rules")
-task(subagent_type="explore", load_skills=[], description="Find anti-patterns", run_in_background=true, prompt="Anti-patterns: FIND 'DO NOT', 'NEVER', 'ALWAYS', 'DEPRECATED' comments → LIST forbidden patterns")
-task(subagent_type="explore", load_skills=[], description="Explore build/CI", run_in_background=true, prompt="Build/CI: FIND .github/workflows, Makefile → REPORT non-standard patterns")
-task(subagent_type="explore", load_skills=[], description="Find test patterns", run_in_background=true, prompt="Test patterns: FIND test configs/structure; codegraph_callers on core modules to see what is covered → REPORT unique conventions")
-```
+When independent parent work remains, dispatch focused exploration concurrently through the current callable schema. Cover project structure, entry points, conventions, anti-patterns, build/CI, and test patterns; ask each child to return concrete paths and evidence. While children run, perform only non-overlapping local discovery. Keep result-gated work foreground, and let the host notify completion rather than polling.
 
 <dynamic-agents>
 **DYNAMIC AGENT SPAWNING**: After bash analysis, spawn ADDITIONAL explore agents based on project scale:
@@ -84,19 +65,12 @@ large_files=$(find . -type f \\( -name "*.ts" -o -name "*.py" \\) -not -path '*/
 max_depth=$(find . -type d -not -path '*/node_modules/*' -not -path '*/.git/*' | awk -F/ '{print NF}' | sort -rn | head -1)
 ```
 
-Example spawning:
-```
-// 500 files, 50k lines, depth 6, 15 large files → spawn 5+5+2+1 = 13 additional agents
-task(subagent_type="explore", load_skills=[], description="Analyze large files", run_in_background=true, prompt="Large file analysis: FIND files >500 lines, REPORT complexity hotspots")
-task(subagent_type="explore", load_skills=[], description="Explore deep modules", run_in_background=true, prompt="Deep modules at depth 4+: FIND hidden patterns, internal conventions")
-task(subagent_type="explore", load_skills=[], description="Find shared utilities", run_in_background=true, prompt="Cross-cutting concerns: FIND shared utilities across directories")
-// ... more based on calculation
-```
+For example, a large, deep project may justify separate exploration of large files, deep modules, and shared utilities. Use the current callable schema and only dispatch work that does not overlap another child.
 </dynamic-agents>
 
 ### Main Session: Concurrent Analysis
 
-**While background agents run**, main session does:
+**While independent exploration runs**, the main session does:
 
 #### 1. Bash Structural Analysis
 ```bash
@@ -123,28 +97,20 @@ For each existing file found:
 
 If `--create-new`: Read all existing first (preserve context) → then delete all → regenerate.
 
-#### 3. Code Map - drive LSP AND codegraph (do NOT skip)
+#### 3. Code Map - drive LSP (do NOT skip)
 
-Highest-signal source for the CODE MAP and the Symbol/Export/Reference scoring rows. Complementary, not alternatives - run BOTH when present, alongside the explore agents.
+Highest-signal source for the CODE MAP and the Symbol/Export/Reference scoring rows. Use it alongside exploration agents.
 
 **LSP** - check `lsp_status`; model-facing names are `lsp_status`/`lsp_symbols`/`lsp_find_references`/`lsp_goto_definition` (some harnesses drop the `lsp_` prefix):
 - `lsp_symbols` scope="document" on each entry point -> file outline.
 - `lsp_symbols` scope="workspace", query by kind (class/interface/function) -> symbol inventory.
 - `lsp_find_references` on top exports (line/character from the symbols result) -> reference centrality.
 
-**codegraph** - when `codegraph_*` tools exist (check `codegraph_status`); a first-class peer to LSP, NOT a last resort:
-- `codegraph_explore` -> overview; `codegraph_callers`/`codegraph_callees`/`codegraph_impact` -> centrality + blast radius for the scoring matrix; `codegraph_search`/`codegraph_files` -> symbol/file inventory.
-
-Only if NEITHER exists: use explore agents plus `rg` evidence and mark centrality unmeasured in the CODE MAP. Do not run ast-grep as a baseline substitute; reserve it for a later, specific exact syntax-tree question that simpler evidence cannot answer reliably.
+If LSP is unavailable, use exploration agents plus Grep, Read, and Glob evidence and mark centrality unmeasured in the CODE MAP. Do not run ast-grep as a baseline substitute; reserve it for a later, specific exact syntax-tree question or deterministic codemod that simpler evidence cannot answer reliably.
 
 ### Collect Background Results
 
-```
-// After main session analysis done, collect all task results
-for each background task ID (`bg_...`): background_output(task_id="bg_...")
-```
-
-**Merge: bash + LSP/codegraph + existing + explore findings. Mark "discovery" as completed.**
+**After host completion notifications, merge structure analysis, LSP, existing, and exploration findings. Mark "discovery" as completed.**
 
 ---
 
@@ -161,9 +127,9 @@ for each background task ID (`bg_...`): background_output(task_id="bg_...")
 | Code ratio | 2x | >70% | bash |
 | Unique patterns | 1x | Has own config | explore |
 | Module boundary | 2x | Has index.ts/__init__.py | bash |
-| Symbol density | 2x | >30 symbols | LSP/cg |
-| Export count | 2x | >10 exports | LSP/cg |
-| Reference centrality | 3x | >20 refs | LSP/cg |
+| Symbol density | 2x | >30 symbols | LSP |
+| Export count | 2x | >10 exports | LSP |
+| Reference centrality | 3x | >20 refs | LSP |
 
 ### Decision Rules
 
@@ -220,7 +186,7 @@ NEVER use Write to overwrite an existing file. ALWAYS check existence first via 
 |------|----------|-------|
 
 ## CODE MAP
-{From LSP/codegraph - skip only if neither exists or project <10 files}
+{From LSP - skip only if unavailable or project <10 files}
 
 | Symbol | Type | Location | Refs | Role |
 |--------|------|----------|------|------|
@@ -247,18 +213,7 @@ NEVER use Write to overwrite an existing file. ALWAYS check existence first via 
 
 ### Subdirectory AGENTS.md (Parallel)
 
-Launch writing tasks for each location:
-
-```
-for loc in AGENTS_LOCATIONS (except root):
-  task(category="documenting", load_skills=[], run_in_background=false, description="Generate AGENTS.md", prompt=`
-    Generate AGENTS.md for: ${loc.path}
-    - Reason: ${loc.reason}
-    - 30-80 lines max
-    - NEVER repeat parent content
-    - Sections: OVERVIEW (1 line), STRUCTURE (if >5 subdirs), WHERE TO LOOK, CONVENTIONS (if different), ANTI-PATTERNS
-  `)
-```
+For each non-root location, dispatch a documentation-capable worker through the current callable schema with its path, reason, 30–80 line limit, non-duplication constraint, and required sections.
 
 **Wait for all. Mark "generate" as completed.**
 
@@ -303,7 +258,7 @@ Hierarchy:
 ## Anti-Patterns
 
 - **Static agent count**: MUST vary agents based on project size/depth
-- **Sequential execution**: MUST parallel (explore + LSP + codegraph concurrent)
+- **Sequential execution**: Run independent exploration and LSP work concurrently when the host supports it
 - **Ignoring existing**: ALWAYS read existing first, even with --create-new
 - **Over-documenting**: Not every dir needs AGENTS.md
 - **Redundancy**: Child never repeats parent

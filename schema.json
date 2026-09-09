@@ -1078,7 +1078,6 @@
     "workflow": {
       "type": "string",
       "enum": [
-        "omo",
         "v1",
         "codex"
       ]

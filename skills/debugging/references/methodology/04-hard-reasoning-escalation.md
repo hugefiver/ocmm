@@ -33,7 +33,7 @@ Do not fan out multiple decision agents. Add `code-search` or `research` only wh
 ## Prompt
 
 ```
-task(subagent_type="hard-reasoning",
+task(description="Reframe root-cause investigation", subagent_type="hard-reasoning",
      prompt="""
      GOAL: Reframe this genuinely difficult root-cause investigation after two failed evidence rounds.
      STOP WHEN: You provide one ranked next hypothesis set and decisive runtime queries; do not propose a fix without confirming evidence.

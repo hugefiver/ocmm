@@ -156,7 +156,7 @@ Reviewer and Oracle profiles are reserved for software implementation acceptance
 ### Pattern
 
 ```
-task(subagent_type="research",
+task(description="Verify non-debug artifact claims", subagent_type="research",
      prompt="""
 SKEPTICAL FINAL VERIFICATION — be critical, look for reasons the task is incomplete or wrong.
 

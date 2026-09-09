@@ -432,6 +432,32 @@ test("list shows [file (shadows inline)] when both exist", () => {
 
 // ---- File-based show tests ----
 
+test("CLI reads and updates BOM-prefixed config and profile JSONC", () => {
+  const xdg = makeTempXdg()
+  try {
+    writeConfigRaw(xdg, `\uFEFF${JSON.stringify({ activeProfile: "old" })}`)
+    const profileDir = join(xdg, "opencode", "ocmm-profiles")
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, "co.jsonc"), `\uFEFF${JSON.stringify({ debug: true })}`)
+
+    const shown = runCli(xdg, ["show", "co"])
+    assert.equal(shown.exitCode, 0)
+    assert.deepEqual(JSON.parse(shown.stdout), {
+      name: "co",
+      active: false,
+      source: "file",
+      config: { debug: true },
+    })
+
+    assert.equal(runCli(xdg, ["use", "co"]).exitCode, 0)
+    const current = runCli(xdg, ["current"])
+    assert.equal(current.exitCode, 0)
+    assert.equal(current.stdout.trim(), "co")
+  } finally {
+    rmSync(xdg, { recursive: true, force: true })
+  }
+})
+
 test("show reads from directory profile file", () => {
   const xdg = makeTempXdg()
   try {

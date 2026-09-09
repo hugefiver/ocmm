@@ -1,12 +1,16 @@
 # ocmm Config Schema Design for Feature Migration
 
-> **Status**: Design document (self-designed)
+> **Status**: Historical design reference. The current local schema snapshot below is authoritative for this document; the phased proposal remains research context only.
 > **Goal**: Extend ocmm's `OcmmConfigSchema` to support progressive migration of omo features, each independently toggleable.
-> **Principle**: Each feature gets its own config namespace with an `enabled` flag. Unknown keys still rejected (`.strict()`). Backward-compatible — all new fields optional with defaults.
+> **Principle**: Each feature gets its own config namespace with an `enabled` flag. Unknown keys still rejected (`.strict()`).
+
+## Current Local Schema Snapshot (2026-09-10)
+
+`OcmmConfigSchema` accepts `workflow: "v1" | "codex"` and defaults to `"v1"`; obsolete workflow values are invalid rather than migrated. OpenCode consumes v1. Codex is packaged through its separate adapter path. CodeGraph is removed. Existing `.omo/rules`, `.omo/plans`, and `.omo/notepads` handling, the ignored `./omo` reference checkout, and `--keep-omo` concern external compatibility surfaces rather than workflow or schema values.
 
 ## Design Constraints
 
-1. **Backward compatible** — existing `ocmm.jsonc` configs must work unchanged. All new fields optional with sensible defaults.
+1. **Explicit compatibility** — supported `ocmm.jsonc` values are accepted as declared; incompatible removed values are rejected rather than silently normalized.
 2. **Feature-isolated** — each migrated feature gets its own namespace. No cross-feature coupling in config.
 3. **Uniform gating** — adopt omo's `disabled_hooks: string[]` pattern for uniform hook enable/disable.
 4. **Strict schema** — unknown keys rejected (`.strict()` preserved). Forces explicit config, catches typos.
@@ -19,7 +23,7 @@
 // src/config/schema.ts (current, 177 lines)
 OcmmConfigSchema = {
   categories, agents, disabledAgents, fallbackModels, systemDefaultModel,
-  workflow: "omo" | "v1",       // default "omo"
+  workflow: "v1" | "codex",     // default "v1"
   intent: { enabled, skipAgents },
   runtimeFallback: { enabled, dispatch, maxAttempts, cooldownSeconds, retryOnStatusCodes, retryOnPatterns },
   profiles: Record<string, ProfileEntry>,
@@ -170,7 +174,7 @@ OcmmConfigSchema = {
   disabledAgents: string[]?,
   fallbackModels: string[]?,                      // reserved
   systemDefaultModel: string?,                    // reserved
-  workflow: "omo" | "v1",                         // default "omo"
+   workflow: "v1" | "codex",                       // default "v1"
   intent: { enabled, skipAgents },
   runtimeFallback: { enabled, dispatch, maxAttempts, cooldownSeconds, retryOnStatusCodes, retryOnPatterns },
   profiles: Record<string, ProfileEntry>,

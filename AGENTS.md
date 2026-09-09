@@ -230,7 +230,7 @@ Write this to `$testDir\opencode.json`.
 
 ### 4. Write an ocmm config mapping agents to your provider's models
 
-Create `$testDir\.opencode\ocmm.jsonc`. Built-in defaults are examples and may reference models your provider does not serve, so map agents to models from your configured provider/catalog. Set `workflow` to `"v1"` or `"omo"` (default) to choose the prompt set:
+Create `$testDir\.opencode\ocmm.jsonc`. Built-in defaults are examples and may reference models your provider does not serve, so map agents to models from your configured provider/catalog. OpenCode uses the default `"v1"` workflow:
 
 ```jsonc
 {
@@ -262,7 +262,7 @@ Expected lines:
 ```
 [ocmm] config loaded: project=...ocmm.jsonc, user=<none>
 [ocmm] loaded prompts: workflow=v1 deepwork=7/7, agents=5/5, category=10/10
-[ocmm] v1 skills loaded: N chars            (v1 only; omo omits this line)
+[ocmm] v1 skills loaded: N chars
 [ocmm] config: registered N agents (built-in + categories + user), N skills, N commands, N MCPs
 ```
 
@@ -304,8 +304,6 @@ Expected (v1 workflow):
 [ocmm] routed agent=orchestrator model=<provider>/<model-a> variant=max source=user-config
 ```
 
-Expected (omo workflow): no `v1 skills queued` line — omo attaches prompts declaratively at config time, no runtime injection.
-
 `OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents..., N MCPs`) and runtime routing (`v1 skills queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
 
 ### 6. Clean up
@@ -326,7 +324,7 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 |---|---|---|
 | `config` | `registered N agents..., N MCPs` | Plugin loaded, agents/categories, skills, commands, and MCPs registered with your provider's models |
 | `chat.params` | `routed agent=... variant=... source=...` | Variant resolved via 4-tier priority, translated to model params |
-| `chat.message` | `v1 skills queued: N chars` (v1 only; omo is no-op) | v1 skill content queued on first message per session |
+| `chat.message` | `v1 skills queued: N chars` | v1 skill content queued on first message per session |
 | `experimental.chat.system.transform` | `prepended N chars` | Queued content injected into system message |
 | `event` | (no output on success) | Session lifecycle hooks fire without errors |
 
@@ -345,27 +343,21 @@ Interruption-recovery event coverage (same `event` + output-adapter surface):
 - The temp directory is outside the repo so it does not pollute git status.
 - `opencode debug config` reads from both `$testDir\opencode.json` and `$testDir\.opencode\*` — both must exist.
 - If `opencode run` shows no `[ocmm]` lines even with `OCMM_DEBUG=1` set, the plugin failed to load. Check `--print-logs --log-level DEBUG` for import errors.
-- To test v1 workflow: add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message; omo (default) attaches prompts to agents declaratively with no runtime injection.
+- To test the default OpenCode workflow explicitly, add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message.
 - If you see `max_tokens` errors (`integer above maximum value`), lower the model's `output` limit in `opencode.json` — OpenCode adds internal overhead to the configured limit.
 
-## Prompt Synchronization
+## Prompt Maintenance
 
-Prompt files are model-facing behavior and must stay synchronized with upstream intent and local workflow semantics.
-
-- `v1` exists only as the version label for the deepwork workflow: `workflow: "v1"`, `prompts/v1/`, `skills/v1/`, and `docs/v1-maintenance.md` are config/path/version labels, not model-facing names. Model-facing prompt text under `prompts/v1/**` must use `deepwork` or omit the workflow name entirely; never describe the workflow to the model as `v1`.
-- `prompts/v1/deepwork/default.md` is intentionally concise and local to this project. Do not blindly replace it with the upstream long default prompt.
-- `prompts/v1/deepwork/{gpt,gpt-5.6,gemini,glm,codex,planner}.md` should track upstream omo/ultrawork model-specialized prompts closely. Preserve model-specific information, constraints, and command style; adapt only local agent names, paths, and OpenCode/ocmm tool semantics.
-- `prompts/v1/agents/*.md` and `prompts/v1/category/*.md` should stay strongly aligned with `prompts/omo/agents/*.md` and `prompts/omo/category/*.md`. Deepwork mechanics come from the deepwork layer and injected skills, not from shortened agent/category prompts.
-- Changes under `prompts/v1/` MUST update `docs/v1-maintenance.md` in the same commit. Changes under `prompts/omo/` MUST update `docs/prompt-sync.md` in the same commit. Changes that affect both workflows update both docs.
-- The repository ignores the root upstream checkout as `/omo/`; `prompts/omo/**` is tracked. If intended prompt files under `prompts/omo/**` ever appear ignored, tighten `.gitignore` rather than leaving them untracked.
+- `v1` is the config/path label for the default OpenCode deepwork workflow. Model-facing files under `prompts/v1/**` use `deepwork` or omit the workflow name.
+- Changes under `prompts/v1/**` or `skills/v1/**` MUST update `docs/v1-maintenance.md` in the same commit.
+- `prompts/codex/**` and generated Codex bundle files are separate adapter surfaces. Refresh generated bundle output only with `pnpm run gen:codex-plugin`; never hand-edit it.
+- The ignored `/omo/` checkout is reference-only and does not create a prompt-maintenance obligation.
 ## v1 Maintenance
 
 All v1 skill file changes (in `skills/v1/`) and v1 prompt file changes (in `prompts/v1/`) MUST be synchronized with `docs/v1-maintenance.md` in the same commit, and vice versa. A file change without a doc update, or a doc update without a file change, is a failed review.
 
 This applies to: content edits, new files, deletions, renames, and upstream skill syncs.
 
-omo prompts (`prompts/omo/`) are not tracked in this doc.
-
 ## Config Schema Sync
 
-`schema.json` (repo root) is generated from `OcmmConfigSchema` in `src/config/schema.ts` via `pnpm run gen-schema` (`scripts/gen-schema.ts`). Any task that modifies the config schema — adding/removing fields, changing types, adding hook names, agent names, command names, or any other `HOOK_NAMES`/`AGENT_NAMES`/`COMMAND_NAMES` entries — MUST regenerate `schema.json` and include it in the same commit as the schema change. A schema code change without a `schema.json` update, or vice versa, is a failed review.
+`schema.json` (repo root) is generated from `OcmmConfigSchema` in `src/config/schema.ts` via `pnpm run gen-schema` (`scripts/gen-schema.ts`). Any task that modifies the config schema — adding/removing fields, changing types, adding hook names, agent names, command names, or any other `HOOK_NAMES`/`AGENT_NAMES`/`COMMAND_NAMES` entries — MUST regenerate `schema.json` and include it in the same commit as the schema change. The schema CI workflow and release verification enforce the same regenerate-then-diff gate.

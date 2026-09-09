@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 import type { McpConfig, McpServerConfig } from "../config/schema.ts"
 import { isRecord } from "../shared/logger.ts"
 import { ocmmLspBinaryNames, ocmmLspPackageBinaryCandidates } from "../shared/ocmm-lsp-binary.ts"
+import { stripLeadingUtf8Bom } from "../shared/text.ts"
 export {
   ocmmLspBinaryNames,
   ocmmLspPackageBinaryCandidates,
@@ -170,7 +171,7 @@ export async function loadSkillMcpConfig(skillDir: string): Promise<SkillMcpConf
 }
 
 export function parseSkillMcpFrontmatter(markdown: string): SkillMcpConfig {
-  const frontmatter = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  const frontmatter = stripLeadingUtf8Bom(markdown).match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!frontmatter) return { servers: {} }
   return { servers: parseMcpBlock(frontmatter[1] ?? "") }
 }
@@ -333,7 +334,7 @@ function local(command: string[], options?: {
 
 async function readJsonMcpConfig(path: string): Promise<SkillMcpConfig | undefined> {
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown
+    const parsed = JSON.parse(stripLeadingUtf8Bom(await readFile(path, "utf8"))) as unknown
     return mcpConfigFromUnknown(parsed)
   } catch {
     return undefined
@@ -474,7 +475,7 @@ export function loadMcpJsonSync(cwd: string): McpServerMap {
   const path = resolve(cwd, ".mcp.json")
   if (!existsSync(path)) return {}
   try {
-    return mcpConfigFromUnknown(JSON.parse(readFileSync(path, "utf8")) as unknown).servers
+    return mcpConfigFromUnknown(JSON.parse(stripLeadingUtf8Bom(readFileSync(path, "utf8"))) as unknown).servers
   } catch {
     return {}
   }

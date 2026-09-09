@@ -5,11 +5,9 @@ description: Use when receiving code review feedback, before implementing sugges
 
 <!-- v1 fork of superpowers/receiving-code-review.
      Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
-     Adjustments: this skill is self-contained and does not reference excluded
-     skills. Upstream v6.1.1+ changes (de-CLAUDE.md hardcoding, "Circle K" →
-     direct expression) were already absent from this fork's base; v6.2.0's
-     redundant final summary was removed.
-     See docs/v1-maintenance.md for sync rules. -->
+     Adjustments: self-contained technical evaluation remains; findings are
+     evidence, not fixed verdict/receipt gates, and follow-up review is limited to
+     substantively changed inputs. See docs/v1-maintenance.md for sync rules. -->
 
 # Code Review Reception
 
@@ -17,159 +15,92 @@ description: Use when receiving code review feedback, before implementing sugges
 
 Code review requires technical evaluation, not emotional performance.
 
-**Core principle:** Verify before implementing. Ask before assuming. Technical correctness over social comfort.
+**Core principle:** Verify before implementing. Preserve the approved goal and constraints. Technical correctness over social comfort.
 
-## The Response Pattern
+## Evaluate the Feedback
 
-```
-WHEN receiving code review feedback:
+1. Read the complete substantive feedback.
+2. Restate or clarify the technical requirement when needed.
+3. Verify the claim against current code, requirements, and evidence.
+4. Classify it as a product defect, evidence gap, optional improvement, incorrect finding, or decision that changes approved intent.
+5. Apply the smallest justified correction or push back with evidence.
+6. Rerun only affected verification and review surfaces.
 
-1. READ: Complete feedback without reacting
-2. UNDERSTAND: Restate requirement in own words (or ask)
-3. VERIFY: Check against codebase reality
-4. EVALUATE: Technically sound for THIS codebase?
-5. RESPOND: Technical acknowledgment or reasoned pushback
-6. IMPLEMENT: One item at a time, test each
-```
+A reviewer status, verdict label, acknowledgement, or receipt-shaped response is informational. The cited code, reasoning, and evidence determine whether action is required. Reviewer approval is not a substitute for verification.
 
-## Forbidden Responses
+## Clarification and Escalation
 
-**NEVER:**
-- "You're absolutely right!" (performative agreement)
-- "Great point!" / "Excellent feedback!" (performative)
-- "Let me implement that now" (before verification)
+Clarify an item before implementing it when ambiguity would materially change the correction. Independent clear items may proceed while clarification is pending if doing so cannot create rework or violate shared assumptions.
 
-**INSTEAD:**
-- Restate the technical requirement
-- Ask clarifying questions
-- Push back with technical reasoning if wrong
-- Just start working (actions > words)
+Escalate instead of deciding when a proposed response changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, requires an irreversible action, conflicts with the user's approved direction, or would otherwise be a pure guess.
 
-## Handling Unclear Feedback
-
-```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
-
-WHY: Items may be related. Partial understanding = wrong implementation.
-```
-
-**Example:**
-```
-Reviewer: "Fix 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-
-WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
-```
+For a non-material ambiguity, choose a safe reversible interpretation from repository evidence. Record a significant ruling or assumption with its reason and cost if wrong.
 
 ## Source-Specific Handling
 
-### From your human partner
-- **Trusted** - implement after understanding
-- **Still ask** if scope unclear
-- **No performative agreement**
-- **Skip to action** or technical acknowledgment
+### From the user
 
-### From External Reviewers
-```
-BEFORE implementing:
-  1. Check: Technically correct for THIS codebase?
-  2. Check: Breaks existing functionality?
-  3. Check: Reason for current implementation?
-  4. Check: Works on all platforms/versions?
-  5. Check: Does reviewer understand full context?
+- Treat the direction as authoritative after understanding its scope.
+- Ask only when ambiguity changes the deliverable or risk.
+- Do not expand authorization beyond the request's semantics.
+- Skip performative agreement; act or state the technical interpretation.
 
-IF suggestion seems wrong:
-  Push back with technical reasoning
+### From an external reviewer
 
-IF can't easily verify:
-  Say so: "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
+Check whether the suggestion:
 
-IF conflicts with your human partner's prior decisions:
-  Stop and discuss with your human partner first
-```
+- is correct for this codebase and supported platforms;
+- breaks existing behavior or approved acceptance criteria;
+- overlooks why the current implementation exists;
+- adds unused or speculative functionality;
+- conflicts with global constraints or user decisions.
 
-## YAGNI Check for "Professional" Features
+Push back with code, requirements, test results, or protocol/platform evidence when it is wrong. If evidence is unavailable and the decision is material, state the gap and escalate rather than guessing.
 
-```
-IF reviewer suggests "implementing properly":
-  grep codebase for actual usage
+## Product Findings vs Evidence Findings
 
-  IF unused: "This endpoint isn't called. Remove it (YAGNI)?"
-  IF used: Then implement properly
-```
+- **Product defect:** Correct the implementation with the smallest change that preserves approved intent.
+- **Evidence gap:** Add or rerun the evidence needed to establish the claim; do not rewrite product behavior unless investigation reveals a real defect.
+- **Optional improvement:** Record or defer it according to scope and value; it does not block a proven result.
+- **Intent-changing proposal:** Return it to the decision owner rather than silently broadening scope.
 
-## Implementation Order
+Keep real security, data-loss, protocol/API, compatibility, release, and irreversible-operation safeguards intact even when a finding is inconvenient.
 
-```
-FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
-  2. Then implement in this order:
-     - Blocking issues (breaks, security)
-     - Simple fixes (typos, imports)
-     - Complex fixes (refactoring, logic)
-  3. Test each fix individually
-  4. Verify no regressions
-```
+## Implementing Valid Findings
 
-## When To Push Back
+Group related findings when one coherent correction and evidence path covers them. Use focused deterministic tests at real regression seams, or other useful evidence such as typechecks, builds, runtime probes, and inspection where those better prove the outcome. There is no universal RED transcript, scenario count, one-review-per-finding, or full-suite requirement.
 
-Push back when:
-- Suggestion breaks existing functionality
-- Reviewer lacks full context
-- Violates YAGNI (unused feature)
-- Technically incorrect for this stack
-- Legacy/compatibility reasons exist
-- Conflicts with your human partner's architectural decisions
+Deep workers and implementers may choose a minimal evidence-based equivalent correction when it preserves the approved goal, constraints, permissions, and acceptance criteria. Record significant rulings or assumptions, why they were made, and the cost if wrong.
 
-**How to push back:**
-- Use technical reasoning, not defensiveness
-- Ask specific questions
-- Reference working tests/code
-- Involve your human partner if architectural
+## Follow-Up Review
 
-## Acknowledging Correct Feedback
+Rerun only the review lanes affected by substantive changes to code, new files, requirements, acceptance criteria, constraints, or relevant evidence. Do not rerun review for formatting, narration, labels, or unrelated changes.
 
-When feedback IS correct:
-```
-"Fixed. [Brief description of what changed]"
-"Good catch - [specific issue]. Fixed in [location]."
-[Just fix it and show in the code]
+An optional or redundant reviewer that times out, acknowledges without analysis, or adds no evidence does not block a result already established by sufficient current evidence. A review explicitly required by the user or governing process still must be completed, and substantive unresolved high-impact risks remain blockers.
 
-NOT: "You're absolutely right!"
-NOT: "Great point!"
-NOT: "Thanks for catching that!"
-NOT: ANY gratitude expression
-```
+## Git Boundary
 
-**Why no thanks:** Actions speak. Just fix it. The code itself shows you heard the feedback.
+Implementing a review fix does not authorize a commit. A commit request does not authorize push, tag, rebase, or release. A clear user request can authorize its exact Git operation without a redundant confirmation, but permissions never expand to another operation or repository.
 
-**If you catch yourself about to write "Thanks":** DELETE IT. State the fix instead.
+## Communication
 
-## Gracefully Correcting Your Pushback
+Avoid performative agreement such as "You're absolutely right" or "Great point." Prefer:
 
-If you pushed back and were wrong:
-```
-"You were right - I checked [X] and it does [Y]. Implementing now."
-"Verified this and you're correct. My initial understanding was wrong because [reason]. Fixing."
+- `Fixed <specific issue> in <location>; <evidence>.`
+- `Verified the finding against <source>; the minimal correction is <change>.`
+- `This would conflict with <requirement/evidence>; I recommend no change because <reason>.`
+- `I cannot verify <claim> without <missing evidence>; this is material because <impact>.`
 
-NOT: Long apology
-NOT: Defending why you pushed back
-NOT: Over-explaining
-```
-
-State the correction factually and move on.
+If earlier pushback was wrong, correct it factually and proceed without a long apology.
 
 ## Common Mistakes
 
-| Mistake | Fix |
-|---------|-----|
-| Performative agreement | State requirement or just act |
-| Blind implementation | Verify against codebase first |
-| Batch without testing | One at a time, test each |
-| Assuming reviewer is right | Check if breaks things |
-| Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
-| Can't verify, proceed anyway | State limitation, ask for direction |
+| Mistake | Better response |
+|---|---|
+| Performative agreement | State the technical interpretation or action |
+| Blind implementation | Verify against current code and requirements |
+| Treating a label as proof | Evaluate cited evidence and actual changes |
+| Broadening scope | Preserve the approved goal and constraints |
+| Repeating every review | Rerun only substantively affected review |
+| Guessing through material risk | Escalate the decision |
+| Treating optional review as a gate | Rely on sufficient current evidence unless review is required |

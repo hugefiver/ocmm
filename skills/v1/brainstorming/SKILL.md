@@ -1,166 +1,93 @@
 ---
 name: brainstorming
-description: "Use before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "Use before creative or materially ambiguous work to clarify outcomes, constraints, risks, and an appropriate implementation direction."
 ---
 
 <!-- v1 fork of superpowers/brainstorming.
      Upstream: obra/superpowers v6.3.0.
-     Adjustments: removed visual-companion section (not applicable to ocmm's
-     declarative prompt model); removed spec-document-reviewer-prompt reference
-     (spec review is handled by receiving-code-review skill in v1); replaced
-     "invoke writing-plans skill" language to match v1's auto-injected skill
-     model; step 2 restructured to conditional clarifier consultation on
-     ambiguity; step 7 spec approval made conditional (user delegation OR
-     self-review unambiguous pass); HARD-GATE approval sources expanded to
-     three (user approval / self-review pass / user delegation); adapted v6.3.0
-     spike/bounded/architectural process scaling without importing visual
-     companion or upstream harness assumptions. See docs/v1-maintenance.md for
-     sync rules. -->
+     Adjustments: removed visual-companion and excluded-skill references;
+     discovery and design now scale with actual uncertainty and risk. A clear,
+     authorized task does not require a separate design gate, rigid checklist,
+     fixed option count, or repeated approval loop. See docs/v1-maintenance.md
+     for sync rules. -->
 
-# Brainstorming Ideas Into Designs
+# Brainstorming Outcomes Into Designs
 
-Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
+Use discovery and design to remove material uncertainty before implementation. The durable objective is a shared understanding of the goal, constraints, acceptance criteria, interfaces, risks, and ideal end state—not completion of a prescribed ceremony.
 
-Start by understanding the current project context, then classify how much process the request needs. Resolve ambiguity (consulting the `clarifier` agent when needed), present the appropriately scaled design, and obtain approval before implementation.
+## Authorization and Intent
 
-<HARD-GATE>
-Do NOT write any code, scaffold any project, or take any implementation action until the design has been approved. Approval is granted by ANY ONE of:
-  (a) explicit user approval of the presented design, OR
-  (b) self-review (step 6) passing all four checks with no unresolved ambiguity, OR
-  (c) explicit user delegation — "你自己决定" / "你看着办" / "you decide" (full session), OR
-      "无需批准自行继续" / "proceed without approval" (current node only), OR
-      "review N 次就下一步" / "review N times then proceed" (caps the plan-critic loop at N iterations).
-This applies to EVERY path regardless of perceived simplicity. The artifact scales with the task; the approval gate does not disappear.
-</HARD-GATE>
+Start from the user's request and current project evidence:
 
-## Path Classification
+- Identify the requested goal and ideal end state.
+- Preserve stated constraints, permissions, exclusions, and acceptance criteria.
+- Treat a materially clear imperative as authorization to implement that stated scope. Do not require a separate design presentation or reapproval merely because implementation follows discovery.
+- Honor an explicit request for a strict process, design review, approval checkpoint, artifact, or verification step.
+- Ask or obtain specific authorization when a decision changes the requested scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, triggers an irreversible/destructive action, or causes an external side effect that requires consent.
 
-Before detailed questions, classify the request and say the path out loud so the user can override it:
+An instruction to design, investigate, implement, or fix does not authorize unrelated work. Git authorization is operation-specific: implement/fix is not commit; commit is not push, tag, rebase, or release. A clear request for an exact Git operation authorizes that operation without a redundant confirmation, but never expands to another operation, repository, branch, or release action.
 
-- **Spike** — a feasibility probe or investigation whose durable output is an answer/recommendation, not kept production code. Present the question and probe plan in 2-3 sentences, obtain approval or use delegated approval, investigate as cheaply as correctness allows, and label any exploratory code as throwaway.
-- **Bounded** — a well-scoped change to an existing flow in this repository. The flow must already exist to read; familiarity with the kind of app is not enough. Ask only material clarifying questions, present a short in-chat design (approach, files touched, tests), obtain approval or use delegated/self-review approval, then proceed through the normal development workflow. No spec file or file-backed implementation plan is required unless complexity discovered during exploration upgrades the path.
-- **Architectural** — new projects, new subsystems, interface-shaping changes, cross-module work, or anything whose boundaries/dependencies remain unclear after discovery. Use the full design spec → plan → implementation flow.
+## Choose Proportional Discovery
 
-When in doubt between paths, take the heavier one. Hidden complexity discovered mid-task upgrades the path; stop, say so, and step up. Nothing downgrades mid-task.
+Choose and revise the path based on actual uncertainty, coordination, and risk. Path labels are planning aids, not gates, and may become lighter or heavier as evidence resolves or reveals complexity.
 
-## Anti-Pattern: "Too Simple To Need Approval"
+- **Direct/bounded:** The goal, affected flow, constraints, and acceptance are materially clear. Read enough local context to match patterns, state any consequential assumption, and proceed without a separate design approval.
+- **Spike:** Feasibility or missing facts determine the path. Use the cheapest valid investigation and return a recommendation; exploratory code is throwaway unless the user authorizes implementation.
+- **Architectural:** Boundaries, interfaces, dependencies, or consequential trade-offs remain unresolved. Explore enough to make those decisions explicit, then present the useful design or choices before implementation when user input is materially required.
 
-Every path presents intent before implementation. A todo list, a single-function utility, a config change — the design may be two sentences in chat, but you MUST present it and obtain approval through one of this fork's allowed approval sources. "Simple" tasks are where unexamined assumptions cause the most wasted work.
+Do not default upward merely because work is multi-file, creative, or unfamiliar. Do not default downward when concrete security, data-loss, compatibility, protocol/API, migration, release, or irreversible-operation risks require additional care.
 
-## User Delegation Forms
+## Discovery
 
-The user may delegate approval authority at any point. Delegation is honored for the scope specified:
+Inspect only enough project context to resolve material questions:
 
-| Form | Scope | Effect |
-|---|---|---|
-| "你自己决定" / "你看着办" / "you decide" | Full session | Skip all approval gates (spec and plan) |
-| "无需批准自行继续" / "proceed without approval" | Current node only | Skip the current approval gate, then resume normal approval |
-| "review N 次就下一步" / "review N times then proceed" | plan-critic loop | Cap the writing-plans plan-critic loop at N iterations; proceed after N even if not unambiguous |
+- current behavior and relevant local patterns;
+- affected boundaries, dependencies, and interfaces;
+- constraints and acceptance evidence;
+- plausible failure, rollback, compatibility, security, data, and operational risks;
+- independent work that can form separate waves.
 
-## Checklist
+Use a clarifier or ask the user only when missing information would change the deliverable, create material rework, or cross an escalation boundary. Ask the smallest useful question in the clearest form; there is no required question count, option count, or multiple-choice format.
 
-You MUST create tasks for the items on the selected path and complete them in order.
+## Explore Approaches When They Matter
 
-**Common first steps:**
+Present alternatives only when there is a real decision with meaningful trade-offs. Give as many viable approaches as the decision warrants, including one when the evidence supports a single clear path. Explain the recommendation using project evidence, constraints, reversibility, risk, and cost.
 
-1. **Explore project context** — check files, docs, recent commits
-2. **First discovery wave** — before deciding decomposition or whether a planner is needed, gather the facts that let you size the work: read the relevant files, search for related code/patterns, and surface unknowns. Discovery happens *before* decomposition and planner-trigger decisions, not after.
-3. **Classify path** — spike, bounded, or architectural; announce it and why.
+Do not manufacture alternatives, architecture, or refactoring to make the process appear thorough. Follow established patterns and apply YAGNI.
 
-**Spike path:**
-4. **Present probe plan** — 2-3 sentences describing the question, cheapest valid check, and expected output
-5. **Obtain approval** — explicit, delegated, or unambiguous self-review approval as allowed by this fork
-6. **Investigate and report** — recommendation only; any code remains throwaway unless the user asks for a follow-up implementation
+## Outcome-Oriented Design
 
-**Bounded path:**
-4. **Ambiguity assessment + conditional clarifier consultation** — assess purpose/constraints/success criteria; if ambiguous, consult `clarifier` and use its Questions for User
-5. **Present short design in chat** — approach, files touched, data/error flow if relevant, and tests/verification
-6. **Conditional design approval** — proceed only under explicit approval, delegation, or self-review with no unresolved ambiguity
-7. **Transition to implementation** — use the normal development workflow; no spec or plan document unless the work upgraded
+Scale the design artifact to the work. It may be a concise statement in chat, a contextual task outline, or a durable spec when coordination and risk justify one. A useful design makes the following discoverable without requiring fixed sections or order:
 
-**Architectural path:**
-4. **Ambiguity assessment + conditional clarifier consultation** — assess the requirement; if purpose/constraints/success criteria are all clear, skip to step 5; otherwise consult the `clarifier` agent and use its Questions for User to drive user Q&A
-5. **Propose 2-3 approaches** — with trade-offs and your recommendation
-6. **Present design** — in sections scaled to their complexity, get user approval after each section
-7. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-9. **Conditional spec approval** — skip user approval if delegation applies OR self-review passed with no ambiguity; otherwise present spec to user for approval
-10. **Transition to implementation** — proceed to the writing-plans skill
+- goal and ideal end state;
+- scope, exclusions, constraints, permissions, and acceptance criteria;
+- current state and proposed approach;
+- dependencies, interfaces, data/error flow, and ownership boundaries;
+- material risks, rollback or safeguards where relevant;
+- wave goals and useful acceptance evidence.
 
-## The Process
+Organize waves by independently meaningful outcomes and dependency order. For each wave, state what becomes true and what evidence would demonstrate it. Do not require a task list, tiny sequential steps, or completion in a fixed order when work can safely proceed directly or in parallel.
 
-**Understanding the idea:**
+## Bounded Rulings and Escalation
 
-- Check out the current project state first (files, docs, recent commits)
-- Before asking detailed questions, assess scope: if the request describes multiple independent subsystems, flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
-- If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
-- For appropriately-scoped projects, classify the path after the first discovery wave and follow that path's remaining steps.
+Resolve non-material ambiguity from the approved goal and repository evidence. Choose the smallest safe, reversible option that preserves the user's goal, constraints, permissions, and acceptance criteria.
 
-**Ambiguity assessment + conditional clarifier consultation (step 3):**
+Record significant rulings and assumptions in the active tracking surface or final report with:
 
-1. Assess whether the requirement has ambiguity in purpose, constraints, or success criteria.
-2. If everything is clear, skip step 3 entirely and proceed to step 4.
-3. If ambiguity exists, dispatch the `clarifier` agent with the requirement and project context. The clarifier returns: Intent Classification, Pre-Analysis Findings, Questions for User (max 3), Identified Risks, Directives for planner, Recommended Approach.
-4. Use the clarifier's Questions for User to drive user Q&A — one question at a time, multiple choice preferred when possible. If the clarifier returns no questions, proceed to step 4.
-5. Focus on understanding: purpose, constraints, success criteria
+- the decision or assumption;
+- the evidence or reason;
+- the cost if wrong.
 
-**Exploring approaches:**
+Escalate rather than guess when a choice changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, creates an irreversible effect, conflicts with a specific user mandate, or has no evidence-based path. Strict process is otherwise justified only by an explicit user request or concrete risk.
 
-- Propose 2-3 different approaches with trade-offs
-- Present options conversationally with your recommendation and reasoning
-- Lead with your recommended option and explain why
-- YAGNI ruthlessly: remove features and complexity that do not serve the stated goal
+## Review and Approval
 
-**Presenting the design:**
+Self-review a material design for requirement coverage, internal consistency, interfaces, risks, and acceptance evidence. Fix clear issues directly.
 
-- Once you believe you understand what you're building, present the design
-- Scale each section to its complexity: a few sentences if straightforward, up to 200-300 words if nuanced
-- Ask after each section whether it looks right so far
-- Cover: architecture, components, data flow, error handling, testing
-- Be ready to go back and clarify if something doesn't make sense
+Request user review or approval only when their decision is needed, they explicitly requested the checkpoint, or a governing high-risk boundary requires it. Do not require approval section-by-section, repeat review because wording changed, or restart a design loop after a non-substantive edit. If substantive inputs change, revisit only the affected decisions and evidence.
 
-**Design for isolation and clarity:**
+A saved spec is not mandatory for a clear bounded change. Create one when the user requests it or durable coordination materially benefits from it. Do not create a separate design/spec commit by default.
 
-- Break the system into smaller units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently
-- For each unit, you should be able to answer: what does it do, how do you use it, and what does it depend on?
-- Can someone understand what a unit does without reading its internals? Can you change the internals without breaking consumers? If not, the boundaries need work.
-- Smaller, well-bounded units are also easier to work with - you reason better about code you can hold in context at once, and your edits are more reliable when files are focused. When a file grows large, that's often a signal that it's doing too much.
+## Implementation Handoff
 
-**Working in existing codebases:**
-
-- Explore the current structure before proposing changes. Follow existing patterns.
-- Where existing code has problems that affect the work (e.g., a file that's grown too large, unclear boundaries, tangled responsibilities), include targeted improvements as part of the design - the way a good developer improves code they're working in.
-- Don't propose unrelated refactoring. Stay focused on what serves the current goal.
-
-## After the Design (Architectural Path)
-
-**Documentation:**
-
-- Write the validated design (spec) to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-- Commit the design document to git
-
-**Spec Self-Review (step 6):**
-After writing the spec document, look at it with fresh eyes:
-
-1. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them.
-2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
-3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
-4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
-
-Fix any issues inline. No need to re-review — just fix and move on.
-
-**Conditional Spec Approval (step 7):**
-After the spec self-review loop passes, determine whether user approval is required:
-
-- **Auto-skip** if ANY of:
-  - The user has delegated approval (any form in the table above).
-  - Self-review ambiguity check (item 4) passed with no unresolved ambiguity.
-- **Require user approval** otherwise. Present the spec:
-
-  > "Spec written and committed to `<path>`. Please review it and let me know if you want to make any changes before we start writing out the implementation plan."
-
-  Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves.
-
-**Implementation:**
-
-- Proceed to the writing-plans skill to create a detailed implementation plan
+Once the goal is authorized and material uncertainty is resolved, proceed through the lightest suitable implementation workflow. Hand off the goal, ideal end state, constraints, acceptance criteria, dependencies/interfaces, material risks, useful evidence, and recorded rulings. Use a file-backed plan or delegated workers only when they add coordination or execution value.

@@ -5,177 +5,88 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 <!-- v1 fork of superpowers/dispatching-parallel-agents.
      Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
-     Adjustments: synced upstream platform-agnostic dispatch pseudocode
-     (TS Task() → text Subagent (general-purpose) + parallel/sequential
-     dispatch rule). No references to excluded skills.
-     See docs/v1-maintenance.md for sync rules. -->
+     Adjustments: platform-agnostic parallel dispatch is retained while worker
+     briefs, evidence, integration, and escalation are outcome-oriented and do
+     not impose mandatory review or Git ceremony. See docs/v1-maintenance.md for
+     sync rules. -->
 
 # Dispatching Parallel Agents
 
 ## Overview
 
-You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
+Parallelize independent work only when isolated workers can make useful progress without sharing mutable state, editing overlapping files, or depending on one another's results.
 
-When you have multiple unrelated failures (different test files, different subsystems, different bugs), investigating them sequentially wastes time. Each investigation is independent and can happen in parallel.
+**Core principle:** Parallelize independent outcome domains, then integrate against the shared goal and constraints.
 
-**Core principle:** Dispatch one agent per independent problem domain. Let them work concurrently.
+Delegation is optional. If direct execution is smaller than preparing and reconciling worker briefs, do the work directly. If tasks share a root cause or interface decision, investigate or sequence them together.
 
-## When to Use
+## Independence Check
 
-```dot
-digraph when_to_use {
-    "Multiple failures?" [shape=diamond];
-    "Are they independent?" [shape=diamond];
-    "Single agent investigates all" [shape=box];
-    "One agent per problem domain" [shape=box];
-    "Can they work in parallel?" [shape=diamond];
-    "Sequential agents" [shape=box];
-    "Parallel dispatch" [shape=box];
+Parallel work is appropriate when:
 
-    "Multiple failures?" -> "Are they independent?" [label="yes"];
-    "Are they independent?" -> "Single agent investigates all" [label="no - related"];
-    "Are they independent?" -> "Can they work in parallel?" [label="yes"];
-    "Can they work in parallel?" -> "Parallel dispatch" [label="yes"];
-    "Can they work in parallel?" -> "Sequential agents" [label="no - shared state"];
-}
-```
+- there are at least two independently understandable goals;
+- file/resource ownership does not overlap;
+- no task consumes an output another task must first produce;
+- workers do not mutate the same external service, environment, or test fixture;
+- each result can be evaluated with useful evidence before integration.
 
-**Use when:**
-- 3+ test files failing with different root causes
-- Multiple subsystems broken independently
-- Each problem can be understood without context from others
-- No shared state between investigations
+Do not parallelize related failures, exploratory debugging with an unknown shared cause, coupled architecture decisions, or work whose safety depends on global ordering.
 
-**Don't use when:**
-- Failures are related (fix one might fix others)
-- Need to understand full system state
-- Agents would interfere with each other
+## Create Focused Worker Briefs
 
-## The Pattern
+Give each worker, in whatever order is clearest:
 
-### 1. Identify Independent Domains
+- its goal and ideal end state;
+- acceptance criteria and useful evidence;
+- current context, dependencies, and interfaces;
+- exclusive files/resources or scope boundaries;
+- global constraints and permissions;
+- material risks or prior rulings.
 
-Group failures by what's broken:
-- File A tests: Tool approval flow
-- File B tests: Batch completion behavior
-- File C tests: Abort functionality
+Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, significant assumptions or rulings, and unresolved concerns. A status label or acknowledgement is informational, not evidence.
 
-Each domain is independent - fixing tool approval doesn't affect abort tests.
+Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. They record significant deviations with reasons and cost if wrong. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
 
-### 2. Create Focused Agent Tasks
+## Dispatch Concurrently
 
-Each agent gets:
-- **Specific scope:** One test file or subsystem
-- **Clear goal:** Make these tests pass
-- **Constraints:** Don't change other code
-- **Expected output:** Summary of what you found and fixed
+Use the host's currently callable parallel-dispatch mechanism. Submit calls together only when its schema supports concurrency; otherwise do not imply that sequential calls run in parallel.
 
-### 3. Dispatch in Parallel
+Before dispatch, verify ownership boundaries and side-effect isolation. Do not allow workers to expand their own permissions or spawn peer implementation, planning, coordination, Reviewer, or Oracle seats.
 
-Emit all dispatch calls in a single response. Multiple dispatch calls in one response execute concurrently; one dispatch call per response executes sequentially.
+## Reconcile and Integrate
 
-```
-Subagent (general-purpose): "Fix agent-tool-abort.test.ts failures — [scope, constraints, expected output]"
-Subagent (general-purpose): "Fix batch-completion-behavior.test.ts failures — [scope, constraints, expected output]"
-Subagent (general-purpose): "Fix tool-approval-race-conditions.test.ts failures — [scope, constraints, expected output]"
-// All three dispatched in one response → run concurrently
-```
+As workers return:
 
-### 4. Review and Integrate
+- inspect each result's actual diff and newly created files;
+- compare it to that worker's goal and acceptance criteria;
+- evaluate or run useful targeted evidence;
+- check cross-result interfaces, assumptions, and conflicts;
+- record significant integration rulings and their cost if wrong;
+- verify the combined result against the overall ideal end state.
 
-When agents return:
-- Read each summary and captured evidence
-- Inspect touched files/diff for each agent's scope
-- Verify fixes don't conflict
-- Run targeted tests for each changed area when available, then run the full suite
-- Integrate all changes
+This is an integration check, not a mandatory full review per worker or wave. Request focused or whole-change review only when risk, uncertainty, user instruction, or a governing process makes it useful.
 
-This step is a completion/integration check: confirm each agent finished its scope, detect conflicts, and verify the combined result. It is not a prompt to dispatch a full spec-reviewer or code-quality-reviewer for each agent. The final acceptance review over the whole change set happens after all tasks are integrated.
+An optional or redundant child that times out, returns only an acknowledgement, or adds no evidence does not block a result already proven by sufficient evidence. Required tasks and real security, data-loss, compatibility, protocol/API, or irreversible-operation risks remain blockers until resolved or explicitly decided.
 
-## Agent Prompt Structure
+## Corrections and Review
 
-Good agent prompts are:
-1. **Focused** - One clear problem domain
-2. **Self-contained** - All context needed to understand the problem
-3. **Specific about output** - What should the agent return?
+When a result needs a bounded correction, continue the same worker session if its context is valid; otherwise issue a fresh focused brief. Rerun only evidence or reviews affected by substantive changes. Formatting, narration, status wording, or unrelated edits do not require a new review.
 
-```markdown
-Fix the 3 failing tests in src/agents/agent-tool-abort.test.ts:
+Do not impose a universal RED gate, test transcript, scenario count, full-suite run, per-task reviewer, or commit. Select evidence proportionate to the plausible regression and integration risk.
 
-1. "should abort tool with partial output capture" - expects 'interrupted at' in message
-2. "should handle mixed completed and aborted tools" - fast tool aborted instead of completed
-3. "should properly track pendingToolCount" - expects 3 results but gets 0
+## Git Boundary
 
-These are timing/race condition issues. Your task:
-
-1. Read the test file and understand what each test verifies
-2. Identify root cause - timing issues or actual bugs?
-3. Fix by:
-   - Replacing arbitrary timeouts with event-based waiting
-   - Fixing bugs in abort implementation if found
-   - Adjusting test expectations if testing changed behavior
-
-Do NOT just increase timeouts - find the real issue.
-
-Return: Summary of what you found and what you fixed.
-```
+Parallel workers do not perform Git writes unless the user specifically authorizes the exact operation and effective policy permits it. A clear request authorizes only its stated operation: implement/fix is not commit, and commit is not push, tag, rebase, or release. Authorization does not expand across repositories or operations.
 
 ## Common Mistakes
 
-**❌ Too broad:** "Fix all the tests" - agent gets lost
-**✅ Specific:** "Fix agent-tool-abort.test.ts" - focused scope
-
-**❌ No context:** "Fix the race condition" - agent doesn't know where
-**✅ Context:** Paste the error messages and test names
-
-**❌ No constraints:** Agent might refactor everything
-**✅ Constraints:** "Do NOT change production code" or "Fix tests only"
-
-**❌ Vague output:** "Fix it" - you don't know what changed
-**✅ Specific:** "Return summary of root cause and changes"
-
-## When NOT to Use
-
-**Related failures:** Fixing one might fix others - investigate together first
-**Need full context:** Understanding requires seeing entire system
-**Exploratory debugging:** You don't know what's broken yet
-**Shared state:** Agents would interfere (editing same files, using same resources)
-
-## Real Example from Session
-
-**Scenario:** 6 test failures across 3 files after major refactoring
-
-**Failures:**
-- agent-tool-abort.test.ts: 3 failures (timing issues)
-- batch-completion-behavior.test.ts: 2 failures (tools not executing)
-- tool-approval-race-conditions.test.ts: 1 failure (execution count = 0)
-
-**Decision:** Independent domains - abort logic separate from batch completion separate from race conditions
-
-**Dispatch:**
-```
-Agent 1 → Fix agent-tool-abort.test.ts
-Agent 2 → Fix batch-completion-behavior.test.ts
-Agent 3 → Fix tool-approval-race-conditions.test.ts
-```
-
-**Results:**
-- Agent 1: Replaced timeouts with event-based waiting
-- Agent 2: Fixed event structure bug (threadId in wrong place)
-- Agent 3: Added wait for async tool execution to complete
-
-**Integration:** All fixes independent, no conflicts, full suite green
-
-## Verification
-
-After agents return:
-1. **Read each summary and evidence** - Understand what changed and what proof the agent captured
-2. **Inspect touched files/diff** - Confirm the changes match each agent's scope
-3. **Check for conflicts** - Did agents edit the same code or make incompatible assumptions?
-4. **Run targeted checks, then full suite** - Verify each changed area when possible, then verify all fixes work together
-5. **Spot check** - Agents can make systematic errors
-
-Treat this as a completion/integration check across the parallel tasks, not as a per-agent full reviewer loop. The parent workflow (e.g., subagent-driven-development) performs the final acceptance review after all tasks are integrated.
+- **Too broad:** one worker owns several unrelated domains.
+- **False independence:** workers touch the same files, interface, fixture, or external state.
+- **Vague outcome:** the brief says "fix it" without criteria or useful evidence.
+- **No constraints:** a worker can accidentally broaden behavior or permissions.
+- **Ceremonial fan-out:** workers or reviewers are dispatched only to satisfy a count.
+- **Summary-only integration:** the parent trusts claims without inspecting changes and evidence.
+- **Guessing through risk:** a worker silently decides scope, safety, data, protocol/API, permission, or irreversible behavior.
 
 ## Codex Compatibility
 

@@ -6,7 +6,7 @@
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
- * The `workflow` parameter ('omo' | 'v1') selects the subdirectory.
+ * The `workflow` parameter ('v1' | 'codex') selects the subdirectory.
  * Synchronous, runs once at plugin init, caches in memory. Missing files are
  * tolerated (skipped with a debug log).
  *
@@ -24,7 +24,7 @@ import { log } from "../shared/logger.ts"
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
-export type Workflow = "omo" | "v1" | "codex"
+export type Workflow = "v1" | "codex"
 
 type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gpt-6-astra" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"

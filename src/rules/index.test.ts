@@ -15,8 +15,8 @@ function write(path: string, content: string): void {
   writeFileSync(path, content)
 }
 
-test("parseRuleMarkdown extracts supported frontmatter fields", () => {
-  const parsed = parseRuleMarkdown(`---
+test("parseRuleMarkdown extracts supported frontmatter fields after a leading BOM", () => {
+  const parsed = parseRuleMarkdown(`\uFEFF---
 description: TypeScript rules
 globs:
   - "**/*.ts"

@@ -205,13 +205,15 @@ const quoteTrimRegex = /^["']|["']$/g
 
 const COMMIT_GUARD_TEXT = `## Commit Guard
 
-You must not execute git commit, git push, git tag, or any other git write
-command on your own in project or user repositories. All normal version
-control writes require explicit user permission in the conversation. Git writes
-inside disposable git repositories under the OS temp directory are allowed for
-isolated tests, repros, and fixtures. If a task needs committing outside a temp
-repository, state what should be committed and ask the user to approve or
-perform it.`
+Git writes in project or user repositories require user authorization for the
+specific operation. A request whose meaning necessarily includes that operation
+is authorization; do not ask again for the same authorized action. Implementing
+or fixing does not authorize committing. A commit request does not authorize
+push, tag, rebase, or release, and one authorization does not expand to other
+operations or scope. If authorization is absent or unclear, ask before writing.
+Do not separately commit specs or plans by default. Git writes inside disposable
+git repositories under the OS temp directory are allowed for isolated tests,
+repros, and fixtures.`
 
 type SystemMutation = "array" | "string" | "initialized" | null
 

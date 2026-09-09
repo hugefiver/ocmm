@@ -20,8 +20,15 @@ import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { z } from "zod"
 import { AgentEntrySchema, defaultConfig, OcmmConfigSchema, ProfileEntrySchema, type OcmmConfig } from "./schema.ts"
-import { tolerantParse, tolerantParseLayers, type TolerantParseLayer } from "./tolerant-parse.ts"
+import {
+  tolerantParse,
+  tolerantParseLayers,
+  type RemovedUnknownKey,
+  type TolerantParseLayer,
+} from "./tolerant-parse.ts"
 import { log } from "../shared/logger.ts"
+import { stripLeadingUtf8Bom } from "../shared/text.ts"
+import { createConfigDiagnostics, type ConfigDiagnostics } from "./diagnostics.ts"
 import { deepMerge, isPlainObject, mergeProfileOverlay } from "./merge.ts"
 import { materializeQualifiedAgentAliases } from "./profile-aliases.ts"
 import type { ProfileDescriptor, ProfileDescriptorError, ProfileDescriptorMap, ProfileSource } from "./profile-types.ts"
@@ -57,6 +64,7 @@ function projectConfigDir(cwd: string, host: ConfigHost): string {
 
 /** Strip // line and /* block comments + trailing commas. Cheap, sufficient for our config. */
 export function stripJsoncCommentsAndTrailingCommas(input: string): string {
+  input = stripLeadingUtf8Bom(input)
   let out = ""
   let i = 0
   let inStr: '"' | "'" | null = null
@@ -195,6 +203,19 @@ export function loadProfileDescriptorsFromDir(
   dir: string,
   source: Exclude<ProfileSource, "inline">,
 ): Map<string, ProfileDescriptor> {
+  const diagnostics = createConfigDiagnostics()
+  try {
+    return loadProfileDescriptorsFromDirWithDiagnostics(dir, source, diagnostics)
+  } finally {
+    diagnostics.flush()
+  }
+}
+
+function loadProfileDescriptorsFromDirWithDiagnostics(
+  dir: string,
+  source: Exclude<ProfileSource, "inline">,
+  diagnostics: ConfigDiagnostics,
+): Map<string, ProfileDescriptor> {
   let entries: string[]
   try {
     entries = readdirSync(dir)
@@ -228,7 +249,7 @@ export function loadProfileDescriptorsFromDir(
       continue
     }
 
-    const prepared = prepareProfileDescriptorValue(name, path, parsed)
+    const prepared = prepareProfileDescriptorValue(name, path, parsed, diagnostics)
     descriptor.value = prepared.value
     if (prepared.error) descriptor.error = prepared.error
     else rawDirectoryProfileValues.set(descriptor, parsed)
@@ -241,6 +262,7 @@ function prepareProfileDescriptorValue(
   name: string,
   source: string,
   value: unknown,
+  diagnostics: ConfigDiagnostics,
 ): { value: unknown; error?: ProfileDescriptorError } {
   const structuralError = profileDescriptorStructuralError(name, source, value)
   if (structuralError) return { value, error: structuralError }
@@ -250,7 +272,13 @@ function prepareProfileDescriptorValue(
   } catch (err) {
     return { value, error: { kind: "shape", message: (err as Error).message } }
   }
-  return sanitizeProfileDescriptorLayers(name, source, selectedProfileLayers([prepared]))
+  return sanitizeProfileDescriptorLayers(
+    name,
+    source,
+    selectedProfileLayers([prepared], diagnostics),
+    diagnostics,
+    [{ source }],
+  )
 }
 
 function profileDescriptorStructuralError(
@@ -271,8 +299,11 @@ function sanitizeProfileDescriptorLayers(
   name: string,
   source: string,
   layers: readonly TolerantParseLayer[],
+  diagnostics: ConfigDiagnostics,
+  diagnosticLayers: readonly DiagnosticLayer[],
 ): { value: unknown; error?: ProfileDescriptorError } {
   const result = tolerantParseLayers(ProfileEntrySchema, layers, mergeConfigLayers)
+  collectLayerDiagnostics(diagnostics, result.unknownKeys, diagnosticLayers)
   if (result.success) return { value: mergeConfigLayers(result.layers) }
   return {
     value: mergeConfigLayers(layers),
@@ -293,6 +324,7 @@ function reviewWarn(message: string): void {
 
 type ConfigSources = LoadedConfig["sources"]
 type RawConfigLayer = { source: string; value: unknown }
+type DiagnosticLayer = { source: string; prefix?: readonly (string | number)[] }
 type LocatedConfigLayers = {
   cwd: string
   host: ConfigHost
@@ -349,6 +381,7 @@ function deriveActiveProfileFromRawLayers(rawLayers: readonly RawConfigLayer[]):
 
 export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
   const { cwd, host, sources, rawLayers } = locateConfigLayers(opts)
+  const diagnostics = createConfigDiagnostics()
 
   try {
     const emittedReviewWarnings = new Set<string>()
@@ -359,8 +392,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
     }
     const prepared = prepareConfigLayers(rawLayers, warnReviewOnce)
     const baseLayers: TolerantParseLayer[] = prepared.layers.map((layer) => ({
-      value: cleanAgentEntries(layer.value),
+      value: cleanAgentEntries(layer.value, diagnostics, layer.source),
     }))
+    const baseDiagnosticLayers = prepared.layers.map((layer) => ({ source: layer.source }))
 
     const profileSelection = tolerantParseLayers(ProfileSelectionSchema, baseLayers, mergeConfigLayers)
     const selectedBaseLayers = profileSelection.success ? profileSelection.layers : baseLayers
@@ -404,7 +438,16 @@ export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
 
     assertSelectedReviewProfileCompatible(prepared.baseOrigins, selectedContributions)
 
-    const profileLayers = selectedProfileLayers(selectedContributions)
+    const inlineContributions = new Set(prepared.inlineProfiles.get(activeProfile ?? "") ?? [])
+    const profileDiagnosticLayers = selectedContributions.map((profile) => ({
+      source: profile.source,
+      ...(inlineContributions.has(profile) ? { prefix: ["profiles", profile.name] } : {}),
+    }))
+    const profileLayers = selectedProfileLayers(
+      selectedContributions,
+      diagnostics,
+      (profile) => inlineContributions.has(profile) ? ["profiles", profile.name] : [],
+    )
     if (activeProfile && profileLayers.length === 0) {
       log.warn(`active profile "${activeProfile}" not found in profiles; ignored`)
     }
@@ -414,6 +457,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
       [...selectedBaseLayers, ...profileLayers],
       mergeConfigLayers,
     )
+    collectLayerDiagnostics(diagnostics, parsed.unknownKeys, [...baseDiagnosticLayers, ...profileDiagnosticLayers])
     if (!parsed.success) {
       log.warn(
         `ocmm config validation failed; using defaults. issues:`,
@@ -431,6 +475,8 @@ export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
       return { config: defaultConfig(), sources, ...(activeProfile ? { activeProfile } : {}) }
     }
     throw err
+  } finally {
+    diagnostics.flush()
   }
 }
 
@@ -445,8 +491,9 @@ export function loadOpenCodePluginConfig(
   options: Omit<LoadConfigOptions, "host"> = {},
 ): LoadedConfig {
   const located = locateConfigLayers({ ...options, host: "opencode" })
+  const diagnostics = createConfigDiagnostics()
   try {
-    return loadOpenCodePluginConfigStrict(located)
+    return loadOpenCodePluginConfigStrict(located, diagnostics)
   } catch (err) {
     if (!(err instanceof PluginProfilePipelineError) && !(err instanceof ReviewConfigConflictError)) {
       throw err
@@ -454,10 +501,12 @@ export function loadOpenCodePluginConfig(
     const activeProfile = deriveActiveProfileFromRawLayers(located.rawLayers)
     log.warn(`ocmm opencode plugin config validation failed; using defaults: ${(err as Error).message}`)
     return { config: defaultConfig(), sources: located.sources, ...(activeProfile ? { activeProfile } : {}) }
+  } finally {
+    diagnostics.flush()
   }
 }
 
-function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedConfig {
+function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers, diagnostics: ConfigDiagnostics): LoadedConfig {
   const emittedReviewWarnings = new Set<string>()
   const warnReviewOnce = (message: string): void => {
     if (emittedReviewWarnings.has(message)) return
@@ -471,16 +520,29 @@ function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedCon
   // Do not replace this with safeParse: one invalid field must be discarded without erasing valid
   // siblings or lower layers. Only structural/semantic plugin-pipeline failures below are atomic.
   const baseParsed = tolerantParseLayers(OcmmConfigSchema, baseLayers, mergeConfigLayers)
+  collectLayerDiagnostics(
+    diagnostics,
+    baseParsed.unknownKeys,
+    prepared.layers.map((layer) => ({ source: layer.source })),
+  )
   if (!baseParsed.success) {
     throw new PluginProfilePipelineError("base config validation could not be recovered")
   }
 
   const descriptors = composeProfileDescriptors(
-    inlineProfileDescriptorsFromPreparedProfiles(prepared.inlineProfiles),
+    inlineProfileDescriptorsFromPreparedProfiles(prepared.inlineProfiles, diagnostics),
     located.includeUser
-      ? loadProfileDescriptorsFromDir(join(userConfigDir("opencode"), "ocmm-profiles"), "user-directory")
+      ? loadProfileDescriptorsFromDirWithDiagnostics(
+          join(userConfigDir("opencode"), "ocmm-profiles"),
+          "user-directory",
+          diagnostics,
+        )
       : new Map(),
-    loadProfileDescriptorsFromDir(join(projectConfigDir(located.cwd, "opencode"), "ocmm-profiles"), "project-directory"),
+    loadProfileDescriptorsFromDirWithDiagnostics(
+      join(projectConfigDir(located.cwd, "opencode"), "ocmm-profiles"),
+      "project-directory",
+      diagnostics,
+    ),
   )
   const activeProfile = selectActiveProfile({ activeProfile: baseParsed.data.activeProfile })
   let config = baseParsed.data
@@ -504,6 +566,14 @@ function loadOpenCodePluginConfigStrict(located: LocatedConfigLayers): LoadedCon
         ProfileEntrySchema,
         selectedProfileLayers(selectedContributions),
         mergeConfigLayers,
+      )
+      collectLayerDiagnostics(
+        diagnostics,
+        selectedProfile.unknownKeys,
+        selectedContributions.map((profile) => ({
+          source: profile.source,
+          ...(descriptor.source === "inline" ? { prefix: ["profiles", profile.name] } : {}),
+        })),
       )
       if (!selectedProfile.success) {
         throw new PluginProfilePipelineError("selected profile validation could not be recovered")
@@ -554,15 +624,22 @@ function composeProfileDescriptors(
 
 function inlineProfileDescriptorsFromPreparedProfiles(
   profiles: ReadonlyMap<string, readonly PreparedReviewProfile[]>,
+  diagnostics: ConfigDiagnostics,
 ): Map<string, ProfileDescriptor> {
   const descriptors = new Map<string, ProfileDescriptor>()
   for (const [name, contributions] of profiles) {
-    const layers = selectedProfileLayers(contributions)
+    const layers = selectedProfileLayers(contributions, diagnostics, (profile) => ["profiles", profile.name])
     const rawValue = mergeConfigLayers(layers)
     const structuralError = profileDescriptorStructuralError(name, "inline profile", rawValue)
     const prepared = structuralError
       ? { value: rawValue, error: structuralError }
-      : sanitizeProfileDescriptorLayers(name, "inline profile", layers)
+      : sanitizeProfileDescriptorLayers(
+          name,
+          "inline profile",
+          layers,
+          diagnostics,
+          contributions.map((profile) => ({ source: profile.source, prefix: ["profiles", profile.name] })),
+        )
     const descriptor: ProfileDescriptor = { name, source: "inline", value: prepared.value }
     if (prepared.error) descriptor.error = prepared.error
     descriptors.set(name, descriptor)
@@ -624,37 +701,64 @@ function mergeConfigLayers(layers: readonly TolerantParseLayer[]): unknown {
   return hasProfile ? mergeProfileOverlay(base, profile) : base
 }
 
-function selectedProfileLayers(selectedProfiles: readonly PreparedReviewProfile[]): TolerantParseLayer[] {
+function selectedProfileLayers(
+  selectedProfiles: readonly PreparedReviewProfile[],
+  diagnostics?: ConfigDiagnostics,
+  prefixFor: (profile: PreparedReviewProfile) => readonly (string | number)[] = () => [],
+): TolerantParseLayer[] {
   return selectedProfiles.map((profile) => ({
-    value: cleanAgentEntries(profile.value),
+    value: cleanAgentEntries(profile.value, diagnostics, profile.source, prefixFor(profile)),
     profileOverlay: true,
   }))
 }
 
-function cleanAgentEntries(value: unknown): unknown {
+function cleanAgentEntries(
+  value: unknown,
+  diagnostics?: ConfigDiagnostics,
+  source?: string,
+  prefix: readonly (string | number)[] = [],
+): unknown {
   if (!isPlainObject(value)) return value
   const cleaned = { ...value }
-  cleanAgentMap(cleaned)
+  cleanAgentMap(cleaned, diagnostics, source, prefix)
   if (!isPlainObject(cleaned.profiles)) return cleaned
 
   const profiles: Record<string, unknown> = { ...cleaned.profiles }
   for (const [name, profile] of Object.entries(profiles)) {
     if (!isPlainObject(profile)) continue
     const profileCopy = { ...profile }
-    cleanAgentMap(profileCopy)
+    cleanAgentMap(profileCopy, diagnostics, source, [...prefix, "profiles", name])
     profiles[name] = profileCopy
   }
   cleaned.profiles = profiles
   return cleaned
 }
 
-function cleanAgentMap(value: Record<string, unknown>): void {
+function cleanAgentMap(
+  value: Record<string, unknown>,
+  diagnostics?: ConfigDiagnostics,
+  source?: string,
+  prefix: readonly (string | number)[] = [],
+): void {
   if (!isPlainObject(value.agents)) return
   const agents: Record<string, unknown> = { ...value.agents }
   for (const [name, entry] of Object.entries(agents)) {
     const parsed = tolerantParse(AgentEntrySchema, entry)
+    if (diagnostics && source) diagnostics.collect(source, parsed.unknownKeys, [...prefix, "agents", name])
     if (parsed.success) agents[name] = parsed.data
     else delete agents[name]
   }
   value.agents = agents
+}
+
+function collectLayerDiagnostics(
+  diagnostics: ConfigDiagnostics,
+  unknownKeys: readonly RemovedUnknownKey[],
+  layers: readonly DiagnosticLayer[],
+): void {
+  for (const unknownKey of unknownKeys) {
+    const layer = unknownKey.layer === undefined ? undefined : layers[unknownKey.layer]
+    if (!layer) continue
+    diagnostics.collect(layer.source, [unknownKey], layer.prefix)
+  }
 }

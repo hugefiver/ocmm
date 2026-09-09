@@ -63,6 +63,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate config schema
+        run: pnpm run gen-schema
+
+      - name: Check generated config schema
+        run: git diff --exit-code -- schema.json
+
       - name: Validate release route
         run: |
           case "$RELEASE_TAG" in

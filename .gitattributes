@@ -1,0 +1,23 @@
+schema.json text eol=lf
+.agents/plugins/marketplace.json text eol=lf
+.codex/agents/*.toml text eol=lf
+
+plugins/deepwork/.codex-plugin/plugin.json text eol=lf
+plugins/deepwork/.mcp.json text eol=lf
+plugins/deepwork/package.json text eol=lf
+plugins/deepwork/README.md text eol=lf
+plugins/deepwork/agents/*.toml text eol=lf
+
+plugins/deepwork/skills/**/*.json text eol=lf
+plugins/deepwork/skills/**/*.md text eol=lf
+plugins/deepwork/skills/**/*.mjs text eol=lf
+plugins/deepwork/skills/**/*.ps1 text eol=lf
+plugins/deepwork/skills/**/*.py text eol=lf
+plugins/deepwork/skills/**/*.sh text eol=lf
+plugins/deepwork/skills/**/*.txt text eol=lf
+plugins/deepwork/skills/**/*.yaml text eol=lf
+plugins/deepwork/skills/**/*.yml text eol=lf
+plugins/deepwork/skills/**/.gitignore text eol=lf
+plugins/deepwork/skills/**/.npmignore text eol=lf
+plugins/deepwork/skills/**/LICENSE text eol=lf
+plugins/deepwork/skills/**/SOURCE text eol=lf

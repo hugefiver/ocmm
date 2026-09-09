@@ -25,6 +25,20 @@ function exactUniqueIndex(source: string, marker: string): number {
   return first
 }
 
+test("release verification refreshes the schema before downstream publication jobs", () => {
+  const verify = sliceReleaseWorkflowJobs("verify", "native")
+  const generate = exactUniqueIndex(verify, "- name: Generate config schema")
+  const diff = exactUniqueIndex(verify, "- name: Check generated config schema")
+  const typecheck = exactUniqueIndex(verify, "- name: Typecheck")
+
+  assert.ok(generate < diff, "schema generation must precede its freshness check")
+  assert.ok(diff < typecheck, "schema freshness must be checked in release verify before downstream jobs")
+  assert.match(verify, /pnpm run gen-schema/)
+  assert.match(verify, /git diff --exit-code -- schema\.json/)
+  assert.match(releaseWorkflowSource, /native:[\s\S]*?needs: verify/)
+  assert.match(releaseWorkflowSource, /stage-pinned-lsp:[\s\S]*?needs: verify/)
+})
+
 test("release workflow validates LSP assets before publish and upload", () => {
   const lspPackage = sliceReleaseWorkflowJobs("lsp-package", "stage-pinned-lsp")
   const checksums = exactUniqueIndex(lspPackage, "- name: Generate checksums")

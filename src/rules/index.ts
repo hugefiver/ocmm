@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "n
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { homedir } from "node:os"
 
+import { stripLeadingUtf8Bom } from "../shared/text.ts"
+
 const PROJECT_RULE_SOURCES = [
   { source: "project-compat", dir: ".omo/rules", priority: 0, instructionsOnly: false },
   { source: "claude", dir: ".claude/rules", priority: 1, instructionsOnly: false },
@@ -200,12 +202,13 @@ export function findAgentsMdUp(input: FindAgentsMdInput): string[] {
 }
 
 export function parseRuleMarkdown(text: string): ParsedRule {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+  const stripped = stripLeadingUtf8Bom(text)
+  const normalized = stripped.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
   const lines = normalized.split("\n")
-  if (lines[0] !== "---") return { metadata: {}, content: text }
+  if (lines[0] !== "---") return { metadata: {}, content: stripped }
 
   const closeIndex = lines.findIndex((line, index) => index > 0 && line === "---")
-  if (closeIndex === -1) return { metadata: {}, content: text }
+  if (closeIndex === -1) return { metadata: {}, content: stripped }
 
   return {
     metadata: parseFrontmatterLines(lines.slice(1, closeIndex)),

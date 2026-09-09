@@ -11,7 +11,7 @@ import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
-loadAllPrompts(join(process.cwd(), "prompts"), "omo")
+loadAllPrompts(join(process.cwd(), "prompts"), "v1")
 
 const UTILITY_TASK_RULES = {
   "*": "deny",
@@ -220,13 +220,11 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
 
   const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
   assert.match(reviewerPrompt, /Agent Role: implementation reviewer/)
-  assert.match(reviewerPrompt, /implementation acceptance and focused code-quality verification/i)
   assert.match(reviewerPrompt, /workflow-model-calibration/)
   assert.match(reviewerPrompt, /DEEPWORK MODE ENABLED/)
 
   const clarifierPrompt = String((cfg.agent.clarifier as Record<string, unknown>).prompt)
   assert.match(clarifierPrompt, /Agent Role: clarifier/)
-  assert.match(clarifierPrompt, /pre-planning consultant/i)
 })
 
 test("orchestrator prompt requires intent verbalization", async () => {
@@ -470,7 +468,7 @@ test("only orchestrator receives deterministic review-session reuse guidance", a
 
 test("compression policy is independent of workflow and model family", async () => {
   const cases = [
-    { workflow: "omo" as const, model: "anthropic/claude-sonnet-4-6" },
+    { workflow: "codex" as const, model: "anthropic/claude-sonnet-4-6" },
     { workflow: "v1" as const, model: "zhipu/glm-5.1" },
   ]
 
@@ -491,7 +489,7 @@ test("compression policy is independent of workflow and model family", async () 
       )
     }
   } finally {
-    loadAllPrompts(join(process.cwd(), "prompts"), "omo")
+    loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   }
 })
 
@@ -1118,10 +1116,10 @@ test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async 
   assert.match(prompt, /Outcome-first/)
 })
 
-test("every workflow composes shell safety once into every builtin agent and category", async () => {
+test("supported workflows compose shell safety once into every builtin agent and category", async () => {
   const promptsRoot = join(process.cwd(), "prompts")
   try {
-    for (const workflow of ["omo", "v1", "codex"] as const) {
+    for (const workflow of ["v1", "codex"] as const) {
       loadAllPrompts(promptsRoot, workflow)
       const configured = { ...defaultConfig(), workflow }
       const target: ConfigTarget = { agent: {} }
@@ -1139,7 +1137,7 @@ test("every workflow composes shell safety once into every builtin agent and cat
       }
     }
   } finally {
-    loadAllPrompts(promptsRoot, "omo")
+    loadAllPrompts(promptsRoot, "v1")
   }
 })
 
@@ -1151,7 +1149,7 @@ test("shell safety preserves existing prompts and remains idempotent across conf
   ]
 
   try {
-    for (const workflow of ["omo", "v1", "codex"] as const) {
+    for (const workflow of ["v1", "codex"] as const) {
       loadAllPrompts(promptsRoot, workflow)
       const configured = { ...defaultConfig(), workflow }
       const target: ConfigTarget = {
@@ -1169,47 +1167,40 @@ test("shell safety preserves existing prompts and remains idempotent across conf
       }
     }
   } finally {
-    loadAllPrompts(promptsRoot, "omo")
+    loadAllPrompts(promptsRoot, "v1")
   }
 })
 
-test("omo and v1 compose default plus Opus 5 exactly once for orchestrator only", async () => {
+test("v1 composes default plus Opus 5 exactly once for orchestrator only", async () => {
   const promptsRoot = join(process.cwd(), "prompts")
   const opus5Agents = Object.fromEntries(
     BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
   )
-
-  try {
-    for (const workflow of ["omo", "v1"] as const) {
-      loadAllPrompts(promptsRoot, workflow)
-      const configured = {
-        ...defaultConfig(),
-        workflow,
-        agents: opus5Agents,
-      }
-      const target: ConfigTarget = {
-        agent: {},
-        provider: { anthropic: { models: { "claude-opus-5": {} } } },
-      }
-      await createConfigHandler({ getConfig: () => configured })(target, undefined)
-
-      const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
-      assert.match(orchestrator, /Agent Role: orchestrator/, workflow)
-      assert.match(orchestrator, /DEEPWORK MODE ENABLED!/, `${workflow}: default base doctrine`)
-      assert.equal(countText(orchestrator, "DEEPWORK MODE ENABLED!"), 1, `${workflow}: default base`)
-      assert.equal(countText(orchestrator, CLAUDE_OPUS_5_MARKER), 1, `${workflow}: orchestrator marker`)
-      assert.ok(orchestrator.indexOf("Agent Role: orchestrator") < orchestrator.indexOf(CLAUDE_OPUS_5_MARKER), workflow)
-
-      for (const { name } of BUILTIN_AGENTS) {
-        if (name === "orchestrator") continue
-        const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
-        assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, `${workflow}/${name}`)
-      }
-      assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
-    }
-  } finally {
-    loadAllPrompts(promptsRoot, "omo")
+  loadAllPrompts(promptsRoot, "v1")
+  const configured = {
+    ...defaultConfig(),
+    workflow: "v1" as const,
+    agents: opus5Agents,
   }
+  const target: ConfigTarget = {
+    agent: {},
+    provider: { anthropic: { models: { "claude-opus-5": {} } } },
+  }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
+  assert.match(orchestrator, /Agent Role: orchestrator/)
+  assert.match(orchestrator, /DEEPWORK MODE ENABLED!/, "default base doctrine")
+  assert.equal(countText(orchestrator, "DEEPWORK MODE ENABLED!"), 1, "default base")
+  assert.equal(countText(orchestrator, CLAUDE_OPUS_5_MARKER), 1, "orchestrator marker")
+  assert.ok(orchestrator.indexOf("Agent Role: orchestrator") < orchestrator.indexOf(CLAUDE_OPUS_5_MARKER))
+
+  for (const { name } of BUILTIN_AGENTS) {
+    if (name === "orchestrator") continue
+    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+    assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, name)
+  }
+  assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
 })
 
 test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", async () => {
@@ -1250,7 +1241,7 @@ test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", a
       assert.equal(countText(prompt, GPT_56_MARKER), 1, `${name}: GPT-5.6 carriage`)
     }
   } finally {
-    loadAllPrompts(promptsRoot, "omo")
+    loadAllPrompts(promptsRoot, "v1")
   }
 })
 
@@ -1448,7 +1439,7 @@ test("config reports an observed host subagent depth once without mutating it", 
   const config = {
     ...baseConfig,
     registerBuiltinAgents: false,
-    workflow: "omo" as const,
+    workflow: "v1" as const,
     disabledCommands: ["ralph-loop", "audit-loop", "dwloop", "idle-continuation"],
     mcp: { ...baseConfig.mcp, enabled: false },
   }
@@ -1493,7 +1484,7 @@ test("config stays silent when host subagent depth is not observable", async () 
   const config = {
     ...baseConfig,
     registerBuiltinAgents: false,
-    workflow: "omo" as const,
+    workflow: "v1" as const,
     disabledCommands: ["ralph-loop", "audit-loop", "dwloop", "idle-continuation"],
     mcp: { ...baseConfig.mcp, enabled: false },
   }

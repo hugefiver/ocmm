@@ -1,10 +1,14 @@
 # omo Config Schema & Plugin Registration Architecture
 
 > **Source**: `omo/packages/omo-opencode/src/config/schema/`, `omo/packages/omo-opencode/src/testing/create-plugin-module.ts`
-> **Status**: Reference doc. ocmm has selectively migrated the useful pieces (feature gates, skill sources, profile overlays, MCP config, hashline/rules toggles, and agent override controls) without adopting omo's full 37-field schema.
+> **Status**: Historical upstream reference. The current local-config note below supersedes this document's older comparison claims; ocmm has selectively adopted feature gates, skill sources, profile overlays, MCP config, hashline/rules toggles, and agent override controls without adopting the full 37-field schema.
 > **Principle**: omo-own — reimplement selectively (take patterns, not the full 37-field schema)
 > **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Agent list caveat**: omo has 14 named agents (below). ocmm has its own 10 builtin agents — this doc is reference material for omo's schema, NOT a migration target.
+
+## Current ocmm Configuration Note (2026-09-10)
+
+The public local workflow enum is `"v1" | "codex"`, defaulting to `"v1"`; removed legacy values are invalid and receive no normalization. OpenCode uses v1; Codex is an independent generated adapter surface. CodeGraph is not registered. The retained `.omo/rules`, `.omo/plans`, and `.omo/notepads` paths, ignored `./omo` checkout, and `--keep-omo` option isolate external compatibility and do not reintroduce a local workflow.
 
 ## Config Schema Overview
 
@@ -225,7 +229,7 @@ Timestamped backups: `<configPath>.bak.<ISO-timestamp>`. Only created when conte
 ### ocmm's Current Config (for comparison)
 
 ocmm currently has:
-- `workflow: "omo" | "v1"` (default "omo")
+- `workflow: "v1" | "codex"` (default "v1")
 - `agents`, `categories` (with shorthand model/variant/fallback fields plus agent overrides such as `tools`, `permission`, `skills`, `thinking`, and `reasoningEffort`)
 - `disabledHooks`, `disabledTools`, `disabledSkills`, `disabledCommands`, `disabledMcps`
 - `skills` (`sources`, `enable`, `disable`)
@@ -237,7 +241,7 @@ ocmm currently has:
 - `registerBuiltinAgents`, `promptsRoot`, `debug`, `shim`
 - `profiles`, `activeProfile` (named overlays)
 
-ocmm is still missing: a config migration system and most large omo-specific namespaces (`ralph_loop` runtime config, openclaw, tmux, tui, monitor, babysitting, team_mode, codegraph provisioning, etc.).
+ocmm intentionally omits a config migration system and most large upstream-specific namespaces (`ralph_loop` runtime config, openclaw, tmux, tui, monitor, babysitting, team_mode, CodeGraph provisioning, etc.).
 
 ### Recommended ocmm Config Extensions
 

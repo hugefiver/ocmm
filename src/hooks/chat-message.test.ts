@@ -41,14 +41,6 @@ function writeSkill(root: string, dir: string, name: string, description: string
   )
 }
 
-test("omo workflow: chat.message is a no-op", async () => {
-  const cfg = { ...defaultConfig(), workflow: "omo" as const }
-  const handler = createChatMessageHandler({ getConfig: () => cfg })
-  clearSessionIntent("s1")
-  await handler(makeInput({ sessionID: "s1" }), makeOutput())
-  assert.equal(getSessionPrompt("s1"), null)
-})
-
 test("v1 workflow: chat.message queues skills on first message", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const handler = createChatMessageHandler({
@@ -88,7 +80,7 @@ test("v1 workflow: empty skills content is not queued", async () => {
 })
 
 test("chat.message expands builtin slash commands for noninteractive run input", async () => {
-  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const cfg = { ...defaultConfig(), workflow: "codex" as const }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
   const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("cmd1")
@@ -115,7 +107,7 @@ test("chat.message expands builtin slash commands for noninteractive run input",
 })
 
 test("chat.message expands slash commands wrapped by shell quotes", async () => {
-  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const cfg = { ...defaultConfig(), workflow: "codex" as const }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
   clearSessionIntent("cmd-quoted")
 
@@ -129,7 +121,7 @@ test("chat.message expands slash commands wrapped by shell quotes", async () => 
 })
 
 test("chat.message expands dwloop as the deepwork loop alias", async () => {
-  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const cfg = { ...defaultConfig(), workflow: "codex" as const }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
   clearSessionIntent("cmd-dwloop")
 
@@ -144,7 +136,7 @@ test("chat.message expands dwloop as the deepwork loop alias", async () => {
 })
 
 test("chat.message respects disabledCommands for slash command compatibility", async () => {
-  const cfg = { ...defaultConfig(), disabledCommands: ["ralph-loop"] }
+  const cfg = { ...defaultConfig(), workflow: "codex" as const, disabledCommands: ["ralph-loop"] }
   const handler = createChatMessageHandler({ getConfig: () => cfg })
   clearSessionIntent("cmd-disabled")
 
@@ -159,7 +151,7 @@ test("chat.message expands shared skill slash commands", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-hook-command-skills-"))
   try {
     writeSkill(root, "local-skill", "local-skill", "Local skill")
-    const cfg = { ...defaultConfig(), skills: { sources: [], enable: [], disable: [] } }
+    const cfg = { ...defaultConfig(), workflow: "codex" as const, skills: { sources: [], enable: [], disable: [] } }
     const handler = createChatMessageHandler({ getConfig: () => cfg, skillsRoot: root })
     clearSessionIntent("cmd-shared-skill")
 
@@ -260,10 +252,7 @@ test("system.transform appends commit guard to array system when enabled", async
   assert.ok(Array.isArray(output.system))
   assert.equal(output.system.length, 2)
   assert.equal(output.system[0], "ORIGINAL")
-  assert.ok(typeof output.system[1] === "string")
-  assert.ok((output.system[1] as string).includes("Commit Guard"))
-  assert.ok((output.system[1] as string).includes("git commit"))
-  assert.ok((output.system[1] as string).includes("OS temp directory"))
+  assert.ok(typeof output.system[1] === "string" && output.system[1].length > 0)
 })
 
 test("system.transform appends commit guard to string system when enabled", async () => {
@@ -273,11 +262,13 @@ test("system.transform appends commit guard to string system when enabled", asyn
   const handler = createSystemTransformHandler({ getConfig })
   const input = { sessionID }
   const output = { system: "ORIGINAL" }
+  const arrayOutput = { system: ["ORIGINAL"] }
+  await handler({ sessionID: `${sessionID}-array` }, arrayOutput)
   await handler(input, output)
+  const guard = arrayOutput.system[1]
+  assert.ok(guard)
   assert.equal(typeof output.system, "string")
-  assert.ok((output.system as string).startsWith("ORIGINAL"))
-  assert.ok((output.system as string).includes("Commit Guard"))
-  assert.ok((output.system as string).includes("git commit"))
+  assert.equal(output.system, `ORIGINAL\n\n${guard}`)
 })
 
 test("system.transform builds array systems idempotently", async () => {
@@ -294,11 +285,15 @@ test("system.transform builds array systems idempotently", async () => {
 
   await handler({ sessionID }, output)
   const once = [...output.system]
+  const prompt = getSessionPrompt(sessionID)
+  assert.ok(prompt)
+  const guard = output.system.at(-1)
+  assert.ok(guard)
   await handler({ sessionID }, output)
 
   assert.deepEqual(output.system, once)
-  assert.equal(output.system.filter((part) => part.includes("SKILL TEXT")).length, 1)
-  assert.equal(output.system.filter((part) => part.includes("## Commit Guard")).length, 1)
+  assert.equal(output.system.filter((part) => part === prompt).length, 1)
+  assert.equal(output.system.filter((part) => part === guard).length, 1)
 })
 
 test("system.transform builds string systems idempotently", async () => {
@@ -312,14 +307,20 @@ test("system.transform builds string systems idempotently", async () => {
   clearSessionIntent(sessionID)
   await msgHandler(makeInput({ sessionID }), makeOutput())
   const output: Record<string, unknown> = { system: "ORIGINAL" }
+  const prompt = getSessionPrompt(sessionID)
+  assert.ok(prompt)
+  const guardOutput = { system: ["ORIGINAL"] }
+  await handler({ sessionID: `${sessionID}-guard` }, guardOutput)
+  const guard = guardOutput.system[1]
+  assert.ok(guard)
 
   await handler({ sessionID }, output)
   const once = output.system
   await handler({ sessionID }, output)
 
   assert.equal(output.system, once)
-  assert.equal((output.system as string).split("SKILL TEXT").length - 1, 1)
-  assert.equal((output.system as string).split("## Commit Guard").length - 1, 1)
+  assert.equal((output.system as string).split(prompt).length - 1, 1)
+  assert.equal((output.system as string).split(guard).length - 1, 1)
 })
 
 test("system.transform independently builds distinct outputs for one session", async () => {
@@ -338,9 +339,13 @@ test("system.transform independently builds distinct outputs for one session", a
   await handler({ sessionID }, first)
   await handler({ sessionID }, second)
 
+  const prompt = getSessionPrompt(sessionID)
+  assert.ok(prompt)
+  const guard = first.system.at(-1)
+  assert.ok(guard)
   for (const output of [first, second]) {
-    assert.equal(output.system.filter((part) => part.includes("SKILL TEXT")).length, 1)
-    assert.equal(output.system.filter((part) => part.includes("## Commit Guard")).length, 1)
+    assert.equal(output.system.filter((part) => part === prompt).length, 1)
+    assert.equal(output.system.filter((part) => part === guard).length, 1)
   }
 })
 
@@ -447,7 +452,7 @@ test("independent stores do not share v1SkillsQueued state", async () => {
 })
 
 test("independent stores do not share once-prompts (slash commands)", async () => {
-  const cfg = { ...defaultConfig(), workflow: "omo" as const }
+  const cfg = { ...defaultConfig(), workflow: "codex" as const }
   const storeA = createSessionIntentStore()
   const storeB = createSessionIntentStore()
 

@@ -1,12 +1,12 @@
 # Architecture
 
-This document captures ocmm's design rationale, hook flow, and routing pipeline. It supersedes the former `.kb/` knowledge base (removed as stale Phase-1 documentation). For the authoritative agent/category definitions, see `src/data/agents.ts` and `src/data/categories.ts`. For prompt provenance, see [`v1-maintenance.md`](./v1-maintenance.md) and [`prompt-sync.md`](./prompt-sync.md).
+This document captures ocmm's design rationale, hook flow, and routing pipeline. It supersedes the former `.kb/` knowledge base (removed as stale Phase-1 documentation). For the authoritative agent/category definitions, see `src/data/agents.ts` and `src/data/categories.ts`. For prompt provenance, see [`v1-maintenance.md`](./v1-maintenance.md).
 
 ## Goals
 
 1. **Config-driven auto-routing** — route each request to the right model+variant based on the active agent and delegate_task category, with no per-call user input required.
 2. **Variant knob translation** — translate an abstract `variant` (e.g. `high`, `max`) into provider-specific parameters (`reasoningEffort`, `thinking`, `temperature`) via `chat.params`, since OpenCode locks the model before the hook fires.
-3. **System context injection** — inject v1 deepwork skills and noninteractive slash-command context into the system message via `chat.message` + `experimental.chat.system.transform`; omo prompts are attached declaratively during `config`.
+3. **System context injection** — inject v1 deepwork skills and noninteractive slash-command context into the system message via `chat.message` + `experimental.chat.system.transform`.
 4. **Model-specialized prompt variants** — pick the right deepwork prompt variant per model family (default/gpt/gemini/glm/codex/planner).
 5. **Reactive runtime fallback** — on `session.error`, retry with the next model in the agent's fallback chain via `client.session.prompt`.
 6. **Honor user overrides** — user config always wins over built-in defaults; explicit config always wins over family-policy defaults.
@@ -299,7 +299,7 @@ See "Proactive layer" above. Input: `{agent, model, variant?}`. Output mutated i
 
 Reads `input.sessionID` and prepends queued persistent v1 skill content plus any one-shot slash command context to `output.system` (handles array/string/empty shapes). It can fire multiple times in a turn, including title generation before the main model call, so one-shot slash context is cleared at the start of the next `chat.message` rather than drained on first transform.
 
-**omo workflow:** no persistent skill injection; this hook only modifies output when `chat.message` queued a bare noninteractive slash command.
+**Non-v1 configuration:** there is no persistent skill injection; this hook only modifies output when `chat.message` queued a bare noninteractive slash command.
 
 ### `event(input)`
 

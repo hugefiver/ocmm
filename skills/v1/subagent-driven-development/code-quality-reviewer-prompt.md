@@ -1,34 +1,21 @@
 # Code Quality Reviewer Prompt Template
 
-Use this template only for an exceptional narrow code-quality consultation after a completion/integration check exposes a quality or maintainability risk.
+Use this template only when an implemented change benefits from focused code-quality or maintainability review.
 
-**Purpose:** Verify implementation is well-built (clean, tested, maintainable)
-
-**Do not dispatch automatically after every task.** Do not require a prior spec-reviewer pass unless the same concern also needs a spec-compliance consultation.
+**Purpose:** Evaluate whether the current implementation is sound, maintainable, and appropriately verified.
 
 ```
 Task tool (general-purpose):
   Use template at requesting-code-review/code-reviewer.md
 
-  ARTIFACT_KIND: [committed-range | working-tree]
-  ARTIFACT_IDENTITY: [current identity from requesting-code-review]
-  DESCRIPTION: [task summary, from implementer's report]
-  PLAN_OR_REQUIREMENTS: Task N from [plan-file]
-  REVIEW_INPUT: [current binary range diff, or binary working diff plus sorted manifest]
-  VERIFICATION_EVIDENCE: [identity-stamped targeted evidence]
-  GLOBAL_CONSTRAINTS: [verbatim task constraints]
+  Supply, without a required field order:
+  - goal and acceptance criteria;
+  - current diff or committed range, including new files;
+  - relevant verification evidence;
+  - global constraints;
+  - focused dependency, interface, or maintainability context when material.
 ```
 
-## You Do Not Dispatch Subagents
+The reviewer does the review directly and does not dispatch subagents or second-opinion reviewers. Evaluate the change's contribution rather than penalizing unrelated pre-existing structure. Check boundaries, interfaces, local conventions, unnecessary complexity, error behavior, and whether the supplied evidence supports the relevant claims.
 
-The reviewer does not dispatch subagents or second-opinion reviewers. Never spawn
-a subagent to review part of the diff or a second reviewer. Ask the
-orchestrator for a corrected packet if identity or evidence is missing.
-
-**In addition to standard code quality concerns, the reviewer should check:**
-- Does each file have one clear responsibility with a well-defined interface?
-- Are units decomposed so they can be understood and tested independently?
-- Is the implementation following the file structure from the plan?
-- Did this implementation create new files that are already large, or significantly grow existing files? (Don't flag pre-existing file sizes — focus on what this change contributed.)
-
-**Code reviewer returns:** Strengths, Issues (Critical/Important/Minor), Assessment
+Report concrete findings with severity, location, impact, and supporting evidence. No fixed first-line verdict, field order, or receipt is required. Rerun only when substantive review input changes.

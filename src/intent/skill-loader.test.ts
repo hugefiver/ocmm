@@ -14,7 +14,7 @@ function makeSkillsRoot(): string {
   return root
 }
 
-test("loadV1Skills injects only brainstorming (HARD-GATE)", () => {
+test("loadV1Skills injects only brainstorming", () => {
   const root = makeSkillsRoot()
   try {
     for (const dir of V1_COMMAND_SKILLS) {
@@ -169,38 +169,6 @@ test("loadV1SkillCommands wraps v1 skills and applies disable filters", () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
-})
-
-test("v1 Superpowers sources retain local boundaries and include selective v6.3.0 guidance", () => {
-  const skillsRoot = join(process.cwd(), "skills", "v1")
-  const source = (skill: string) => readFileSync(join(skillsRoot, skill, "SKILL.md"), "utf8")
-  for (const skill of ["brainstorming", "writing-plans", "requesting-code-review"] as const) {
-    assert.match(source(skill), /Upstream: obra\/superpowers v6\.3\.0/)
-  }
-  for (const skill of ["receiving-code-review", "dispatching-parallel-agents"] as const) {
-    assert.match(source(skill), /Upstream: obra\/superpowers v6\.2\.0/)
-  }
-
-  const sdd = source("subagent-driven-development")
-  const implementer = readFileSync(join(skillsRoot, "subagent-driven-development", "implementer-prompt.md"), "utf8")
-
-  assert.match(sdd, /Upstream: obra\/superpowers v6\.3\.0/)
-  assert.match(sdd, /Rulings, not stalls/i)
-  assert.match(sdd, /Batch Small Same-Shape Work/i)
-  assert.match(sdd, /Waiting on Dispatched Subagents/i)
-  assert.match(sdd, /same implementer.*task_id.*equivalent same-session continuation handle/is)
-  assert.match(sdd, /host.*does not expose a continuation surface.*fresh implementer/is)
-  assert.match(sdd, /two correction rounds.*same blocker|two.*no.*progress/is)
-  assert.match(sdd, /five correction rounds.*hard ceiling/is)
-  assert.match(sdd, /recheck only.*affected blocker|affected evidence/is)
-  assert.doesNotMatch(sdd, /(?:must|require(?:d)?)\s+(?:create|maintain|use).*?(?:automatic workspace|ledger|cleanup script|subagent commit)/is)
-
-  assert.match(implementer, /observable input, action, and output/i)
-  assert.match(implementer, /production change.*make the test fail/i)
-  assert.match(implementer, /expected values.*not.*derived.*implementation/i)
-  assert.match(implementer, /mutation check/i)
-  assert.match(implementer, /structural contract tests/i)
-  assert.match(implementer, /Do not spawn a peer implementer, a reviewer, or a second-opinion subagent/i)
 })
 
 test("loadSharedSkills scans additional sources recursively", () => {

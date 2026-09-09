@@ -24,6 +24,12 @@ Configured workflow: `codex`
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
+Define the ideal end state, dependencies, interfaces, risks, and useful acceptance evidence. Plans guide execution rather than prescribe a fixed script: each wave has a goal, and actual results may change the order or equivalent implementation. Deep and workers may make minimal evidence-based decisions that preserve the approved goal, constraints, permissions, and final acceptance. Record significant rulings or assumptions, their reasons, and the cost if wrong. Escalate user-visible scope or acceptance changes, security/data/API/irreversible risks, or decisions supported only by guesses.
+
+Completion means complete functionality, clear usable interfaces, meaningful regression coverage, and evidence from the real surface. Task status labels are informational; acknowledgements alone are not evidence. An optional or redundant child does not block a result already proven through the actual interface. Use stricter process only when the user explicitly requires it or a concrete high-risk boundary needs it, limited to that risk.
+
+Git writes require user authorization for the specific action. A request that necessarily includes that action is sufficient without asking twice. Implement/fix does not authorize commit; commit does not authorize push, tag, rebase, or release. Do not expand authorization or separately commit specs/plans by default.
+
 ## Runtime Controls
 
 ### Callable Dispatch Contract
@@ -137,7 +143,7 @@ For base generated role `dw-R` (`dw-planner` or `dw-plan-critic`), choose the fi
 - Complex, cross-module, or coordination-heavy work tries `dw-R-high`, then unsuffixed normal.
 - High-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration work tries `dw-R-max`, then high, then unsuffixed normal.
 
-Never invent or synthesize a missing profile. The tier changes only the configured model route, never the role, prompt, mode, permissions, or receipt semantics. `dw-plan-critic-low` may select a lower-cost or lower-latency model, but it retains the xhigh-equivalent effort floor. Every `dw-plan-critic*` suffix has the same minimum.
+Never invent or synthesize a missing profile. The tier changes only the configured model route, never the role, prompt, mode, permissions, or review responsibilities. `dw-plan-critic-low` may select a lower-cost or lower-latency model, but it retains the xhigh-equivalent effort floor. Every `dw-plan-critic*` suffix has the same minimum.
 
 ### Ordered Oracle review
 
@@ -146,9 +152,9 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 - Oracle priority is ordered by slot: `dw-oracle`, then `dw-oracle-2nd` through later configured slots.
 - Oracle slots are model priority, not capability ranking.
 - The unsuffixed profile is logical `normal`; configured `-low`, `-high`, and `-max` profiles select task rigor independently of slot priority.
-- Simple final acceptance selects the first available Oracle normal profile.
-- Complex cross-module final acceptance selects the first available Oracle plus Reviewer; for each role choose configured `high`, falling back to unsuffixed `normal` when `high` is absent.
-- Security, performance, data-loss, release, or runtime-safety review selects configured `max`, otherwise configured `high`, otherwise unsuffixed `normal`.
+- When an external cross-check is useful or explicitly required, select the first available Oracle normal profile; complexity alone does not require dispatch.
+- When a focused review needs greater rigor, choose configured `high`, falling back to unsuffixed `normal`; select Reviewer and Oracle only for their distinct evidentiary value.
+- A review addressing concrete security, performance, data-loss, release, or runtime-safety risk selects configured `max`, otherwise configured `high`, otherwise unsuffixed `normal`.
 - Logical `low` is selected only by an explicit user/workflow cost-or-latency request and still receives the review-effort floor.
 - Additional Oracle passes select later configured slots in order only when additional independent evidence is explicitly needed.
 - Configuring multiple Oracle profiles does not fan-out automatically.
@@ -173,9 +179,11 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 
 ### Review dispatch guardrail
 
-Oracle and Reviewer profiles are selectable options, not automatic fan-out. Choose exactly the profiles required by risk/complexity and dispatch only those selections.
+Oracle and Reviewer profiles are selectable options, not automatic fan-out or default delivery authorities. Choose only reviews that resolve a concrete uncertainty or meet an explicit user requirement, rather than attaching reviews to every task or wave.
 
-dw-plan-critic* provides receipt-focused plan review through the Plan review lane at an `xhigh`-equivalent minimum for every suffix.
+dw-plan-critic* provides advisory plan review through the Plan review lane at an `xhigh`-equivalent minimum for every suffix. No mandatory critic loop, verdict format, receipt, or routine edit re-review is required. Resolve concrete safety, data-loss, external-protocol, and irreversible risks or refer them to the user.
+
+When review is needed, provide the goal, acceptance criteria, current diff or range plus new files, verification evidence, and global constraints in a useful form without prescribed labels or order. Rerun only the affected review when its inputs change substantively; do not repeat unchanged reviews. Do not invent workflow hashes, artifact identities, stamps, or digest receipts; preserve existing Git commit SHAs and explicitly required external integrity/release protocols. Review supports judgment, not unconditional approval as a default completion gate.
 
 Reviewer and Oracle routes use an `xhigh`-equivalent minimum when the selected model family exposes that control; otherwise they use the highest supported review effort for that family. GPT-5.6 supports native `max`; for other families, request `max` only when the selected model and catalog expose a maximum-effort control.
 

@@ -1,8 +1,18 @@
 # v1 Skills and Prompts — Sources, Characteristics, and Maintenance
 
-This document is the single source of truth for v1 skill and prompt provenance, characteristics, and maintenance rules.
+This document is the single source of truth for v1 skill and prompt provenance, characteristics, and maintenance rules. Historical upstream references below are provenance only; they never create a maintained upstream workflow surface.
 
 Naming note: `v1` remains the configuration value and on-disk version label. Prompt text shown to models calls this the `deepwork` workflow to describe the behavior rather than the version tag.
+
+## Current Operating Contract (2026-09-10)
+
+- OpenCode has one maintained workflow: `v1` (the default). `prompts/codex/**` and the generated Codex bundle are an independent adapter surface; the generator owns generated output. CodeGraph is removed and is not a discovery prerequisite or runtime dependency.
+- OpenCode background work is conditional on the active callable Task schema. Keep dependencies foreground, rely on host completion/error notification rather than polling, and preserve returned `task_id` semantics. Codex has no equivalent background-session contract.
+- Planning, plan criticism, and implementation review are advisory and outcome-oriented by default. Task status labels are informational, not authority or proof. Apply a strict process only when the user explicitly asks for it or a concrete safety, data, protocol, or irreversible-risk condition requires it.
+- `deep` and workers may make the smallest evidence-backed adjustment that does not change the stated goal, constraints, permissions, or acceptance criteria; report the adjustment and evidence. GPT-5.6+ capability never by itself adds process, hashes, or review.
+- Do not invent workflow hashes for plans, files, tasks, checkpoints, or evidence. External integrity, release, and protocol contracts may require their own identifiers or checksums.
+- Git authorization is operation-specific. Implementation never implies a commit; specs and plans do not require separate commits unless the user authorizes that operation.
+- This round reviewed upstream OMO range `ef1c392f..4ec56b79`. Superpowers v6.3 remains the latest reviewed skill baseline. The range informs selective local adaptations only and restores no OMO maintenance responsibility.
 
 ## Skills Source Mapping
 
@@ -37,13 +47,13 @@ Naming note: `v1` remains the configuration value and on-disk version label. Pro
 
 ## Codex Plugin Prompts (`prompts/codex/`)
 
-The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory (parallel to `prompts/v1/` and `prompts/omo/`). These are v1 prompts adapted for the Codex environment:
+The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory alongside `prompts/v1/`. These are v1-derived prompts adapted for the Codex environment:
 
 - **Tool substitutions**: `task()` → `multi_agent_v1.spawn_agent`, TodoWrite → `update_plan`, Edit/Write → `apply_patch`, `lsp_diagnostics` → LSP via lsp MCP.
 - **Skill Reference**: slash commands (`/writing-plans`) → load by name (`deepwork-writing-plans`).
 - **Brainstorming injection**: brainstorming SKILL.md is embedded into each agent's `developer_instructions` at packaging time (Codex has no runtime system message injection).
 - **Codex Environment note**: deepwork/gpt.md includes a Codex-specific compatibility section.
-- **Plan-critic convergence parity (2026-08-15 follow-up):** `prompts/codex/agents/plan-critic.md` now mirrors the v1/omo blocker eligibility, non-blocking notes, approval-with-notes, and frozen blocker-ledger rules so generated `dw-plan-critic` behaves consistently with `deepwork-writing-plans`.
+- **Plan-critic convergence parity (2026-08-15 follow-up):** `prompts/codex/agents/plan-critic.md` mirrors the v1 blocker eligibility, non-blocking notes, approval-with-notes, and frozen blocker-ledger rules so generated `dw-plan-critic` behaves consistently with `deepwork-writing-plans`.
 - **Planner proxy-loophole sync (2026-07-06)**: `prompts/codex/deepwork/planner.md` mirrors the omo+v1 planner update closing the implement-by-proxy loophole (no subagent is an execution worker). Synced from `./omo@a7ac217` Prometheus prompt.
 - **GPT-5.6 compact calibration (2026-07-19)**: `prompts/codex/deepwork/gpt-5.6.md` shares the v1/omo four-section doctrine, keeps the Codex `<deepwork-mode>` wrapper, says profiles may carry the layer ahead of runtime selection, and names embedded skills plus Codex tool-compatibility rules as authoritative. Generated `dw-*` profiles must contain outcome/waiting/revalidation guidance without reintroducing removed headings inside the specialization segment. **2026-07-22 agile calibration and role correction:** GPT-5.6 assesses complexity and rigor before workflow selection, avoids forcing low-complexity work through full engineering or non-triggered skill ceremony, delegates only for context savings or workflow/parallel-delivery value, treats Reviewer as primary-lane implementation self-review and Oracle as external-model implementation cross-check, reserves both for implementation acceptance/code quality, and considers parallel subagents for independent non-coupled modules. **2026-08-31 proportional testing and identity:** it rejects universal full TDD and fixture-first unit-test matrices, requires meaningful regression risk and a real deterministic seam before unit-test RED/GREEN work, and avoids hash locks without an authoritative immutable-identity contract or concrete stale/mixed-artifact risk.
 - **Claude Opus 5 calibration (2026-07-28):** `prompts/codex/deepwork/claude-opus-5.md` is a compact additive, orchestrator-only layer. Its first paragraph guards ahead-of-runtime carriage so every non-`claude-opus-5` runtime model ignores it. The role prompt, embedded skills, workflow/authorization/evidence rules, final acceptance, Codex compatibility, and terminal contract remain authoritative.
@@ -132,8 +142,8 @@ workspace ancestors, and unexpected parent directories.
 - Codex difference: retains one wrapper, guards ahead-of-runtime carriage for non-GPT-5.6 models, and makes embedded skills plus Codex tool-compatibility rules authoritative.
 - Shared body: outcome-first completion, conservative retrieval/delegation, context-efficient waiting/revalidation, and reporting priority. Generic workflow and exact permission doctrine remain in their existing authoritative layers.
 - 2026-07-22 agile calibration: the shared body now first scales process to task complexity and required rigor; low-complexity work avoids full engineering and non-triggered Superpowers ceremony. Subagents require parent-context savings or workflow/parallel-delivery value, reviewer/Oracle profiles are limited to implementation acceptance or focused code-quality verification and selected by existing rules, and independent non-coupled modules may be implemented through parallel subagents.
-- 2026-08-19 cache-aware retrieval: GPT-5.6 calibration now avoids unnecessary large tool-output replay by preferring targeted lookup, bounded reads, small stable outputs, closed-batch summaries, and focused re-lookups when exact old output is needed. v1/omo include OpenCode-specific native `tool_output` and compression/history rewrite restraint; Codex keeps the neutral subset only.
-- 2026-08-24 measured cache restraint: v1/omo prefer tool results below 16,000 characters and per-turn new output below 32,000 characters, reject phase-end `compress`, keep summaries in the current response, preserve model/session continuity after unavoidable compression, and reuse one subagent `task_id` within the same role/stage. Codex carries equivalent environment-neutral output, context-reduction, and continuation guidance.
+- 2026-08-19 cache-aware retrieval: GPT-5.6 calibration now avoids unnecessary large tool-output replay by preferring targeted lookup, bounded reads, small stable outputs, closed-batch summaries, and focused re-lookups when exact old output is needed. Then-maintained v1/omo sources included OpenCode-specific native `tool_output` and compression/history rewrite restraint; Codex kept the neutral subset only.
+- 2026-08-24 measured cache restraint: Then-maintained v1/omo sources preferred tool results below 16,000 characters and per-turn new output below 32,000 characters, rejected phase-end `compress`, kept summaries in the current response, preserved model/session continuity after unavoidable compression, and reused one subagent `task_id` within the same role/stage. Codex carried equivalent environment-neutral output, context-reduction, and continuation guidance.
 
 ## GPT-6 Astra Sync (2026-09-07)
 
@@ -190,13 +200,11 @@ All v1 prompts share these principles (derived from superpowers skills):
 
 ## Maintenance Rules
 
-1. v1 skill file changes (in `skills/v1/`) MUST update the Skills Source Mapping table in this doc in the same commit.
-2. v1 prompt file changes (in `prompts/v1/`) MUST update the Prompt Source Mapping table in this doc in the same commit.
-3. Source Mapping table changes MUST be reflected in the actual files in the same commit.
-4. Adding a new v1 file requires adding a row to the relevant table.
-5. Removing a v1 file requires removing its row and updating any references in `src/intent/skill-loader.ts` or `src/intent/prompt-loader.ts`.
-6. Upstream skill sync requires updating the "Last synced" date and "Upstream version" column, plus re-applying any adjustments listed.
-7. omo prompts (`prompts/omo/`) are tracked in `docs/prompt-sync.md`, not this v1 derivative table. Update that doc when omo prompt files change.
+1. Any change under `skills/v1/**` or `prompts/v1/**` MUST update this document in the same commit.
+2. Source-mapping changes and their actual source files change together. Adding or removing a v1 file updates its mapping and the relevant loader references.
+3. Upstream skill sync records the reviewed version, date, and retained local adjustments here.
+4. Codex generated artifacts are generator-owned consumers: refresh them only through `pnpm run gen:codex-plugin` when the change requires it; never hand-edit generated output.
+5. Do not create a commit solely for a spec, plan, or maintenance update. Request authorization for each Git write operation that is actually needed.
 
 ## Upstream Sync Procedure
 
@@ -206,8 +214,8 @@ When syncing a v1 skill from upstream superpowers:
 2. Diff against the current `skills/v1/<name>/SKILL.md`
 3. Re-apply the adjustments listed in the Skills Source Mapping table
 4. Update the "Last synced" date and "Upstream version" in this doc
-5. Run `pnpm test` to verify nothing broke
-6. Commit with message: `chore: sync v1/<name> skill from superpowers <version>`
+5. Run the proportionate relevant verification
+6. Request any required Git-write authorization separately
 
 ## Research Provenance Alignment (2026-08-28)
 

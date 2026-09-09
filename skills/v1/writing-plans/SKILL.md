@@ -5,252 +5,111 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 
 <!-- v1 fork of superpowers/writing-plans.
      Upstream: obra/superpowers v6.3.0 (synced 2026-08-15).
-     Adjustments: removed executing-plans cross-reference (excluded from v1);
-     removed using-git-worktrees reference (not in v1); subagent-driven is the
-     only execution path in v1; added mandatory plan-critic review loop with
-     three-state verdict (REJECT/OKAY/OKAY-UNAMBIGUOUS) after self-review;
-     plan approval now conditional (user delegation OR [OKAY-UNAMBIGUOUS]);
-     added bounded convergence rules from upstream 13a034b83 adapted to local
-     plan-critic receipts without adding any second review role; synced v6.3.0
-     Spec header pointer so implementation resolves plan questions against the
-     design artifact.
-     Synced v6.1.1+: added Task Right-Sizing section, Global Constraints header
-     field, and Interfaces block (Consumes/Produces) per task.
-     See docs/v1-maintenance.md for sync rules. -->
+     Adjustments: removed executing-plans and using-git-worktrees references;
+     plans are outcome-oriented and scale with uncertainty, dependencies, and
+     risk rather than prescribing fixed steps, commits, or review receipts.
+     Plan review is optional and evidence-driven. See docs/v1-maintenance.md for
+     sync rules. -->
 
 # Writing Plans
 
 ## Overview
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+Write an implementation plan that lets a capable engineer reach the approved outcome without rediscovering important context. Capture the goal, ideal end state, dependencies, interfaces, risks, constraints, and evidence that would demonstrate success. Prefer useful decision support over procedural ceremony.
 
-Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
+Assume the engineer is skilled but unfamiliar with this codebase and problem domain. Explain local conventions or non-obvious constraints that materially affect the work; do not prescribe details that repository evidence leaves safely open.
 
-**Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+**Default location for durable plans:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 
 ## When to Write a File-Backed Plan
 
-Do not write a plan just because a task has more than one step. Use a file-backed plan only when the work is **relatively complex and has a clear purpose**, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across multiple tasks or agents. Examples: multi-file cross-module changes, novel behavior, security/perf/migration work, or any task where a downstream builder would need a durable artifact to stay aligned.
+Do not write a plan merely because work has multiple steps. Use a durable plan when discovery shows unclear boundaries or dependencies, cross-module coordination, novel behavior, migration/security/performance risk, or enough work that downstream executors need a shared artifact.
 
-For work with clear boundaries and a single obvious path, a contextual lightweight plan in the notepad or todo list is enough. Do not escalate to a file-backed plan + plan-critic review for trivial or low-uncertainty work.
+For a clear bounded change, a contextual todo list or concise in-chat plan is enough. A planner or critic is not mandatory when the orchestrator can state the outcome, boundaries, and verification clearly.
 
-**Planner trigger summary:**
-- Clear scope, single path, low coordination need → lightweight contextual plan.
-- Complex, cross-cutting, ambiguous boundaries/dependencies/success criteria → file-backed plan using this skill, followed by plan-critic review.
+## Scope and Discovery
 
-## Scope Check
+Before decomposing work:
 
-If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+- Read the approved design or requirements and the relevant repository evidence.
+- Describe the current state and the ideal end state.
+- Identify dependencies, interfaces, ownership boundaries, and ordering constraints.
+- Surface material risks: security, data loss, compatibility, protocols/APIs, irreversible operations, and difficult rollback.
+- Check external constraints such as budget, mandated/prohibited stack, scale, privacy, compliance, accessibility, and platform requirements. Do not invent constraints.
 
-## File Structure
+If the work contains independent subsystems, split it into independently valuable plans or waves. If a material choice would alter scope, acceptance, safety, data, a public API/protocol, permissions, or an irreversible action, return it for approval rather than guessing.
 
-Before defining tasks, map out which files will be created or modified and what each one is responsible for. This is where decomposition decisions get locked in.
+For a non-material open choice, choose a safe reversible default. Record a significant ruling or assumption with the evidence behind it, why it was chosen, and the cost if it is wrong.
 
-- Design units with clear boundaries and well-defined interfaces. Each file should have one clear responsibility.
-- You reason best about code you can hold in context at once, and your edits are more reliable when files are focused. Prefer smaller, focused files over large ones that do too much.
-- Files that change together should live together. Split by responsibility, not by technical layer.
-- In existing codebases, follow established patterns. If the codebase uses large files, don't unilaterally restructure - but if a file you're modifying has grown unwieldy, including a split in the plan is reasonable.
+## Plan Shape
 
-This structure informs the task decomposition. Each task should produce self-contained changes that make sense independently.
+Use the structure that best explains the work. A useful plan normally makes these discoverable, but does not require fixed headings or field order:
 
-## Task Right-Sizing
+- Approved goal and ideal end state
+- Source requirements/design and global constraints
+- Relevant current state
+- Dependencies and interfaces, including what each unit consumes and produces
+- Risks, assumptions, and significant rulings
+- Waves or tasks with clear outcome boundaries
+- Useful acceptance evidence for each wave and for the integrated result
 
-A task is the smallest unit that has its own test cycle. Tasks that are too large create context bloat for the implementer and make review harder; tasks that are too small create coordination overhead without value.
+Do not turn the plan into a transcript. Include commands, code sketches, file paths, or signatures when they prevent ambiguity; omit them when repository patterns and acceptance criteria already make the implementation obvious.
 
-- **Fold setup, config, scaffolding, and docs into the task that needs them.** A "create the directory structure" task is not a task — it belongs in the first task that uses that structure.
-- **Only split when a reviewer could meaningfully reject one task while approving its neighbor.** If two tasks always pass or fail together, they are one task.
-- **Each task must end with an independently testable deliverable.** The test at the end of the task must prove the task's value, not just "the code compiles."
-- **Resist splitting by technical layer.** "Write the types" then "write the implementation" is two tasks that always pass or fail together — combine them.
+## Waves and Tasks
 
-## Bite-Sized Task Granularity
+Organize work around outcomes and dependency order.
 
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
+For each wave, state:
 
-## Plan Document Header
+- the wave goal and observable end state;
+- the tasks or changes that produce it;
+- dependencies and interfaces that constrain execution;
+- likely files or areas, when known;
+- material risks or decisions;
+- useful acceptance evidence showing the wave achieved its goal.
 
-## Extrinsic Constraints Pass
+A task should be cohesive enough to produce meaningful progress and small enough to reason about and verify. Combine setup, types, implementation, docs, and validation when they only have value together. Split tasks when they can be implemented or rejected independently, have different ownership, or unlock parallel work.
 
-Before finalizing `Global Constraints`, inspect repository and request evidence first. Check whether the work has constraints for budget or paid services; a mandated or prohibited stack; expected scale or capacity; intended audience, privacy, compliance, or accessibility; and any other stated external requirement. Do not invent constraints that the evidence does not support.
+Plans need not prescribe one executor action every 2-5 minutes. They also need not mandate a failing-test transcript, scenario count, per-task full review, or commit. Use deterministic tests at real regression-prone seams; use typechecks, builds, focused inspection, runtime probes, or other evidence when those better demonstrate the outcome. Keep real security, data-loss, protocol, compatibility, and irreversible-operation safeguards explicit.
 
-When evidence leaves a non-material choice open, choose and record a safe, reversible default. A material unresolved constraint must enter the approval gate rather than being guessed or silently deferred.
+## Executor Flexibility
 
-**Every plan MUST start with this header:**
+The plan defines the approved goal, constraints, permissions, and acceptance criteria. It may recommend an approach, task boundary, executor profile, or evidence path without freezing incidental mechanics.
 
-```markdown
-# [Feature Name] Implementation Plan
+Deep workers and implementers may choose a minimal evidence-based equivalent when repository reality makes a planned detail unnecessary or inferior, provided they do not change the approved goal, constraints, permissions, or acceptance criteria. They record significant deviations, rulings, and assumptions with reasons and the cost if wrong.
 
-> **For agentic workers:** Use the subagent-driven-development skill to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+They escalate instead of choosing when the decision changes scope or acceptance, weakens safety or data guarantees, changes a public API/protocol, expands permissions, introduces an irreversible action, or would otherwise be a pure guess.
 
-**Goal:** [One sentence describing what this builds]
+Executor recommendations are hints, not dispatch commands. Select a currently callable profile based on actual complexity and policy; direct execution is valid when delegation adds no value.
 
-**Architecture:** [2-3 sentences about approach]
+## Git Boundaries
 
-**Tech Stack:** [Key technologies/libraries]
+Do not include routine commit steps or a default separate spec/plan commit. Git writes require authorization for the specific operation. A clear user request can authorize that exact operation without a second confirmation, but authorization never expands beyond its semantics:
 
-**Spec:** [path to the spec/design doc this plan implements, or `inline/chat design` for an approved bounded design — the plan argues from this source of truth]
-
-**Global Constraints:** [Project-level constraints from the spec — version floors, dependency limits, naming/copy rules, platform requirements. Copy verbatim from the spec, one constraint per line. Each task implicitly includes these.]
-
----
-```
-
-## Task Structure
-
-````markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Interfaces:**
-- Consumes: [What this task uses from upstream tasks — exact function/type names and signatures, e.g. `parseConfig(path: string): Config` from Task 1]
-- Produces: [What downstream tasks depend on — exact function/type names and signatures, e.g. `validateInput(input: Input): Result`]
-
-**Recommended executor:** `coding`
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-- [ ] **Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-````
-
-Choose one recommendation per task, not per step. The value is a local planning hint, not a dispatch command. Allowed values only: `quick`, `coding`, `normal-task`, `complex`, `deep`, `frontend`, `documenting`. The `hard-reasoning` profile may be recommended only for a genuinely difficult decision; it returns that decision, not code. `planner`, `plan-critic`, `Reviewer`, and `Oracle` are not implementers.
-
-## No Placeholders
-
-Every step must contain the actual content an engineer needs. These are **plan failures** — never write them:
-- "TBD", "TODO", "implement later", "fill in details"
-- "Add appropriate error handling" / "add validation" / "handle edge cases"
-- "Write tests for the above" (without actual test code)
-- "Similar to Task N" (repeat the code — the engineer may be reading tasks out of order)
-- Steps that describe what to do without showing how (code blocks required for code steps)
-- References to types, functions, or methods not defined in any task
+- implement or fix does not mean commit;
+- commit does not mean push, tag, rebase, or release;
+- authorization for one repository, branch, range, or operation does not authorize another.
 
 ## Self-Review
 
-After writing the complete plan, look at the spec with fresh eyes and check the plan against it. This is a checklist you run yourself — not a subagent dispatch.
+Review the completed plan against its source:
 
-**1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
+1. **Outcome coverage:** Does the ideal end state satisfy every approved requirement?
+2. **Dependency consistency:** Do ordering, interfaces, files, and ownership assumptions agree?
+3. **Evidence quality:** Would the proposed evidence demonstrate the behavior or invariant that matters?
+4. **Risk discipline:** Are material security, data, compatibility, protocol, and irreversible risks handled without speculative scope?
+5. **Executability:** Can an engineer act without placeholders or pure guesses while retaining discretion over incidental mechanics?
 
-**2. Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
+Fix issues inline. Do not require a second review simply because wording or formatting changed.
 
-**3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+## Optional Plan Review
 
-If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
+Request a plan review only when independent scrutiny is useful: unresolved cross-module interactions, consequential migration/security/data risk, a novel interface, or explicit user request. Give the reviewer the goal, acceptance criteria, current plan, source requirements, relevant evidence, and global constraints. No fixed field order, first-line verdict, receipt, or mandatory critic loop is required.
 
-## Plan-Critic Profile Selection
+Treat acknowledgements and status labels as informational, not evidence. Judge the returned analysis and cited evidence. An optional, redundant, unavailable, timed-out, or merely acknowledging child does not block an outcome already established by sufficient evidence.
 
-Before starting a fresh plan-review stage, inspect the current callable or registered plan-critic profile names. Configuration examples and generated files are not availability proof. Choose the first actually available candidate for the plan being reviewed:
-
-- Consider `plan-critic-low` only for an explicit user cost/latency request; for that request try `plan-critic-low`, then `plan-critic`.
-- A small or clear plan: `plan-critic`, the unsuffixed normal profile.
-- A complex or cross-module plan: `plan-critic-high`, then `plan-critic`.
-- A high-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration plan: `plan-critic-max`, then `plan-critic-high`, then `plan-critic`.
-
-Never invent or synthesize a missing profile. The selected tier changes only the configured model route, not the role, prompt, mode, permissions, or verdict. Continue the same `task_id` and selected tier within an existing review stage rather than changing profiles mid-stage. Every tier uses the same current-revision receipt contract. `plan-critic-low` may select a cheaper or lower-latency model, but it always retains the xhigh-equivalent effort floor.
-
-## plan-critic Review Loop
-
-After self-review passes, submit the plan to the `plan-critic` agent for a mandatory review loop. A review round covers exactly one saved, complete, current plan revision. A current receipt is valid only when that round returns an explicit `[OKAY]` or `[OKAY-UNAMBIGUOUS]`; any plan edit invalidates every earlier receipt.
-
-Timeouts, `WORKING`, acknowledgements, partial output, a missing verdict, or a review of an older/incomplete plan are not approval. Wait for a complete verdict, follow up, or re-dispatch the critic for the current full plan. Dispatch success is not a receipt.
-
-**Loop procedure and convergence policy:**
-
-1. Save the complete plan, then submit that exact plan path to the selected available plan-critic profile.
-2. Determine the review cap before dispatch:
-   - Default: at most 5 plan-critic review rounds.
-   - Explicit user delegation `review N 次就下一步` / `review N times then proceed`: cap at N rounds.
-   - Explicit user request for unlimited/infinite plan review: no cap. Do not infer unlimited review from risk, strictness, or repeated rejections.
-3. Dispatch the selected available plan-critic profile and wait for one explicit verdict for the current revision.
-4. Branch on the verdict:
-
-   | Verdict | Meaning | Action |
-   |---|---|---|
-   | `[REJECT]` | Eligible blockers exist; plan not executable as-is | Apply the smallest plan edit that fixes each eligible blocker without expanding scope (max 3), re-run self-review, save the updated complete plan, then begin a fresh critic round if the cap allows. |
-   | `[OKAY]` | Plan is executable; residual uncertainty/ambiguity remains | Exit the loop. Proceed to user approval (unless delegation applies). |
-   | `[OKAY-UNAMBIGUOUS]` | Plan is executable AND logically clear with no ambiguity | Exit the loop. Skip user approval. Proceed to Execution Handoff. |
-
-**Blocker eligibility and notes:**
-
-A plan-critic rejection may block the loop only when each blocker fits at least one eligibility class:
-- It contradicts an explicit requirement, global constraint, or accepted design/plan decision.
-- It exposes an existing failing regression that the plan would leave unaddressed.
-- It identifies a reproducible broken flow with concrete steps or a concrete missing prerequisite that prevents execution.
-- It identifies a concrete security, data-loss, compatibility, release-safety, or runtime-safety risk.
-- It conflicts with an external API, provider, protocol, platform, packaging, or release contract the plan relies on.
-
-Anything else is a non-blocking note. Approval-with-notes is still approval for the review loop: `[OKAY]` with notes exits the loop, and `[OKAY-UNAMBIGUOUS]` with purely stylistic notes exits and still skips user approval.
-
-**Blocker ledger freeze after round 1:**
-
-After the first `[REJECT]`, treat the listed eligible blockers as the blocker ledger. Later rounds may block only on:
-- verification that an existing ledger blocker remains unfixed;
-- a regression introduced by the plan edits made to fix those blockers; or
-- a newly introduced blocker that independently satisfies the eligibility classes above.
-
-Do not allow each round to discover unrelated improvements or expand the plan-review scope. Fix blockers with the smallest plan edit that resolves the defect; do not add new product scope, new architecture, or extra QA beyond what the blocker requires.
-
-**Cap exhaustion:**
-
-When the active cap is reached without `[OKAY]` or `[OKAY-UNAMBIGUOUS]`:
-- Default cap: stop and ask the user how to proceed. Record unresolved blockers in the plan only if doing so helps the handoff. Do not call the plan approved, passed, or receipted.
-- User-delegated `review N 次就下一步`: record unresolved blockers in the plan (as a "Known Unresolved Blockers" section) and proceed only under the explicit status `delegated-without-plan-approval`. Do not call this approved, passed, or receipted.
-- Unlimited explicit review: continue until a current `[OKAY]` or `[OKAY-UNAMBIGUOUS]` receipt exists, or until the user changes direction.
-
-**Plan approval conditionality:**
-
-After the loop exits, determine whether user approval is required:
-
-- **Auto-skip** if ANY of:
-  - The user has delegated approval (any form — see the brainstorming skill's User Delegation Forms table).
-  - The loop exited with `[OKAY-UNAMBIGUOUS]`.
-- **Require user approval** otherwise (loop exited with `[OKAY]`, no delegation). Present the plan:
-
-  > "Plan written to `<path>`. plan-critic verdict: `[OKAY]` (executable, residual uncertainty). Please review and approve before execution, or delegate with '你自己决定' / '无需批准自行继续' to proceed."
-
-  Wait for the user's response. If they request changes, make them, re-run self-review, and re-run the plan-critic loop for the changed plan. Only proceed once the user approves or delegates.
-
-Reviewer and Oracle profiles do not review implementation plans. `plan-critic` owns plan review and the current-revision receipt; genuinely difficult decision blockers return to the orchestrator for separate routing. Strict or high-risk conditions alone do not qualify for `hard-reasoning`.
+If review finds a substantive issue, update the plan and rerun only the affected review when the review input changed materially. Formatting, narration, status wording, or other non-substantive edits do not stale a sound review.
 
 ## Execution Handoff
 
-Proceed to the subagent-driven-development skill only with a current plan-critic receipt, user approval where required, or an explicitly labeled `delegated-without-plan-approval` exception. Report the current receipt verdict or `waiting for receipt`; never treat a dispatch timeout or acknowledgement as pass.
-
-**Execution:**
-- Fresh subagent per task + completion/integration check after each returned agent + final acceptance review once after all tasks
-- Continuous execution — no pause between tasks
+Hand off the approved outcome, plan or task text, dependencies/interfaces, relevant evidence, global constraints, and recorded rulings. Use subagent-driven development or parallel dispatch only when delegation materially helps; otherwise execute directly through the appropriate workflow.

@@ -7,6 +7,8 @@
  *
  * On structural surprise, throws PatchError; caller falls back to full rewrite.
  */
+import { stripLeadingUtf8Bom } from "../shared/text.ts"
+
 export class PatchError extends Error {
   constructor(msg: string) {
     super(msg)
@@ -16,6 +18,7 @@ export class PatchError extends Error {
 
 /** Strip // line and /* block comments + trailing commas for validation only. */
 function stripJsonc(input: string): string {
+  input = stripLeadingUtf8Bom(input)
   let out = ""
   let i = 0
   let inStr: '"' | "'" | null = null

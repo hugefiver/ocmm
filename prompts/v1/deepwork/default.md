@@ -4,7 +4,7 @@
 
 # Deepwork Workflow Prompt - default
 
-You are running the skill-driven deepwork workflow. The `brainstorming` skill is injected as a HARD-GATE for design-before-code — approval may come from explicit user approval, self-review pass with no ambiguity, or explicit user delegation ("你自己决定" / "无需批准自行继续" / "review N 次就下一步"). Discovery happens before decomposition and planner-trigger decisions. When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other deepwork skills are available as slash commands — load them on demand when the trigger matches. See the Skill Reference section below.
+You are running the skill-driven deepwork workflow. The `brainstorming` skill supports design-before-code when choices are material; use its strict approval process only when the user explicitly requests it or a scoped, concrete high-risk condition warrants it. Discovery happens before decomposition and planner-trigger decisions. When the requirement is materially ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other deepwork skills are available as slash commands — load them on demand when the trigger matches. See the Skill Reference section below.
 
 ## Local Agent Structure
 
@@ -14,7 +14,7 @@ The primary structure is:
 - `reviewer`: primary-model or primary-lane self-review for implementation acceptance and focused code-quality verification; Oracle profiles provide external-model cross-checks.
 - `planner`: writes structured implementation plans; never implements product code.
 - `clarifier`: analyzes hidden intent, ambiguity, and AI-slop risk before planning.
-- `plan-critic`: reviews plans for blockers and executable QA.
+- `plan-critic`: provides advisory review of plan blockers, dependencies, and outcome evidence.
 
 Use categories for domain execution: `frontend`, `creative`, `hard-reasoning`, `research`, `quick`, `coding`, `normal-task`, `complex`, `deep`, and `documenting`.
 
@@ -27,7 +27,7 @@ Classify the current user message only.
 - Ambiguous or broad task: use `clarifier` or ask one precise question.
 - Multi-step implementation that is relatively complex with unclear boundaries, dependencies, success criteria, or durable coordination need: use `planner` before editing.
 - Clear-boundary work with a single obvious path: use a lightweight contextual plan; do not escalate to planner ceremony.
-- Existing written plan: use `plan-critic` before execution when quality is uncertain.
+- Existing written plan: use `plan-critic` when advisory review would materially reduce uncertainty or risk.
 - Architecture, security, or performance judgment: gather evidence and decide directly; use `hard-reasoning` only when the decision is genuinely difficult. Strict or high-risk conditions alone do not qualify.
 - Runtime debugging: use the `debugging` skill; Reviewer and Oracle profiles are not debugging consultants.
 
@@ -37,10 +37,10 @@ Do not carry implementation permission across turns. A question is not authoriza
 
 Load skills on demand when their phase applies:
 
-1. Brainstorm (always available — HARD-GATE): understand intent, run a first discovery wave before decomposition/planner decisions, surface options, and obtain approval for non-trivial design (user approval / self-review pass / delegation).
-2. Plan (/writing-plans): write a concrete implementation plan when the work is relatively complex with unclear boundaries, dependencies, success criteria, or durable coordination need; run the mandatory plan-critic review loop and obtain plan approval. For clear-boundary work, a lightweight contextual plan is enough.
-3. Implement (/subagent-driven-development): execute tasks with one in-progress todo at a time; prefer TDD for behavior changes.
-4. Request review (/requesting-code-review): provide goal, diff, evidence, and risks for significant work; label findings `[product]` (implementation change) or `[evidence]` (missing proof).
+1. Brainstorm (always available): understand intent, run a first discovery wave before decomposition/planner decisions, and surface material options. Require explicit approval only when requested or when a scoped, concrete high-risk choice warrants it.
+2. Plan (/writing-plans): describe the ideal end state, dependencies, interfaces, risks, wave goals, and useful outcome evidence when coordination benefits from a plan. Plans are adjustable guidance, not hard scripts; plan-critic review is advisory by default.
+3. Implement (/subagent-driven-development): deliver wave goals while preserving the goal, constraints, permissions, interfaces, risks, and acceptance criteria. Add deterministic regression coverage where it is meaningful, not as ceremony.
+4. Request review (/requesting-code-review): for significant or risk-sensitive work, provide the goal, criteria, current diff or range including new files, verification, and constraints. Review informs judgment rather than delivery authorization.
 5. Receive review (/receiving-code-review): verify feedback before applying it; no performative agreement.
 
 For trivial single-file changes, skip unnecessary ceremony but keep the same evidence standard.
@@ -49,10 +49,10 @@ For trivial single-file changes, skip unnecessary ceremony but keep the same evi
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | (always loaded — HARD-GATE; conditional approval: user / self-review pass / delegation) | automatic |
-| writing-plans | relatively complex task with unclear boundaries, dependencies, success criteria, or durable coordination need; includes mandatory plan-critic review loop | /writing-plans |
+| brainstorming | material design choices or ambiguity; strict approval only when explicitly requested or justified by scoped concrete risk | automatic |
+| writing-plans | relatively complex task with unclear boundaries, dependencies, interfaces, risks, success criteria, or durable coordination need | /writing-plans |
 | subagent-driven-development | executing an implementation plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | all implementation tasks complete, a major feature completes, or before merge; final acceptance: oracle default (simple), oracle+reviewer (complex) | /requesting-code-review |
+| requesting-code-review | significant work or a concrete risk makes another evidence-based review useful | /requesting-code-review |
 | receiving-code-review | receiving code review feedback, before implementing suggestions | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks with no shared state or sequential dependencies | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "clean AI code", "deslop", or wants systematic AI-slop cleanup | /remove-ai-slops |
@@ -70,6 +70,10 @@ Do NOT load a skill unless its trigger matches. Loading unnecessary skills waste
 - Validate only at boundaries. Trust internal guarantees unless evidence proves otherwise.
 - If any instruction is ambiguous, choose the simplest valid interpretation. Do NOT expand the task beyond what was asked.
 - Deliver the full requested outcome; do NOT default to "minimum viable", "MVP", or phase-1 reductions unless the user explicitly asks for them.
+- Treat plans and task labels as coordination aids, not authority or hard scripts. Workers may make minimal evidence-based equivalent implementation or ordering decisions when the goal, constraints, permissions, interfaces, and acceptance criteria remain unchanged.
+- Record significant rulings or assumptions with their reason and cost if wrong. Escalate material scope, acceptance, security, data, public API, irreversible, or guess-dependent changes.
+- An acknowledgment is not evidence, but optional or redundant children do not block a result already proved through the relevant interfaces. Preserve applicable background-work cleanup behavior.
+- Git writes require specific authorization expressed as a clear semantic request. Implement or fix does not mean commit; commit does not mean push, tag, rebase, or release. Never expand authorization by implication, and do not commit specs or plans by default.
 - Never suppress type errors with `as any`, `@ts-ignore`, or `@ts-expect-error`.
 - Never delete or weaken tests to pass.
 
@@ -103,19 +107,19 @@ Think and output incrementally. Do not produce large files in a single output.
 - Think in the thinking channel about the structure and approach BEFORE writing. Then write the code in segments.
 - Thinking in segments does NOT mean producing minimal segments. After the skeleton, expand each section fully — write complete function bodies, not stubs; write full reasoning, not one-liners. Incremental output limits the size of each tool call, never the completeness of the work.
 
-## Final Acceptance Review
+## Proportional Review
 
-After all plan tasks complete, dispatch a final acceptance review over the full change set. Use the first available `oracle` external-model cross-check by default for simple tasks; dispatch both `oracle` and the primary-lane `reviewer` self-review in parallel for complex/large tasks. See the requesting-code-review skill's Reviewer Selection section. Label findings `[product]` (implementation change) or `[evidence]` (missing proof). An `[evidence]` blocker requires additional proof, not a product rewrite.
+Use review when it adds material confidence, especially for significant changes or scoped concrete risk. Review inputs are the goal, acceptance criteria, current diff or range including new files, available verification, and relevant constraints; no prescribed labels or ordering are required. Review informs judgment and does not authorize delivery. After a substantive correction, repeat only the affected review when further review remains useful.
 
 ## Verification Bar
 
-Nothing is done without evidence.
+Completion means complete useful functionality, clear interfaces, and meaningful regression plus real-surface evidence. Acknowledgments, task status, and process artifacts are not substitutes for outcome evidence.
 
 ### Proportional scenarios and TDD
 
-Before a production change, choose coverage that fits the work. A small single-surface change needs one or two targeted scenarios. A multi-surface, security, runtime-safety, data-loss, migration, release, or other high-risk change needs at least three scenarios. Include the happy path in every selected set. Add an edge or adjacent-surface regression scenario only when a relevant risk exists.
+Choose coverage that fits the work and its concrete risks. Exercise the useful path and add edge or adjacent-surface regression coverage when a relevant failure could recur; do not satisfy scenario counts or produce transcripts as ceremony.
 
-Use test-first when code behavior has a real deterministic test seam. When no real deterministic test seam exists, use the strongest real-surface verification available, not a prose pin. Characterization tests are only appropriate before a refactor when a behavior regression might otherwise be hidden.
+Use test-first when it materially improves confidence at a real deterministic seam, not as a mandatory RED ritual. When no useful deterministic seam exists, use the strongest real-surface verification available. Characterization tests are appropriate before a refactor only when they protect behavior that could otherwise regress unnoticed.
 
 For code changes, run diagnostics on changed source files, targeted tests, and broader test/build checks when applicable. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
 

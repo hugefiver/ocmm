@@ -90,7 +90,7 @@ test("loadOpenCodePluginConfig discards an invalid selected inline profile field
   const xdg = makeTempXdg()
   try {
     writeConfig(xdg, {
-      workflow: "omo",
+      workflow: "codex",
       locale: "en-US",
       agents: { orchestrator: { model: "BASE" } },
       profiles: {
@@ -106,7 +106,7 @@ test("loadOpenCodePluginConfig discards an invalid selected inline profile field
     const loaded = loadPluginWithXdg(xdg)
 
     assert.equal(loaded.activeProfile, "selected")
-    assert.equal(loaded.config.workflow, "omo")
+    assert.equal(loaded.config.workflow, "codex")
     assert.equal(loaded.config.locale, "en-US")
     assert.equal(loaded.config.debug, true)
     assert.equal(loaded.config.agents?.orchestrator?.model, "PROFILE")

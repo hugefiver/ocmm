@@ -1,14 +1,15 @@
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
+  type Stats,
   writeFileSync,
 } from "node:fs"
-import { basename, dirname, join, relative, resolve, sep } from "node:path"
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path"
 
 import { type OcmmConfig } from "../config/schema.ts"
 import { loadConfig, type ConfigHost } from "../config/load.ts"
@@ -45,6 +46,8 @@ const CODEX_RUNTIME_NPMIGNORE_SIGNATURE = [
   "*.py[cod]",
 ] as const
 const CODEX_RUNTIME_CACHE_DIRS = new Set(["__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"])
+const CODEX_SKILL_TEXT_EXTENSIONS = new Set([".json", ".md", ".mjs", ".ps1", ".py", ".sh", ".txt", ".yaml", ".yml"])
+const CODEX_SKILL_TEXT_FILENAMES = new Set([".gitignore", ".npmignore", "LICENSE", "SOURCE"])
 
 const CODEX_COMPATIBLE_PROVIDERS = new Set([
   "openai",
@@ -607,6 +610,12 @@ Configured workflow: \`${config.workflow}\`
 3. Load task-relevant skills explicitly before doing specialized work.
 4. Verify with the repository's own commands before reporting completion.
 
+Define the ideal end state, dependencies, interfaces, risks, and useful acceptance evidence. Plans guide execution rather than prescribe a fixed script: each wave has a goal, and actual results may change the order or equivalent implementation. Deep and workers may make minimal evidence-based decisions that preserve the approved goal, constraints, permissions, and final acceptance. Record significant rulings or assumptions, their reasons, and the cost if wrong. Escalate user-visible scope or acceptance changes, security/data/API/irreversible risks, or decisions supported only by guesses.
+
+Completion means complete functionality, clear usable interfaces, meaningful regression coverage, and evidence from the real surface. Task status labels are informational; acknowledgements alone are not evidence. An optional or redundant child does not block a result already proven through the actual interface. Use stricter process only when the user explicitly requires it or a concrete high-risk boundary needs it, limited to that risk.
+
+Git writes require user authorization for the specific action. A request that necessarily includes that action is sufficient without asking twice. Implement/fix does not authorize commit; commit does not authorize push, tag, rebase, or release. Do not expand authorization or separately commit specs/plans by default.
+
 ${renderCodexRuntimeCompatibility()}
 
 ## Generated Agents
@@ -659,7 +668,7 @@ For base generated role \`${CODEX_AGENT_PREFIX}-R\` (\`${CODEX_AGENT_PREFIX}-pla
 - Complex, cross-module, or coordination-heavy work tries \`${CODEX_AGENT_PREFIX}-R-high\`, then unsuffixed normal.
 - High-risk security, performance, data-loss, release-safety, runtime-safety, or critical-migration work tries \`${CODEX_AGENT_PREFIX}-R-max\`, then high, then unsuffixed normal.
 
-Never invent or synthesize a missing profile. The tier changes only the configured model route, never the role, prompt, mode, permissions, or receipt semantics. \`${CODEX_AGENT_PREFIX}-plan-critic-low\` may select a lower-cost or lower-latency model, but it retains the xhigh-equivalent effort floor. Every \`${CODEX_AGENT_PREFIX}-plan-critic*\` suffix has the same minimum.
+Never invent or synthesize a missing profile. The tier changes only the configured model route, never the role, prompt, mode, permissions, or review responsibilities. \`${CODEX_AGENT_PREFIX}-plan-critic-low\` may select a lower-cost or lower-latency model, but it retains the xhigh-equivalent effort floor. Every \`${CODEX_AGENT_PREFIX}-plan-critic*\` suffix has the same minimum.
 
 ### Ordered Oracle review
 
@@ -668,9 +677,9 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 - Oracle priority is ordered by slot: \`${CODEX_AGENT_PREFIX}-oracle\`, then \`${CODEX_AGENT_PREFIX}-oracle-2nd\` through later configured slots.
 - Oracle slots are model priority, not capability ranking.
 - The unsuffixed profile is logical \`normal\`; configured \`-low\`, \`-high\`, and \`-max\` profiles select task rigor independently of slot priority.
-- Simple final acceptance selects the first available Oracle normal profile.
-- Complex cross-module final acceptance selects the first available Oracle plus Reviewer; for each role choose configured \`high\`, falling back to unsuffixed \`normal\` when \`high\` is absent.
-- Security, performance, data-loss, release, or runtime-safety review selects configured \`max\`, otherwise configured \`high\`, otherwise unsuffixed \`normal\`.
+- When an external cross-check is useful or explicitly required, select the first available Oracle normal profile; complexity alone does not require dispatch.
+- When a focused review needs greater rigor, choose configured \`high\`, falling back to unsuffixed \`normal\`; select Reviewer and Oracle only for their distinct evidentiary value.
+- A review addressing concrete security, performance, data-loss, release, or runtime-safety risk selects configured \`max\`, otherwise configured \`high\`, otherwise unsuffixed \`normal\`.
 - Logical \`low\` is selected only by an explicit user/workflow cost-or-latency request and still receives the review-effort floor.
 - Additional Oracle passes select later configured slots in order only when additional independent evidence is explicitly needed.
 - Configuring multiple Oracle profiles does not fan-out automatically.
@@ -695,9 +704,11 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 
 ### Review dispatch guardrail
 
-Oracle and Reviewer profiles are selectable options, not automatic fan-out. Choose exactly the profiles required by risk/complexity and dispatch only those selections.
+Oracle and Reviewer profiles are selectable options, not automatic fan-out or default delivery authorities. Choose only reviews that resolve a concrete uncertainty or meet an explicit user requirement, rather than attaching reviews to every task or wave.
 
-${CODEX_AGENT_PREFIX}-plan-critic* provides receipt-focused plan review through the Plan review lane at an \`xhigh\`-equivalent minimum for every suffix.
+${CODEX_AGENT_PREFIX}-plan-critic* provides advisory plan review through the Plan review lane at an \`xhigh\`-equivalent minimum for every suffix. No mandatory critic loop, verdict format, receipt, or routine edit re-review is required. Resolve concrete safety, data-loss, external-protocol, and irreversible risks or refer them to the user.
+
+When review is needed, provide the goal, acceptance criteria, current diff or range plus new files, verification evidence, and global constraints in a useful form without prescribed labels or order. Rerun only the affected review when its inputs change substantively; do not repeat unchanged reviews. Do not invent workflow hashes, artifact identities, stamps, or digest receipts; preserve existing Git commit SHAs and explicitly required external integrity/release protocols. Review supports judgment, not unconditional approval as a default completion gate.
 
 Reviewer and Oracle routes use an \`xhigh\`-equivalent minimum when the selected model family exposes that control; otherwise they use the highest supported review effort for that family. GPT-5.6 supports native \`max\`; for other families, request \`max\` only when the selected model and catalog expose a maximum-effort control.
 
@@ -727,8 +738,8 @@ function codexAgentInstructions(args: {
     "- Treat AGENTS.md as native Codex project guidance.",
     "- The model and reasoning_effort in your profile are defaults. The main agent may override them only when its current dispatch tool exposes those parameters.",
     "",
-    "## Injected Brainstorming Skill (HARD-GATE)",
-    "The following skill is always loaded. It is mandatory for any new feature, component, or behavior change — present a design and get explicit user approval BEFORE any code.",
+    "## Injected Brainstorming Skill",
+    "The following skill is always loaded. Establish the approved goal, constraints, and acceptance before changing behavior; use the skill's proportionate design and approval routes rather than requiring repeated approval for equivalent implementation decisions.",
     "",
     args.brainstormingSkill,
     "",
@@ -742,9 +753,10 @@ function codexAgentInstructions(args: {
     "- Use Reviewer and Oracle profiles only for software implementation acceptance or focused code-quality verification after an implementation diff exists; never for research, ideation, architecture design, root-cause debugging, general-answer validation, or routine confidence.",
     "- Oracle slots are model priority, not capability ranking: dw-oracle, then dw-oracle-2nd through configured later slots.",
     "- Unsuffixed profile is logical normal; -low/-high/-max tiers choose rigor independent of slot priority.",
-    "- Simple final acceptance selects first available Oracle normal.",
-    "- Complex cross-module final acceptance selects first available Oracle plus Reviewer; choose high then normal.",
-    "- Security/performance/data-loss/release/runtime-safety selects max then high then normal.",
+    "- Review is advisory by default, selected for a concrete uncertainty or explicit user requirement, not automatically for complexity or each task/wave.",
+    "- When useful, an external cross-check selects first available Oracle normal; greater review rigor selects high then normal. Use Reviewer plus Oracle only for distinct evidentiary value.",
+    "- A review of concrete security/performance/data-loss/release/runtime-safety risk selects max then high then normal.",
+    "- Provide the goal, acceptance criteria, current diff/range plus new files, verification evidence, and global constraints without fixed labels, receipts, or workflow hashes. Rerun affected reviews only after substantive input changes; review informs judgment rather than granting default delivery permission.",
     "- Logical low is only for explicit cost/latency requests and still receives the review floor.",
     "- Additional Oracle passes use later configured slots in order only when additional independent evidence is explicitly needed.",
     "- Configuring multiple Oracle profiles does not fan-out automatically.",
@@ -832,23 +844,54 @@ function formatFallbackEntry(entry: FallbackEntry): string {
 }
 
 function copySkillDirectory(source: string, target: string): void {
+  requireRealSkillSourceDirectory(source)
   rmSync(target, { recursive: true, force: true })
-  if (!hasCodexRuntimeFilterSignature(source)) {
-    cpSync(source, target, { recursive: true })
-    return
-  }
+  const applyRuntimeFilter = hasCodexRuntimeFilterSignature(source)
   cpSync(source, target, {
     recursive: true,
-    filter: (path) => !isCodexRuntimeExcludedPath(source, path),
+    filter: (path) => {
+      const stats = lstatSync(path)
+      if (stats.isSymbolicLink()) return false
+      return !applyRuntimeFilter || !isCodexRuntimeExcludedPath(source, path)
+    },
   })
+  normalizeCopiedSkillText(target)
+}
+
+function requireRealSkillSourceDirectory(source: string): void {
+  let stats: Stats
+  try {
+    stats = lstatSync(source)
+  } catch (error) {
+    throw new Error(`Codex skill source is missing or inaccessible: ${source}`, { cause: error })
+  }
+  if (stats.isSymbolicLink()) {
+    throw new Error(`Codex skill source must be a real directory, not a symbolic link or junction: ${source}`)
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`Codex skill source must be a real directory: ${source}`)
+  }
+}
+
+export function normalizeCopiedSkillText(root: string): void {
+  for (const path of listRegularFiles(root)) {
+    const filename = basename(path)
+    if (!CODEX_SKILL_TEXT_FILENAMES.has(filename) && !CODEX_SKILL_TEXT_EXTENSIONS.has(extname(filename).toLowerCase())) {
+      continue
+    }
+    const original = readFileSync(path, "utf8")
+    const normalized = original.replace(/\r\n?/g, "\n")
+    if (normalized !== original) writeFileSync(path, normalized, "utf8")
+  }
 }
 
 function hasCodexRuntimeFilterSignature(skillDir: string): boolean {
   const npmignorePath = join(skillDir, ".npmignore")
-  if (!existsSync(npmignorePath)) return false
 
   let text: string
   try {
+    const stats = lstatSync(npmignorePath)
+    if (stats.isSymbolicLink() || !stats.isFile()) return false
     text = readFileSync(npmignorePath, "utf8")
   } catch {
     return false
@@ -880,8 +923,9 @@ function isCodexRuntimeExcludedPath(skillDir: string, path: string): boolean {
   return normalizedPath.endsWith(".pyc") || normalizedPath.endsWith(".pyo") || normalizedPath.endsWith(".pyd")
 }
 
-function normalizeSkillForCodex(skillDir: string, name?: string): void {
+export function normalizeSkillForCodex(skillDir: string, name?: string): void {
   const skillPath = join(skillDir, "SKILL.md")
+  requireRealSkillDocument(skillPath)
   let text = readFileSync(skillPath, "utf8")
   text = text.replace(/^(?:\s*<!--[\s\S]*?-->\s*)+(?=---\s*\r?\n)/, "")
   if (name) text = text.replace(/^name:\s*.+$/m, `name: ${name}`)
@@ -899,10 +943,25 @@ function normalizeSkillForCodex(skillDir: string, name?: string): void {
   sanitizeSkillAgentMetadata(skillDir)
 }
 
+function requireRealSkillDocument(skillPath: string): void {
+  let stats: Stats
+  try {
+    stats = lstatSync(skillPath)
+  } catch (error) {
+    throw new Error(`Codex skill document is missing or inaccessible: ${skillPath}`, { cause: error })
+  }
+  if (stats.isSymbolicLink()) {
+    throw new Error(`Codex skill document must be a real regular file, not a symbolic link or junction: ${skillPath}`)
+  }
+  if (!stats.isFile()) {
+    throw new Error(`Codex skill document must be a real regular file: ${skillPath}`)
+  }
+}
+
 function sanitizeSkillAgentMetadata(skillDir: string): void {
   const agentsDir = join(skillDir, "agents")
   if (!existsSync(agentsDir)) return
-  for (const path of listFiles(agentsDir)) {
+  for (const path of listRegularFiles(agentsDir)) {
     if (!/\.(ya?ml)$/i.test(path)) continue
     const original = readFileSync(path, "utf8")
     const sanitized = removeYamlBlock(original, "search_terms")
@@ -910,12 +969,14 @@ function sanitizeSkillAgentMetadata(skillDir: string): void {
   }
 }
 
-function listFiles(root: string): string[] {
+function listRegularFiles(root: string): string[] {
   const out: string[] = []
   for (const entry of readdirSync(root)) {
     const path = join(root, entry)
-    if (statSync(path).isDirectory()) out.push(...listFiles(path))
-    else out.push(path)
+    const stats = lstatSync(path)
+    if (stats.isSymbolicLink()) continue
+    if (stats.isDirectory()) out.push(...listRegularFiles(path))
+    else if (stats.isFile()) out.push(path)
   }
   return out
 }

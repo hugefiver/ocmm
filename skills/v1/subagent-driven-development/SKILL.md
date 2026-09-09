@@ -5,327 +5,165 @@ description: Use when executing implementation plans with independent tasks in t
 
 <!-- v1 fork of superpowers/subagent-driven-development.
      Upstream: obra/superpowers v6.3.0 (synced 2026-08-15).
-     Adjustments: removed executing-plans comparison (excluded from v1);
-     removed using-git-worktrees and finishing-a-development-branch references
-     (not in v1); removed test-driven-development reference (TDD is described
-     inline in v1); final code review uses requesting-code-review skill only.
-     Synced v6.1.1+: Model Selection rewrite (explicit model dispatch, turn-count
-     beats token price, tiered guidance); Constructing Reviewer Prompts section
-      (no pre-judging, no open-ended directives, verbatim global constraints, no
-      history pasting, findings handling by severity); Narration discipline rule;
-      task-type analysis hint (prefer dispatching-parallel-agents for independent
-      tasks); Final Acceptance Review stage updated with ordered Oracle slot
-      priority and logical tiers. Project 5 adaptation binds final acceptance to one
-      current review artifact identity and five-field receipts without a ledger or Git
-      requirement. v1 intentionally replaces per-task reviewer loops with
-      completion/integration checks plus one final acceptance review; ⚠️ Items
-      section (reviewer "Cannot verify from diff" items). Did NOT sync:
-     review-package/task-brief bash scripts (Windows incompatible); progress
-     ledger (v1 uses TodoWrite); File Handoffs/Durable Progress sections
-      (depend on scripts). v1 also rejects automatic workspace creation, progress
-      ledgers, automatic cleanup, routine per-task full reviews, and subagent Git
-     writes. Synced v6.3.0 high-value workflow rules using local TodoWrite /
-     plan-note / notepad tracking instead of upstream ledgers: rulings not
-     stalls, spec pointer consumption, small same-shape task batching, bounded
-     waiting, and no worker-spawned implementation/review seats.
-     See docs/v1-maintenance.md for sync rules. -->
+     Adjustments: removed excluded-skill references and Git-writing workers;
+     delegation, evidence, and review now scale with the work rather than forming
+     mandatory per-task or final gates. Workers may make bounded evidence-based
+     equivalent changes while preserving approved outcomes. Existing background
+     waiting and no-ledger/no-automatic-cleanup boundaries remain. See
+     docs/v1-maintenance.md for sync rules. -->
 
 # Subagent-Driven Development
 
-Execute plan by dispatching a fresh subagent per task, running a completion/integration check after each returned agent, and running one final acceptance review after all tasks are done.
+Use focused workers when delegation materially improves implementation of an approved plan. Coordinate toward the plan's goal and ideal end state, not toward ceremonial completion of every originally imagined step.
 
-**Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
+**Core principle:** Preserve the approved goal, constraints, permissions, and acceptance criteria; choose the smallest execution and evidence path that proves the outcome.
 
-**Core principle:** Fresh subagent per task + per-agent completion/integration check + final acceptance review = high quality without drowning in per-subtask reviews
+Delegation is optional. Direct execution is valid when a task is small, tightly coupled to controller context, or cheaper to complete than to brief and reconcile. When delegation helps, give each worker self-contained context rather than session history.
 
-**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are: an irreversible or destructive operation; a security-sensitive action; a side effect outside this worktree that norms require asking about first (merge, push, publish, external service mutation); a plan so broken that every path forward is a guess; or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
+**Continuous execution:** Do not pause between ordinary tasks merely to ask whether to continue. Stop for a decision that changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, requires an irreversible/destructive operation, triggers an external side effect requiring authorization, or leaves only pure guesses. Otherwise make a bounded ruling and continue.
 
-**Rulings, not stalls:** A running plan does not stop for non-catastrophic conflicts, small ambiguities, or plan defects you can resolve from the approved spec and current evidence. Make the smallest safe ruling, record it in the active tracking surface (TodoWrite item, plan note, notepad, or final report section), include why and what it costs if wrong, and keep going. The spec/design is the binding authority; the plan is its argument. Stop only for the four classes above.
+**Rulings, not stalls:** Resolve non-material plan defects or ambiguities from approved requirements and repository evidence. Record significant rulings and assumptions in the active tracking surface or final report, including the reason and cost if wrong. Do not create a separate ledger solely for this purpose.
 
-**Narration discipline:** Between tool calls, write at most one line of narration. The todo list and tool results carry the record — do not duplicate progress in prose. Reserve prose for decisions, blockers, and questions to your partner.
+**Narration discipline:** Between tool calls, keep narration brief. Use prose for decisions, blockers, and questions rather than duplicating tool output.
 
 ## When to Use
 
-- You have an implementation plan
-- Tasks are mostly independent
-- You are executing in the current session
+- An approved plan or bounded task has work that benefits from isolated execution context.
+- Task boundaries and file ownership are clear enough to avoid interference.
+- The controller can supply goals, criteria, dependencies, interfaces, evidence expectations, and constraints without pasting session history.
 
-**Task-type analysis before execution:** Before dispatching the first implementer, assess the plan. If the plan has 2+ independent tasks with no shared state or sequential dependencies, prefer the `dispatching-parallel-agents` skill to execute them concurrently rather than dispatching them one-by-one here. This skill's sequential per-task loop is for tasks with dependencies or shared state.
+For two or more independent tasks with no shared state or overlapping files, consider `dispatching-parallel-agents`. Keep dependent or shared-state work sequential. Do not delegate merely to satisfy a workflow label.
 
-## The Process
+## Outcome-Oriented Process
 
-1. **Read plan, its `Spec:` source if present, extract all tasks with full text, note context, create TodoWrite**
-   - If the `Spec:` path is missing or unreachable, record that as a ruling context before execution; do not invent requirements.
-   - Before dispatching Task 1, scan task/file/interface overlaps and obvious contradictions against the spec/global constraints. Record what you checked, even when clean.
-2. **Per task:**
-   a. Dispatch implementer subagent (use implementer-prompt.md template)
-   b. If implementer asks questions, answer and re-dispatch
-   c. Implementer implements, tests, self-reviews, and reports changed files plus a suggested commit message. Subagents do not commit, stage, push, or run any Git write command.
-   d. **Completion/Integration check (not a full review):** Read the agent's summary, inspect touched files/diff, run targeted tests or record implementer evidence, verify the task is complete, and check whether the change conflicts with earlier tasks or needs follow-up by the same implementer
-   e. If the completion check finds gaps, re-dispatch the same implementer to fix them
-   f. Mark task complete in TodoWrite
-3. **After all tasks:** Dispatch final code reviewer subagent for the entire implementation (use requesting-code-review skill)
+1. Understand the goal, ideal end state, acceptance criteria, dependencies/interfaces, relevant evidence, and global constraints.
+2. Scan planned file/interface overlaps and material risks. Record significant rulings or assumptions.
+3. Choose direct execution or a useful worker boundary for each task or wave.
+4. After work returns, inspect the actual changes and evidence, resolve integration issues, and update tracking based on the demonstrated outcome.
+5. Request focused or whole-change review only when risk, uncertainty, change shape, or user instruction makes independent review useful.
+6. Verify the integrated result with evidence proportionate to the plausible regression and report any unverified item.
 
-### Recommended Executor Dispatch Decision
+The plan is guidance, not an immutable script. A worker may use a minimal evidence-based equivalent when repository reality makes a planned detail unnecessary or inferior, provided the approved goal, constraints, permissions, and acceptance criteria remain unchanged. Significant deviations require a recorded ruling with reasons and cost if wrong. Decisions in the stop classes above return to the controller or user.
 
-Before dispatching a task with a recommended profile, verify that the profile is currently callable. Check for an active task file ownership conflict, task dependencies, and the security and runtime rigor the task needs. Also decide whether direct execution is smaller than a dispatch for this task.
+## Worker Briefs
 
-The recommendation is evidence for that decision, not an instruction to obey blindly. It never overrides routing policy or explicit configuration. Do not create a goal/assumption ledger for these checks; keep only the normal active tracking and task context.
+Give a worker, in whatever order is clearest:
 
-**Git ownership:** Subagents do not commit, stage, push, or run any Git write command. They return changed files and a suggested commit message to the orchestrator, along with verification evidence. The orchestrator performs any Git write only after explicit user authorization.
+- the task/wave goal and ideal end state;
+- acceptance criteria and useful evidence;
+- relevant current state, dependencies, and interfaces;
+- owned files or explicit boundaries;
+- global constraints and permissions;
+- significant prior rulings or known risks.
 
-**Local workflow boundaries:** No automatic workspace or ledger scripts, automatic
-cleanup, routine full review after each task, or subagent Git write is permitted.
-Use the active todo list, plan notes, notepad, or final response for rulings and
-handoffs; do not introduce upstream ledger files or cleanup scripts.
+Do not make a worker read an entire plan when a self-contained excerpt is available. Do not prescribe fixed report fields, a first-line status, test transcript, scenario count, commit, or reviewer approval. Ask for the changed files, substantive decisions, verification evidence, and unresolved risks needed for integration.
 
-### Pre-Dispatch Spec/Plan Scan
+### Recommended Executor Decision
 
-Before the first implementation dispatch, compare the plan against the `Spec:` source and global constraints:
+Before dispatch, verify the profile is callable, no ownership conflict exists, dependencies are ready, and the task's security/runtime rigor fits the worker. A recommendation is evidence for this decision, not a command. Never expand a worker's permissions because a plan names a more powerful profile.
 
-- For every pair of tasks that share a file or interface, check what one produces against what the other consumes.
-- For every task, check that its tests, files, and stated code changes agree with each other.
-- For every conflict, make a ruling from the spec/design and record `Ruling: <decision> — <why> — <cost if wrong>`.
+Use direct tools first. Workers may use only bounded utility leaves their effective policy permits; they do not spawn implementation, planning, coordination, Reviewer, or Oracle seats. Worker self-review is useful evidence but does not become a mandatory review receipt.
 
-The scan output is a factual checklist, not a ceremonial blocker. If it is clean, proceed. If it finds non-catastrophic conflicts, rule and proceed. Stop only when the conflict leaves every path forward a guess or requires one of the stop-class side effects above.
+## Git Ownership and Authorization
 
-### Batch Small Same-Shape Work
+Workers do not stage, commit, push, tag, rebase, release, or perform other Git writes unless the user specifically authorized that exact operation and the effective worker policy permits it. Normally they return changed files and evidence to the controller.
 
-When several planned tasks are small, independent edits of the same kind — the same constant change, one-line field addition, wording update, or fixture update repeated across files — combine them into one dispatch brief listing every file and expected hunk. Review the returned diff file-by-file against that list. Keep one-dispatch-per-task for work that needs distinct judgment, tests, or integration risk.
+A clear user request can authorize the exact Git operation without a redundant confirmation, but its semantics do not expand:
 
-### Same-Task Correction Boundaries
+- implement or fix does not mean commit;
+- commit does not mean push, tag, rebase, or release;
+- authorization for one repository, branch, range, or operation does not authorize another.
 
-Continue the **same implementer** using its existing `task_id`, or the current
-callable schema's equivalent same-session continuation handle, only for a
-correction to the same planned task and the same artifact objective. If the host
-does not expose a continuation surface, start a fresh implementer and provide the
-bounded correction context explicitly. Also start fresh when the task, goal,
-stage, or artifact objective changes, or when the existing session context is
-stale or unavailable.
+## Local Workflow Boundaries
 
-After a correction, recheck only the affected blocker, changed files, and affected
-evidence; do not restart a full review loop for a bounded correction. After two correction rounds without progress on the same blocker, the controller must adjudicate the next step before another dispatch. It may clarify the requirement, change the task boundary, or report the blocker rather than retrying blindly. After five correction rounds, the hard ceiling stops automatic correction; do not accept the task while any blocker remains open.
+No automatic workspace or ledger scripts, automatic cleanup, routine full review after each task or wave, or default worker Git write is permitted. Use the active todo list, plan notes, notepad, or final response for rulings and handoffs; do not introduce upstream ledger files or cleanup scripts.
+
+## Plan and Integration Scan
+
+Before work that spans tasks or waves:
+
+- Check shared files and interfaces for incompatible assumptions.
+- Check dependencies and ordering against the desired end state.
+- Confirm planned evidence relates to observable acceptance criteria.
+- Keep security, data-loss, protocol/API, compatibility, and irreversible-operation safeguards intact.
+
+When a conflict is non-material, record the significant decision, its evidence or reason, and the cost if wrong in whatever form is useful, then proceed. Escalate when resolving it would change scope, acceptance, safety, data guarantees, public interfaces/protocols, permissions, irreversible effects, or would be a pure guess.
+
+## Batch Small Same-Shape Work
+
+Several independent, low-judgment edits of the same kind may share one brief. List every owned area and expected outcome, then inspect the result area-by-area. Keep separate work where judgment, dependencies, tests, or integration risk differ.
+
+## Corrections and Changed Inputs
+
+Continue the same worker session for a bounded correction to the same goal when the host exposes a continuation handle and its context remains valid. Otherwise start a fresh worker with the necessary correction context.
+
+After a correction, rerun only affected checks or reviews plus any integration check whose substantive input changed. Do not restart a full review for formatting, narration, status wording, or other changes that cannot affect the reviewed outcome. Escalate rather than retry blindly after repeated no-progress attempts.
 
 ## Model Selection
 
-Use the least powerful model that can handle each role — but **always specify the model explicitly** when dispatching a subagent. Omitting it inherits the session model, which is usually the most expensive.
+Use the least costly currently available profile likely to complete the task reliably. Turn count and context handoff cost matter more than nominal token price. Scale capability to integration judgment, diff size, uncertainty, and risk; do not use a reviewer or Oracle as an implementation or architecture worker.
 
-**Turn count beats token price.** The cheapest model often takes 2-3× more turns to complete a task; the aggregate cost is frequently higher than a mid-tier model that completes it in one pass. Apply a mid-tier floor to reviewers and prose-heavy implementers.
+## Worker Results Are Evidence, Not Gates
 
-**Tiered guidance:**
-- **Plan contains complete code → transcription work → cheapest tier.** The implementer is copying and adapting, not designing.
-- **Integration / judgment tasks** (multi-file coordination, pattern matching): standard model.
-- **Reviewers and prose-heavy implementers:** mid-tier floor. Cheap models miss subtle defects and produce vague reviews.
-- **Final whole-branch review:** most capable available model. This is the last gate before merge.
-- **Review tasks scale by diff size / complexity / risk.** A 10-line single-file diff does not need the most capable reviewer; a 500-line cross-module change does.
+Status labels such as `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT` are informational. Read the actual changed files, reasoning, evidence, and concerns. An acknowledgement, dispatch success, or label alone is not completion evidence.
 
-**Task complexity signals:**
-- Touches 1-2 files with a complete spec → cheapest tier
-- Touches multiple files with integration concerns → standard model
-- Requires design judgment or broad codebase understanding → most capable model
+Likewise, an optional or redundant child that is unavailable, times out, returns only an acknowledgement, or fails to add evidence does not block a result already proven by sufficient current evidence. Required work remains required; do not use this rule to bypass a real unresolved security, data-loss, protocol/API, compatibility, or irreversible-operation risk.
 
-## Handling Implementer Status
+When a worker raises a concern:
 
-Implementer subagents report one of four statuses. Handle each appropriately:
-
-**DONE:** Run the completion/integration check, then continue to the next task. Do not dispatch spec-reviewer or code-quality-reviewer for a clean DONE result. If the work needs a commit, the implementer reports the intended files and message; the orchestrator handles any Git write only after explicit user authorization.
-
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, resolve them before continuing. If an actual implementation diff shows a high-risk code-quality or cross-task integration concern, a narrow early implementation review is allowed; otherwise note the concern and continue after the completion check.
-
-**NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
-
-**BLOCKED:** The implementer cannot complete the task. Assess the blocker:
-1. If it's a context problem, provide more context and re-dispatch with the same model
-2. If the task requires more reasoning, re-dispatch with a more capable model
-3. If the task is too large, break it into smaller pieces
-4. If the plan itself is wrong, rule on the smallest correction from the spec/design, record the ruling, and re-dispatch with that ruling unless every path forward is a guess or a stop-class action is required
-
-**Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
+- resolve correctness or scope concerns from code and requirements before relying on the result;
+- provide missing context when that is the blocker;
+- change model or task boundary when the work genuinely exceeds the worker;
+- escalate decisions in the stop classes rather than forcing a guess.
 
 ### Waiting on Dispatched Subagents
 
-Do not poll aggressively, sleep, or repeatedly ask for status. While you have local work — preparing the next dispatch, inspecting returned diffs, updating todos, or packaging review input — keep working. If the host exposes background completion, let it notify you. If a wait surface exists and you are genuinely idle, wait in bounded stretches rather than short loops, then reconcile outstanding children once per stretch. A `task_id` continues a child session; it is not a polling job ID.
+Do not poll aggressively, sleep, or repeatedly ask for status. While you have local work — preparing the next dispatch, inspecting returned diffs, updating todos, or packaging review input — keep working. If the host exposes background completion, let it notify you. If a wait surface exists and you are genuinely idle, wait in bounded stretches rather than short loops, then reconcile outstanding children once per stretch. A continuation handle continues a child session; it is not a polling job ID.
+
+## Verification
+
+Choose evidence that can demonstrate the requested behavior or invariant. Depending on the change, this can include focused deterministic tests, existing regression tests, typechecks, builds, runtime probes, inspection of generated output, or protocol/security checks.
+
+Do not impose a universal RED gate, test transcript, scenario count, or full-suite run for every task. Add or run tests where a plausible deterministic regression seam warrants them. Never weaken real safeguards or substitute an acknowledgement for evidence.
+
+## Completion and Integration Check
+
+For each worker result or direct-execution wave:
+
+- inspect the actual changed and newly created files or current diff;
+- compare the result to the goal and acceptance criteria;
+- evaluate the reported evidence and run additional targeted checks when needed;
+- check shared interfaces and assumptions against other work;
+- record significant rulings, unresolved risks, and intentionally unverified items.
+
+This is outcome verification, not a mandatory full reviewer pass after each task or wave.
+
+## Constructing Review Requests
+
+When independent review is useful, provide the reviewer with the goal, acceptance criteria, current diff or committed range including new files, relevant verification evidence, and global constraints. Add focused context for a known concern without pre-judging the conclusion. Do not paste accumulated session history or require a fixed packet schema, receipt, or first-line verdict.
+
+Reviewers inspect the actual change and evidence; they should not rerun expensive checks without a reason. Treat their findings according to technical merit. Re-request only the affected review when substantive code, requirements, evidence, or constraints changed. An editorial prompt change does not stale otherwise applicable review analysis.
+
+## When Review Is Useful
+
+Consider focused review for a high-risk implementation concern, uncertain complex fix, meaningful cross-module integration, security/data/protocol/compatibility/release risk, or explicit user request. Consider a whole-change review before merge or delivery when the size or risk benefits from independent scrutiny.
+
+Review is not unconditional. A proven low-risk result need not wait for an optional or redundant reviewer, and reviewer approval is not a substitute for evidence. When review is required by the user or a governing release/safety process, satisfy that requirement and resolve substantive blockers before completion.
+
+## Handling Findings
+
+Use the `receiving-code-review` skill. Fix validated blocking defects or missing required evidence. Group related findings into a coherent correction rather than spawning one worker per comment. Push back with code, requirements, or evidence when a finding is incorrect or would change approved intent.
+
+After a substantive fix, rerun affected evidence and reviews. Do not rerun unaffected reviews. Preserve the approved goal and constraints; escalate feedback that would change scope, acceptance, safety/data guarantees, public APIs/protocols, permissions, or irreversible behavior.
 
 ## Prompt Templates
 
-- `./implementer-prompt.md` - Dispatch implementer subagent
-- `./spec-reviewer-prompt.md` - Optional narrow consultation when a completion check reveals a scope/compliance risk
-- `./code-quality-reviewer-prompt.md` - Optional narrow consultation when a completion check reveals a quality/maintainability risk
-
-## TDD Cycle
-
-Each implementation task follows TDD:
-1. **RED**: Write a failing test that captures the desired behavior
-2. **GREEN**: Write minimal code to make the test pass
-3. **REFACTOR**: Clean up the code while keeping tests green
-4. **REGRESSION**: Run the full test suite to verify no regressions
-
-## Red Flags
-
-**Never:**
-- Start implementation on main/master branch without explicit user consent
-- Skip the completion/integration check after an implementer returns
-- Treat a completion/integration check as a substitute for the final acceptance review
-- Dispatch spec-reviewer/code-quality-reviewer automatically after every DONE subtask
-- Accept or rely on an implementer-spawned reviewer, peer implementer, planner, or plan-critic as workflow evidence
-- Proceed with unfixed issues
-- Dispatch multiple implementation subagents in parallel (conflicts)
-- Make subagent read plan file (provide full text instead)
-- Skip scene-setting context (subagent needs to understand where task fits)
-- Ignore subagent questions (answer before letting them proceed)
-- Accept "close enough" when the completion check shows the task is not done
-- Let implementer self-review replace the completion check or the final acceptance review
-- Move to next task while the completion check has open issues
-- Confuse narrow early review of an actual implementation diff with architecture consultation, debugging, plan review, or routine per-task review
-
-**If subagent asks questions:**
-- Answer clearly and completely
-- Provide additional context if needed
-- Don't rush them into implementation
-
-**If the completion check finds issues:**
-- Apply the Same-Task Correction Boundaries above before dispatching a correction
-- Recheck only the affected blocker, files, and evidence after the correction
-- Do not move on or accept the task while a blocker remains open
-
-**If a reviewer is consulted early (only for an implemented diff with DONE_WITH_CONCERNS, user-requested strict step-by-step code review, or an obvious high-risk integration conflict):**
-- Implementer (same subagent) fixes the findings
-- Re-check only the narrow blocker or concern that triggered the consultation
-- Repeat only until that blocker is resolved
-
-**If subagent fails task:**
-- Dispatch a fix subagent with specific instructions; the fix subagent also reports changes instead of committing.
-- Don't try to fix manually (context pollution)
-
-## Completion / Integration Check
-
-After each implementer returns, run this check before moving to the next task. It is lightweight and focused on factual verification, not a full reviewer-style audit.
-
-**Read the summary:** What was done, what was not done, what evidence the implementer provides.
-
-**Verify completion:** Does the diff satisfy the task's acceptance criteria? Are the files that should have been created/modified actually present?
-
-**Inspect touched files / diff:** Read the changed files or diff. Look for obvious omissions, scope creep, or unintended edits.
-
-**Run targeted tests or record evidence:** If the task has targeted tests, run them. If not, record the implementer's test output or other evidence in the todo list.
-
-**Check integration / conflicts:** Does this change conflict with earlier tasks (same files, inverted assumptions, duplicated logic)? If yes, resolve before continuing, either by re-dispatching the same implementer or by requesting narrow implementation review of the actual diff when the conflict is high-risk.
-
-**When to request early implementation review:** Reviewer/Oracle use is exceptional and requires an actual implementation diff. It is reserved for:
-- DONE_WITH_CONCERNS where the concern is about implemented-code correctness, implemented architecture, or cross-task impact
-- User explicitly asks for strict step-by-step code review of implemented work
-- Obvious high-risk conflict or regression visible between implemented tasks
-
-Do not use Reviewer or Oracle profiles for a BLOCKED task with no implementation to inspect, pre-implementation architecture, plan defects, or root-cause debugging; route those through the orchestrator's ordinary decision, plan, or debugging workflow.
-
-Do not dispatch spec-reviewer or code-quality-reviewer after a clean DONE result. If early consultation is needed, ask for the narrow issue to be evaluated; do not recreate the old routine per-task review loop.
-
-## Constructing Reviewer Prompts
-
-Reviewer prompts shape what the reviewer finds. A poorly constructed prompt pre-judges findings, bloats context with history, or sends the reviewer on irrelevant tangents.
-
-**Do not pre-judge findings.** If your prompt contains any of these, stop — you are pre-judging:
-- "Do not flag X" / "don't treat Y as a defect"
-- "At most Minor" / "this is expected"
-- "The plan chose this approach"
-
-The reviewer must evaluate the diff on its merits. If you have context the reviewer lacks, state it as context, not as a verdict.
-
-**Do not add open-ended directives** without a task-specific reason. "Check all uses of this function," "run race tests if useful," "verify every edge case" — these send the reviewer on unfocused tangents. Point them at specific concerns instead.
-
-**Do not let reviewers re-run tests** the implementer already ran. The reviewer evaluates the diff and the test results the implementer reported. Re-running wastes time and tokens.
-
-**Global constraints block.** Copy the plan's Global Constraints (or spec constraints) **verbatim** into the reviewer prompt — exact values, formats, relationships. This is the reviewer's attention lens. The reviewer template already contains process rules; you add the task-specific constraints.
-
-**Do not paste accumulated history into dispatch prompts.** Each dispatch gets exactly the context it needs — the task text, the diff, the constraints. A real session once dispatched 42k characters where 99% was pasted conversation history. The reviewer cannot use that; it dilutes focus.
-
-**Dispatch the diff, not a summary.** When early consultation or final acceptance review is needed, the reviewer needs the actual diff with context, not your description of it. Structure the dispatch with the review input, the diff, and the task description; the review input may be a committed range or a working-tree/staged diff. The final acceptance review uses `code-reviewer.md` via the requesting-code-review skill; `spec-reviewer-prompt.md` and `code-quality-reviewer-prompt.md` are optional narrow-consult tools only, not routine per-task gates.
-
-**Handling findings:**
-- **Critical + Important** → dispatch a fix subagent. Each fix dispatch must include: the test name that covers the fix, the command to run it, and the expected output.
-  - If a finding is labeled `[product]`, change the implementation to address it.
-  - If a finding is labeled `[evidence]`, supply the missing evidence/proof; do not change product behavior unless the evidence exposes a real defect.
-- **Minor** → record in the todo list / ledger; the final acceptance review triages them. Do not dispatch per-Minor fix subagents.
-- **Plan-mandated behavior flagged as a defect** → the plan overrode a default. Do not auto-fix. Rule from the spec/design and global constraints, record the ruling, and carry it into the fix dispatch. Stop and ask only if the conflict leaves every path forward a guess or requires a stop-class action.
-- **Final review findings** → dispatch ONE fix subagent carrying all findings, not one subagent per finding.
-
-## Final Acceptance Review
-
-After all plan tasks are marked complete, before declaring the work done, run a final acceptance review over the full change set. This is distinct from completion/integration checks — it evaluates the work as a whole.
-
-**1. Assess complexity and choose reviewers deliberately:**
-
-Review selection has two independent axes: role/model priority and logical rigor.
-
-- `reviewer` is the primary-model or primary-lane self-review profile. Oracle profiles are external-model cross-check slots ordered by selection priority as `oracle`, `oracle-2nd`, then configured `oracle-3rd` through `oracle-9th`.
-- `oracle-2nd` and later slots mean lower selection priority, never stronger capability.
-- Logical rigor tiers are `low`, `normal`, `high`, `max` (`normal` is the unsuffixed profile; other tiers are used only when configured and available).
-- Explicit user model configuration remains authoritative and may remove model heterogeneity.
-
-| Complexity / evidence shape | Criteria | Reviewer(s) | Tier choice |
-|---|---|---|---|
-| Simple | 1-2 tasks, single module, no architectural change | first available Oracle | `normal` |
-| Complex / cross-module | 3+ tasks, cross-module integration, architectural change, migration | first available Oracle + `reviewer` in parallel | configured `high`, otherwise `normal` |
-| Security / performance / data-loss / release / runtime-safety | high-impact risk profile regardless of file count | first available Oracle + `reviewer` in parallel | configured `max`, otherwise `high`, otherwise `normal` |
-| Additional evidence requested | user/orchestrator asks for more independent model evidence | additional Oracle slots in order (start with `oracle-2nd`, then later configured/available slots in ordinal order) | keep the intentionally selected tier |
-
-The orchestrator performs this selection after all tasks complete. Do not fan out reviews merely because several Oracle slots or tiers are registered. Collect only intentionally requested reviews. A later Oracle slot is another configured model perspective, not a stronger reviewer.
-
-<!-- ocmm-review-artifact-final-acceptance -->
-**2. Capture and dispatch the identity-bound acceptance packet:**
-
-Load the applicable `requesting-code-review` skill and, immediately before each
-dispatch, capture one common current seven-field packet:
-
-```text
-ARTIFACT_KIND: committed-range | working-tree
-ARTIFACT_IDENTITY: <current identity from the requesting-code-review skill>
-DESCRIPTION: <implemented change summary>
-PLAN_OR_REQUIREMENTS: <path or supplied requirements>
-REVIEW_INPUT: <current binary review input and manifest/report reference>
-VERIFICATION_EVIDENCE: <identity-stamped affected evidence>
-GLOBAL_CONSTRAINTS: <verbatim task constraints>
-```
-
-Dispatch that common packet only to the Oracle and Reviewer lanes deliberately
-selected by the table. For baseline acceptance use the selected first available
-Oracle, adding `reviewer` only when the table says so; later Oracle slots require
-an intentional evidence need. Do not fan out merely because profiles are available.
-Every lane must return exactly this five-field receipt:
-
-```text
-role/profile lane: <selected reviewer or Oracle profile>
-task_id or session receipt: <task_id or durable session/result reference>
-artifact identity: <received and verified identity>
-verdict: <approved | rejected>
-report artifact/source: <review report path or task-result source>
-```
-
-The parent recomputes the artifact identity after each lane returns. A missing
-receipt field, missing identity, mismatch, or drift is an `[evidence]` blocker;
-reject the stale verdict and do not declare completion. Do not reconstruct a lost
-receipt from memory: re-review the current artifact; no memory reconstruction. No ledger, Git write, or
-implementation-subagent commit requirement is introduced. Do not require implementation subagents to commit, stage, or push merely to create review input.
-
-**3. Process feedback and converge:**
-
-- Use the `receiving-code-review` skill to handle findings with technical rigor.
-- For Critical or Important findings, dispatch one fix subagent carrying all
-  findings. Continue its review in the same review task IDs, but capture a new
-  packet and artifact identity after the fix.
-- Re-run affected evidence and the required final pass, then re-dispatch only the
-  selected lanes whose prior receipt no longer covers the changed artifact.
-- Accept completion only when every required receipt has all five fields, the same
-  common current identity, and `verdict: approved`. A previous approval for any
-  different identity is stale.
-
-**4. When to skip:**
-
-The final acceptance review is mandatory unless the user explicitly delegates ("你自己决定" / "无需批准自行继续"). Completion/integration checks do not replace final acceptance review.
+- `./implementer-prompt.md` — focused worker brief
+- `./spec-reviewer-prompt.md` — optional narrow requirements consultation
+- `./code-quality-reviewer-prompt.md` — optional narrow quality consultation
 
 ## Integration
 
-**Required workflow skills:**
-- **writing-plans** - Creates the plan this skill executes
-- **requesting-code-review** - Code review template for reviewer subagents
-- **receiving-code-review** - How to handle reviewer feedback
+- **writing-plans** — captures outcomes, dependencies, risks, and useful evidence when durable coordination is warranted
+- **requesting-code-review** — constructs a focused review request when review is useful
+- **receiving-code-review** — evaluates and acts on findings with technical rigor

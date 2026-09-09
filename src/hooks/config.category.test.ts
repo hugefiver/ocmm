@@ -10,7 +10,7 @@ import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
 const PROMPTS_ROOT = join(process.cwd(), "prompts")
 
-loadAllPrompts(PROMPTS_ROOT, "omo")
+loadAllPrompts(PROMPTS_ROOT, "v1")
 
 const UTILITY_TASK_RULES = {
   "*": "deny",
@@ -168,7 +168,7 @@ test("user category override changes the model without disabling subagent mode",
 })
 
 test("GPT-5.6 category selections append only the additive calibration after the authoritative role", async () => {
-  loadAllPrompts(PROMPTS_ROOT, "omo")
+  loadAllPrompts(PROMPTS_ROOT, "v1")
   const rolePrompt = getCategoryPrompt("frontend").trim()
   const specialization = getDeepworkPrompt("gpt-5.6").trim()
   const genericGptPrompt = getDeepworkPrompt("gpt").trim()
@@ -202,7 +202,7 @@ test("GPT-5.6 category selections append only the additive calibration after the
 })
 
 test("Opus 5 category selections never attach the orchestrator calibration", async () => {
-  loadAllPrompts(PROMPTS_ROOT, "omo")
+  loadAllPrompts(PROMPTS_ROOT, "v1")
   const configured = {
     ...defaultConfig(),
     categories: Object.fromEntries(
@@ -250,7 +250,7 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
     }
   } finally {
-    loadAllPrompts(PROMPTS_ROOT, "omo")
+    loadAllPrompts(PROMPTS_ROOT, "v1")
   }
 })
 
@@ -272,7 +272,7 @@ test("Codex carries the exact Astra category calibration behind its own runtime 
     assert.match(prompt, /every other runtime model must ignore it/)
     assert.doesNotMatch(getCategoryPrompt("deep"), /model-calibration|Astra/)
   } finally {
-    loadAllPrompts(PROMPTS_ROOT, "omo")
+    loadAllPrompts(PROMPTS_ROOT, "v1")
   }
 })
 

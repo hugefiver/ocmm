@@ -350,9 +350,9 @@ test("default config includes subagent.maxDepth === 3", () => {
 
 test("deepMerge: workflow scalar replaces (project wins)", () => {
   const user = { workflow: "v1" as const }
-  const project = { workflow: "omo" as const }
+  const project = { workflow: "codex" as const }
   const merged = deepMerge(user, project) as { workflow: string }
-  assert.equal(merged.workflow, "omo")
+  assert.equal(merged.workflow, "codex")
 })
 
 test("project config cannot extend mcp envAllowlist", () => {
@@ -426,7 +426,7 @@ test("codex host reads CODEX_HOME and project .codex config without changing ope
     mkdirSync(join(cwd, ".opencode"), { recursive: true })
     writeFileSync(join(codexHome, "ocmm.jsonc"), JSON.stringify({ workflow: "v1" }))
     writeFileSync(join(cwd, ".codex", "ocmm.jsonc"), JSON.stringify({ debug: true }))
-    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "omo", debug: false }))
+    writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "codex", debug: false }))
 
     const loaded = loadConfig({ cwd, host: "codex" })
     assert.equal(loaded.sources.user, join(codexHome, "ocmm.jsonc"))
@@ -436,7 +436,7 @@ test("codex host reads CODEX_HOME and project .codex config without changing ope
 
     const opencodeLoaded = loadConfig({ cwd, includeUser: false })
     assert.equal(opencodeLoaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
-    assert.equal(opencodeLoaded.config.workflow, "omo")
+    assert.equal(opencodeLoaded.config.workflow, "codex")
     assert.equal(opencodeLoaded.config.debug, false)
   } finally {
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME
@@ -548,10 +548,10 @@ test("loadConfig drops invalid array elements and preserves valid values", () =>
 
 test("loadConfig treats an invalid project override as absent while preserving project siblings", () => {
   withUserAndProjectConfigs(
-    { workflow: "omo", debug: true },
+    { workflow: "codex", debug: true },
     { workflow: "unsupported", debug: false },
     (config) => {
-      assert.equal(config.workflow, "omo")
+      assert.equal(config.workflow, "codex")
       assert.equal(config.debug, false)
     },
   )
@@ -631,14 +631,14 @@ test("loadConfig restores profile selection and inline profile provenance", () =
   for (const project of [42, [], ["invalid-root"]]) {
     withUserAndProjectConfigs(
       {
-        workflow: "omo",
+        workflow: "codex",
         debug: true,
         profiles: { selected: { locale: "zh-CN" } },
         activeProfile: "selected",
       },
       project,
       (config) => {
-        assert.equal(config.workflow, "omo")
+        assert.equal(config.workflow, "codex")
         assert.equal(config.debug, true)
         assert.equal(config.locale, "zh-CN")
       },
@@ -735,6 +735,50 @@ test("loadProfilesFromDir strips nested profiles/activeProfile keys defensively"
 })
 
 // --- loadConfig directory profile integration tests ---
+
+test("loadConfig reads BOM-prefixed base, project, and profile JSONC", () => {
+  const xdg = mkdtempSync(join(tmpdir(), "ocmm-bom-base-"))
+  const cwd = mkdtempSync(join(tmpdir(), "ocmm-bom-project-"))
+  const userConfigDir = join(xdg, "opencode")
+  const projectConfigDir = join(cwd, ".opencode")
+  const projectProfileDir = join(projectConfigDir, "ocmm-profiles")
+  mkdirSync(userConfigDir, { recursive: true })
+  mkdirSync(projectProfileDir, { recursive: true })
+  writeFileSync(
+    join(userConfigDir, "ocmm.jsonc"),
+    `\uFEFF${JSON.stringify({ locale: "en-US", activeProfile: "focused" })}`,
+  )
+  writeFileSync(
+    join(projectConfigDir, "ocmm.jsonc"),
+    `\uFEFF${JSON.stringify({ debug: true })}`,
+  )
+  writeFileSync(
+    join(projectProfileDir, "focused.jsonc"),
+    `\uFEFF${JSON.stringify({ agents: { orchestrator: { model: "BOM-PROFILE" } } })}`,
+  )
+  const previousXdg = process.env.XDG_CONFIG_HOME
+  const previousProfile = process.env.OCMM_PROFILE
+  const previousNoProfile = process.env.OCMM_NO_PROFILE
+  process.env.XDG_CONFIG_HOME = xdg
+  delete process.env.OCMM_PROFILE
+  delete process.env.OCMM_NO_PROFILE
+  try {
+    const { config, activeProfile } = loadConfig({ cwd })
+    assert.equal(activeProfile, "focused")
+    assert.equal(config.locale, "en-US")
+    assert.equal(config.debug, true)
+    assert.equal(config.agents?.orchestrator?.model, "BOM-PROFILE")
+  } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = previousXdg
+    if (previousProfile === undefined) delete process.env.OCMM_PROFILE
+    else process.env.OCMM_PROFILE = previousProfile
+    if (previousNoProfile === undefined) delete process.env.OCMM_NO_PROFILE
+    else process.env.OCMM_NO_PROFILE = previousNoProfile
+    rmSync(xdg, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
 
 test("loadConfig applies a directory profile, shadowing inline same-name", () => {
   const xdg = mkdtempSync(join(tmpdir(), "ocmm-int-"))
@@ -972,7 +1016,7 @@ test("loadProfileDescriptorsFromDir records structural shape errors and sanitize
 test("loadProfileDescriptorsFromDir does not inject defaults for omitted profile fields", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-profile-descriptor-defaults-"))
   try {
-    writeFileSync(join(root, "selected.jsonc"), JSON.stringify({ debug: true }))
+    writeFileSync(join(root, "selected.jsonc"), `\uFEFF${JSON.stringify({ debug: true })}`)
 
     const descriptor = loadProfileDescriptorsFromDir(root, "user-directory").get("selected")
     const value = descriptor?.value as Record<string, unknown> | undefined
@@ -1024,24 +1068,24 @@ test("loadConfig tolerates logical-tier violations without discarding valid sibl
 
     for (const scenario of scenarios) {
       writeFileSync(join(configDir, "ocmm.jsonc"), JSON.stringify({
-        workflow: "omo",
+        workflow: "codex",
         agents: {
           orchestrator: { model: "openai/gpt-5.6-sol" },
           ...scenario.agents,
         },
       }))
       const config = loadConfig({ cwd }).config
-      assert.equal(config.workflow, "omo", JSON.stringify(scenario.agents))
+      assert.equal(config.workflow, "codex", JSON.stringify(scenario.agents))
       assert.equal(config.agents?.orchestrator?.model, "openai/gpt-5.6-sol")
       scenario.verify(config)
     }
 
     writeFileSync(join(configDir, "ocmm.jsonc"), JSON.stringify({
-      workflow: "omo",
+      workflow: "codex",
       agents: { orchestrator: { model: "openai/gpt-5.6-terra", temperature: 3 } },
     }))
     const tolerant = loadConfig({ cwd }).config
-    assert.equal(tolerant.workflow, "omo")
+    assert.equal(tolerant.workflow, "codex")
     assert.equal(tolerant.agents?.orchestrator?.model, "openai/gpt-5.6-terra")
     assert.equal(tolerant.agents?.orchestrator?.temperature, undefined)
   } finally {

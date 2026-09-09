@@ -503,14 +503,19 @@ describe("shim buildIsolatedConfig", () => {
         hoo: { npm: "@ai-sdk/anthropic", options: { apiKey: "test-key" } },
       },
       disabled_providers: ["opencode", "openrouter"],
-      plugin: ["occo", "opencode-dcp", "oh-my-openagent@latest"],
+      plugin: [
+        "occo",
+        ["opencode-dcp", { enabled: true, settings: { mode: "strict" } }],
+        ["oh-my-openagent@latest", { theme: "fixture-theme" }],
+        [resolvePluginPath(), { source: "global-tuple" }],
+      ],
       agent: {
         compaction: { model: "hoo/deepseek-v4-pro" },
         title: { model: "hoo/deepseek-v4-flash" },
       },
       compaction: { auto: true, reserved: 5000 },
     }
-    writeFileSync(join(globalConfigDir, "opencode.json"), JSON.stringify(globalConfig))
+    writeFileSync(join(globalConfigDir, "opencode.json"), `\uFEFF${JSON.stringify(globalConfig)}`)
     process.env.XDG_CONFIG_HOME = tempHome
   })
 
@@ -534,20 +539,25 @@ describe("shim buildIsolatedConfig", () => {
     assert.ok(config.agent, "agent should be merged")
     assert.ok(config.compaction, "compaction should be merged")
     assert.ok(config.plugin, "plugin array should exist")
-    // occo + opencode-dcp + ocmm = 3 (oh-my-openagent stripped by default)
-    assert.ok(config.plugin!.length >= 3, "should have global plugins (minus omo) + ocmm")
+    assert.equal(config.plugin!.length, 3)
     assert.ok(config.plugin!.includes("occo"))
-    assert.ok(config.plugin!.includes("opencode-dcp"))
-    assert.ok(!config.plugin!.some((p) => p.includes("oh-my-openagent")), "omo should be stripped")
+    assert.deepEqual(config.plugin![1], ["opencode-dcp", { enabled: true, settings: { mode: "strict" } }])
+    assert.ok(!config.plugin!.some((entry) => {
+      const name = typeof entry === "string" ? entry : entry[0]
+      return name.includes("oh-my-openagent")
+    }))
   })
 
-  it("adds ocmm plugin path always", () => {
+  it("recognizes an existing ocmm tuple without adding a duplicate string entry", () => {
     const config = buildIsolatedConfig({
       mergeProviders: true,
       mergePlugins: true,
     })
     const pluginPath = resolvePluginPath()
-    assert.ok(config.plugin!.includes(pluginPath), "ocmm plugin path should be in array")
+    assert.deepEqual(
+      config.plugin!.filter((entry) => (typeof entry === "string" ? entry : entry[0]) === pluginPath),
+      [[pluginPath, { source: "global-tuple" }]],
+    )
   })
 
   it("strips oh-my-openagent variants (bare, @version, scoped)", () => {
@@ -559,9 +569,9 @@ describe("shim buildIsolatedConfig", () => {
       JSON.stringify({
         plugin: [
           "oh-my-openagent",
-          "oh-my-openagent@latest",
+          ["oh-my-openagent@latest", { channel: "latest" }],
           "occo",
-          "@scope/oh-my-openagent",
+          ["@scope/oh-my-openagent", { scoped: true }],
         ],
       }),
     )
@@ -572,7 +582,10 @@ describe("shim buildIsolatedConfig", () => {
         mergePlugins: true,
       })
       assert.ok(config.plugin!.includes("occo"))
-      assert.ok(!config.plugin!.some((p) => p.includes("oh-my-openagent")), "no omo variant should remain")
+      assert.ok(!config.plugin!.some((entry) => {
+        const name = typeof entry === "string" ? entry : entry[0]
+        return name.includes("oh-my-openagent")
+      }))
     } finally {
       process.env.XDG_CONFIG_HOME = origHome
       rmSync(emptyDir, { recursive: true, force: true })
@@ -585,9 +598,9 @@ describe("shim buildIsolatedConfig", () => {
       mergePlugins: true,
       keepOmo: true,
     })
-    assert.ok(
-      config.plugin!.some((p) => p.includes("oh-my-openagent")),
-      "omo should be present when keepOmo=true",
+    assert.deepEqual(
+      config.plugin!.find((entry) => (typeof entry === "string" ? entry : entry[0]).includes("oh-my-openagent")),
+      ["oh-my-openagent@latest", { theme: "fixture-theme" }],
     )
   })
 

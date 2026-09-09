@@ -354,7 +354,7 @@ test("resolveMcpServers merges builtins, mcp.json, and explicit config with disa
   try {
     writeFileSync(
       join(cwd, ".mcp.json"),
-      JSON.stringify({ local_docs: { type: "remote", url: "https://json.example/mcp" } }),
+      `\uFEFF${JSON.stringify({ local_docs: { type: "remote", url: "https://json.example/mcp" } })}`,
     )
 
     const servers = resolveMcpServers(
@@ -399,8 +399,8 @@ test("resolveMcpServers lets explicit lsp config override builtin lsp", () => {
   assert.equal(servers.lsp?.type === "local" ? servers.lsp.cwd : undefined, undefined)
 })
 
-test("parseSkillMcpFrontmatter reads simple embedded MCP server config", () => {
-  const parsed = parseSkillMcpFrontmatter(`---
+test("parseSkillMcpFrontmatter reads simple embedded MCP server config after a leading BOM", () => {
+  const parsed = parseSkillMcpFrontmatter(`\uFEFF---
 name: docs
 mcp:
   docs:
@@ -435,7 +435,7 @@ test("loadSkillMcpConfig prefers companion mcp.json", async () => {
     )
     writeFileSync(
       join(skillDir, "mcp.json"),
-      JSON.stringify({ preferred: { type: "remote", url: "https://preferred.example/mcp" } }),
+      `\uFEFF${JSON.stringify({ preferred: { type: "remote", url: "https://preferred.example/mcp" } })}`,
     )
 
     const loaded = await loadSkillMcpConfig(skillDir)

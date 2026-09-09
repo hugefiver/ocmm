@@ -76,7 +76,7 @@ comments → dead code → defensive → duplication → complexity → abstract
 
 ### Phase 4: Parallel slop removal via task agents (batches of 5)
 
-Process files via the task tool with appropriate category agents. Batch 5 files in parallel (`run_in_background=true`), wait for all to complete before the next batch.
+Process files via `task(description=..., subagent_type=..., prompt=...)`. Batch up to 5 independent files concurrently; pass `background: true` only when the current callable schema exposes `background` and the parent has independent work. Otherwise omit it and keep the batch foreground; integrate every result before starting the next batch.
 
 Each file gets a detailed prompt containing:
 - The category checklist for that file

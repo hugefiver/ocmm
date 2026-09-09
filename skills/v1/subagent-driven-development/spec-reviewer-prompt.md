@@ -1,68 +1,30 @@
 # Spec Compliance Reviewer Prompt Template
 
-Use this template only for an exceptional narrow spec-compliance consultation after a completion/integration check exposes a scope or requirements risk.
+Use this template only when an implemented change benefits from a focused requirements-compliance review.
 
-**Purpose:** Verify implementer built what was requested (nothing more, nothing less)
+**Purpose:** Evaluate whether the current implementation reaches the approved goal without material omission or scope expansion.
 
 ```
 Task tool (general-purpose):
-  description: "Review spec compliance for Task N"
+  description: "Review implementation against requirements"
   prompt: |
-    You are reviewing whether an implementation matches its specification.
+    Review the actual implementation yourself. Do not dispatch another reviewer,
+    worker, or evidence-gathering subagent.
 
-    ## You Do Not Dispatch Subagents
+    Supply the goal, acceptance criteria, current diff or committed range including
+    new files, relevant verification evidence, and global constraints. Add only the
+    context needed to understand dependencies, interfaces, and approved rulings.
+    No fixed field order is required.
 
-    Do this review yourself. Never spawn a subagent to review part of the diff,
-    never spawn another reviewer for a second opinion, and never ask an
-    implementation worker to create review evidence. If the evidence is missing,
-    report that gap to the orchestrator.
+    Compare the actual code and new files to the criteria. Identify missing behavior,
+    unjustified scope, incompatible assumptions, or evidence gaps with file/line
+    references and technical impact. Allow minimal evidence-based equivalent
+    implementations that preserve the approved goal, constraints, permissions, and
+    acceptance criteria.
 
-    ## What Was Requested
-
-    [FULL TEXT of task requirements]
-
-    ## What Implementer Claims They Built
-
-    [From implementer's report]
-
-    ## CRITICAL: Do Not Trust the Report
-
-    The implementer finished suspiciously quickly. Their report may be incomplete,
-    inaccurate, or optimistic. You MUST verify everything independently.
-
-    **DO NOT:**
-    - Take their word for what they implemented
-    - Trust their claims about completeness
-    - Accept their interpretation of requirements
-
-    **DO:**
-    - Read the actual code they wrote
-    - Compare actual implementation to requirements line by line
-    - Check for missing pieces they claimed to implement
-    - Look for extra features they didn't mention
-
-    ## Your Job
-
-    Read the implementation code and verify:
-
-    **Missing requirements:**
-    - Did they implement everything that was requested?
-    - Are there requirements they skipped or missed?
-    - Did they claim something works but didn't actually implement it?
-
-    **Extra/unneeded work:**
-    - Did they build things that weren't requested?
-    - Did they over-engineer or add unnecessary features?
-    - Did they add "nice to haves" that weren't in spec?
-
-    **Misunderstandings:**
-    - Did they interpret requirements differently than intended?
-    - Did they solve the wrong problem?
-    - Did they implement the right feature but wrong way?
-
-    **Verify by reading code, not by trusting report.**
-
-    Report:
-    - ✅ Spec compliant (if everything matches after code inspection)
-    - ❌ Issues found: [list specifically what's missing or extra, with file:line references]
+    Report concrete findings and supporting evidence. Do not rely on an implementer
+    status or acknowledgement, and do not require a fixed first-line verdict or
+    receipt. If the supplied material is insufficient, identify the missing evidence.
 ```
+
+Rerun only if substantive implementation, criteria, constraints, or evidence relevant to this review changes.
