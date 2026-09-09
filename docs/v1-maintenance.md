@@ -87,7 +87,12 @@ duplicating generic shell rules inside model-specific calibrations. The prompt
 requires short inspectable commands, prohibits PowerShell `$home` case
 variants as custom variables, and makes recursive or batch deletion fail closed
 against unassigned/empty targets, filesystem roots, user home, workspace,
-workspace ancestors, and unexpected parent directories.
+workspace ancestors, and unexpected parent directories. It also avoids
+hard-to-audit complex or nested shell and large inline-language programs in
+favor of structured tools, dedicated files, and short single-purpose commands;
+simple inline probes remain allowed, while complex script logic must be a
+clearly purposed standalone file and temporary cleanup is limited to files
+created for the current task.
 
 | v1 prompt | Skills referenced | Kept from omo | Dropped from omo | Adapted for v1 |
 |-----------|-------------------|---------------|------------------|-----------------|
