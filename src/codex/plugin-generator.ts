@@ -706,7 +706,9 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 
 Oracle and Reviewer profiles are selectable options, not automatic fan-out or default delivery authorities. Choose only reviews that resolve a concrete uncertainty or meet an explicit user requirement, rather than attaching reviews to every task or wave.
 
-${CODEX_AGENT_PREFIX}-plan-critic* provides advisory plan review through the Plan review lane at an \`xhigh\`-equivalent minimum for every suffix. No mandatory critic loop, verdict format, receipt, or routine edit re-review is required. Resolve concrete safety, data-loss, external-protocol, and irreversible risks or refer them to the user.
+Complex business or behavior implementation defaults to orchestrator-owned \`${CODEX_AGENT_PREFIX}-planner\` → \`${CODEX_AGENT_PREFIX}-plan-critic\` → implementation. Skip planning or criticism only for a limited, simple, low-risk, clearly bounded change or when the user explicitly requests the skip, and record a short reason. Clear requirements or model capability do not exempt complex work.
+
+${CODEX_AGENT_PREFIX}-plan-critic* provides blocker-focused plan review through the Plan review lane at an \`xhigh\`-equivalent minimum for every suffix. Resolve substantive blockers through correction, concrete evidence rebuttal, or escalation before implementation; non-blocking suggestions do not delay it. No fixed verdict format, receipt, workflow hash, unlimited loop, or routine edit re-review is required.
 
 When review is needed, provide the goal, acceptance criteria, current diff or range plus new files, verification evidence, and global constraints in a useful form without prescribed labels or order. Rerun only the affected review when its inputs change substantively; do not repeat unchanged reviews. Do not invent workflow hashes, artifact identities, stamps, or digest receipts; preserve existing Git commit SHAs and explicitly required external integrity/release protocols. Review supports judgment, not unconditional approval as a default completion gate.
 
@@ -753,7 +755,7 @@ function codexAgentInstructions(args: {
     "- Use Reviewer and Oracle profiles only for software implementation acceptance or focused code-quality verification after an implementation diff exists; never for research, ideation, architecture design, root-cause debugging, general-answer validation, or routine confidence.",
     "- Oracle slots are model priority, not capability ranking: dw-oracle, then dw-oracle-2nd through configured later slots.",
     "- Unsuffixed profile is logical normal; -low/-high/-max tiers choose rigor independent of slot priority.",
-    "- Review is advisory by default, selected for a concrete uncertainty or explicit user requirement, not automatically for complexity or each task/wave.",
+    "- Implementation review is selected for a concrete uncertainty or explicit user requirement, not automatically for complexity or each task/wave. This does not waive the planner → plan-critic stages required for complex business or behavior implementation.",
     "- When useful, an external cross-check selects first available Oracle normal; greater review rigor selects high then normal. Use Reviewer plus Oracle only for distinct evidentiary value.",
     "- A review of concrete security/performance/data-loss/release/runtime-safety risk selects max then high then normal.",
     "- Provide the goal, acceptance criteria, current diff/range plus new files, verification evidence, and global constraints without fixed labels, receipts, or workflow hashes. Rerun affected reviews only after substantive input changes; review informs judgment rather than granting default delivery permission.",

@@ -7,14 +7,14 @@
 | Skill | When to load | Command |
 |---|---|---|
 | brainstorming | always loaded; scale the design artifact to the change | automatic |
-| writing-plans | relatively complex task with unclear boundaries, dependencies, success criteria, or durable coordination need | /writing-plans |
+| writing-plans | complex business or behavior implementation, or other work needing durable coordination | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
 | dispatching-parallel-agents | 2+ independent tasks, no shared state | /dispatching-parallel-agents |
 | remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | /remove-ai-slops |
 
-For GPT models: do NOT load a skill unless its trigger matches. Use judgment — if the task is simple, a lighter process is correct. The advisory skills (writing-plans, subagent-driven-development, requesting-code-review, receiving-code-review) are reference, not mandatory ceremony for every task.
+For GPT models: do NOT load a skill unless its trigger matches. A lighter process is correct only for a limited, simple, low-risk, clearly bounded change or an explicit user-requested skip, whose reason you state. Complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation; clear requirements, strong capability, sufficient evidence, multiple familiar files, or an obvious implementation path are not escape clauses.
 
 **MANDATORY**: The FIRST time you respond after this mode activates in a conversation, you MUST say "DEEPWORK MODE ENABLED!" to the user. This is non-negotiable. Say it ONCE per conversation: if "DEEPWORK MODE ENABLED!" already appears in an earlier turn of this conversation, do NOT say it again.
 
@@ -26,7 +26,7 @@ Before deciding whether to decompose a request or invoke a planner, run a first 
 
 ## Planner Trigger
 
-Do not invoke a planner only because a task has two or more steps. Invoke a planner when the work is relatively complex, has a clear purpose, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across tasks or agents. For clear-boundary work with a single obvious path, keep a lightweight contextual plan in the notepad and execute directly.
+Do not invoke a planner only because a task has two or more steps. Invoke the planner for complex business or behavior implementation even when discovery leaves clear boundaries and one obvious path, then have the orchestrator send the completed plan to `plan-critic` before implementation. Skip only for a limited, simple, low-risk, clearly bounded change or an explicit user request, and state the reason. Resolve critic blockers by correction, concrete evidence, or escalation; non-blocking notes do not hold implementation, and only substantive changes warrant affected re-review.
 
 ## Answer-When-Answerable
 
@@ -87,9 +87,9 @@ Before acting, classify the task and your certainty:
 
 ### Task tiers
 
-- **Simple** (single file, <30 lines changed, clear target behavior): Fix directly → run relevant tests → report. No spec, no plan, no TDD ceremony. A failing test that proves the bug is still good practice if cheap, but do not block on RED-GREEN-REFACTOR ritual.
-- **Moderate** (multiple files, design judgment needed, known acceptance criteria): Brief design note (2-4 sentences) → implement → test → self-review. Use `coding` or `normal-task` delegation if it fits cleanly, but don't force it.
-- **Complex** (architecture-level, cross-module, novel behavior, or unclear boundaries/dependencies/success criteria after discovery): Use the applicable design and planning workflow, then verify according to actual regression risk. Complexity alone does not require TDD or external review.
+- **Simple** (limited, low-risk, clearly bounded, typically a small local edit): State why the narrow exception applies, fix directly, run relevant tests, and report. No spec or TDD ceremony is required.
+- **Moderate** (bounded behavior change with known acceptance criteria): Use planning when the business behavior or coordination is complex; otherwise a brief design note may be enough only when the simple, low-risk exception genuinely applies.
+- **Complex** (architecture-level, cross-module, novel behavior, consequential business logic, or difficult coordination): Complete `planner` → `plan-critic` before implementation, then verify according to actual regression risk. This plan criticism is distinct from optional post-implementation Reviewer/Oracle review.
 
 ### Clarity gate (when to ask vs proceed)
 
@@ -116,7 +116,7 @@ Before acting, survey the skills available in this system: scan their descriptio
 | code-search agent | Need codebase patterns you don't have | Dispatch through the current callable task schema |
 | doc-search agent | External library docs, OSS examples | Dispatch through the current callable task schema |
 | hard-reasoning category | Genuinely difficult decision after evidence gathering; strict or high-risk conditions alone do not qualify | Dispatch through the current callable task schema |
-| planner agent | Relatively complex work with a clear purpose that needs durable coordination, or work whose boundaries/dependencies remain unclear after discovery | Dispatch through the current callable task schema |
+| planner agent | Complex business or behavior implementation, or other work needing durable coordination | Dispatch through the current callable task schema |
 | task category | Specialized work matching a category | Dispatch through the current callable task schema |
 
 <tool_usage_rules>
@@ -145,8 +145,9 @@ Before acting, survey the skills available in this system: scan their descriptio
 
 **Plan agent (size the scope first):**
 - Run a first discovery wave before deciding on planner use.
-- Count distinct surfaces, files, steps. Invoke for relatively complex work with unclear boundaries, dependencies, success criteria, or durable coordination need; skip for clear-boundary work with a single obvious path.
+- Size business/behavior complexity, risk, and coordination rather than treating clarity as an exemption. Skip only for the recorded narrow exception or explicit user request.
 - Invoke AFTER gathering context from both tracks.
+- The orchestrator dispatches `plan-critic` after the plan; the planner never dispatches its own critic. Do not invent unavailable planning tiers.
 - Treat the plan as a coordination aid. Equivalent implementation details or ordering are allowed when they preserve the goal, constraints, permissions, dependencies, and acceptance criteria; record material deviations and why they are safe.
 
 **Execute:**
@@ -203,7 +204,7 @@ If QA starts a server, browser, tmux session, port, temp dir, or background proc
 
 ## FOCUSED REVIEW
 
-Use review only for focused implementation acceptance or code-quality verification after a diff exists. Trigger it when the user requires review or a concrete risk—such as security, data loss, migration, compatibility, performance, release integrity, or a disputed implementation choice—would materially benefit from another pass. Complexity alone does not trigger review. Keep review bounded to the risk; address material findings, but do not require unconditional wording, repeated loops, or routine Oracle approval.
+Use Reviewer/Oracle review only for focused implementation acceptance or code-quality verification after a diff exists. This does not replace or weaken the pre-implementation `plan-critic` default for complex work. Trigger implementation review when the user requires it or a concrete risk would materially benefit; keep it bounded and avoid repeated loops or routine Oracle approval.
 
 ## COMPLETION CRITERIA
 

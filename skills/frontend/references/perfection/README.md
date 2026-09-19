@@ -12,9 +12,11 @@ The `lighthouse` CLI runs `chrome-headless-shell` with default settings. That is
 The correct path:
 
 1. Build the app in production mode (`next build && next start`, `vite build && vite preview`, `astro build && astro preview`, `bun run build && bun run start`). **NEVER** measure a dev server.
-2. Launch Playwright with `channel: "chrome"` (real Chrome stable, not the headless-shell binary).
-3. Run Lighthouse against the Playwright-controlled page via `playwright-lighthouse` OR via `chrome-launcher` + the `lighthouse` Node API, attaching to the Playwright CDP endpoint so cookies, auth state, and warmed caches mirror what a real returning user sees.
+2. Launch Playwright with `channel: "chrome"` (real Chrome stable, not the headless-shell binary) and a new run-owned user-data directory.
+3. Run Lighthouse against only the dynamic CDP endpoint created by that launch. Confirm the endpoint from that run-owned directory before use; if endpoint ownership cannot be confirmed, stop. Never fall back to a conventional port or an existing browser.
 4. Use the **mobile** preset (4x CPU throttle, Fast 3G) for the primary number, AND the **desktop** preset for the secondary number. Report both.
+
+Every audit uses a **run-owned temporary empty browser profile or isolated empty context**. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** Anonymous navigation may warm caches inside this run only; that evidence does not cover a returning or authenticated user. If a route cannot be audited anonymously, **report authentication as a verification limitation** and do not claim a complete audit.
 
 If the `playwright` skill is not loaded in this session, load it now via the `skill` tool.
 
@@ -85,36 +87,136 @@ For initial install of react-scan + react-doctor (and react-grab) in a fresh Rea
 
 ## AUDIT WORKFLOW
 
-Quick audit via the cross-platform Python CLI (macOS, Linux, Windows):
-
-```bash
-uv run $SKILL_DIR/scripts/perfection/lighthouse-audit.py https://localhost:3000
-uv run $SKILL_DIR/scripts/perfection/lighthouse-audit.py https://localhost:3000 --threshold 95
-uv run $SKILL_DIR/scripts/perfection/lighthouse-audit.py https://localhost:3000 --desktop-only
-```
-
-Or use the TypeScript approach directly in your test suite:
+The retained `scripts/perfection/lighthouse-audit.py` is a legacy helper and **must not be used as a browser verification entry point**. It derives a port through a private transport field, does not establish the endpoint ownership contract below, and may automatically install missing dependencies. Do not run it. Use this canonical TypeScript approach with already-installed project dependencies; if those dependencies are unavailable, report the audit as unverified rather than installing or falling back to another browser endpoint:
 
 ```ts
 // scripts/audit.ts
-import { chromium } from "playwright";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { playAudit } from "playwright-lighthouse";
 
-const browser = await chromium.launch({ channel: "chrome" });
-const context = await browser.newContext();
-const page = await context.newPage();
-await page.goto("http://localhost:3000/<route>");
+type OwnedAuditBrowser = {
+  context: BrowserContext;
+  page: Page;
+  port: number;
+  close(): Promise<void>;
+};
 
-await playAudit({
-  page,
-  port: 9222,
-  thresholds: { performance: 100, accessibility: 100, "best-practices": 100, seo: 100 },
-  reports: { formats: { html: true, json: true }, name: "lighthouse-<route>" },
-  config: { extends: "lighthouse:default", settings: { formFactor: "mobile" } },
-});
+async function removeOwnedRunRoot(runRoot: string, ownershipToken: string): Promise<void> {
+  const [resolvedTempRoot, resolvedRunRoot] = await Promise.all([realpath(tmpdir()), realpath(runRoot)]);
+  const ownershipMarker = join(resolvedRunRoot, ".ocmm-run-owner");
+  if (
+    dirname(resolvedRunRoot) !== resolvedTempRoot ||
+    !/^ocmm-lighthouse-[A-Za-z0-9_-]+$/.test(basename(resolvedRunRoot)) ||
+    (await readFile(ownershipMarker, "utf8")) !== ownershipToken
+  ) {
+    throw new Error("Refusing to remove a Lighthouse run root without exact ownership evidence");
+  }
+  await rm(resolvedRunRoot, { recursive: true, force: false });
+}
 
-await browser.close();
+async function readOwnedCdpPort(userDataDir: string, launchStartedAt: number): Promise<number> {
+  const activePortFile = join(userDataDir, "DevToolsActivePort");
+  const deadline = Date.now() + 10_000;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const [portText, browserPath] = (await readFile(activePortFile, "utf8")).trim().split(/\r?\n/);
+      const port = Number(portText);
+      const metadata = await stat(activePortFile);
+      if (!Number.isInteger(port) || port < 1 || !browserPath?.startsWith("/devtools/browser/")) {
+        throw new Error("Chrome wrote an invalid DevToolsActivePort file");
+      }
+      if (metadata.mtimeMs < launchStartedAt - 1_000) {
+        throw new Error("DevToolsActivePort predates this browser launch");
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error("CDP readiness budget expired before the ownership probe");
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(remainingMs),
+      });
+      if (!response.ok) throw new Error(`CDP readiness returned HTTP ${response.status}`);
+      const version = (await response.json()) as { webSocketDebuggerUrl?: string };
+      if (!version.webSocketDebuggerUrl) throw new Error("CDP response omitted webSocketDebuggerUrl");
+      const endpoint = new URL(version.webSocketDebuggerUrl);
+      if (endpoint.hostname !== "127.0.0.1" || endpoint.port !== String(port) || endpoint.pathname !== browserPath) {
+        throw new Error("CDP endpoint does not match this launch's DevToolsActivePort file");
+      }
+      return port;
+    } catch (error) {
+      lastError = error;
+      const retryDelayMs = Math.min(100, Math.max(0, deadline - Date.now()));
+      if (retryDelayMs > 0) await delay(retryDelayMs);
+    }
+  }
+
+  throw new Error(`Owned CDP endpoint was not ready before the deadline: ${String(lastError)}`);
+}
+
+async function launchOwnedAuditBrowser(): Promise<OwnedAuditBrowser> {
+  const resolvedTempRoot = await realpath(tmpdir());
+  const runRoot = await mkdtemp(join(resolvedTempRoot, "ocmm-lighthouse-"));
+  const ownershipToken = randomUUID();
+  const ownershipMarker = join(runRoot, ".ocmm-run-owner");
+  const userDataDir = join(runRoot, "user-data");
+  await writeFile(ownershipMarker, ownershipToken, { flag: "wx" });
+  await mkdir(userDataDir);
+
+  let context: BrowserContext | undefined;
+  try {
+    const launchStartedAt = Date.now();
+    context = await chromium.launchPersistentContext(userDataDir, {
+      channel: "chrome",
+      headless: false,
+      args: [
+        '--disable-extensions',
+        '--disable-sync',
+        '--remote-debugging-address=127.0.0.1',
+        '--remote-debugging-port=0',
+      ],
+    });
+    const port = await readOwnedCdpPort(userDataDir, launchStartedAt);
+    const ownedContext = context;
+    const page = ownedContext.pages()[0] ?? (await ownedContext.newPage());
+    return {
+      context: ownedContext,
+      page,
+      port,
+      close: async () => {
+        await ownedContext.close();
+        await removeOwnedRunRoot(runRoot, ownershipToken);
+      },
+    };
+  } catch (error) {
+    if (context) await context.close();
+    await removeOwnedRunRoot(runRoot, ownershipToken);
+    throw error;
+  }
+}
+
+const ownedBrowser = await launchOwnedAuditBrowser();
+try {
+  await ownedBrowser.page.goto("http://localhost:3000/<route>");
+  await playAudit({
+    page: ownedBrowser.page,
+    port: ownedBrowser.port,
+    thresholds: { performance: 100, accessibility: 100, "best-practices": 100, seo: 100 },
+    reports: { formats: { html: true, json: true }, name: "lighthouse-<route>" },
+    config: { extends: "lighthouse:default", settings: { formFactor: "mobile" } },
+  });
+  await ownedBrowser.page.screenshot({ path: "lighthouse-<route>.png", fullPage: true });
+} finally {
+  await ownedBrowser.close();
+}
 ```
+
+The `DevToolsActivePort` file is accepted only from the empty directory created immediately before this launch, then cross-checked against `/json/version`. A readiness failure is terminal: do not substitute a fixed port. The returned Playwright context is the process-ownership handle; cleanup closes that exact object before checking the run-root marker and deleting only the exact run-owned path. Keep the screenshot and report as evidence, but remove temporary browser state.
 
 Run twice per route: once `formFactor: "mobile"`, once `formFactor: "desktop"`. Both must hit 100/100/100/100.
 
@@ -139,7 +241,7 @@ Run twice per route: once `formFactor: "mobile"`, once `formFactor: "desktop"`. 
 - Reporting a CLI Lighthouse score. **REJECT.** Tenet 1.
 - Removing an animation to fix INP. **REJECT.** Switch to a CSS-only transform/opacity animation. Debounce listeners. Move heavy work off the main thread.
 - Replacing a hero image with a placeholder to "fix" LCP. **REJECT.** Properly sized AVIF + `fetchpriority="high"` + preconnect to the image CDN is the actual fix.
-- Disabling JS for a route to "score 100". **REJECT.** Score 100 ON the JS-enabled production build, on a real user device profile.
+- Disabling JS for a route to "score 100". **REJECT.** Score 100 ON the JS-enabled production build with representative device settings inside the isolated run-owned profile.
 - Setting `display: none` on offscreen content to dodge audits. **REJECT.** Use `content-visibility: auto` plus proper lazy mounting. Never lie about the page.
 - Declaring victory after a single audit run. **REJECT.** Run 3-5 times, take the median. CI must enforce the threshold.
 - Scoring 100 on `localhost` and shipping without re-measuring against the deployed URL. **REJECT.** The CDN, real DNS, and real TLS handshake matter.

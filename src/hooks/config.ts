@@ -4,7 +4,8 @@ import { dirname, join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
+import { isPlannerAgent } from "../intent/detectors.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type {
@@ -402,17 +403,23 @@ function deepworkPromptForAgent(
   const prefModel = selectedModel ?? chain[0]?.model ?? ""
   const gpt56Specialization = isGpt56Model(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
   const astraSpecialization = isGpt6Model(prefModel) ? getDeepworkPrompt("gpt-6-astra") : ""
+  const modelCalibrations = pickModelCalibrationVariants(prefModel, workflow === "codex")
+    .map((variant) => getDeepworkPrompt(variant))
   // Codex profiles are generated ahead of runtime model overrides. Carry the
   // separately guarded GPT-5.6 and GPT-6 Astra layers in every Codex profile,
   // and carry the separately guarded Opus 5 layer only for the orchestrator
   // prompt identity.
   if (workflow === "codex") {
-    return [
-      getDeepworkPrompt("gpt"),
+    const base = isPlannerAgent(promptName)
+      ? getDeepworkPrompt("planner")
+      : getDeepworkPrompt("gpt")
+    return joinPromptLayers([
+      base,
       getDeepworkPrompt("gpt-5.6"),
       getDeepworkPrompt("gpt-6-astra"),
       promptName === "orchestrator" ? getDeepworkPrompt("claude-opus-5") : "",
-    ].filter(Boolean).join("\n\n---\n\n")
+      ...modelCalibrations,
+    ])
   }
   const variant = pickDeepworkVariantForAgent({
     agentName: promptName,
@@ -429,7 +436,11 @@ function deepworkPromptForAgent(
   }
   const base = getDeepworkPrompt(variant)
   const specialization = gpt56Specialization || astraSpecialization
-  return specialization ? `${base}\n\n---\n\n${specialization}` : base
+  return joinPromptLayers([base, specialization, ...modelCalibrations])
+}
+
+function joinPromptLayers(prompts: readonly string[]): string {
+  return [...new Set(prompts.filter(Boolean))].join("\n\n---\n\n")
 }
 
 function promptForBuiltinAgent(
@@ -460,11 +471,14 @@ function promptForBuiltinCategory(
   const astraAddendum = getCategoryModelCalibration(categoryName, selectedModel, workflow === "codex").trim()
   const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""
   const astraCalibration = needsAstraCalibration ? getDeepworkPrompt("gpt-6-astra").trim() : ""
-  const calibration = [
+  const modelCalibrations = pickModelCalibrationVariants(selectedModel, workflow === "codex")
+    .map((variant) => getDeepworkPrompt(variant).trim())
+  const calibration = joinPromptLayers([
     modelPrompt,
     astraCalibration,
     astraAddendum,
-  ].filter(Boolean).join("\n\n---\n\n")
+    ...modelCalibrations,
+  ])
   const calibrationIntro = calibration
     ? "The category role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for model calibration when it does not conflict with the category role prompt."
     : ""

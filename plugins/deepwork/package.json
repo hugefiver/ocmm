@@ -1,6 +1,6 @@
 {
   "name": "deepwork-codex-plugin-runtime",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "private": true,
   "type": "module"
 }

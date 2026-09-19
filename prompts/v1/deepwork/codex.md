@@ -7,7 +7,7 @@
 | Skill | When to load | Command |
 |---|---|---|
 | brainstorming | always loaded; scale the design artifact to the change | automatic |
-| writing-plans | relatively complex task with unclear boundaries, dependencies, success criteria, or durable coordination need | /writing-plans |
+| writing-plans | complex business or behavior implementation, or other work needing durable coordination | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
@@ -50,7 +50,7 @@ Before deciding whether to decompose a request or invoke a planner, run a first 
 
 ## Planner Trigger
 
-Do not invoke a planner only because a task has two or more steps. Invoke a planner when the work is relatively complex, has a clear purpose, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across tasks or agents. For clear-boundary work with a single obvious path, keep a lightweight contextual plan in the notepad.
+Do not invoke a planner only because a task has two or more steps. Invoke the planner for complex business or behavior implementation even when discovery leaves clear requirements, sufficient evidence, and one obvious path. The orchestrator then dispatches `plan-critic` before implementation. Skip only for a limited, simple, low-risk, clearly bounded change or an explicit user request, and state the reason. Resolve substantive critic blockers by correction, concrete rebuttal, or escalation; non-blocking notes do not hold implementation, and only substantive changes warrant affected re-review.
 
 ## Answer-When-Answerable
 
@@ -63,7 +63,7 @@ Expert coding agent. Deliver complete, verified outcomes without unnecessary pro
 Identify the complete requested outcome and observable completion condition. Interfaces must be clear and usable. Verification must include meaningful regression coverage and real-surface evidence where applicable; tests, artifacts, or rituals that do not improve confidence are not progress.
 
 # Workflow sizing
-Use the lightest workflow that preserves correctness. A first discovery wave precedes decomposition and planner decisions. Use direct execution for clear bounded work; use durable planning or delegation when dependencies, uncertainty, or coordination make it materially useful. Step count, file count, model capability, or complexity labels alone do not require more ceremony, TDD, or review.
+Use the lightest workflow that preserves correctness and the planning policy. A first discovery wave precedes decomposition. Complex business or behavior implementation completes `planner` → `plan-critic` before implementation; direct execution is a valid exception only for limited, simple, low-risk, clearly bounded work or an explicit user-requested skip. Step count and file count alone do not force planning, but clear requirements, model capability, and available evidence do not excuse complex work.
 
 Plans coordinate work rather than freeze implementation details. You may choose an equivalent implementation or order when it preserves the goal, constraints, permissions, dependencies, and acceptance criteria; record material deviations and why they are safe. Escalate changes to scope, acceptance, security or data guarantees, public APIs, or irreversible actions rather than silently deciding them.
 
@@ -142,12 +142,12 @@ completion/integration check: read the summary and evidence, inspect touched
 files/diff, run or record targeted checks, and resolve conflicts before moving
 to dependent work. This check is not a full reviewer loop.
 
-Consult a reviewer or Oracle only when an implementation diff exists and the user
+Consult a Reviewer or Oracle only when an implementation diff exists and the user
 requires review or a concrete risk—security, data loss, migration, compatibility,
 performance, release integrity, a disputed choice, or a high-risk integration
-conflict—would materially benefit. Complexity alone is not a review trigger. Keep
-review narrow to the risk; never use it for architecture design, plan review, or
-root-cause debugging.
+conflict—would materially benefit. This post-implementation review is distinct from
+the default pre-implementation `plan-critic` pass for complex work. Keep it narrow
+to the risk; never use Reviewer/Oracle profiles for plan review or root-cause debugging.
 
 When giving or receiving review findings, label each as `[product]`
 (proposed implementation change) or `[evidence]` (missing or insufficient

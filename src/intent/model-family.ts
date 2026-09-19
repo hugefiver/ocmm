@@ -99,6 +99,26 @@ export function isKimiK27Model(modelID: string): boolean {
   return /kimi-k2[.-]?7/.test(lc) || /k2[-.]?p7/.test(lc)
 }
 
+export function isKimiK28Model(modelID: string): boolean {
+  const name = extractModelName(modelID).toLowerCase()
+  return name === "kimi-for-coding"
+    || /^(?:kimi-k2[.-]?8|k2[-.]?p8)(?:$|[-_.])/.test(name)
+}
+
+/** Exact prompt-only match; intentionally independent from reasoning-family classification. */
+export function isKimiK2CodePromptModel(modelID: string): boolean {
+  const name = extractModelName(modelID).toLowerCase()
+  const k27 = name === "kimi-for-coding-highspeed"
+    || /^(?:kimi-k2[.-]?7|k2[-.]?p7)(?:$|[-_.])/.test(name)
+  return k27 || isKimiK28Model(modelID)
+}
+
+/** Devin SWE-2 effort lanes. This is a prompt match, not a Kimi reasoning family. */
+export function isSwe2Model(modelID: string): boolean {
+  const name = extractModelName(modelID).toLowerCase()
+  return /^swe-2(?:[-.]|$)/.test(name)
+}
+
 export function isMiniMaxModel(modelID: string): boolean {
   return modelID.toLowerCase().includes("minimax")
 }

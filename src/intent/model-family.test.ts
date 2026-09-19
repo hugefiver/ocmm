@@ -11,8 +11,11 @@ import {
   isGeminiModel,
   isGptModel,
   isMiniModel,
+  isKimiK2CodePromptModel,
   isKimiK27Model,
+  isKimiK28Model,
   isKimiK2Model,
+  isSwe2Model,
   parseGptVersion,
   supportsNativeGptMaxReasoning,
 } from "./model-family.ts"
@@ -104,14 +107,47 @@ test("isGeminiModel covers provider + name signals", () => {
   assert.equal(isGeminiModel("gpt-5.5"), false)
 })
 
-test("kimi family detection", () => {
+test("Kimi K2.7 and K2.8 coding aliases share one precise prompt calibration", () => {
   assert.equal(isKimiK2Model("kimi-k2.6"), true)
   assert.equal(isKimiK2Model("k2p5"), true)
   assert.equal(isKimiK2Model("k2-p7"), true)
+  assert.equal(isKimiK2Model("k2p8"), false)
   assert.equal(isKimiK2Model("gpt-5"), false)
-  assert.equal(isKimiK27Model("kimi-k2.7"), true)
-  assert.equal(isKimiK27Model("k2p7"), true)
-  assert.equal(isKimiK27Model("kimi-k2.6"), false)
+
+  for (const modelID of [
+    "kimi-k2.7",
+    "MOONSHOT/KIMI-K2-7-PREVIEW",
+    "kimi-for-coding/k2p7-fast",
+  ]) {
+    assert.equal(isKimiK27Model(modelID), true, modelID)
+    assert.equal(isKimiK2CodePromptModel(modelID), true, modelID)
+  }
+  assert.equal(isKimiK2CodePromptModel("kimi-for-coding/kimi-for-coding-highspeed"), true)
+  for (const modelID of [
+    "kimi-k2.8",
+    "MOONSHOT/KIMI-K2-8-PREVIEW",
+    "kimi-for-coding/k2.p8-fast",
+    "kimi-for-coding/kimi-for-coding",
+  ]) {
+    assert.equal(isKimiK28Model(modelID), true, modelID)
+    assert.equal(isKimiK2CodePromptModel(modelID), true, modelID)
+  }
+  for (const modelID of ["kimi-k2.6", "kimi-k2.70", "kimi-k2.80", "xkimi-k2.8", "provider-kimi-for-coding/model"]) {
+    assert.equal(isKimiK2CodePromptModel(modelID), false, modelID)
+  }
+  assert.equal(isKimiK27Model("prefix-kimi-k2.7-snapshot"), true, "legacy K2.7 matcher remains compatible")
+  assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding-highspeed"), false)
+  assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding"), false)
+  assert.equal(isKimiK28Model("kimi-for-coding/kimi-for-coding-highspeed"), false)
+})
+
+test("SWE-2 detection is provider-safe and does not absorb adjacent model names", () => {
+  for (const modelID of ["swe-2", "devin/swe-2-low", "DEVIN/SWE-2.HIGH", "providers/devin/swe-2-max-preview"]) {
+    assert.equal(isSwe2Model(modelID), true, modelID)
+  }
+  for (const modelID of ["swe-20", "swe-21-low", "xswe-2", "swe/2", "swe-2-provider/unrelated"]) {
+    assert.equal(isSwe2Model(modelID), false, modelID)
+  }
 })
 
 test("deepseek family detection", () => {
@@ -137,4 +173,19 @@ test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "glm-5.1" }), "glm")
   assert.equal(classifyModelFamily({ modelID: "deepseek-v4-pro" }), "deepseek")
   assert.equal(classifyModelFamily({ modelID: "totally-unknown" }), "unknown")
+})
+
+test("additive prompt routing does not change reasoning-family classification", () => {
+  const cases = [
+    ["kimi-k2.7", "kimi-k27"],
+    ["kimi-k2.8", "kimi"],
+    ["kimi-for-coding/kimi-for-coding", "kimi"],
+    ["kimi-for-coding/kimi-for-coding-highspeed", "kimi"],
+    ["kimi-for-coding/k2p8", "unknown"],
+    ["devin/swe-2-high", "unknown"],
+  ] as const
+
+  for (const [modelID, family] of cases) {
+    assert.equal(classifyModelFamily({ modelID }), family, modelID)
+  }
 })

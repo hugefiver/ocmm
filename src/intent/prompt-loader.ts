@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gpt-5.6,gpt-6-astra,claude-opus-5,gemini,glm,codex,planner}.md
+ *     deepwork/{default,gpt,gpt-5.6,gpt-6-astra,claude-opus-5,gemini,glm,codex,planner,kimi-k27,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, parseGptVersion, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, isKimiK2CodePromptModel, isSwe2Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -26,7 +26,8 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "v1" | "codex"
 
-type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gpt-6-astra" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner"
+type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gpt-6-astra" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
+export type ModelCalibrationVariant = "kimi-k27" | "swe-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -41,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -149,6 +150,17 @@ export function isGpt56Model(modelID: string): boolean {
 /** Exact GPT-6 Astra family, including provider-prefixed and suffixed aliases. */
 export function isGpt6Model(modelID: string): boolean {
   return isGpt6AstraModel(modelID)
+}
+
+/** Additive model calibrations, kept independent from reasoning-family classification. */
+export function pickModelCalibrationVariants(
+  modelID: string,
+  carryAhead = false,
+): ModelCalibrationVariant[] {
+  if (carryAhead) return ["kimi-k27", "swe-2"]
+  if (isKimiK2CodePromptModel(modelID)) return ["kimi-k27"]
+  if (isSwe2Model(modelID)) return ["swe-2"]
+  return []
 }
 
 export function getDeepworkPrompt(variant: DeepworkVariant): string {

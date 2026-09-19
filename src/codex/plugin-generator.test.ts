@@ -576,6 +576,8 @@ test("Codex agent composition keeps role prompts and model calibration for both 
       getDeepworkPrompt("gpt-5.6"),
       getDeepworkPrompt("gpt-6-astra"),
       getDeepworkPrompt("claude-opus-5"),
+      getDeepworkPrompt("kimi-k27"),
+      getDeepworkPrompt("swe-2"),
     ].map((prompt) => prompt.trim()).filter(Boolean)
 
     assert.equal(orchestratorPrompt.includes(orchestratorRole), true, `${workflow} orchestrator role composition`)
@@ -584,12 +586,41 @@ test("Codex agent composition keeps role prompts and model calibration for both 
     assert.equal(calibrations.some((prompt) => codingPrompt.includes(prompt)), true, `${workflow} coding calibration`)
 
     if (workflow === "codex") {
-      for (const calibration of [getDeepworkPrompt("gpt-5.6"), getDeepworkPrompt("gpt-6-astra")]) {
+      for (const calibration of [
+        getDeepworkPrompt("gpt-5.6"),
+        getDeepworkPrompt("gpt-6-astra"),
+        getDeepworkPrompt("kimi-k27"),
+        getDeepworkPrompt("swe-2"),
+      ]) {
         assert.equal(orchestratorPrompt.includes(calibration.trim()), true, `codex orchestrator carries ${calibration.length}-byte calibration`)
         assert.equal(codingPrompt.includes(calibration.trim()), true, `codex coding carries ${calibration.length}-byte calibration`)
       }
     }
   }
+})
+
+test("Codex agents carry guarded Kimi and SWE-2 calibrations once without replacing planner role", async () => {
+  const agents = await buildCodexAgents({
+    config: { ...defaultConfig(), workflow: "codex" },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const kimi = getDeepworkPrompt("kimi-k27").trim()
+  const swe2 = getDeepworkPrompt("swe-2").trim()
+
+  for (const agent of agents) {
+    const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
+    assert.equal(countOccurrences(prompt, kimi), 1, `${agent.sourceName}: Kimi calibration`)
+    assert.equal(countOccurrences(prompt, swe2), 1, `${agent.sourceName}: SWE-2 calibration`)
+    assert.match(kimi, /every other runtime model must ignore it/)
+    assert.match(swe2, /every other runtime model must ignore it/)
+  }
+
+  const planner = agents.find((agent) => agent.sourceName === "planner")
+  assert.ok(planner)
+  const plannerPrompt = extractOriginalDeepworkPrompt(planner.developerInstructions)
+  assert.match(plannerPrompt, /Agent Role: planner/)
+  assert.match(plannerPrompt, /# Deepwork Planner Injection/)
 })
 
 test("Codex subscription defaults cover every always-on role without activating opt-in roles", async () => {
@@ -1136,6 +1167,10 @@ test("generateCodexPlugin writes a self-contained bundle", async () => {
     assert.match(reviewer, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(creative, /^name = "dw-creative"$/m)
     assert.match(workflowSkill, /^---\nname: deepwork$/m)
+    assert.match(workflowSkill, /Complex business or behavior implementation defaults to orchestrator-owned `dw-planner` → `dw-plan-critic` → implementation/)
+    assert.match(workflowSkill, /non-blocking suggestions do not delay it/)
+    assert.doesNotMatch(workflowSkill, /provides advisory plan review/)
+    assert.match(generatedAgentInstructions, /does not waive the planner → plan-critic stages/)
     assert.equal(existsSync(join(result.pluginRoot, "agents", `${CODEX_AGENT_PREFIX}-oracle-high.toml`)), false)
     assert.match(deepworkSkill, /^---\nname: deepwork-writing-plans$/m)
 

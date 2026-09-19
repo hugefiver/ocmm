@@ -20,6 +20,8 @@ Use focused workers when delegation materially improves implementation of an app
 
 Delegation is optional. Direct execution is valid when a task is small, tightly coupled to controller context, or cheaper to complete than to brief and reconcile. When delegation helps, give each worker self-contained context rather than session history.
 
+This skill begins at implementation. For complex business or behavior work, the orchestrator must first complete the `planner` → `plan-critic` sequence and resolve every substantive plan blocker. A recorded exception is valid only for a limited, simple, low-risk, clearly bounded change or an explicit user request. Direct execution here chooses an implementer; it does not bypass required planning.
+
 **Continuous execution:** Do not pause between ordinary tasks merely to ask whether to continue. Stop for a decision that changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, requires an irreversible/destructive operation, triggers an external side effect requiring authorization, or leaves only pure guesses. Otherwise make a bounded ruling and continue.
 
 **Rulings, not stalls:** Resolve non-material plan defects or ambiguities from approved requirements and repository evidence. Record significant rulings and assumptions in the active tracking surface or final report, including the reason and cost if wrong. Do not create a separate ledger solely for this purpose.

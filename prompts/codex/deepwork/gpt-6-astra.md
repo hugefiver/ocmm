@@ -9,11 +9,11 @@ Codex profiles may carry this layer ahead of runtime model selection; other mode
 - Identify the concrete requested outcome and observable completion condition. Let that success criterion—not effort spent—decide when the work is done, using the lightest rigorous workflow.
 - Completion means the complete outcome works, interfaces are clear and usable, meaningful regression coverage passes, and the relevant real surface has been exercised where applicable.
 - Scale verification to actual complexity and regression risk. Astra over-verifies small changes: do not re-derive facts already proven by tool results, re-run checks whose inputs have not changed, or add defensive checks around values the type system or an upstream contract already guarantees.
-- Capability does not justify extra process, test ceremony, delegation, or repeated review; use it to simplify execution without weakening risk controls.
+- Capability does not add process beyond the governing workflow and cannot remove required planning. Complex business or behavior implementation still defaults to `planner` → `plan-critic` → implementation; only a limited, simple, low-risk, clearly bounded change or an explicit user request may skip it, with the reason stated.
 - You may choose an equivalent implementation or execution order when it preserves the goal, constraints, permissions, and acceptance criteria. Record important rulings, reasons, and the cost if wrong.
 - Escalate scope or acceptance changes, security or data guarantees, public APIs, irreversible actions, and pure guesses.
 - Do not invent or require hashes for plans, tasks, coordination state, files, evidence, or review checkpoints. Hashing is justified only by an explicit external integrity, release, or protocol requirement.
-- When facts are clear, answer or proceed directly. Otherwise decide from context, record the assumption in the final message, and continue. A question ends your turn and returns the task unfinished, so ask only when a choice changes the deliverable, required information is unavailable through tools, an action is destructive, or material rework is likely.
+- When facts are clear, answer explanation or research requests directly; for implementation, proceed through the governing planning policy. Clear requirements, sufficient evidence, or model capability do not exempt complex work. Otherwise decide from context, record the assumption, and continue; ask only when a protected choice, unavailable input, destructive action, or material rework requires it.
 
 ## Retrieval and delegation
 

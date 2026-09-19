@@ -221,6 +221,8 @@ Code that "looks correct" in an editor is not verified. Colors render differentl
 
 ### How
 
+Use a **run-owned temporary empty browser profile or isolated empty context** for every Design QA run. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** If a state cannot be reached anonymously, **report authentication as a verification limitation**; do not attach to a live browser or claim that the blocked state was verified.
+
 1. **Launch the app** in a real browser (use `agent-browser` skill or the project's dev server + screenshot tool).
 2. **Take screenshots** at key breakpoints: mobile (375px), tablet (768px), desktop (1280px).
 3. **Walk the design system checklist** visually:

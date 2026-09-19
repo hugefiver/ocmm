@@ -181,9 +181,11 @@ test.use({ ...devices['iPhone 14'] });
 
 **Never clear cookies, cache, or site data on a user's real browser profile.** This includes Playwright's `context.clearCookies()`, CDP `Network.clearBrowserCookies` and `Storage.clearCookies`, and browser APIs such as `chrome.browsingData.remove`. These operations can erase the user's authenticated state across unrelated sites.
 
+Every browser action in this guide uses a **run-owned temporary empty browser profile or isolated empty context**. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state**; this includes Playwright `--load-storage`, `storageState`, copied profiles, and connections to an existing CDP session. If a required flow cannot be reached anonymously, stop and **report authentication as a verification limitation** rather than bypassing the boundary or claiming that coverage.
+
 `launchPersistentContext` preserves cookies, local storage, and other browser state in its directory. It must use an **independent, run-owned empty user-data directory** made for this debug run; Chrome's main User Data directory and every other existing browser profile are off limits. Never copy a browser profile into the run directory or transfer authentication state from one. This is both safer and the supported Playwright model for persistent contexts.
 
-Do not load browser extensions or plugins. The clean profile and `--disable-extensions` are mandatory; `--load-extension` and `--disable-extensions-except` are prohibited. Never sign in to a browser or vendor account (Google, Microsoft, Firefox, or similar), never use a personal web account, and never enable browser setting sync. If the target application requires authentication, use only a disposable, one-time test account or injected target-site test state—never a browser-account login.
+Do not load browser extensions or plugins. The clean profile and `--disable-extensions` are mandatory; `--load-extension` and `--disable-extensions-except` are prohibited. Never sign in to a browser or vendor account (Google, Microsoft, Firefox, or similar), a personal web account, or any target application. Never enable browser setting sync. Cookies, cache, and service-worker data may be created only by anonymous visits made inside this run; they expire with its profile and do not represent returning-user or authenticated coverage.
 
 Create the run-owned directories without referring to any existing browser data:
 
@@ -193,9 +195,12 @@ if (-not (Test-Path -LiteralPath $env:TEMP)) { throw "Temporary directory was no
 $runRoot = Join-Path $env:TEMP ("ocmm-playwright-" + [guid]::NewGuid().ToString("N"))
 $userDataDir = Join-Path $runRoot "user-data"
 $logsDir = Join-Path $runRoot "logs"
-New-Item -ItemType Directory -Path $runRoot | Out-Null
-New-Item -ItemType Directory -Path $userDataDir | Out-Null
-New-Item -ItemType Directory -Path $logsDir | Out-Null
+$ownershipToken = [guid]::NewGuid().ToString("N")
+$ownershipMarker = Join-Path $runRoot ".ocmm-run-owner"
+New-Item -ItemType Directory -Path $runRoot -ErrorAction Stop | Out-Null
+New-Item -ItemType Directory -Path $userDataDir -ErrorAction Stop | Out-Null
+New-Item -ItemType Directory -Path $logsDir -ErrorAction Stop | Out-Null
+New-Item -ItemType File -Path $ownershipMarker -Value $ownershipToken -ErrorAction Stop | Out-Null
 $env:PW_USER_DATA_DIR = $userDataDir
 ```
 
@@ -243,6 +248,8 @@ $launchReceipt = [ordered]@{
   pid = $process.Id
   startTimeTicks = $process.StartTime.ToUniversalTime().Ticks
   pidFile = $pidFile
+  ownershipMarker = $ownershipMarker
+  ownershipToken = $ownershipToken
   stdoutLog = $stdoutLog
   stderrLog = $stderrLog
 }
@@ -264,6 +271,12 @@ if (
   $runRootName -notmatch '^ocmm-playwright-[0-9a-f]{32}$'
 ) {
   throw "Refusing to remove a non-run-owned profile"
+}
+if (
+  -not (Test-Path -LiteralPath $ownershipMarker -PathType Leaf) -or
+  (Get-Content -LiteralPath $ownershipMarker -Raw).Trim() -ne $ownershipToken
+) {
+  throw "Refusing to remove a run root without its exact ownership marker"
 }
 
 $pidRecord = (Get-Content -LiteralPath $pidFile -Raw).Trim().Split(":")

@@ -8,7 +8,8 @@ description: Use when you have a spec or requirements for a multi-step task, bef
      Adjustments: removed executing-plans and using-git-worktrees references;
      plans are outcome-oriented and scale with uncertainty, dependencies, and
      risk rather than prescribing fixed steps, commits, or review receipts.
-     Plan review is optional and evidence-driven. See docs/v1-maintenance.md for
+     Complex implementation receives blocker-focused plan criticism without a
+     fixed receipt or repeated approval loop. See docs/v1-maintenance.md for
      sync rules. -->
 
 # Writing Plans
@@ -23,9 +24,9 @@ Assume the engineer is skilled but unfamiliar with this codebase and problem dom
 
 ## When to Write a File-Backed Plan
 
-Do not write a plan merely because work has multiple steps. Use a durable plan when discovery shows unclear boundaries or dependencies, cross-module coordination, novel behavior, migration/security/performance risk, or enough work that downstream executors need a shared artifact.
+Do not write a plan merely because work has multiple steps. Use a durable plan for complex business or behavior implementation, or when discovery shows unclear boundaries or dependencies, cross-module coordination, novel behavior, migration/security/performance risk, or enough work that downstream executors need a shared artifact.
 
-For a clear bounded change, a contextual todo list or concise in-chat plan is enough. A planner or critic is not mandatory when the orchestrator can state the outcome, boundaries, and verification clearly.
+Skip the planner/critic sequence only when the change is limited, simple, low risk, and clearly bounded, or when the user explicitly requests the skip. Record the short reason. Clear requirements, multiple familiar files, strong model capability, or sufficient evidence do not exempt complex work. A user-requested skip does not authorize changes to security/data guarantees, public APIs/protocols, permissions, or irreversible behavior.
 
 ## Scope and Discovery
 
@@ -80,7 +81,7 @@ Deep workers and implementers may choose a minimal evidence-based equivalent whe
 
 They escalate instead of choosing when the decision changes scope or acceptance, weakens safety or data guarantees, changes a public API/protocol, expands permissions, introduces an irreversible action, or would otherwise be a pure guess.
 
-Executor recommendations are hints, not dispatch commands. Select a currently callable profile based on actual complexity and policy; direct execution is valid when delegation adds no value.
+Executor recommendations are hints, not dispatch commands. The orchestrator selects a currently callable profile based on actual complexity and policy. Direct execution describes who performs implementation after applicable planning; it is not a way to skip the complex-work planner/critic sequence.
 
 ## Git Boundaries
 
@@ -102,14 +103,14 @@ Review the completed plan against its source:
 
 Fix issues inline. Do not require a second review simply because wording or formatting changed.
 
-## Optional Plan Review
+## Blocker-Focused Plan Review
 
-Request a plan review only when independent scrutiny is useful: unresolved cross-module interactions, consequential migration/security/data risk, a novel interface, or explicit user request. Give the reviewer the goal, acceptance criteria, current plan, source requirements, relevant evidence, and global constraints. No fixed field order, first-line verdict, receipt, or mandatory critic loop is required.
+For complex business or behavior implementation, return the completed plan to the orchestrator for `plan-critic` review before implementation. The orchestrator owns dispatch; the planner never invokes the critic. For a valid narrow skip, state the reason instead. Give the critic the goal, acceptance criteria, current plan, source requirements, relevant evidence, and global constraints. No fixed field order, first-line verdict, receipt, hash, or repeated approval ritual is required.
 
-Treat acknowledgements and status labels as informational, not evidence. Judge the returned analysis and cited evidence. An optional, redundant, unavailable, timed-out, or merely acknowledging child does not block an outcome already established by sufficient evidence.
+Treat acknowledgements and status labels as informational, not evidence. Judge the returned analysis and cited evidence. Correct a substantive blocker, rebut it with concrete evidence, or escalate it for clarification before implementation. Non-blocking improvements do not hold implementation, and an unavailable, timed-out, or merely acknowledging critic does not manufacture approval or erase an unresolved blocker.
 
-If review finds a substantive issue, update the plan and rerun only the affected review when the review input changed materially. Formatting, narration, status wording, or other non-substantive edits do not stale a sound review.
+If review finds a substantive issue, update the plan and rerun only the affected review when the review input changed materially. Formatting, narration, status wording, or other non-substantive edits do not stale a sound review. Do not impose a fixed iteration count or continue an open-ended loop; escalate when a blocker cannot be resolved from evidence.
 
 ## Execution Handoff
 
-Hand off the approved outcome, plan or task text, dependencies/interfaces, relevant evidence, global constraints, and recorded rulings. Use subagent-driven development or parallel dispatch only when delegation materially helps; otherwise execute directly through the appropriate workflow.
+Hand off the approved outcome, reviewed plan or recorded narrow-skip reason, dependencies/interfaces, relevant evidence, global constraints, and recorded rulings. Use subagent-driven development or parallel dispatch only when delegation materially helps; otherwise implement directly through the appropriate workflow.

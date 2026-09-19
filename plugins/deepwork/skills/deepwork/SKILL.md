@@ -181,7 +181,9 @@ Never invent or synthesize a missing profile. The tier changes only the configur
 
 Oracle and Reviewer profiles are selectable options, not automatic fan-out or default delivery authorities. Choose only reviews that resolve a concrete uncertainty or meet an explicit user requirement, rather than attaching reviews to every task or wave.
 
-dw-plan-critic* provides advisory plan review through the Plan review lane at an `xhigh`-equivalent minimum for every suffix. No mandatory critic loop, verdict format, receipt, or routine edit re-review is required. Resolve concrete safety, data-loss, external-protocol, and irreversible risks or refer them to the user.
+Complex business or behavior implementation defaults to orchestrator-owned `dw-planner` → `dw-plan-critic` → implementation. Skip planning or criticism only for a limited, simple, low-risk, clearly bounded change or when the user explicitly requests the skip, and record a short reason. Clear requirements or model capability do not exempt complex work.
+
+dw-plan-critic* provides blocker-focused plan review through the Plan review lane at an `xhigh`-equivalent minimum for every suffix. Resolve substantive blockers through correction, concrete evidence rebuttal, or escalation before implementation; non-blocking suggestions do not delay it. No fixed verdict format, receipt, workflow hash, unlimited loop, or routine edit re-review is required.
 
 When review is needed, provide the goal, acceptance criteria, current diff or range plus new files, verification evidence, and global constraints in a useful form without prescribed labels or order. Rerun only the affected review when its inputs change substantively; do not repeat unchanged reviews. Do not invent workflow hashes, artifact identities, stamps, or digest receipts; preserve existing Git commit SHAs and explicitly required external integrity/release protocols. Review supports judgment, not unconditional approval as a default completion gate.
 

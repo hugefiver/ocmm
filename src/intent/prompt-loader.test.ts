@@ -12,11 +12,12 @@ import {
   getCategoryModelCalibration,
   getShellSafetyPrompt,
   pickDeepworkVariantForAgent,
+  pickModelCalibrationVariants,
   isGpt56Model,
   isGpt6Model,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"] as const
 
 function makeTempRoot(workflow: "v1" | "codex"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -91,11 +92,15 @@ test("loadAllPrompts loads specialized deepwork variants", () => {
     writeFileSync(join(root, "codex", "deepwork", "codex.md"), "codex-content")
     writeFileSync(join(root, "codex", "deepwork", "gpt-5.6.md"), "gpt-5.6-content")
     writeFileSync(join(root, "codex", "deepwork", "claude-opus-5.md"), "claude-opus-5-content")
+    writeFileSync(join(root, "codex", "deepwork", "kimi-k27.md"), "kimi-k27-content")
+    writeFileSync(join(root, "codex", "deepwork", "swe-2.md"), "swe-2-content")
     loadAllPrompts(root, "codex")
     assert.equal(getDeepworkPrompt("glm"), "glm-content")
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
     assert.equal(getDeepworkPrompt("gpt-5.6"), "gpt-5.6-content")
     assert.equal(getDeepworkPrompt("claude-opus-5"), "claude-opus-5-content")
+    assert.equal(getDeepworkPrompt("kimi-k27"), "kimi-k27-content")
+    assert.equal(getDeepworkPrompt("swe-2"), "swe-2-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -268,6 +273,46 @@ test("pickDeepworkVariantForAgent defaults for unknown families", () => {
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "unknown-model" }),
     "default",
   )
+})
+
+test("additive model calibration selector distinguishes Kimi Code, SWE-2, and carry-ahead", () => {
+  const cases: Array<[string, readonly string[]]> = [
+    ["moonshot/KIMI-K2.7", ["kimi-k27"]],
+    ["moonshot/kimi-k2-8-preview", ["kimi-k27"]],
+    ["kimi-for-coding/kimi-for-coding", ["kimi-k27"]],
+    ["kimi-for-coding/kimi-for-coding-highspeed", ["kimi-k27"]],
+    ["devin/swe-2-high", ["swe-2"]],
+    ["DEVIN/SWE-2.MAX", ["swe-2"]],
+    ["devin/swe-20", []],
+    ["provider-kimi-for-coding/unrelated", []],
+    ["moonshot/kimi-k2.6", []],
+    ["moonshot/kimi-k3", []],
+    ["unknown/model", []],
+  ]
+  for (const [modelID, expected] of cases) {
+    assert.deepEqual(pickModelCalibrationVariants(modelID), expected, modelID)
+  }
+  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["kimi-k27", "swe-2"])
+})
+
+test("localized Kimi and SWE-2 calibrations preserve policy without upstream identity or tool protocol", () => {
+  const root = join(process.cwd(), "prompts")
+  for (const workflow of ["v1", "codex"] as const) {
+    loadAllPrompts(root, workflow)
+    const kimi = getDeepworkPrompt("kimi-k27")
+    const swe2 = getDeepworkPrompt("swe-2")
+
+    assert.notEqual(kimi, swe2, `${workflow}: model behaviors must remain distinct`)
+    for (const [name, prompt] of [["kimi", kimi], ["swe-2", swe2]] as const) {
+      assert.match(prompt, /planner → plan-critic → implementation/, `${workflow}/${name}: planning policy`)
+      assert.match(prompt, /temporary blank profile\/context owned by the current run/, `${workflow}/${name}: blank browser profile`)
+      assert.match(prompt, /Do not connect to an existing browser or CDP session, log in, import or synchronize settings, extensions, cookies, auth\/storage state/, `${workflow}/${name}: browser isolation`)
+      assert.doesNotMatch(prompt, /\bAtlas\b|\bSenpi\b|task\(\)|master orchestrator/i, `${workflow}/${name}: upstream identity/protocol leak`)
+    }
+    assert.match(kimi, /routine implementation transitions directly/)
+    assert.match(swe2, /Do not end a work turn with only “I will” or “next I would”/)
+    assert.match(swe2, /not a Kimi reasoning family/)
+  }
 })
 
 test("category files expose GPT-6 Astra calibrations for only three categories", () => {

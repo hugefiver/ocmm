@@ -65,13 +65,7 @@ When the user names a brand or site — "Linear-style", "like Stripe's landing",
 | `README.md` | Any frontend code is written or audited. Carries the seven tenets: real-browser audits only, 100-in-every-category floor, fix-at-the-architecture, never weaken UX for points, design-system compliance checks, and the response format for audit reports. |
 | `react-perf-tooling.md` | Before ANY React audit. The Playwright + `playwright-lighthouse` + `react-scan/lite` injection recipe, per-route render budgets, and the React-specific root-cause checklist. Lighthouse 100 with 30+ unnecessary renders is NOT done. |
 
-Audit CLI (build for production first; never measure a dev server):
-
-```bash
-uv run $SKILL_DIR/scripts/perfection/lighthouse-audit.py https://localhost:3000
-```
-
-Run mobile AND desktop presets, 3–5 runs, take the median, diagnose from the JSON report.
+The retained `scripts/perfection/lighthouse-audit.py` is a legacy helper and **must not be used as a browser verification entry point**: it does not satisfy the run-owned endpoint contract and may install missing dependencies. Use the canonical TypeScript example in `references/perfection/README.md`; if its existing dependencies are unavailable, report the browser-verification limitation without installing anything. Run mobile AND desktop presets, 3–5 runs, take the median, and diagnose from the JSON report.
 
 ## Ruleset 3 — ui-ux-db (`references/ui-ux-db/`)
 
@@ -108,6 +102,7 @@ Domains: `product` `style` `typography` `color` `landing` `chart` `ux` `react` `
 - **No emojis as icons.** SVG icon sets only (Lucide, Heroicons, Radix, Phosphor).
 - **GPU-composited animation only** — `transform`, `opacity`, `filter`; never animate layout properties.
 - **Verify in a real browser before declaring done.** Screenshots at 375 / 768 / 1280px; hover, focus, loading, empty, and error states all exercised.
+- Browser QA and extraction use a **run-owned temporary empty browser profile or isolated empty context**. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** If the required page is authentication-gated, **report authentication as a verification limitation** rather than attaching to a live browser or bypassing the boundary.
 
 ## When to load something else instead
 

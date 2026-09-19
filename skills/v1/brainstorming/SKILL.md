@@ -8,7 +8,8 @@ description: "Use before creative or materially ambiguous work to clarify outcom
      Adjustments: removed visual-companion and excluded-skill references;
      discovery and design now scale with actual uncertainty and risk. A clear,
      authorized task does not require a separate design gate, rigid checklist,
-     fixed option count, or repeated approval loop. See docs/v1-maintenance.md
+     fixed option count, or repeated approval loop; complex implementation still
+     follows the workflow planning policy. See docs/v1-maintenance.md
      for sync rules. -->
 
 # Brainstorming Outcomes Into Designs
@@ -36,6 +37,8 @@ Choose and revise the path based on actual uncertainty, coordination, and risk. 
 - **Architectural:** Boundaries, interfaces, dependencies, or consequential trade-offs remain unresolved. Explore enough to make those decisions explicit, then present the useful design or choices before implementation when user input is materially required.
 
 Do not default upward merely because work is multi-file, creative, or unfamiliar. Do not default downward when concrete security, data-loss, compatibility, protocol/API, migration, release, or irreversible-operation risks require additional care.
+
+These paths size discovery and design; they do not replace workflow planning policy. Complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation even when requirements are clear and evidence is strong. Planning or criticism may be skipped only for a limited, simple, low-risk, clearly bounded change, or when the user explicitly requests the skip; record the short reason. An explicit skip never permits an unapproved security, data, API/protocol, permission, or irreversible-action decision.
 
 ## Discovery
 
@@ -90,4 +93,4 @@ A saved spec is not mandatory for a clear bounded change. Create one when the us
 
 ## Implementation Handoff
 
-Once the goal is authorized and material uncertainty is resolved, proceed through the lightest suitable implementation workflow. Hand off the goal, ideal end state, constraints, acceptance criteria, dependencies/interfaces, material risks, useful evidence, and recorded rulings. Use a file-backed plan or delegated workers only when they add coordination or execution value.
+Once the goal is authorized and material uncertainty is resolved, proceed through the applicable implementation workflow without asking for a second design approval. Hand off the goal, ideal end state, constraints, acceptance criteria, dependencies/interfaces, material risks, useful evidence, and recorded rulings. Use a file-backed plan when complex work needs the default planner/critic sequence or durable coordination; delegated workers remain conditional on execution value.

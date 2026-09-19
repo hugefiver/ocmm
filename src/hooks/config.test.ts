@@ -68,6 +68,8 @@ const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
 const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
+const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
+const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
 type ConfigTarget = {
   agent: Record<string, unknown>
@@ -1114,6 +1116,51 @@ test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async 
   const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
   assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
   assert.match(prompt, /Outcome-first/)
+})
+
+test("config composes Kimi Code calibration after each agent's workflow base", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: {
+      reviewer: { model: "kimi-for-coding/kimi-for-coding" },
+      planner: { model: "moonshot/KIMI-K2-8-PREVIEW" },
+    },
+  }
+  const target: ConfigTarget = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  const reviewer = String((target.agent.reviewer as Record<string, unknown>).prompt)
+  assert.match(reviewer, /Agent Role: implementation reviewer/)
+  assert.match(reviewer, /Deepwork Workflow Prompt - default/)
+  assert.equal(countText(reviewer, KIMI_K27_MARKER), 1)
+  assert.equal(countText(reviewer, SWE_2_MARKER), 0)
+
+  const planner = String((target.agent.planner as Record<string, unknown>).prompt)
+  assert.match(planner, /Agent Role: planner/)
+  assert.match(planner, /# Deepwork Planner Injection/)
+  assert.equal(countText(planner, KIMI_K27_MARKER), 1)
+  assert.equal(countText(planner, SWE_2_MARKER), 0)
+})
+
+test("config keeps SWE-2 calibration independent from Kimi and unknown models", async () => {
+  const configured = {
+    ...defaultConfig(),
+    agents: {
+      builder: { model: "devin/SWE-2-HIGH" },
+      clarifier: { model: "devin/swe-20" },
+    },
+  }
+  const target: ConfigTarget = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  const swe = String((target.agent.builder as Record<string, unknown>).prompt)
+  assert.equal(countText(swe, SWE_2_MARKER), 1)
+  assert.equal(countText(swe, KIMI_K27_MARKER), 0)
+  assert.match(swe, /SWE-2 is not a Kimi reasoning family/)
+
+  const adjacent = String((target.agent.clarifier as Record<string, unknown>).prompt)
+  assert.equal(countText(adjacent, SWE_2_MARKER), 0)
+  assert.equal(countText(adjacent, KIMI_K27_MARKER), 0)
 })
 
 test("supported workflows compose shell safety once into every builtin agent and category", async () => {

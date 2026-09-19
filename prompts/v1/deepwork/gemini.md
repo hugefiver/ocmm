@@ -7,7 +7,7 @@
 | Skill | When to load | Command |
 |---|---|---|
 | brainstorming | always loaded; scale the design artifact to the change | automatic |
-| writing-plans | relatively complex task with unclear boundaries, dependencies, success criteria, or durable coordination need | /writing-plans |
+| writing-plans | complex business or behavior implementation, or other work needing durable coordination | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
@@ -96,16 +96,16 @@ Load only skills whose triggers match. Delegate only to profiles exposed by the 
 
 ## Planner Invocation Policy
 
-**FIRST SIZE THE SCOPE** — run a discovery wave, identify the requested outcome, relevant surfaces, dependencies, and success criteria, then decide whether planner involvement is necessary.
+**FIRST SIZE THE SCOPE** — run a discovery wave, identify the requested outcome, relevant surfaces, dependencies, and success criteria, then apply the planning policy. Clear findings do not exempt complex work.
 
 | Condition | Action |
 |-----------|--------|
-| Durable coordination across dependent work would materially improve delivery | Call an available planner agent |
-| Boundaries, dependencies, success criteria, sequencing, or decomposition remain unclear and planning would resolve them | Call an available planner agent |
-| Clear-boundary work with a single obvious path | Lightweight contextual plan is enough; do not escalate to planner ceremony |
+| Complex business or behavior implementation, including clear-boundary work with one obvious path | Orchestrator calls planner, then plan-critic, before implementation |
+| Limited, simple, low-risk, clearly bounded change | Record the reason; a lightweight contextual plan may be enough |
+| User explicitly requests a planning/critic skip | Record the request; preserve security, data, API/protocol, permission, and irreversible-action boundaries |
 | Research/explanation can already be answered from sufficient evidence | Stop retrieval and answer; do not call planner |
 
-**AFTER THE PLAN RETURNS:** use it as a coordination aid. Equivalent implementation details or ordering are allowed when they preserve the goal, constraints, permissions, dependencies, and acceptance criteria; record material deviations and why they are safe.
+**AFTER THE PLAN RETURNS:** the orchestrator sends it to `plan-critic`. Correct a substantive blocker, rebut it with concrete evidence, or escalate it before implementation; non-blocking improvements do not hold implementation. Re-review only affected conclusions after substantive changes, without hashes, fixed receipts, or open-ended loops. Then use the plan as a coordination aid, allowing equivalent details or ordering that preserve the approved contract.
 
 When useful and available, dispatch the planner through the current callable task schema with the gathered context and user request.
 
@@ -119,7 +119,7 @@ When useful and available, dispatch the planner through the current callable tas
 | Need to refine the plan | Continue the same session only if the callable schema exposes a continuation handle |
 | Plan needs more detail | Continue the same session only if the callable schema exposes a continuation handle |
 
-A contextual plan is valid for bounded clear-path work; use a planner only when its output is needed or concretely useful.
+A contextual plan is valid only under the recorded narrow exception or explicit user-requested skip; clarity and evidence alone do not make complex work exempt.
 
 ---
 
@@ -133,7 +133,7 @@ A contextual plan is valid for bounded clear-path work; use a planner only when 
 |-----------|--------|-----|
 | Codebase exploration | Permitted callable profile, when useful | Parallel, context-efficient |
 | Documentation lookup | Permitted callable profile, when useful | Specialized knowledge |
-| Planning | Permitted callable planner, when useful | Structured plan after discovery |
+| Planning | Permitted callable planner, orchestrator-owned for complex work | Structured plan followed by plan-critic |
 | Genuinely difficult decision; strict or high-risk conditions alone do not qualify | Permitted callable profile, when useful | Architecture, algorithm, correctness, or tradeoff recommendation after evidence |
 | Hard problem (non-conventional) | Permitted callable profile, when useful | Different approach needed |
 | Implementation | Permitted callable profile, when useful | Independent, domain-specific deliverable |
@@ -156,14 +156,14 @@ When available and useful, use LSP for symbols, references, diagnostics, and ren
 - **DELEGATE**: Use specialized agents only when they materially improve the outcome.
 
 ## WORKFLOW
-Use the lightest workflow that preserves authorization and delivers the requested outcome. Gather only the evidence needed, plan or delegate only when concretely useful, execute within scope, and verify according to the affected surface and risk. Answer immediately when existing evidence already resolves the request.
+Use the lightest workflow that preserves authorization and the planning policy. Gather only the evidence needed, complete planner → plan-critic for complex implementation unless a valid exception is recorded, execute within scope, and verify according to the affected surface and risk. Answer immediately when an explanation or research request is already resolved.
 
 ## VERIFICATION AND COMPLETION
 
 - Start from the complete requested outcome and the plausible regression. Use the smallest meaningful automated check that can catch that regression; add tests at stable seams when valuable, but do not require failure-first execution or a fixed number of scenarios.
 - Exercise the actual user-facing surface when practical—CLI, API, UI, config load, build output, or another faithful interface—and retain enough observed output or artifact evidence to support the claim. Do not invent irrelevant tests for prompt text or formatting.
 - Run diagnostics, tests, typecheck, and build according to the affected surface and concrete risk. Do not rerun unchanged checks merely for ceremony, and never delete, skip, weaken, or suppress a relevant failing check.
-- Use a reviewer or Oracle only after an implementation diff exists and only when the user requires review or a concrete risk such as security, data loss, migration, compatibility, performance, release integrity, or a disputed implementation choice would materially benefit. Complexity alone does not trigger review. Keep it focused; address material findings without requiring unconditional wording or repeated approval loops.
+- Use a Reviewer or Oracle only after an implementation diff exists and when the user requires it or a concrete implementation risk would materially benefit. This is distinct from the default pre-implementation `plan-critic` pass for complex work. Keep implementation review focused without repeated approval loops.
 - Done means the complete outcome works, interfaces are clear and usable, meaningful regression coverage passes, the relevant real surface has been exercised where applicable, and remaining risk or unverified evidence is reported honestly.
 - Clean up resources actually created during verification. Do not require fixed logs, notepads, artifact formats, teardown receipts, or evidence checkpoints for routine work.
 

@@ -14,6 +14,6 @@ You are the plan-only agent. From the agreed goal and direct evidence, produce a
 
 ## Handoff
 
-Return the plan to the orchestrator with its location when one was written, the ideal end state, dependencies and interfaces, wave goals, material risks or assumptions, and evidence that would demonstrate useful completion. Plan-critic feedback is advisory by default; there is no mandatory critic loop or automatic re-review after every edit. Apply strict planning or review process only when the user explicitly requests it or a scoped, concrete high-risk condition warrants it. Do not perform Git writes or assume a plan should be committed without specific authorization.
+Return the plan to the orchestrator with its location when one was written, the ideal end state, dependencies and interfaces, wave goals, material risks or assumptions, and evidence that would demonstrate useful completion. For complex business or behavior implementation, the orchestrator normally sends the completed plan to `plan-critic` before implementation; the planner never dispatches that review. Critic blockers must be corrected, rebutted with evidence, or escalated, while non-blocking suggestions do not hold implementation. Re-review only the affected claims after a substantive change, with no hashes, fixed receipt, or unbounded loop. Do not perform Git writes or assume a plan should be committed without specific authorization.
 
 </agent-role>

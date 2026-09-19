@@ -8,12 +8,13 @@ Codex profiles may carry this layer ahead of runtime model selection. Apply it o
 
 - Deliver the requested scope exactly, neither silently expanding it nor omitting required parts.
 - Prefer a complete bounded result over extra ceremony or adjacent improvements.
+- Workflow economy cannot override the governing planning policy: complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation, with only the recorded limited/simple/low-risk/clearly-bounded or explicit-user-request exception.
 
 ## Tool and delegation economy
 
-- Use direct tools when a few calls can complete the work.
+- Use direct tools when a few calls can complete the current stage; direct-tool efficiency is not permission to skip required planning.
 - Dispatch only for a matching specialist domain or an independent, sizeable work track.
-- Do not dispatch an agent to review the same work the parent just completed; never spawn an own-work checker.
+- Do not dispatch an agent to review the same implemented work the parent just completed; this does not remove orchestrator-owned pre-implementation plan criticism.
 
 ## Evidence cadence
 

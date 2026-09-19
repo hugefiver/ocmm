@@ -9,6 +9,8 @@ You are auditing or optimizing a React app for Lighthouse 100. Two tools belong 
 
 Use both. They are complementary: `react-scan` tells you *what's slow right now*; `react-doctor` tells you *what's structurally wrong*. Both are dev-only and free.
 
+Every browser audit uses a **run-owned temporary empty browser profile or isolated empty context**. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** If the route cannot be exercised anonymously, **report authentication as a verification limitation**; do not attach to a live browser or inject state to make the audit pass.
+
 If the project does not yet have react-scan and react-doctor wired into its dev environment, read `../design/react-dev-tooling-skill.md` first and install them — they should be on by default for every React project this skill audits.
 
 ## Lighthouse run + react-scan/lite
@@ -17,55 +19,158 @@ If the project does not yet have react-scan and react-doctor wired into its dev 
 
 ```ts
 // scripts/audit-with-react-scan.ts
-import { chromium } from "playwright";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { playAudit } from "playwright-lighthouse";
 
-const browser = await chromium.launch({ channel: "chrome" });
-const context = await browser.newContext();
+type OwnedAuditBrowser = {
+  context: BrowserContext;
+  page: Page;
+  port: number;
+  close(): Promise<void>;
+};
 
-// Inject react-scan/lite BEFORE the app boots
-await context.addInitScript(() => {
-  // @ts-ignore — pulled from the project's node_modules or a self-hosted bundle
-  import("react-scan/lite").then(({ instrument }) => {
-    (window as any).__renderEvents = [];
-    instrument({
-      onEvent: (event: any) => {
-        if (event.kind === "commit") (window as any).__renderEvents.push(event);
-      },
-      recordChangeDescriptions: true,
-      includeFiberSource: true,
-      includeFiberIdentity: true,
-    });
-  });
-});
-
-const page = await context.newPage();
-await page.goto("http://localhost:3000/<route>");
-
-await playAudit({
-  page,
-  port: 9222,
-  thresholds: { performance: 100, accessibility: 100, "best-practices": 100, seo: 100 },
-  reports: { formats: { html: true, json: true }, name: "lighthouse-<route>" },
-  config: { extends: "lighthouse:default", settings: { formFactor: "mobile" } },
-});
-
-// Pull render events and assert on render quality
-const events = await page.evaluate(() => (window as any).__renderEvents);
-const unnecessary = events.filter((e: any) =>
-  e.tree?.some((node: any) => node.changeDescription?.kind === "unnecessary"),
-);
-
-if (unnecessary.length > 0) {
-  console.error(`FAIL: ${unnecessary.length} unnecessary renders detected during audit`);
-  for (const e of unnecessary.slice(0, 10)) console.error("  -", JSON.stringify(e, null, 2));
-  process.exit(1);
+async function removeOwnedRunRoot(runRoot: string, ownershipToken: string): Promise<void> {
+  const [resolvedTempRoot, resolvedRunRoot] = await Promise.all([realpath(tmpdir()), realpath(runRoot)]);
+  const ownershipMarker = join(resolvedRunRoot, ".ocmm-run-owner");
+  if (
+    dirname(resolvedRunRoot) !== resolvedTempRoot ||
+    !/^ocmm-lighthouse-[A-Za-z0-9_-]+$/.test(basename(resolvedRunRoot)) ||
+    (await readFile(ownershipMarker, "utf8")) !== ownershipToken
+  ) {
+    throw new Error("Refusing to remove a Lighthouse run root without exact ownership evidence");
+  }
+  await rm(resolvedRunRoot, { recursive: true, force: false });
 }
 
-await browser.close();
+async function readOwnedCdpPort(userDataDir: string, launchStartedAt: number): Promise<number> {
+  const activePortFile = join(userDataDir, "DevToolsActivePort");
+  const deadline = Date.now() + 10_000;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const [portText, browserPath] = (await readFile(activePortFile, "utf8")).trim().split(/\r?\n/);
+      const port = Number(portText);
+      const metadata = await stat(activePortFile);
+      if (!Number.isInteger(port) || port < 1 || !browserPath?.startsWith("/devtools/browser/")) {
+        throw new Error("Chrome wrote an invalid DevToolsActivePort file");
+      }
+      if (metadata.mtimeMs < launchStartedAt - 1_000) {
+        throw new Error("DevToolsActivePort predates this browser launch");
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error("CDP readiness budget expired before the ownership probe");
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(remainingMs),
+      });
+      if (!response.ok) throw new Error(`CDP readiness returned HTTP ${response.status}`);
+      const version = (await response.json()) as { webSocketDebuggerUrl?: string };
+      if (!version.webSocketDebuggerUrl) throw new Error("CDP response omitted webSocketDebuggerUrl");
+      const endpoint = new URL(version.webSocketDebuggerUrl);
+      if (endpoint.hostname !== "127.0.0.1" || endpoint.port !== String(port) || endpoint.pathname !== browserPath) {
+        throw new Error("CDP endpoint does not match this launch's DevToolsActivePort file");
+      }
+      return port;
+    } catch (error) {
+      lastError = error;
+      const retryDelayMs = Math.min(100, Math.max(0, deadline - Date.now()));
+      if (retryDelayMs > 0) await delay(retryDelayMs);
+    }
+  }
+
+  throw new Error(`Owned CDP endpoint was not ready before the deadline: ${String(lastError)}`);
+}
+
+async function launchOwnedAuditBrowser(): Promise<OwnedAuditBrowser> {
+  const resolvedTempRoot = await realpath(tmpdir());
+  const runRoot = await mkdtemp(join(resolvedTempRoot, "ocmm-lighthouse-"));
+  const ownershipToken = randomUUID();
+  const ownershipMarker = join(runRoot, ".ocmm-run-owner");
+  const userDataDir = join(runRoot, "user-data");
+  await writeFile(ownershipMarker, ownershipToken, { flag: "wx" });
+  await mkdir(userDataDir);
+
+  let context: BrowserContext | undefined;
+  try {
+    const launchStartedAt = Date.now();
+    context = await chromium.launchPersistentContext(userDataDir, {
+      channel: "chrome",
+      headless: false,
+      args: [
+        '--disable-extensions',
+        '--disable-sync',
+        '--remote-debugging-address=127.0.0.1',
+        '--remote-debugging-port=0',
+      ],
+    });
+    const port = await readOwnedCdpPort(userDataDir, launchStartedAt);
+    const ownedContext = context;
+    const page = ownedContext.pages()[0] ?? (await ownedContext.newPage());
+    return {
+      context: ownedContext,
+      page,
+      port,
+      close: async () => {
+        await ownedContext.close();
+        await removeOwnedRunRoot(runRoot, ownershipToken);
+      },
+    };
+  } catch (error) {
+    if (context) await context.close();
+    await removeOwnedRunRoot(runRoot, ownershipToken);
+    throw error;
+  }
+}
+
+const ownedBrowser = await launchOwnedAuditBrowser();
+try {
+  // Inject react-scan/lite BEFORE the app boots. Initialization failure still reaches finally.
+  await ownedBrowser.context.addInitScript(() => {
+    // @ts-ignore — pulled from the project's node_modules or a self-hosted bundle
+    import("react-scan/lite").then(({ instrument }) => {
+      (window as any).__renderEvents = [];
+      instrument({
+        onEvent: (event: any) => {
+          if (event.kind === "commit") (window as any).__renderEvents.push(event);
+        },
+        recordChangeDescriptions: true,
+        includeFiberSource: true,
+        includeFiberIdentity: true,
+      });
+    });
+  });
+
+  await ownedBrowser.page.goto("http://localhost:3000/<route>");
+  await playAudit({
+    page: ownedBrowser.page,
+    port: ownedBrowser.port,
+    thresholds: { performance: 100, accessibility: 100, "best-practices": 100, seo: 100 },
+    reports: { formats: { html: true, json: true }, name: "lighthouse-<route>" },
+    config: { extends: "lighthouse:default", settings: { formFactor: "mobile" } },
+  });
+
+  // Pull render events and assert on render quality
+  const events = await ownedBrowser.page.evaluate(() => (window as any).__renderEvents);
+  const unnecessary = events.filter((e: any) =>
+    e.tree?.some((node: any) => node.changeDescription?.kind === "unnecessary"),
+  );
+
+  if (unnecessary.length > 0) {
+    throw new Error(`FAIL: ${unnecessary.length} unnecessary renders detected during audit`);
+  }
+  await ownedBrowser.page.screenshot({ path: "lighthouse-react-<route>.png", fullPage: true });
+} finally {
+  await ownedBrowser.close();
+}
 ```
 
-This is the canonical integration. Run twice per route (mobile + desktop), same as the base Lighthouse workflow. Both must hit 100/100/100/100 AND zero unnecessary renders.
+This is the canonical integration. `DevToolsActivePort` comes only from the new empty directory and is cross-checked against `/json/version`; failure to confirm it stops the audit, with no fixed-port fallback. The returned context is the browser ownership handle, and cleanup closes that exact context before marker-validated removal of the exact run root. Run twice per route (mobile + desktop), same as the base Lighthouse workflow. Both must hit 100/100/100/100 AND zero unnecessary renders.
 
 ## react-doctor — static perf gate
 

@@ -9,11 +9,11 @@ Codex profiles may carry this layer ahead of runtime model selection; other mode
 - Identify the concrete requested outcome and observable completion condition. Use the lightest rigorous workflow. Continue until the outcome and required verification hold, then stop.
 - Completion means the complete outcome works, interfaces are clear and usable, meaningful regression coverage passes, and the relevant real surface has been exercised where applicable.
 - Scale testing to actual complexity and regression risk; never apply full TDD universally or start with bulk fixtures/test matrices. Understand production behavior and name the plausible regression first. Add unit tests and use RED/GREEN only at real deterministic seams for regression-prone behavior—not ceremony, framework/type guarantees, duplicate coverage, or cases existing checks/real-surface verification already protect.
-- Capability does not justify extra process, test ceremony, delegation, or repeated review; use it to simplify execution without weakening risk controls.
+- Capability does not add process beyond the governing workflow and cannot remove required planning. Complex business or behavior implementation still defaults to `planner` → `plan-critic` → implementation; only a limited, simple, low-risk, clearly bounded change or an explicit user request may skip it, with the reason stated.
 - You may choose an equivalent implementation or execution order when it preserves the goal, constraints, permissions, and acceptance criteria. Record important rulings, reasons, and the cost if wrong.
 - Escalate scope or acceptance changes, security or data guarantees, public APIs, irreversible actions, and pure guesses.
 - Do not invent or require hashes for plans, tasks, coordination state, files, evidence, or review checkpoints. Hashing is justified only by an explicit external integrity, release, or protocol requirement.
-- When facts are clear, answer or proceed directly; otherwise state a safe assumption and continue. Ask only when a choice changes the deliverable, required information is unavailable through tools, an action is destructive, or material rework is likely.
+- When facts are clear, answer explanation or research requests directly; for implementation, proceed through the governing planning policy. Clear requirements, sufficient evidence, or model capability do not exempt complex work. Otherwise state a safe assumption and continue, asking only when a protected choice or material rework requires it.
 
 ## Retrieval and delegation
 

@@ -33,6 +33,8 @@ const LOCAL_COORDINATOR_TASK_RULES = {
 
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
 const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
+const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
+const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
 function countText(text: string, needle: string): number {
   return text.split(needle).length - 1
@@ -225,6 +227,34 @@ test("Opus 5 category selections never attach the orchestrator calibration", asy
   }
 })
 
+test("Kimi and SWE category selections preserve the category role and isolate calibrations", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "v1")
+  const configured = {
+    ...defaultConfig(),
+    categories: {
+      coding: { model: "kimi-for-coding/kimi-for-coding-highspeed" },
+      research: { model: "devin/swe-2.max" },
+      quick: { model: "devin/swe-20" },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+  const coding = String((target.agent.coding as Record<string, unknown>).prompt)
+  assert.ok(coding.startsWith(getCategoryPrompt("coding").trim()))
+  assert.equal(countText(coding, KIMI_K27_MARKER), 1)
+  assert.equal(countText(coding, SWE_2_MARKER), 0)
+
+  const research = String((target.agent.research as Record<string, unknown>).prompt)
+  assert.ok(research.startsWith(getCategoryPrompt("research").trim()))
+  assert.equal(countText(research, SWE_2_MARKER), 1)
+  assert.equal(countText(research, KIMI_K27_MARKER), 0)
+
+  const adjacent = String((target.agent.quick as Record<string, unknown>).prompt)
+  assert.equal(countText(adjacent, SWE_2_MARKER), 0)
+  assert.equal(countText(adjacent, KIMI_K27_MARKER), 0)
+})
+
 test("Codex generation gives every builtin category the guarded GPT-5.6 calibration", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
@@ -235,6 +265,8 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
     await handler(cfg, undefined)
     const specialization = getDeepworkPrompt("gpt-5.6").trim()
     const opus5 = getDeepworkPrompt("claude-opus-5").trim()
+    const kimi = getDeepworkPrompt("kimi-k27").trim()
+    const swe2 = getDeepworkPrompt("swe-2").trim()
 
     for (const category of BUILTIN_CATEGORIES) {
       if (category.optIn) {
@@ -248,6 +280,11 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.equal(countText(prompt, GPT_56_MARKER), 1, `${category.name}: GPT-5.6 marker`)
       assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
+      assert.equal(countText(prompt, KIMI_K27_MARKER), 1, `${category.name}: Kimi carry-ahead`)
+      assert.equal(countText(prompt, SWE_2_MARKER), 1, `${category.name}: SWE-2 carry-ahead`)
+      assert.ok(prompt.includes(kimi), `${category.name}: exact Kimi calibration`)
+      assert.ok(prompt.includes(swe2), `${category.name}: exact SWE-2 calibration`)
+      assert.match(prompt, /every other runtime model must ignore it/, `${category.name}: runtime guard`)
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")

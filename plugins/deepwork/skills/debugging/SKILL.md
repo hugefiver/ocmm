@@ -57,6 +57,8 @@ These are not "optional extras". They are the correct tool in their domain, and 
 
 **Failing to use these tools in their domain is a process failure, not a stylistic choice.** If the bug is in a browser and you did Phase 8 without Playwright, you are doing it wrong. If the bug is in a stripped binary and you read hex with `xxd`, you are doing it wrong. The references tell you how. Read them.
 
+Browser tools always run in a **run-owned temporary empty browser profile or isolated empty context**. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** If the required flow is authentication-gated, stop at that boundary and **report authentication as a verification limitation**; never attach to a live browser or weaken the boundary to complete QA.
+
 ---
 
 ## The Phase Loop — READ THE REFERENCE FOR THE PHASE YOU ARE ENTERING

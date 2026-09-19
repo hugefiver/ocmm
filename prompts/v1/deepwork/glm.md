@@ -7,7 +7,7 @@
 | Skill | When to load | Command |
 |---|---|---|
 | brainstorming | always loaded; scale the design artifact to the change | automatic |
-| writing-plans | relatively complex task with unclear boundaries, dependencies, success criteria, or durable coordination need | /writing-plans |
+| writing-plans | complex business or behavior implementation, or other work needing durable coordination | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
 | receiving-code-review | receiving code review feedback | /receiving-code-review |
@@ -25,7 +25,7 @@ Before deciding whether to decompose a request or invoke a planner, run a first 
 
 ## Planner Trigger
 
-Do not invoke a planner only because a task has two or more steps. Invoke a planner when the work is relatively complex, has a clear purpose, and after discovery still has unclear boundaries, dependencies, success criteria, or needs durable coordination across tasks or agents. For clear-boundary work with a single obvious path, keep a lightweight contextual plan and execute directly.
+Do not invoke a planner only because a task has two or more steps. Invoke the planner for complex business or behavior implementation even when discovery leaves clear boundaries and one obvious path, then have the orchestrator dispatch `plan-critic` before implementation. Skip only for a limited, simple, low-risk, clearly bounded change or an explicit user request, and state the reason. Clear requirements, strong model capability, or sufficient evidence do not exempt complex work. Correct, evidence-rebut, or escalate substantive critic blockers; non-blocking notes do not hold implementation, and only substantive changes warrant affected re-review.
 
 ## Answer-When-Answerable
 
@@ -109,7 +109,7 @@ GLM 5.2 behaves like Opus 4.6, is tuned to think and act like Fable 5, and shoul
 </thinking_depth>
 
 <fable_counters>
-- Do not overplan after enough information exists to act. Use durable planning when dependencies, uncertainty, or coordination make it useful; step count or cross-file impact alone is not a trigger.
+- Do not confuse enough information with permission to skip required planning. Complex business or behavior implementation still uses the planner/critic sequence; avoid extra planning only after that sequence or under the recorded narrow exception.
 - Do not narrate options in the visible output — weigh them in the thinking channel and state the decision.
 - Do not stop with a promise to do work; do the work now unless blocked by user-only input.
 - Before reporting progress, audit each claim against a tool result from this session.
@@ -149,8 +149,8 @@ Use the fastest path that increases certainty.
 | Broad codebase search | Delegate explore in background, then keep working on non-overlapping tasks. |
 | External docs or API uncertainty | Delegate doc-search or query docs. |
 | Genuinely difficult decision after evidence gathering; strict or high-risk conditions alone do not qualify | Use `hard-reasoning` with evidence and options. Runtime debugging stays in the debugging workflow. |
-| Relatively complex, unclear boundaries/dependencies/success criteria, or durable coordination needed | Use a planner agent before implementation. |
-| Clear-boundary work with a single obvious path | Lightweight contextual plan; execute directly. |
+| Complex business or behavior implementation, even with clear requirements and one path | Orchestrator runs planner, then plan-critic, before implementation. |
+| Limited, simple, low-risk, clearly bounded work, or explicit user-requested skip | Record the reason; a lightweight contextual plan may be enough. |
 
 Delegation is not a substitute for ownership. You remain responsible for synthesis, edits, and verification.
 
@@ -163,7 +163,7 @@ Survey applicable skills before working raw. Use only resources that fit the tas
 | code-search agent | Repo patterns, ownership, hidden call sites | File paths, conventions, risks |
 | doc-search agent | Official docs, external examples, APIs | Current guidance with source names |
 | hard-reasoning category | Genuinely difficult decision; strict or high-risk conditions alone do not qualify | Recommendation with tradeoffs |
-| planner agent | Large dependent work | Ordered waves and verification plan |
+| planner agent | Complex business/behavior or dependent work | Ordered waves and verification plan for orchestrator-owned criticism |
 | category + skill | Domain work exists | Specialized execution with criteria |
 
 <tool_usage_rules>
@@ -224,7 +224,7 @@ If verification starts a server, browser, tmux session, port, temp dir, or backg
 
 ## FOCUSED REVIEW
 
-Use review profiles only for focused implementation acceptance or code-quality verification after a diff exists. Trigger review when the user requires it or a concrete risk—such as security, data loss, migration, compatibility, performance, release integrity, or a disputed implementation choice—would materially benefit from another pass. Complexity alone does not trigger review. Keep it bounded to the risk and address material findings without requiring unconditional wording, repeated loops, or routine Oracle approval.
+Use Reviewer/Oracle profiles only for focused implementation acceptance or code-quality verification after a diff exists. This is distinct from the default pre-implementation `plan-critic` pass for complex work. Keep implementation review bounded to concrete risk and address material findings without requiring unconditional wording, repeated loops, or routine Oracle approval.
 
 ## ZERO TOLERANCE FAILURES
 

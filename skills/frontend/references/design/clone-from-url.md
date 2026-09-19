@@ -8,6 +8,8 @@ A `DESIGN.md` whose every token, interaction state, and motion value was read fr
 
 ## Phase 1 — Extract the runtime truth (never guess a value)
 
+Use a **run-owned temporary empty browser profile or isolated empty context** for source extraction. **Do not sign in to any browser, vendor, site, or account, including disposable or test accounts.** **Do not import, copy, reuse, or sync user browser settings, extensions, cookies, authentication, or storage state.** If the source or a required state is gated, **report authentication as a verification limitation** and omit that unverified surface rather than attaching to a live browser or bypassing access controls.
+
 Drive a real browser: Codex `browser:control-in-app-browser` first, otherwise the project's `agent-browser` / playwright / dev-browser tooling. Do NOT parse CSS files — minification, CORS, CSS-in-JS, and Tailwind utilities make source unreliable. `getComputedStyle` returns what the browser ACTUALLY rendered, so it is the only source of truth.
 
 Sweep the page and read, for every meaningful element and every repeated pattern:
