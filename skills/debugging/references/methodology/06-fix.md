@@ -1,4 +1,4 @@
-# Phase 6 + 7 — Root Cause Confirmation & TDD Fix
+# Phase 6 + 7 — Root Cause Confirmation & Reproduction-Locked Fix
 
 A cause is not "confirmed" until you can toggle the bug by toggling the cause. Every other level of evidence is correlation, and correlation-driven fixes ship bugs.
 
@@ -47,34 +47,34 @@ The "mechanism" field is the acid test. If you can't write the causal chain from
 
 ---
 
-## Phase 7 — TDD Fix
+## Phase 7 — Reproduction-Locked Fix
 
-Red, green, refactor. No shortcuts.
+Red reproduction, green same case, refactor. No shortcuts.
 
-### 1. Red — failing-first test
+### 1. Red — the reproduction as a test
 
-Write a test that fails *specifically because of this bug*. Requirements:
+Capture a case that fails *specifically because of this bug*. Where the repository keeps tests for this behavior, keep that case as a regression test; otherwise capture a before-fix run and its failure output. Requirements:
 
-- **Test name reads like a bug report.** `test_refinement_turn_returns_empty_content_when_anthropic_returns_401` is good. `test_bug_fix` is not.
-- **Failure message clearly shows what the bug looks like.** If someone reads only the failure output, they understand what's broken.
-- **Minimum infrastructure.** Don't spin up the whole server if a unit test against the right seam captures the mechanism.
+- **For a test, its name reads like a bug report.** `test_refinement_turn_returns_empty_content_when_anthropic_returns_401` is good. `test_bug_fix` is not.
+- **Failure output clearly shows what the bug looks like.** If someone reads only the failure output, they understand what's broken.
+- **Minimum infrastructure.** Don't spin up the whole server if a smaller reproducible run captures the mechanism.
 
-Run the test. Confirm it fails. Paste the failure output into the journal:
+Run the test or scenario. Confirm it fails before the fix. Paste the failure output into the journal:
 
 ```markdown
 ### Red phase (<ISO timestamp>)
-Test: <path>::<name>
+Reproduction: <test path>::<name> or <scenario and inputs>
 Command: <exact invocation>
 Output:
 ```
 <verbatim failure output>
 ```
-Confirms: the bug is reproducible at the test-harness level, not just the manual repro.
+Confirms: the bug is reproducible in the test harness or captured runtime scenario.
 ```
 
 ### 2. Green — minimum change
 
-Make the test pass with the **smallest change that fully fixes the observed mechanism**.
+Make the same case pass with the **smallest change that fully fixes the observed mechanism**.
 
 If the diff is larger than ~30 lines and you aren't refactoring, something is wrong — either you're fixing more than the bug, or the root cause was deeper than you confirmed. Back to Phase 6.
 
@@ -94,7 +94,7 @@ If the code around the fix is rough, note it in the journal as a follow-up for t
 
 ### 4. Regression — full suite green
 
-Run the full test suite for the affected package (not just the one new test). Existing tests must still pass.
+Run the full test suite for the affected package when present (not just the targeted test, if any). Existing tests must still pass.
 
 If they don't, your "fix" broke something else. Back to Phase 6 with the new failure as evidence — usually it means the mechanism you thought you fixed was load-bearing for some other code path you didn't know about, and the "broken" test is actually pointing at a better understanding of the system.
 
@@ -109,14 +109,15 @@ This does not soften the artifact rule: every temporary `print` / `dbg!` / `cons
 ```markdown
 ### Green phase (<ISO timestamp>)
 Fix: <file:line> — <two-line description of the change>
-Test: <path>::<name> now passes
-Full suite: <N tests, <M failures — should be 0>
+Reproduction: <test path>::<name> or <scenario> now passes
+Output: <verbatim passing output for the same case>
+Full suite: <N tests, <M failures — should be 0> (or <none exists>)
 ```
 
 ---
 
 ## The red-green discipline summary
 
-No red test → no proof the fix addresses the reported bug. Only proof it doesn't break tests that already existed.
+No captured failure → no proof the fix addresses the reported bug. Only proof it doesn't break tests that already existed. Keep the reproduction as a test where the repository keeps tests for this behavior; otherwise the captured before/after run is the proof.
 
-A test written *after* the fix might still pass with the fix reverted. If that's the case, the test doesn't lock the bug — it locks something else. Always verify the test fails without the fix and passes with it. The journal should show both outputs.
+Where tests are kept, a test written *after* the fix might still pass with the fix reverted. If that's the case, the test doesn't lock the bug — it locks something else. Always verify the same case fails without the fix and passes with it, whether test or captured run. The journal should show both outputs.

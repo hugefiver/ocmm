@@ -184,6 +184,7 @@ Use `update_plan` or a notepad when the work benefits from durable coordination.
 ## REGRESSION COVERAGE
 
 - Start from the plausible regression, then choose the smallest check that would detect it.
+- Before changing an area, read existing tests that cover it as a record of current behavior; never change tests merely to get green, and report an existing test that is itself wrong as a finding.
 - Add tests when behavior is regression-prone and a stable seam exists. RED/GREEN is useful evidence when it materially increases confidence, not a gate.
 - Do not invent fixed scenario counts, redundant tests, or ceremony for prompt text, formatting, type guarantees, or behavior already proved by a stronger check.
 - Never delete, skip, weaken, or suppress a relevant failing check to obtain a green result.

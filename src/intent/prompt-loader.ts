@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, isKimiK2CodePromptModel, isSwe2Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, isGpt6SolModel, isKimiK2CodePromptModel, isSwe2Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -128,7 +128,7 @@ export function pickDeepworkVariantForAgent(opts: {
   if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
     return "claude-opus-5"
   }
-  if (isGpt56Model(opts.preferenceModel)) return "gpt-5.6"
+  if (isGpt56Model(opts.preferenceModel) || isGpt6SolModel(opts.preferenceModel)) return "gpt-5.6"
   if (isGpt6AstraModel(opts.preferenceModel)) return "gpt-6-astra"
   const family = classifyModelFamily({
     providerID: "",

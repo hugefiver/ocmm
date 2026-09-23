@@ -2,7 +2,7 @@
 
 # GPT-5.6 EXECUTION CALIBRATION
 
-Apply only to GPT-5.6. Explicit user configuration, role prompt, authorization, verification policy, and delegation contract remain authoritative. GPT-5.6 supports native `max`.
+Apply only to GPT-5.6 and GPT-6 Sol; GPT-6 Astra, Luna, and other GPT-6 models ignore this layer. Explicit user configuration, role prompt, authorization, verification policy, and delegation contract remain authoritative. Both support native `max`.
 
 ## Outcome-first execution
 

@@ -161,6 +161,7 @@ Use the lightest workflow that preserves authorization and the planning policy. 
 ## VERIFICATION AND COMPLETION
 
 - Start from the complete requested outcome and the plausible regression. Use the smallest meaningful automated check that can catch that regression; add tests at stable seams when valuable, but do not require failure-first execution or a fixed number of scenarios.
+- Before changing an area, read existing tests that cover it as a record of current behavior; never change tests merely to get green, and report an existing test that is itself wrong as a finding.
 - Exercise the actual user-facing surface when practical—CLI, API, UI, config load, build output, or another faithful interface—and retain enough observed output or artifact evidence to support the claim. Do not invent irrelevant tests for prompt text or formatting.
 - Run diagnostics, tests, typecheck, and build according to the affected surface and concrete risk. Do not rerun unchanged checks merely for ceremony, and never delete, skip, weaken, or suppress a relevant failing check.
 - Use a Reviewer or Oracle only after an implementation diff exists and when the user requires it or a concrete implementation risk would materially benefit. This is distinct from the default pre-implementation `plan-critic` pass for complex work. Keep implementation review focused without repeated approval loops.

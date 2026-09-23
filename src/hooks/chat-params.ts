@@ -22,6 +22,9 @@ import {
 } from "../routing/fast-option-rules.ts"
 import {
   classifyModelFamily,
+  isGpt6AstraModel,
+  isGpt6LunaModel,
+  isGpt6SolModel,
   isMiniModel,
   supportsNativeGptMaxReasoning,
 } from "../intent/model-family.ts"
@@ -206,6 +209,21 @@ function stripUnsupportedTemperature(capability: ModelTemperatureCapability, out
   }
 }
 
+function capGpt6ReasoningEffort(family: string, modelID: string, effort: string): string {
+  if (family !== "gpt" && family !== "codex") return effort
+  if (effort === "none" && isGpt6AstraModel(modelID)) return "low"
+  if (effort === "minimal" && (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID) || isGpt6AstraModel(modelID))) {
+    return "low"
+  }
+  return effort
+}
+
+function capOutputGpt6ReasoningEffort(family: string, modelID: string, options: Record<string, unknown>): void {
+  if (typeof options.reasoningEffort === "string") {
+    options.reasoningEffort = capGpt6ReasoningEffort(family, modelID, options.reasoningEffort)
+  }
+}
+
 function normalizeReasoningEffortForModel(args: {
   family: string
   modelID: string
@@ -215,6 +233,11 @@ function normalizeReasoningEffortForModel(args: {
   const effort = args.reasoningEffort.toLowerCase()
   if ((args.family === "gpt" || args.family === "codex") && effort === "max" && !supportsNativeGptMaxReasoning(args.modelID)) {
     return "xhigh"
+  }
+  if ((args.family === "gpt" || args.family === "codex")
+    && (effort === "none" || effort === "minimal")
+    && (isGpt6SolModel(args.modelID) || isGpt6LunaModel(args.modelID) || isGpt6AstraModel(args.modelID))) {
+    return capGpt6ReasoningEffort(args.family, args.modelID, effort)
   }
   if (args.explicit) return args.reasoningEffort
   if (protectedModelHasNoReasoningParam(args.family)) return undefined
@@ -348,6 +371,13 @@ export function createChatParamsHandler(args: {
 
     if (!resolution) {
       applyFastOptionRoute({ route, input, output })
+      if (route?.fastPath.kind === "options") {
+        capOutputGpt6ReasoningEffort(
+          classifyModelFamily({ providerID: input.model.providerID, modelID: input.model.modelID }),
+          input.model.modelID,
+          output.options,
+        )
+      }
       // A host-provided protected review profile may be absent from its
       // expanded route map when the matching tier is not configured. Enforce
       // the xhigh-equivalent floor against the actual runtime model without
@@ -418,16 +448,21 @@ export function createChatParamsHandler(args: {
     const explicitIntent = resolution.source === "user-config" || !!input.message.variant
     let appliedReasoning: Reasoning | undefined = resolution.reasoning
     let appliedVariant: Variant | undefined = resolution.variant
+    // Codex static profiles share the translator, but this exception belongs to
+    // the OpenCode runtime model selected for this chat only.
+    const runtimeCodexMinimal = !explicitIntent && family === "codex"
+      && (appliedReasoning === "minimal" || appliedVariant === "minimal")
+      && (isGpt6SolModel(input.model.modelID) || isGpt6LunaModel(input.model.modelID) || isGpt6AstraModel(input.model.modelID))
     if (!explicitIntent) {
       if (appliedReasoning !== undefined) {
-        appliedReasoning = normalizeReasoningForModel({
+        appliedReasoning = runtimeCodexMinimal && appliedReasoning === "minimal" ? "low" : normalizeReasoningForModel({
           family,
           modelID: input.model.modelID,
           reasoning: appliedReasoning,
         })
       }
       if (appliedVariant !== undefined) {
-        appliedVariant = normalizeVariantForModel({
+        appliedVariant = runtimeCodexMinimal && appliedVariant === "minimal" ? "low" : normalizeVariantForModel({
           family,
           modelID: input.model.modelID,
           variant: appliedVariant,
@@ -452,7 +487,11 @@ export function createChatParamsHandler(args: {
       : appliedVariant !== undefined
         ? translateVariant(family, appliedVariant, {
             modelID: input.model.modelID,
-            respectExplicit: explicitIntent,
+            // The minimal exception was already normalized to low above; do not
+            // re-enter the built-in below-high rule and turn that low into high.
+            respectExplicit: explicitIntent || (resolution.variant === "minimal" && appliedVariant === "low"
+              && (family === "gpt" || family === "codex")
+              && (isGpt6SolModel(input.model.modelID) || isGpt6LunaModel(input.model.modelID) || isGpt6AstraModel(input.model.modelID))),
           })
         : {}
     if (effect.reasoningEffort !== undefined) {
@@ -491,6 +530,7 @@ export function createChatParamsHandler(args: {
       output.maxOutputTokens = resolution.entry.maxTokens
     }
     applyFastOptionRoute({ route, input, output })
+    capOutputGpt6ReasoningEffort(family, input.model.modelID, output.options)
     const reviewFloorVariant = appliedReasoning !== undefined
       ? reasoningToVariant(appliedReasoning)
       : appliedVariant

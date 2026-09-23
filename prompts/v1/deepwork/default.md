@@ -114,6 +114,7 @@ Use review when it adds material confidence, especially for significant changes 
 ## Verification Bar
 
 Completion means complete useful functionality, clear interfaces, and meaningful regression plus real-surface evidence. Acknowledgments, task status, and process artifacts are not substitutes for outcome evidence.
+Before changing an area, read existing tests that cover it as a record of current behavior; never change tests merely to get green, and report an existing test that is itself wrong as a finding.
 
 ### Proportional scenarios and TDD
 

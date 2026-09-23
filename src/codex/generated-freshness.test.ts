@@ -94,9 +94,15 @@ function copyComparableGeneratedOutputs(sourceRoot: string, targetRoot: string):
   }
 }
 
-test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", async () => {
+test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", { concurrency: false }, async () => {
   const runRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-freshness-"))
+  const previousCodexHome = process.env.CODEX_HOME
+  const previousNoProfile = process.env.OCMM_NO_PROFILE
   try {
+    const codexHome = join(runRoot, "codex-home")
+    mkdirSync(codexHome)
+    process.env.CODEX_HOME = codexHome
+    process.env.OCMM_NO_PROFILE = "1"
     const result = await generateCodexPlugin({
       projectRoot: repositoryRoot,
       marketplacePath: join(runRoot, CODEX_MARKETPLACE_FILE),
@@ -104,7 +110,7 @@ test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", 
       pluginRoot: join(runRoot, CODEX_PLUGIN_DIR),
     })
 
-    assert.notEqual(result.configHost, "provided", "freshness generation must use the CLI adapter config loader")
+    assert.equal(result.configHost, "codex", "freshness generation must use the project Codex config loader")
     assert.deepEqual(filesContainingCarriageReturns(runRoot), [], "fresh generation must use LF for text artifacts")
     assert.deepEqual(filesContainingCarriageReturns(repositoryRoot), [], "tracked text artifacts must use LF")
     assert.deepEqual(compareGeneratedOutputs(runRoot, repositoryRoot), [])
@@ -118,6 +124,10 @@ test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", 
       [`stale tracked file: ${CODEX_PLUGIN_DIR}/README.md`],
     )
   } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodexHome
+    if (previousNoProfile === undefined) delete process.env.OCMM_NO_PROFILE
+    else process.env.OCMM_NO_PROFILE = previousNoProfile
     rmSync(runRoot, { recursive: true, force: true })
   }
 })

@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: "MUST USE for any real runtime debugging across ANY language or binary — crashes, silent failures, wrong responses, stuck processes, memory leaks, async misbehavior, unexplained timing, flaky tests, intermittent failures, passes in isolation, different test fails, order-dependent behavior, CI-only failures, reverse engineering. Runs a hypothesis-driven loop: form ≥3 hypotheses, investigate in parallel, after 2 failed evidence rounds allow one hard-reasoning escalation only when the task is genuinely difficult, confirm root cause, lock with a failing test, fix minimally, QA by actually USING the system, scrub artifacts. The actual HOW lives in `references/` — READ THEM. Triggers: 'debug this', 'why is X not working', 'hanging', 'attach a debugger', 'reverse engineer', 'pwndbg', 'gdb', 'lldb', 'node inspect', 'tsx debug', 'pdb', 'dlv', 'delve', 'rust-gdb', 'set a breakpoint', 'context window exploded', 'why is the response empty', 'attach the debugger', 'debug it', 'why is this happening', 'trace this bug', 'reproduce and fix', 'silent failure', 'HTTP 200 but empty', 'why did it stop', 'inspect the binary', 'reverse engineering', 'playwright', 'flaky test', 'intermittent failure', 'passes in isolation', 'different test fails', 'order-dependent', 'CI-only failure'."
+description: "MUST USE for any real runtime debugging across ANY language or binary — crashes, silent failures, wrong responses, stuck processes, memory leaks, async misbehavior, unexplained timing, flaky tests, intermittent failures, passes in isolation, different test fails, order-dependent behavior, CI-only failures, reverse engineering. Runs a hypothesis-driven loop: form ≥3 hypotheses, investigate in parallel, after 2 failed evidence rounds allow one hard-reasoning escalation only when the task is genuinely difficult, confirm root cause, capture a failing reproduction before the fix and verify the same case after, fix minimally, QA by actually USING the system, scrub artifacts. The actual HOW lives in `references/` — READ THEM. Triggers: 'debug this', 'why is X not working', 'hanging', 'attach a debugger', 'reverse engineer', 'pwndbg', 'gdb', 'lldb', 'node inspect', 'tsx debug', 'pdb', 'dlv', 'delve', 'rust-gdb', 'set a breakpoint', 'context window exploded', 'why is the response empty', 'attach the debugger', 'debug it', 'why is this happening', 'trace this bug', 'reproduce and fix', 'silent failure', 'HTTP 200 but empty', 'why did it stop', 'inspect the binary', 'reverse engineering', 'playwright', 'flaky test', 'intermittent failure', 'passes in isolation', 'different test fails', 'order-dependent', 'CI-only failure'."
 ---
 
 # Debugging
@@ -74,9 +74,9 @@ Each phase has exactly one reference. Read it as you enter the phase — not in 
 | 4 | **Hard-reasoning escalation** — only after 2 consecutive failed evidence rounds make the task genuinely difficult; consult one hard-reasoning agent with orthogonal framings | [references/methodology/04-hard-reasoning-escalation.md](references/methodology/04-hard-reasoning-escalation.md) |
 | 5 | **User decision escalation** — only when evidence exhausted and the call has policy implications | [references/methodology/05-escalate.md](references/methodology/05-escalate.md) |
 | 6 | **Root cause confirmation** — confirmed only when toggling the suspected cause toggles the bug | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
-| 7 | **TDD fix** — red test first, minimal green, no scope expansion | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
+| 7 | **Reproduction-first fix** — capture failure first, minimal change, same case passes, no scope expansion | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
 | 8 | **Manual QA** — actually use the system (tmux for CLI, Playwright for browser, real curl for API, real repro for binary) | [references/methodology/08-qa.md](references/methodology/08-qa.md) |
-| 9 | **Cleanup** — walk the journal, revert every artifact, verify `git diff` shows only fix + test | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
+| 9 | **Cleanup** — walk the journal, revert every artifact, verify `git diff` shows only the fix and any retained reproduction evidence | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 | 10 | **Final verification** — four evidence gates before declaring done | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 
 **Phase references are short by design.** Reading one takes a minute. Skipping one costs an hour.
@@ -98,7 +98,7 @@ These are not phases — read them when the situation calls for them:
 <safety>
 1. **Runtime state is the only source of truth.** A hypothesis without an observed value is a guess. Do not fix guesses.
 2. **Every debug artifact is journaled before it is created.** Journal-then-modify, not modify-then-remember-maybe.
-3. **Never ship a fix without a failing-first test.** Red→green transition required, or the fix is unverified.
+3. **Never ship a fix without its reproduction.** The failing case captured BEFORE the fix, the same case passing after it, or the fix is unverified. Where the repository keeps tests for this behavior, that case is the regression test.
 4. **Never declare done on type-check/compile alone.** Types catch declaration bugs. Only running the actual user scenario catches the actual user bug.
 5. **Never ask the user a question that runtime evidence can already answer.** Escalation is for genuine ambiguity.
 6. **Never silently swallow errors while debugging.** If the system swallows errors, that is often the bug itself. Make them loud temporarily; restore at cleanup.

@@ -9,6 +9,8 @@ import {
   isCodexModel,
   isDeepSeekModel,
   isGeminiModel,
+  isGpt6LunaModel,
+  isGpt6SolModel,
   isGptModel,
   isMiniModel,
   isKimiK2CodePromptModel,
@@ -49,6 +51,46 @@ test("GPT version parsing supports vendor-prefixed dotted Bedrock aliases", () =
   assert.equal(supportsNativeGptMaxReasoning("amazon-bedrock/openai.gpt-5.6"), true)
 })
 
+test("isGpt6SolModel matches only Sol names and aliases across known provider prefixes", () => {
+  for (const modelID of [
+    "gpt-6-sol",
+    "gpt-6-sol-fast",
+    "OPENAI/GPT-6-SOL",
+    "providers/openai/gpt-6-sol-fast",
+    "amazon-bedrock/openai.gpt-6-sol",
+    "amazon-bedrock/us.openai.gpt-6-sol.fast",
+    "gpt-6-sol_preview",
+  ]) {
+    assert.equal(isGpt6SolModel(modelID), true, modelID)
+  }
+  for (const modelID of [
+    "gpt-6-astra",
+    "gpt-6-luna",
+    "gpt-6-solar",
+    "gpt-6-solstice",
+    "prefix-gpt-6-sol",
+    "vendor/custom.gpt-6-sol",
+    "unrelated",
+  ]) {
+    assert.equal(isGpt6SolModel(modelID), false, modelID)
+  }
+})
+
+test("isGpt6LunaModel matches only Luna names and aliases across known provider prefixes", () => {
+  for (const modelID of [
+    "gpt-6-luna",
+    "openai-codex/gpt-6-luna-fast",
+    "OPENAI/GPT-6-LUNA",
+    "amazon-bedrock/us.openai.gpt-6-luna.fast",
+    "gpt-6-luna_preview",
+  ]) {
+    assert.equal(isGpt6LunaModel(modelID), true, modelID)
+  }
+  for (const modelID of ["gpt-6-lunar", "gpt-6-astra", "gpt-6-astral", "gpt-6-sol", "gpt-6-solar", "prefix-gpt-6-luna", "vendor/custom.gpt-6-luna"]) {
+    assert.equal(isGpt6LunaModel(modelID), false, modelID)
+  }
+})
+
 test("isCodexModel matches codex family without catching generic GPT", () => {
   assert.equal(isCodexModel("codex-mini-latest"), true)
   assert.equal(isCodexModel("openai/codex-1"), true)
@@ -71,11 +113,23 @@ test("isClaudeOpus47OrLaterModel matches >= 4.7 and claude-fable", () => {
   assert.equal(isClaudeOpus47OrLaterModel("claude-sonnet-4-6"), false)
 })
 
-test("isClaudeOpus5Model accepts only exact, provider-prefixed, date, and named snapshots", () => {
+test("isClaudeOpus5Model accepts only exact Opus 5/5.5, provider-prefixed, date, and named snapshots", () => {
   for (const modelID of [
     "claude-opus-5",
     "anthropic/claude-opus-5",
     "providers/anthropic/claude-opus-5",
+    "claude-opus-5-5",
+    "claude-opus-5.5",
+    "anthropic/claude-opus-5-5",
+    "providers/anthropic/claude-opus-5.5",
+    "amazon-bedrock/us.anthropic.claude-opus-5-5",
+    "claude-opus-5-5@default",
+    "amazon-bedrock/global.anthropic.claude-opus-5-5",
+    "amazon-bedrock/global.anthropic.claude-opus-5-5@default",
+    "claude-opus-5@default",
+    "claude-opus-5.5@default",
+    "claude-opus-5-5-20260728",
+    "claude-opus-5.5.latest",
     "claude-opus-5-20260728",
     "claude-opus-5.20260728",
     "claude-opus-5.20260728-beta.1",
@@ -87,12 +141,24 @@ test("isClaudeOpus5Model accepts only exact, provider-prefixed, date, and named 
 
   for (const modelID of [
     "claude-opus-4-8",
+    "claude-opus-5-50",
     "claude-opus-5.0",
     "claude-opus-50",
     "claude-sonnet-5",
     "prefix-claude-opus-5",
+    "prefix-claude-opus-5-5",
     "claude-opus-5_20260728",
     "claude-opus-5-19990101",
+    "claude-opus-5-5@other",
+    "claude-opus-5-5@default-extra",
+    "claude-opus-5-5@default@default",
+    "claude-opus-5-50@default",
+    "prefix-claude-opus-5-5@default",
+    "amazon-bedrock/global.unknown.claude-opus-5-5",
+    "amazon-bedrock/global.anthropic.anthropic.claude-opus-5-5",
+    "amazon-bedrock/global.anthropic.claude-opus-5-50@default",
+    "amazon-bedrock/global.openai.claude-opus-5-5",
+    "amazon-bedrock/other.anthropic.claude-opus-5-5",
     "unrelated",
   ]) {
     assert.equal(isClaudeOpus5Model(modelID), false, modelID)
@@ -162,6 +228,7 @@ test("classifyModelFamily picks the highest-priority match", () => {
   assert.equal(classifyModelFamily({ modelID: "amazon-bedrock/us.openai.gpt-5.4" }), "gpt")
   assert.equal(classifyModelFamily({ modelID: "claude-opus-4-7" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "anthropic/claude-opus-5" }), "claude-opus-47-plus")
+  assert.equal(classifyModelFamily({ modelID: "claude-opus-5.5" }), "claude-opus-47-plus")
   assert.equal(classifyModelFamily({ modelID: "claude-sonnet-4-6" }), "claude")
   assert.equal(
     classifyModelFamily({ modelID: "gemini-3.1-pro", providerID: "google" }),

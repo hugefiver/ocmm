@@ -5,6 +5,7 @@ import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
 import { getAgentPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, isGpt56Model, isGpt6Model, pickDeepworkVariantForAgent, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
+import { isGpt6SolModel } from "../intent/model-family.ts"
 import { isPlannerAgent } from "../intent/detectors.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
@@ -401,12 +402,12 @@ function deepworkPromptForAgent(
       ? override.requirement.fallbackChain
       : agent.requirement.fallbackChain
   const prefModel = selectedModel ?? chain[0]?.model ?? ""
-  const gpt56Specialization = isGpt56Model(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
+  const gpt56Specialization = isGpt56Model(prefModel) || isGpt6SolModel(prefModel) ? getDeepworkPrompt("gpt-5.6") : ""
   const astraSpecialization = isGpt6Model(prefModel) ? getDeepworkPrompt("gpt-6-astra") : ""
   const modelCalibrations = pickModelCalibrationVariants(prefModel, workflow === "codex")
     .map((variant) => getDeepworkPrompt(variant))
   // Codex profiles are generated ahead of runtime model overrides. Carry the
-  // separately guarded GPT-5.6 and GPT-6 Astra layers in every Codex profile,
+  // separately guarded GPT-5.6/GPT-6 Sol and GPT-6 Astra layers in every Codex profile,
   // and carry the separately guarded Opus 5 layer only for the orchestrator
   // prompt identity.
   if (workflow === "codex") {
@@ -466,7 +467,7 @@ function promptForBuiltinCategory(
   selectedModel: string,
 ): string {
   const rolePrompt = getCategoryPrompt(categoryName).trim()
-  const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel)
+  const needsGpt56Calibration = workflow === "codex" || isGpt56Model(selectedModel) || isGpt6SolModel(selectedModel)
   const needsAstraCalibration = workflow === "codex" || isGpt6Model(selectedModel)
   const astraAddendum = getCategoryModelCalibration(categoryName, selectedModel, workflow === "codex").trim()
   const modelPrompt = needsGpt56Calibration ? getDeepworkPrompt("gpt-5.6").trim() : ""

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path"
 
 import { defaultConfig } from "../config/schema.ts"
+import { loadConfig, stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
 import { createConfigHandler } from "../hooks/config.ts"
 import { isRecord } from "../shared/logger.ts"
 import {
@@ -25,6 +26,7 @@ import {
   createPluginManifest,
   createPluginRuntimePackage,
   generateCodexPlugin,
+  loadAdapterConfig,
   normalizeCopiedSkillText,
   normalizeSkillForCodex,
   renderPlanningLogicalTierProfiles,
@@ -547,14 +549,14 @@ test("Codex dispatch rules preserve source role delegation permissions", async (
   }
 })
 
-test("Codex agent composition keeps role prompts and model calibration for both workflows", async () => {
+test("Codex agent composition reuses the guarded GPT-5.6 layer for GPT-6 Sol without losing roles or tools", async () => {
   for (const workflow of ["v1", "codex"] as const) {
     const agents = await buildCodexAgents({
       config: {
         ...defaultConfig(),
         workflow,
-        agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
-        categories: { coding: { model: "openai/gpt-5.6-sol" } },
+        agents: { orchestrator: { model: "openai/gpt-6-sol" } },
+        categories: { coding: { model: "openai/gpt-6-sol" } },
       },
       cwd: process.cwd(),
       skillsRoot: join(process.cwd(), "skills"),
@@ -563,8 +565,10 @@ test("Codex agent composition keeps role prompts and model calibration for both 
     const coding = agents.find((agent) => agent.sourceName === "coding")
     assert.ok(orchestrator, `${workflow} orchestrator`)
     assert.ok(coding, `${workflow} coding`)
-    assert.equal(orchestrator.model, "gpt-5.6-sol", `${workflow} orchestrator model`)
-    assert.equal(coding.model, "gpt-5.6-sol", `${workflow} coding model`)
+    assert.equal(orchestrator.model, "gpt-6-sol", `${workflow} orchestrator model`)
+    assert.equal(coding.model, "gpt-6-sol", `${workflow} coding model`)
+    assert.equal(agents.some((agent) => /gpt-6-sol/i.test(agent.name)), false, `${workflow}: no separate Sol profile`)
+    assert.equal(existsSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-6-sol.md")), false, `${workflow}: no Sol variant source`)
 
     const orchestratorPrompt = extractOriginalDeepworkPrompt(orchestrator.developerInstructions)
     const codingPrompt = extractOriginalDeepworkPrompt(coding.developerInstructions)
@@ -582,8 +586,23 @@ test("Codex agent composition keeps role prompts and model calibration for both 
 
     assert.equal(orchestratorPrompt.includes(orchestratorRole), true, `${workflow} orchestrator role composition`)
     assert.equal(codingPrompt.includes(codingRole), true, `${workflow} coding role composition`)
+    assert.ok(orchestratorPrompt.indexOf(orchestratorRole) < orchestratorPrompt.indexOf("# GPT-5.6 EXECUTION CALIBRATION"), `${workflow} orchestrator role first`)
+    assert.ok(codingPrompt.indexOf(codingRole) < codingPrompt.indexOf("# GPT-5.6 EXECUTION CALIBRATION"), `${workflow} coding role first`)
+    assert.equal(countOccurrences(orchestratorPrompt, "# GPT-5.6 EXECUTION CALIBRATION"), 1, `${workflow} orchestrator shared layer once`)
+    assert.equal(countOccurrences(codingPrompt, "# GPT-5.6 EXECUTION CALIBRATION"), 1, `${workflow} coding shared layer once`)
+    assert.match(orchestrator.developerInstructions, /Codex tool compatibility:/, `${workflow} orchestrator tool contract`)
+    assert.match(coding.developerInstructions, /Codex tool compatibility:/, `${workflow} coding tool contract`)
+    assert.match(orchestrator.developerInstructions, /## Subagent Dispatch Compatibility/, `${workflow} orchestrator dispatch contract`)
+    assert.match(coding.developerInstructions, /## Subagent Dispatch Compatibility/, `${workflow} coding dispatch contract`)
     assert.equal(calibrations.some((prompt) => orchestratorPrompt.includes(prompt)), true, `${workflow} orchestrator calibration`)
     assert.equal(calibrations.some((prompt) => codingPrompt.includes(prompt)), true, `${workflow} coding calibration`)
+
+    const specialization = getDeepworkPrompt("gpt-5.6").trim()
+    assert.ok(orchestratorPrompt.includes(specialization), `${workflow} orchestrator uses existing layer`)
+    assert.ok(codingPrompt.includes(specialization), `${workflow} coding uses existing layer`)
+    assert.match(specialization, /apply only to GPT-5\.6 and GPT-6 Sol/i, `${workflow} dual-model guard in calibration`)
+    assert.match(specialization, /GPT-6 Astra, Luna, and other GPT-6 models ignore (?:it|this layer)/, `${workflow} guard excludes other GPT-6`)
+    assert.match(specialization, /Both support native `max`/, `${workflow} native max`)
 
     if (workflow === "codex") {
       for (const calibration of [
@@ -595,6 +614,28 @@ test("Codex agent composition keeps role prompts and model calibration for both 
         assert.equal(orchestratorPrompt.includes(calibration.trim()), true, `codex orchestrator carries ${calibration.length}-byte calibration`)
         assert.equal(codingPrompt.includes(calibration.trim()), true, `codex coding carries ${calibration.length}-byte calibration`)
       }
+    }
+  }
+})
+
+test("Codex agent composition continues to select GPT-5.6 Sol without a separate variant", async () => {
+  for (const workflow of ["v1", "codex"] as const) {
+    const agents = await buildCodexAgents({
+      config: {
+        ...defaultConfig(),
+        workflow,
+        agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
+        categories: { coding: { model: "openai/gpt-5.6-sol" } },
+      },
+      cwd: process.cwd(),
+      skillsRoot: join(process.cwd(), "skills"),
+    })
+    for (const name of ["orchestrator", "coding"]) {
+      const agent = agents.find(({ sourceName }) => sourceName === name)
+      assert.ok(agent, `${workflow}/${name}`)
+      assert.equal(agent.model, "gpt-5.6-sol", `${workflow}/${name}`)
+      const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
+      assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt-5.6").trim()), 1, `${workflow}/${name}`)
     }
   }
 })
@@ -659,7 +700,128 @@ test("Codex subscription defaults cover every always-on role without activating 
   )
 })
 
-test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is fresh", async () => {
+test("Codex project OA snapshot loads without user profiles and produces the exact 22-role matrix", { concurrency: false }, async () => {
+  const projectRoot = process.cwd()
+  const codexHome = mkdtempSync(join(tmpdir(), "ocmm-codex-oa-home-"))
+  const previous = {
+    CODEX_HOME: process.env.CODEX_HOME,
+    OCMM_PROFILE: process.env.OCMM_PROFILE,
+    OCMM_NO_PROFILE: process.env.OCMM_NO_PROFILE,
+  }
+  const source = {
+    agents: {
+      orchestrator: ["apai/gpt-6-sol", "high"],
+      planner: ["apai/gpt-6-astra", "high"],
+      reviewer: ["apai/gpt-6-astra", "high"],
+      clarifier: ["apai/gpt-6-sol", "high"],
+      "plan-critic": ["apai/gpt-6-astra", "high"],
+      oracle: ["apai/gpt-5.6-terra", "xhigh"],
+      "oracle-2nd": ["apai/gpt-6-sol", "high"],
+      "doc-search": ["apai/gpt-6-luna", "high"],
+      explore: ["apai/gpt-6-luna", "medium"],
+      "code-search": ["apai/gpt-6-luna", "medium"],
+      "media-reader": ["apai/gpt-6-luna", "high"],
+    },
+    categories: {
+      "hard-reasoning": ["apai/gpt-6-astra", "max"],
+      deep: ["apai/gpt-6-astra", "high"],
+      complex: ["apai/gpt-6-sol", "xhigh"],
+      creative: ["apai/gpt-6-astra", "high"],
+      frontend: ["apai/gpt-6-astra", "xhigh"],
+      research: ["apai/gpt-6-sol", "high"],
+      quick: ["apai/gpt-6-luna", "medium"],
+      coding: ["apai/gpt-6-sol", "xhigh"],
+      "normal-task": ["apai/gpt-6-sol", "high"],
+      documenting: ["apai/gpt-6-sol", "medium"],
+    },
+  } as const
+  const expectedGenerated = {
+    orchestrator: ["gpt-6-sol", "high"],
+    planner: ["gpt-6-astra", "high"],
+    builder: ["gpt-6-astra", "xhigh"],
+    reviewer: ["gpt-6-astra", "xhigh"],
+    clarifier: ["gpt-6-sol", "high"],
+    "plan-critic": ["gpt-6-astra", "xhigh"],
+    oracle: ["gpt-5.6-terra", "xhigh"],
+    "oracle-2nd": ["gpt-6-sol", "xhigh"],
+    "doc-search": ["gpt-6-luna", "high"],
+    explore: ["gpt-6-luna", "high"],
+    "code-search": ["gpt-6-luna", "high"],
+    "media-reader": ["gpt-6-luna", "high"],
+    "hard-reasoning": ["gpt-6-astra", "max"],
+    deep: ["gpt-6-astra", "high"],
+    complex: ["gpt-6-sol", "xhigh"],
+    creative: ["gpt-6-astra", "high"],
+    frontend: ["gpt-6-astra", "xhigh"],
+    research: ["gpt-6-sol", "high"],
+    quick: ["gpt-6-luna", "high"],
+    coding: ["gpt-6-sol", "xhigh"],
+    "normal-task": ["gpt-6-sol", "high"],
+    documenting: ["gpt-6-sol", "high"],
+  }
+  try {
+    process.env.CODEX_HOME = codexHome
+    process.env.OCMM_PROFILE = "oa"
+    process.env.OCMM_NO_PROFILE = "1"
+
+    const configPath = join(projectRoot, ".codex", "ocmm.jsonc")
+    const raw = JSON.parse(stripJsoncCommentsAndTrailingCommas(readFileSync(configPath, "utf8"))) as Record<string, unknown>
+    assert.deepEqual(Object.keys(raw).sort(), ["agents", "categories"])
+    for (const group of ["agents", "categories"] as const) {
+      const entries = raw[group] as Record<string, Record<string, unknown>>
+      assert.deepEqual(Object.keys(entries).sort(), Object.keys(source[group]).sort(), `${group} keys`)
+      for (const [name, entry] of Object.entries(entries)) {
+        assert.deepEqual(Object.keys(entry).sort(), ["model", "variant"], `${group}.${name} keys`)
+        assert.deepEqual([entry.model, entry.variant], source[group][name as keyof typeof source[typeof group]], `${group}.${name} source`)
+      }
+    }
+
+    const loaded = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
+    assert.deepEqual(loaded.sources, { project: configPath })
+    assert.equal(loaded.activeProfile, undefined)
+    assert.deepEqual(Object.keys(loaded.config.agents ?? {}).sort(), Object.keys(source.agents).sort())
+    assert.deepEqual(Object.keys(loaded.config.categories ?? {}).sort(), Object.keys(source.categories).sort())
+    assert.deepEqual(loaded.config.agents?.orchestrator, { model: "apai/gpt-6-sol", variant: "high" })
+
+    writeFileSync(join(codexHome, "ocmm.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "apai/gpt-5.6-luna", variant: "max" } } }))
+    const withoutUserBase = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
+    assert.deepEqual(withoutUserBase.sources, { project: configPath })
+    assert.equal(withoutUserBase.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+
+    const profileDir = join(codexHome, "ocmm-profiles")
+    mkdirSync(profileDir)
+    writeFileSync(join(profileDir, "oa.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "apai/gpt-5.5", variant: "xhigh" } } }))
+    delete process.env.OCMM_NO_PROFILE
+    const leaked = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
+    assert.equal(leaked.sources.user, undefined)
+    assert.equal(leaked.activeProfile, "oa")
+    assert.equal(leaked.config.agents?.orchestrator?.model, "apai/gpt-5.5")
+
+    process.env.OCMM_NO_PROFILE = "1"
+    const isolated = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
+    assert.deepEqual(isolated.sources, { project: configPath })
+    assert.equal(isolated.activeProfile, undefined)
+    assert.equal(isolated.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+    const adapter = loadAdapterConfig(projectRoot)
+    assert.equal(adapter.host, "codex")
+    assert.equal(adapter.config.workflow, "codex")
+    assert.equal(adapter.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+    const agents = await buildCodexAgents({ config: adapter.config, cwd: projectRoot, skillsRoot: join(projectRoot, "skills") })
+    assert.deepEqual(
+      Object.fromEntries(agents.map(({ sourceName, model, reasoningEffort }) => [sourceName, [model, reasoningEffort]])),
+      expectedGenerated,
+    )
+    assert.deepEqual(agents.map(({ name }) => name).sort(), Object.keys(expectedGenerated).map((name) => `dw-${name}`).sort())
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(codexHome, { recursive: true, force: true })
+  }
+})
+
+test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is fresh", { concurrency: false }, async () => {
   const config = { ...defaultConfig(), workflow: "codex" as const }
   const agents = await buildCodexAgents({
     config,
@@ -702,7 +864,13 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
   assert.equal(explicitBySource.get("planner")?.model, "gpt-5.5")
 
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-opus5-carriage-"))
+  const previousCodexHome = process.env.CODEX_HOME
+  const previousNoProfile = process.env.OCMM_NO_PROFILE
   try {
+    const codexHome = join(root, "codex-home")
+    mkdirSync(codexHome)
+    process.env.CODEX_HOME = codexHome
+    process.env.OCMM_NO_PROFILE = "1"
     const result = await generateCodexPlugin({
       projectRoot: process.cwd(),
       pluginRoot: join(root, "plugins", "deepwork"),
@@ -723,7 +891,16 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
       assert.equal(countOccurrences(instructions, gpt56Prompt), 1, `${file}: GPT-5.6 carriage`)
     }
 
-    const generatedAgentFiles = readdirSync(generatedAgentsRoot)
+    const fresh = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "cli-equivalent", "plugins", "deepwork"),
+      marketplacePath: join(root, "cli-equivalent", ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: join(root, "cli-equivalent", CODEX_PROJECT_AGENTS_DIR),
+      packageVersion: "9.9.9",
+    })
+    assert.equal(fresh.configHost, "codex")
+    const freshAgentsRoot = join(fresh.pluginRoot, "agents")
+    const generatedAgentFiles = readdirSync(freshAgentsRoot)
       .filter((name) => name.endsWith(".toml"))
       .sort()
     for (const [label, trackedAgentsRoot] of [
@@ -737,17 +914,21 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
       for (const file of generatedAgentFiles) {
         assert.equal(
           readFileSync(join(trackedAgentsRoot, file), "utf8"),
-          readFileSync(join(generatedAgentsRoot, file), "utf8"),
+          readFileSync(join(freshAgentsRoot, file), "utf8"),
           `${label} ${file} is stale`,
         )
       }
     }
     assert.equal(
       readFileSync(join(process.cwd(), CODEX_PLUGIN_DIR, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8"),
-      readFileSync(join(result.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8"),
+      readFileSync(join(fresh.pluginRoot, "skills", CODEX_WORKFLOW_SKILL_NAME, "SKILL.md"), "utf8"),
       "tracked deepwork workflow skill is stale",
     )
   } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodexHome
+    if (previousNoProfile === undefined) delete process.env.OCMM_NO_PROFILE
+    else process.env.OCMM_NO_PROFILE = previousNoProfile
     rmSync(root, { recursive: true, force: true })
   }
 })

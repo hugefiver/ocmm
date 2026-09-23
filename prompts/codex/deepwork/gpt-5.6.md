@@ -2,7 +2,7 @@
 
 # GPT-5.6 EXECUTION CALIBRATION
 
-Codex profiles may carry this layer ahead of runtime model selection; other models ignore it. Explicit user configuration, role prompt, authorization, verification policy, Codex tool-compatibility rules, and delegation contract remain authoritative. GPT-5.6 supports native `max`.
+Codex profiles may carry this layer ahead of runtime model selection; apply only to GPT-5.6 and GPT-6 Sol. GPT-6 Astra, Luna, and other GPT-6 models ignore it. Explicit user configuration, role prompt, authorization, verification policy, Codex tool-compatibility rules, and delegation contract remain authoritative. Both support native `max`.
 
 ## Outcome-first execution
 

@@ -59,6 +59,16 @@ export function isGpt6AstraModel(modelID: string): boolean {
   return /^gpt-6-astra(?:$|[-_.])/.test(extractModelName(modelID).toLowerCase())
 }
 
+/** Exact GPT-6 Luna family, including provider prefixes and suffixed aliases such as -fast. */
+export function isGpt6LunaModel(modelID: string): boolean {
+  return /^gpt-6-luna(?:$|[-_.])/.test(extractModelName(modelID).toLowerCase())
+}
+
+/** Exact GPT-6 Sol family, including provider prefixes and suffixed aliases such as -fast. */
+export function isGpt6SolModel(modelID: string): boolean {
+  return /^gpt-6-sol(?:$|[-_.])/.test(extractModelName(modelID).toLowerCase())
+}
+
 export function isCodexModel(modelID: string, providerID?: string): boolean {
   const lc = modelID.toLowerCase()
   const provider = providerID?.toLowerCase() ?? ""
@@ -76,7 +86,9 @@ export function isClaudeModel(modelID: string): boolean {
 
 export function isClaudeOpus5Model(modelID: string): boolean {
   const name = extractModelName(modelID)
-  return /^claude-opus-5(?:$|[-.](?:20\d{6}(?:[-.][a-z0-9]+)*|[a-z][a-z0-9-]*))$/i.test(name)
+    .replace(/^global\.anthropic\./i, "")
+    .replace(/@default$/i, "")
+  return /^claude-opus-5(?:[-.]5)?(?:$|[-.](?:20\d{6}(?:[-.][a-z0-9]+)*|[a-z][a-z0-9-]*))$/i.test(name)
 }
 
 export function isClaudeOpus47OrLaterModel(modelID: string): boolean {

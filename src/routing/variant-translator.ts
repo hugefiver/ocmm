@@ -2,7 +2,8 @@
  * Variant -> per-model-family inference parameters.
  *
  * Different providers express "reasoning intensity" differently:
- *   - OpenAI / GPT/Codex family : `options.reasoningEffort`; non-mini built-ins are never below high
+ *   - OpenAI / GPT/Codex family : `options.reasoningEffort`; non-mini built-ins are generally at least high,
+ *     except exact GPT-6 Sol/Luna off and GPT-family Sol/Luna/Astra minimal
  *   - Anthropic Claude   : `options.thinking = { type, budgetTokens }`
  *   - Anthropic Opus 4.7+: no thinking override from ocmm
  *   - Google Gemini      : same `reasoningEffort` style; thinking via `options.thinking`
@@ -14,7 +15,7 @@
  * reasoningEffort/thinking fields are handled by the chat.params hook.
  */
 
-import { isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
+import { isGpt6AstraModel, isGpt6LunaModel, isGpt6SolModel, isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
 import { reasoningToVariant, variantToReasoningLevel } from "../shared/reasoning.ts"
 import type { Reasoning, ThinkingMode, Variant } from "../shared/types.ts"
 
@@ -29,8 +30,10 @@ const NEUTRAL: VariantEffect = {}
 /**
  * Map a variant to OpenAI-style reasoningEffort.
  *
- * Mini models keep the full ladder. Non-mini GPT/Codex built-ins normalize any
- * below-high or no-op request to high before this function is called.
+ * Mini models keep the full ladder. Non-mini GPT/Codex built-ins generally
+ * normalize below-high requests to high; exact GPT-6 off and GPT-family
+ * minimal exceptions use their supported effort rung instead. Codex static
+ * profiles retain the generic built-in minimal floor.
  */
 function gptVariant(variant: Variant, modelID = ""): VariantEffect {
   switch (variant) {
@@ -203,6 +206,9 @@ export function normalizeVariantForModel(opts: {
 }): Variant {
   const { family, modelID, variant } = opts
   if ((family === "gpt" || family === "codex") && !isMiniModel(modelID)) {
+    if (family === "gpt" && variant === "minimal" && (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID) || isGpt6AstraModel(modelID))) {
+      return "low"
+    }
     if (variant === "max" && !supportsNativeGptMaxReasoning(modelID)) return "xhigh"
     return atLeastHigh(variant)
   }
@@ -222,6 +228,10 @@ export function normalizeReasoningForModel(opts: {
   if (reasoning === "auto") return reasoning
 
   if (reasoning === "off") {
+    if (family === "gpt" || family === "codex") {
+      if (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID)) return "off"
+      if (isGpt6AstraModel(modelID)) return "low"
+    }
     const normalized = normalizeVariantForModel({ family, modelID, variant: "none" })
     return normalized === "none" ? "off" : variantToReasoningLevel(normalized) ?? reasoning
   }

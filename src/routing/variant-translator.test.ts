@@ -154,3 +154,33 @@ test("canonical reasoning respects explicit user values while retaining GPT max 
     respectExplicit: true,
   }), { reasoningEffort: "max" })
 })
+
+test("exact GPT-6 models retain canonical off while Codex static minimal keeps its high contract", () => {
+  for (const family of ["gpt", "codex"] as const) {
+    for (const [modelID, off] of [
+      ["gpt-6-sol-fast", "off"],
+      ["openai-codex/gpt-6-luna", "off"],
+      ["openai/gpt-6-astra-fast", "low"],
+    ] as const) {
+      assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "off" }), off, modelID)
+      assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "minimal" }), family === "gpt" ? "low" : "high", modelID)
+      assert.equal(normalizeVariantForModel({ family, modelID, variant: "minimal" }), family === "gpt" ? "low" : "high", modelID)
+      assert.equal(normalizeVariantForModel({ family, modelID, variant: "low" }), "high", modelID)
+      assert.equal(normalizeVariantForModel({ family, modelID, variant: "medium" }), "high", modelID)
+      assert.deepEqual(translateReasoning(family, "off", { modelID }), { reasoningEffort: off === "off" ? "none" : "low" }, modelID)
+      assert.deepEqual(translateVariant(family, "minimal", { modelID }), { reasoningEffort: family === "gpt" ? "low" : "high" }, modelID)
+      assert.deepEqual(translateVariant(family, "none", { modelID, respectExplicit: true }), {}, modelID)
+      assert.deepEqual(translateReasoning(family, "auto", { modelID }), {}, modelID)
+    }
+    for (const modelID of ["gpt-6-lunar", "gpt-6-solar", "gpt-6-astral"]) {
+      assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "off" }), "high", modelID)
+      assert.equal(normalizeVariantForModel({ family, modelID, variant: "minimal" }), "high", modelID)
+    }
+  }
+})
+
+test("Codex static profile translation does not inherit the OpenCode runtime minimal exception", () => {
+  assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-sol" }), { reasoningEffort: "high" })
+  assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-luna-fast" }), { reasoningEffort: "high" })
+  assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-astra" }), { reasoningEffort: "high" })
+})

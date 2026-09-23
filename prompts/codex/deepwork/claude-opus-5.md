@@ -2,7 +2,7 @@
 
 # CLAUDE OPUS 5 EXECUTION CALIBRATION
 
-Codex profiles may carry this layer ahead of runtime model selection. Apply it only when the runtime model name matches `claude-opus-5`; every other runtime model must ignore it. The role prompt, workflow rules, explicit user configuration/authorization, verification requirements including required evidence/review, embedded skills, Codex tool-compatibility rules, and effective terminal policies remain authoritative and override this additive calibration.
+Codex profiles may carry this layer ahead of runtime model selection. Apply it only when the runtime model name matches `claude-opus-5` or its Opus 5.5 forms (`claude-opus-5-5` and `claude-opus-5.5`), including valid dated or named snapshots; every other runtime model must ignore it. The role prompt, workflow rules, explicit user configuration/authorization, verification requirements including required evidence/review, embedded skills, Codex tool-compatibility rules, and effective terminal policies remain authoritative and override this additive calibration.
 
 ## Scope fidelity
 

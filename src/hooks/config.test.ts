@@ -1250,6 +1250,45 @@ test("v1 composes default plus Opus 5 exactly once for orchestrator only", async
   assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
 })
 
+test("v1 assembles exact upstream Opus 5.5 aliases from selected models without leaking the layer", async () => {
+  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  for (const model of [
+    "claude-opus-5-5@default",
+    "amazon-bedrock/global.anthropic.claude-opus-5-5",
+  ]) {
+    const configured = {
+      ...defaultConfig(),
+      workflow: "v1" as const,
+      agents: Object.fromEntries(BUILTIN_AGENTS.map(({ name }) => [name, { model }])),
+    }
+    const target: ConfigTarget = { agent: {} }
+    await createConfigHandler({ getConfig: () => configured })(target, undefined)
+
+    for (const { name } of BUILTIN_AGENTS) {
+      const entry = target.agent[name] as Record<string, unknown>
+      assert.equal(entry.model, model, `${name}: selected model`)
+      const prompt = String(entry.prompt)
+      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), name === "orchestrator" ? 1 : 0, `${model}/${name}`)
+      if (name === "orchestrator") {
+        assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, `${model}: default base`)
+        assert.ok(prompt.indexOf("Agent Role: orchestrator") < prompt.indexOf(CLAUDE_OPUS_5_MARKER), model)
+      }
+    }
+    for (const { name } of BUILTIN_CATEGORIES.filter(({ optIn }) => !optIn)) {
+      assert.equal(countText(String((target.agent[name] as Record<string, unknown>).prompt), CLAUDE_OPUS_5_MARKER), 0, `${model}/${name}`)
+    }
+    assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/, model)
+  }
+
+  for (const model of ["claude-opus-5-5@other", "amazon-bedrock/global.openai.claude-opus-5-5"]) {
+    const configured = { ...defaultConfig(), workflow: "v1" as const, agents: { orchestrator: { model } } }
+    const target: ConfigTarget = { agent: {} }
+    await createConfigHandler({ getConfig: () => configured })(target, undefined)
+    assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
+    assert.equal(countText(String((target.agent.orchestrator as Record<string, unknown>).prompt), CLAUDE_OPUS_5_MARKER), 0, model)
+  }
+})
+
 test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", async () => {
   const promptsRoot = join(process.cwd(), "prompts")
   const opus5Agents = Object.fromEntries(
@@ -1303,6 +1342,29 @@ test("existing host models drive prompt calibration", async () => {
 
   const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
   assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
+})
+
+test("v1 GPT-6 Sol selections compose the 5.6 layer after the agent-specific base", async () => {
+  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  for (const model of ["openai/gpt-6-sol", "providers/openai/gpt-6-sol-fast"]) {
+    const cfg: ConfigTarget = {
+      agent: { builder: { model }, planner: { model } },
+    }
+    await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
+
+    const builder = String((cfg.agent.builder as Record<string, unknown>).prompt)
+    assert.match(builder, /### Skill Reference \(load on demand\)/, model)
+    assert.equal(countText(builder, GPT_56_MARKER), 1, model)
+    assert.ok(builder.indexOf("### Skill Reference (load on demand)") < builder.indexOf(GPT_56_MARKER), model)
+    assert.doesNotMatch(builder, /# GPT-6 ASTRA/, model)
+
+    const planner = String((cfg.agent.planner as Record<string, unknown>).prompt)
+    assert.match(planner, /Agent Role: planner/, model)
+    assert.match(planner, /Deepwork Planner Injection/, model)
+    assert.equal(countText(planner, GPT_56_MARKER), 1, model)
+    assert.ok(planner.indexOf("Deepwork Planner Injection") < planner.indexOf(GPT_56_MARKER), model)
+    assert.doesNotMatch(planner, /# GPT-6 ASTRA/, model)
+  }
 })
 
 test("description-only oracle inherits the explicit reviewer model before catalog promotion", async () => {

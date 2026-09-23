@@ -169,7 +169,7 @@ test("user category override changes the model without disabling subagent mode",
   assert.equal(entry.mode, "subagent")
 })
 
-test("GPT-5.6 category selections append only the additive calibration after the authoritative role", async () => {
+test("GPT-5.6 and GPT-6 Sol category selections append only the additive calibration after the authoritative role", async () => {
   loadAllPrompts(PROMPTS_ROOT, "v1")
   const rolePrompt = getCategoryPrompt("frontend").trim()
   const specialization = getDeepworkPrompt("gpt-5.6").trim()
@@ -188,6 +188,19 @@ test("GPT-5.6 category selections append only the additive calibration after the
       },
       target: { agent: {} } as { agent: Record<string, unknown> },
     },
+    {
+      label: "host-selected GPT-6 Sol-fast",
+      config: defaultConfig(),
+      target: { agent: { frontend: { model: "providers/openai/gpt-6-sol-fast" } } } as { agent: Record<string, unknown> },
+    },
+    {
+      label: "category GPT-6 Sol override",
+      config: {
+        ...defaultConfig(),
+        categories: { frontend: { model: "openai/gpt-6-sol" } },
+      },
+      target: { agent: {} } as { agent: Record<string, unknown> },
+    },
   ]
 
   for (const { label, config, target } of cases) {
@@ -199,7 +212,9 @@ test("GPT-5.6 category selections append only the additive calibration after the
     assert.ok(prompt.startsWith(rolePrompt), `${label}: category role must remain first and authoritative`)
     assert.match(prompt, /<workflow-model-calibration>/, `${label}: missing calibration envelope`)
     assert.ok(prompt.includes(specialization), `${label}: missing additive GPT-5.6 calibration`)
+    assert.equal(countText(prompt, GPT_56_MARKER), 1, `${label}: additive layer occurs once`)
     assert.ok(!prompt.includes(genericGptPrompt), `${label}: generic GPT prompt must not be appended`)
+    assert.doesNotMatch(prompt, /# GPT-6 ASTRA EXECUTION CALIBRATION/, `${label}: Astra layer must not be appended`)
   }
 })
 
@@ -264,6 +279,9 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
     const cfg: { agent: Record<string, unknown> } = { agent: {} }
     await handler(cfg, undefined)
     const specialization = getDeepworkPrompt("gpt-5.6").trim()
+    assert.match(specialization, /apply only to GPT-5\.6 and GPT-6 Sol/i, "guard inside 5.6 calibration")
+    assert.match(specialization, /GPT-6 Astra, Luna, and other GPT-6 models ignore it/, "Astra/Luna exclusion inside 5.6 calibration")
+    assert.match(specialization, /Both support native `max`/, "native max guard")
     const opus5 = getDeepworkPrompt("claude-opus-5").trim()
     const kimi = getDeepworkPrompt("kimi-k27").trim()
     const swe2 = getDeepworkPrompt("swe-2").trim()
@@ -278,13 +296,14 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
       assert.ok(prompt.includes(specialization), `${category.name}: missing GPT-5.6 calibration`)
       assert.equal(countText(prompt, GPT_56_MARKER), 1, `${category.name}: GPT-5.6 marker`)
+      assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), `${category.name}: category role remains first`)
       assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
       assert.equal(countText(prompt, KIMI_K27_MARKER), 1, `${category.name}: Kimi carry-ahead`)
       assert.equal(countText(prompt, SWE_2_MARKER), 1, `${category.name}: SWE-2 carry-ahead`)
       assert.ok(prompt.includes(kimi), `${category.name}: exact Kimi calibration`)
       assert.ok(prompt.includes(swe2), `${category.name}: exact SWE-2 calibration`)
-      assert.match(prompt, /every other runtime model must ignore it/, `${category.name}: runtime guard`)
+      assert.ok(prompt.includes(specialization), `${category.name}: guarded dual-model calibration`)
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")

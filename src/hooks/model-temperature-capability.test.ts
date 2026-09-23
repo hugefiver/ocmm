@@ -46,6 +46,10 @@ test("uses the existing heuristic when no capability metadata is available", () 
     { modelID: "o3-mini", supported: false },
     { modelID: "codex-mini-latest", supported: false },
     { modelID: "claude-opus-4-7", supported: false },
+    { modelID: "claude-opus-5-5", supported: false },
+    { modelID: "anthropic/claude-opus-5-5", supported: false },
+    { modelID: "claude-opus-5.5", supported: false },
+    { modelID: "anthropic/claude-opus-5.5", supported: false },
     { modelID: "gpt-4o", supported: true },
     { modelID: "claude-sonnet-4-6", supported: true },
   ] as const

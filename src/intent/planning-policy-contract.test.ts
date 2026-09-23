@@ -51,6 +51,19 @@ function assertComplexPlanningDefault(text: string, label: string): void {
   )
 }
 
+function assertDelegationAndDeepThreshold(text: string, label: string): void {
+  assert.match(
+    text,
+    /prefer to decompose authorized work yourself[\s\S]{0,140}best-fitting callable[\s\S]{0,30}subagent/i,
+    `${label}: orchestrator must actively split and delegate bounded work`,
+  )
+  assert.match(
+    text,
+    /routine implementation or multi-file coordination[\s\S]{0,150}`coding`, `normal-task`, `complex`[\s\S]{0,170}multiple files or steps alone do not warrant `deep`[\s\S]{0,100}genuinely complex systems engineering/i,
+    `${label}: routine and multi-file work must not default to deep`,
+  )
+}
+
 async function assembledPrompt(workflow: Workflow, name: "orchestrator" | "planner", model: string): Promise<string> {
   loadAllPrompts(PROMPTS_ROOT, workflow)
   const configured = {
@@ -73,6 +86,7 @@ test("planning policy stays consistent across role, model, and adapter layers", 
     const critic = prompt(workflow, "agents", "plan-critic")
 
     assertComplexPlanningDefault(orchestrator, `${workflow} orchestrator`)
+    assertDelegationAndDeepThreshold(orchestrator, `${workflow} orchestrator`)
     assert.match(orchestrator, /exclusive owner of workflow-agent composition/i)
     assert.match(orchestrator, /blocker must be corrected, rebutted with concrete evidence, or escalated/i)
     assert.match(orchestrator, /non-blocking improvements do not delay implementation/i)
@@ -103,6 +117,7 @@ test("planning policy stays consistent across role, model, and adapter layers", 
     ]) {
       const assembled = await assembledPrompt(workflow, "orchestrator", model)
       assertComplexPlanningDefault(assembled, `${workflow} assembled orchestrator ${model}`)
+      assertDelegationAndDeepThreshold(assembled, `${workflow} assembled orchestrator ${model}`)
       assert.ok(
         assembled.indexOf("Agent Role: orchestrator") < assembled.indexOf("workflow-model-calibration"),
         `${workflow}/${model}: role policy must precede model calibration`,

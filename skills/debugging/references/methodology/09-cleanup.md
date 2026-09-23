@@ -1,6 +1,6 @@
 # Phase 9 + 10 — Cleanup & Final Verification
 
-The working tree after the session must differ from before only by the real fix and its test. Anything else is a process failure.
+The working tree after the session must differ from before only by the real fix and any retained reproduction evidence. Anything else is a process failure.
 
 ---
 
@@ -69,7 +69,7 @@ git diff --stat
 The diff must contain **only**:
 
 1. The real fix.
-2. The new failing-first test.
+2. Any retained regression test or reproduction evidence, if tracked.
 3. Nothing else.
 
 ### Detector checklist — scan the diff for these
@@ -108,13 +108,13 @@ Last gate before reporting done. All four gates must be true, and all four must 
 
 ### The four gates
 
-1. **Red→green toggle confirmed** — show the failing test output from before the fix and passing output after. Both outputs visible in the reply or the journal.
+1. **Red→green reproduction confirmed** — show the failing case's output from before the fix and the same case's passing output after. Both outputs visible in the reply (and journaled during work).
 
-2. **Full test suite green** — show the suite's final pass line (e.g. `42 passed in 3.14s`). Not just the new test.
+2. **Existing test suite green** — show the suite's final pass line when one exists (e.g. `42 passed in 3.14s`); otherwise state that no suite exists. Not just the targeted test, if any.
 
 3. **Manual QA reproduced the fix** — show the command or scenario that originally failed and its now-correct output. Verbatim, not paraphrased.
 
-4. **Working tree clean of debug artifacts** — show `git diff --stat` output containing only fix + test, plus `git status` clean of untracked debug files.
+4. **Working tree clean of debug artifacts** — show `git diff --stat` output containing only the fix and any retained reproduction evidence, plus `git status` clean of untracked debug files.
 
 If any of the four lacks evidence, you have not finished — return to the appropriate phase.
 
@@ -127,7 +127,7 @@ Fixed.
 
 **Root cause**: <one sentence — the mechanism, not the symptom>
 **Fix**: `<file:line>` — <two words>
-**Test**: `<test file>::<test name>` — red without fix, green with fix
+**Reproduction**: `<test file>::<test name>` or <scenario> — failure before fix, same case passing after
 **QA**: <one line describing what you ran and what you saw>
 
 Diff:

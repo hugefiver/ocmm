@@ -207,6 +207,7 @@ Think and output incrementally. Do not produce large files in a single output.
 ## VERIFICATION AND REGRESSION COVERAGE
 
 Start from the complete requested outcome and the plausible regression. Use the smallest meaningful automated check that can catch that regression; add tests at stable seams when valuable, but do not require failure-first execution or a fixed number of scenarios. Exercise the real user-facing surface when practical and retain enough observed output or artifact evidence to support the completion claim.
+Before changing an area, read existing tests that cover it as a record of current behavior; never change tests merely to get green, and report an existing test that is itself wrong as a finding.
 
 Run diagnostics, tests, typecheck, and build according to the affected surface and concrete risk. Do not invent irrelevant tests for prompt text, formatting, framework guarantees, or behavior already proved by a stronger check. Never delete, skip, weaken, or suppress a relevant failing check.
 

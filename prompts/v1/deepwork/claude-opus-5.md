@@ -2,7 +2,7 @@
 
 # CLAUDE OPUS 5 EXECUTION CALIBRATION
 
-Apply this additive layer only to a Claude Opus 5 orchestrator. The role prompt, workflow rules, explicit user configuration/authorization, verification requirements including required evidence/review, injected skills, and effective terminal policies remain authoritative and override this additive calibration.
+Apply this additive layer only to a Claude Opus 5 or 5.5 orchestrator (including valid dated or named snapshots). The role prompt, workflow rules, explicit user configuration/authorization, verification requirements including required evidence/review, injected skills, and effective terminal policies remain authoritative and override this additive calibration.
 
 ## Scope fidelity
 

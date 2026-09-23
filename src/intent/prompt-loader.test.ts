@@ -194,10 +194,29 @@ test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () 
   assert.equal(isGpt56Model("vercel/openai/gpt-5.6-terra"), true)
   assert.equal(isGpt56Model("amazon-bedrock/openai.gpt-5.6"), true)
   assert.equal(isGpt56Model("gpt-5.7-sol"), false)
+  assert.equal(isGpt56Model("gpt-6-sol"), false)
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "gpt-5.6-terra" }),
     "gpt-5.6",
   )
+})
+
+test("pickDeepworkVariantForAgent reuses GPT-5.6 only for exact GPT-6 Sol", () => {
+  for (const modelID of [
+    "gpt-6-sol",
+    "gpt-6-sol-fast",
+    "openai/gpt-6-sol",
+    "providers/openai/gpt-6-sol-fast",
+    "amazon-bedrock/openai.gpt-6-sol",
+  ]) {
+    assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: modelID }), "gpt-5.6", modelID)
+  }
+  for (const modelID of ["gpt-6-luna", "gpt-6-solar", "gpt-6-solstice", "prefix-gpt-6-sol"]) {
+    assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: modelID }), "gpt", modelID)
+  }
+  assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-6-astra" }), "gpt-6-astra")
+  assert.equal(pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "gpt-6-sol" }), "planner")
+  assert.equal(isGpt6Model("gpt-6-sol"), false)
 })
 
 test("pickDeepworkVariantForAgent reserves the Astra variant for GPT-6 Astra", () => {
@@ -221,12 +240,20 @@ test("pickDeepworkVariantForAgent reserves the Astra variant for GPT-6 Astra", (
   assert.equal(isGpt6Model("gpt-5.6-sol"), false)
 })
 
-test("pickDeepworkVariantForAgent reserves the Opus 5 calibration for orchestrator", () => {
+test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orchestrator", () => {
   for (const modelID of [
     "claude-opus-5",
     "anthropic/claude-opus-5",
     "claude-opus-5-20260728",
     "claude-opus-5.latest",
+    "claude-opus-5-5",
+    "claude-opus-5.5",
+    "anthropic/claude-opus-5-5",
+    "claude-opus-5-5-20260728",
+    "claude-opus-5-5@default",
+    "amazon-bedrock/global.anthropic.claude-opus-5-5",
+    "claude-opus-5@default",
+    "claude-opus-5.5@default",
   ]) {
     assert.equal(
       pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }),
@@ -234,13 +261,35 @@ test("pickDeepworkVariantForAgent reserves the Opus 5 calibration for orchestrat
       modelID,
     )
   }
-  for (const agentName of ["reviewer", "coding", "deep"]) {
-    assert.equal(
-      pickDeepworkVariantForAgent({ agentName, preferenceModel: "claude-opus-5" }),
-      "default",
-      agentName,
+  for (const modelID of ["claude-opus-5", "claude-opus-5-5@default", "amazon-bedrock/global.anthropic.claude-opus-5-5"]) {
+    for (const agentName of ["reviewer", "builder", "coding", "deep"]) {
+      assert.equal(
+        pickDeepworkVariantForAgent({ agentName, preferenceModel: modelID }),
+        "default",
+        `${agentName}/${modelID}`,
+      )
+    }
+  }
+  for (const modelID of [
+    "claude-opus-5-5@other",
+    "claude-opus-5-5@default-extra",
+    "claude-opus-5-5@default@default",
+    "claude-opus-5-50@default",
+    "prefix-claude-opus-5-5@default",
+    "amazon-bedrock/global.unknown.claude-opus-5-5",
+    "amazon-bedrock/global.anthropic.anthropic.claude-opus-5-5",
+    "amazon-bedrock/global.openai.claude-opus-5-5",
+  ]) {
+    assert.notEqual(
+      pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }),
+      "claude-opus-5",
+      modelID,
     )
   }
+  assert.equal(
+    pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "claude-opus-5-5@default" }),
+    "planner",
+  )
 })
 
 test("pickDeepworkVariantForAgent picks gemini variant for gemini model", () => {

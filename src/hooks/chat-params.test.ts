@@ -1550,6 +1550,125 @@ test("chat.params applies canonical minimums and GPT native-max caps by route so
   }
 })
 
+test("chat.params resolves GPT-6 effort from canonical, legacy, request-local, direct, and fast inputs", async () => {
+  const cases = [
+    { label: "builtin Sol off", modelID: "gpt-6-sol", reasoning: "off", expected: "none" },
+    { label: "builtin Luna off through codex", providerID: "openai-codex", modelID: "gpt-6-luna", reasoning: "off", expected: "none" },
+    { label: "builtin Astra off", modelID: "gpt-6-astra", reasoning: "off", expected: "low" },
+    { label: "user prefixed Sol-fast off", modelID: "openai/gpt-6-sol-fast", source: "user-config", reasoning: "off", expected: "none" },
+    { label: "user Astra off through codex", providerID: "openai-codex", modelID: "gpt-6-astra-fast", source: "user-config", reasoning: "off", expected: "low" },
+    { label: "builtin Sol canonical minimal", modelID: "gpt-6-sol", reasoning: "minimal", expected: "low" },
+    { label: "builtin Luna canonical minimal through codex", providerID: "openai-codex", modelID: "gpt-6-luna", reasoning: "minimal", expected: "low" },
+    { label: "user Luna canonical minimal", modelID: "gpt-6-luna", source: "user-config", reasoning: "minimal", expected: "low" },
+    { label: "builtin Luna legacy minimal", modelID: "gpt-6-luna", variant: "minimal", expected: "low" },
+    { label: "builtin Sol legacy minimal through codex", providerID: "openai-codex", modelID: "gpt-6-sol", variant: "minimal", expected: "low" },
+    { label: "builtin Astra legacy minimal through codex", providerID: "openai-codex", modelID: "gpt-6-astra", variant: "minimal", expected: "low" },
+    { label: "builtin Astra legacy minimal", modelID: "gpt-6-astra", variant: "minimal", expected: "low" },
+    { label: "request-local Sol minimal", modelID: "gpt-6-sol-fast", variant: "high", requestVariant: "minimal", expected: "low" },
+    { label: "request-local Astra minimal through codex", providerID: "openai-codex", modelID: "gpt-6-astra", requestVariant: "minimal", expected: "low" },
+    { label: "builtin Sol direct none", modelID: "gpt-6-sol", direct: "none", expected: "none" },
+    { label: "builtin Astra direct none", modelID: "gpt-6-astra", direct: "none", expected: "low" },
+    { label: "builtin Luna direct minimal", modelID: "gpt-6-luna", direct: "minimal", expected: "low" },
+    { label: "user Astra direct minimal", modelID: "gpt-6-astra", source: "user-config", direct: "minimal", expected: "low" },
+    { label: "fast Sol none overrides high", modelID: "gpt-6-sol", variant: "high", fast: "none", expected: "none" },
+    { label: "fast Luna minimal overrides high through codex", providerID: "openai-codex", modelID: "gpt-6-luna-fast", variant: "high", fast: "minimal", expected: "low" },
+    { label: "fast Astra none overrides high", modelID: "gpt-6-astra-fast", variant: "high", fast: "none", expected: "low" },
+    { label: "builtin Sol raw low stays high", modelID: "gpt-6-sol", variant: "low", expected: "high" },
+    { label: "builtin Luna raw medium through codex stays high", providerID: "openai-codex", modelID: "gpt-6-luna", variant: "medium", expected: "high" },
+    { label: "builtin Astra raw low stays high", modelID: "gpt-6-astra", variant: "low", expected: "high" },
+    { label: "builtin Sol raw medium stays high", modelID: "gpt-6-sol", variant: "medium", expected: "high" },
+    { label: "builtin Luna raw low stays high", modelID: "gpt-6-luna", variant: "low", expected: "high" },
+    { label: "builtin Astra raw medium stays high", modelID: "gpt-6-astra", variant: "medium", expected: "high" },
+    { label: "older GPT builtin low", modelID: "gpt-5.5", variant: "low", expected: "high" },
+    { label: "older GPT builtin high", modelID: "gpt-5.5", variant: "high", expected: "high" },
+    { label: "older GPT explicit low", modelID: "gpt-5.5", source: "user-config", variant: "low", expected: "low" },
+    { label: "Sol builtin legacy none keeps old below-high policy", modelID: "gpt-6-sol", variant: "none", expected: "high" },
+    { label: "Sol explicit legacy none stays no-op", modelID: "gpt-6-sol", source: "user-config", variant: "none" },
+    { label: "Astra explicit legacy none stays no-op", modelID: "gpt-6-astra", source: "user-config", variant: "none" },
+    { label: "Luna canonical auto stays no-op", modelID: "gpt-6-luna", reasoning: "auto" },
+    { label: "lunar off remains old builtin policy", modelID: "gpt-6-lunar", reasoning: "off", expected: "high" },
+    { label: "solar minimal remains old builtin policy", modelID: "gpt-6-solar", variant: "minimal", expected: "high" },
+    { label: "astral fast none is unchanged", modelID: "gpt-6-astral", variant: "high", fast: "none", expected: "none" },
+  ] as const
+
+  for (const c of cases) {
+    clearResolutions()
+    const providerID = "providerID" in c ? c.providerID : "openai"
+    const registry = createEffectiveRouteRegistry()
+    publishRoutes(registry, new Map([["builder", {
+      model: `${providerID}/${c.modelID}`,
+      requirement: {
+        fallbackChain: [{ providers: [providerID], model: c.modelID, ...("direct" in c ? { reasoningEffort: c.direct } : {}) }],
+        ...("reasoning" in c ? { reasoning: c.reasoning } : {}),
+        ...("variant" in c ? { variant: c.variant } : {}),
+      },
+      requirementSource: "source" in c ? c.source : "agent-default",
+      primarySource: "source" in c ? "user-requirement" : "builtin-requirement",
+      fastPath: "fast" in c
+        ? { kind: "options", defaultRules: false, rules: [{ match: { provider: providerID, model: c.modelID }, options: { reasoningEffort: c.fast } }] }
+        : { kind: "off" },
+    }]]))
+    const output = { options: {} as Record<string, unknown> }
+    await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+      makeInput({ agentName: "builder", providerID, modelID: c.modelID, ...("requestVariant" in c ? { variant: c.requestVariant } : {}) }),
+      output,
+    )
+    assert.equal(output.options.reasoningEffort, "expected" in c ? c.expected : undefined, c.label)
+    assert.equal(recentResolutions().at(-1)!.applied.reasoningEffort, output.options.reasoningEffort, c.label)
+  }
+})
+
+test("chat.params constrains a published fast route even if its empty requirement has no resolution", async () => {
+  clearResolutions()
+  const registry = createEffectiveRouteRegistry()
+  publishRoutes(registry, new Map([["builder", {
+    model: "openai/gpt-6-astra-fast",
+    requirement: { fallbackChain: [] },
+    requirementSource: "user-config",
+    primarySource: "user-requirement",
+    fastPath: {
+      kind: "options", defaultRules: false,
+      rules: [{ match: { provider: "openai", model: "gpt-6-astra-fast" }, options: { reasoningEffort: "none" } }],
+    },
+  }]]))
+  const output = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "builder", modelID: "gpt-6-astra-fast" }), output,
+  )
+  assert.equal(output.options.reasoningEffort, "low")
+  assert.equal(recentResolutions().at(-1)!.source, "no-op")
+
+  const unmanaged = { options: {} as Record<string, unknown> }
+  await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+    makeInput({ agentName: "unmanaged", modelID: "gpt-6-astra-fast" }), unmanaged,
+  )
+  assert.deepEqual(unmanaged.options, {})
+  assert.equal(recentResolutions().at(-1)!.source, "no-op")
+})
+
+test("chat.params keeps GPT-6 reviewer and plan-critic floors over none/minimal and legal max", async () => {
+  for (const [agentName, modelID, inputEffort, expected] of [
+    ["reviewer", "gpt-6-sol", "none", "xhigh"],
+    ["plan-critic", "gpt-6-astra", "minimal", "xhigh"],
+    ["reviewer", "gpt-6-luna", "max", "max"],
+    ["plan-critic", "gpt-6-sol", "max", "max"],
+  ] as const) {
+    const registry = createEffectiveRouteRegistry()
+    publishRoutes(registry, new Map([[agentName, {
+      model: `openai/${modelID}`,
+      requirement: { fallbackChain: [{ providers: ["openai"], model: modelID, reasoningEffort: inputEffort }] },
+      requirementSource: "user-config",
+      primarySource: "user-requirement",
+      fastPath: { kind: "options", defaultRules: false, rules: [{ match: { model: modelID }, options: { reasoningEffort: inputEffort } }] },
+    }]]))
+    const output = { options: {} as Record<string, unknown> }
+    await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+      makeInput({ agentName, modelID }), output,
+    )
+    assert.equal(output.options.reasoningEffort, expected, `${agentName}/${modelID}`)
+  }
+})
+
 test("chat.params strips temperature for known unsupported reasoning models only", async () => {
   const cases = [
     {

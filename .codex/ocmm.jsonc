@@ -1,0 +1,27 @@
+{
+  "agents": {
+    "orchestrator": { "model": "apai/gpt-6-sol", "variant": "high" },
+    "planner": { "model": "apai/gpt-6-astra", "variant": "high" },
+    "reviewer": { "model": "apai/gpt-6-astra", "variant": "high" },
+    "clarifier": { "model": "apai/gpt-6-sol", "variant": "high" },
+    "plan-critic": { "model": "apai/gpt-6-astra", "variant": "high" },
+    "oracle": { "model": "apai/gpt-5.6-terra", "variant": "xhigh" },
+    "oracle-2nd": { "model": "apai/gpt-6-sol", "variant": "high" },
+    "doc-search": { "model": "apai/gpt-6-luna", "variant": "high" },
+    "explore": { "model": "apai/gpt-6-luna", "variant": "medium" },
+    "code-search": { "model": "apai/gpt-6-luna", "variant": "medium" },
+    "media-reader": { "model": "apai/gpt-6-luna", "variant": "high" }
+  },
+  "categories": {
+    "hard-reasoning": { "model": "apai/gpt-6-astra", "variant": "max" },
+    "deep": { "model": "apai/gpt-6-astra", "variant": "high" },
+    "complex": { "model": "apai/gpt-6-sol", "variant": "xhigh" },
+    "creative": { "model": "apai/gpt-6-astra", "variant": "high" },
+    "frontend": { "model": "apai/gpt-6-astra", "variant": "xhigh" },
+    "research": { "model": "apai/gpt-6-sol", "variant": "high" },
+    "quick": { "model": "apai/gpt-6-luna", "variant": "medium" },
+    "coding": { "model": "apai/gpt-6-sol", "variant": "xhigh" },
+    "normal-task": { "model": "apai/gpt-6-sol", "variant": "high" },
+    "documenting": { "model": "apai/gpt-6-sol", "variant": "medium" }
+  }
+}
