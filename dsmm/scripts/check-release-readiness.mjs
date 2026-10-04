@@ -281,7 +281,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.3",
+    version: "0.1.4",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -429,7 +429,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.3") errors.push("npm pack receipt version must equal 0.1.3");
+  if (entry.version !== "0.1.4") errors.push("npm pack receipt version must equal 0.1.4");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);

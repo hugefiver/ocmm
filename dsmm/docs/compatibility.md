@@ -1,6 +1,8 @@
-# Deepwork 0.1.3 Compatibility and Upgrade
+# Deepwork 0.1.4 Compatibility and Upgrade
 
-This document describes the 0.1.3 source contract and required acceptance evidence. It does not claim that the final 0.1.3 artifact has passed Docker, been published, or been activated in Desktop. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
+This document describes the 0.1.4 source contract and required acceptance evidence. It does not claim that the final 0.1.4 artifact has passed Docker, been published, or been activated in Desktop. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
+
+The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts, so it provides no accepted release artifact. The 0.1.4 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
 
 Deepwork is the native plugin title in both exported metadata locales, with localized descriptions. Profiles are displayed as **Deepwork Profiles** / **Deepwork 配置档**, and twelve roles as `DW …`. Package `@dsmm/dsmm`, Loader `dsmm`, role/tool/provider IDs, commands, schemas and persistence vocabulary remain compatible. Native metadata-reader and actual UI evidence must prove the display names; a manifest `displayName` is not a supported substitute.
 
@@ -89,7 +91,7 @@ Global/system Desktop migration is the **third phase**: independent frozen-artif
 
 The Linux packed-lifecycle smoke pins pnpm `12.8.1` and retains DSH's native `nodeLinker: hoisted` profile layout. On Linux Node 22, pnpm `11.9.0` with that layout and DSMM's auto-installed peer graph can print `Done` after removal without exiting; the same failure was reproduced directly without DSH, while `12.8.1` returned normally. A printed `Done` is not uninstall completion. This does not claim the same failure on Windows or modify a user's existing package manager or profile. The smoke enforces a bounded fail-closed timeout and checks actual remove/reinstall exits and profile state.
 
-The matrix separates required 0.1.3 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable.
+The matrix separates required 0.1.4 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable.
 
 The independent Docker gate installs the exact frozen tarball into a fresh pinned native runtime/home and verifies root selection, actual read-only child denials, aliased-parent route preflight, runtime snapshot behavior, and the **same compiled DSMM UI** using native client/slots/RPC and real profile storage. A supported composition-owned in-process operator/Gateway carrier and test-owned browser bridge provide no-credential native component/RPC/storage proof. No user login, copied cookie, launcher token, browser state, Desktop data, account records or authentication bypass is permitted. This proof is not authenticated Desktop/Web-launch proof; actual Desktop mounting and authorized operations remain the later check.
 

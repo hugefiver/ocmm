@@ -6,11 +6,11 @@ This is an extension of the existing DSH Settings interface, not a new applicati
 
 Read-only extraction used the installed DSH package's `dsh-client-ui-theme`, `dsh-client-ui-primitives`, `dsh-client-ui-settings-general`, `dsh-client-ui-settings-models` and `dsh-client-ui-settings-plugins`. Relevant authored sources are `ui-theme/src/styles/{base,design-platform,focus}.css`, `ui-primitives/src/{Button,Input}.module.css`, and the Settings/Models section CSS embedded in their published client bundles. The values below describe the shipped default theme; installed theme overrides remain authoritative. No vendor code, theme or user configuration is changed.
 
-This document records the Deepwork UI design contract. The interaction matrix and browser checks below are requirements, not claims that final 0.1.3 verification has already passed. Native browser authentication remains intact; an isolated component/in-process-carrier test does not establish authenticated Desktop/Web end-to-end behavior.
+This document records the Deepwork UI design contract. The interaction matrix and browser checks below are requirements, not claims that final 0.1.4 verification has already passed. Native browser authentication remains intact; an isolated component/in-process-carrier test does not establish authenticated Desktop/Web end-to-end behavior.
 
 ## 1. Atmosphere & Identity
 
-A quiet, practical part of DSH Settings: system typography, compact controls, a readable configuration editor, clear selection and explicit save outcomes. Its signature is continuity with the host. The section is displayed as **Deepwork Profiles** / **Deepwork 配置档**, without replacing navigation, opening another application shell or relabeling native agent presets as configuration profiles. Native role display names use `DW …`; technical section, RPC, package and role IDs retain their DSMM identity. The 0.1.3 naming/resource patch changes no layout, theme, animation, component or dependency contract below.
+A quiet, practical part of DSH Settings: system typography, compact controls, a readable configuration editor, clear selection and explicit save outcomes. Its signature is continuity with the host. The section is displayed as **Deepwork Profiles** / **Deepwork 配置档**, without replacing navigation, opening another application shell or relabeling native agent presets as configuration profiles. Native role display names use `DW …`; technical section, RPC, package and role IDs retain their DSMM identity. The naming/resource contract introduced in 0.1.3 changes no layout, theme, animation, component or dependency contract below.
 
 ## 2. Color
 

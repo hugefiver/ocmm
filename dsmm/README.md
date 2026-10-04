@@ -2,7 +2,9 @@
 
 Deepwork adapts ocmm's deepwork workflow to DeepSeek Harness. Its package remains `@dsmm/dsmm`: a DSH-native Cordis bundle, not an OpenCode compatibility layer.
 
-This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The current `0.1.3` source contract includes native Agent preset loading repairs and independent-file runtime profiles, with human-facing **Deepwork** branding and **DW Role** display names. Publication and Desktop acceptance remain pending. The old 0.1.2 frozen tag/artifact and draft Release stay untouched and unpublished; the existing `@dsmm/dsmm@0.1.1` release remains immutable. Package, configuration, tool and role IDs retain the `dsmm` namespace.
+This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The current `0.1.4` source contract includes native Agent preset loading repairs and independent-file runtime profiles, with human-facing **Deepwork** branding and **DW Role** display names. Publication and Desktop acceptance remain pending. The old 0.1.2 frozen tag/artifact and draft Release stay untouched and unpublished; the existing `@dsmm/dsmm@0.1.1` release remains immutable. Package, configuration, tool and role IDs retain the `dsmm` namespace.
+
+The immutable `dsmm-scoped-v0.1.3` tag remains at `2bdea4b`. Its CI run `37235817488` failed before packing or publication because pnpm 11 ignored the required esbuild/koffi build scripts. The successor target is 0.1.4; this does not authorize rewriting either earlier release identity.
 
 ## Current functionality
 
@@ -23,14 +25,14 @@ Durable session metadata requires explicit deployment-only `sessionPersistence: 
 
 ## Install and configure
 
-Install the exact registry version after terminal verified publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.3`. For isolated development verification, use a built and packed artifact:
+Install the exact registry version after terminal verified publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.4`. For isolated development verification, use a built and packed artifact:
 
 ```powershell
 pnpm --dir dsmm build
 pnpm --dir dsmm pack --pack-destination <temporary-artifact-directory>
 $env:DSH_HOME = "<disposable-test-home>"
 dsh --profile <profile> --from-default-profile headless --dump-config
-dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.3.tgz>
+dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.4.tgz>
 dsh --profile <profile> --dump-config
 ```
 
@@ -52,7 +54,7 @@ This runtime-baseline example is not the full durable-persistence patch. Native 
 
 Do not copy the old `settings.yaml` namespace or preset-discovery roots into the new host. Runtime drafts instead live at `<profileContext.dir>/dsmm-profiles/<id>.jsonc`; there is no embedded profiles object in plugin config. See [runtime profiles](docs/profiles.md), [settings/status](docs/settings-status.md), and [agent roles](docs/agent-presets.md).
 
-The [historical 0.1.1 migration guide](docs/migration-from-ocmm.md) explains the earlier ocmm/DSH adapter migration; use the current profile and upgrade guides above for 0.1.3 behavior.
+The [historical 0.1.1 migration guide](docs/migration-from-ocmm.md) explains the earlier ocmm/DSH adapter migration; use the current profile and upgrade guides above for 0.1.4 behavior.
 
 For a role-specific model, configure `roleRouting.dsmm-reviewer.primary` with native `provider`, `model`, and optional `reasoningEffort`. There are no built-in provider routes or API keys. See [model routing](docs/model-routing.md) for policy precedence and [runtime recovery](docs/runtime-recovery.md) for the opt-in fallback gate.
 
@@ -67,7 +69,7 @@ pnpm --dir dsmm check:release
 pnpm --dir dsmm smoke:docker
 ```
 
-A separately authorized credentialed, packed real-model diagnostic is also available from this checkout. It is **not** the independent 0.1.3 Docker/UI release gate; that gate must not copy credentials, sessions, Desktop configuration or browser authentication:
+A separately authorized credentialed, packed real-model diagnostic is also available from this checkout. It is **not** the independent 0.1.4 Docker/UI release gate; that gate must not copy credentials, sessions, Desktop configuration or browser authentication:
 
 ```powershell
 node dsmm/scripts/live-dsh-smoke.mjs --runtime <npm-prefix-with-pinned-dsh> --package <packed-dsmm.tgz> --provider deepseek-account --credentials <existing-dsh-credentials-file> --receipt <sanitized-receipt.json>
@@ -77,4 +79,4 @@ Add `--delegate` to verify the actual `dsmm_reviewer` child persona, inherited F
 
 The test copies only native account records into a temporary home, verifies a real read/write/model round-trip, checks the exact route and DSMM prompt, and removes temporary credentials and sessions. It does not print reasoning or credentials, log into a browser, modify the original credential file, or silently use a different model. API-key testing uses `--provider deepseek-official` and an existing `DEEPSEEK_API_KEY` environment variable.
 
-These commands are verification procedures, not a claim they have passed for the final 0.1.3 artifact. The dedicated DSMM workflow builds a fresh CI tarball with pnpm, Docker-gates its exact bytes, and publishes through OIDC with genuine provenance; the old 0.1.2 bootstrap is not used. See [compatibility](docs/compatibility.md) and [release policy](docs/releasing.md) for terminal publication and later Desktop evidence boundaries.
+These commands are verification procedures, not a claim they have passed for the final 0.1.4 artifact. The dedicated DSMM workflow builds a fresh CI tarball with pnpm, Docker-gates its exact bytes, and publishes through OIDC with genuine provenance; the old 0.1.2 bootstrap is not used. See [compatibility](docs/compatibility.md) and [release policy](docs/releasing.md) for terminal publication and later Desktop evidence boundaries.
