@@ -2,7 +2,7 @@
 
 DSMM adapts ocmm's deepwork workflow to DeepSeek Harness. It is a DSH-native Cordis bundle, not an OpenCode compatibility layer.
 
-This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The first release is version 0.1.0; local readiness checks alone do not represent a published release.
+This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The first scoped release is `@dsmm/dsmm@0.1.0`; local readiness checks alone do not represent a published release. Runtime settings and role IDs retain the `dsmm` namespace.
 
 ## Current functionality
 
@@ -17,14 +17,14 @@ The native host owns child-session controls, depth limits, permission checks, ca
 
 ## Install and configure
 
-Install the exact registry version after publication with `dsh plugin --profile <profile> add dsmm@0.1.0`. For isolated local verification, use a built and packed artifact:
+Install the exact registry version after publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.0`. For isolated local verification, use a built and packed artifact:
 
 ```powershell
-pnpm --filter dsmm build
+pnpm --dir dsmm build
 pnpm --dir dsmm pack --pack-destination <temporary-artifact-directory>
 $env:DSH_HOME = "<disposable-test-home>"
 dsh --profile <profile> --from-default-profile headless --dump-config
-dsh plugin --profile <profile> add <absolute-path-to-dsmm-0.1.0.tgz>
+dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.0.tgz>
 dsh --profile <profile> --dump-config
 ```
 
@@ -49,10 +49,10 @@ Without active mode or a selected DSMM preset, DSMM workflow prompts and default
 ## Verification
 
 ```powershell
-pnpm --filter dsmm typecheck:test
-pnpm --filter dsmm test
-pnpm --filter dsmm check:release
-pnpm --filter dsmm smoke:docker
+pnpm --dir dsmm typecheck:test
+pnpm --dir dsmm test
+pnpm --dir dsmm check:release
+pnpm --dir dsmm smoke:docker
 ```
 
 A credentialed, packed real-model test is also available from this checkout:

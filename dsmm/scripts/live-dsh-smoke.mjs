@@ -85,6 +85,11 @@ try {
 
   await run(["--profile", profile, "--from-default-profile", "headless", "--dump-config"], "initialize");
   await run(["plugin", "--profile", profile, "add", artifact], "install-packed-dsmm");
+  const profileRequire = createRequire(join(home, "profiles", profile, "package.json"));
+  const installedManifest = JSON.parse(readFileSync(profileRequire.resolve("@dsmm/dsmm/package.json"), "utf8"));
+  if (installedManifest.name !== "@dsmm/dsmm" || installedManifest.version !== "0.1.0") throw new Error("Installed scoped package identity mismatch");
+  profileRequire.resolve("@dsmm/dsmm/preset-skills");
+  report.package = { name: installedManifest.name, version: installedManifest.version };
   const patch = join(owned, "live.patch.yml");
   const yaml = requireRuntime("js-yaml");
   writeFileSync(patch, yaml.dump([

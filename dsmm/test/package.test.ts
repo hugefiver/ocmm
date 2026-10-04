@@ -46,7 +46,7 @@ void publicRuntimeRecoveryTypes;
 test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
-  assert.equal(pkg.name, "dsmm");
+  assert.equal(pkg.name, "@dsmm/dsmm");
   assert.equal(pkg.version, "0.1.0");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");

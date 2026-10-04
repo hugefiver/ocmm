@@ -1,5 +1,5 @@
 {
-  "name": "dsmm",
+  "name": "@dsmm/dsmm",
   "version": "0.1.0",
   "description": "DeepSeek Harness deepwork mode bundle for ocmm-style agentic workflows.",
   "author": "Hugefiver",

@@ -21,7 +21,7 @@
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
 - id: dsmm-preset-skills
-  name: 'dsmm/preset-skills'
+  name: '@dsmm/dsmm/preset-skills'
   config:
     skills:
       - 'brainstorming'

@@ -34,7 +34,7 @@ The package should eventually declare:
 
 ```json
 {
-  "name": "dsmm",
+  "name": "@dsmm/dsmm",
   "type": "module",
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }

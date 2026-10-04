@@ -384,14 +384,14 @@ test("release guide fixes the preflight, publication, verification, and rollback
   );
 
   for (const phrase of [
-    "dsmm-v0.1.0",
+    "dsmm-scoped-v0.1.0",
     "explicit authorization",
     "npm Trusted Publishing",
     "no DSMM lane",
     "never overwrite an npm version",
     "never move, delete, or recreate an immutable tag",
     "a successful local checker or Docker smoke is not proof of publication",
-    "dsh plugin --profile <name> remove dsmm",
+    "dsh plugin --profile <name> remove @dsmm/dsmm",
     "add an exact known-good version",
     "restart the profile process"
   ]) {
@@ -402,12 +402,12 @@ test("release guide fixes the preflight, publication, verification, and rollback
   for (const command of [
     "git rev-parse HEAD",
     "git status --short",
-    'npm view dsmm name version --registry "https://registry.npmjs.org/"',
-    "pnpm --filter dsmm build",
+    'npm view @dsmm/dsmm name version --registry "https://registry.npmjs.org/"',
+    "pnpm --dir dsmm build",
     'pnpm --dir ".\\dsmm" exec tsc -p ".\\tsconfig.test.json" --noEmit',
-    "pnpm --filter dsmm check:release",
+    "pnpm --dir dsmm check:release",
     'npm pack ".\\dsmm" --dry-run --json',
-    "pnpm --filter dsmm smoke:docker",
+    "pnpm --dir dsmm smoke:docker",
     "pnpm run typecheck",
     "pnpm test",
     "pnpm run build"
@@ -456,10 +456,10 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
     "local readiness checks alone do not represent a published release",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-0.1.0.tgz>",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.0.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
-    "pnpm --filter dsmm smoke:docker",
+    "pnpm --dir dsmm smoke:docker",
     "real read/write/model round-trip",
     "separately authorized publication"
   ]) {
@@ -487,7 +487,7 @@ test("release readiness checker accepts the real 0.1.0 package without creating 
 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
-  assert.equal(receipt.name, "dsmm");
+  assert.equal(receipt.name, "@dsmm/dsmm");
   assert.equal(receipt.version, "0.1.0");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
@@ -497,6 +497,24 @@ test("release readiness checker accepts the real 0.1.0 package without creating 
   assert.equal(receipt.outcome, "ready");
   assert.deepEqual(receipt.errors, []);
   assert.deepEqual(listTgzPaths(packageRoot), tgzBefore);
+});
+
+test("release readiness checker rejects the superseded unscoped package identity", () => {
+  const fixtureRoot = createReleaseFixture();
+  const tgzBefore = listTgzPaths(fixtureRoot);
+  try {
+    updateFixtureManifest(fixtureRoot, (manifest) => { manifest.name = "dsmm"; });
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+
+    assertReceiptKeys(receipt);
+    assert.equal(status, 1);
+    assert.equal(receipt.outcome, "failed");
+    assert.equal(receipt.fileCount, 0);
+    assert.deepEqual(receipt.errors, ["manifest.name must equal @dsmm/dsmm"]);
+    assert.deepEqual(listTgzPaths(fixtureRoot), tgzBefore);
+  } finally {
+    removeReleaseFixture(fixtureRoot);
+  }
 });
 
 test("release readiness checker fails closed when a fixture omits LICENSE", () => {

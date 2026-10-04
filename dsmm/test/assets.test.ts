@@ -21,7 +21,8 @@ test("cordis patch registers only the dsmm bundle row", () => {
   const patch = readFileSync(join(packageRoot, "cordis.patch.yml"), "utf8");
 
   assert.match(patch, /id: dsmm/);
-  assert.match(patch, /name: ['"]?dsmm['"]?/);
+  assert.match(patch, /name: ['"]@dsmm\/dsmm['"]/);
+  assert.doesNotMatch(patch, /name: ['"]?dsmm['"]?(?:\r?\n|$)/);
   assert.doesNotMatch(patch, /dsh-skill-filesystem/);
   assert.equal((patch.match(/^\s*- id:/gm) ?? []).length, 1);
 });

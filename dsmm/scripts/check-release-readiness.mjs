@@ -236,7 +236,7 @@ function requiredPathsFor(packageRoot) {
 
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
-    name: "dsmm",
+    name: "@dsmm/dsmm",
     version: "0.1.0",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
@@ -324,7 +324,7 @@ function check(packageRoot) {
   const paths = inspectPackedFiles(entry.files, errors);
   const requiredPaths = requiredPathsFor(packageRoot);
 
-  if (entry.name !== "dsmm") errors.push("npm pack receipt name must equal dsmm");
+  if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
   if (entry.version !== "0.1.0") errors.push("npm pack receipt version must equal 0.1.0");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);

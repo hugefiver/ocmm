@@ -27,7 +27,7 @@ test("custom headless profile installs role tools in Agent scope before assembly
   }, new DeepworkModeController({}), () => DEFAULT_DSMM_SETTINGS);
   assert.ok(created);
   const agentCtx: DshContext = {
-    get: () => ({ startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless", "dsmm"] }) as never,
+    get: () => ({ startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless", "@dsmm/dsmm"] }) as never,
     tools: {
       get(name) { return name === "read_image" ? { name } : undefined; },
       guard(candidate) { guard = candidate; return () => {}; }

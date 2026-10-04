@@ -46,11 +46,13 @@ test("Docker builds pinned latest DSH and an actual native ocmm-lsp binary", () 
 
 test("packed profile lifecycle remains isolated, reversible, and release-checked", () => {
   const smoke = readFileSync(join(packageRoot, "scripts", "docker-smoke.mjs"), "utf8");
+  assert.match(smoke, /const PACKAGE_NAME = "@dsmm\/dsmm"/u);
+  assert.match(smoke, /manifest\.name !== PACKAGE_NAME/u);
   const ordered = [
     '"pack", "--pack-destination", workspace',
     '"plugin", "--profile", PROFILE, "add", tarball',
     '"plugin", "--profile", PROFILE, "list"',
-    '"plugin", "--profile", PROFILE, "remove", "dsmm"',
+    '"plugin", "--profile", PROFILE, "remove", PACKAGE_NAME',
     '"plugin", "--profile", PROFILE, "add", tarball'
   ];
   let offset = 0;
@@ -68,7 +70,10 @@ test("packed profile lifecycle remains isolated, reversible, and release-checked
   assert.match(smoke, /assertInstalled\(profilePackage, true\)/u);
   assert.match(smoke, /assertInstalled\(profilePackage, false\)/u);
   assert.equal(smoke.split("assertDump(env, true)").length - 1, 2);
+  assert.equal(smoke.split("assertDump(env, false)").length - 1, 2);
   assert.match(smoke, /assertPackedExports\(profilePackage, home\)/u);
+  assert.match(smoke, /profileRequire\.resolve\(PACKAGE_NAME\)/u);
+  assert.match(smoke, /profileRequire\.resolve\(`\$\{PACKAGE_NAME\}\/preset-skills`\)/u);
   assert.match(smoke, /profileRequire\.resolve\(`@deepseek-ai\/\$\{name\}`\)/u);
   assert.match(smoke, /join\(root, "scripts", "check-release-readiness\.mjs"\)/u);
   assert.match(smoke, /receipt\.outcome !== "ready" \|\| receipt\.forbiddenSurfaceCount !== 0/u);

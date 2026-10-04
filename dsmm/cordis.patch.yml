@@ -1,6 +1,6 @@
 - insert:
     - id: dsmm
-      name: dsmm
+      name: '@dsmm/dsmm'
       config:
         modeName: deepwork
         defaultActive: false

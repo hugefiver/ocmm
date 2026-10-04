@@ -38,8 +38,8 @@ test("static agent cordis files mirror native preset plugin inventory", () => {
     assert.match(agentCordis, /^- id: persona\r?\n/mu, `${role.id} starts with a top-level list item`);
     assert.ok((agentCordis.match(/^\s*- id:/gmu) ?? []).length >= 7, `${role.id} has working tool rows`);
     assert.equal((agentCordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? []).length, 1, `${role.id} has one persona row`);
-    assert.equal((agentCordis.match(/name: 'dsmm\/preset-skills'/gu) ?? []).length, 1, `${role.id} has one preset skill row`);
-    assert.ok(agentCordis.includes(`- id: dsmm-preset-skills\n  name: 'dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
+    assert.equal((agentCordis.match(/name: '@dsmm\/dsmm\/preset-skills'/gu) ?? []).length, 1, `${role.id} has one preset skill row`);
+    assert.ok(agentCordis.includes(`- id: dsmm-preset-skills\n  name: '@dsmm/dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
     assert.equal(agentCordis.includes("name: '@deepseek-ai/dsh-tool-subagent'"), role.id === "dsmm-orchestrator" || role.id === "dsmm-builder");
   }
 });

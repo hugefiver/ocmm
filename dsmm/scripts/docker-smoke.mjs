@@ -10,6 +10,7 @@ import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PROFILE = "dsmm-v1-smoke";
+const PACKAGE_NAME = "@dsmm/dsmm";
 const DSH_VERSION = "0.2.0-rc.2";
 const requiredRolePlugins = [
   "dsh-agent-preset-registry", "dsh-tool-subagent", "dsh-tool-fs", "dsh-tool-fs-search",
@@ -45,16 +46,16 @@ function profileManifest(profilePackage) {
 
 function assertInstalled(profilePackage, expected) {
   const manifest = profileManifest(profilePackage);
-  const dependency = manifest.dependencies?.dsmm;
+  const dependency = manifest.dependencies?.[PACKAGE_NAME];
   const bundles = manifest.dsh?.profile?.bundles;
   if (!Array.isArray(bundles)) throw new Error("profile bundles must be an array");
-  if ((typeof dependency === "string") !== expected || bundles.filter((item) => item === "dsmm").length !== Number(expected)) {
+  if ((typeof dependency === "string") !== expected || bundles.filter((item) => item === PACKAGE_NAME).length !== Number(expected)) {
     throw new Error(`profile dsmm install state was not ${String(expected)}`);
   }
 }
 
 function assertListed(output, expected) {
-  const present = output.split(/\s+/u).some((item) => item === "dsmm" || item.startsWith("dsmm@"));
+  const present = output.split(/\s+/u).some((item) => item === PACKAGE_NAME || item.startsWith(`${PACKAGE_NAME}@`));
   if (present !== expected) throw new Error(`dsh plugin list presence was ${String(present)}, expected ${String(expected)}`);
 }
 
@@ -127,8 +128,8 @@ async function runInnerSmoke() {
 
     const dshRequire = pinnedDshRequire();
     success(spawnSync("pnpm", ["--dir", root, "pack", "--pack-destination", workspace], { env, encoding: "utf8" }), "pnpm pack dsmm");
-    const tarballs = readdirSync(workspace).filter((name) => /^dsmm-.+\.tgz$/u.test(name));
-    if (tarballs.length !== 1) throw new Error("pnpm pack did not produce exactly one dsmm tarball");
+    const tarballs = readdirSync(workspace).filter((name) => name.endsWith(".tgz"));
+    if (tarballs.length !== 1 || tarballs[0] !== "dsmm-dsmm-0.1.0.tgz") throw new Error("pnpm pack did not produce exactly one scoped dsmm 0.1.0 tarball");
     const tarball = join(workspace, tarballs[0]);
     inside(tarball, workspace, "dsmm tarball");
 
@@ -144,9 +145,10 @@ async function runInnerSmoke() {
     if (receipt.outcome !== "ready" || receipt.forbiddenSurfaceCount !== 0) throw new Error(`release readiness failed: ${JSON.stringify(receipt)}`);
     console.log("DSMM_V1_RELEASE_CHECK_OK");
 
-    runDsh(installEnv, ["plugin", "--profile", PROFILE, "remove", "dsmm"], "remove packed dsmm");
+    runDsh(installEnv, ["plugin", "--profile", PROFILE, "remove", PACKAGE_NAME], "remove packed dsmm");
     assertInstalled(profilePackage, false);
     assertListed(runDsh(env, ["plugin", "--profile", PROFILE, "list"], "list after remove"), false);
+    assertDump(env, false);
     assertSentinels(sentinels, snapshots);
     console.log("DSMM_V1_PROFILE_REMOVE_OK");
 
@@ -184,15 +186,15 @@ async function importDsh(dshRequire, name) {
 
 async function assertPackedExports(profilePackage, home) {
   const profileRequire = createRequire(profilePackage);
-  const entry = profileRequire.resolve("dsmm");
-  const skillsEntry = profileRequire.resolve("dsmm/preset-skills");
+  const entry = profileRequire.resolve(PACKAGE_NAME);
+  const skillsEntry = profileRequire.resolve(`${PACKAGE_NAME}/preset-skills`);
   const packageRoot = dirname(dirname(entry));
   inside(packageRoot, home, "installed dsmm package");
   if (resolve(packageRoot) === resolve(root) || basename(entry) !== "index.js" || basename(dirname(entry)) !== "lib" || dirname(dirname(skillsEntry)) !== packageRoot) {
     throw new Error("profile did not resolve the packed dsmm entry points");
   }
   const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
-  if (manifest.version !== "0.1.0" || manifest.dsh?.bundle?.patch !== "./cordis.patch.yml" || !existsSync(join(packageRoot, manifest.dsh.bundle.patch))) {
+  if (manifest.name !== PACKAGE_NAME || manifest.version !== "0.1.0" || manifest.dsh?.bundle?.patch !== "./cordis.patch.yml" || !existsSync(join(packageRoot, manifest.dsh.bundle.patch))) {
     throw new Error("installed dsmm manifest or patch does not match packed bundle");
   }
   for (const name of requiredRolePlugins) profileRequire.resolve(`@deepseek-ai/${name}`);
@@ -208,7 +210,7 @@ async function assertPackedExports(profilePackage, home) {
 function assertDump(env, installed) {
   const dump = runDsh(env, ["--profile", PROFILE, "--dump-config"], "dsh profile dump-config");
   if (dump.includes("id: dsmm") !== installed) throw new Error("profile dump disagreed with dsmm bundle state");
-  if (installed && (!dump.includes("defaultActive: false") || !dump.includes("name: dsmm"))) throw new Error("profile did not compose restart-scoped DSMM settings");
+  if (installed && (!dump.includes("defaultActive: false") || !/^\s*name: (?:'@dsmm\/dsmm'|"@dsmm\/dsmm")\s*$/mu.test(dump))) throw new Error("profile did not compose restart-scoped scoped DSMM settings");
 }
 
 async function smokeRuntimeDomains(installedRoot, dshRequire, env, home) {

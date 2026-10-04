@@ -53,13 +53,13 @@ test("agent cordis renders one persona, actual capability rows, and bundled skil
   for (const role of DSMM_ROLES) {
     const cordis = renderAgentCordis(role);
     const personaMarkers = cordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? [];
-    const presetSkillMarkers = cordis.match(/name: 'dsmm\/preset-skills'/gu) ?? [];
+    const presetSkillMarkers = cordis.match(/name: '@dsmm\/dsmm\/preset-skills'/gu) ?? [];
 
     assert.equal(personaMarkers.length, 1);
     assert.equal(presetSkillMarkers.length, 1);
     assert.match(cordis, /^- id: persona\n  name: '@deepseek-ai\/dsh-persona'\n  config:\n    text: /mu);
     assert.ok(cordis.includes(role.id));
-    assert.ok(cordis.includes(`- id: dsmm-preset-skills\n  name: 'dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
+    assert.ok(cordis.includes(`- id: dsmm-preset-skills\n  name: '@dsmm/dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs-search'/u);
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs'/u);
     assert.equal(cordis.includes("name: '@deepseek-ai/dsh-tool-pwsh'"), role.access !== "read-only");
@@ -72,7 +72,7 @@ test("agent cordis renders an explicit empty core skill list", () => {
   assert.ok(role);
   const cordis = renderAgentCordis(role, []);
 
-  assert.match(cordis, /- id: dsmm-preset-skills\n  name: 'dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
+  assert.match(cordis, /- id: dsmm-preset-skills\n  name: '@dsmm\/dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
   assert.doesNotMatch(cordis, /    skills:\n\n$/u);
   assert.ok(cordis.includes(role.id));
 });

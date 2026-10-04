@@ -400,7 +400,7 @@ test("materialized roles receive only currently enabled preset-scoped skills", (
     assert.ok(orchestrator);
     const rendered = readFileSync(join(root, orchestrator.id, "agent.cordis.yml"), "utf8");
     assert.equal(rendered, renderAgentCordis(orchestrator, enabledSkillNames(settings)));
-    assert.ok(rendered.includes(`name: 'dsmm/preset-skills'\n  config:\n    skills:\n${enabledSkillNames(settings).map((skill) => `      - '${skill}'`).join("\n")}\n`));
+    assert.ok(rendered.includes(`name: '@dsmm/dsmm/preset-skills'\n  config:\n    skills:\n${enabledSkillNames(settings).map((skill) => `      - '${skill}'`).join("\n")}\n`));
     assert.doesNotMatch(rendered, /- 'writing-plans'$/mu);
     assert.doesNotMatch(rendered, /- 'remove-ai-slops'$/mu);
   });
@@ -416,7 +416,7 @@ test("materialized roles keep an explicitly empty preset skill list when all ski
     materializeRolePresets({ root, settings });
 
     const rendered = readFileSync(join(root, "dsmm-orchestrator", "agent.cordis.yml"), "utf8");
-    assert.match(rendered, /- id: dsmm-preset-skills\n  name: 'dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
+    assert.match(rendered, /- id: dsmm-preset-skills\n  name: '@dsmm\/dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
     assert.doesNotMatch(rendered, /    skills:\n\n$/u);
   });
 });

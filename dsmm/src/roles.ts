@@ -178,7 +178,7 @@ export function rolePluginRows(role: DsmmRoleDefinition, skills: readonly DsmmSk
     { id: "tool-web", name: "@deepseek-ai/dsh-tool-web", config: { fetch: true } },
     { id: "skill-filesystem", name: "@deepseek-ai/dsh-skill-filesystem" },
     { id: "tool-skill", name: "@deepseek-ai/dsh-tool-skill" },
-    { id: "dsmm-preset-skills", name: "dsmm/preset-skills", config: { skills: DSMM_SKILL_NAMES.filter((name) => skills.includes(name)) } }
+    { id: "dsmm-preset-skills", name: "@dsmm/dsmm/preset-skills", config: { skills: DSMM_SKILL_NAMES.filter((name) => skills.includes(name)) } }
   ];
   if (role.access !== "read-only") {
     rows.push({ id: "tool-bash", name: "@deepseek-ai/dsh-tool-bash", disabled: process.platform === "win32" });
