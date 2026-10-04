@@ -6,7 +6,9 @@ import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(root, "..");
-const dsmm = await import(pathToFileURL(join(root, "lib", "index.js")).href);
+const packageRoot = process.env.DSMM_LSP_PACKAGE_ROOT === undefined ? root : resolve(process.env.DSMM_LSP_PACKAGE_ROOT);
+const entry = process.env.DSMM_LSP_PACKAGE_ROOT === undefined ? "index.js" : "lsp.js";
+const dsmm = await import(pathToFileURL(join(packageRoot, "lib", entry)).href);
 const wrapper = join(repoRoot, "dist", "cli", process.platform === "win32" ? "ocmm-lsp.js" : "ocmm-lsp.js");
 const fallback = existsSync(wrapper) ? [process.execPath, wrapper, "mcp"] : ["ocmm-lsp", "mcp"];
 const command = dsmm.parseLspSmokeCommand(process.env.DSMM_LSP_COMMAND_JSON ?? process.env.DSMM_LSP_COMMAND, fallback);

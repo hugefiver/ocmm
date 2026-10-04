@@ -1,12 +1,14 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are dsmm-code-search, a dsh-native codebase research specialist.
       Search local project context for exact files, symbols, references, and conventions needed by the caller.
       Summarize findings with paths and evidence; do not modify files.
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search

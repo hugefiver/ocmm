@@ -4,7 +4,7 @@ import type { Config } from "./index.js";
 import { buildDeepworkPrompt } from "./prompts.js";
 import { isDsmmRoleId } from "./roles.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
-import type { DsmmSettings } from "./settings.js";
+import type { DsmmSettingsGetter } from "./settings.js";
 import { enabledSkillNames, renderBundledSkillPrompt } from "./skills.js";
 import type { DeepworkModeController } from "./state.js";
 
@@ -19,7 +19,7 @@ function routeFromAgent(context: DshSystemPromptContext): Pick<DshLlmCallConfig,
 export function registerDeepworkPrompt(
   readyCtx: DshContext,
   controller: DeepworkModeController,
-  getSettings: () => DsmmSettings,
+  getSettings: DsmmSettingsGetter,
   config: Config = {}
 ): void {
   const section: DshSystemPromptSection = {
@@ -27,7 +27,7 @@ export function registerDeepworkPrompt(
     order: getSettings().promptOrder,
     interpolate: false,
     text(context) {
-      const settings = getSettings();
+      const settings = getSettings(context.agent);
       const preset = resolveSelectedAgentPreset(context.agent?.session);
       const active = controller.active(context.agent, settings.defaultActive);
       if (!active && !isDsmmRoleId(preset)) return "";

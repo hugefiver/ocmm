@@ -1,7 +1,7 @@
 import type { DshContext } from "./dsh-types.js";
 import type { DsmmPluginConfig } from "./settings.js";
 export declare const name = "dsmm";
-export declare const inject: readonly [];
+export declare const inject: readonly ["profileContext"];
 export type Config = DsmmPluginConfig;
 export declare const Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
 export type { DeepworkSessionEventMap } from "./dsh-events.js";
@@ -26,8 +26,16 @@ export { DSMM_STATUS_VERSION, createDsmmStatusSnapshot, formatDsmmStatus } from 
 export type { DsmmStatusSnapshot } from "./status.js";
 export type { AgentRequestErrorFrame, AgentRequestFrame, AgentTurnStoppingFrame, DshEpochHeader, DshGoalChangeEventData, DshGoalSnapshot, DshLlmCallConfig, DshLlmFailure, DshModelReasoningInfo, DshReasoningEffortInfo, DshRequestErrorAction, DshRequestHeaderEventData, DshResolvedModelInfo, DshStepBoundaryEventData, DshTodoItem, DshTodoWriteEventData } from "./dsh-types.js";
 export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
-export type { DeepseekCalibration, DeepseekDefaultReasoningEffort, DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmModelRoute, DsmmRoleRoutingConfig, DsmmRoleRouting, DsmmRecoveryRoute, DsmmRuntimeRecoverySettings, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export type { DeepseekCalibration, DeepseekDefaultReasoningEffort, DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmModelRoute, DsmmRoleRoutingConfig, DsmmRoleRouting, DsmmRecoveryRoute, DsmmRuntimeRecoverySettings, DsmmSettings, DsmmSettingsGetter, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
+export type { DsmmProfileRuntimeStore, DsmmProfileRuntimeOptions } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
-export declare function apply(ctx: DshContext, config?: Config): void;
-export default apply;
+export declare function apply(ctx: DshContext, config?: Config): void | Promise<void>;
+declare const _default: {
+    name: string;
+    inject: readonly ["profileContext"];
+    Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
+    apply: typeof apply;
+};
+export default _default;
 //# sourceMappingURL=index.d.ts.map

@@ -188,6 +188,10 @@ const LSP_SCHEMA = Schema.object({
     failOnStartupError: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.failOnStartupError)
 });
 export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+        sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
+                root: Schema.string().required(),
+                compression: Schema.union([Schema.const("zstd"), Schema.const("none")])
+            })]),
         modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
         section: Schema.string(),
         defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),

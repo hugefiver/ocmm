@@ -1,7 +1,7 @@
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { DshCommandInvocation, DshCommandResult, DshCommandsRegistry, DshContext } from "./dsh-types.js";
 import { DSMM_STATUS_COMMAND } from "./settings.js";
-import type { DsmmSettings } from "./settings.js";
+import type { DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 import { createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
 
@@ -19,11 +19,11 @@ export function parseDeepworkCommandInput(rawInput: string): DeepworkCommandInpu
 
 async function handleDeepworkCommand(
   controller: DeepworkModeController,
-  getSettings: () => DsmmSettings,
+  getSettings: DsmmSettingsGetter,
   invocation: DshCommandInvocation
 ): Promise<DshCommandResult> {
   const parsed = parseDeepworkCommandInput(invocation.rawInput);
-  await controller.select(invocation.agent, parsed.action === "on", getSettings().defaultActive);
+  await controller.select(invocation.agent, parsed.action === "on", getSettings(invocation.agent).defaultActive);
 
   if (parsed.action === "on" && parsed.message !== "") {
     await invocation.agent.steer?.(createUserMessage({
@@ -39,13 +39,13 @@ async function handleDeepworkCommand(
 
 function handleDsmmStatusCommand(
   controller: DeepworkModeController,
-  getSettings: () => DsmmSettings,
+  getSettings: DsmmSettingsGetter,
   invocation: DshCommandInvocation
 ): DshCommandResult {
   const input = invocation.rawInput.trim();
   if (input !== "" && input !== "json") return { kind: "error", text: "Usage: /dsmm-status [json]" };
 
-  const settings = getSettings();
+  const settings = getSettings(invocation.agent);
   const snapshot = createDsmmStatusSnapshot({
     agent: invocation.agent,
     settings,
@@ -60,7 +60,7 @@ function handleDsmmStatusCommand(
 export function registerDeepworkCommand(
   readyCtx: DshContext,
   controller: DeepworkModeController,
-  getSettings: () => DsmmSettings
+  getSettings: DsmmSettingsGetter
 ): void {
   const commands = readyCtx.get?.<DshCommandsRegistry>("commands") ?? readyCtx.commands;
   commands?.register({
@@ -74,7 +74,7 @@ export function registerDeepworkCommand(
 export function registerDsmmStatusCommand(
   readyCtx: DshContext,
   controller: DeepworkModeController,
-  getSettings: () => DsmmSettings
+  getSettings: DsmmSettingsGetter
 ): void {
   const commands = readyCtx.get?.<DshCommandsRegistry>("commands") ?? readyCtx.commands;
   commands?.register({

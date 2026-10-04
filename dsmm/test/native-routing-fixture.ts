@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import { AgentRegistry, installModelSelection } from "@deepseek-ai/dsh-agent";
 import type { Agent, AgentHandle, CreateAgentOptions, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
@@ -45,8 +48,9 @@ export class RoutingFixtureAdapter extends LlmAdapter {
 
 let fixtureSequence = 0;
 
-export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean } = {}) {
+export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string } = {}) {
   const ctx = new Context();
+  const profileDir = options.profileDir ?? mkdtempSync(join(tmpdir(), "dsmm-native-routing-"));
   const adapter = new RoutingFixtureAdapter();
   const fibers = [
     ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
@@ -65,14 +69,14 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       async execute() { return name; }
     });
   }
-  ctx.provide("profileContext", { startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
+  ctx.provide("profileContext", { dir: profileDir, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
   const loopFiber = ctx.plugin(AgentLoop, {});
   await loopFiber.await();
   const spawnFiber = options.spawn === false ? undefined : ctx.plugin(nativeSpawn, { providerName: "spawn" });
   await spawnFiber?.await();
   const dsmmFiber = ctx.plugin({
     name: "dsmm-native-routing-fixture",
-    apply(ready: Context) { apply(ready as unknown as DshContext, config); }
+    apply(ready: Context) { return apply(ready as unknown as DshContext, config); }
   });
   await dsmmFiber.await();
   const agents = ctx.get("agents");
@@ -80,7 +84,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
   assert.ok(agents && subagents);
   const handles: AgentHandle[] = [];
   return {
-    ctx, adapter, agents, subagents, dsmmFiber, spawnFiber, tools,
+    ctx, adapter, agents, subagents, dsmmFiber, spawnFiber, tools, profileDir,
     async create(meta: CreateAgentOptions["meta"] = {}, selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> {
       const handle = await agents.create({
         sessionId: SessionId(`dsmm-routing-fixture-${++fixtureSequence}`),
@@ -94,6 +98,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     async dispose() {
       for (const handle of [...handles].reverse()) await handle.dispose();
       await ctx.fiber.dispose();
+      if (options.profileDir === undefined) rmSync(profileDir, { recursive: true, force: true });
     }
   };
 }

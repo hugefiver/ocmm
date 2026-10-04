@@ -29,6 +29,8 @@ export interface DshSession {
     append(type: "dsmm/role-policy", payload: import("./dsh-events.js").DsmmRolePolicyEventData): unknown | Promise<unknown>;
 }
 export interface DshAgent {
+    id?: string;
+    ctx?: DshContext;
     session: DshSession;
     options?: {
         provider?: string;
@@ -77,6 +79,7 @@ export interface DshResolvedModelInfo {
 }
 export interface DshLlmRuntime {
     resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<DshResolvedModelInfo>;
+    resolveCallConfig?(config: DshLlmCallConfig, signal?: AbortSignal): Promise<DshLlmCallConfig>;
 }
 export interface AgentRequestFrame {
     agent: DshAgent;
@@ -288,6 +291,7 @@ export interface DshContext {
     tools?: DshToolRuntime;
     llm?: DshLlmRuntime;
     get?<T = unknown>(name: string): T | undefined;
+    provide?(name: string, service: unknown): unknown;
     plugin?(plugin: unknown, config?: unknown): PromiseLike<unknown>;
     inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
     effect?(callback: () => void | (() => void)): unknown;

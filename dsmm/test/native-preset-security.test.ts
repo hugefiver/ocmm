@@ -3,16 +3,53 @@ import { test } from "node:test";
 import { Context, getTraceable, symbols } from "@deepseek-ai/cordis";
 import { AgentRegistry } from "@deepseek-ai/dsh-agent";
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import * as AgentInstructions from "@deepseek-ai/dsh-agent-instructions";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
+import * as Persona from "@deepseek-ai/dsh-persona";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
+import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
 import { bindScopeParent, createScope, scopeOf, scopeParentOf, scopeTarget } from "@deepseek-ai/dsh-scope";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshContext } from "../lib/dsh-types.js";
 import { registerRolePresets } from "../lib/preset-registry.js";
+import { DSMM_ROLES, isRootRole, rolePluginRows } from "../lib/roles.js";
 import { resolveConfig } from "../lib/settings.js";
 
-test("native blank preset switch applies and lifts Agent-scoped read-only restrictions", async () => {
+test("native role persona and instruction compositions accept required Config fields and activate", async () => {
+  const ctx = new Context();
+  const promptFiber = ctx.plugin(SystemPrompt, {});
+  const projectionsFiber = ctx.plugin(SessionProjectionRegistry);
+  try {
+    await Promise.all([promptFiber.await(), projectionsFiber.await()]);
+    for (const role of DSMM_ROLES) {
+      const key = {};
+      const scope = createScope(ctx, key);
+      const rows = rolePluginRows(role);
+      const persona = rows.find((row) => row.id === "persona");
+      const instructions = rows.find((row) => row.id === "agent-instructions");
+      assert.ok(persona && instructions);
+      // Native Cordis validates each real plugin's Config before activation.
+      // Mount the emitted values unchanged so the old text/missing-maxBytes
+      // composition fails here exactly as it does in the eager preset audit.
+      const personaFiber = scope.ctx.plugin(Persona, persona.config as unknown as Persona.Config);
+      const instructionsFiber = scope.ctx.plugin(AgentInstructions, instructions.config as unknown as AgentInstructions.Config);
+      const activation = await Promise.allSettled([personaFiber.await(), instructionsFiber.await()]);
+      const failures = activation.flatMap((result) => result.status === "rejected" ? [String(result.reason)] : []);
+      assert.deepEqual(failures, [], `${role.id} native composition failed Config validation or activation`);
+      const prompt = await ctx.systemPrompt.assemble({ scope: key });
+      assert.equal(prompt.sections.find((section) => section.name === Persona.PERSONA_PREFIX_SECTION)?.text, role.persona);
+    }
+  } finally {
+    await ctx.fiber.dispose();
+  }
+});
+
+for (const readOnlyRole of ["dsmm-planner", "dsmm-reviewer"] as const) {
+  test(`native ${readOnlyRole} composition applies and lifts Agent-scoped read-only restrictions`, () => verifyReadonlyPresetSwitch(readOnlyRole));
+}
+
+async function verifyReadonlyPresetSwitch(readOnlyRole: "dsmm-planner" | "dsmm-reviewer"): Promise<void> {
   const ctx = new Context();
   const promptFiber = ctx.plugin(SystemPrompt, {});
   const agentsFiber = ctx.plugin(AgentRegistry);
@@ -43,14 +80,15 @@ test("native blank preset switch applies and lifts Agent-scoped read-only restri
     const rawReviewerTools = (reviewerTools as unknown as Record<symbol, typeof reviewerTools>)[symbols.original];
     assert.ok(rawBuilderTools && rawReviewerTools);
     const services = new Map([[builderKey, rawBuilderTools], [reviewerKey, rawReviewerTools]]);
-    const ids = new Map([[builderKey, "dsmm-builder"], [reviewerKey, "dsmm-reviewer"]]);
+    const ids = new Map([[builderKey, "dsmm-builder"], [reviewerKey, readOnlyRole]]);
     let registered = 0;
+    const expectedRegistrations = DSMM_ROLES.filter(isRootRole).length;
     let resolveReady: (() => void) | undefined;
     const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
     ctx.provide("agentPresets", {
       async register() {
         registered++;
-        if (registered === 12) resolveReady?.();
+        if (registered === expectedRegistrations) resolveReady?.();
         return async () => {};
       },
       composedPreset(target: Context) {
@@ -79,8 +117,8 @@ test("native blank preset switch applies and lifts Agent-scoped read-only restri
     assert.ok(builderTools.get("dsmm_builder", agent));
     binding.rebind(reviewerKey);
     ctx.emit("tools/change");
-    session.append("agent-preset/selected", { agentPreset: "dsmm-reviewer" });
-    ctx.emit("agent-preset/selected", session.id, "dsmm-reviewer");
+    session.append("agent-preset/selected", { agentPreset: readOnlyRole });
+    ctx.emit("agent-preset/selected", session.id, readOnlyRole);
     assert.equal(reviewerTools.get("write", agent), undefined);
     assert.equal(reviewerTools.get("edit", agent), undefined);
     assert.ok(reviewerTools.get("read", agent));
@@ -104,4 +142,4 @@ test("native blank preset switch applies and lifts Agent-scoped read-only restri
   } finally {
     await ctx.fiber.dispose();
   }
-});
+}

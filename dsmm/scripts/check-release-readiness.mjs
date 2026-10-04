@@ -3,16 +3,22 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
 const repositoryLicensePath = resolve(scriptDirectory, "..", "..", "LICENSE");
+const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
 
 const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
+  ...operatorScripts,
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
+  "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
+  ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/lsp.md",
-  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/releasing.md",
+  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
   "docs/settings-status.md", "docs/skill-sync.md"
 ];
@@ -22,6 +28,7 @@ const requiredTrees = ["agent-presets", "docs/research", "patches", "prompts", "
 const expectedFiles = [
   "lib/**/*.js",
   "lib/**/*.d.ts",
+  ...operatorScripts,
   "agent-presets",
   "docs/agent-presets.md",
   "docs/compatibility.md",
@@ -29,6 +36,7 @@ const expectedFiles = [
   "docs/lsp.md",
   "docs/migration-from-ocmm.md",
   "docs/model-routing.md",
+  "docs/profiles.md",
   "docs/releasing.md",
   "docs/research",
   "docs/roadmap.md",
@@ -47,20 +55,27 @@ const expectedFiles = [
 const expectedExports = {
   ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
   "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
+  "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
+  "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
   "./package.json": "./package.json"
 };
 
 const expectedDependencies = {
-  "@deepseek-ai/schemastery": "~3.18.4"
+  "@deepseek-ai/schemastery": "~3.18.4",
+  "jsonc-parser": "^3.3.1"
 };
 
 const expectedPeers = {
   "@deepseek-ai/cordis": "~4.0.4",
+  "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
   "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
   "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
   "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
   "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
   "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-session-persistence": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-subagent": "0.2.0-rc.2",
   "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
@@ -77,6 +92,18 @@ const expectedPeers = {
 
 const expectedDevDependencies = {
   ...expectedPeers,
+  "@deepseek-ai/dsh-typert-registry": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-api-gateway": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+  "@types/react": "^18.3.27",
+  "esbuild": "^0.25.12",
+  "react": "^18.3.1",
   "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-loop": "0.2.0-rc.2",
@@ -91,7 +118,8 @@ const expectedDevDependencies = {
 };
 
 const expectedScripts = {
-  "build": "tsc -p tsconfig.json",
+  "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+  "build:client": "node scripts/build-client.mjs",
   "check:release": "node scripts/check-release-readiness.mjs",
   "typecheck": "tsc -p tsconfig.json --noEmit",
   "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
@@ -208,12 +236,17 @@ function inspectPackedFiles(files, errors) {
   return paths;
 }
 
-function compiledOutputPaths(packageRoot) {
-  const sourceEntries = readdirSync(resolve(packageRoot, "src"), { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
+function compiledOutputPaths(packageRoot, current = resolve(packageRoot, "src")) {
+  const sourceEntries = readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
   const paths = [];
   for (const entry of sourceEntries) {
-    if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
-    const base = entry.name.slice(0, -3);
+    const entryPath = resolve(current, entry.name);
+    if (entry.isDirectory()) {
+      paths.push(...compiledOutputPaths(packageRoot, entryPath));
+      continue;
+    }
+    if (!entry.isFile() || !/\.tsx?$/u.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
+    const base = normalizePackedPath(relative(resolve(packageRoot, "src"), entryPath)).replace(/\.tsx?$/u, "");
     paths.push(`lib/${base}.js`, `lib/${base}.d.ts`);
   }
   return paths;
@@ -241,7 +274,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.1",
+    version: "0.1.2",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -262,13 +295,13 @@ function validateManifest(manifest, errors) {
   if (manifest.type !== "module") errors.push("manifest.type must equal module");
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
-  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the three public exports");
+  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the five public exports");
   if (!isDeepStrictEqual(manifest.engines, { node: ">=22" })) errors.push("manifest.engines must equal the Node 22 policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.devDependencies, expectedDevDependencies)) errors.push("manifest.devDependencies must preserve release ranges");
-  if (!isDeepStrictEqual(manifest.dsh, { bundle: { patch: "./cordis.patch.yml" } })) {
-    errors.push("manifest.dsh.bundle.patch must equal ./cordis.patch.yml");
+  if (!isDeepStrictEqual(manifest.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } })) {
+    errors.push("manifest.dsh must equal the native web client and bundle policy");
   }
   if (!isDeepStrictEqual(manifest.scripts, expectedScripts)) {
     errors.push("manifest.scripts must exactly equal the release script policy");
@@ -302,7 +335,48 @@ function validateRequiredSurface(paths, requiredPaths, errors) {
 function isForbiddenPath(path) {
   const basename = path.slice(path.lastIndexOf("/") + 1);
   const segments = path.split("/");
-  return segments.some((segment) => ["src", "test", "tests"].includes(segment.toLowerCase())) || /\.(?:test|spec)\.[^/]+$/u.test(path) || path.endsWith(".map") || path.endsWith(".tgz") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
+  const forbiddenScript = segments.some((segment) => segment.toLowerCase() === "scripts")
+    && !operatorScripts.includes(path) && path !== "skills/debugging/references/scripts/dap.mjs";
+  return segments.some((segment) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules"].includes(segment.toLowerCase())) || forbiddenScript || /\.(?:test|spec)\.[^/]+$/u.test(path) || path.endsWith(".map") || path.endsWith(".tgz") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
+}
+
+function validateNativeClient(packageRoot, paths, errors) {
+  if (!paths.has("lib/client.js")) return;
+  const source = readFileSync(resolve(packageRoot, "lib/client.js"), "utf8");
+  if (/(?:["']node:|require\(["'](?:fs|path|os|crypto|child_process|worker_threads|net|http|https|process|module)(?:\/|["']))/u.test(source)
+    || /(?:[A-Za-z]:[\\/](?:Users|home)[\\/]|\/Users\/|\/home\/|react-grab|react-scan|react-doctor|localhost:\d+|127\.0\.0\.1:\d+)/iu.test(source)) {
+    errors.push("native client bundle must not contain Node, user-path, or development-tool leakage");
+  }
+  try {
+    const registrations = [];
+    const sandbox = { window: { __ModuleLoader__: { load: (registration) => { registrations.push(registration); } } } };
+    runInNewContext(source, sandbox, { timeout: 1000 });
+    if (registrations.length !== 1 || registrations[0]?.id !== "@dsmm/dsmm" || typeof registrations[0]?.factory !== "function") {
+      throw new Error("invalid registration");
+    }
+    const allowedImports = new Set(["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-primitives", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-typert-protocol"]);
+    sandbox.registration = registrations[0];
+    sandbox.require = (id) => { if (!allowedImports.has(id)) throw new Error("unsupported client import"); return {}; };
+    runInNewContext("clientExports = registration.factory(require)", sandbox, { timeout: 1000 });
+    const client = sandbox.clientExports;
+    if (typeof client?.apply !== "function" || !Array.isArray(client?.inject)
+      || !isDeepStrictEqual(Array.from(client.inject), ["slots", "locale", "remote"])
+      || typeof client.ProfilesController !== "function" || typeof client.ProfilesSection !== "function"
+      || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
+      || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
+      || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), ["describe", "read", "save", "select"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`))) {
+      throw new Error("invalid exports");
+    }
+  } catch {
+    errors.push("native client bundle must lazily register @dsmm/dsmm with apply and inject exports");
+  }
+}
+
+function validateProfileDeploymentBoundary(packageRoot, errors) {
+  const patch = readFileSync(resolve(packageRoot, "cordis.patch.yml"), "utf8");
+  if (/^\s*(?:profiles|runtimeProfiles|selectedProfile|profileDefinitions):/mu.test(patch)) {
+    errors.push("cordis.patch.yml must not embed runtime profile definitions or selection");
+  }
 }
 
 function validateLicense(packageRoot, paths, errors) {
@@ -329,9 +403,11 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.1") errors.push("npm pack receipt version must equal 0.1.1");
+  if (entry.version !== "0.1.2") errors.push("npm pack receipt version must equal 0.1.2");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
+  validateNativeClient(packageRoot, paths, errors);
+  validateProfileDeploymentBoundary(packageRoot, errors);
 
   const forbiddenPaths = [...paths].filter(isForbiddenPath).sort(compareBytewise);
   for (const path of forbiddenPaths) errors.push(`forbidden package surface: ${path}`);

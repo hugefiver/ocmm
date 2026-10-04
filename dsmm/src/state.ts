@@ -1,5 +1,6 @@
 import type { DshAgent, DshContext, DshSession, DshSessionEvent, PreStepDecision, PreStepFrame } from "./dsh-types.js";
 import { sessionEvents } from "./session-scope.js";
+import { assertDsmmMetadataPersistence } from "./session-metadata.js";
 
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 
@@ -34,7 +35,7 @@ export function hasOpenTurn(events: readonly DshSessionEvent[] = []): boolean {
 export class DeepworkModeController {
   private readonly pending = new WeakMap<DshSession, PendingIntent>();
 
-  constructor(ctx: DshContext) {
+  constructor(private readonly ctx: DshContext) {
     ctx.on?.("agent/pre-step", async (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => {
       const decision = await next();
       const intent = this.pending.get(frame.agent.session);
@@ -66,6 +67,7 @@ export class DeepworkModeController {
   }
 
   private async commit(session: DshSession, active: boolean): Promise<void> {
+    assertDsmmMetadataPersistence(this.ctx);
     await session.append(DEEPWORK_MODE_EVENT, { active });
     this.pending.delete(session);
   }

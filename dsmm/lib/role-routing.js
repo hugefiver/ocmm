@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertDsmmMetadataPersistence } from "./session-metadata.js";
 import { isDsmmRoleId } from "./roles.js";
 import { isCurrentRecoveryStep } from "./recovery-policy.js";
 import { childOwnedSessionEvents, sessionEvents } from "./session-scope.js";
@@ -41,7 +42,7 @@ function readPolicyMarker(event) {
     return { role: data.role, policy: data.policy };
 }
 /** Native custom events are model-hidden log facts, retained across surface compaction. */
-export async function establishRolePolicy(frame, settings, role) {
+export async function establishRolePolicy(frame, settings, role, ctx) {
     const identity = rolePolicyIdentity(settings, role);
     if (frame.signal.aborted)
         return identity;
@@ -57,11 +58,13 @@ export async function establishRolePolicy(frame, settings, role) {
         return identity;
     if (identity === undefined || role === undefined) {
         if (latest !== undefined && latest.policy !== null) {
+            assertDsmmMetadataPersistence(ctx ?? frame.agent.ctx);
             await frame.agent.session.append(DSMM_ROLE_POLICY_EVENT, { version: 1, role: latest.role, policy: null });
         }
         return undefined;
     }
     if (latest?.role !== role || latest.policy !== identity) {
+        assertDsmmMetadataPersistence(ctx ?? frame.agent.ctx);
         await frame.agent.session.append(DSMM_ROLE_POLICY_EVENT, { version: 1, role, policy: identity });
     }
     return identity;

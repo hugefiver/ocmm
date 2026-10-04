@@ -6,9 +6,9 @@
 
 Commands belong to the native command adapter. Headless task text is not a slash-command invocation.
 
-## DSH 0.2 configuration
+## DSH 0.2 deployment configuration
 
-DSMM's configuration remains **restart-scoped** and is resolved from the Loader plugin entry. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy the desired DSMM values manually into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
+The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; 0.1.2 adds runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
 
 ```yaml
 - id: dsmm
@@ -28,7 +28,9 @@ DSMM's configuration remains **restart-scoped** and is resolved from the Loader 
       enabled: false
 ```
 
-DSH's new SettingsForms only projects explicitly volatile fields; DSMM does not silently turn restart-only values into live references merely to display a settings form. There is no custom settings panel.
+The 0.1.2 source update adds an additive native Settings **DSMM Profiles** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
+
+Save changes only the draft. Explicit apply pins an immutable revision and changes settings for **new Agents only**; existing live Agents, including blank Agents, retain their admitted snapshots. Children and recovery inherit the parent snapshot. After restart, cold-resumed sessions use the current selection, not historical per-session settings. Reset restores the deployment baseline for future Agents and leaves drafts intact.
 
 ## Workflow compatibility
 
@@ -38,9 +40,11 @@ Risk-based behavior scales discovery, planning, and review to uncertainty and in
 
 ## Other settings
 
-`roleRouting` defaults to an empty restart-scoped map. Each canonical role accepts an optional fixed `primary` and an optional ordered `fallbackRoutes` list of `{provider, model, reasoningEffort?}`. It is separate from the boolean `roles` enable map. Unknown role keys and malformed explicit routes fail closed; omitted chains and explicit empty chains have different meanings. See [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md).
+`roleRouting` defaults to an empty map, configured in the deployment baseline or a selected runtime profile. Each canonical role accepts an optional fixed `primary` and an optional ordered `fallbackRoutes` list of `{provider, model, reasoningEffort?}`. It is separate from the deployment-only boolean `roles` enable map. Unknown role keys and malformed explicit routes fail closed; omitted chains and explicit empty chains have different meanings. See [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md).
 
 The public schema and exported `DEFAULT_DSMM_SETTINGS` are the complete defaults. Seven core skill toggles and all twelve role toggles default on; effective application is scoped to active mode or a selected DSMM role, not global task policy. Managed preset-directory materialization remains off by default and is an export facility rather than native discovery.
+
+Runtime overlays allow only `defaultActive`, `roleRouting`, `workflow`, `guards`, `runtimeRecovery`, and both `deepseekV4Pro*`/`deepseekFlash*` Calibration, DefaultReasoningEffort and MaxReasoningPresets fields. `roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `lsp`, `sessionPersistence`, native provider/account/install controls, embedded profiles and unknown fields are rejected. Defaults resolve before deployment settings, then the selected immutable overlay. A missing selection leaves the deployment baseline unchanged.
 
 Existing `deepseekV4ProCalibration`, `deepseekV4ProDefaultReasoningEffort`, and `deepseekV4ProMaxReasoningPresets` remain compatible. Flash has independent corresponding `deepseekFlash*` settings; calibration modes are off/auto/strict. Auto preserves explicit effort, strict chooses supported policy effort, and unsupported capabilities never justify guessed parameters.
 
@@ -53,3 +57,5 @@ The snapshot reports `mode`, `route`, `calibration`, `runtimeRecovery`, and `eff
 Status does not perform capability/network queries, expose credentials or provider errors, or report process-local pending retries. Model calibration is enforced in the actual request waterfall, not by status or prompt text.
 
 Configured role policy/chain and the actual persisted current route are distinct facts. The normalized settings snapshot defensively copies nested role routes and lists; configuration presence is not a claim of successful provider authentication or a completed fallback.
+
+Status describes the receiving Agent's admitted settings; the profile UI's current selection describes future Agents. These can intentionally differ. `--dump-config` shows deployment composition, not proof of runtime-profile application or authenticated UI behavior.

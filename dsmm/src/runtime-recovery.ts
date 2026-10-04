@@ -5,7 +5,7 @@ import { isDsmmRoleId } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { applyModelRoute, effectiveRoleFallbackRoutes, recordAdmittedRecoveryRoute, rolePolicyIdentity, sameModelRoute } from "./role-routing.js";
 import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
-import type { DsmmRecoveryRoute, DsmmSettings } from "./settings.js";
+import type { DsmmRecoveryRoute, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
 interface PendingRecoveryRoute {
@@ -35,7 +35,7 @@ function recoveryEvents(agent: DshAgent): ReturnType<typeof sessionEvents> {
   return agent.session.header?.origin === "subagent" ? childOwnedSessionEvents(agent.session) : sessionEvents(agent.session);
 }
 
-export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void {
+export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {
   if (installedContexts.has(ctx) || ctx.on === undefined) return;
 
   installedContexts.add(ctx);
@@ -74,7 +74,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       if (pending.turn !== frame.turn || pending.step !== frame.step) return downstream;
 
       if (pending.policy !== undefined) {
-        const settings = getSettings();
+        const settings = getSettings(frame.agent);
         const role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
         if (role !== pending.role || rolePolicyIdentity(settings, role) !== pending.policy) {
           pendingByAgent.delete(frame.agent);
@@ -102,7 +102,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       }
 
       try {
-        const settings = getSettings();
+        const settings = getSettings(frame.agent);
         if (!settings.runtimeRecovery.enabled || frame.signal.aborted
           || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step)) return downstream;
 
@@ -147,7 +147,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
     }, { prepend: true });
     disposeTurnStopping = ctx.on("agent/turn-stopping", async (frame) => {
       try {
-        const settings = getSettings();
+        const settings = getSettings(frame.agent);
         const continuation = settings.runtimeRecovery.idleContinuation;
         if (!settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted) return;
 

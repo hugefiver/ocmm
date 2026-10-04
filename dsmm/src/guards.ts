@@ -1,6 +1,6 @@
 import type { DshContentBlock, DshContext, DshPostToolDecision, DshPreToolDecision, DshToolExecution, DshToolExecutionResult } from "./dsh-types.js";
 import { isDsmmRoleId } from "./roles.js";
-import type { DsmmSettings } from "./settings.js";
+import type { DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
@@ -257,9 +257,9 @@ export function decidePostToolExecution(
   };
 }
 
-export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void {
+export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {
   ctx.on?.("tools/pre-execute", async (exec: DshToolExecution, next: () => Promise<DshPreToolDecision>) => {
-    const decision = decidePreToolExecution(exec, getSettings(), controller);
+    const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
     if (decision === undefined) return next();
     if (decision.kind === "deny") return decision;
 
@@ -268,7 +268,8 @@ export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeCo
   }, { prepend: true });
 
   ctx.on?.("tools/post-execute", async (exec: DshToolExecution, result: DshToolExecutionResult, next: () => Promise<DshPostToolDecision>) => {
+    const settings = getSettings(exec.agent);
     const decision = await next();
-    return decidePostToolExecution(exec, result, decision, getSettings(), controller);
+    return decidePostToolExecution(exec, result, decision, settings, controller);
   }, { prepend: true });
 }

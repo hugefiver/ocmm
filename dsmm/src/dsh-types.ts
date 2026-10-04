@@ -29,6 +29,8 @@ export interface DshSession {
 }
 
 export interface DshAgent {
+  id?: string;
+  ctx?: DshContext;
   session: DshSession;
   options?: { provider?: string; model?: string; reasoningEffort?: string };
   steer?(message: unknown): unknown | Promise<unknown>;
@@ -80,6 +82,7 @@ export interface DshResolvedModelInfo {
 
 export interface DshLlmRuntime {
   resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<DshResolvedModelInfo>;
+  resolveCallConfig?(config: DshLlmCallConfig, signal?: AbortSignal): Promise<DshLlmCallConfig>;
 }
 
 export interface AgentRequestFrame {
@@ -282,6 +285,7 @@ export interface DshContext {
   tools?: DshToolRuntime;
   llm?: DshLlmRuntime;
   get?<T = unknown>(name: string): T | undefined;
+  provide?(name: string, service: unknown): unknown;
   plugin?(plugin: unknown, config?: unknown): PromiseLike<unknown>;
   inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
   effect?(callback: () => void | (() => void)): unknown;

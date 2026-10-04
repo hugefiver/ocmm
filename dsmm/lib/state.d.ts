@@ -4,6 +4,7 @@ export type DeepworkSelectionOutcome = "committed" | "pending" | "unchanged";
 export declare function isDeepworkActive(events?: readonly DshSessionEvent[], defaultActive?: boolean): boolean;
 export declare function hasOpenTurn(events?: readonly DshSessionEvent[]): boolean;
 export declare class DeepworkModeController {
+    private readonly ctx;
     private readonly pending;
     constructor(ctx: DshContext);
     active(agent: DshAgent | undefined, defaultActive: boolean): boolean;

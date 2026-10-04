@@ -1,4 +1,5 @@
 import { sessionEvents } from "./session-scope.js";
+import { assertDsmmMetadataPersistence } from "./session-metadata.js";
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 function activeFromEvent(event) {
     if (event.type !== DEEPWORK_MODE_EVENT)
@@ -25,8 +26,10 @@ export function hasOpenTurn(events = []) {
     return open;
 }
 export class DeepworkModeController {
+    ctx;
     pending = new WeakMap();
     constructor(ctx) {
+        this.ctx = ctx;
         ctx.on?.("agent/pre-step", async (frame, next) => {
             const decision = await next();
             const intent = this.pending.get(frame.agent.session);
@@ -57,6 +60,7 @@ export class DeepworkModeController {
         return "committed";
     }
     async commit(session, active) {
+        assertDsmmMetadataPersistence(this.ctx);
         await session.append(DEEPWORK_MODE_EVENT, { active });
         this.pending.delete(session);
     }

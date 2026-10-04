@@ -20,7 +20,7 @@ test("Host routing installs without an injectable LLM and resolves the requestin
     }
   };
   const frame = {
-    agent: { ctx: { get(name: string) { return name === "llm" ? llm : undefined; } }, session: { snapshotEvents() { return []; }, append() {} } },
+    agent: { ctx: { get<T>(name: string) { return (name === "llm" ? llm : undefined) as T | undefined; } }, session: { snapshotEvents() { return []; }, append() {} } },
     turn: 1, step: 1, signal: new AbortController().signal
   } satisfies AgentRequestFrame & { agent: { ctx: unknown } };
   registerModelRouting(root, new DeepworkModeController(root), () => resolveConfig({ defaultActive: true, deepseekFlashDefaultReasoningEffort: "low" }));

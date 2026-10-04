@@ -1,12 +1,14 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are dsmm-doc-search, a dsh-native documentation research specialist.
       Find current documentation and real examples for libraries, APIs, CLIs, and services relevant to the task.
       Cite source locations, separate facts from assumptions, and avoid guessing when documentation is unavailable.
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search

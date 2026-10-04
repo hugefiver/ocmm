@@ -7,10 +7,14 @@ import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materia
 import { registerHeadlessRoleTools } from "./role-subagents.js";
 import { registerRolePresets } from "./preset-registry.js";
 import { registerRoleProviders } from "./role-providers.js";
+import { createProfileRuntime } from "./profile-runtime.js";
+import { registerProfilesRpc } from "./profile-rpc.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
+import DsmmSessionPersistence from "./session-persistence.js";
+import { isAbsolute } from "node:path";
 export const name = "dsmm";
-export const inject = [];
+export const inject = ["profileContext"];
 export const Config = DSMM_CONFIG_SCHEMA;
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
@@ -26,33 +30,81 @@ export { effectiveRoleFallbackRoutes } from "./role-routing.js";
 export { DSMM_STATUS_COMMAND, registerDsmmStatusCommand } from "./commands.js";
 export { DSMM_STATUS_VERSION, createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
 export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
+export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export function apply(ctx, config = {}) {
+    const storage = config.sessionPersistence;
+    if (storage !== undefined) {
+        if (storage === null || typeof storage !== "object" || typeof storage.root !== "string" || !isAbsolute(storage.root)
+            || Object.keys(storage).some((key) => !["root", "compression"].includes(key))
+            || storage.compression !== undefined && !["zstd", "none"].includes(storage.compression)) {
+            throw new Error("DSMM sessionPersistence must preserve an explicit absolute native root and compression");
+        }
+        if (ctx.get === undefined || ctx.plugin === undefined)
+            throw new Error("DSMM sessionPersistence requires native startup composition");
+        if (ctx.get("sessionPersistence") !== undefined)
+            throw new Error("Disable the exact existing JSONL entry at startup before enabling DSMM sessionPersistence; live replacement is refused");
+        const fiber = ctx.plugin(DsmmSessionPersistence, storage);
+        if (fiber === undefined)
+            throw new Error("DSMM sessionPersistence startup registration failed");
+        return fiber.await().then(() => applyRuntime(ctx, config));
+    }
+    return applyRuntime(ctx, config);
+}
+function applyRuntime(ctx, config) {
     const controller = new DeepworkModeController(ctx);
+    let runtime;
+    let profileInitialization;
+    const getBoundSettings = (agent) => runtime?.getSettings(agent) ?? getSettings();
     const getSettings = registerSettings(ctx, config, {
         install(readyCtx, getReadySettings) {
-            registerDeepworkPrompt(readyCtx, controller, getReadySettings, config);
-            const installCommands = (commandCtx) => {
-                registerDeepworkCommand(commandCtx, controller, getReadySettings);
-                registerDsmmStatusCommand(commandCtx, controller, getReadySettings);
+            const install = (installCtx, settingsGetter) => {
+                registerDeepworkPrompt(installCtx, controller, settingsGetter, config);
+                const installCommands = (commandCtx) => {
+                    registerDeepworkCommand(commandCtx, controller, settingsGetter);
+                    registerDsmmStatusCommand(commandCtx, controller, settingsGetter);
+                };
+                if (installCtx.get !== undefined && installCtx.inject !== undefined)
+                    installCtx.inject(["commands"], installCommands);
+                else
+                    installCommands(installCtx);
+                registerRoleProviders(installCtx, settingsGetter, getReadySettings);
+                // Standing compositions are deployment-only and never replaced on a
+                // runtime profile selection. All routes are read from Agent bindings.
+                registerRolePresets(installCtx, getReadySettings);
+                const settings = getReadySettings();
+                const root = resolveManagedPresetRoot(settings);
+                if (root !== undefined)
+                    reconcileRolePresets({ root, settings });
             };
-            if (readyCtx.get !== undefined && readyCtx.inject !== undefined)
-                readyCtx.inject(["commands"], installCommands);
-            else
-                installCommands(readyCtx);
-            registerRoleProviders(readyCtx, getReadySettings);
-            registerRolePresets(readyCtx, getReadySettings);
-            const settings = getReadySettings();
-            const root = resolveManagedPresetRoot(settings);
-            if (root === undefined)
+            if (readyCtx.get === undefined) {
+                install(readyCtx, getReadySettings);
                 return;
-            reconcileRolePresets({ root, settings });
+            }
+            const installProfiles = async (profileCtx) => {
+                runtime = await createProfileRuntime(profileCtx, getReadySettings());
+                profileCtx.provide?.("dsmmProfileRuntime", runtime);
+                const manager = runtime;
+                profileCtx.inject?.(["typert"], (rpcCtx) => {
+                    registerProfilesRpc(rpcCtx, manager);
+                });
+                install(profileCtx, runtime.getSettings);
+            };
+            if (readyCtx.inject !== undefined) {
+                const initialization = readyCtx.inject(["profileContext"], installProfiles);
+                profileInitialization = Promise.resolve(initialization).then(() => undefined);
+            }
+            else
+                throw new Error("dsmm native profiles require asynchronous profileContext injection");
         }
     });
-    registerRuntimeRecovery(ctx, controller, getSettings);
-    registerModelRouting(ctx, controller, getSettings);
-    registerHeadlessRoleTools(ctx, controller, getSettings);
-    registerSafetyGuards(ctx, controller, getSettings);
+    registerRuntimeRecovery(ctx, controller, getBoundSettings);
+    registerModelRouting(ctx, controller, getBoundSettings);
+    registerHeadlessRoleTools(ctx, controller, getBoundSettings);
+    registerSafetyGuards(ctx, controller, getBoundSettings);
+    return profileInitialization;
 }
-export default apply;
+// Cordis Loader introspects this object's Config/inject; a bare function loses
+// the exported schema and may pass null where required DSMM defaults belong.
+export default { name, inject, Config, apply };
 //# sourceMappingURL=index.js.map

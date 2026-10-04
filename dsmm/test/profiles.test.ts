@@ -1,0 +1,146 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { DSMM_ROLE_IDS } from "../lib/roles.js";
+import { DsmmProfileError, MAX_PROFILE_BYTES, mergeProfileConfig, parseProfileDocument, profileErrorInfo, resolveProfileSettings, validateProfileId } from "../lib/profiles.js";
+import type { DsmmPluginConfig } from "../lib/settings.js";
+
+function content(settings: unknown = {}, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ version: 1, id: "focus", settings, ...extra });
+}
+
+function validation(operation: () => unknown): void {
+  assert.throws(operation, (error: unknown) => error instanceof DsmmProfileError && error.code === "validation");
+}
+
+test("versioned JSONC profiles preserve strict settings and allow comments, BOM and trailing commas", () => {
+  const raw = '\uFEFF{ // Keep this note\n "version": 1, "id": "focus", "label": "Focused review", "settings": { "defaultActive": false, }, }';
+  const document = parseProfileDocument(raw, "focus");
+  assert.deepEqual(document, { version: 1, id: "focus", label: "Focused review", settings: { defaultActive: false } });
+  assert.ok(raw.includes("// Keep this note"));
+});
+
+test("JSONC input must round-trip through UTF-8, while paired Unicode and JSON escapes remain lossless", () => {
+  for (const surrogate of ["\uD800", "\uDC00"]) {
+    validation(() => parseProfileDocument(content().replace("focus", `fo${surrogate}cus`)));
+    validation(() => parseProfileDocument(`${content()} // ${surrogate}`));
+    validation(() => parseProfileDocument(content({}, { label: "fixture" }).replace("fixture", surrogate)));
+  }
+  const unicode = content({}, { label: "中文 😀" });
+  assert.equal(parseProfileDocument(unicode).label, "中文 😀");
+  const escaped = content({}, { label: "\uD800" });
+  assert.ok(escaped.includes("\\ud800"), "a JSON escape is UTF-8 representable without changing the file bytes");
+  assert.equal(parseProfileDocument(escaped).label, "\uD800");
+});
+
+test("profile schema rejects unknown, restart-scoped, executable and credential-bearing families", () => {
+  for (const key of ["roles", "skills", "modeName", "promptOrder", "section", "presets", "lsp", "sessionPersistence", "provider", "apiKey", "credentials", "env", "headers", "import", "profiles", "activeProfile"]) {
+    validation(() => parseProfileDocument(content({ [key]: {} })));
+  }
+  validation(() => parseProfileDocument(content({}, { other: "secret-value-not-echoed" })));
+  const info = (() => { try { parseProfileDocument(content({ credentials: "secret-value-not-echoed" })); } catch (error) { return profileErrorInfo(error); } })();
+  assert.ok(info);
+  assert.equal(JSON.stringify(info).includes("secret-value-not-echoed"), false);
+  assert.match(info.message, /native deployment/u);
+});
+
+test("profile parser rejects duplicate/unsafe keys, wrong versions, IDs, labels and malformed JSON", () => {
+  validation(() => parseProfileDocument('{"version":1,"id":"focus","settings":{"defaultActive":true,"defaultActive":false}}'));
+  validation(() => parseProfileDocument('{"version":1,"id":"focus","settings":{"__proto__":{}}}'));
+  validation(() => parseProfileDocument(content({}, { version: 2 })));
+  validation(() => parseProfileDocument(content({}, { label: "" })));
+  validation(() => parseProfileDocument(content({}, { settings: null })));
+  validation(() => parseProfileDocument(content(), "another"));
+  validation(() => parseProfileDocument("{broken"));
+  validation(() => parseProfileDocument(""));
+  for (const id of ["", "Focus", "../focus", "/focus", "focus.jsonc", "focus\\next", "con", "nul", "lpt1", "com9", "中文", "a".repeat(65)]) validation(() => validateProfileId(id));
+  for (const id of ["focus", "0", "review_2", "deep-work", "a".repeat(64)]) validateProfileId(id);
+});
+
+test("profiles validate every supported nested enum, type, finite bound, role and route", () => {
+  const cases = [
+    { defaultActive: "false" },
+    { workflow: { strictGates: null } },
+    { workflow: { policy: "other" } },
+    { workflow: { finalReviewPolicy: "oracle-only" } },
+    { workflow: { reviewCap: -1 } },
+    { workflow: { reviewCap: 11 } },
+    { workflow: { reviewCap: 1.1 } },
+    { guards: { unknown: true } },
+    { guards: { scope: "all" } },
+    { guards: { gitWriteGuard: "allow" } },
+    { guards: { toolOutputTruncation: { enabled: 1 } } },
+    { guards: { toolOutputTruncation: { maxInlineBytes: 0 } } },
+    { guards: { questionLabelHelper: { maxLabelChars: 257 } } },
+    { runtimeRecovery: { maxFallbackAttempts: 11 } },
+    { runtimeRecovery: { retryOnStatusCodes: [99] } },
+    { runtimeRecovery: { retryOnStatusCodes: [600] } },
+    { runtimeRecovery: { retryOnCodes: [""] } },
+    { runtimeRecovery: { fallbackRoutes: [{ provider: "fixture" }] } },
+    { runtimeRecovery: { fallbackRoutes: [{ provider: "https://credential@host", model: "m" }] } },
+    { runtimeRecovery: { idleContinuation: { maxContinuations: -1 } } },
+    { runtimeRecovery: { idleContinuation: { prompt: "" } } },
+    { runtimeRecovery: { idleContinuation: { secret: "bad" } } },
+    { roleRouting: { other: {} } },
+    { roleRouting: { "dsmm-reviewer": null } },
+    { roleRouting: { "dsmm-reviewer": { primary: null } } },
+    { roleRouting: { "dsmm-reviewer": { fallbackRoutes: null } } },
+    { roleRouting: { "dsmm-reviewer": { primary: { provider: "p", model: "m", apiKey: "bad" } } } },
+    { roleRouting: { "dsmm-reviewer": { primary: { provider: "p", model: "m", reasoningEffort: "" } } } },
+    { deepseekV4ProCalibration: "other" },
+    { deepseekFlashDefaultReasoningEffort: "max" },
+    { deepseekV4ProMaxReasoningPresets: ["other"] },
+    { deepseekFlashMaxReasoningPresets: ["dsmm-reviewer", "dsmm-reviewer"] }
+  ];
+  for (const settings of cases) validation(() => parseProfileDocument(content(settings)));
+  validation(() => parseProfileDocument('{"version":1,"id":"focus","settings":{"workflow":{"reviewCap":1e400}}}'));
+  assert.throws(() => parseProfileDocument(`${content()}${" ".repeat(MAX_PROFILE_BYTES)}`), (error: unknown) => error instanceof DsmmProfileError && error.code === "limit");
+});
+
+test("all allowed runtime families round-trip through the existing resolver", () => {
+  const document = parseProfileDocument(content({
+    defaultActive: true,
+    deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "low", deepseekV4ProMaxReasoningPresets: [],
+    deepseekFlashCalibration: "off", deepseekFlashDefaultReasoningEffort: "off", deepseekFlashMaxReasoningPresets: [...DSMM_ROLE_IDS],
+    roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review", reasoningEffort: "max" }, fallbackRoutes: [] } },
+    workflow: { policy: "risk-based", strictGates: false, reviewCap: 0, finalReviewPolicy: "off" },
+    guards: { scope: "always", shellCommandSafety: false, gitWriteGuard: "deny", toolOutputTruncation: { enabled: false, maxInlineBytes: 512 }, questionLabelHelper: { enabled: false, maxLabelChars: 20 }, planFormatValidation: false, todoDisciplineHelper: false },
+    runtimeRecovery: { enabled: true, retryOnStatusCodes: [], retryOnCodes: [], fallbackRoutes: [{ provider: "fixture", model: "recover", reasoningEffort: "xhigh" }], maxFallbackAttempts: 0, idleContinuation: { enabled: false, maxContinuations: 0, prompt: "Continue\ncarefully." } }
+  }));
+  const settings = resolveProfileSettings({}, document.settings);
+  assert.equal(settings.defaultActive, true);
+  assert.equal(settings.guards.toolOutputTruncation.enabled, false);
+  assert.equal(settings.runtimeRecovery.maxFallbackAttempts, 0);
+  assert.equal(settings.runtimeRecovery.fallbackRoutes[0]?.reasoningEffort, "xhigh");
+  assert.deepEqual(settings.deepseekV4ProMaxReasoningPresets, []);
+});
+
+test("overlay merge preserves false, explicit empty arrays, nested baseline and absent fallback inheritance", () => {
+  const baseline: DsmmPluginConfig = {
+    defaultActive: true, modeName: "deployment-mode", roles: { "dsmm-builder": false },
+    lsp: { enabled: true, env: { FIXTURE_ONLY: "retained" } },
+    roleRouting: {
+      "dsmm-reviewer": { primary: { provider: "old", model: "old", reasoningEffort: "high" }, fallbackRoutes: [{ provider: "old", model: "backup" }] },
+      "dsmm-oracle": { primary: { provider: "old", model: "oracle" } }
+    },
+    guards: { toolOutputTruncation: { enabled: true, maxInlineBytes: 12000 }, questionLabelHelper: { enabled: true } },
+    runtimeRecovery: { fallbackRoutes: [{ provider: "global", model: "backup" }], idleContinuation: { enabled: true, maxContinuations: 2 } }
+  };
+  const original = structuredClone(baseline);
+  const overlay = parseProfileDocument(content({ defaultActive: false, guards: { toolOutputTruncation: { enabled: false } }, roleRouting: { "dsmm-reviewer": { primary: { provider: "new", model: "new" } }, "dsmm-oracle": { fallbackRoutes: [] } }, runtimeRecovery: { idleContinuation: { enabled: false } } })).settings;
+  const merged = mergeProfileConfig(baseline, overlay);
+  assert.deepEqual(baseline, original, "merge must not mutate the deployment baseline");
+  assert.equal(merged.defaultActive, false);
+  assert.equal(merged.roles?.["dsmm-builder"], false);
+  assert.equal(merged.modeName, "deployment-mode");
+  assert.deepEqual(merged.lsp, baseline.lsp);
+  assert.deepEqual(merged.roleRouting?.["dsmm-reviewer"]?.primary, { provider: "new", model: "new" }, "complete primary replacement must clear the previous effort");
+  assert.deepEqual(merged.roleRouting?.["dsmm-reviewer"]?.fallbackRoutes, [{ provider: "old", model: "backup" }]);
+  assert.deepEqual(merged.roleRouting?.["dsmm-oracle"]?.fallbackRoutes, []);
+  assert.equal(Object.hasOwn(merged.roleRouting?.["dsmm-oracle"] ?? {}, "fallbackRoutes"), true);
+  const absent = mergeProfileConfig({}, parseProfileDocument(content({ roleRouting: { "dsmm-reviewer": { primary: { provider: "p", model: "m" } } } })).settings);
+  assert.equal(Object.hasOwn(absent.roleRouting?.["dsmm-reviewer"] ?? {}, "fallbackRoutes"), false);
+  assert.deepEqual(merged.guards?.toolOutputTruncation, { enabled: false, maxInlineBytes: 12000 });
+  assert.deepEqual(merged.runtimeRecovery?.idleContinuation, { enabled: false, maxContinuations: 2 });
+  merged.lsp!.env!.FIXTURE_ONLY = "changed";
+  assert.equal(baseline.lsp?.env?.FIXTURE_ONLY, "retained", "result must own deep copies of unchanged baseline fields");
+});

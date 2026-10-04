@@ -56,7 +56,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             if (pending.turn !== frame.turn || pending.step !== frame.step)
                 return downstream;
             if (pending.policy !== undefined) {
-                const settings = getSettings();
+                const settings = getSettings(frame.agent);
                 const role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
                 if (role !== pending.role || rolePolicyIdentity(settings, role) !== pending.policy) {
                     pendingByAgent.delete(frame.agent);
@@ -81,7 +81,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 return downstream;
             }
             try {
-                const settings = getSettings();
+                const settings = getSettings(frame.agent);
                 if (!settings.runtimeRecovery.enabled || frame.signal.aborted
                     || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step))
                     return downstream;
@@ -128,7 +128,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
         }, { prepend: true });
         disposeTurnStopping = ctx.on("agent/turn-stopping", async (frame) => {
             try {
-                const settings = getSettings();
+                const settings = getSettings(frame.agent);
                 const continuation = settings.runtimeRecovery.idleContinuation;
                 if (!settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted)
                     return;

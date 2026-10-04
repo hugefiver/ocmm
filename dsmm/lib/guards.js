@@ -236,7 +236,7 @@ export function decidePostToolExecution(exec, result, decision, settings, contro
 }
 export function registerSafetyGuards(ctx, controller, getSettings) {
     ctx.on?.("tools/pre-execute", async (exec, next) => {
-        const decision = decidePreToolExecution(exec, getSettings(), controller);
+        const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
         if (decision === undefined)
             return next();
         if (decision.kind === "deny")
@@ -245,8 +245,9 @@ export function registerSafetyGuards(ctx, controller, getSettings) {
         return downstream.kind === "allow" ? decision : downstream;
     }, { prepend: true });
     ctx.on?.("tools/post-execute", async (exec, result, next) => {
+        const settings = getSettings(exec.agent);
         const decision = await next();
-        return decidePostToolExecution(exec, result, decision, getSettings(), controller);
+        return decidePostToolExecution(exec, result, decision, settings, controller);
     }, { prepend: true });
 }
 //# sourceMappingURL=guards.js.map

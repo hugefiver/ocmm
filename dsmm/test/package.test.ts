@@ -51,7 +51,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.1.1");
+  assert.equal(pkg.version, "0.1.2");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -66,11 +66,15 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.deepEqual(pkg.exports, {
     ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
     "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
+    "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
+    "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
     "./package.json": "./package.json"
   });
   assert.deepEqual(pkg.files, [
     "lib/**/*.js",
     "lib/**/*.d.ts",
+    "scripts/repair-session-log.mjs",
+    "scripts/session-repair-native-verifier.mjs",
     "agent-presets",
     "docs/agent-presets.md",
     "docs/compatibility.md",
@@ -78,6 +82,7 @@ test("package manifest exposes dsh bundle metadata", () => {
     "docs/lsp.md",
     "docs/migration-from-ocmm.md",
     "docs/model-routing.md",
+    "docs/profiles.md",
     "docs/releasing.md",
     "docs/research",
     "docs/roadmap.md",
@@ -95,27 +100,39 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.equal(pkg.files.includes("lib"), false);
   assert.equal(pkg.files.some((path: string) => path.includes("implementation-plan")), false);
   assert.deepEqual(pkg.engines, { node: ">=22" });
-  assert.deepEqual(pkg.dependencies, { "@deepseek-ai/schemastery": "~3.18.4" });
+  assert.deepEqual(pkg.dependencies, { "@deepseek-ai/schemastery": "~3.18.4", "jsonc-parser": "^3.3.1" });
   assert.equal(pkg.scripts["smoke:docker:build"], "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..");
   assert.equal(pkg.scripts["check:release"], "node scripts/check-release-readiness.mjs");
   assert.equal(Object.hasOwn(pkg, "browser"), false);
-  assert.equal(Object.keys(pkg.exports).some((key) => key.includes("client")), false);
-  assert.equal(Object.keys(pkg.scripts).some((key) => key.includes("client")), false);
-
-  for (const packageSection of [pkg.dependencies, pkg.peerDependencies, pkg.devDependencies]) {
-    assert.equal(Object.keys(packageSection).some((name) => /react/i.test(name)), false);
-  }
+  assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
+  assert.equal(pkg.scripts.build, "tsc -p tsconfig.json && node scripts/build-client.mjs");
+  assert.equal(pkg.scripts["build:client"], "node scripts/build-client.mjs");
+  assert.equal(pkg.devDependencies.react, "^18.3.1");
+  assert.equal(pkg.devDependencies["@types/react"], "^18.3.27");
+  assert.equal(pkg.devDependencies.esbuild, "^0.25.12");
+  assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
   for (const packageSection of [pkg.peerDependencies, pkg.devDependencies]) {
     assert.equal(packageSection["@deepseek-ai/cordis"], "~4.0.4");
-    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent"]) {
+    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl"]) {
       assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
     }
   }
   for (const name of ["system-prompt", "agent", "agent-loop", "agent-preset-registry", "tools", "scope", "session", "session-projection", "subagent-spawn-in-process"]) {
     assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
   }
+  for (const name of ["typert-registry", "api-gateway", "client-connection", "client-ui-slots", "client-ui-renderer", "client-store", "client-locale", "client-ui-primitives", "client-ui-settings"]) {
+    assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
+  }
 
-  assert.deepEqual(pkg.dsh, { bundle: { patch: "./cordis.patch.yml" } });
+  assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
+});
+
+test("package includes only the exact operator repair entrypoints without additional public exports", () => {
+  const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  const scripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
+  assert.deepEqual(pkg.files.filter((path: string) => path.startsWith("scripts")), scripts);
+  assert.equal(Object.keys(pkg.exports).some((path) => /repair|operator/u.test(path)), false);
+  for (const path of scripts) assert.equal(existsSync(join(packageRoot, path)), true, path);
 });
 
 test("README local documentation links are shipped by the package", () => {
@@ -123,7 +140,7 @@ test("README local documentation links are shipped by the package", () => {
   const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
   const localDocs = [...new Set([...readme.matchAll(/\[[^\]]+\]\((docs\/[^)#]+)\)/gu)].map((match) => match[1]))];
 
-  for (const required of ["docs/migration-from-ocmm.md", "docs/settings-status.md", "docs/agent-presets.md", "docs/compatibility.md", "docs/releasing.md"]) {
+  for (const required of ["docs/migration-from-ocmm.md", "docs/settings-status.md", "docs/agent-presets.md", "docs/compatibility.md", "docs/releasing.md", "docs/profiles.md"]) {
     assert.ok(localDocs.includes(required), `${required} is linked from README`);
   }
   assert.match(readme, /@deepseek-ai\/dsh@0\.2\.0-rc\.2/u);
@@ -137,23 +154,22 @@ test("README local documentation links are shipped by the package", () => {
   }
 });
 
-test("settings-status documentation ships the DSH 0.2 restart-scoped contract", () => {
+test("settings-status documentation separates deployment configuration from runtime profiles", () => {
   const settingsStatus = readFileSync(join(packageRoot, "docs", "settings-status.md"), "utf8");
 
-  assert.deepEqual(
-    [...settingsStatus.matchAll(/^## (.+)$/gmu)].map((match) => match[1]),
-    ["Commands and inspection", "DSH 0.2 configuration", "Workflow compatibility", "Other settings", "Snapshot boundaries"]
-  );
+  for (const heading of ["Commands and inspection", "Workflow compatibility", "Other settings", "Snapshot boundaries"]) {
+    assert.match(settingsStatus, new RegExp(`^## ${heading}$`, "mu"));
+  }
   assert.match(settingsStatus, /\/dsmm-status\b/u);
   assert.match(settingsStatus, /\/dsmm-status json/u);
   assert.match(settingsStatus, /Usage: \/dsmm-status \[json\]/u);
   assert.match(settingsStatus, /defensive JSON snapshot with version 1/u);
   assert.match(settingsStatus, /Commands belong to the native command adapter/u);
   assert.match(settingsStatus, /restart-scoped/u);
-  assert.match(settingsStatus, /Loader plugin entry/u);
+  assert.match(settingsStatus, /Loader plugin entry.*deployment baseline/u);
   assert.match(settingsStatus, /removed `settings\.register\(\)` service/u);
   assert.match(settingsStatus, /\$DSH_HOME\/settings\.yaml/u);
-  assert.match(settingsStatus, /explicitly volatile fields/u);
+  assert.match(settingsStatus, /runtime-only file overlays for newly admitted Agents/u);
   assert.match(settingsStatus, /Schema parsing preserves this distinction/u);
   assert.match(settingsStatus, /twelve role toggles default on/u);
   assert.match(settingsStatus, /does not perform capability\/network queries/u);
@@ -172,6 +188,11 @@ test("settings-status documentation ships the DSH 0.2 restart-scoped contract", 
     assert.ok(settingsStatus.includes(line), line);
   }
   assert.match(settingsStatus, /materialization remains off by default/u);
+  assert.match(settingsStatus, /Save changes only the draft/u);
+  assert.match(settingsStatus, /new Agents only/u);
+  assert.match(settingsStatus, /including blank Agents.*retain.*snapshots/u);
+  assert.match(settingsStatus, /cold-resumed sessions use the current selection/u);
+  assert.match(settingsStatus, /`roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `lsp`/u);
 });
 
 test("model-routing documentation ships the exact calibration contract", () => {
@@ -196,6 +217,30 @@ test("model-routing documentation ships the exact calibration contract", () => {
   assert.match(modelRouting, /Runtime recovery chooses any final route before calibration evaluates it/u);
   assert.match(modelRouting, /warning is sanitized.*no prompt, credentials, response body or request headers/is);
   assert.match(modelRouting, /actual persisted request header.*authoritative for the resolved effort/u);
+});
+
+test("runtime profile documentation distinguishes draft, revision, selection and live Agent authority", () => {
+  const profiles = readFileSync(join(packageRoot, "docs", "profiles.md"), "utf8");
+  assert.match(profiles, /native `profileContext\.dir` is the only storage authority/u);
+  assert.match(profiles, /dsmm-profiles\/<id>\.jsonc/u);
+  assert.match(profiles, /\.revisions\/<sha256>\.jsonc/u);
+  assert.match(profiles, /\.selection\.json.*\{version: 1, id, revision\}/u);
+  for (const field of ["defaultActive", "roleRouting", "workflow", "guards", "runtimeRecovery", "deepseekV4ProCalibration", "deepseekFlashCalibration"]) {
+    assert.ok(profiles.includes(`\`${field}\``), `${field} runtime field is documented`);
+  }
+  const rejectedFields = profiles.slice(profiles.indexOf("Profiles reject deployment-only"), profiles.indexOf("Effective settings resolve"));
+  for (const field of ["roles", "skills", "modeName", "promptOrder", "section", "presets", "lsp", "sessionPersistence"]) {
+    assert.ok(rejectedFields.includes(`\`${field}\``), `${field} remains deployment-only`);
+  }
+  assert.match(profiles, /built-in DSMM defaults → deployment DSMM configuration → selected immutable runtime revision/u);
+  assert.match(profiles, /Saving.*does not activate/iu);
+  assert.match(profiles, /Only after the pointer commit succeeds may the current in-memory selection change/u);
+  assert.match(profiles, /Every existing live Agent, including a blank one, retains/u);
+  assert.match(profiles, /Native children inherit their parent's snapshot/u);
+  assert.match(profiles, /cold-resumed sessions admit the currently selected immutable revision/u);
+  assert.match(profiles, /no cross-restart historical per-session settings guarantee/u);
+  assert.match(profiles, /No operation rewrites `cordis\.patch\.yml`/u);
+  assert.match(profiles, /no model-visible profile-management tools.*anonymous endpoints or authentication bypasses/iu);
 });
 
 test("runtime-recovery documentation ships the supported recovery contract", () => {
@@ -242,11 +287,11 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
 test("source entry exports a dsh plugin function and config schema", async () => {
   const mod = await import("../lib/index.js");
   assert.equal(mod.name, "dsmm");
-  assert.deepEqual(mod.inject, []);
+  assert.deepEqual(mod.inject, ["profileContext"]);
   assert.equal(typeof mod.Config, "function");
   assert.equal(typeof mod.Config.toJSON, "function");
   assert.equal(typeof mod.apply, "function");
-  assert.equal(mod.default, mod.apply);
+  assert.deepEqual(mod.default, { name: mod.name, inject: mod.inject, Config: mod.Config, apply: mod.apply });
   for (const name of [
     "classifyModelFamily",
     "desiredDeepseekEffort",
@@ -328,9 +373,21 @@ test("source and generated root entry declare the public status type contract", 
   assert.match(generatedStatusDeclarations, /export interface DsmmStatusSnapshot/u);
 });
 
-test("package surface excludes browser and client artifacts", () => {
-  assert.equal(existsSync(join(packageRoot, "DESIGN.md")), false);
-  assert.equal(existsSync(join(dirname(packageRoot), "DESIGN.md")), false);
-  assert.equal(existsSync(join(packageRoot, "client")), false);
-  assert.equal(existsSync(join(packageRoot, "browser")), false);
+test("compiled package includes native client and profile runtime assets without deployment definitions", () => {
+  for (const name of ["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"]) {
+    for (const extension of ["js", "d.ts"]) {
+      assert.equal(existsSync(join(packageRoot, "lib", `${name}.${extension}`)), true, `${name}.${extension}`);
+    }
+  }
+  assert.equal(existsSync(join(packageRoot, "lib", "client.js")), true);
+  assert.equal(existsSync(join(packageRoot, "lib", "client", "index.d.ts")), true);
+  const patch = readFileSync(join(packageRoot, "cordis.patch.yml"), "utf8");
+  assert.doesNotMatch(patch, /^\s*(?:profiles|runtimeProfiles|selectedProfile|profileDefinitions):/mu);
+  const remote = readFileSync(join(packageRoot, "lib", "profile-remote.js"), "utf8");
+  assert.match(remote, /TYPERT_REMOTE/u);
+  assert.match(remote, /TYPERT_HOST/u);
+  assert.doesNotMatch(remote, /["']node:|profile-store\.js|settings\.js/u, "remote descriptor is browser-safe wire data, not Host configuration");
+  const rpc = readFileSync(join(packageRoot, "lib", "profile-rpc.js"), "utf8");
+  assert.match(rpc, /typert\.register\(TYPERT_HOST\)/u);
+  assert.match(rpc, /invocation\.peer/u, "profile management requires a native authenticated invocation peer");
 });

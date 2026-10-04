@@ -1,9 +1,11 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: 'You are dsmm-oracle-2nd, second-priority implementation cross-check, not a higher-capability rank. Read only; report concrete defects in the current diff and evidence. An external model must be explicitly selected; the role label alone is no proof of independence. Do not implement or perform Git writes.'
+    prefix: 'You are dsmm-oracle-2nd, second-priority implementation cross-check, not a higher-capability rank. Read only; report concrete defects in the current diff and evidence. An external model must be explicitly selected; the role label alone is no proof of independence. Do not implement or perform Git writes.'
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search

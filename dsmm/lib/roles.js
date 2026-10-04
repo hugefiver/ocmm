@@ -20,6 +20,7 @@ export const DSMM_ROLES = [
         name: "DSMM Orchestrator",
         description: "Coordinates deepwork sessions and routes work to focused dsmm role presets.",
         order: 10,
+        mode: "primary",
         enabledByDefault: true,
         persona: `You are dsmm-orchestrator, a dsh-native coordinator for deepwork sessions.
 For complex behavior implementation, default to planner → plan-critic → implementation; for simple bounded low-risk work, proceed directly. A clear implementation request authorizes its stated scope without repeated design approval.
@@ -32,6 +33,7 @@ Keep scope explicit, preserve user constraints, and do not claim a preset is act
         name: "DSMM Planner",
         description: "Turns approved scope into ordered implementation steps with verification gates.",
         order: 20,
+        mode: "all",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-planner, a dsh-native planning specialist.
@@ -42,6 +44,7 @@ Inspect evidence and convert approved complex work into an outcome-oriented plan
         name: "DSMM Plan Critic",
         description: "Checks implementation plans for ambiguity, missing evidence, and unsafe sequencing.",
         order: 30,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-plan-critic, a dsh-native plan review specialist.
@@ -52,6 +55,7 @@ Inspect the plan and evidence for material blockers in outcome coverage, depende
         name: "DSMM Builder",
         description: "Implements one bounded approved outcome and verifies the changed surface.",
         order: 35,
+        mode: "primary",
         enabledByDefault: true,
         access: "write",
         persona: `You are dsmm-builder, a bounded implementation worker. Respect assigned file ownership and other workers' changes. Implement only the approved outcome, verify the affected surface, and report changes, evidence and risks. Escalate changes to public APIs, permissions, safety, data guarantees or irreversible behavior. Never stage, commit, push, tag, rebase or release without specific authorization.`
@@ -61,6 +65,7 @@ Inspect the plan and evidence for material blockers in outcome coverage, depende
         name: "DSMM Reviewer",
         description: "Reviews completed changes against requirements, tests, and regression risk.",
         order: 40,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-reviewer, a dsh-native implementation reviewer.
@@ -71,6 +76,7 @@ Read the current implementation diff and new files against requirements, convent
         name: "DSMM Oracle",
         description: "First-priority external-model implementation cross-check when explicitly configured.",
         order: 42,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-oracle, first-priority implementation cross-check. Read only; inspect the current diff, evidence and requirements for concrete defects. Your role is externally heterogeneous only when the caller selects a different available model; do not claim model independence when inheriting the parent's route. Do not implement or perform Git writes.`
@@ -80,6 +86,7 @@ Read the current implementation diff and new files against requirements, convent
         name: "DSMM Oracle 2nd",
         description: "Second-priority external-model implementation cross-check for an additional evidence need.",
         order: 44,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-oracle-2nd, second-priority implementation cross-check, not a higher-capability rank. Read only; report concrete defects in the current diff and evidence. An external model must be explicitly selected; the role label alone is no proof of independence. Do not implement or perform Git writes.`
@@ -89,6 +96,7 @@ Read the current implementation diff and new files against requirements, convent
         name: "DSMM Creative",
         description: "Explores unconventional but coherent approaches and explicit trade-offs.",
         order: 46,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-creative. Explore distinct coherent approaches, state trade-offs, constraints and a grounded recommendation. Remain read-only unless a separate implementation assignment authorizes changes. Do not perform Git writes.`
@@ -98,6 +106,7 @@ Read the current implementation diff and new files against requirements, convent
         name: "DSMM Code Search",
         description: "Finds local codebase facts, symbols, patterns, and relevant implementation context.",
         order: 50,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-code-search, a dsh-native codebase research specialist.
@@ -109,6 +118,7 @@ Summarize findings with paths and evidence; do not modify files.`
         name: "DSMM Doc Search",
         description: "Finds current external documentation and examples for library or API questions.",
         order: 60,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-doc-search, a dsh-native documentation research specialist.
@@ -120,6 +130,7 @@ Cite source locations, separate facts from assumptions, and avoid guessing when 
         name: "DSMM Clarifier",
         description: "Reduces ambiguous requests to the few decisions needed before planning or implementation.",
         order: 70,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-clarifier, a dsh-native requirements clarification specialist.
@@ -131,6 +142,7 @@ Ask at most three material questions, prefer concrete choices, and propose safe 
         name: "DSMM Media Reader",
         description: "Extracts implementation-relevant information from images, PDFs, and visual artifacts.",
         order: 80,
+        mode: "subagent",
         enabledByDefault: true,
         access: "read-only",
         persona: `You are dsmm-media-reader, a dsh-native visual and document analysis specialist.
@@ -141,14 +153,18 @@ Report uncertainty clearly and avoid inventing details that are not visible.`
 export function isDsmmRoleId(value) {
     return typeof value === "string" && DSMM_ROLE_IDS.includes(value);
 }
+/** Root exposure is separate from whether a role is enabled for delegation. */
+export function isRootRole(role) {
+    return role.mode === "primary" || role.mode === "all";
+}
 export function renderAgentCordis(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS, roleRouting = {}) {
     return rolePluginRows(role, skills, enabledRoles, roleRouting).map(renderPluginRow).join("");
 }
 /** The native PresetDefinition and the static YAML mirror use this same inventory. */
 export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS, roleRouting = {}) {
     const rows = [
-        { id: "persona", name: "@deepseek-ai/dsh-persona", config: { text: role.persona } },
-        { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions" },
+        { id: "persona", name: "@deepseek-ai/dsh-persona", config: { prefix: role.persona } },
+        { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions", config: { maxBytes: 65536 } },
         { id: "tool-fs", name: "@deepseek-ai/dsh-tool-fs" },
         { id: "tool-fs-search", name: "@deepseek-ai/dsh-tool-fs-search", config: { sampleOverCapGlobResults: false } },
         { id: "tool-web", name: "@deepseek-ai/dsh-tool-web", config: { fetch: true } },

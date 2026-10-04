@@ -1,5 +1,5 @@
 import Schema from "@deepseek-ai/schemastery";
-import type { DshContext } from "./dsh-types.js";
+import type { DshAgent, DshContext } from "./dsh-types.js";
 import type { DsmmLspSettings } from "./lsp.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmSkillName } from "./skills.js";
@@ -68,6 +68,11 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
     idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 export interface DsmmPluginConfig {
+    /** Startup-only native storage binding; never a runtime-profile field. */
+    sessionPersistence?: {
+        root: string;
+        compression?: "zstd" | "none";
+    };
     modeName?: string;
     section?: string;
     deepseekV4ProCalibration?: DeepseekCalibration;
@@ -106,6 +111,8 @@ export interface DsmmSettings {
     runtimeRecovery: DsmmRuntimeRecoverySettings;
     lsp: DsmmLspSettings;
 }
+/** Runtime consumers pass their Agent so immutable profile admission is retained. */
+export type DsmmSettingsGetter = (agent?: DshAgent) => DsmmSettings;
 export declare const DSMM_SETTINGS_NAMESPACE = "dsmm";
 export declare const DSMM_STATUS_COMMAND = "dsmm-status";
 export interface RegisterSettingsOptions {

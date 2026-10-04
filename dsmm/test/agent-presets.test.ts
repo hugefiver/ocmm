@@ -43,3 +43,11 @@ test("static agent cordis files mirror native preset plugin inventory", () => {
     assert.equal(agentCordis.includes("name: '@deepseek-ai/dsh-tool-subagent'"), role.id === "dsmm-orchestrator" || role.id === "dsmm-builder");
   }
 });
+
+test("optional native default patch does not configure removed directory discovery", () => {
+  const patch = readFileSync(join(packageRoot, "patches", "agent-presets-root.example.cordis.patch.yml"), "utf8");
+  assert.match(patch, /^- id: agent-presets\r?\n  config:\r?\n    default: dsmm-orchestrator\r?\n?$/mu);
+  assert.doesNotMatch(patch, /roots:|includeUserRoot:|trust:|path:/u);
+  assert.match(patch, /inspection templates, not discovery inputs/u);
+  assert.match(patch, /does not apply this patch or change the deployment default/u);
+});

@@ -1,5 +1,5 @@
 import Schema from "@deepseek-ai/schemastery";
-import type { DshContext, DshSettingsRegistry } from "./dsh-types.js";
+import type { DshAgent, DshContext, DshSettingsRegistry } from "./dsh-types.js";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import type { DsmmLspSettings } from "./lsp.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
@@ -83,6 +83,8 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
 };
 
 export interface DsmmPluginConfig {
+  /** Startup-only native storage binding; never a runtime-profile field. */
+  sessionPersistence?: { root: string; compression?: "zstd" | "none" };
   modeName?: string;
   section?: string;
   deepseekV4ProCalibration?: DeepseekCalibration;
@@ -122,6 +124,9 @@ export interface DsmmSettings {
   runtimeRecovery: DsmmRuntimeRecoverySettings;
   lsp: DsmmLspSettings;
 }
+
+/** Runtime consumers pass their Agent so immutable profile admission is retained. */
+export type DsmmSettingsGetter = (agent?: DshAgent) => DsmmSettings;
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
 export const DSMM_STATUS_COMMAND = "dsmm-status";
@@ -338,6 +343,10 @@ const LSP_SCHEMA = Schema.object({
 });
 
 export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+  sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
+    root: Schema.string().required(),
+    compression: Schema.union([Schema.const("zstd"), Schema.const("none")])
+  })]),
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   section: Schema.string(),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),

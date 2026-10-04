@@ -1,8 +1,8 @@
-import type { DshContext, DshLlmCallConfig, DshLlmRuntime, DshModelReasoningInfo } from "./dsh-types.js";
+import type { DshAgent, DshContext, DshLlmCallConfig, DshLlmRuntime, DshModelReasoningInfo } from "./dsh-types.js";
 import { isDsmmRoleId } from "./roles.js";
 import { applyModelRoute, effectiveRoleFallbackRoutes, establishRolePolicy, persistedRoleRoute, sameModelRoute, takeAdmittedRecoveryRoute } from "./role-routing.js";
 import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
-import type { DeepseekDefaultReasoningEffort, DsmmSettings } from "./settings.js";
+import type { DeepseekDefaultReasoningEffort, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
 export type DeepseekReasoningEffort = DeepseekDefaultReasoningEffort | "max";
@@ -39,7 +39,13 @@ export function selectAdvertisedEffort(desired: DeepseekReasoningEffort, reasoni
   return advertised.has(desired) ? desired : fallback;
 }
 
-export function registerModelRouting(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void {
+function hasLiveRuntimeOwner(ctx: DshContext, agent: DshAgent): boolean {
+  const agents = ctx.get?.<{ list(): DshAgent[]; isOwnedBy(id: string, parent: DshAgent): boolean }>("agents");
+  return agent.id !== undefined && agents !== undefined
+    && agents.list().some((parent) => parent !== agent && agents.isOwnedBy(agent.id!, parent));
+}
+
+export function registerModelRouting(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {
   const installedContexts = new WeakSet<DshContext>();
 
   const install = (readyCtx: DshContext): void => {
@@ -50,19 +56,29 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
     try {
       dispose = readyCtx.on("agent/request", async (frame, next) => {
         let downstream = await next();
-        const settings = getSettings();
+        const settings = getSettings(frame.agent);
         const admitted = takeAdmittedRecoveryRoute(frame);
         const active = controller.active(frame.agent, settings.defaultActive);
         const role = resolveEffectiveDsmmRole(frame.agent, settings, active);
         const policy = role === undefined ? undefined : settings.roleRouting[role];
         const primary = policy?.primary;
-        const identity = await establishRolePolicy(frame, settings, role);
+        const identity = await establishRolePolicy(frame, settings, role, readyCtx);
         if (admitted !== undefined) {
           downstream = applyModelRoute(downstream, admitted);
           if (admitted.reasoningEffort !== undefined || primary !== undefined
             || (role !== undefined && settings.roleRouting[role]?.fallbackRoutes !== undefined)) return downstream;
         }
         const fallbacks = effectiveRoleFallbackRoutes(settings, role);
+        if (primary !== undefined && role !== undefined && frame.agent.session.header?.origin === "subagent"
+          && (frame.agent.session.inheritedEventCount ?? 0) === 0
+          && hasLiveRuntimeOwner(readyCtx, frame.agent)) {
+          // A trusted one-shot alias already preflighted its merged native
+          // options. Its first accepted route, not the profile default, starts
+          // this live child's durable host/recovery ownership. Cold unowned or
+          // parent-seeded fork children resolve the current primary below.
+          const accepted = persistedRoleRoute(frame, undefined, fallbacks, identity);
+          return accepted === undefined ? downstream : applyModelRoute(downstream, accepted);
+        }
         if (primary !== undefined) return applyModelRoute(downstream, persistedRoleRoute(frame, primary, fallbacks, identity) ?? primary);
         if (settings.runtimeRecovery.enabled && policy?.fallbackRoutes !== undefined) {
           const accepted = persistedRoleRoute(frame, undefined, fallbacks, identity);

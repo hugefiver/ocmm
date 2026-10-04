@@ -1,5 +1,5 @@
 import { getTraceable } from "@deepseek-ai/cordis";
-import { DSMM_ROLES, DSMM_ROLE_IDS, rolePluginRows } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole, rolePluginRows } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
 /** Declare roles to DSH 0.2's native registry; directories are not discovery inputs. */
 export function registerRolePresets(ctx, getSettings) {
@@ -10,7 +10,7 @@ export function registerRolePresets(ctx, getSettings) {
             throw new Error("dsmm requires the native DSH agentPresets registry");
         const settings = getSettings();
         const enabled = DSMM_ROLE_IDS.filter((id) => settings.roles[id]);
-        const active = DSMM_ROLES.filter((role) => enabled.includes(role.id));
+        const active = DSMM_ROLES.filter((role) => isRootRole(role) && enabled.includes(role.id));
         const disposers = [];
         try {
             for (const role of active) {
@@ -19,7 +19,9 @@ export function registerRolePresets(ctx, getSettings) {
                     name: role.name,
                     description: role.description,
                     order: role.order,
-                    plugins: rolePluginRows(role, enabledSkillNames(settings), enabled, settings.roleRouting)
+                    // Profiles do not replace standing native compositions. Child routes
+                    // are admitted by the role provider from the parent's fixed snapshot.
+                    plugins: rolePluginRows(role, enabledSkillNames(settings), enabled)
                 }));
             }
             // A direct selection of a read-only preset must be restricted at the Agent

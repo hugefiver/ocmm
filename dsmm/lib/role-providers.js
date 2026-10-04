@@ -1,3 +1,5 @@
+import { parentAgentOptionsForDelegation } from "@deepseek-ai/dsh-subagent";
+import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { DSMM_ROLE_IDS } from "./roles.js";
 export function roleProviderName(role) {
     return `dsmm-role-${role.slice("dsmm-".length)}`;
@@ -12,7 +14,7 @@ function supportedSpawn(provider) {
         && Object.keys(SPAWN_CAPABILITIES).every((key) => provider.capabilities?.[key] === true);
 }
 /** Only the native outer start owns descriptors, capability admission and returned runs. */
-export function registerRoleProviders(ctx, getSettings) {
+export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = getSettings) {
     const installed = new WeakSet();
     const install = (readyCtx) => {
         const registry = readyCtx.get?.("subagents")
@@ -22,20 +24,51 @@ export function registerRoleProviders(ctx, getSettings) {
         const disposers = [];
         installed.add(registry);
         try {
-            const settings = getSettings();
+            const settings = getDeploymentSettings();
             for (const role of DSMM_ROLE_IDS) {
                 if (role === "dsmm-orchestrator" || !settings.roles[role])
                     continue;
                 let active = true;
                 const dispose = registry.registerProvider({
                     name: roleProviderName(role), capabilities: SPAWN_CAPABILITIES, inheritsParentContext: false,
-                    start(request) {
+                    async start(request) {
                         if (!active)
-                            return Promise.reject(new Error("dsmm role provider is disposed"));
+                            throw new Error("dsmm role provider is disposed");
                         const spawn = registry.getProvider("spawn");
                         if (!supportedSpawn(spawn))
-                            return Promise.reject(new Error("dsmm role provider requires the supported native spawn capabilities"));
-                        return spawn.start(request);
+                            throw new Error("dsmm role provider requires the supported native spawn capabilities");
+                        const parentSettings = getSettings(request.parent);
+                        if (!parentSettings.roles[role])
+                            throw new Error("dsmm role provider is disabled by deployment configuration");
+                        const primary = parentSettings.roleRouting[role]?.primary;
+                        const agentOptions = primary === undefined ? request.agentOptions : {
+                            ...primary,
+                            reasoningEffort: primary.reasoningEffort === undefined ? undefined : ReasoningEffortId(primary.reasoningEffort),
+                            ...request.agentOptions
+                        };
+                        if (primary !== undefined && request.agentOptions?.reasoningEffort === undefined
+                            && ((request.agentOptions?.provider !== undefined && request.agentOptions.provider !== primary.provider)
+                                || (request.agentOptions?.model !== undefined && request.agentOptions.model !== primary.model))) {
+                            agentOptions.reasoningEffort = undefined;
+                        }
+                        const parentOptions = parentAgentOptionsForDelegation(request.parent);
+                        const provider = agentOptions?.provider ?? parentOptions.provider;
+                        const model = agentOptions?.model ?? parentOptions.model;
+                        if (provider === undefined || model === undefined)
+                            throw new Error("dsmm role delegation requires an effective provider and model");
+                        const routeChanged = provider !== parentOptions.provider || model !== parentOptions.model;
+                        const reasoningEffort = agentOptions?.reasoningEffort
+                            ?? (primary === undefined && !routeChanged ? parentOptions.reasoningEffort : undefined);
+                        const llm = request.parent.ctx.get("llm");
+                        if (llm?.resolveCallConfig === undefined)
+                            throw new Error("dsmm role delegation requires the parent Agent native LLM service");
+                        await llm.resolveCallConfig({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }, request.signal);
+                        request.signal.throwIfAborted();
+                        if (!active || registry.getProvider("spawn") !== spawn)
+                            throw new Error("dsmm role spawn provider changed during route validation; retry delegation");
+                        // Preserve the native descriptor, authority filters and lifecycle;
+                        // this alias owns only profile-derived route defaults and preflight.
+                        return spawn.start(primary === undefined ? request : { ...request, agentOptions });
                     }
                 });
                 disposers.push(() => { active = false; dispose(); });

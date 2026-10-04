@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DSMM_ROLE_IDS as EXPORTED_ROLE_IDS } from "../lib/index.js";
-import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, renderAgentCordis, renderPresetMetadata, roleSubagentConfig, rolePluginRows } from "../lib/roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, isRootRole, renderAgentCordis, renderPresetMetadata, roleSubagentConfig, rolePluginRows } from "../lib/roles.js";
 import { DSMM_SKILL_NAMES } from "../lib/skills.js";
 
 const EXPECTED_ROLE_IDS = [
@@ -36,6 +36,27 @@ test("role ids are valid dsh preset ids", () => {
   assert.equal(isDsmmRoleId(undefined), false);
 });
 
+test("root eligibility follows explicit role mode without hiding enabled auxiliary roles", () => {
+  assert.deepEqual(DSMM_ROLES.map((role) => [role.id, role.mode]), [
+    ["dsmm-orchestrator", "primary"],
+    ["dsmm-planner", "all"],
+    ["dsmm-plan-critic", "subagent"],
+    ["dsmm-builder", "primary"],
+    ["dsmm-reviewer", "subagent"],
+    ["dsmm-oracle", "subagent"],
+    ["dsmm-oracle-2nd", "subagent"],
+    ["dsmm-creative", "subagent"],
+    ["dsmm-code-search", "subagent"],
+    ["dsmm-doc-search", "subagent"],
+    ["dsmm-clarifier", "subagent"],
+    ["dsmm-media-reader", "subagent"]
+  ]);
+  assert.deepEqual(DSMM_ROLES.filter(isRootRole).map((role) => role.id), ["dsmm-orchestrator", "dsmm-planner", "dsmm-builder"]);
+  assert.equal(DSMM_ROLES.filter((role) => !isRootRole(role)).length, 9);
+  assert.equal(DSMM_ROLES.find((role) => role.id === "dsmm-planner")?.access, "read-only");
+  assert.equal(DSMM_ROLES.every((role) => role.enabledByDefault), true);
+});
+
 test("preset metadata renders id, name, and description", () => {
   for (const role of DSMM_ROLES) {
     const metadata = renderPresetMetadata(role);
@@ -57,7 +78,8 @@ test("agent cordis renders one persona, actual capability rows, and bundled skil
 
     assert.equal(personaMarkers.length, 1);
     assert.equal(presetSkillMarkers.length, 1);
-    assert.match(cordis, /^- id: persona\n  name: '@deepseek-ai\/dsh-persona'\n  config:\n    text: /mu);
+    assert.match(cordis, /^- id: persona\n  name: '@deepseek-ai\/dsh-persona'\n  config:\n    prefix: /mu);
+    assert.match(cordis, /- id: agent-instructions\n  name: '@deepseek-ai\/dsh-agent-instructions'\n  config:\n    maxBytes: 65536\n/u);
     assert.ok(cordis.includes(role.id));
     assert.ok(cordis.includes(`- id: dsmm-preset-skills\n  name: '@dsmm/dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs-search'/u);

@@ -8,7 +8,7 @@ export function parseDeepworkCommandInput(rawInput) {
 }
 async function handleDeepworkCommand(controller, getSettings, invocation) {
     const parsed = parseDeepworkCommandInput(invocation.rawInput);
-    await controller.select(invocation.agent, parsed.action === "on", getSettings().defaultActive);
+    await controller.select(invocation.agent, parsed.action === "on", getSettings(invocation.agent).defaultActive);
     if (parsed.action === "on" && parsed.message !== "") {
         await invocation.agent.steer?.(createUserMessage({
             content: [{ type: "text", text: parsed.message }],
@@ -23,7 +23,7 @@ function handleDsmmStatusCommand(controller, getSettings, invocation) {
     const input = invocation.rawInput.trim();
     if (input !== "" && input !== "json")
         return { kind: "error", text: "Usage: /dsmm-status [json]" };
-    const settings = getSettings();
+    const settings = getSettings(invocation.agent);
     const snapshot = createDsmmStatusSnapshot({
         agent: invocation.agent,
         settings,

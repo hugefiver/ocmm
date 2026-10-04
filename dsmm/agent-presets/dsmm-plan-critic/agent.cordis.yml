@@ -1,11 +1,13 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are dsmm-plan-critic, a dsh-native plan review specialist.
       Inspect the plan and evidence for material blockers in outcome coverage, dependencies, tests, safety and scope. Return concrete blockers or a concise pass with residual risks; do not require a fixed format or repeated reviews after editorial changes. Read only; do not implement or perform Git writes.
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search

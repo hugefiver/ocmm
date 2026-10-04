@@ -31,9 +31,13 @@ interface ReleaseReceipt {
 
 const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
+  "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
+  "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
+  ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/lsp.md",
-  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/releasing.md",
+  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
   "docs/settings-status.md", "docs/skill-sync.md"
 ];
@@ -48,14 +52,17 @@ function normalizePackagePath(root: string, path: string): string {
   return relative(root, path).split(sep).join("/");
 }
 
-function compiledOutputPaths(root: string): string[] {
-  return readdirSync(join(root, "src"), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-    .sort((left, right) => compareBytewise(left.name, right.name))
-    .flatMap((entry) => {
-      const base = entry.name.slice(0, -3);
-      return [`lib/${base}.js`, `lib/${base}.d.ts`];
-    });
+function compiledOutputPaths(root: string, current = join(root, "src")): string[] {
+  const paths: string[] = [];
+  for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name))) {
+    const entryPath = join(current, entry.name);
+    if (entry.isDirectory()) paths.push(...compiledOutputPaths(root, entryPath));
+    else if (entry.isFile() && /\.tsx?$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+      const base = normalizePackagePath(join(root, "src"), entryPath).replace(/\.tsx?$/u, "");
+      paths.push(`lib/${base}.js`, `lib/${base}.d.ts`);
+    }
+  }
+  return paths;
 }
 
 function requiredTreeFiles(root: string, tree: string, current = join(root, tree)): string[] {
@@ -154,14 +161,16 @@ const expectedCompatibility = [
   ["Cordis", "~4.0.4"],
   ["DSH component peers", "0.2.0-rc.2"],
   ["Linux container", "Node 22 Bookworm"],
-  ["Windows", "Node >=22"],
+  ["Windows Desktop", "installed official `0.2.0-rc.2` carrier/host"],
   ["macOS", "Node >=22"],
-  ["Web", "host command/status"],
-  ["Headless", "profile config and --dump-config"],
+  ["Native Settings", "additive DSMM Profiles client and authenticated RPC"],
+  ["Headless", "deployment config and native role tools"],
   ["TUI", "DSH 0.2.0-rc.2"],
   ["LSP/MCP", "external ocmm-lsp mcp"],
   ["Runtime recovery", "process-local"],
   ["Per-role model/effort/fallback policy", "native request, subagent and descriptor seams"],
+  ["Runtime profiles", "independent drafts, immutable revisions, minimal pointer"],
+  ["Durable DSMM metadata", "deployment-only `sessionPersistence` on main DSMM entry"],
   ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
   ["DeepSeek V41 Flash calibration", "native DeepSeek providers/deepseek-flash"]
 ];
@@ -257,30 +266,23 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   const rows = parseMarkdownTable(compatibility, "## Compatibility matrix", "compatibility matrix");
 
   assert.deepEqual(rows.map(([surface, boundary]) => [surface, boundary]), expectedCompatibility);
-  assert.equal(rows.length, 15);
+  assert.equal(rows.length, 17);
   assert.ok(rows.every((row) => row.length === 3 && row[2] !== ""), "each surface states an evidence level");
-  assert.equal(rows.find(([surface]) => surface === "DSH")?.[2], "verified");
+  assert.match(rows.find(([surface]) => surface === "DSH")?.[2] ?? "", /pinned authority.*acceptance required/u);
   assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "unavailable");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
-  assert.deepEqual(
-    [...new Set(rows.map((row) => row[2]))].sort(),
-    ["opt-in; exact configured capability required", "optional", "supported by contract", "unavailable", "verified"]
-  );
+  assert.match(rows.find(([surface]) => surface === "Native Settings")?.[2] ?? "", /actual Desktop.*separate proofs/u);
+  assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /new-Agent.*no historical snapshot guarantee/u);
+  assert.match(rows.find(([surface]) => surface === "Durable DSMM metadata")?.[2] ?? "", /explicit startup integration.*acceptance pending/u);
 });
 
 test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
-  assert.deepEqual(
-    [...compatibility.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
-    [
-      "# DSMM 0.1.1 Compatibility",
-      "## Compatibility authority",
-      "## Compatibility matrix",
-      "## Command and runtime boundaries",
-      "## Evidence limits"
-    ]
-  );
+  assert.match(compatibility, /^# DSMM 0\.1\.2 Compatibility/mu);
+  for (const heading of ["Compatibility authority", "Compatibility matrix", "Command and runtime boundaries", "Evidence limits"]) {
+    assert.match(compatibility, new RegExp(`^## ${heading}$`, "mu"));
+  }
   assert.ok(compatibility.includes("@deepseek-ai/dsh@0.2.0-rc.2"));
   assert.ok(compatibility.includes("0.2.1-alpha.1"));
   assert.ok(compatibility.includes("Installation ranges are not proof of compatibility with future releases."));
@@ -296,13 +298,18 @@ test("compatibility document fixes command, headless, platform, and provider bou
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
   assert.ok(compatibility.includes("`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands."));
-  assert.ok(compatibility.includes("Web exposes host command/status but has no custom panel."));
+  assert.match(compatibility, /native client adds Settings → DSMM Profiles/u);
+  assert.match(compatibility, /no model-visible profile-management tools or anonymous file endpoints/u);
   assert.ok(compatibility.includes("Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`."));
   assert.ok(compatibility.includes("Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file."));
   assert.ok(compatibility.includes("Windows, Linux, Web, and macOS evidence are not interchangeable."));
   assert.ok(compatibility.includes("LSP/MCP and runtime recovery are disabled by default."));
   assert.ok(compatibility.includes("V4 Pro calibration remains limited to the exact `deepseek-official/deepseek-v4-pro` route."));
   assert.ok(compatibility.includes("`deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`"));
+  assert.match(compatibility, /including a blank Agent.*retains.*admitted runtime settings/u);
+  assert.match(compatibility, /cold-resumed sessions use the current selected revision/u);
+  assert.match(compatibility, /auxiliary roles can fail native cold resume/u);
+  assert.match(compatibility, /third phase/u);
 });
 
 test("migration guide fixes the non-parity feature and cutover contracts", () => {
@@ -369,39 +376,34 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.deepEqual(
-    [...release.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
-    [
-      "# DSMM 0.1.1 Release and Rollback",
-      "## Preflight",
-      "## Authorized publication",
-      "## Post-publication verification",
-      "## Rollback"
-    ]
-  );
+  assert.match(release, /^# DSMM 0\.1\.2 Release and Rollback$/mu);
+  const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
+  const phaseOffsets = phases.map((phase) => release.indexOf(phase));
+  assert.ok(phaseOffsets.every((offset) => offset >= 0));
+  assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.1",
+    "dsmm-scoped-v0.1.2",
     "explicit authorization",
     "npm Trusted Publishing",
     "no DSMM lane",
     "never overwrite an npm version",
     "never move, delete, or recreate an immutable tag",
-    "a successful local checker or Docker smoke is not proof of publication",
-    "dsh plugin --profile <name> remove @dsmm/dsmm",
-    "add an exact known-good version",
-    "restart the profile process"
+    "same frozen tarball",
+    "npm publish <reviewed-dsmm-dsmm-0.1.2.tgz>",
+    "dist.integrity",
+    "SHA256SUMS.txt",
+    "fully quit"
   ]) {
     assert.ok(release.includes(phrase), `release guide includes ${phrase}`);
   }
 
-  const preflight = release.slice(release.indexOf("## Preflight"), release.indexOf("## Authorized publication"));
+  const preflight = release.slice(release.indexOf("## Preflight"), phaseOffsets[0]);
   for (const command of [
     "git rev-parse HEAD",
     "git status --short",
-    'npm view @dsmm/dsmm name version --registry "https://registry.npmjs.org/"',
     "pnpm --dir dsmm build",
-    'pnpm --dir ".\\dsmm" exec tsc -p ".\\tsconfig.test.json" --noEmit',
+    "pnpm --dir dsmm typecheck:test",
     "pnpm --dir dsmm check:release",
     'npm pack ".\\dsmm" --dry-run --json',
     "pnpm --dir dsmm smoke:docker",
@@ -411,27 +413,42 @@ test("release guide fixes the preflight, publication, verification, and rollback
   ]) {
     assert.ok(preflight.includes(command), `preflight includes ${command}`);
   }
-  assert.match(preflight, /exact checkout.*status/i);
-  assert.match(preflight, /npm-name ownership.*recheck/i);
-  assert.match(preflight, /registry lookup.*current evidence.*cannot reserve name/is);
+  assert.match(preflight, /exact source selected for review/i);
+  assert.match(preflight, /Recheck scoped npm authority/i);
+  assert.match(preflight, /registry lookup cannot reserve ownership/i);
   assert.match(preflight, /DSH 0\.2\.0-rc\.2/u);
   assert.match(preflight, /license parity/i);
-  assert.match(preflight, /DSMM test.*build.*checker.*pack.*Docker/is);
   assert.match(preflight, /root.*typecheck.*test.*build/is);
-  assert.match(preflight, /artifact review/i);
+  assert.match(preflight, /exact shipped client\/profile assets/i);
 
-  const postPublication = release.slice(release.indexOf("## Post-publication verification"), release.indexOf("## Rollback"));
+  const dockerGate = release.slice(phaseOffsets[0], phaseOffsets[1]);
+  assert.match(dockerGate, /explicit artifact path and expected SHA256/u);
+  assert.match(dockerGate, /fail closed.*missing\/mismatched/u);
+  assert.match(dockerGate, /must not build, repack/u);
+  assert.match(dockerGate, /packedSha256/u);
+  assert.match(dockerGate, /same packaged compiled DSMM UI.*native client\/slots/iu);
+  assert.match(dockerGate, /immutable-revision\/pointer bytes/u);
+  assert.match(dockerGate, /existing even-blank Agent retention/u);
+  assert.match(dockerGate, /Do not mount or copy Desktop\/global configuration.*credentials/u);
+  const postPublication = release.slice(release.indexOf("### Publication identity verification"), phaseOffsets[2]);
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
-    "registry install",
-    "plugin list",
+    "registry installation",
+    "plugin --profile dsmm-0.1.2-verify list",
     "--dump-config",
-    "new profile process",
-    "available host adapter status",
-    "package integrity"
+    "installed registry package",
+    "DSMM-specific release receipt"
   ]) {
     assert.ok(postPublication.includes(phrase), `post-publication verification includes ${phrase}`);
   }
+  const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
+  assert.match(desktopGate, /Only after both preceding gates pass/u);
+  assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
+  assert.match(desktopGate, /actual native profile UI create\/edit\/save\/apply\/reset/u);
+  const rollback = release.slice(release.indexOf("## Rollback"));
+  assert.match(rollback, /official carrier.*remove `@dsmm\/dsmm`/u);
+  assert.match(rollback, /add an exact known immutable version/u);
+  assert.match(rollback, /Keep runtime drafts\/revisions and unrelated settings/u);
 });
 
 test("README fixes the pending publication and stable packed-runtime boundaries", () => {
@@ -452,13 +469,13 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "Local readiness checks alone do not represent a published release",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.1.tgz>",
+    "not a completed publication or Desktop verification",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.2.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
     "real read/write/model round-trip",
-    "separately authorized publication"
+    "independent frozen-artifact Docker acceptance and verified npm/GitHub publication"
   ]) {
     assert.ok(readme.includes(phrase), `README includes ${phrase}`);
   }
@@ -477,7 +494,7 @@ test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.1 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.2 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -485,7 +502,7 @@ test("release readiness checker accepts the real 0.1.1 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.1");
+  assert.equal(receipt.version, "0.1.2");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -512,6 +529,169 @@ test("release readiness checker rejects the superseded unscoped package identity
   } finally {
     removeReleaseFixture(fixtureRoot);
   }
+});
+
+test("release readiness checker requires native client and each profile runtime surface", () => {
+  for (const path of ["lib/client.js", "lib/client/index.d.ts", "lib/profile-store.js", "lib/profile-runtime.d.ts", "lib/profile-rpc.js", "lib/profile-remote.d.ts", "docs/profiles.md"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      rmSync(join(fixtureRoot, ...path.split("/")));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, path);
+      assert.equal(receipt.outcome, "failed", path);
+      assert.ok(receipt.errors.includes(`missing required package surface: ${path}`), path);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker recursively requires nested TSX runtime and declaration outputs", () => {
+  const fixtureRoot = createReleaseFixture();
+  try {
+    writeFixtureFile(fixtureRoot, "src/client/nested/Fixture.tsx", "export const Fixture = () => null;\n");
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.ok(receipt.errors.includes("missing required package surface: lib/client/nested/Fixture.js"));
+    assert.ok(receipt.errors.includes("missing required package surface: lib/client/nested/Fixture.d.ts"));
+  } finally { removeReleaseFixture(fixtureRoot); }
+});
+
+test("release readiness checker requires every history compatibility companion asset", () => {
+  for (const module of ["session-metadata", "session-persistence"]) {
+    for (const extension of ["js", "d.ts"]) {
+      const path = `lib/${module}.${extension}`;
+      const fixtureRoot = createReleaseFixture();
+      try {
+        rmSync(join(fixtureRoot, ...path.split("/")));
+        const { receipt, status } = runReleaseChecker(fixtureRoot);
+        assert.equal(status, 1, path);
+        assert.ok(receipt.errors.includes(`missing required package surface: ${path}`), path);
+      } finally { removeReleaseFixture(fixtureRoot); }
+    }
+  }
+});
+
+test("release readiness checker requires both exact operator repair scripts", () => {
+  for (const path of ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      rmSync(join(fixtureRoot, ...path.split("/")));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, path);
+      assert.deepEqual(receipt.errors, [`missing required package surface: ${path}`]);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects broad or extra implementation script manifest entries", () => {
+  for (const extra of ["scripts", "scripts/*.mjs", "scripts/build-client.mjs", "scripts/nested/repair-session-log.mjs"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, (manifest) => { (manifest.files as string[]).push(extra); });
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, extra);
+      assert.equal(receipt.fileCount, 0);
+      assert.deepEqual(receipt.errors, ["manifest.files must exactly equal the release files policy"]);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects nested script, build, test, temporary and secret leakage", () => {
+  const paths = [
+    "lib/scripts/extra.js",
+    "patches/scripts/repair-session-log.mjs",
+    "patches/nested/scripts/session-repair-native-verifier.mjs",
+    "patches/build/leak.js",
+    "patches/test/operator.mjs",
+    "patches/temp/operator.mjs",
+    "patches/secrets.json"
+  ];
+  const fixtureRoot = createReleaseFixture();
+  try {
+    for (const path of paths) writeFixtureFile(fixtureRoot, path, "fixture\n");
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.equal(receipt.forbiddenSurfaceCount, paths.length);
+    assert.deepEqual(receipt.errors, paths.map((path) => `forbidden package surface: ${path}`).sort(compareBytewise));
+  } finally { removeReleaseFixture(fixtureRoot); }
+});
+
+test("release readiness checker preserves the exact history companion export and rejects added exports", () => {
+  for (const mutate of [
+    (exports: Record<string, unknown>) => { delete exports["./session-persistence"]; },
+    (exports: Record<string, unknown>) => { exports["./session-persistence"] = "./lib/session-metadata.js"; },
+    (exports: Record<string, unknown>) => { exports["./session-metadata"] = "./lib/session-metadata.js"; }
+  ]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, (manifest) => mutate(manifest.exports as Record<string, unknown>));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1);
+      assert.equal(receipt.fileCount, 0);
+      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the five public exports"]);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker pins native session and persistence contracts in peer and dev dependencies", () => {
+  for (const section of ["peerDependencies", "devDependencies"]) {
+    for (const name of ["@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-persistence-jsonl"]) {
+      const fixtureRoot = createReleaseFixture();
+      try {
+        updateFixtureManifest(fixtureRoot, (manifest) => { (manifest[section] as Record<string, string>)[name] = "^0.2.0-rc.2"; });
+        const { receipt, status } = runReleaseChecker(fixtureRoot);
+        assert.equal(status, 1, `${section}.${name}`);
+        assert.equal(receipt.fileCount, 0);
+        assert.deepEqual(receipt.errors, [`manifest.${section} must preserve release ranges`]);
+      } finally { removeReleaseFixture(fixtureRoot); }
+    }
+  }
+});
+
+test("release readiness checker rejects missing client metadata and duplicate Typert auto-loading", () => {
+  for (const mutate of [
+    (manifest: Record<string, unknown>) => { delete (manifest.dsh as Record<string, unknown>).client; },
+    (manifest: Record<string, unknown>) => { (manifest.exports as Record<string, unknown>)["./typert"] = "./lib/profile-remote.js"; }
+  ]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, mutate);
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1);
+      assert.equal(receipt.fileCount, 0, "unsafe loader metadata is rejected before pack");
+      assert.ok(receipt.errors.some((error) => error.startsWith("manifest.dsh ") || error.startsWith("manifest.exports ")));
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects invalid, eager and Host-leaking client bundles", () => {
+  const lazy = (id: string, body: string) => `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => { ${body} } });\n`;
+  const cases = [
+    ["wrong native id", lazy("dsmm", "return {apply(){}, inject: []};")],
+    ["absent plugin exports", lazy("@dsmm/dsmm", "return {}; ")],
+    ["eager browser code", "require('react');\n"],
+    ["Node runtime import", lazy("@dsmm/dsmm", "require('node:fs'); return {apply(){}, inject: []};")],
+    ["user path", lazy("@dsmm/dsmm", "const path = 'C:/Users/someone/checkout'; return {apply(){}, inject: []};")],
+    ["browser development tool", lazy("@dsmm/dsmm", "const name = 'react-grab'; return {apply(){}, inject: []};")]
+  ];
+  for (const [label, source] of cases) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      writeFixtureFile(fixtureRoot, "lib/client.js", source);
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, label);
+      assert.ok(receipt.errors.some((error) => error.startsWith("native client bundle must ")), label);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects embedded runtime profile deployment definitions", () => {
+  const fixtureRoot = createReleaseFixture();
+  try {
+    writeFileSync(join(fixtureRoot, "cordis.patch.yml"), `${readFileSync(join(fixtureRoot, "cordis.patch.yml"), "utf8")}\n  profiles:\n    embedded: {}\n`);
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.ok(receipt.errors.includes("cordis.patch.yml must not embed runtime profile definitions or selection"));
+  } finally { removeReleaseFixture(fixtureRoot); }
 });
 
 test("release readiness checker fails closed when a fixture omits LICENSE", () => {
@@ -563,7 +743,7 @@ test("release readiness checker fails closed when dsh bundle metadata is wrong",
     assertReceiptKeys(receipt);
     assert.equal(status, 1);
     assert.equal(receipt.outcome, "failed");
-    assert.deepEqual(receipt.errors, ["manifest.dsh.bundle.patch must equal ./cordis.patch.yml"]);
+    assert.deepEqual(receipt.errors, ["manifest.dsh must equal the native web client and bundle policy"]);
     assert.deepEqual(listTgzPaths(fixtureRoot), tgzBefore);
   } finally {
     removeReleaseFixture(fixtureRoot);

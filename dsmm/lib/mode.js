@@ -14,7 +14,7 @@ export function registerDeepworkPrompt(readyCtx, controller, getSettings, config
         order: getSettings().promptOrder,
         interpolate: false,
         text(context) {
-            const settings = getSettings();
+            const settings = getSettings(context.agent);
             const preset = resolveSelectedAgentPreset(context.agent?.session);
             const active = controller.active(context.agent, settings.defaultActive);
             if (!active && !isDsmmRoleId(preset))

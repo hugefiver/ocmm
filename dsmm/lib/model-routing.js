@@ -28,6 +28,11 @@ export function selectAdvertisedEffort(desired, reasoning) {
     }
     return advertised.has(desired) ? desired : fallback;
 }
+function hasLiveRuntimeOwner(ctx, agent) {
+    const agents = ctx.get?.("agents");
+    return agent.id !== undefined && agents !== undefined
+        && agents.list().some((parent) => parent !== agent && agents.isOwnedBy(agent.id, parent));
+}
 export function registerModelRouting(ctx, controller, getSettings) {
     const installedContexts = new WeakSet();
     const install = (readyCtx) => {
@@ -38,13 +43,13 @@ export function registerModelRouting(ctx, controller, getSettings) {
         try {
             dispose = readyCtx.on("agent/request", async (frame, next) => {
                 let downstream = await next();
-                const settings = getSettings();
+                const settings = getSettings(frame.agent);
                 const admitted = takeAdmittedRecoveryRoute(frame);
                 const active = controller.active(frame.agent, settings.defaultActive);
                 const role = resolveEffectiveDsmmRole(frame.agent, settings, active);
                 const policy = role === undefined ? undefined : settings.roleRouting[role];
                 const primary = policy?.primary;
-                const identity = await establishRolePolicy(frame, settings, role);
+                const identity = await establishRolePolicy(frame, settings, role, readyCtx);
                 if (admitted !== undefined) {
                     downstream = applyModelRoute(downstream, admitted);
                     if (admitted.reasoningEffort !== undefined || primary !== undefined
@@ -52,6 +57,16 @@ export function registerModelRouting(ctx, controller, getSettings) {
                         return downstream;
                 }
                 const fallbacks = effectiveRoleFallbackRoutes(settings, role);
+                if (primary !== undefined && role !== undefined && frame.agent.session.header?.origin === "subagent"
+                    && (frame.agent.session.inheritedEventCount ?? 0) === 0
+                    && hasLiveRuntimeOwner(readyCtx, frame.agent)) {
+                    // A trusted one-shot alias already preflighted its merged native
+                    // options. Its first accepted route, not the profile default, starts
+                    // this live child's durable host/recovery ownership. Cold unowned or
+                    // parent-seeded fork children resolve the current primary below.
+                    const accepted = persistedRoleRoute(frame, undefined, fallbacks, identity);
+                    return accepted === undefined ? downstream : applyModelRoute(downstream, accepted);
+                }
                 if (primary !== undefined)
                     return applyModelRoute(downstream, persistedRoleRoute(frame, primary, fallbacks, identity) ?? primary);
                 if (settings.runtimeRecovery.enabled && policy?.fallbackRoutes !== undefined) {

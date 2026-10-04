@@ -20,13 +20,13 @@ export function registerHeadlessRoleTools(ctx, controller, getSettings) {
             throw new Error("dsmm headless role tools require Agent-scoped Cordis plugin and tool guard services");
         installed.add(agentCtx);
         try {
-            const settings = getSettings();
+            const settings = getSettings(agent);
             const roles = DSMM_ROLES.filter((role) => role.id !== "dsmm-orchestrator" && settings.roles[role.id]);
             const names = new Set(roles.map((role) => role.id.replace(/-/gu, "_")));
             const guard = agentCtx.tools.guard((execution) => {
                 if (!names.has(execution.name))
                     return undefined;
-                const current = getSettings();
+                const current = getSettings(execution.agent);
                 if (controller.active(execution.agent, current.defaultActive) || isDsmmRoleId(resolveSelectedAgentPreset(execution.agent?.session)))
                     return undefined;
                 return "dsmm role tools require an active deepwork session or DSMM-selected preset";
@@ -38,7 +38,9 @@ export function registerHeadlessRoleTools(ctx, controller, getSettings) {
                 // Agent creation is awaited before first prompt assembly. Mounting here
                 // sees the Agent-isolated systemPrompt/tools and avoids leaking tools to
                 // its sibling sessions or the read-only child being delegated.
-                await agentCtx.plugin(nativeSubagentTool, roleSubagentConfig(role, availableTools, settings.roleRouting[role.id]?.primary));
+                // Model routing belongs to the parent's admitted profile, not the tool's
+                // standing composition. The role provider validates it before spawning.
+                await agentCtx.plugin(nativeSubagentTool, roleSubagentConfig(role, availableTools));
             }
             agentCtx.effect?.(() => () => installed.delete(agentCtx));
         }

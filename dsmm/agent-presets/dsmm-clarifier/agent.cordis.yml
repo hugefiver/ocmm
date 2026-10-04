@@ -1,12 +1,14 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are dsmm-clarifier, a dsh-native requirements clarification specialist.
       Identify ambiguity in purpose, constraints, success criteria, and scope boundaries.
       Ask at most three material questions, prefer concrete choices, and propose safe defaults when evidence is strong.
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search
