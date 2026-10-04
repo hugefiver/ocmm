@@ -682,6 +682,8 @@ export async function publishArtifact(directory, context, workDirectory, { env =
   // Version conflicts are never implicit authorization to retry or repair a publication.
   invariant(await registryVersion(identity.version, fetcher) === null, "registry version already exists; stop for explicit same-identity continuation authority");
   emptyOwnedDirectory(workDirectory);
+  // Corepack activation lives in the original HOME, which publication must not inherit.
+  exclusivelyWrite(join(workDirectory, "package.json"), jsonBytes({ packageManager: `pnpm@${POLICY.pnpmVersion}` }));
   const artifactPath = join(workDirectory, identity.filename);
   exclusivelyWrite(artifactPath, readFileSync(join(directory, identity.filename)));
   const configPath = join(workDirectory, "publish.npmrc");

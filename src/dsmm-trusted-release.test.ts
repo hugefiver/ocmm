@@ -283,6 +283,28 @@ test("keyless publisher isolates config/home, publishes once and preserves froze
     assert.equal(computeDigests(readFileSync(join(directory, identity.filename))).sha256, identity.sha256);
   });
 });
+test("isolated publisher pins Corepack selection rather than losing the activated pnpm version with HOME", async () => {
+  await withArtifactDirectory(async ({ context, identity }, directory, root) => {
+    let publishes = 0;
+    await publishArtifact(directory, context, join(root, "isolated-pnpm"), {
+      nodeVersion: "24.1.0", env: { ...oidcEnvironment(), HOME: "/prepared-corepack-home", COREPACK_HOME: "/not-inherited" },
+      fetcher: async () => new Response("", { status: 404 }),
+      request: async () => ({ ref: `refs/tags/${identity.tag}`, object: { type: "commit", sha: identity.releaseSha } }),
+      execute: (command: string, args: string[], options: Json) => {
+        assert.equal(command, "pnpm");
+        assert.equal(options.env.COREPACK_HOME, undefined);
+        assert.notEqual(options.env.HOME, "/prepared-corepack-home");
+        const manifest = JSON.parse(readFileSync(join(options.cwd, "package.json"), "utf8"));
+        assert.deepEqual(manifest, { packageManager: "pnpm@11.9.0" });
+        if (args[0] === "--version") return manifest.packageManager.split("@")[1];
+        assert.equal(args[1], join(options.cwd, identity.filename));
+        publishes++;
+        return "submitted";
+      },
+    });
+    assert.equal(publishes, 1);
+  });
+});
 test("OIDC failure, version conflict, wrong pnpm or changed frozen bytes never trigger a publish retry", async () => {
   await withArtifactDirectory(async ({ context, identity }, directory, root) => {
     let publishCalls = 0;
