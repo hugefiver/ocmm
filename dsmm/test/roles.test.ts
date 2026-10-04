@@ -57,6 +57,18 @@ test("root eligibility follows explicit role mode without hiding enabled auxilia
   assert.equal(DSMM_ROLES.every((role) => role.enabledByDefault), true);
 });
 
+test("Deepwork uses DW display names and personas without changing compatible role identities", () => {
+  assert.deepEqual(DSMM_ROLES.map((role) => role.name), [
+    "DW Orchestrator", "DW Planner", "DW Plan Critic", "DW Builder",
+    "DW Reviewer", "DW Oracle", "DW Oracle 2nd", "DW Creative",
+    "DW Code Search", "DW Doc Search", "DW Clarifier", "DW Media Reader"
+  ]);
+  assert.deepEqual(DSMM_ROLES.map((role) => role.id), EXPECTED_ROLE_IDS);
+  for (const role of DSMM_ROLES) {
+    assert.ok(role.persona.startsWith(`You are ${role.name} (role ID: ${role.id})`));
+  }
+});
+
 test("preset metadata renders id, name, and description", () => {
   for (const role of DSMM_ROLES) {
     const metadata = renderPresetMetadata(role);

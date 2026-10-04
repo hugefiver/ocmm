@@ -36,7 +36,7 @@ export function apply(ctx, config) {
     const final = await next();
     receipt.assemblies.push({ agent: agentLabel(context.agent?.id),
       dsmm: final.sections.some((section) => section.name === "dsmm:deepwork" && section.text.includes("DEEPWORK MODE ENABLED")),
-      reviewer: final.sections.some((section) => section.text.includes("You are dsmm-reviewer")),
+      reviewer: final.sections.some((section) => section.text.includes("You are DW Reviewer (role ID: dsmm-reviewer)")),
       tools: final.tools.map((tool) => tool.name), roleTools: final.tools.filter((tool) => tool.name.startsWith("dsmm_")).map((tool) => tool.name) });
     save();
     return final;

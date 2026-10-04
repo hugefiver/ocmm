@@ -44,7 +44,7 @@ test("custom headless profile installs role tools in Agent scope before assembly
   assert.deepEqual(media?.config.toolFilter, { allow: ["read", "glob", "grep", "web_search", "web_fetch", "read_image"] });
   assert.equal(registrations.find(({ config }) => config.toolName === "dsmm_builder")?.config.toolFilter, undefined);
   assert.ok(guard);
-  assert.match(guard(execution("dsmm_reviewer", false)) ?? "", /active deepwork/u);
+  assert.match(guard(execution("dsmm_reviewer", false)) ?? "", /active Deepwork/u);
   assert.equal(guard(execution("dsmm_reviewer", true)), undefined);
   assert.equal(guard(execution("read", false)), undefined);
 });

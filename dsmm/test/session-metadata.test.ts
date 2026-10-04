@@ -49,7 +49,7 @@ test("DSMM metadata annotation never marks unrelated required events or invalid 
     { type: "dsmm/role-policy", data: { version: 1, role: "reviewer", policy: null } },
     { type: "dsmm/role-policy", data: { version: 1, role: "dsmm-reviewer", policy: "A".repeat(64) } },
     { type: "dsmm/role-policy", data: { version: 1, role: "dsmm-reviewer", policy: null, extra: 1 } }
-  ]) assert.throws(() => annotateDsmmEvent(event), /invalid DSMM session metadata/u);
+  ]) assert.throws(() => annotateDsmmEvent(event), /invalid Deepwork session metadata/u);
   const valid = { type: "deepwork/mode", seq: 9, time: 123, data: { active: true } };
   for (const event of [
     { ...valid, surfaceOp: "append" },
@@ -59,5 +59,5 @@ test("DSMM metadata annotation never marks unrelated required events or invalid 
     { ...valid, seq: -0 },
     { ...valid, seq: 1.5 },
     { ...valid, time: Infinity }
-  ]) assert.throws(() => annotateDsmmEvent(event), /invalid DSMM session metadata/u);
+  ]) assert.throws(() => annotateDsmmEvent(event), /invalid Deepwork session metadata/u);
 });

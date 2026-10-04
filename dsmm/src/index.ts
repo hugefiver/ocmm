@@ -58,12 +58,12 @@ export function apply(ctx: DshContext, config: Config = {}): void | Promise<void
     if (storage === null || typeof storage !== "object" || typeof storage.root !== "string" || !isAbsolute(storage.root)
       || Object.keys(storage).some((key) => !["root", "compression"].includes(key))
       || storage.compression !== undefined && !["zstd", "none"].includes(storage.compression)) {
-      throw new Error("DSMM sessionPersistence must preserve an explicit absolute native root and compression");
+      throw new Error("Deepwork sessionPersistence must preserve an explicit absolute native root and compression");
     }
-    if (ctx.get === undefined || ctx.plugin === undefined) throw new Error("DSMM sessionPersistence requires native startup composition");
-    if (ctx.get("sessionPersistence") !== undefined) throw new Error("Disable the exact existing JSONL entry at startup before enabling DSMM sessionPersistence; live replacement is refused");
+    if (ctx.get === undefined || ctx.plugin === undefined) throw new Error("Deepwork sessionPersistence requires native startup composition");
+    if (ctx.get("sessionPersistence") !== undefined) throw new Error("Disable the exact existing JSONL entry at startup before enabling Deepwork sessionPersistence; live replacement is refused");
     const fiber = (ctx as unknown as Context).plugin(DsmmSessionPersistence, storage);
-    if (fiber === undefined) throw new Error("DSMM sessionPersistence startup registration failed");
+    if (fiber === undefined) throw new Error("Deepwork sessionPersistence startup registration failed");
     return fiber.await().then(() => applyRuntime(ctx, config));
   }
   return applyRuntime(ctx, config);

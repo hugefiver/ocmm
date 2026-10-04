@@ -29,7 +29,7 @@ export function registerHeadlessRoleTools(ctx, controller, getSettings) {
                 const current = getSettings(execution.agent);
                 if (controller.active(execution.agent, current.defaultActive) || isDsmmRoleId(resolveSelectedAgentPreset(execution.agent?.session)))
                     return undefined;
-                return "dsmm role tools require an active deepwork session or DSMM-selected preset";
+                return "DW role tools require an active Deepwork session or DW-selected preset";
             });
             agentCtx.effect?.(() => guard);
             const catalog = agentCtx.tools;

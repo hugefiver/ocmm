@@ -1,3 +1,3 @@
 id: dsmm-plan-critic
-name: 'DSMM Plan Critic'
+name: 'DW Plan Critic'
 description: 'Checks implementation plans for ambiguity, missing evidence, and unsafe sequencing.'

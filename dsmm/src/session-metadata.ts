@@ -8,7 +8,7 @@ export function assertDsmmMetadataPersistence(ctx: DshContext | undefined): void
   const persistence = ctx?.get?.("sessionPersistence");
   if (persistence !== undefined && (typeof persistence !== "object" || persistence === null
     || (persistence as Record<symbol, unknown>)[DSMM_PERSISTENCE_COMPATIBILITY] !== true)) {
-    throw new Error("DSMM requires @dsmm/dsmm/session-persistence for durable session metadata; no unsafe event was appended");
+    throw new Error("Deepwork requires @dsmm/dsmm/session-persistence for durable session metadata; no unsafe event was appended");
   }
 }
 
@@ -30,7 +30,7 @@ export function annotateDsmmEvent<T extends { type: string; data?: unknown; igno
     : Reflect.ownKeys(record).length === 3 && record.version === 1 && isDsmmRoleId(record.role)
       && (record.policy === null || typeof record.policy === "string" && /^[a-f0-9]{64}$/u.test(record.policy)));
   if (!validEnvelope || !valid || event.ignorable !== undefined && event.ignorable !== true) {
-    throw new TypeError("invalid DSMM session metadata; refusing to mark it ignorable");
+    throw new TypeError("invalid Deepwork session metadata; refusing to mark it ignorable");
   }
   return event.ignorable === true ? event as T & { ignorable: true } : { ...event, ignorable: true };
 }

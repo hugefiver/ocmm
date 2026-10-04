@@ -41,7 +41,7 @@ function isProfileId(value) {
   return typeof value === "string" && idPattern.test(value) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value);
 }
 function fail(field) {
-  throw new TypeError(`Invalid DSMM profile wire field: ${field}`);
+  throw new TypeError(`Invalid Deepwork profile wire field: ${field}`);
 }
 function text(value, field, maximum = 1024) {
   if (typeof value !== "string" || value.length > maximum) fail(field);
@@ -1647,7 +1647,7 @@ var ProfilesController = class {
 // src/client/locales.ts
 var NS = "settings.dsmm-profiles";
 var en = {
-  title: "DSMM Profiles",
+  title: "Deepwork Profiles",
   description: "Save independent runtime configurations and choose which one new sessions use.",
   newSessions: "Apply and reset affect new sessions only. Existing sessions, including blank sessions, keep their current policy. A cold resume uses the currently applied policy.",
   editorSelect: "Profile to edit",
@@ -1687,14 +1687,14 @@ var en = {
   conflict: "The saved file or selection changed elsewhere. Your draft and the prior selection were kept. Refresh profiles, then reload the saved profile or review your draft before retrying.",
   validation: "This profile is not valid. Correct the field below; your draft is unchanged.",
   io: "The Host could not commit this operation. Your draft and the prior selection were kept. Check profile storage access, refresh, then retry.",
-  unavailable: "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or DSMM is enabled.",
+  unavailable: "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or Deepwork is enabled.",
   transport: "The native connection could not confirm this operation. Your draft is kept. Refresh the Host state before retrying; do not assume a save or apply completed.",
   invalidProfile: "Unavailable profile: {id}",
   details: "Host diagnostic",
   retry: "Resolve the diagnostic, refresh profiles, then retry."
 };
 var zh = {
-  title: "DSMM 配置档",
+  title: "Deepwork 配置档",
   description: "保存独立的运行时配置，并选择新会话使用的配置档。",
   newSessions: "应用和重置仅影响新会话。已有会话（包括空白会话）保留原策略。冷恢复使用当前已应用的策略。",
   editorSelect: "要编辑的配置档",
@@ -1734,7 +1734,7 @@ var zh = {
   conflict: "已保存文件或选择已被其他操作修改。草稿和原选择已保留。请刷新配置档，然后重新加载已保存配置档或检查草稿后重试。",
   validation: "此配置档无效。请修正下方字段；草稿未改变。",
   io: "Host 无法提交此操作。草稿和原选择已保留。请检查配置档存储权限，刷新后重试。",
-  unavailable: "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 DSMM 后请刷新。",
+  unavailable: "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 Deepwork 后请刷新。",
   transport: "原生连接无法确认此操作。草稿已保留。重试之前请刷新 Host 状态；不要假定保存或应用已完成。",
   invalidProfile: "不可用配置档：{id}",
   details: "Host 诊断",

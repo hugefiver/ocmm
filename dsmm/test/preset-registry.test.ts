@@ -6,7 +6,7 @@ import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DshContext } from "../lib/dsh-types.js";
 
 test("native DSH registration declares enabled root roles and keeps auxiliary child tools", async () => {
-  const definitions: Array<{ id: string; plugins: Array<{ name: string; config?: Record<string, unknown> }> }> = [];
+  const definitions: Array<{ id: string; name: string; plugins: Array<{ name: string; config?: Record<string, unknown> }> }> = [];
   const registry = {
     async register(definition: typeof definitions[number]) {
       definitions.push(definition);
@@ -26,6 +26,7 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
   await installer({ get: (name) => (name === "agentPresets" ? registry : name === "agents" ? { list: () => [], get: () => undefined } : { guard: () => () => {} }) as never, on() {} });
 
   assert.deepEqual(definitions.map((item) => item.id), ["dsmm-orchestrator", "dsmm-planner", "dsmm-builder"]);
+  assert.deepEqual(definitions.map((item) => item.name), ["DW Orchestrator", "DW Planner", "DW Builder"]);
   assert.equal(definitions.some((item) => DSMM_ROLES.some((role) => role.id === item.id && !isRootRole(role))), false);
   const orchestrator = definitions[0];
   assert.ok(orchestrator);

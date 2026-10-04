@@ -1,14 +1,16 @@
-# Settings and status
+# Deepwork settings and status
 
 ## Commands and inspection
 
 `/deepwork [off|message]` changes the receiving session's mode. `/dsmm-status` reports bounded normalized state; `/dsmm-status json` returns a defensive JSON snapshot with version 1. Other input returns `Usage: /dsmm-status [json]`.
 
+Human-facing status/mode copy uses Deepwork. The technical commands, JSON fields, namespace and configurable `modeName` remain unchanged in 0.1.3.
+
 Commands belong to the native command adapter. Headless task text is not a slash-command invocation.
 
 ## DSH 0.2 deployment configuration
 
-The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; 0.1.2 adds runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
+The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; the 0.1.3 source contract includes runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
 
 ```yaml
 - id: dsmm
@@ -28,7 +30,7 @@ The Loader plugin entry remains the deployment baseline. Structural fields are *
       enabled: false
 ```
 
-The 0.1.2 source update adds an additive native Settings **DSMM Profiles** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
+The 0.1.3 source contract includes the additive native Settings **Deepwork Profiles** / **Deepwork 配置档** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
 
 Save changes only the draft. Explicit apply pins an immutable revision and changes settings for **new Agents only**; existing live Agents, including blank Agents, retain their admitted snapshots. Children and recovery inherit the parent snapshot. After restart, cold-resumed sessions use the current selection, not historical per-session settings. Reset restores the deployment baseline for future Agents and leaves drafts intact.
 

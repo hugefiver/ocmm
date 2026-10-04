@@ -1,6 +1,6 @@
 export const NS = "settings.dsmm-profiles";
 export const en = {
-  title: "DSMM Profiles", description: "Save independent runtime configurations and choose which one new sessions use.",
+  title: "Deepwork Profiles", description: "Save independent runtime configurations and choose which one new sessions use.",
   newSessions: "Apply and reset affect new sessions only. Existing sessions, including blank sessions, keep their current policy. A cold resume uses the currently applied policy.",
   editorSelect: "Profile to edit", choose: "Choose a profile", newDraft: "New unsaved profile", new: "New profile",
   profileId: "Profile ID (name)", idHint: "Use 1–64 lowercase letters, digits, hyphens or underscores. The ID cannot be changed after saving. Add an optional display label in the JSONC document.",
@@ -18,13 +18,13 @@ export const en = {
   conflict: "The saved file or selection changed elsewhere. Your draft and the prior selection were kept. Refresh profiles, then reload the saved profile or review your draft before retrying.",
   validation: "This profile is not valid. Correct the field below; your draft is unchanged.",
   io: "The Host could not commit this operation. Your draft and the prior selection were kept. Check profile storage access, refresh, then retry.",
-  unavailable: "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or DSMM is enabled.",
+  unavailable: "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or Deepwork is enabled.",
   transport: "The native connection could not confirm this operation. Your draft is kept. Refresh the Host state before retrying; do not assume a save or apply completed.",
   invalidProfile: "Unavailable profile: {id}", details: "Host diagnostic", retry: "Resolve the diagnostic, refresh profiles, then retry.",
 };
 export type ProfilesLocaleKey = keyof typeof en;
 export const zh: Record<ProfilesLocaleKey, string> = {
-  title: "DSMM 配置档", description: "保存独立的运行时配置，并选择新会话使用的配置档。",
+  title: "Deepwork 配置档", description: "保存独立的运行时配置，并选择新会话使用的配置档。",
   newSessions: "应用和重置仅影响新会话。已有会话（包括空白会话）保留原策略。冷恢复使用当前已应用的策略。",
   editorSelect: "要编辑的配置档", choose: "选择配置档", newDraft: "新的未保存配置档", new: "新建配置档",
   profileId: "配置档 ID（名称）", idHint: "使用 1–64 个小写字母、数字、连字符或下划线。保存后不能修改 ID。可在 JSONC 文档中添加可选的显示名称 label。",
@@ -42,7 +42,7 @@ export const zh: Record<ProfilesLocaleKey, string> = {
   conflict: "已保存文件或选择已被其他操作修改。草稿和原选择已保留。请刷新配置档，然后重新加载已保存配置档或检查草稿后重试。",
   validation: "此配置档无效。请修正下方字段；草稿未改变。",
   io: "Host 无法提交此操作。草稿和原选择已保留。请检查配置档存储权限，刷新后重试。",
-  unavailable: "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 DSMM 后请刷新。",
+  unavailable: "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 Deepwork 后请刷新。",
   transport: "原生连接无法确认此操作。草稿已保留。重试之前请刷新 Host 状态；不要假定保存或应用已完成。",
   invalidProfile: "不可用配置档：{id}", details: "Host 诊断", retry: "请解决诊断问题，刷新配置档后重试。",
 };

@@ -96,7 +96,7 @@ export class ProfileStore {
       const name = this.draftName(request.id, entries);
       const current = name === undefined ? undefined : this.draft(request.id, entries);
       if ((current?.revision ?? null) !== request.expectedRevision) conflict("The profile changed since it was opened. Reload it before saving.");
-      if (current === undefined && entries.length >= MAX_PROFILE_COUNT) throw new DsmmProfileError("limit", "At most 128 DSMM profiles are supported.");
+      if (current === undefined && entries.length >= MAX_PROFILE_COUNT) throw new DsmmProfileError("limit", "At most 128 Deepwork profiles are supported.");
       const bytes = Buffer.from(request.content, "utf8");
       const target = join(this.profileDir, `${request.id}.jsonc`);
       this.atomicReplace(target, bytes, () => {
@@ -177,7 +177,7 @@ export class ProfileStore {
   private draft(id: string, entries: string[]): ProfileDraft {
     validateProfileId(id);
     const name = this.draftName(id, entries);
-    if (name === undefined) throw new DsmmProfileError("not-found", "The requested DSMM profile does not exist.");
+    if (name === undefined) throw new DsmmProfileError("not-found", "The requested Deepwork profile does not exist.");
     const file = regularFile(join(this.profileDir, name), MAX_PROFILE_BYTES);
     return { ...file, document: parseProfileDocument(file.content, id) };
   }
@@ -309,7 +309,7 @@ export class ProfileStore {
       return await operation(assertLock);
     } catch (error) {
       if (error instanceof DsmmProfileError) throw error;
-      throw new DsmmProfileError("io", "DSMM profile storage failed. Existing files and the previous selection were retained.");
+      throw new DsmmProfileError("io", "Deepwork profile storage failed. Existing files and the previous selection were retained.");
     } finally {
       if (fd !== undefined) {
         try { closeSync(fd); } catch { /* A committed pointer must remain a successful transaction. */ }

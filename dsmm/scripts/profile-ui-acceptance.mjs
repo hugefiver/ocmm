@@ -266,7 +266,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.equal(report.browserBoot.sessionScope.provider, "uiSession", "native root renderer requires the real UiSession scope owner");
     assert.equal(report.browserBoot.sessionScope.installed, true);
     assert.equal(report.browserBoot.sessionScope.noActiveSession, true, "owned settings component must preserve the native absent-Session projection");
-    await page.getByRole("heading", { name: "DSMM Profiles", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Deepwork Profiles", exact: true }).waitFor();
     await idle();
     report.nativeClient.seed = await page.evaluate(() => window.__dsmmNativeSeedProof);
     assert.match(report.nativeClient.seed.reactVersion, /^18\./u);

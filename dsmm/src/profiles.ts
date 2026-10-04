@@ -39,7 +39,7 @@ export class DsmmProfileError extends Error {
 }
 
 export function profileErrorInfo(error: unknown, fallback: ProfileErrorCode = "io"): ProfileErrorInfo {
-  return error instanceof DsmmProfileError ? error.toInfo() : { code: fallback, message: "DSMM profile operation failed; the previous selection and files were retained." };
+  return error instanceof DsmmProfileError ? error.toInfo() : { code: fallback, message: "Deepwork profile operation failed; the previous selection and files were retained." };
 }
 
 export function validateProfileId(id: unknown): asserts id is string {
@@ -85,7 +85,7 @@ export function parseProfileDocument(content: string, expectedId?: string): Dsmm
   optional(overlay, "runtimeRecovery", recovery, "settings");
   const result = clone(document) as DsmmProfileDocument;
   // The package's existing resolver remains authoritative for semantic normalization.
-  try { resolveConfig(result.settings); } catch { invalid("settings", "contains an invalid DSMM runtime policy"); }
+  try { resolveConfig(result.settings); } catch { invalid("settings", "contains an invalid Deepwork runtime policy"); }
   return result;
 }
 

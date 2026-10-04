@@ -13,7 +13,7 @@ export function apply(ctx, config) {
       agent: context.agent?.id,
       dsmm: final.sections.some((section) => section.name === "dsmm:deepwork" && section.text.includes("DEEPWORK MODE ENABLED")),
       flash: final.sections.some((section) => section.text.includes("dsmm-deepseek-flash-calibration")),
-      reviewer: final.sections.some((section) => section.text.includes("You are dsmm-reviewer")),
+      reviewer: final.sections.some((section) => section.text.includes("You are DW Reviewer (role ID: dsmm-reviewer)")),
       roleTools: final.tools.filter((tool) => tool.name.startsWith("dsmm_")).map((tool) => tool.name),
       tools: final.tools.map((tool) => tool.name)
     });

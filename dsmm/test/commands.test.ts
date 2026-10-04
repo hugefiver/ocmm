@@ -69,7 +69,7 @@ test("registerDsmmStatusCommand is optional and resolves commands through get wi
   assert.doesNotThrow(() => registerDsmmStatusCommand(ctx, controller, () => DEFAULT_DSMM_SETTINGS));
   assert.equal(commands.length, 1);
   assert.equal(commands[0]?.name, DSMM_STATUS_COMMAND);
-  assert.match(commands[0]?.description ?? "", /DSMM status/i);
+  assert.match(commands[0]?.description ?? "", /Deepwork status/i);
   assert.equal(commands[0]?.input?.hint, "[json]");
 });
 

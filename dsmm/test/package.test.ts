@@ -51,7 +51,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.1.2");
+  assert.equal(pkg.version, "0.1.3");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -68,13 +68,16 @@ test("package manifest exposes dsh bundle metadata", () => {
     "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
     "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
     "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/en.json": "./locale/en.json",
+    "./locale/zh.json": "./locale/zh.json"
   });
   assert.deepEqual(pkg.files, [
     "lib/**/*.js",
     "lib/**/*.d.ts",
     "scripts/repair-session-log.mjs",
     "scripts/session-repair-native-verifier.mjs",
+    "locale/*.json",
     "agent-presets",
     "docs/agent-presets.md",
     "docs/compatibility.md",
@@ -127,12 +130,27 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
 });
 
-test("package includes only the exact operator repair entrypoints without additional public exports", () => {
+test("package includes only the exact operator repair entrypoints without exposing repair APIs", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   const scripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
   assert.deepEqual(pkg.files.filter((path: string) => path.startsWith("scripts")), scripts);
   assert.equal(Object.keys(pkg.exports).some((path) => /repair|operator/u.test(path)), false);
   for (const path of scripts) assert.equal(existsSync(join(packageRoot, path)), true, path);
+});
+
+test("exported native plugin metadata displays Deepwork in both languages without renaming the package", () => {
+  const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  assert.equal(pkg.name, "@dsmm/dsmm");
+  for (const language of ["en", "zh"]) {
+    const resource = `locale/${language}.json`;
+    assert.equal(pkg.exports[`./${resource}`], `./${resource}`);
+    const metadata = JSON.parse(readFileSync(join(packageRoot, resource), "utf8"));
+    assert.deepEqual(Object.keys(metadata), ["meta"]);
+    assert.deepEqual(Object.keys(metadata.meta).sort(), ["description", "title"]);
+    assert.equal(metadata.meta.title, "Deepwork");
+    assert.equal(typeof metadata.meta.description, "string");
+    assert.ok(metadata.meta.description.trim().length > 0);
+  }
 });
 
 test("README local documentation links are shipped by the package", () => {

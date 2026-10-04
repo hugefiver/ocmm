@@ -33,7 +33,7 @@ export function isProfileId(value: unknown): value is string {
     && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value);
 }
 
-function fail(field: string): never { throw new TypeError(`Invalid DSMM profile wire field: ${field}`); }
+function fail(field: string): never { throw new TypeError(`Invalid Deepwork profile wire field: ${field}`); }
 function text(value: unknown, field: string, maximum = 1024): string {
   if (typeof value !== "string" || value.length > maximum) fail(field);
   return value;

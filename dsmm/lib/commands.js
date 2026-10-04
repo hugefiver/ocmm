@@ -38,7 +38,7 @@ export function registerDeepworkCommand(readyCtx, controller, getSettings) {
     const commands = readyCtx.get?.("commands") ?? readyCtx.commands;
     commands?.register({
         name: getSettings().modeName,
-        description: "Enter or leave dsmm deepwork mode",
+        description: "Enter or leave Deepwork mode",
         input: { hint: "[off|message]" },
         handler: (invocation) => handleDeepworkCommand(controller, getSettings, invocation)
     });
@@ -47,7 +47,7 @@ export function registerDsmmStatusCommand(readyCtx, controller, getSettings) {
     const commands = readyCtx.get?.("commands") ?? readyCtx.commands;
     commands?.register({
         name: DSMM_STATUS_COMMAND,
-        description: "Show DSMM status",
+        description: "Show Deepwork status",
         input: { hint: "[json]" },
         handler: (invocation) => handleDsmmStatusCommand(controller, getSettings, invocation)
     });

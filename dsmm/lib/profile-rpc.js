@@ -64,7 +64,7 @@ let DsmmProfilesHost = (() => {
         async invoke(operation) {
             const invocation = this.ctx.invocation;
             if (invocation === undefined || invocation.peer === undefined) {
-                throw new RemoteError("dsmm-profiles/peer-required", "Use DSMM Profiles through the native Host connection.", {});
+                throw new RemoteError("dsmm-profiles/peer-required", "Use Deepwork Profiles through the native Host connection.", {});
             }
             invocation.signal.throwIfAborted();
             try {

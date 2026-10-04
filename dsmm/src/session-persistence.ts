@@ -277,10 +277,10 @@ export default class DsmmSessionPersistence extends SessionPersistence {
 
   private warn(id: SessionId, error: unknown): void {
     const errorClass = error instanceof Error && /^[A-Za-z][A-Za-z0-9]*Error$/u.test(error.name) ? error.name : "Error";
-    this.ctx.logger.warn("DSMM session persistence failed", { sessionId: id, errorClass });
+    this.ctx.logger.warn("Deepwork session persistence failed", { sessionId: id, errorClass });
   }
 
   private assertActive(): void {
-    if (this.disposed) throw new Error("DSMM session persistence is disposed");
+    if (this.disposed) throw new Error("Deepwork session persistence is disposed");
   }
 }

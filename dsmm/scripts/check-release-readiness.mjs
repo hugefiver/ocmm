@@ -9,10 +9,12 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
 const repositoryLicensePath = resolve(scriptDirectory, "..", "..", "LICENSE");
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
+const metadataResources = ["locale/en.json", "locale/zh.json"];
 
 const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
   ...operatorScripts,
+  ...metadataResources,
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
@@ -29,6 +31,7 @@ const expectedFiles = [
   "lib/**/*.js",
   "lib/**/*.d.ts",
   ...operatorScripts,
+  "locale/*.json",
   "agent-presets",
   "docs/agent-presets.md",
   "docs/compatibility.md",
@@ -57,6 +60,8 @@ const expectedExports = {
   "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
+  "./locale/en.json": "./locale/en.json",
+  "./locale/zh.json": "./locale/zh.json",
   "./package.json": "./package.json"
 };
 
@@ -171,6 +176,8 @@ function npmEnvironment() {
   );
 }
 
+// npm's dry-run is a metadata-only size/inventory diagnostic. Actual release
+// packing and publication use pnpm; this preview is not frozen-artifact proof.
 function runPack(packageRoot) {
   const isWindows = process.platform === "win32";
   if (isWindows && /[&|<>^%!\r\n]/u.test(packageRoot)) {
@@ -274,7 +281,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.2",
+    version: "0.1.3",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -295,7 +302,7 @@ function validateManifest(manifest, errors) {
   if (manifest.type !== "module") errors.push("manifest.type must equal module");
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
-  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the five public exports");
+  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the seven public exports");
   if (!isDeepStrictEqual(manifest.engines, { node: ">=22" })) errors.push("manifest.engines must equal the Node 22 policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
@@ -337,7 +344,26 @@ function isForbiddenPath(path) {
   const segments = path.split("/");
   const forbiddenScript = segments.some((segment) => segment.toLowerCase() === "scripts")
     && !operatorScripts.includes(path) && path !== "skills/debugging/references/scripts/dap.mjs";
-  return segments.some((segment) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules"].includes(segment.toLowerCase())) || forbiddenScript || /\.(?:test|spec)\.[^/]+$/u.test(path) || path.endsWith(".map") || path.endsWith(".tgz") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
+  const forbiddenMetadataResource = /^locale\//iu.test(path) && !metadataResources.includes(path);
+  return segments.some((segment) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules"].includes(segment.toLowerCase())) || forbiddenScript || forbiddenMetadataResource || /\.(?:test|spec)\.[^/]+$/u.test(path) || path.endsWith(".map") || path.endsWith(".tgz") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
+}
+
+function validatePluginMetadata(packageRoot, paths, errors) {
+  for (const resource of metadataResources) {
+    if (!paths.has(resource)) continue;
+    try {
+      const value = JSON.parse(readFileSync(resolve(packageRoot, resource), "utf8"));
+      if (value === null || Array.isArray(value) || typeof value !== "object"
+        || !isDeepStrictEqual(Object.keys(value), ["meta"])
+        || value.meta === null || Array.isArray(value.meta) || typeof value.meta !== "object"
+        || !isDeepStrictEqual(Object.keys(value.meta).sort(compareBytewise), ["description", "title"])
+        || value.meta.title !== "Deepwork" || typeof value.meta.description !== "string" || value.meta.description.trim().length === 0) {
+        throw new Error("invalid plugin metadata");
+      }
+    } catch {
+      errors.push(`plugin metadata resource must contain exactly Deepwork title and nonempty description: ${resource}`);
+    }
+  }
 }
 
 function validateNativeClient(packageRoot, paths, errors) {
@@ -403,9 +429,10 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.2") errors.push("npm pack receipt version must equal 0.1.2");
+  if (entry.version !== "0.1.3") errors.push("npm pack receipt version must equal 0.1.3");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
+  validatePluginMetadata(packageRoot, paths, errors);
   validateNativeClient(packageRoot, paths, errors);
   validateProfileDeploymentBoundary(packageRoot, errors);
 

@@ -115,7 +115,7 @@ export class DsmmProfileRuntime {
                         throw new Error("unusable root preset");
                 }
                 catch {
-                    throw new DsmmProfileError("activation", "An enabled DSMM root preset is unavailable. Resolve the native preset loading error before applying a profile.", role.id);
+                    throw new DsmmProfileError("activation", "An enabled DW root preset is unavailable. Resolve the native preset loading error before applying a profile.", role.id);
                 }
             }
         }
@@ -151,7 +151,7 @@ export class DsmmProfileRuntime {
 export async function createProfileRuntime(ctx, baseline) {
     const profile = ctx.get?.("profileContext");
     if (typeof profile?.dir !== "string" || profile.dir.trim() === "")
-        throw new DsmmProfileError("activation", "DSMM profiles require the native deployment profile directory.");
+        throw new DsmmProfileError("activation", "Deepwork profiles require the native deployment profile directory.");
     const runtime = new DsmmProfileRuntime(ctx, baseline, new ProfileStore(join(profile.dir, "dsmm-profiles")));
     await runtime.initialize();
     return runtime;

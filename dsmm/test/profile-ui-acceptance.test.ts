@@ -123,6 +123,7 @@ test("acceptance hook enters the real native Host after appReady and never impor
   assert.match(source, /peer = ctx\.get\("connection"\)\.operator/u);
   assert.match(source, /gateway\.invoke\(/u);
   assert.match(source, /browser\.newContext\(/u);
+  assert.match(source, /getByRole\("heading", \{ name: "Deepwork Profiles", exact: true \}\)/u);
   assert.match(source, /persistence\[Symbol\.for\("dsmm\.sessionPersistence\.ignorable\.v1"\)\]/u);
   assert.match(source, /removeOwnedUiRoot/u);
   assert.doesNotMatch(source, /join\(packageRoot, "lib", "index\.js"\)/u);

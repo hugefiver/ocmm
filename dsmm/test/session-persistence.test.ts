@@ -223,7 +223,7 @@ test("failed native live writes retain their batch, pause automatic retries, and
     t.mock.timers.tick(1000);
     await Promise.resolve();
     assert.equal(warnings.length, 1);
-    assert.deepEqual(warnings[0], ["DSMM session persistence failed", { sessionId: session.id, errorClass: "Error" }]);
+    assert.deepEqual(warnings[0], ["Deepwork session persistence failed", { sessionId: session.id, errorClass: "Error" }]);
     assert.doesNotMatch(JSON.stringify(warnings), /obstruction|bbbb|logs|ENOTDIR/);
     await assert.rejects(f.ctx.sessions.flush(session));
     await unlink(f.root);

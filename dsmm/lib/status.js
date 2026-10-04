@@ -1,6 +1,6 @@
 import { classifyModelFamily } from "./model-family.js";
 import { isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
-import { isDsmmRoleId } from "./roles.js";
+import { DSMM_ROLES, isDsmmRoleId } from "./roles.js";
 import { effectiveRoleFallbackRoutes, persistedRoleRoute, rolePolicyIdentity } from "./role-routing.js";
 import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 export const DSMM_STATUS_VERSION = 1;
@@ -85,11 +85,12 @@ export function createDsmmStatusSnapshot(input) {
     };
 }
 export function formatDsmmStatus(snapshot) {
+    const displayRole = (id) => DSMM_ROLES.find((role) => role.id === id)?.name ?? id ?? "none";
     const scope = snapshot.rolePolicy.role !== undefined && snapshot.rolePolicy.role !== "dsmm-orchestrator"
         && snapshot.rolePolicy.role !== snapshot.mode.selectedPreset
-        ? `${snapshot.rolePolicy.role} role`
+        ? `${displayRole(snapshot.rolePolicy.role)} role`
         : snapshot.mode.inScope && snapshot.mode.dsmmPreset && snapshot.mode.selectedPreset
-            ? `${snapshot.mode.selectedPreset} preset`
+            ? `${displayRole(snapshot.mode.selectedPreset)} preset`
             : snapshot.mode.inScope
                 ? "active deepwork"
                 : "out of scope";
@@ -98,12 +99,12 @@ export function formatDsmmStatus(snapshot) {
     const policyEffort = snapshot.calibration.policyEffort ?? "not applicable";
     const currentReasoningEffort = snapshot.route.currentReasoningEffort ?? "provider default";
     return [
-        "DSMM status",
+        "Deepwork status",
         `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
         `Scope: ${scope}`,
         `Workflow policy: ${snapshot.effectiveSettings.workflow.policy}`,
         `Route: ${provider}/${model} [${snapshot.route.family}]`,
-        `Role policy: ${snapshot.rolePolicy.role ?? "none"}; primary=${snapshot.rolePolicy.primary === undefined ? "inherit" : `${snapshot.rolePolicy.primary.provider}/${snapshot.rolePolicy.primary.model}`}; fallbacks=${snapshot.rolePolicy.fallbackSource}`,
+        `Role policy: ${displayRole(snapshot.rolePolicy.role)}; primary=${snapshot.rolePolicy.primary === undefined ? "inherit" : `${snapshot.rolePolicy.primary.provider}/${snapshot.rolePolicy.primary.model}`}; fallbacks=${snapshot.rolePolicy.fallbackSource}`,
         `Reasoning: ${snapshot.calibration.mode}; policy=${policyEffort}; current=${currentReasoningEffort}; action=${snapshot.calibration.action}`,
         `Runtime recovery: ${snapshot.runtimeRecovery.enabled ? "enabled" : "disabled"}; applies=${snapshot.runtimeRecovery.applies ? "yes" : "no"}; fallbacks=${snapshot.runtimeRecovery.fallbackRouteCount}; max attempts=${snapshot.runtimeRecovery.maxFallbackAttempts}`,
         `Idle continuation: ${snapshot.runtimeRecovery.idleContinuation.enabled ? "enabled" : "disabled"}; max=${snapshot.runtimeRecovery.idleContinuation.maxContinuations}`,

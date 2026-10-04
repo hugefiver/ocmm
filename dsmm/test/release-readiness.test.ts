@@ -32,6 +32,7 @@ interface ReleaseReceipt {
 const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
   "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
+  "locale/en.json", "locale/zh.json",
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
@@ -163,7 +164,7 @@ const expectedCompatibility = [
   ["Linux container", "Node 22 Bookworm"],
   ["Windows Desktop", "installed official `0.2.0-rc.2` carrier/host"],
   ["macOS", "Node >=22"],
-  ["Native Settings", "additive DSMM Profiles client and authenticated RPC"],
+  ["Native Settings", "additive Deepwork Profiles client and authenticated RPC"],
   ["Headless", "deployment config and native role tools"],
   ["TUI", "DSH 0.2.0-rc.2"],
   ["LSP/MCP", "external ocmm-lsp mcp"],
@@ -279,7 +280,7 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
 test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
-  assert.match(compatibility, /^# DSMM 0\.1\.2 Compatibility/mu);
+  assert.match(compatibility, /^# Deepwork 0\.1\.3 Compatibility/mu);
   for (const heading of ["Compatibility authority", "Compatibility matrix", "Command and runtime boundaries", "Evidence limits"]) {
     assert.match(compatibility, new RegExp(`^## ${heading}$`, "mu"));
   }
@@ -298,7 +299,7 @@ test("compatibility document fixes command, headless, platform, and provider bou
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
   assert.ok(compatibility.includes("`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands."));
-  assert.match(compatibility, /native client adds Settings → DSMM Profiles/u);
+  assert.match(compatibility, /native client provides Settings → Deepwork Profiles/u);
   assert.match(compatibility, /no model-visible profile-management tools or anonymous file endpoints/u);
   assert.ok(compatibility.includes("Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`."));
   assert.ok(compatibility.includes("Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file."));
@@ -376,21 +377,22 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.match(release, /^# DSMM 0\.1\.2 Release and Rollback$/mu);
+  assert.match(release, /^# Deepwork 0\.1\.3 Release and Rollback$/mu);
   const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
   const phaseOffsets = phases.map((phase) => release.indexOf(phase));
   assert.ok(phaseOffsets.every((offset) => offset >= 0));
   assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.2",
+    "dsmm-scoped-v0.1.3",
     "explicit authorization",
-    "npm Trusted Publishing",
-    "no DSMM lane",
+    "npm Trusted Publisher registration",
+    ".github/workflows/dsmm-release.yml",
+    "scripts/check-dsmm-release-completion.mjs",
     "never overwrite an npm version",
     "never move, delete, or recreate an immutable tag",
-    "same frozen tarball",
-    "npm publish <reviewed-dsmm-dsmm-0.1.2.tgz>",
+    "that exact tarball with native pnpm",
+    "OIDC and genuine provenance enabled",
     "dist.integrity",
     "SHA256SUMS.txt",
     "fully quit"
@@ -419,32 +421,43 @@ test("release guide fixes the preflight, publication, verification, and rollback
   assert.match(preflight, /DSH 0\.2\.0-rc\.2/u);
   assert.match(preflight, /license parity/i);
   assert.match(preflight, /root.*typecheck.*test.*build/is);
-  assert.match(preflight, /exact shipped client\/profile assets/i);
+  assert.match(preflight, /Inspect the preview for client\/profile assets/i);
+  assert.match(preflight, /npm pack --dry-run --json.*metadata diagnostic/u);
+  assert.match(preflight, /not release packaging/u);
+  assert.match(preflight, /Use pnpm.*pack\/publish/u);
+  assert.match(preflight, /readPluginMeta.*installed resources/u);
 
   const dockerGate = release.slice(phaseOffsets[0], phaseOffsets[1]);
   assert.match(dockerGate, /explicit artifact path and expected SHA256/u);
   assert.match(dockerGate, /fail closed.*missing\/mismatched/u);
   assert.match(dockerGate, /must not build, repack/u);
   assert.match(dockerGate, /packedSha256/u);
-  assert.match(dockerGate, /same packaged compiled DSMM UI.*native client\/slots/iu);
+  assert.match(dockerGate, /same packaged compiled Deepwork Profiles UI.*native client\/slots/iu);
   assert.match(dockerGate, /immutable-revision\/pointer bytes/u);
   assert.match(dockerGate, /existing even-blank Agent retention/u);
   assert.match(dockerGate, /Do not mount or copy Desktop\/global configuration.*credentials/u);
+  assert.match(dockerGate, /Node 24 \/ pnpm 11\.9\.0/u);
+  assert.match(dockerGate, /one new actual tarball/u);
+  assert.match(dockerGate, /Native metadata reader yields Deepwork from both packaged locales/u);
   const postPublication = release.slice(release.indexOf("### Publication identity verification"), phaseOffsets[2]);
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
     "registry installation",
-    "plugin --profile dsmm-0.1.2-verify list",
+    "plugin --profile dsmm-0.1.3-verify list",
     "--dump-config",
     "installed registry package",
-    "DSMM-specific release receipt"
+    "scripts/check-dsmm-release-completion.mjs",
+    "bootstrapImport: null",
+    "COMPLETED"
   ]) {
     assert.ok(postPublication.includes(phrase), `post-publication verification includes ${phrase}`);
   }
   const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
-  assert.match(desktopGate, /Only after both preceding gates pass/u);
+  assert.match(postPublication, /import-bootstrap.*skipped \/ NOT_APPLICABLE/u);
+  assert.match(postPublication, /Workflow success alone is insufficient/u);
+  assert.match(desktopGate, /Only after terminal 0\.1\.3 completion/u);
   assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
-  assert.match(desktopGate, /actual native profile UI create\/edit\/save\/apply\/reset/u);
+  assert.match(desktopGate, /actual Deepwork Profiles UI create\/edit\/save\/apply\/reset/u);
   const rollback = release.slice(release.indexOf("## Rollback"));
   assert.match(rollback, /official carrier.*remove `@dsmm\/dsmm`/u);
   assert.match(rollback, /add an exact known immutable version/u);
@@ -469,13 +482,13 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "not a completed publication or Desktop verification",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.2.tgz>",
+    "Publication and Desktop acceptance remain pending",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.3.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
     "real read/write/model round-trip",
-    "independent frozen-artifact Docker acceptance and verified npm/GitHub publication"
+    "publishes through OIDC with genuine provenance"
   ]) {
     assert.ok(readme.includes(phrase), `README includes ${phrase}`);
   }
@@ -494,7 +507,7 @@ test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.2 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.3 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -502,7 +515,7 @@ test("release readiness checker accepts the real 0.1.2 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.2");
+  assert.equal(receipt.version, "0.1.3");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -528,6 +541,84 @@ test("release readiness checker rejects the superseded unscoped package identity
     assert.deepEqual(listTgzPaths(fixtureRoot), tgzBefore);
   } finally {
     removeReleaseFixture(fixtureRoot);
+  }
+});
+
+test("release readiness checker rejects a stale or manifest-selected release version", () => {
+  for (const version of ["0.1.2", "0.1.4"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, (manifest) => { manifest.version = version; });
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, version);
+      assert.equal(receipt.fileCount, 0);
+      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.3"]);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker requires both native Deepwork metadata resources", () => {
+  for (const path of ["locale/en.json", "locale/zh.json"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      rmSync(join(fixtureRoot, ...path.split("/")));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, path);
+      assert.deepEqual(receipt.errors, [`missing required package surface: ${path}`]);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects malformed or noncanonical Deepwork metadata", () => {
+  const cases = [
+    ["invalid JSON", "{not-json}"],
+    ["missing metadata", "{}"],
+    ["wrong title", JSON.stringify({ meta: { title: "DSMM", description: "Workflow bundle" } })],
+    ["empty description", JSON.stringify({ meta: { title: "Deepwork", description: "  \n" } })],
+    ["non-string description", JSON.stringify({ meta: { title: "Deepwork", description: 3 } })],
+    ["unexpected metadata field", JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle", extra: true } })],
+    ["unexpected root field", JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle" }, extra: true })]
+  ];
+  for (const path of ["locale/en.json", "locale/zh.json"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      for (const [label, contents] of cases) {
+        writeFixtureFile(fixtureRoot, path, contents);
+        const { receipt, status } = runReleaseChecker(fixtureRoot);
+        assert.equal(status, 1, `${path}: ${label}`);
+        assert.deepEqual(receipt.errors, [`plugin metadata resource must contain exactly Deepwork title and nonempty description: ${path}`]);
+      }
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects extra locale assets without broadening file policy", () => {
+  const fixtureRoot = createReleaseFixture();
+  try {
+    const extra = "locale/fr.json";
+    writeFixtureFile(fixtureRoot, extra, JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle" } }));
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.equal(receipt.forbiddenSurfaceCount, 1);
+    assert.deepEqual(receipt.errors, [`forbidden package surface: ${extra}`]);
+  } finally { removeReleaseFixture(fixtureRoot); }
+});
+
+test("release readiness checker pins exact locale resource exports", () => {
+  for (const mutate of [
+    (exports: Record<string, unknown>) => { delete exports["./locale/en.json"]; },
+    (exports: Record<string, unknown>) => { exports["./locale/zh.json"] = "./locale/en.json"; },
+    (exports: Record<string, unknown>) => { exports["./locale/en.json"] = "./src/client/locales.ts"; },
+    (exports: Record<string, unknown>) => { exports["./locale/fr.json"] = "./locale/fr.json"; }
+  ]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, (manifest) => mutate(manifest.exports as Record<string, unknown>));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1);
+      assert.equal(receipt.fileCount, 0);
+      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the seven public exports"]);
+    } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
 
@@ -627,7 +718,7 @@ test("release readiness checker preserves the exact history companion export and
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the five public exports"]);
+      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the seven public exports"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });

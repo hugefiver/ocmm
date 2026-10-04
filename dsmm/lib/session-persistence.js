@@ -294,11 +294,11 @@ export default class DsmmSessionPersistence extends SessionPersistence {
     }
     warn(id, error) {
         const errorClass = error instanceof Error && /^[A-Za-z][A-Za-z0-9]*Error$/u.test(error.name) ? error.name : "Error";
-        this.ctx.logger.warn("DSMM session persistence failed", { sessionId: id, errorClass });
+        this.ctx.logger.warn("Deepwork session persistence failed", { sessionId: id, errorClass });
     }
     assertActive() {
         if (this.disposed)
-            throw new Error("DSMM session persistence is disposed");
+            throw new Error("Deepwork session persistence is disposed");
     }
 }
 //# sourceMappingURL=session-persistence.js.map

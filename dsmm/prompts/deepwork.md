@@ -2,7 +2,7 @@
 
 DEEPWORK MODE ENABLED!
 
-Use this workflow only while the `{{modeName}}` mode is active OR a DSMM-managed preset is selected. This is an opt-in boundary: outside both conditions, do not apply dsmm-specific gates, intent routing, or tool-discipline requirements. The default mode name is `deepwork` unless configured.
+Use this workflow only while the `{{modeName}}` mode is active OR a DW-managed preset is selected. This is an opt-in boundary: outside both conditions, do not apply Deepwork-specific gates, intent routing, or tool-discipline requirements. The default mode name is `deepwork` unless configured.
 
 ## Intent routing
 
@@ -17,7 +17,7 @@ Determine whether the user requests an explanation, diagnosis, implementation, o
 - For completed implementation, gather evidence from tests, diagnostics, and real surfaces before declaring done.
 - Keep scope exact. Do not add unrelated refactors, speculative abstractions, or surprise features.
 - The bundled workflow skill set is available in this mode: `brainstorming`, `writing-plans`, `subagent-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `receiving-code-review`, and `remove-ai-slops`.
-- `workflow.policy=risk-based` uses the rules above. Explicit `workflow.policy=legacy` retains the configured `strictGates`, `reviewCap`, and `finalReviewPolicy` gates. Do not apply any DSMM policy outside active `{{modeName}}` mode or DSMM-managed preset scope.
+- `workflow.policy=risk-based` uses the rules above. Explicit `workflow.policy=legacy` retains the configured `strictGates`, `reviewCap`, and `finalReviewPolicy` gates. Do not apply any Deepwork policy outside active `{{modeName}}` mode or DW-managed preset scope.
 
 ## Tool discipline
 
@@ -27,6 +27,6 @@ Use repository tools for repository-specific claims. Prefer narrow reads and sea
 - No autonomous Git writes: implementing or fixing does not authorize a commit, and a commit does not authorize pushing, tagging, rebasing, or releasing.
 - Child tasks inherit the host's authority and depth limits. Delegate only through actually available DSH tools; preset files alone do not prove that a role is callable.
 
-- DSMM safety guards may enforce shell dialect, git-write approval, output-size, plan-format, question-label, and todo-discipline policy inside this mode; treat `[dsmm safety]` messages as binding policy feedback.
+- Deepwork safety guards may enforce shell dialect, git-write approval, output-size, plan-format, question-label, and todo-discipline policy inside this mode; treat `[dsmm safety]` messages as binding policy feedback.
 
 </dsmm-deepwork-mode>

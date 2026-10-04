@@ -1,8 +1,8 @@
-# DSMM runtime profiles (0.1.2 source contract)
+# Deepwork runtime profiles (0.1.3 source contract)
 
-This guide describes the 0.1.2 source contract. It is not evidence of a published package or completed Docker/Desktop acceptance; see [releasing](releasing.md).
+This guide describes the 0.1.3 source contract. It is not evidence of a published package or completed Docker/Desktop acceptance; see [releasing](releasing.md). Deepwork is the display name; package, storage and configuration IDs retain `dsmm` for compatibility.
 
-A DSMM runtime profile is a named file containing runtime policy, not a native deployment profile or an Agent role preset. Native Settings → **DSMM Profiles** provides create/read/edit/save, explicit apply, and reset to the deployment baseline. The native Agent preset selector remains a separate role selector.
+A Deepwork runtime profile is a named file containing runtime policy, not a native deployment profile or an Agent role preset. Native Settings → **Deepwork Profiles** / **Deepwork 配置档** provides create/read/edit/save, explicit apply, and reset to the deployment baseline. The native Agent preset selector remains a separate role selector, displaying `DW …` names under unchanged `dsmm-*` IDs.
 
 ## Files and document format
 

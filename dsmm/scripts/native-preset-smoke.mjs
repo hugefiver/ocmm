@@ -82,7 +82,7 @@ export async function apply(ctx, config) {
         assert.ok(registry, "native Web composition must expose its real Agent preset registry");
         const roster = await registry.list();
         const inventory = await registry.compositionInventory();
-        report.presets = roster.map(({ id, broken }) => ({ id, ...(broken === undefined ? {} : { broken }) }));
+        report.presets = roster.map(({ id, name, broken }) => ({ id, name, ...(broken === undefined ? {} : { broken }) }));
         report.rootIds = roster.filter(({ id }) => id.startsWith("dsmm-")).map(({ id }) => id).sort();
         if (config.nativeOnly) {
           assert.equal(report.rootIds.length, 0, "native control must have no installed DSMM definitions");
@@ -105,6 +105,23 @@ export async function apply(ctx, config) {
         // Audit the real native headless services, not an invented selector.
         assert.equal(registry, undefined, "headless acceptance must preserve the shipped preset-free composition");
         report.checks = { shippedPresetFreeHeadless: true };
+      }
+      if (!config.nativeOnly) {
+        const profile = ctx.get("profileContext");
+        assert.ok(typeof profile?.dir === "string");
+        const profileManifest = join(profile.dir, "package.json");
+        const profileRequire = createRequire(profileManifest);
+        const installed = await import(pathToFileURL(profileRequire.resolve("@dsmm/dsmm")).href);
+        const { readPluginMeta } = await load("@deepseek-ai/dsh-app-boot");
+        const meta = readPluginMeta("@dsmm/dsmm", pathToFileURL(profileManifest).href);
+        assert.equal(meta?.error, undefined);
+        assert.deepEqual(meta?.title, { en: "Deepwork", zh: "Deepwork" });
+        const presetNames = installed.DSMM_ROLES.map(({ id, name }) => ({ id, name }));
+        assert.equal(presetNames.length, 12);
+        assert.ok(presetNames.every(({ name }) => name.startsWith("DW ")));
+        const rootPresetNames = (report.presets ?? []).filter(({ id }) => id.startsWith("dsmm-")).map(({ id, name }) => ({ id, name }));
+        for (const preset of rootPresetNames) assert.deepEqual(preset, presetNames.find(({ id }) => id === preset.id));
+        report.branding = { pluginTitle: meta.title.en, presetNames, rootPresetNames };
       }
       const agents = ctx.get("agents");
       const parentHandle = await agents.create({ sessionId: SessionId(`dsmm-artifact-${config.template}-${config.nativeOnly ? "control" : "installed"}-blank`),
@@ -137,12 +154,12 @@ export async function apply(ctx, config) {
       if (registry !== undefined) {
         await registry.select(parent, "dsmm-orchestrator");
         const orchestrator = await snapshot(parent, registry);
-        assert.match(orchestrator.prompt, /You are dsmm-orchestrator/u);
+        assert.match(orchestrator.prompt, /You are DW Orchestrator \(role ID: dsmm-orchestrator\)/u);
         assert.deepEqual(orchestrator.roleTools, ROLE_TOOLS);
         assert.equal(orchestrator.tools.includes("write"), true);
         await registry.select(parent, "dsmm-planner");
         const planner = await snapshot(parent, registry);
-        assert.match(planner.prompt, /You are dsmm-planner/u);
+        assert.match(planner.prompt, /You are DW Planner \(role ID: dsmm-planner\)/u);
         const plannerDenials = await denyMutations(parent, registry, "planner");
         await registry.select(parent, "dsmm-orchestrator");
         const restored = await snapshot(parent, registry);
@@ -178,7 +195,7 @@ export async function apply(ctx, config) {
         if (descriptor?.provider !== "dsmm-role-reviewer" || checkedChildren.has(agent.id)) return await next();
         checkedChildren.add(agent.id);
         const child = await snapshot(agent, registry);
-        assert.match(child.prompt, /You are dsmm-reviewer/u);
+        assert.match(child.prompt, /You are DW Reviewer \(role ID: dsmm-reviewer\)/u);
         children.push({ agent, provider: descriptor.provider, persona: true, tools: child.tools,
           denied: await denyMutations(agent, registry, "reviewer-child") });
         return await next();

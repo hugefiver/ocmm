@@ -112,16 +112,16 @@ function createFormatterFixture(): DsmmStatusSnapshot {
   };
 }
 
-test("status formatter renders the exact bounded DSMM summary", () => {
+test("status formatter renders the exact bounded Deepwork summary with DW role labels", () => {
   const formatted = formatDsmmStatus(createFormatterFixture());
 
   assert.equal(formatted, [
-    "DSMM status",
+    "Deepwork status",
     "Mode: inactive (deepwork)",
-    "Scope: dsmm-reviewer preset",
+    "Scope: DW Reviewer preset",
     "Workflow policy: risk-based",
     "Route: deepseek-official/deepseek-v4-pro [deepseek]",
-    "Role policy: dsmm-reviewer; primary=inherit; fallbacks=global",
+    "Role policy: DW Reviewer; primary=inherit; fallbacks=global",
     "Reasoning: auto; policy=max; current=high; action=preserve-explicit",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
@@ -176,7 +176,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
   });
 
   assert.equal(formatted, [
-    "DSMM status",
+    "Deepwork status",
     "Mode: inactive (deepwork)",
     "Scope: out of scope",
     "Workflow policy: risk-based",
@@ -215,12 +215,12 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
   });
 
   assert.equal(formatted, [
-    "DSMM status",
+    "Deepwork status",
     "Mode: active (deepwork)",
     "Scope: active deepwork",
     "Workflow policy: risk-based",
     "Route: openai/gpt-5.6 [gpt]",
-    "Role policy: dsmm-orchestrator; primary=inherit; fallbacks=global",
+    "Role policy: DW Orchestrator; primary=inherit; fallbacks=global",
     "Reasoning: auto; policy=not applicable; current=provider default; action=non-target-route",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",

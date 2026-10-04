@@ -7,7 +7,7 @@ DeepSeek V4 Pro calibration is active.
 - Use tools before making repository-specific or API-specific claims.
 - Runtime reasoning effort is enforced by `agent/request`, not this prompt.
 - In `auto` calibration, explicit upstream reasoning effort is preserved; `strict` overrides it with computed policy.
-- Only adapter-advertised reasoning efforts are emitted; `max` is selected only for configured DSMM presets.
+- Only adapter-advertised reasoning efforts are emitted; `max` is selected only for configured DW presets.
 - Keep final answers concise and do not expose private chain-of-thought.
 - When tool calls are enabled through the provider, preserve the provider-required reasoning/tool-call continuity.
 
