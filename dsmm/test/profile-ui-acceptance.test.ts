@@ -11,7 +11,7 @@ import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, 
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { extractNativeThemeStyles, NATIVE_IDS } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { acceptanceChromium, nativeUiStartupPatch, validatedNativeStorage } from "../scripts/profile-ui-acceptance.mjs";
+import { acceptanceChromium, nativeUiStartupPatch, validatedNativeStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
 
 test("acceptance tools load the real required CommonJS face when no synthetic chromium export exists", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "dsmm-playwright-interop-"));
@@ -68,6 +68,18 @@ test("owned browser composition preserves native Connection, renderer and lazy D
 test("native browser Gateway boots with its real Typert registry provider", () => {
   assert.ok(NATIVE_IDS.includes("@deepseek-ai/dsh-typert-registry"), "native client Gateway requires the real typert service before it can activate");
   assert.equal(new Set(NATIVE_IDS).size, NATIVE_IDS.length, "native client providers must materialize once");
+});
+
+test("native root renderer receives the real optional Session scope provider and its complete closure", () => {
+  for (const id of ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"]) {
+    assert.ok(NATIVE_IDS.includes(id), `native session-maybe rendering requires the real provider closure: ${id}`);
+  }
+  assert.doesNotMatch(compositionBundle(), /installScope\(|provide\(['"](?:sessions|uiSession)['"]/u, "the harness must not synthesize a replacement Session provider or adapter");
+});
+
+test("owned native carrier admits the genuine Session observer without broadening stream endpoints", () => {
+  assert.deepEqual(NATIVE_STREAM_ENDPOINTS, ["$events", "session/control"]);
+  assert.doesNotMatch(carrierBootstrap(), /const id='(?:call|stream)-'/u, "reloads must not reuse an outstanding native stream identity");
 });
 
 test("native client preflight reports all actual service requirements and public startup errors", async () => {

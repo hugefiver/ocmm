@@ -45,10 +45,11 @@ export function bootstrapFacade() {
 export function carrierBootstrap() {
   return `(()=>{
     let sequence=0;
+    const generation=crypto.randomUUID();
     const request=value=>window.__dsmmNativeBridge(value);
     window.__dsmmOwnedCarrier={
       async call(channel,endpoint,payload,signal){
-        const id='call-'+(++sequence);
+        const id=generation+'-call-'+(++sequence);
         const cancel=()=>{void request({operation:'cancel',id})};
         signal?.addEventListener('abort',cancel,{once:true});
         try{
@@ -57,7 +58,7 @@ export function carrierBootstrap() {
         }finally{signal?.removeEventListener('abort',cancel)}
       },
       async *open(channel,endpoint,payload,signal){
-        const id='stream-'+(++sequence);
+        const id=generation+'-stream-'+(++sequence);
         const cancel=()=>{void request({operation:'cancel',id})};
         signal.addEventListener('abort',cancel,{once:true});
         try{
@@ -115,6 +116,11 @@ export async function nativeClientPreflight(scope = window) {
     }
     entries.push(row);
   }
+  const uiSession = root?.get("uiSession");
+  const scopeBinding = uiSession?.adapter.current.getSnapshot();
+  const sessionScope = { provider: uiSession?.name, installed: uiSession?.adapter !== undefined,
+    noActiveSession: scopeBinding !== undefined && scopeBinding.key === undefined,
+    hookNames: Object.keys(scopeBinding?.hooks ?? {}), propNames: Object.keys(scopeBinding?.props ?? {}) };
   return { rootPresent: root !== undefined, nativeModules: [...(modules?.loadCache.keys() ?? [])], pluginGraph, providers, missingServices, entries,
-    entryState: modules?.entries.state.getSnapshot() };
+    entryState: modules?.entries.state.getSnapshot(), slotTree: root?.get("slots")?.snapshot?.(), sessionScope };
 }

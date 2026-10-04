@@ -10,6 +10,7 @@ import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 
 const PROFILE_ID = "browser-native";
+export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
 const profileText = (reviewCap, label = "Browser native acceptance profile with a deliberately long display name to check narrow Settings layouts") => `${JSON.stringify({ version: 1, id: PROFILE_ID, label, settings: { defaultActive: true, workflow: { reviewCap } } }, null, 2)}\n`;
 
 export function acceptanceChromium(toolsManifest) {
@@ -124,7 +125,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
   const evidence = [];
   const report = { outcome: "FAILED", postAppReady: true, kind: "native-client-component-owned-carrier", artifactSha256: sha256, installedRoot: packageRoot,
     authentication: { realWebOrDesktopLogin: "NOT_EXERCISED", signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false },
-    performance: { lighthouse: "NOT_RUN_COMPONENT_ACCEPTANCE", scoreClaim: false }, checks: {}, evidence, nativeCalls: [] };
+    performance: { lighthouse: "NOT_RUN_COMPONENT_ACCEPTANCE", scoreClaim: false }, checks: {}, evidence, nativeCalls: [], nativeStreams: [] };
   const handles = [];
   const pending = new Map();
   let server;
@@ -163,6 +164,10 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
       assert.ok(descriptor.parameters.every(({ codec }) => codec?.mode === "strict"));
       return { endpoint: `dsmmProfiles/${method}`, resultMode: descriptor.result.mode, parameters: descriptor.parameters.map(({ name, codec }) => ({ name, mode: codec.mode })) };
     });
+    const controlDescriptor = ctx.get("typert").local.get("session/control");
+    assert.ok(controlDescriptor, "native Session observer descriptor was not registered");
+    assert.equal(controlDescriptor.result.mode, "strict");
+    report.nativeControlDescriptor = { endpoint: "session/control", resultMode: controlDescriptor.result.mode };
     peer = ctx.get("connection").operator;
     assert.ok(peer?.ctx, "native Connection did not supply its genuine operator Peer");
     let agentSequence = 0;
@@ -194,18 +199,26 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
       if (operation === "cancel") { const job = pending.get(id); job?.control.abort(); return { ok: true, value: null }; }
       if (operation === "next") {
         const job = pending.get(id); assert.ok(job?.iterator, "stream request lost its native iterator");
-        try { return { ok: true, value: await job.iterator.next() }; } catch (error) { return { ok: false, error: gateway.wireStream.failure(error) }; }
+        try {
+          const value = await job.iterator.next();
+          if (value.done) job.record.ended = true;
+          else job.record.frames += 1;
+          return { ok: true, value };
+        } catch (error) { return { ok: false, error: gateway.wireStream.failure(error) }; }
       }
       assert.equal(channel, "/api");
       const control = new AbortController();
       pending.set(id, { control });
       if (operation === "open") {
-        assert.equal(endpoint, "$events", "owned bridge may open only native generation events");
+        assert.ok(NATIVE_STREAM_ENDPOINTS.includes(endpoint), "owned bridge may open only native generation events and Session control");
+        const record = { endpoint, nativePeer: peer.id, strictGateway: true, result: "pending", frames: 0 };
+        report.nativeStreams.push(record);
         try {
           const stream = await gateway.wireStream.open(endpoint, payload, { async *[Symbol.asyncIterator]() {} }, peer, control.signal);
-          pending.set(id, { control, iterator: stream[Symbol.asyncIterator]() });
+          pending.set(id, { control, iterator: stream[Symbol.asyncIterator](), record });
+          record.result = "accepted";
           return { ok: true, value: null };
-        } catch (error) { pending.delete(id); return { ok: false, error: gateway.wireStream.failure(error) }; }
+        } catch (error) { const failure = gateway.wireStream.failure(error); record.result = failure.code; pending.delete(id); return { ok: false, error: failure }; }
       }
       assert.equal(operation, "call");
       assert.match(endpoint, /^dsmmProfiles\/(describe|read|save|select)$/u);
@@ -250,6 +263,9 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     report.browserBoot.text = await page.evaluate(() => document.body.innerText.slice(0, 4096));
     assert.deepEqual(report.browserBoot.missingServices, [], `native browser required services unavailable: ${JSON.stringify(report.browserBoot.missingServices)}`);
     assert.ok(!report.browserBoot.text.includes("Failed to load plugins"), `native browser boot failed: ${report.browserBoot.text}`);
+    assert.equal(report.browserBoot.sessionScope.provider, "uiSession", "native root renderer requires the real UiSession scope owner");
+    assert.equal(report.browserBoot.sessionScope.installed, true);
+    assert.equal(report.browserBoot.sessionScope.noActiveSession, true, "owned settings component must preserve the native absent-Session projection");
     await page.getByRole("heading", { name: "DSMM Profiles", exact: true }).waitFor();
     await idle();
     report.nativeClient.seed = await page.evaluate(() => window.__dsmmNativeSeedProof);
@@ -383,6 +399,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     report.keyboardOrder = keyboardOrder;
     assert.ok(keyboardOrder.every(({ tag }) => ["BUTTON", "SELECT", "TEXTAREA", "INPUT"].includes(tag)), "keyboard focus left the interactive component unexpectedly");
     report.checks.pointerKeyboardReducedMotionZoomAndResponsive = true;
+    assert.ok(report.nativeStreams.some(({ endpoint, result, frames }) => endpoint === "session/control" && result === "accepted" && frames > 0), "real native Session observer never received its opening frame");
+    report.checks.realNativeSessionScopeAndControlObserver = true;
     assert.deepEqual(pageErrors, [], "browser raised an uncontained runtime or network error");
     assert.deepEqual(server.errors, [], "owned static server failed");
     assert.ok(report.nativeCalls.some(({ domainCode }) => domainCode === "validation") && report.nativeCalls.some(({ domainCode }) => domainCode === "conflict"));
@@ -405,6 +423,12 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     const cleanup = async (label, operation) => { try { await operation(); } catch (error) { cleanupErrors.push({ label, message: error.message }); } };
     for (const gate of [...gates.values(), ...activeGates]) { gate.entered(); gate.release(); }
     for (const job of pending.values()) job.control.abort();
+    for (const job of pending.values()) {
+      if (job.iterator) await cleanup("native observer stream", async () => {
+        await job.iterator.return?.();
+        job.record.disposed = true;
+      });
+    }
     if (blockedLock) await cleanup("owned backend lock", () => rmdir(blockedLock));
     if (browserContext) {
       const path = join(evidenceRoot, "native-profile-ui.trace.zip");

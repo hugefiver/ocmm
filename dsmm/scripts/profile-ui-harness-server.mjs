@@ -4,7 +4,8 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { COMPOSITION_ID, bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph } from "./profile-ui-harness-browser.mjs";
 
-export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway"];
+const SESSION_PROVIDER_IDS = ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"];
+export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway", ...SESSION_PROVIDER_IDS];
 const mime = { ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
 
 /** Serve only run-owned test HTML and exact installed, unmodified artifacts. */
@@ -23,7 +24,13 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256 
   for (const [index, id] of NATIVE_IDS.entries()) {
     const url = `/bundles/native-${index}.js`;
     bundles.set(url, await readFile(nativeRequire.resolve(`${id}/client`)));
-    rows.push({ id, url, inject: id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID] : [] });
+    // Scope owners activate unchanged; their installed native metadata owns
+    // the full package dependency graph, not harness-invented service aliases.
+    const declaration = SESSION_PROVIDER_IDS.includes(id)
+      ? JSON.parse(await readFile(nativeRequire.resolve(`${id}/package.json`), "utf8")).dsh.client : undefined;
+    const inject = declaration?.inject ?? (id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID] : []);
+    for (const dependency of inject) assert.ok(NATIVE_IDS.includes(dependency) || dependency === COMPOSITION_ID, `${id} requires unprovided native client package ${dependency}`);
+    rows.push({ id, url, inject, external: declaration?.external ?? [] });
   }
   bundles.set("/bundles/composition.js", Buffer.from(compositionBundle()));
   rows.push({ id: COMPOSITION_ID, url: "/bundles/composition.js", inject: ["@deepseek-ai/dsh-client-ui-renderer"], external: ["@deepseek-ai/dsh-client-connection/client", "@deepseek-ai/dsh-client-locale/client"] });
