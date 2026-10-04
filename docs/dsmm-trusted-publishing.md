@@ -29,7 +29,7 @@ The established independent Docker acceptance image has its own pinned native-ca
 
 ## Frozen 0.1.2 bootstrap
 
-This retained contract protects the existing unpublished 0.1.2 candidate. The current release work targets a separately authorized future-tag 0.1.3 release; do not dispatch 0.1.2 bootstrap or change its frozen draft/assets in that phase.
+This retained contract protects the existing unpublished 0.1.2 candidate. The current release work targets the separately authorized future-tag 0.1.4 release; do not dispatch 0.1.2 bootstrap or change its frozen draft/assets. The immutable 0.1.3 tag remains at `2bdea4b`: run `37235817488` failed before packing or publication because dependency builds were unapproved.
 
 The immutable `dsmm-scoped-v0.1.2` tag points at `6f82a2e5dc366c7bcf13efe67da4fd0c326d0b8a`. It predates the new workflow. If bootstrap is separately authorized in a later phase, dispatch from `master`; do not move or recreate the tag.
 
@@ -55,7 +55,9 @@ Because this package was packed locally before CI existed, bootstrap explicitly 
 
 Only a maintainer-authorized stable `dsmm-scoped-vX.Y.Z` tag matching `dsmm/package.json` initiates a new version. Its workflow checks source identity, installs with the frozen lockfile, verifies/builds with pnpm, packs once, then runs independent full Docker acceptance against the frozen tarball. Publication receives the exact accepted run/attempt artifact, uses pnpm's native tarball publisher, and enables genuine CI provenance.
 
-Human-facing plugin/preset labels use `Deepwork` / `DW Role`; package and protocol identities remain stable: `@dsmm/dsmm`, config ID `dsmm`, `dsmmProfiles` RPCs, role/tool/event IDs and the persistence provider. The controller selects a strict versioned resource policy independently of the source readiness helper's current 0.1.3 assertion. Historical 0.1.1/0.1.2 packages retain exactly five exports and no metadata locale resources. From 0.1.3, exactly seven exports are required: the existing five plus string exports `./locale/en.json` and `./locale/zh.json` to those exact resource paths. Both JSON resources contain only `meta.title` (`Deepwork`) and a nonempty localized `meta.description`; extra languages, fields or exports are rejected. Locale JSON is a resource, not executable compiled output.
+Human-facing plugin/preset labels use `Deepwork` / `DW Role`; package and protocol identities remain stable: `@dsmm/dsmm`, config ID `dsmm`, `dsmmProfiles` RPCs, role/tool/event IDs and the persistence provider. The controller selects a strict versioned resource policy independently of the source readiness helper's current 0.1.4 assertion. Historical 0.1.1/0.1.2 packages retain exactly five exports and no metadata locale resources. From 0.1.3, exactly seven exports are required: the existing five plus string exports `./locale/en.json` and `./locale/zh.json` to those exact resource paths. Both JSON resources contain only `meta.title` (`Deepwork`) and a nonempty localized `meta.description`; extra languages, fields or exports are rejected. Locale JSON is a resource, not executable compiled output.
+
+Fresh pnpm 11 source installation keeps `strictDepBuilds: true`. The workspace approves only `esbuild@0.25.12` and `koffi@3.1.1` through exact-version `allowBuilds` entries; it does not allow all dependency scripts or suppress ignored-build failures. This source policy does not alter the publication job's `--ignore-scripts` exact-tarball contract.
 
 Future-tag controls use the trusted-repository-maintainer model: ancestry checks detect accidental wrong-source tags, not malicious repository writers who can replace the tagged workflow itself. This setup does not add or claim repository rulesets. Default-branch bootstrap dispatch has its own fixed identity checks.
 
