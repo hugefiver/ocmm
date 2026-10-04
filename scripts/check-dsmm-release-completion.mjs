@@ -7,9 +7,9 @@ import {
   computeDigests, expectedAssetNames, readArtifactIdentity, validateArtifactIdentity, validateDockerReceipt,
   validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact,
 } from "./dsmm-release.mjs";
-import { cleanupOwnedRoot, createOwnedRoot, validateInstallReceipt } from "./dsmm-registry-install-probe.mjs";
+import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 
-export const REQUIRED_JOBS = ["prepare", "publish", "verify", "github-release"];
+export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
 const REPOSITORY = "hugefiver/ocmm";
 const WORKFLOW = ".github/workflows/dsmm-release.yml";
 const scriptRoot = fileURLToPath(new URL(".", import.meta.url));
@@ -40,10 +40,12 @@ export function validateRunEvidence(run, workflow, jobs, identity, expected) {
   requireCondition(new Set(jobs.map(job => job.name)).size === jobs.length, "duplicate workflow jobs");
   for (const name of REQUIRED_JOBS) {
     const job = jobs.find(candidate => candidate.name === name);
-    requireCondition(job?.status === "completed" && job.conclusion === "success", `required job ${name} did not complete successfully`);
+    const expectedConclusion = name === "import-bootstrap" && !bootstrap ? "skipped" : "success";
+    requireCondition(job?.status === "completed" && job.conclusion === expectedConclusion, `required job ${name} has the wrong mode-specific conclusion`);
     requireCondition(String(job.run_id) === String(expected.runId) && String(job.run_attempt) === String(expected.runAttempt), `job ${name} is from another run/attempt`);
   }
-  return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt }));
+  return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt,
+    applicability: name === "import-bootstrap" && !bootstrap ? "NOT_APPLICABLE" : "REQUIRED" }));
 }
 
 export function validateVerificationReceipt(receipt, identity) {
@@ -58,6 +60,21 @@ export function validateVerificationReceipt(receipt, identity) {
   validateInstallReceipt(receipt.freshInstall, { version: identity.version, sha256: identity.sha256 });
   requireCondition(receipt.freshInstall.registry.size === identity.size && receipt.freshInstall.registry.sha1 === identity.sha1 && receipt.freshInstall.registry.integrity === identity.integrity, "fresh install registry identity differs");
   return receipt;
+}
+
+export function validateBootstrapImportArtifact(artifact, identity, acceptedFiles, importedFiles) {
+  validateArtifactIdentity(identity);
+  requireCondition(identity.mode === "bootstrap", "bootstrap import is not applicable to future releases");
+  requireCondition(artifact.name === identity.bootstrapImport.artifactName && artifact.expired === false
+    && artifact.workflow_run?.id === Number(identity.runId), "bootstrap import artifact is from another run/attempt");
+  requireCondition(Number.isSafeInteger(artifact.id) && artifact.id > 0 && /^sha256:[a-f0-9]{64}$/u.test(artifact.digest ?? ""), "bootstrap import artifact ID/digest is invalid");
+  if (artifact.workflow_run.head_sha !== undefined) requireCondition(artifact.workflow_run.head_sha === identity.controlSha, "bootstrap import control SHA differs");
+  const names = ["context.json", "identity.json", identity.filename, identity.receiptFilename, "SHA256SUMS.txt"].sort();
+  requireCondition(acceptedFiles instanceof Map && importedFiles instanceof Map
+    && JSON.stringify([...acceptedFiles.keys()].sort()) === JSON.stringify(names)
+    && JSON.stringify([...importedFiles.keys()].sort()) === JSON.stringify(names), "bootstrap import artifact file set differs");
+  for (const name of names) requireCondition(Buffer.isBuffer(importedFiles.get(name)) && importedFiles.get(name).equals(acceptedFiles.get(name)), "accepted artifact differs from exact run/attempt bootstrap import");
+  return { outcome: "COMPLETED", ...identity.bootstrapImport, artifactId: artifact.id, archiveDigest: artifact.digest, transport: identity.bootstrapTransport };
 }
 
 export async function verifyPublishedArtifact(identity, { registryCheck = verifyRegistryArtifact, installProbe = runInstallProbe } = {}) {
@@ -116,6 +133,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     const candidates = artifactsResponse.artifacts.filter(artifact => artifact.name === name && artifact.expired === false);
     requireCondition(candidates.length === 1, "exact run artifact is missing or ambiguous");
     requireCondition(candidates[0].workflow_run?.id === Number(expected.runId), "artifact belongs to another workflow run");
+    requireCondition(Number.isSafeInteger(candidates[0].id) && candidates[0].id > 0 && /^sha256:[a-f0-9]{64}$/u.test(candidates[0].digest ?? ""), "run artifact ID or archive digest is invalid");
     return candidates[0];
   };
   const acceptedArtifact = findArtifact(`dsmm-accepted-${expected.runId}-${expected.runAttempt}`);
@@ -131,6 +149,22 @@ export async function checkTerminalCompletion(expected, { request = github, down
     requireCondition(await peelRemoteTag(identity.tag, request) === identity.releaseSha, "immutable release tag changed");
     const expectedFiles = ["context.json", "identity.json", identity.filename, identity.receiptFilename, "SHA256SUMS.txt"].sort();
     requireCondition(JSON.stringify(readdirSync(owned).sort()) === JSON.stringify(expectedFiles), "accepted artifact has missing or extra files");
+    let bootstrapImportEvidence = { outcome: "NOT_APPLICABLE", job: "import-bootstrap" };
+    if (identity.mode === "bootstrap") {
+      const importedArtifact = findArtifact(identity.bootstrapImport.artifactName);
+      const importedDirectory = join(owner.root, "bootstrap-import"); mkdirSync(importedDirectory);
+      await downloadArtifact(importedArtifact, importedDirectory, expected);
+      requireCondition(JSON.stringify(readdirSync(importedDirectory).sort()) === JSON.stringify(expectedFiles), "bootstrap import artifact file set differs");
+      const importedFiles = new Map(), acceptedFiles = new Map();
+      for (const name of expectedFiles) {
+        const file = join(importedDirectory, name);
+        requireCondition(lstatSync(file).isFile() && !lstatSync(file).isSymbolicLink(), "bootstrap import contains links or directories");
+        importedFiles.set(name, readFileSync(file)); acceptedFiles.set(name, readFileSync(join(owned, name)));
+      }
+      bootstrapImportEvidence = validateBootstrapImportArtifact(importedArtifact, identity, acceptedFiles, importedFiles);
+    } else {
+      requireCondition(!artifactsResponse.artifacts.some(artifact => artifact.name === `dsmm-bootstrap-${expected.runId}-${expected.runAttempt}`), "future release has an unexpected bootstrap import artifact");
+    }
     const accepted = validateTarballBuffer(readFileSync(join(owned, identity.filename)), { version: identity.version, expectedDigests: identity });
     const dockerBytes = readFileSync(join(owned, identity.receiptFilename));
     requireCondition(computeDigests(dockerBytes).sha256 === identity.receiptSha256, "accepted Docker receipt bytes differ");
@@ -158,6 +192,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
       workflow: { file: WORKFLOW, id: workflow.id, controlSha: identity.controlSha, runId: expected.runId, runAttempt: expected.runAttempt, jobs },
       artifact: identity, githubRelease: { id: release.id, tag: release.tag_name, draft: false, assetIds: release.assets.map(({ id, name }) => ({ id, name })) },
       publication,
+      bootstrapImportEvidence,
       freshInstallEvidence: { origin: "CI verify job, Linux/Node 24", artifactId: proofArtifact.id, runId: expected.runId, runAttempt: expected.runAttempt },
       nonclaims: { ...publication.nonclaims, terminalHostNativeInstall: "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
     };
@@ -170,6 +205,13 @@ export function validateInstalledFileHashes(receipt, files) {
   for (const entry of [...Object.values(receipt.exports), ...Object.values(receipt.compiledFiles)]) {
     const bytes = files.get(entry.path);
     requireCondition(Buffer.isBuffer(bytes) && computeDigests(bytes).sha256 === entry.sha256, "native installed export/profile/client bytes differ from the verified archive");
+  }
+  if (requiresDeepworkMetadata(receipt.version)) {
+    const resources = validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), receipt.version);
+    for (const language of ["en", "zh"]) {
+      const observed = receipt.nativeMetadata.locales[language], expected = resources[language];
+      requireCondition(["path", "sha256", "title", "description"].every((field) => observed[field] === expected[field]), "native metadata reader evidence differs from verified locale resource bytes");
+    }
   }
 }
 
@@ -202,6 +244,7 @@ function defaultDownloadArtifact(artifact, output, expected) {
   const members = execFileSync(windows ? "tar" : "unzip", windows ? ["-tf", archivePath] : ["-Z1", archivePath], { encoding: "utf8", timeout: 30_000, windowsHide: true }).trim().split(/\r?\n/u);
   if (artifact.name === `dsmm-registry-verification-${expected.runId}-${expected.runAttempt}`) requireCondition(JSON.stringify(members) === JSON.stringify(["dsmm-registry-verification.json"]), "unsafe verification archive membership");
   else {
+    requireCondition([`dsmm-accepted-${expected.runId}-${expected.runAttempt}`, `dsmm-bootstrap-${expected.runId}-${expected.runAttempt}`].includes(artifact.name), "unexpected accepted/import artifact identity");
     const fixed = ["context.json", "identity.json", "docker-receipt-native-session-control.json", "SHA256SUMS.txt"];
     requireCondition(members.length === 5 && fixed.every(name => members.includes(name)) && members.filter(name => /^dsmm-dsmm-(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.tgz$/u.test(name)).length === 1, "unsafe accepted archive membership");
   }

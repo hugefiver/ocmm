@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { COMPILED_FILES, PUBLIC_EXPORTS, REQUIRED_CHECKS, lifecycleCommands } from "../scripts/dsmm-registry-install-probe.mjs";
-import { BOOTSTRAP, POLICY, UI_CHECKS, computeDigests, createArtifactIdentity, deterministicChecksums, resolveReleaseContext, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
+import { COMPILED_FILES, DW_PRESET_NAMES, LOCALE_FILES, lifecycleCommands, publicExportsForVersion, requiredChecksForVersion, requiresDeepworkMetadata, validateLocaleResources } from "../scripts/dsmm-registry-install-probe.mjs";
+import { BOOTSTRAP, POLICY, UI_CHECKS, computeDigests, createArtifactIdentity, deterministicChecksums, manifestExportsForVersion, resolveReleaseContext, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
 
 export function contextInput(bootstrap = false) {
   const commit = "a".repeat(40);
@@ -28,6 +28,9 @@ export function receiptFixture(version, digest) {
     checks: template === "web" ? { healthyNativeRoster: true, exactEnabledRoots: true } : { shippedPresetFreeHeadless: true },
     blankSelection: { outcome: "COMPLETED", nativeSelect: true, personaAndToolsChanged: true, mutationRestored: true, nativeWriteAndRead: true },
     headlessTools: { outcome: "COMPLETED", disabledBuilderAbsent: true },
+    ...(requiresDeepworkMetadata(version) ? { rootIds: template === "web" ? ["dsmm-orchestrator", "dsmm-planner"] : undefined,
+      branding: { pluginTitle: "Deepwork", presetNames: DW_PRESET_NAMES.map((entry) => ({ ...entry })),
+        rootPresetNames: template === "web" ? DW_PRESET_NAMES.filter(({ id }) => ["dsmm-orchestrator", "dsmm-planner"].includes(id)).map((entry) => ({ ...entry })) : [] } } : {}),
   });
   return { outcome: "COMPLETED", acceptanceScope: "native-final-artifact", dshVersion: POLICY.dshVersion,
     artifact: { package: { name: POLICY.packageName, version }, sha256: digest, sha256After: digest, hostSha256After: digest },
@@ -72,12 +75,15 @@ export function archive(entries) {
 
 export function packageFiles(version = "0.1.3") {
   const manifest = JSON.parse(readFileSync(new URL("../dsmm/package.json", import.meta.url), "utf8")); manifest.version = version;
+  manifest.exports = manifestExportsForVersion(version);
+  if (!requiresDeepworkMetadata(version)) manifest.files = manifest.files.filter((path) => path !== "locale/*.json");
   const names = ["LICENSE", "README.md", "cordis.patch.yml", "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
     "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
     ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
     ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`),
     "agent-presets/default.yml", "docs/research/reference.md", "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
-  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...COMPILED_FILES])].map((name) => [name, Buffer.from("fixture\n")])]);
+  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...COMPILED_FILES])].map((name) => [name, Buffer.from("fixture\n")]),
+    ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, readFileSync(new URL(`../dsmm/${path}`, import.meta.url))]) : [])]);
 }
 
 export function archiveFiles(files) { return archive([...files].map(([name, bytes]) => ({ name: `package/${name}`, bytes }))); }
@@ -96,6 +102,7 @@ export function makeInstallFixture({ identity, tarball }) {
   const hash = "a".repeat(64), profile = `dsmm-registry-${"a".repeat(32)}`;
   const { files } = validateTarballBuffer(tarball, { version: identity.version, expectedDigests: identity });
   const fileIdentity = (path) => ({ path, sha256: computeDigests(files.get(path)).sha256 });
+  const publicExports = publicExportsForVersion(identity.version);
   return {
     schemaVersion: 1, outcome: "COMPLETED", packageName: POLICY.packageName, version: identity.version, sha256: identity.sha256,
     registry: { url: POLICY.registry, tarball: `${POLICY.registry}@dsmm/dsmm/-/dsmm-${identity.version}.tgz`,
@@ -105,9 +112,13 @@ export function makeInstallFixture({ identity, tarball }) {
     native: { version: POLICY.dshVersion, integrity: "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==",
       binSha256: hash, headless: true, profileList: true, dumpConfig: true, profile,
       commands: lifecycleCommands(profile, identity.version).map((command) => ({ ...command, status: 0, stdoutSha256: hash, stderrSha256: hash })) },
-    exports: Object.fromEntries(Object.entries(PUBLIC_EXPORTS).map(([name, path]) => [name, fileIdentity(path)])),
+    exports: Object.fromEntries(Object.entries(publicExports).map(([name, path]) => [name, fileIdentity(path)])),
     compiledFiles: Object.fromEntries(COMPILED_FILES.map((path) => [path, fileIdentity(path)])),
-    checks: Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, true])), temporaryRootRemoved: true, cleanup: { outcome: "COMPLETED" },
+    checks: Object.fromEntries(requiredChecksForVersion(identity.version).map((name) => [name, true])), temporaryRootRemoved: true, cleanup: { outcome: "COMPLETED" },
+    ...(requiresDeepworkMetadata(identity.version) ? { nativeMetadata: { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: POLICY.dshVersion,
+      readerSha256: hash, packageName: POLICY.packageName, version: identity.version, source: "profile-owned-installed-package",
+      locales: validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), identity.version),
+      execution: { status: 0, stdoutSha256: hash, stderrSha256: hash } } } : {}),
     nonClaims: { paidModelCall: false, realLogin: false, authenticatedDesktop: false, uiAcceptance: false },
     startedAt: "2026-10-05T00:00:00.000Z", finishedAt: "2026-10-05T00:01:00.000Z",
   };

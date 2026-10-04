@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { gunzipSync } from "node:zlib";
-import { validateInstallReceipt } from "./dsmm-registry-install-probe.mjs";
+import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 
 export const POLICY = Object.freeze({
   repository: "hugefiver/ocmm", packageName: "@dsmm/dsmm", defaultBranch: "master",
@@ -20,6 +20,14 @@ export const BOOTSTRAP = Object.freeze({
   sha1: "78c681c93c045f2ec733c550e6bded576f116e10",
   integrity: "sha512-NwZeld4+Z7ya3YzPtiC9iJlrMar18kQjosgA1oWjOYpEcvpkn7hmJS8JyWZA74YBlilvXM1JVpvSzgDC+pMFFQ==",
   receiptSha256: "e0fb329bf21f7b32ac06ffdbe93c32dadcfd2bf9f078089eceb97e421f0e8f3c",
+});
+export const BOOTSTRAP_TRANSPORT = Object.freeze({
+  repository: POLICY.repository, releaseId: "403185800",
+  assetIds: Object.freeze([
+    Object.freeze({ name: POLICY.checksumsFilename, id: "610552442" }),
+    Object.freeze({ name: POLICY.receiptFilename, id: "610552439" }),
+    Object.freeze({ name: BOOTSTRAP.filename, id: "610552438" }),
+  ]),
 });
 
 const stableVersion = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
@@ -73,6 +81,9 @@ export function resolveReleaseContext(input) {
     workflow: { file: POLICY.workflowFile, ref: input.workflowRef, sha: input.workflowSha },
     eventName: input.eventName, eventSha: input.eventSha, ref: input.ref,
     runId: String(input.runId), runAttempt: String(input.runAttempt),
+    bootstrapTransport: mode === "bootstrap" ? BOOTSTRAP_TRANSPORT : null,
+    bootstrapImport: mode === "bootstrap" ? { job: "import-bootstrap", artifactName: `dsmm-bootstrap-${input.runId}-${input.runAttempt}`,
+      runId: String(input.runId), runAttempt: String(input.runAttempt) } : null,
     origin: mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built",
     provenance: mode === "future", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "REQUIRED_BEFORE_FREEZE" };
 }
@@ -125,6 +136,17 @@ export function validateDockerReceipt(receipt, identity) {
     equal(native.model?.kind, "deterministic-test-only-adapter", "native model adapter");
     equal(native.model?.externalModelCalls, false, "external model calls");
     equal(native.uiAuthentication, "NOT_EXERCISED", "native authentication nonclaim");
+    if (requiresDeepworkMetadata(identity.version)) {
+      equal(native.branding?.pluginTitle, "Deepwork", "native plugin title");
+      invariant(Array.isArray(native.branding?.presetNames), "native preset display evidence missing");
+      equal([...native.branding.presetNames].sort((left, right) => byteOrder(left.id, right.id)),
+        [...DW_PRESET_NAMES].sort((left, right) => byteOrder(left.id, right.id)), "all twelve DW preset names");
+      const rootIds = template === "web" ? ["dsmm-orchestrator", "dsmm-planner"] : [];
+      if (template === "web") equal([...(native.rootIds ?? [])].sort(byteOrder), [...rootIds].sort(byteOrder), "native branded root IDs");
+      invariant(Array.isArray(native.branding?.rootPresetNames), "actual native root display evidence missing");
+      equal([...native.branding.rootPresetNames].sort((left, right) => byteOrder(left.id, right.id)),
+        DW_PRESET_NAMES.filter((preset) => rootIds.includes(preset.id)).sort((left, right) => byteOrder(left.id, right.id)), "actual native root DW names");
+    }
     const persistence = native.persistence;
     equal(persistence?.backendName, "dsmm-session-persistence", "native persistence provider");
     equal(persistence?.stockEntry?.disabled, true, "stock persistence disabled");
@@ -200,6 +222,9 @@ const PUBLIC_EXPORTS = Object.freeze({
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" }, "./package.json": "./package.json",
 });
+export function manifestExportsForVersion(version) {
+  return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])) } : { ...PUBLIC_EXPORTS };
+}
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
 const requiredFiles = ["LICENSE", "README.md", "package.json", "cordis.patch.yml", ...operatorScripts,
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
@@ -268,13 +293,15 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   invariant(terminated, "tar archive has no terminator");
   for (const file of requiredFiles) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
   for (const tree of ["agent-presets", "docs/research", "patches", "prompts", "skills"]) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
-  for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path), `unexpected package surface: ${path}`);
+  for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
+    || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
+  validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), version);
   const manifest = JSON.parse(files.get("package.json").toString("utf8"));
   invariant(object(manifest), "package manifest must be an object");
   equal(manifest.name, POLICY.packageName, "package name"); equal(manifest.version, version, "package version");
   invariant(!Object.hasOwn(manifest, "private"), "private manifest field forbidden");
   equal(manifest.type, "module", "module type"); equal(manifest.main, "./lib/index.js", "main export"); equal(manifest.types, "./lib/index.d.ts", "types export");
-  equal(manifest.exports, PUBLIC_EXPORTS, "public exports");
+  equal(manifest.exports, manifestExportsForVersion(version), "public exports");
   equal(manifest.publishConfig, { registry: POLICY.registry, access: "public" }, "publish configuration");
   equal(manifest.engines, { node: ">=22" }, "Node engine contract");
   invariant(object(manifest.peerDependencies) && Object.entries(manifest.peerDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === POLICY.dshVersion), "native DSH peers must remain exactly pinned");
@@ -325,8 +352,14 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   if (identity.mode === "bootstrap") {
     invariant(identity.controlSha !== BOOTSTRAP.releaseSha, "bootstrap identity requires distinct new trusted controls");
     for (const key of ["version", "tag", "releaseSha", "filename", "size", "sha256", "sha1", "integrity", "receiptSha256"]) equal(identity[key], BOOTSTRAP[key], `frozen bootstrap ${key}`);
+    equal(identity.bootstrapTransport, BOOTSTRAP_TRANSPORT, "original bootstrap transport identity");
+    equal(identity.bootstrapImport, { job: "import-bootstrap", artifactName: `dsmm-bootstrap-${identity.runId}-${identity.runAttempt}`,
+      runId: identity.runId, runAttempt: identity.runAttempt }, "run-bound bootstrap import");
+  } else {
+    equal(identity.bootstrapTransport, null, "future transport is not the frozen bootstrap");
+    equal(identity.bootstrapImport, null, "future bootstrap import is not applicable");
   }
-  if (context) for (const key of ["repository", "packageName", "mode", "version", "tag", "releaseSha", "controlSha", "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "origin", "provenance"]) equal(identity[key], context[key], `run-bound ${key}`);
+  if (context) for (const key of ["repository", "packageName", "mode", "version", "tag", "releaseSha", "controlSha", "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "origin", "provenance", "bootstrapTransport", "bootstrapImport"]) equal(identity[key], context[key], `run-bound ${key}`);
   return identity;
 }
 
@@ -344,11 +377,26 @@ export function createArtifactIdentity(context, tarballBuffer, receiptBuffer, { 
 
 export function readArtifactIdentity(path) { return validateArtifactIdentity(JSON.parse(readFileSync(path, "utf8"))); }
 
+export function validateBootstrapTransport(release) {
+  equal(String(release?.id), BOOTSTRAP_TRANSPORT.releaseId, "original bootstrap Release ID");
+  equal(release?.tag_name, BOOTSTRAP.tag, "original bootstrap Release tag");
+  invariant(Array.isArray(release.assets), "original bootstrap assets missing");
+  equal(release.assets.map(({ name, id }) => ({ name, id: String(id) })).sort((left, right) => byteOrder(left.name, right.name)),
+    BOOTSTRAP_TRANSPORT.assetIds, "original bootstrap asset name/ID map");
+  return release;
+}
+
 export function validateTransportAssets(release, assets, identity, { requireDraft = true } = {}) {
   validateArtifactIdentity(identity);
+  if (identity.mode === "bootstrap") validateBootstrapTransport(release);
   invariant(object(release) && positiveId.test(String(release.id)), "invalid release identity");
   if (release.url !== undefined) equal(release.url, `https://api.github.com/repos/${POLICY.repository}/releases/${release.id}`, "Release repository API identity");
-  if (release.html_url !== undefined) equal(release.html_url, `https://github.com/${POLICY.repository}/releases/tag/${identity.tag}`, "Release repository public identity");
+  if (release.html_url !== undefined) {
+    const canonicalUrl = `https://github.com/${POLICY.repository}/releases/tag/${identity.tag}`;
+    const draftPrefix = `https://github.com/${POLICY.repository}/releases/tag/untagged-`;
+    invariant(release.html_url === canonicalUrl || (release.draft === true && typeof release.html_url === "string"
+      && release.html_url.startsWith(draftPrefix) && /^[A-Za-z0-9_-]+$/u.test(release.html_url.slice(draftPrefix.length))), "Release repository public identity mismatch");
+  }
   equal(release.tag_name, identity.tag, "Release tag"); equal(release.draft, requireDraft, "Release public/draft state");
   equal(release.prerelease, false, "Release prerelease state");
   invariant(Array.isArray(release.assets), "Release assets missing");
@@ -449,7 +497,10 @@ async function responseBuffer(response, maxBytes = 16 * 1024 * 1024) {
 }
 
 export async function githubRequest(path, { method = "GET", body, binary = false, allow404 = false, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN } = {}) {
-  invariant(typeof path === "string" && path.startsWith(`/repos/${POLICY.repository}/`) && !/[?#\s]/u.test(path), "untrusted GitHub API path");
+  const pagination = typeof path === "string" && /^\/repos\/hugefiver\/ocmm\/releases\?per_page=100&page=(?:[1-9]|1[0-9]|20)$/u.test(path);
+  invariant(typeof path === "string" && path.startsWith(`/repos/${POLICY.repository}/`)
+    && (!/[?#\s]/u.test(path) || (pagination && method === "GET" && body === undefined && !binary && !allow404)), "untrusted GitHub API path");
+  if (pagination) invariant(typeof token === "string" && token.length > 0, "authenticated GitHub Release list is required to inspect drafts");
   const headers = { Accept: binary ? "application/octet-stream" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -457,6 +508,31 @@ export async function githubRequest(path, { method = "GET", body, binary = false
   if (response.status === 404 && allow404) return null;
   invariant(response.ok, `GitHub ${method} failed (HTTP ${response.status}); no repair or overwrite attempted`);
   return binary ? responseBuffer(response) : response.json();
+}
+
+export async function findReleaseByTag(tag, request = githubRequest) {
+  invariant(typeof tag === "string" && /^dsmm-scoped-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(tag), "unsafe Release lookup tag");
+  // The tag endpoint can return 404 for a draft visible to the authenticated list/ID endpoints.
+  // Scan the complete bounded list before treating a tag as absent or choosing an exact ID.
+  const seen = new Set(); let match = null; let completeList = false;
+  for (let page = 1; page <= 20; page++) {
+    const releases = await request(`/repos/${POLICY.repository}/releases?per_page=100&page=${page}`);
+    invariant(Array.isArray(releases) && releases.length <= 100, "invalid GitHub Release page");
+    for (const release of releases) {
+      invariant(object(release) && positiveId.test(String(release.id)) && typeof release.tag_name === "string"
+        && typeof release.draft === "boolean" && typeof release.prerelease === "boolean", "invalid GitHub Release list identity");
+      const id = String(release.id); invariant(!seen.has(id), "duplicate/conflicting Release IDs in paginated lookup"); seen.add(id);
+      if (release.tag_name === tag) { invariant(match === null, "ambiguous Releases for exact tag"); match = release; }
+    }
+    if (releases.length < 100) { completeList = true; break; }
+  }
+  invariant(completeList, "GitHub Release list incomplete at bounded pagination limit");
+  if (match === null) return null;
+  const release = await request(`/repos/${POLICY.repository}/releases/${match.id}`);
+  equal(String(release?.id), String(match.id), "re-fetched Release ID"); equal(release?.tag_name, tag, "re-fetched Release tag");
+  equal(release?.draft, match.draft, "re-fetched Release draft state"); equal(release?.prerelease, match.prerelease, "re-fetched Release prerelease state");
+  if (release.url !== undefined) equal(release.url, `https://api.github.com/repos/${POLICY.repository}/releases/${match.id}`, "re-fetched Release repository");
+  return release;
 }
 
 export async function remotePeelTag(tag, request = githubRequest) {
@@ -499,7 +575,9 @@ export async function downloadReleaseAssets(release, version, request = githubRe
 
 export async function downloadBootstrap(directory, context, request = githubRequest) {
   equal(context.mode, "bootstrap", "bootstrap mode");
-  const release = await request(`/repos/${POLICY.repository}/releases/tags/${BOOTSTRAP.tag}`);
+  const release = await findReleaseByTag(BOOTSTRAP.tag, request);
+  invariant(release, "frozen bootstrap draft transport is absent");
+  validateBootstrapTransport(release);
   equal(release.tag_name, BOOTSTRAP.tag, "bootstrap draft tag"); equal(release.draft, true, "bootstrap must use a draft transport");
   const assets = await downloadReleaseAssets(release, context.version, request);
   const identity = createArtifactIdentity(context, assets.get(BOOTSTRAP.filename), assets.get(POLICY.receiptFilename));
@@ -643,8 +721,7 @@ export async function uploadReleaseAsset(releaseId, name, bytes, { fetcher = fet
 
 export async function stageDraftTransport(directory, context, request = githubRequest, upload = uploadReleaseAsset) {
   const identity = validateArtifactDirectory(directory, context);
-  const path = `/repos/${POLICY.repository}/releases/tags/${identity.tag}`;
-  const existing = await request(path, { allow404: true });
+  const existing = await findReleaseByTag(identity.tag, request);
   if (context.mode === "bootstrap") {
     invariant(existing, "frozen bootstrap draft transport is absent");
     return validateTransportAssets(existing, await downloadReleaseAssets(existing, identity.version, request), identity);
@@ -658,7 +735,8 @@ export async function stageDraftTransport(directory, context, request = githubRe
     await verifyRemoteReleaseTag(identity, request);
     await upload(release.id, name, readFileSync(join(directory, name)));
   }
-  const staged = await request(path);
+  const staged = await request(`/repos/${POLICY.repository}/releases/${release.id}`);
+  equal(String(staged?.id), String(release.id), "staged Release ID");
   return validateTransportAssets(staged, await downloadReleaseAssets(staged, identity.version, request), identity);
 }
 
@@ -678,7 +756,8 @@ export async function finalizeRelease(directory, context, verification, request 
   validateFinalizationEvidence(verification, identity);
   // Recheck registry bytes at the public-Release boundary, not only prior job status.
   await registryCheck(identity);
-  const release = await request(`/repos/${POLICY.repository}/releases/tags/${identity.tag}`);
+  const release = await findReleaseByTag(identity.tag, request);
+  invariant(release, "accepted draft transport is absent before finalization");
   validateTransportAssets(release, await downloadReleaseAssets(release, identity.version, request), identity);
   await verifyRemoteReleaseTag(identity, request);
   const result = await request(`/repos/${POLICY.repository}/releases/${release.id}`, { method: "PATCH", body: { draft: false, body: releaseNotes(identity) } });

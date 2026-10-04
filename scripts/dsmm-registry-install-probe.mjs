@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 export const PACKAGE_NAME = "@dsmm/dsmm";
@@ -24,6 +24,13 @@ export const PUBLIC_EXPORTS = Object.freeze({
   "./client": "lib/client.js",
   "./package.json": "package.json",
 });
+export const LOCALE_FILES = Object.freeze(["locale/en.json", "locale/zh.json"]);
+export const LOCALE_EXPORTS = Object.freeze({ "./locale/en.json": "locale/en.json", "./locale/zh.json": "locale/zh.json" });
+export const DW_PRESET_NAMES = Object.freeze([
+  ["orchestrator", "Orchestrator"], ["planner", "Planner"], ["plan-critic", "Plan Critic"], ["builder", "Builder"],
+  ["reviewer", "Reviewer"], ["oracle", "Oracle"], ["oracle-2nd", "Oracle 2nd"], ["creative", "Creative"],
+  ["code-search", "Code Search"], ["doc-search", "Doc Search"], ["clarifier", "Clarifier"], ["media-reader", "Media Reader"],
+].map(([id, name]) => Object.freeze({ id: `dsmm-${id}`, name: `DW ${name}` })));
 export const COMPILED_FILES = Object.freeze([
   "lib/profile-runtime.js", "lib/profile-store.js", "lib/profile-rpc.js", "lib/profile-remote.js",
   "lib/profile-types.js", "lib/profiles.js", "lib/client/index.js", "lib/client/controller.js", "lib/client/ProfilesSection.js",
@@ -46,6 +53,39 @@ function exactKeys(value, keys) {
 function validVersion(version) {
   return typeof version === "string" && STABLE_VERSION.test(version)
     && version.split(".").every((part) => Number.isSafeInteger(Number(part)));
+}
+
+export function requiresDeepworkMetadata(version) {
+  requireFact(validVersion(version), "INVALID_METADATA_POLICY_VERSION");
+  if (version === "0.1.1" || version === "0.1.2") return false;
+  const [major, minor, patch] = version.split(".").map(Number);
+  requireFact(major > 0 || minor > 1 || (minor === 1 && patch >= 3), "UNSUPPORTED_METADATA_POLICY_VERSION");
+  return true;
+}
+
+export function publicExportsForVersion(version) {
+  return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS } : { ...PUBLIC_EXPORTS };
+}
+
+export function requiredChecksForVersion(version) {
+  return requiresDeepworkMetadata(version) ? [...REQUIRED_CHECKS, "localeResources", "nativePluginMetadata"] : [...REQUIRED_CHECKS];
+}
+
+export function validateLocaleResources(resources, version) {
+  requireFact(resources instanceof Map, "INVALID_LOCALE_RESOURCES");
+  const names = requiresDeepworkMetadata(version) ? LOCALE_FILES : [];
+  requireFact(JSON.stringify([...resources.keys()].sort()) === JSON.stringify([...names].sort()), "LOCALE_RESOURCE_INVENTORY_MISMATCH");
+  const result = {};
+  for (const path of names) {
+    let resource;
+    try { resource = JSON.parse(resources.get(path).toString("utf8")); }
+    catch { throw new ProbeError("INVALID_LOCALE_RESOURCE_JSON"); }
+    requireFact(exactKeys(resource, ["meta"]) && exactKeys(resource.meta, ["title", "description"])
+      && resource.meta.title === "Deepwork" && typeof resource.meta.description === "string"
+      && resource.meta.description.trim().length > 0, "INVALID_DEEPWORK_LOCALE_METADATA");
+    result[path.slice("locale/".length, -".json".length)] = { path, ...resource.meta, sha256: digest(resources.get(path)) };
+  }
+  return result;
 }
 
 export function parseArgs(argv) {
@@ -254,6 +294,7 @@ export function lifecycleCommands(profile, version) {
 }
 
 export function verifyInstalledPackage(profilePackage, profileRoot, expected, version) {
+  const publicExports = publicExportsForVersion(version);
   const profileRequire = createRequire(profilePackage);
   let packageRoot;
   try { packageRoot = realpathSync(dirname(profileRequire.resolve(`${PACKAGE_NAME}/package.json`))); }
@@ -261,7 +302,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
   requireFact(isInside(packageRoot, realpathSync(profileRoot)), "INSTALLED_PACKAGE_NOT_PROFILE_OWNED");
   const installed = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   requireFact(installed.name === PACKAGE_NAME && installed.version === version, "INSTALLED_PACKAGE_IDENTITY_MISMATCH");
-  requireFact(exactKeys(installed.exports, Object.keys(PUBLIC_EXPORTS)), "INSTALLED_EXPORT_INVENTORY_MISMATCH");
+  requireFact(exactKeys(installed.exports, Object.keys(publicExports)), "INSTALLED_EXPORT_INVENTORY_MISMATCH");
   const verifyFile = (path, location) => {
     const resolved = realpathSync(location);
     requireFact(isInside(resolved, packageRoot) && relative(packageRoot, resolved).split(sep).join("/") === path,
@@ -272,7 +313,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
     return { path, sha256: digest(bytes) };
   };
   const exports = {};
-  for (const [name, path] of Object.entries(PUBLIC_EXPORTS)) {
+  for (const [name, path] of Object.entries(publicExports)) {
     const declaration = installed.exports[name];
     requireFact((typeof declaration === "string" ? declaration : declaration?.default ?? declaration?.import) === `./${path}`,
       "INSTALLED_EXPORT_TARGET_MISMATCH");
@@ -280,7 +321,55 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
   }
   const compiledFiles = {};
   for (const path of COMPILED_FILES) compiledFiles[path] = verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
+  const resources = new Map([...expected].filter(([path]) => path.startsWith("locale/")).map(([path, entry]) => [path, entry.bytes]));
+  validateLocaleResources(resources, version);
+  if (requiresDeepworkMetadata(version)) {
+    const localeRoot = join(packageRoot, "locale");
+    requireFact(JSON.stringify(readdirSync(localeRoot).sort()) === JSON.stringify(["en.json", "zh.json"]), "INSTALLED_LOCALE_INVENTORY_MISMATCH");
+  }
   return { name: installed.name, version: installed.version, exports, compiledFiles };
+}
+
+export async function readInstalledPluginMetadata(profilePackage, profileRoot, nativePackage, nativeRoot, version) {
+  requireFact(requiresDeepworkMetadata(version), "LEGACY_METADATA_NOT_REQUIRED");
+  const profileRequire = createRequire(profilePackage), nativeRequire = createRequire(realpathSync(nativePackage));
+  const packageRoot = realpathSync(dirname(profileRequire.resolve(`${PACKAGE_NAME}/package.json`)));
+  requireFact(isInside(packageRoot, realpathSync(profileRoot)), "METADATA_PACKAGE_NOT_PROFILE_OWNED");
+  const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  requireFact(manifest.name === PACKAGE_NAME && manifest.version === version && exactKeys(manifest.exports, Object.keys(publicExportsForVersion(version))), "METADATA_PACKAGE_IDENTITY_MISMATCH");
+  const reader = realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot"));
+  const readerManifest = JSON.parse(readFileSync(realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot/package.json")), "utf8"));
+  requireFact(isInside(reader, realpathSync(nativeRoot)) && readerManifest.name === "@deepseek-ai/dsh-app-boot" && readerManifest.version === DSH_VERSION, "NATIVE_METADATA_READER_IDENTITY_MISMATCH");
+  const resources = new Map();
+  for (const [name, path] of Object.entries(LOCALE_EXPORTS)) {
+    const location = realpathSync(profileRequire.resolve(`${PACKAGE_NAME}${name.slice(1)}`));
+    requireFact(isInside(location, packageRoot) && relative(packageRoot, location).split(sep).join("/") === path, "METADATA_RESOURCE_RESOLUTION_ESCAPE");
+    resources.set(path, readFileSync(location));
+  }
+  requireFact(JSON.stringify(readdirSync(join(packageRoot, "locale")).sort()) === JSON.stringify(["en.json", "zh.json"]), "INSTALLED_LOCALE_INVENTORY_MISMATCH");
+  const locales = validateLocaleResources(resources, version);
+  const { readPluginMeta } = await import(pathToFileURL(reader).href);
+  requireFact(typeof readPluginMeta === "function", "NATIVE_METADATA_READER_MISSING");
+  const metadata = await readPluginMeta(PACKAGE_NAME, pathToFileURL(profilePackage).href);
+  requireFact(metadata && metadata.error === undefined && exactKeys(metadata.title, ["en", "zh"]) && exactKeys(metadata.description, ["en", "zh"]), "NATIVE_PLUGIN_METADATA_UNPROVED");
+  for (const language of ["en", "zh"]) requireFact(metadata.title[language] === locales[language].title
+    && metadata.description[language] === locales[language].description, "NATIVE_PLUGIN_METADATA_RESOURCE_MISMATCH");
+  return { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: DSH_VERSION, readerSha256: digest(readFileSync(reader)),
+    packageName: PACKAGE_NAME, version, source: "profile-owned-installed-package", locales };
+}
+
+export function validateNativeMetadataReceipt(metadata, version, exports) {
+  requireFact(metadata?.reader === "@deepseek-ai/dsh-app-boot/readPluginMeta" && metadata.readerVersion === DSH_VERSION
+    && SHA256.test(metadata.readerSha256 ?? "") && metadata.packageName === PACKAGE_NAME && metadata.version === version
+    && metadata.source === "profile-owned-installed-package" && exactKeys(metadata.locales, ["en", "zh"]), "INSTALL_RECEIPT_NATIVE_METADATA_INVALID");
+  requireFact(metadata.execution?.status === 0 && SHA256.test(metadata.execution.stdoutSha256 ?? "")
+    && SHA256.test(metadata.execution.stderrSha256 ?? ""), "INSTALL_RECEIPT_METADATA_EXECUTION_INVALID");
+  for (const language of ["en", "zh"]) {
+    const entry = metadata.locales[language], path = `locale/${language}.json`;
+    requireFact(entry?.path === path && entry.title === "Deepwork" && typeof entry.description === "string" && entry.description.trim().length > 0
+      && SHA256.test(entry.sha256 ?? "") && entry.sha256 === exports[`./${path}`]?.sha256, "INSTALL_RECEIPT_LOCALE_METADATA_INVALID");
+  }
+  return metadata;
 }
 
 export function verifyNativePluginList(output, profileRoot, version) {
@@ -351,12 +440,13 @@ function pnpmShim(root, entry) {
 
 export async function runInstallProbe(options, runtime = {}) {
   requireFact(validVersion(options.version) && SHA256.test(options.sha256), "INVALID_INPUT");
+  const requiredChecks = requiredChecksForVersion(options.version);
   const owner = (runtime.createOwnedRoot ?? createOwnedRoot)();
   const receipt = {
     schemaVersion: 1, outcome: "FAILED", packageName: PACKAGE_NAME, version: options.version, sha256: options.sha256,
     startedAt: new Date().toISOString(), packageManager: { name: "pnpm", version: PNPM_VERSION },
     native: { version: DSH_VERSION, headless: false, profileList: false, dumpConfig: false, commands: [] },
-    exports: {}, compiledFiles: {}, checks: Object.fromEntries(REQUIRED_CHECKS.map((key) => [key, false])),
+    exports: {}, compiledFiles: {}, checks: Object.fromEntries(requiredChecks.map((key) => [key, false])),
     temporaryRootRemoved: false, cleanup: { outcome: "NOT_RUN" },
     nonClaims: { paidModelCall: false, realLogin: false, authenticatedDesktop: false, uiAcceptance: false },
   };
@@ -429,6 +519,16 @@ export async function runInstallProbe(options, runtime = {}) {
         receipt.exports = installed.exports;
         receipt.compiledFiles = installed.compiledFiles;
         for (const check of ["profileOwnedResolution", "publicExports", "compiledProfileClient", "installedBytes"]) receipt.checks[check] = true;
+        if (requiresDeepworkMetadata(options.version)) {
+          stage = "native-plugin-metadata";
+          const code = "const {readInstalledPluginMetadata}=await import(process.argv[1]); const result=await readInstalledPluginMetadata(...process.argv.slice(2)); process.stdout.write(JSON.stringify(result));";
+          const metadataResult = await runChecked(process.execPath, ["--input-type=module", "-e", code, import.meta.url,
+            join(profileRoot, "package.json"), profileRoot, nativePackage, nativeRoot, options.version], owner.root, 60_000);
+          receipt.nativeMetadata = { ...JSON.parse(metadataResult.stdout), execution: { status: metadataResult.status,
+            stdoutSha256: digest(metadataResult.stdout), stderrSha256: digest(metadataResult.stderr) } };
+          validateNativeMetadataReceipt(receipt.nativeMetadata, options.version, receipt.exports);
+          receipt.checks.localeResources = true; receipt.checks.nativePluginMetadata = true;
+        }
       } else if (command.operation === "list-profile") {
         verifyNativePluginList(result.stdout, profileRoot, options.version);
         receipt.native.profileList = true;
@@ -465,6 +565,7 @@ export async function runInstallProbe(options, runtime = {}) {
 }
 
 export function validateInstallReceipt(receipt, { version, sha256 }) {
+  const publicExports = publicExportsForVersion(version), requiredChecks = requiredChecksForVersion(version);
   requireFact(validVersion(version) && SHA256.test(sha256), "INVALID_EXPECTED_IDENTITY");
   requireFact(receipt?.schemaVersion === 1 && receipt.outcome === "COMPLETED" && receipt.packageName === PACKAGE_NAME
     && receipt.version === version && receipt.sha256 === sha256, "INSTALL_RECEIPT_IDENTITY_MISMATCH");
@@ -486,12 +587,13 @@ export function validateInstallReceipt(receipt, { version, sha256 }) {
         && JSON.stringify(observed.args) === JSON.stringify(command.args)
         && SHA256.test(observed.stdoutSha256 ?? "") && SHA256.test(observed.stderrSha256 ?? "");
     }), "INSTALL_RECEIPT_COMMANDS_INVALID");
-  requireFact(exactKeys(receipt.exports, Object.keys(PUBLIC_EXPORTS)) && Object.entries(PUBLIC_EXPORTS).every(([name, path]) =>
+  requireFact(exactKeys(receipt.exports, Object.keys(publicExports)) && Object.entries(publicExports).every(([name, path]) =>
     receipt.exports[name]?.path === path && SHA256.test(receipt.exports[name]?.sha256 ?? "")), "INSTALL_RECEIPT_EXPORTS_INVALID");
   requireFact(exactKeys(receipt.compiledFiles, COMPILED_FILES) && COMPILED_FILES.every((path) =>
     receipt.compiledFiles[path]?.path === path && SHA256.test(receipt.compiledFiles[path]?.sha256 ?? "")), "INSTALL_RECEIPT_COMPILED_FILES_INVALID");
-  requireFact(exactKeys(receipt.checks, REQUIRED_CHECKS) && REQUIRED_CHECKS.every((key) => receipt.checks[key] === true)
+  requireFact(exactKeys(receipt.checks, requiredChecks) && requiredChecks.every((key) => receipt.checks[key] === true)
     && receipt.temporaryRootRemoved === true && receipt.cleanup?.outcome === "COMPLETED", "INSTALL_RECEIPT_CHECKS_INCOMPLETE");
+  if (requiresDeepworkMetadata(version)) validateNativeMetadataReceipt(receipt.nativeMetadata, version, receipt.exports);
   requireFact(exactKeys(receipt.nonClaims, ["paidModelCall", "realLogin", "authenticatedDesktop", "uiAcceptance"])
     && Object.values(receipt.nonClaims).every((value) => value === false), "INSTALL_RECEIPT_FALSE_CLAIM");
   requireFact(Number.isFinite(Date.parse(receipt.startedAt)) && Number.isFinite(Date.parse(receipt.finishedAt))

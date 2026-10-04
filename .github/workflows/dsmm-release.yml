@@ -18,10 +18,49 @@ env:
   PNPM_VERSION: "11.9.0"
 
 jobs:
+  import-bootstrap:
+    name: import-bootstrap
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      artifact-id: ${{ steps.imported.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Import exact frozen draft transport without building or publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node control/scripts/dsmm-release.mjs resolve --control-root control --output "$RUNNER_TEMP/dsmm-import-context.json"
+          node control/scripts/dsmm-release.mjs bootstrap --control-root control --context "$RUNNER_TEMP/dsmm-import-context.json" --output-dir "$RUNNER_TEMP/dsmm-bootstrap-import"
+      - name: Retain immutable run and attempt bootstrap transport
+        id: imported
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dsmm-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dsmm-bootstrap-import/
+          if-no-files-found: error
+          retention-days: 30
+
   prepare:
     name: prepare
+    needs: import-bootstrap
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && needs.import-bootstrap.result == 'success') || (github.event_name == 'push' && needs.import-bootstrap.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
     outputs:
       artifact-id: ${{ steps.accepted.outputs.artifact-id }}
     steps:
@@ -47,11 +86,15 @@ jobs:
         run: |
           node control/scripts/dsmm-release.mjs resolve --control-root control --output "$RUNNER_TEMP/dsmm-context.json"
           node -e 'const fs=require("node:fs");const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/dsmm-context.json","utf8"));fs.appendFileSync(process.env.GITHUB_OUTPUT,"mode="+c.mode+"\n");'
-      - name: Validate imported frozen 0.1.2 and previous Docker proof
+      - name: Download the exact bootstrap import artifact
         if: steps.context.outputs.mode == 'bootstrap'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node control/scripts/dsmm-release.mjs bootstrap --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --output-dir "$RUNNER_TEMP/dsmm-accepted"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.import-bootstrap.outputs.artifact-id }}
+          path: ${{ runner.temp }}/dsmm-accepted
+      - name: Revalidate imported frozen 0.1.2 and previous Docker proof with read-only control
+        if: steps.context.outputs.mode == 'bootstrap'
+        run: node control/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
       - name: Verify future source with pnpm
         if: steps.context.outputs.mode == 'future'
         working-directory: control
@@ -64,6 +107,7 @@ jobs:
           pnpm --dir dsmm run typecheck:test
           pnpm --dir dsmm test
           pnpm --dir dsmm run build
+          node dsmm/scripts/generate-role-assets.mjs
           git diff --exit-code
       - name: Pack future artifact once and independently accept frozen bytes
         if: steps.context.outputs.mode == 'future'
@@ -99,6 +143,7 @@ jobs:
   publish:
     name: publish
     needs: prepare
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -134,6 +179,7 @@ jobs:
   verify:
     name: verify
     needs: [prepare, publish]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -176,6 +222,7 @@ jobs:
   github-release:
     name: github-release
     needs: [prepare, verify]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

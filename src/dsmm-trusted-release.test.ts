@@ -5,23 +5,26 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { gzipSync, gunzipSync } from "node:zlib";
 import {
-  BOOTSTRAP, POLICY, UI_CHECKS, assertPublishEnvironment, assertSanitizedReceipt,
-  computeDigests, deterministicChecksums, downloadBootstrap, finalizeRelease,
-  expectedAssetNames, prepareTransport, publishArguments, publishArtifact, registryVersion, remotePeelTag, stageDraftTransport, verifyRemoteReleaseTag,
+  BOOTSTRAP, BOOTSTRAP_TRANSPORT, POLICY, UI_CHECKS, assertPublishEnvironment, assertSanitizedReceipt,
+  computeDigests, deterministicChecksums, downloadBootstrap, finalizeRelease, findReleaseByTag, githubRequest,
+  expectedAssetNames, manifestExportsForVersion, prepareTransport, publishArguments, publishArtifact, registryVersion, remotePeelTag, stageDraftTransport, verifyRemoteReleaseTag,
   resolveReleaseContext, validateArtifactDirectory, validateArtifactIdentity,
   validateDockerReceipt, validateRegistryMetadata, validateRegistryProvenance,
-  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact,
+  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateBootstrapTransport,
 } from "../scripts/dsmm-release.mjs";
 
 type Json = Record<string, any>;
 
-import { archive, archiveFiles, contextInput, makeAcceptedFixture, makeInstallFixture, packageFiles } from "./dsmm-trusted-release-fixtures.mjs";
+import { archive, archiveFiles, contextInput, makeAcceptedFixture, makeInstallFixture, packageFiles, receiptFixture } from "./dsmm-trusted-release-fixtures.mjs";
 
 test("two modes bind workflow control independently from immutable bootstrap source", () => {
   const bootstrap = resolveReleaseContext(contextInput(true));
   assert.equal(bootstrap.releaseSha, BOOTSTRAP.releaseSha); assert.notEqual(bootstrap.controlSha, bootstrap.releaseSha);
   assert.equal(bootstrap.provenance, false); assert.equal(bootstrap.origin, "frozen-local-bootstrap");
+  assert.deepEqual(bootstrap.bootstrapTransport, BOOTSTRAP_TRANSPORT);
+  assert.deepEqual(bootstrap.bootstrapImport, { job: "import-bootstrap", artifactName: "dsmm-bootstrap-1234-1", runId: "1234", runAttempt: "1" });
   const future = resolveReleaseContext(contextInput()); assert.equal(future.controlSha, future.releaseSha); assert.equal(future.provenance, true);
+  assert.equal(future.bootstrapTransport, null); assert.equal(future.bootstrapImport, null);
 });
 
 for (const [key, value] of Object.entries({ repository: "attacker/ocmm", eventName: "pull_request", ref: "refs/heads/master", workflowRef: "hugefiver/ocmm/evil.yml@refs/tags/dsmm-scoped-v0.1.3", workflowSha: "b".repeat(40), eventSha: "b".repeat(40), peeledSha: "b".repeat(40), packageVersion: "0.1.4", sourceInDefaultHistory: false, sourceHasControls: false, runId: "1;echo injected", runAttempt: "0", defaultBranch: "other" })) {
@@ -40,6 +43,47 @@ test("version-aware package validation never executes manifest or compiled code"
   assert.equal(accepted.version, "0.1.3"); assert.ok(accepted.fileCount > 40);
   assert.throws(() => validateTarballBuffer(archiveFiles(files), { version: "0.1.4" }), /version/);
   assert.throws(() => validateTarballBuffer(archiveFiles(files), { version: "0.1.3", expectedDigests: { sha256: "0".repeat(64) } }), /sha256/);
+});
+
+test("historical five exports stay exact while 0.1.3 adds only the two Deepwork locale resources", () => {
+  for (const version of ["0.1.1", "0.1.2", "0.1.3"]) {
+    const files = packageFiles(version);
+    const accepted = validateTarballBuffer(archiveFiles(files), { version });
+    const manifest = JSON.parse(accepted.files.get("package.json").toString());
+    assert.deepEqual(manifest.exports, manifestExportsForVersion(version));
+    assert.equal(Object.keys(manifest.exports).length, version === "0.1.3" ? 7 : 5);
+    assert.deepEqual([...files.keys()].filter((path) => path.startsWith("locale/")), version === "0.1.3" ? ["locale/en.json", "locale/zh.json"] : []);
+    if (version === "0.1.3") {
+      assert.equal(manifest.exports["./locale/en.json"], "./locale/en.json");
+      assert.equal(manifest.exports["./locale/zh.json"], "./locale/zh.json");
+    } else {
+      files.set("locale/en.json", packageFiles().get("locale/en.json"));
+      assert.throws(() => validateTarballBuffer(archiveFiles(files), { version }), /unexpected package surface/);
+    }
+  }
+});
+
+const localeMutations: [string, (files: Map<string, Buffer>) => void][] = [
+  ["missing English", (files) => { files.delete("locale/en.json"); }],
+  ["missing Chinese", (files) => { files.delete("locale/zh.json"); }],
+  ["extra language", (files) => { files.set("locale/fr.json", files.get("locale/en.json")!); }],
+  ["malformed JSON", (files) => { files.set("locale/en.json", Buffer.from("{")); }],
+  ["old title", (files) => { files.set("locale/en.json", Buffer.from(JSON.stringify({ meta: { title: "DSMM", description: "Description" } }))); }],
+  ["empty description", (files) => { files.set("locale/zh.json", Buffer.from(JSON.stringify({ meta: { title: "Deepwork", description: " \n\t" } }))); }],
+  ["extra metadata field", (files) => { files.set("locale/en.json", Buffer.from(JSON.stringify({ meta: { title: "Deepwork", description: "Description", displayName: "Deepwork" } }))); }],
+  ["invented top-level field", (files) => { files.set("locale/en.json", Buffer.from(JSON.stringify({ meta: { title: "Deepwork", description: "Description" }, title: "Deepwork" }))); }],
+  ...["missing export", "extra export", "wrong target", "conditional locale export"].map((name): [string, (files: Map<string, Buffer>) => void] => [name, (files) => {
+    const manifest = JSON.parse(files.get("package.json")!.toString());
+    if (name === "missing export") delete manifest.exports["./locale/zh.json"];
+    if (name === "extra export") manifest.exports["./locale/fr.json"] = "./locale/en.json";
+    if (name === "wrong target") manifest.exports["./locale/en.json"] = "./locale/zh.json";
+    if (name === "conditional locale export") manifest.exports["./locale/en.json"] = { default: "./locale/en.json" };
+    files.set("package.json", Buffer.from(JSON.stringify(manifest)));
+  }]),
+];
+for (const [name, mutate] of localeMutations) test(`0.1.3 artifact rejects locale ${name}`, () => {
+  const files = packageFiles(); mutate(files);
+  assert.throws(() => validateTarballBuffer(archiveFiles(files), { version: "0.1.3" }));
 });
 
 for (const path of ["package/../outside", "/absolute", "package/C:/evil", "package/skills\\evil", "package/test/example.test.ts", "package/.npmrc", "package/skills/.env", "package/credentials.json", "package/skills/nested.tgz", "package/src/source.ts", "package/docs/superpowers/plan.md"]) {
@@ -70,6 +114,35 @@ test("completed Docker acceptance binds substantive exact artifact evidence", ()
   assert.equal(accepted.uiCheckCount, 14); assert.equal(accepted.sourceUnitTests, "NOT_RUN"); assert.equal(accepted.realAuthentication, "NOT_EXERCISED");
 });
 
+test("frozen 0.1.2 Docker contract remains valid without Deepwork branding fields", () => {
+  const identity = { version: "0.1.2", sha256: "a".repeat(64) };
+  const receipt = receiptFixture(identity.version, identity.sha256);
+  assert.equal("branding" in receipt.native.web, false);
+  assert.equal("branding" in receipt.native.headless, false);
+  assert.doesNotThrow(() => validateDockerReceipt(receipt, identity));
+});
+
+for (const template of ["web", "headless"]) {
+  const mutations: [string, (native: Json) => void][] = [
+    ["missing branding", (native) => { delete native.branding; }],
+    ["old plugin title", (native) => { native.branding.pluginTitle = "DSMM"; }],
+    ["missing label", (native) => { native.branding.presetNames.pop(); }],
+    ["duplicate label", (native) => { native.branding.presetNames[1] = native.branding.presetNames[0]; }],
+    ["extra label", (native) => { native.branding.presetNames.push({ id: "dsmm-extra", name: "DW Extra" }); }],
+    ["missing root names", (native) => { delete native.branding.rootPresetNames; }],
+    ...Array.from({ length: 12 }, (_, index): [string, (native: Json) => void] => [`wrong label ${index + 1}`, (native) => { native.branding.presetNames[index].name = "DSMM Role"; }]),
+    ...(template === "web" ? [
+      ["changed root ID", (native: Json) => { native.rootIds[0] = "dsmm-builder"; }],
+      ["old root name", (native: Json) => { native.branding.rootPresetNames[0].name = "DSMM Orchestrator"; }],
+      ["extra native root", (native: Json) => { native.branding.rootPresetNames.push({ id: "dsmm-builder", name: "DW Builder" }); }],
+    ] as [string, (native: Json) => void][] : [["invented headless root", (native: Json) => { native.branding.rootPresetNames.push({ id: "dsmm-orchestrator", name: "DW Orchestrator" }); }]] as [string, (native: Json) => void][]),
+  ];
+  for (const [name, mutate] of mutations) test(`0.1.3 Docker ${template} branding rejects ${name}`, () => {
+    const fixture = makeAcceptedFixture(); mutate(fixture.receipt.native[template]);
+    assert.throws(() => validateDockerReceipt(fixture.receipt, fixture.identity));
+  });
+}
+
 const receiptMutations: [string, (r: Json) => void][] = [
   ["top-level only", (r) => { delete r.native; }], ["initial hash", (r) => { r.artifact.sha256 = "b".repeat(64); }],
   ["container-final hash", (r) => { r.artifact.sha256After = "b".repeat(64); }], ["host-final hash", (r) => { r.artifact.hostSha256After = "b".repeat(64); }],
@@ -99,6 +172,27 @@ test("exact transport checksums bind both frozen inputs without modifying bytes"
   assert.throws(() => validateTransportAssets({ ...release, draft: false }, assets, identity), /draft/);
   assert.doesNotThrow(() => validateTransportAssets({ ...release, draft: false }, assets, identity, { requireDraft: false }));
 });
+test("GitHub opaque untagged draft display URL is accepted without replacing authoritative tag or API identity", () => {
+  const { identity, release, assets } = makeAcceptedFixture();
+  const actualDraftDisplayUrl = "https://github.com/hugefiver/ocmm/releases/tag/untagged-c0f746b1b12ac4b85845";
+  const draft = { ...release, url: `https://api.github.com/repos/${POLICY.repository}/releases/${release.id}`, html_url: actualDraftDisplayUrl };
+  assert.equal(validateTransportAssets(draft, assets, identity).releaseId, String(release.id));
+});
+test("opaque draft display URL cannot weaken public tag, repository, scheme or API identity checks", () => {
+  const { identity, release, assets } = makeAcceptedFixture();
+  const prefix = `https://github.com/${POLICY.repository}/releases/tag/`;
+  for (const html_url of [
+    "https://github.com/attacker/ocmm/releases/tag/untagged-c0f746b1b12ac4b85845",
+    "http://github.com/hugefiver/ocmm/releases/tag/untagged-c0f746b1b12ac4b85845",
+    `${prefix}dsmm-scoped-v9.9.9`, `${prefix}untagged-`, `${prefix}untagged-value/extra`,
+    `${prefix}untagged-value?unexpected=query`, `${prefix}untagged-value#fragment`, `${prefix}untagged-%2e%2e`,
+  ]) assert.throws(() => validateTransportAssets({ ...release, html_url }, assets, identity), /public identity/);
+  const html_url = `${prefix}untagged-c0f746b1b12ac4b85845`;
+  assert.throws(() => validateTransportAssets({ ...release, html_url, draft: false }, assets, identity, { requireDraft: false }), /public identity/);
+  assert.throws(() => validateTransportAssets({ ...release, html_url, tag_name: "dsmm-scoped-v9.9.9" }, assets, identity), /Release tag/);
+  assert.throws(() => validateTransportAssets({ ...release, html_url, url: "https://api.github.com/repos/attacker/ocmm/releases/44" }, assets, identity), /API identity/);
+  assert.doesNotThrow(() => validateTransportAssets({ ...release, draft: false, html_url: `${prefix}${identity.tag}` }, assets, identity, { requireDraft: false }));
+});
 test("missing/extra/partial/conflicting asset state fails closed", () => {
   const { identity, release, assets } = makeAcceptedFixture();
   for (const mutation of [(r: Json) => { r.assets.pop(); }, (r: Json) => { r.assets.push({ id: 999, name: "extra.txt", size: 1, state: "uploaded" }); }, (r: Json) => { r.assets[0].state = "starter"; }, (r: Json) => { r.tag_name = "dsmm-scoped-v0.1.4"; }, (r: Json) => { r.assets[0].digest = `sha256:${"0".repeat(64)}`; }]) {
@@ -112,6 +206,20 @@ test("standalone identities reject altered mode, source, workflow, run and prove
   for (const [key, value] of Object.entries({ controlSha: "b".repeat(40), workflow: { ...identity.workflow, ref: "wrong" }, provenance: false, eventName: "workflow_dispatch", ref: "refs/heads/master", eventSha: "b".repeat(40), receiptSha256: "bad", sourceChecks: "NOT_RUN" })) assert.throws(() => validateArtifactIdentity({ ...identity, [key]: value }));
   assert.throws(() => validateArtifactIdentity({ ...identity, runAttempt: "2" }, { context }), /runAttempt/);
   assert.throws(() => validateArtifactIdentity({ ...identity, mode: "bootstrap", origin: "frozen-local-bootstrap", provenance: false }));
+  assert.throws(() => validateArtifactIdentity({ ...identity, bootstrapTransport: BOOTSTRAP_TRANSPORT }), /future transport/);
+  assert.throws(() => validateArtifactIdentity({ ...identity, bootstrapImport: { artifactName: "wrong" } }), /not applicable/);
+});
+
+test("bootstrap transport retains the original Release and exact asset name/ID map through public finalization", () => {
+  const release = { id: Number(BOOTSTRAP_TRANSPORT.releaseId), tag_name: BOOTSTRAP.tag, draft: true, prerelease: false,
+    assets: BOOTSTRAP_TRANSPORT.assetIds.map(({ name, id }) => ({ name, id: Number(id) })) };
+  assert.equal(validateBootstrapTransport(release), release);
+  assert.doesNotThrow(() => validateBootstrapTransport({ ...release, draft: false }));
+  for (const mutate of [(copy: Json) => { copy.id++; }, (copy: Json) => { copy.assets[0].id++; },
+    (copy: Json) => { copy.assets[0].name = "wrong-name"; }, (copy: Json) => { copy.assets.pop(); },
+    (copy: Json) => { copy.assets.push({ name: "extra", id: 1 }); }]) {
+    const copy = structuredClone(release); mutate(copy); assert.throws(() => validateBootstrapTransport(copy));
+  }
 });
 test("freeze creates exact run artifact files non-overwriting and validates on download", () => {
   const { context, tarball, receiptBytes } = makeAcceptedFixture(); const root = mkdtempSync(join(tmpdir(), "dsmm-control-test-"));
@@ -192,9 +300,23 @@ test("OIDC failure, version conflict, wrong pnpm or changed frozen bytes never t
 test("future draft staging refuses even matching pre-existing and partial Releases without mutation", async () => {
   await withArtifactDirectory(async ({ context, release }, directory) => {
     let writes = 0;
-    await assert.rejects(stageDraftTransport(directory, context, async (_path: string, options: Json = {}) => {
-      if (options.method) writes++; return release;
+    await assert.rejects(stageDraftTransport(directory, context, async (path: string, options: Json = {}) => {
+      if (options.method) writes++; return path.includes("?per_page=") ? [release] : release;
     }, async () => { writes++; }), /already exists/);
+    assert.equal(writes, 0);
+  });
+});
+test("authenticated draft hidden from tag endpoint is found by release list and never recreated", async () => {
+  await withArtifactDirectory(async ({ context, release }, directory) => {
+    let writes = 0;
+    const request = async (path: string, options: Json = {}) => {
+      if (options.method) { writes++; throw new Error("unexpected release mutation"); }
+      if (path.includes("/releases/tags/")) throw new Error("GitHub GET failed (HTTP 404)");
+      if (path.endsWith("/releases?per_page=100&page=1")) return [release];
+      if (path.endsWith(`/releases/${release.id}`)) return release;
+      throw new Error(`unexpected API path ${path}`);
+    };
+    await assert.rejects(stageDraftTransport(directory, context, request, async () => { writes++; }), /Release already exists/);
     assert.equal(writes, 0);
   });
 });
@@ -232,7 +354,7 @@ test("moved remote tag prevents registry upload and draft creation despite match
       execute: (_command: string, args: string[]) => { if (args[0] === "publish") published++; return "11.9.0"; } }), /remote immutable/);
     await assert.rejects(stageDraftTransport(directory, context, async (path: string, options: Json = {}) => {
       if (options.method === "POST") created++;
-      return path.includes("/git/ref/") ? moved : null;
+      return path.includes("/git/ref/") ? moved : [];
     }, async () => { uploaded++; }), /remote immutable/);
     assert.equal(published, 0); assert.equal(created, 0); assert.equal(uploaded, 0);
   });
@@ -243,7 +365,7 @@ test("tag changing after draft creation preserves partial draft and blocks every
     await assert.rejects(stageDraftTransport(directory, context, async (path: string, options: Json = {}) => {
       if (options.method === "POST") { created++; return { id: 55 }; }
       if (path.includes("/git/ref/")) return { ref: `refs/tags/${identity.tag}`, object: { type: "commit", sha: created ? "b".repeat(40) : identity.releaseSha } };
-      return null;
+      return [];
     }, async () => { uploaded++; }), /remote immutable/);
     assert.equal(created, 1); assert.equal(uploaded, 0);
   });
@@ -260,6 +382,7 @@ test("moved or deleted remote tag after asset and registry proof blocks public R
       let patches = 0, assetReads = 0, registryReads = 0, tagReads = 0;
       const request = async (path: string, options: Json = {}) => {
         if (options.method === "PATCH") { patches++; return { ...release, draft: false }; }
+        if (path.includes("/releases/tags/")) throw new Error("GitHub GET failed (HTTP 404)");
         if (path.includes("/git/ref/")) {
           tagReads++; assert.equal(assetReads, 3); assert.equal(registryReads, 1);
           if (deleted) throw new Error("remote tag was deleted");
@@ -269,7 +392,7 @@ test("moved or deleted remote tag after asset and registry proof blocks public R
           const id = Number(path.split("/").at(-1)); const asset = release.assets.find((entry: Json) => entry.id === id);
           assert.ok(asset); assetReads++; return assets.get(asset.name);
         }
-        return release;
+        return path.includes("?per_page=") ? [release] : release;
       };
       await assert.rejects(finalizeRelease(directory, context, verification, request, { registryCheck: async (expected: Json) => {
         registryReads++; assert.equal(expected.sha256, computeDigests(fixture.tarball).sha256);
@@ -319,7 +442,77 @@ test("provenance binding fails on source/workflow/subject/run disagreement witho
 test("bootstrap download fails before writes on wrong assets or failed receipt", async () => {
   const context = resolveReleaseContext(contextInput(true)); const root = mkdtempSync(join(tmpdir(), "dsmm-control-download-"));
   try {
-    await assert.rejects(downloadBootstrap(join(root, "empty"), context, async () => ({ id: 1, tag_name: BOOTSTRAP.tag, draft: true, assets: [] })), /asset names/);
+    const draft = { id: Number(BOOTSTRAP_TRANSPORT.releaseId), tag_name: BOOTSTRAP.tag, draft: true, prerelease: false, assets: [] };
+    await assert.rejects(downloadBootstrap(join(root, "empty"), context, async (path: string) => {
+      if (path.includes("/releases/tags/")) throw new Error("GitHub GET failed (HTTP 404)");
+      return path.includes("?per_page=") ? [draft] : draft;
+    }), /asset name\/ID map/);
     assert.deepEqual(expectedAssetNames(BOOTSTRAP.version), [POLICY.checksumsFilename, POLICY.receiptFilename, BOOTSTRAP.filename]);
   } finally { rmSync(root, { recursive: true, force: false }); }
+});
+
+test("draft-aware lookup scans every page, matches exact tag and re-fetches exact numeric ID", async () => {
+  const tag = BOOTSTRAP.tag;
+  const draft = { id: 403185800, tag_name: tag, draft: true, prerelease: false, assets: [] };
+  const other = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, tag_name: `unrelated-${index}`, draft: false, prerelease: false }));
+  const calls: string[] = [];
+  const found = await findReleaseByTag(tag, async (path: string) => {
+    calls.push(path);
+    if (path.endsWith("page=1")) return other;
+    if (path.endsWith("page=2")) return [draft, { ...draft, id: 403185801, tag_name: `${tag}-different` }];
+    if (path.endsWith("/403185800")) return draft;
+    throw Error("unexpected lookup endpoint");
+  });
+  assert.equal(found.id, 403185800);
+  assert.deepEqual(calls, [`/repos/${POLICY.repository}/releases?per_page=100&page=1`, `/repos/${POLICY.repository}/releases?per_page=100&page=2`, `/repos/${POLICY.repository}/releases/403185800`]);
+  assert.equal(await findReleaseByTag(tag, async () => []), null);
+  assert.equal((await findReleaseByTag(tag, async (path: string) => path.includes("?per_page=") ? [{ ...draft, draft: false }] : { ...draft, draft: false })).draft, false);
+});
+
+test("draft-aware lookup rejects duplicate tags or conflicting IDs before any mutation", async () => {
+  const draft = { id: 403185800, tag_name: BOOTSTRAP.tag, draft: true, prerelease: false };
+  await assert.rejects(findReleaseByTag(BOOTSTRAP.tag, async () => [draft, { ...draft, id: 403185801 }]), /ambiguous/);
+  await assert.rejects(findReleaseByTag(BOOTSTRAP.tag, async () => [draft, { ...draft, tag_name: "different" }]), /conflicting Release IDs/);
+  await assert.rejects(findReleaseByTag(BOOTSTRAP.tag, async () => ({ message: "not a complete page" })), /invalid GitHub Release page/);
+});
+
+test("draft-aware lookup rejects incomplete pagination rather than declaring absence", async () => {
+  let calls = 0;
+  await assert.rejects(findReleaseByTag(BOOTSTRAP.tag, async () => {
+    const page = calls++;
+    return Array.from({ length: 100 }, (_, index) => ({ id: page * 100 + index + 1, tag_name: "unrelated", draft: false, prerelease: false }));
+  }), /incomplete at bounded/);
+  assert.equal(calls, 20);
+});
+
+test("draft-aware lookup rejects an altered tag, ID, state or repository on numeric re-fetch", async () => {
+  const draft = { id: 403185800, tag_name: BOOTSTRAP.tag, draft: true, prerelease: false };
+  for (const change of [{ id: 403185801 }, { tag_name: "other-tag" }, { draft: false }, { prerelease: true }, { url: "https://api.github.com/repos/attacker/ocmm/releases/403185800" }]) {
+    await assert.rejects(findReleaseByTag(BOOTSTRAP.tag, async (path: string) => path.includes("?per_page=") ? [draft] : { ...draft, ...change }), /re-fetched Release/);
+  }
+});
+
+test("release-list authentication or server errors cannot become permission to create a conflicting draft", async () => {
+  await withArtifactDirectory(async ({ context }, directory) => {
+    for (const status of [401, 403, 404, 500]) {
+      let writes = 0;
+      await assert.rejects(stageDraftTransport(directory, context, async (_path: string, options: Json = {}) => {
+        if (options.method) writes++; throw new Error(`GitHub GET failed (HTTP ${status})`);
+      }, async () => { writes++; }), new RegExp(`HTTP ${status}`, "u"));
+      assert.equal(writes, 0);
+    }
+  });
+});
+
+test("GitHub API query allowance is restricted to fixed read-only release pagination", async () => {
+  const original = globalThis.fetch; let calls = 0;
+  try {
+    globalThis.fetch = async () => { calls++; return Response.json([]); };
+    assert.deepEqual(await githubRequest(`/repos/${POLICY.repository}/releases?per_page=100&page=1`, { token: "test-only" }), []);
+    await assert.rejects(githubRequest(`/repos/${POLICY.repository}/releases?per_page=100&page=1`, { token: "" }), /authenticated GitHub Release list/);
+    const prefix = `/repos/${POLICY.repository}/releases`;
+    for (const path of [`${prefix}?per_page=100&page=0`, `${prefix}?per_page=100&page=21`, `${prefix}?per_page=100&page=01`, `${prefix}?per_page=10&page=1`, `${prefix}?per_page=100&page=1&extra=unsafe`, `${prefix}/403185800?per_page=100&page=1`, `/repos/attacker/ocmm/releases?per_page=100&page=1`]) await assert.rejects(githubRequest(path), /untrusted GitHub API path/);
+    for (const options of [{ method: "POST" }, { binary: true }, { allow404: true }, { body: {} }]) await assert.rejects(githubRequest(`${prefix}?per_page=100&page=1`, options), /untrusted GitHub API path/);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = original; }
 });
