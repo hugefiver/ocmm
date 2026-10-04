@@ -1,5 +1,8 @@
+export function sessionEvents(session) {
+    return session?.snapshotEvents?.() ?? session?.events ?? [];
+}
 export function resolveSelectedAgentPreset(session) {
-    const events = session?.events ?? [];
+    const events = sessionEvents(session);
     for (let index = events.length - 1; index >= 0; index -= 1) {
         const event = events[index];
         if (event?.type !== "agent-preset/selected")

@@ -98,10 +98,10 @@ test("recovery types match the pinned DSH rc.2 structural contracts", async () =
   context.on?.("agent/request-error", requestErrorListener, { prepend: true, global: true });
   context.on?.("agent/turn-stopping", turnStoppingListener, { prepend: true, global: true });
 
-  assert.equal(session.events[1]?.data, stepBoundary);
-  assert.equal(session.events[2]?.data, requestHeader);
-  assert.equal(session.events[3]?.data, todoWrite);
-  assert.equal(session.events[4]?.data, goalChange);
+  assert.equal(session.events?.[1]?.data, stepBoundary);
+  assert.equal(session.events?.[2]?.data, requestHeader);
+  assert.equal(session.events?.[3]?.data, todoWrite);
+  assert.equal(session.events?.[4]?.data, goalChange);
   assert.equal(session.requestHeader?.(), header);
   assert.equal(requestErrorFrame.failure, failure);
   assert.equal(requestErrorFrame.failure.message, "sensitive provider body");

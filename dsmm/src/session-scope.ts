@@ -1,7 +1,11 @@
-import type { DshSession } from "./dsh-types.js";
+import type { DshSession, DshSessionEvent } from "./dsh-types.js";
+
+export function sessionEvents(session: DshSession | undefined): readonly DshSessionEvent[] {
+  return session?.snapshotEvents?.() ?? session?.events ?? [];
+}
 
 export function resolveSelectedAgentPreset(session: DshSession | undefined): string | undefined {
-  const events = session?.events ?? [];
+  const events = sessionEvents(session);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event?.type !== "agent-preset/selected") continue;

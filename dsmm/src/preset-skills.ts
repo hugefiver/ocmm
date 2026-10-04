@@ -1,6 +1,6 @@
 import Schema from "@deepseek-ai/schemastery";
 import type { DshContext, DshSkillRegistry } from "./dsh-types.js";
-import { DSMM_SKILL_NAMES, registerBundledSkills } from "./skills.js";
+import { DSMM_SKILL_NAMES, DSMM_ON_DEMAND_SKILL_NAMES, registerBundledSkills } from "./skills.js";
 import type { DsmmSkillName } from "./skills.js";
 
 export const name = "dsmm/preset-skills";
@@ -26,7 +26,7 @@ export const Config: Schema<PresetSkillsConfig> = Schema.object({
 
 export function apply(ctx: DshContext, config: PresetSkillsConfig = {}): void {
   const skills = config.skills ?? DSMM_SKILL_NAMES;
-  const register = (registry: DshSkillRegistry | undefined): void => registerBundledSkills(registry, skills);
+  const register = (registry: DshSkillRegistry | undefined): void => registerBundledSkills(registry, [...skills, ...DSMM_ON_DEMAND_SKILL_NAMES]);
 
   if (ctx.inject !== undefined) {
     ctx.inject(["skills"], (readyCtx) => register(readyCtx.skills));

@@ -1,4 +1,5 @@
 import type { DshAgent, DshContext, DshSession, DshSessionEvent, PreStepDecision, PreStepFrame } from "./dsh-types.js";
+import { sessionEvents } from "./session-scope.js";
 
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 
@@ -50,7 +51,7 @@ export class DeepworkModeController {
 
   active(agent: DshAgent | undefined, defaultActive: boolean): boolean {
     if (agent === undefined) return false;
-    return this.pending.get(agent.session)?.active ?? isDeepworkActive(agent.session.events, defaultActive);
+    return this.pending.get(agent.session)?.active ?? isDeepworkActive(sessionEvents(agent.session), defaultActive);
   }
 
   async select(agent: DshAgent, active: boolean, defaultActive = false): Promise<DeepworkSelectionOutcome> {
@@ -58,7 +59,7 @@ export class DeepworkModeController {
     if (current === active && !this.pending.has(agent.session)) return "unchanged";
 
     this.pending.set(agent.session, { active });
-    if (hasOpenTurn(agent.session.events)) return "pending";
+    if (hasOpenTurn(sessionEvents(agent.session))) return "pending";
 
     await this.commit(agent.session, active);
     return "committed";

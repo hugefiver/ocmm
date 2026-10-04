@@ -1,7 +1,7 @@
 import type { DshContext } from "./dsh-types.js";
 import type { DsmmPluginConfig } from "./settings.js";
 export declare const name = "dsmm";
-export declare const inject: readonly ["systemPrompt"];
+export declare const inject: readonly [];
 export type Config = DsmmPluginConfig;
 export declare const Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
 export type { DeepworkSessionEventMap } from "./dsh-events.js";

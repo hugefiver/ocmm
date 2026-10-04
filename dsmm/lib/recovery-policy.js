@@ -1,4 +1,4 @@
-const REQUEST_HEADER_REASONS = new Set(["initial", "resume", "change"]);
+const REQUEST_HEADER_REASONS = new Set(["initial", "resume", "change", "series"]);
 const TODO_STATUSES = new Set(["pending", "in_progress", "completed"]);
 const GOAL_OPERATIONS = new Set(["create", "edit", "pause", "resume", "complete", "block"]);
 const GOAL_PHASES = new Set(["active", "paused", "blocked", "complete"]);
@@ -16,11 +16,30 @@ export function classifyRecoveryFailure(failure, settings) {
     if (typeof status === "number" && Number.isInteger(status) && settings.retryOnStatusCodes.includes(status)) {
         return { kind: "retryable", matchedBy: "status" };
     }
+    // Payment failures require an explicit status policy, not a generic transport code.
+    if (status === 402)
+        return { kind: "ignored" };
     const code = failure.code;
     if (typeof code === "string" && settings.retryOnCodes.includes(code.toLowerCase())) {
         return { kind: "retryable", matchedBy: "code" };
     }
     return { kind: "ignored" };
+}
+export function isCurrentRecoveryStep(events, turn, step) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        if (event.type === "step/start" || event.type === "step/end") {
+            const coordinates = readStepCoordinates(event.data);
+            if (coordinates !== undefined)
+                return event.type === "step/start" && coordinates.turn === turn && coordinates.step === step;
+        }
+        if (event.type === "turn/start" || event.type === "turn/end") {
+            const data = eventData(event);
+            if (isRecord(data) && isPositiveSafeInteger(data.turn))
+                return false;
+        }
+    }
+    return false;
 }
 export function foldAttemptedRecoveryRoutes(events, turn, step) {
     const routes = [];

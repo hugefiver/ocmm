@@ -7,7 +7,8 @@ export const DSMM_LSP_TOOL_NAMES = [
   "find_symbol_related",
   "symbols",
   "prepare_rename",
-  "rename"
+  "rename",
+  "format"
 ] as const;
 export type DsmmLspToolName = (typeof DSMM_LSP_TOOL_NAMES)[number];
 

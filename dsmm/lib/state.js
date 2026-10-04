@@ -1,3 +1,4 @@
+import { sessionEvents } from "./session-scope.js";
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 function activeFromEvent(event) {
     if (event.type !== DEEPWORK_MODE_EVENT)
@@ -43,14 +44,14 @@ export class DeepworkModeController {
     active(agent, defaultActive) {
         if (agent === undefined)
             return false;
-        return this.pending.get(agent.session)?.active ?? isDeepworkActive(agent.session.events, defaultActive);
+        return this.pending.get(agent.session)?.active ?? isDeepworkActive(sessionEvents(agent.session), defaultActive);
     }
     async select(agent, active, defaultActive = false) {
         const current = this.active(agent, defaultActive);
         if (current === active && !this.pending.has(agent.session))
             return "unchanged";
         this.pending.set(agent.session, { active });
-        if (hasOpenTurn(agent.session.events))
+        if (hasOpenTurn(sessionEvents(agent.session)))
             return "pending";
         await this.commit(agent.session, active);
         return "committed";

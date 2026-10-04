@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { DSMM_ROLES, renderAgentCordis, renderPresetMetadata } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { isRoleEnabled } from "./settings.js";
 import type { DsmmSettings } from "./settings.js";
@@ -205,7 +205,7 @@ function updateOwnedRoleDirectory(
   }
 
   const files = [
-    ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings))],
+    ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings), enabledRoles(settings))],
     ["preset.yml", renderPresetMetadata(knownDirectory.role)],
     [DSMM_MANAGED_PRESET_MARKER, renderManagedPresetMarker(knownDirectory.role.id)]
   ] as const;
@@ -254,7 +254,7 @@ function publishNewRoleDirectory(
     assertDirectoryNotLinked(temporaryDirectory, temporaryStatus, `temporary preset directory for ${role}`);
     assertCanonicalChild(canonicalRoot, filesystem.realpathSync(temporaryDirectory), `temporary preset directory for ${role}`);
 
-    filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings)), "utf8");
+    filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings), enabledRoles(settings)), "utf8");
     filesystem.writeFileSync(join(temporaryDirectory, "preset.yml"), renderPresetMetadata(findRole(role)), "utf8");
     filesystem.writeFileSync(join(temporaryDirectory, DSMM_MANAGED_PRESET_MARKER), renderManagedPresetMarker(role), "utf8");
 
@@ -282,6 +282,10 @@ function findRole(roleId: DsmmRoleId): (typeof DSMM_ROLES)[number] {
   const role = DSMM_ROLES.find((candidate) => candidate.id === roleId);
   if (role === undefined) throw new Error(`unknown dsmm role: ${roleId}`);
   return role;
+}
+
+function enabledRoles(settings: DsmmSettings): DsmmRoleId[] {
+  return DSMM_ROLE_IDS.filter((id) => isRoleEnabled(settings, id));
 }
 
 function assertDirectoryNotLinked(path: string, status: PresetFileStatus, label: string): void {

@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { DSMM_ROLES, renderAgentCordis, renderPresetMetadata } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 import { isRoleEnabled } from "./settings.js";
 import { enabledSkillNames } from "./skills.js";
 export const DSMM_MANAGED_PRESET_MARKER = ".dsmm-managed-preset";
@@ -146,7 +146,7 @@ function updateOwnedRoleDirectory(canonicalRoot, knownDirectory, settings, files
         throw new Error(`dsmm preset directory is not owned and cannot be updated: ${knownDirectory.directory}`);
     }
     const files = [
-        ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings))],
+        ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings), enabledRoles(settings))],
         ["preset.yml", renderPresetMetadata(knownDirectory.role)],
         [DSMM_MANAGED_PRESET_MARKER, renderManagedPresetMarker(knownDirectory.role.id)]
     ];
@@ -183,7 +183,7 @@ function publishNewRoleDirectory(canonicalRoot, root, role, settings, filesystem
         }
         assertDirectoryNotLinked(temporaryDirectory, temporaryStatus, `temporary preset directory for ${role}`);
         assertCanonicalChild(canonicalRoot, filesystem.realpathSync(temporaryDirectory), `temporary preset directory for ${role}`);
-        filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings)), "utf8");
+        filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings), enabledRoles(settings)), "utf8");
         filesystem.writeFileSync(join(temporaryDirectory, "preset.yml"), renderPresetMetadata(findRole(role)), "utf8");
         filesystem.writeFileSync(join(temporaryDirectory, DSMM_MANAGED_PRESET_MARKER), renderManagedPresetMarker(role), "utf8");
         if (lstatIfExists(finalDirectory, filesystem) !== undefined) {
@@ -211,6 +211,9 @@ function findRole(roleId) {
     if (role === undefined)
         throw new Error(`unknown dsmm role: ${roleId}`);
     return role;
+}
+function enabledRoles(settings) {
+    return DSMM_ROLE_IDS.filter((id) => isRoleEnabled(settings, id));
 }
 function assertDirectoryNotLinked(path, status, label) {
     if (status.isSymbolicLink()) {

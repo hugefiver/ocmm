@@ -1,7 +1,7 @@
 import type { DshAgent } from "./dsh-types.js";
 import { classifyModelFamily } from "./model-family.js";
 import type { DsmmModelFamily } from "./model-family.js";
-import { isDeepseekV4ProRoute } from "./model-routing.js";
+import { isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
 import { isDsmmRoleId } from "./roles.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
 import type { DeepseekCalibration, DsmmSettings } from "./settings.js";
@@ -22,6 +22,7 @@ export interface DsmmStatusSnapshot {
     model?: string;
     family: DsmmModelFamily;
     deepseekV4Pro: boolean;
+    deepseekFlash: boolean;
     currentReasoningEffort?: string;
   };
   calibration: {
@@ -72,6 +73,8 @@ export function createDsmmStatusSnapshot(input: {
   const deepseekV4Pro = selectedRoute.provider !== undefined
     && selectedRoute.model !== undefined
     && isDeepseekV4ProRoute({ provider: selectedRoute.provider, model: selectedRoute.model });
+  const deepseekFlash = selectedRoute.provider !== undefined && selectedRoute.model !== undefined
+    && isDeepseekFlashRoute({ provider: selectedRoute.provider, model: selectedRoute.model });
 
   return {
     version: DSMM_STATUS_VERSION,
@@ -87,13 +90,14 @@ export function createDsmmStatusSnapshot(input: {
       ...(selectedRoute.model === undefined ? {} : { model: selectedRoute.model }),
       family,
       deepseekV4Pro,
+      deepseekFlash,
       ...(selectedRoute.reasoningEffort === undefined ? {} : { currentReasoningEffort: selectedRoute.reasoningEffort })
     },
     calibration: resolveCalibration({
-      calibration: settings.deepseekV4ProCalibration,
+      calibration: deepseekFlash ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration,
       inScope,
-      deepseekV4Pro,
-      policyEffort: resolvePolicyEffort(settings, selectedPreset),
+      targetRoute: deepseekV4Pro || deepseekFlash,
+      policyEffort: resolvePolicyEffort(settings, selectedPreset, deepseekFlash),
       currentReasoningEffort: selectedRoute.reasoningEffort
     }),
     runtimeRecovery: {
@@ -125,6 +129,7 @@ export function formatDsmmStatus(snapshot: DsmmStatusSnapshot): string {
     "DSMM status",
     `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
     `Scope: ${scope}`,
+    `Workflow policy: ${snapshot.effectiveSettings.workflow.policy}`,
     `Route: ${provider}/${model} [${snapshot.route.family}]`,
     `Reasoning: ${snapshot.calibration.mode}; policy=${policyEffort}; current=${currentReasoningEffort}; action=${snapshot.calibration.action}`,
     `Runtime recovery: ${snapshot.runtimeRecovery.enabled ? "enabled" : "disabled"}; applies=${snapshot.runtimeRecovery.applies ? "yes" : "no"}; fallbacks=${snapshot.runtimeRecovery.fallbackRouteCount}; max attempts=${snapshot.runtimeRecovery.maxFallbackAttempts}`,
@@ -154,16 +159,17 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function resolvePolicyEffort(settings: DsmmSettings, selectedPreset: string | undefined): "off" | "low" | "high" | "max" {
-  return isDsmmRoleId(selectedPreset) && settings.deepseekV4ProMaxReasoningPresets.includes(selectedPreset)
+function resolvePolicyEffort(settings: DsmmSettings, selectedPreset: string | undefined, flash: boolean): "off" | "low" | "high" | "max" {
+  const presets = flash ? settings.deepseekFlashMaxReasoningPresets : settings.deepseekV4ProMaxReasoningPresets;
+  return isDsmmRoleId(selectedPreset) && presets.includes(selectedPreset)
     ? "max"
-    : settings.deepseekV4ProDefaultReasoningEffort;
+    : flash ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
 }
 
 function resolveCalibration(input: {
   calibration: DeepseekCalibration;
   inScope: boolean;
-  deepseekV4Pro: boolean;
+  targetRoute: boolean;
   policyEffort: "off" | "low" | "high" | "max";
   currentReasoningEffort?: string;
 }): DsmmStatusSnapshot["calibration"] {
@@ -173,7 +179,7 @@ function resolveCalibration(input: {
   if (!input.inScope) {
     return { mode: input.calibration, applies: false, action: "out-of-scope" };
   }
-  if (!input.deepseekV4Pro) {
+  if (!input.targetRoute) {
     return { mode: input.calibration, applies: false, action: "non-target-route" };
   }
   if (input.calibration === "auto") {
@@ -193,6 +199,9 @@ function copySettings(settings: DsmmSettings): DsmmSettings {
     deepseekV4ProCalibration: settings.deepseekV4ProCalibration,
     deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort,
     deepseekV4ProMaxReasoningPresets: [...settings.deepseekV4ProMaxReasoningPresets],
+    deepseekFlashCalibration: settings.deepseekFlashCalibration,
+    deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort,
+    deepseekFlashMaxReasoningPresets: [...settings.deepseekFlashMaxReasoningPresets],
     skills: { ...settings.skills },
     roles: { ...settings.roles },
     presets: { ...settings.presets },

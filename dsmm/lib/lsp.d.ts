@@ -1,5 +1,5 @@
 export declare const DSMM_LSP_SERVER_NAME = "dsmm_lsp";
-export declare const DSMM_LSP_TOOL_NAMES: readonly ["status", "diagnostics", "goto_definition", "find_references", "find_symbol_related", "symbols", "prepare_rename", "rename"];
+export declare const DSMM_LSP_TOOL_NAMES: readonly ["status", "diagnostics", "goto_definition", "find_references", "find_symbol_related", "symbols", "prepare_rename", "rename", "format"];
 export type DsmmLspToolName = (typeof DSMM_LSP_TOOL_NAMES)[number];
 export interface DsmmLspSettings {
     enabled: boolean;

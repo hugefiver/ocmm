@@ -3,16 +3,31 @@
   config:
     text: |-
       You are dsmm-plan-critic, a dsh-native plan review specialist.
-      Inspect plans for vague steps, hidden dependencies, missing tests, unsafe ordering, and scope creep.
-      Return concrete blockers or a concise pass with any minor risks.
+      Inspect the plan and evidence for material blockers in outcome coverage, dependencies, tests, safety and scope. Return concrete blockers or a concise pass with residual risks; do not require a fixed format or repeated reviews after editorial changes. Read only; do not implement or perform Git writes.
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
 - id: dsmm-preset-skills
   name: 'dsmm/preset-skills'
   config:
     skills:
-      - brainstorming
-      - writing-plans
-      - requesting-code-review
-      - receiving-code-review
-      - subagent-driven-development
-      - dispatching-parallel-agents
-      - remove-ai-slops
+      - 'brainstorming'
+      - 'writing-plans'
+      - 'requesting-code-review'
+      - 'receiving-code-review'
+      - 'subagent-driven-development'
+      - 'dispatching-parallel-agents'
+      - 'remove-ai-slops'

@@ -15,10 +15,12 @@ export interface DshSessionEvent {
 export interface DshSessionHeader {
   cwd?: string;
   agentPreset?: string;
+  origin?: string;
 }
 
 export interface DshSession {
-  events: readonly DshSessionEvent[];
+  events?: readonly DshSessionEvent[];
+  snapshotEvents?(): readonly DshSessionEvent[];
   header?: DshSessionHeader;
   requestHeader?(): DshEpochHeader | undefined;
   append(type: "deepwork/mode", payload: { active: boolean }): unknown | Promise<unknown>;
@@ -110,7 +112,7 @@ export interface DshStepBoundaryEventData {
 
 export interface DshRequestHeaderEventData {
   header: DshEpochHeader;
-  reason: "initial" | "resume" | "change";
+  reason: "initial" | "resume" | "change" | "series";
 }
 
 export interface DshTodoItem {
@@ -157,11 +159,19 @@ export interface DshSystemPromptContext {
 export interface DshSystemPromptSection {
   name: string;
   order: number;
+  interpolate?: boolean;
   text(context: DshSystemPromptContext): string;
 }
 
 export interface DshSystemPromptRegistry {
   section(section: DshSystemPromptSection): unknown;
+}
+
+export interface DshPromptAssembly {
+  sections: Array<{ name: string; text: string; interpolate?: boolean }>;
+  contexts: unknown[];
+  tools: unknown[];
+  variables: Record<string, string | undefined>;
 }
 
 export interface DshCommandInvocation {
@@ -218,7 +228,8 @@ export interface DshToolExecution {
 export type DshPreToolDecision =
   | { kind: "allow" }
   | { kind: "deny"; reason: string }
-  | { kind: "ask"; reason?: string };
+  | { kind: "ask"; reason?: string }
+  | { kind: "cancel" };
 
 export type DshPostToolDecision =
   | { kind: "accept"; content?: DshContentBlock[]; value?: never; additionalContexts?: unknown[] }
@@ -235,6 +246,7 @@ export interface DshToolExecutionResult {
 
 export interface DshToolRuntime {
   guard?(guard: (execution: Readonly<DshToolExecution>) => string | undefined): () => void;
+  get?(name: string): unknown;
 }
 
 export type DshEventListener = (...args: any[]) => any;
@@ -267,6 +279,7 @@ export interface DshContext {
   tools?: DshToolRuntime;
   llm?: DshLlmRuntime;
   get?<T = unknown>(name: string): T | undefined;
+  plugin?(plugin: unknown, config?: unknown): PromiseLike<unknown>;
   inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
   effect?(callback: () => void | (() => void)): unknown;
   on?(event: "agent/request", listener: (frame: AgentRequestFrame, next: () => Promise<DshLlmCallConfig>) => Promise<DshLlmCallConfig>, options?: boolean | { prepend?: boolean; global?: boolean }): unknown;

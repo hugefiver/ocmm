@@ -18,7 +18,7 @@ test("preset-skills apply registers exactly configured model- and user-invocable
 
   assert.equal(name, "dsmm/preset-skills");
   assert.deepEqual(inject, ["skills"]);
-  assert.deepEqual(registered.map((skill) => skill.name), ["brainstorming", "remove-ai-slops"]);
+  assert.deepEqual(registered.map((skill) => skill.name), ["brainstorming", "remove-ai-slops", "debugging"]);
   assert.ok(registered.every((skill) => skill.invocation?.modelInvocable === true && skill.invocation.userInvocable === true));
 });
 
@@ -27,7 +27,7 @@ test("preset-skills apply preserves an explicit empty skill list", () => {
 
   apply({ skills: { register(skill) { registered.push(skill); } } }, { skills: [] });
 
-  assert.deepEqual(registered, []);
+  assert.deepEqual(registered.map((skill) => skill.name), ["debugging"]);
 });
 
 test("preset-skills waits for its scoped skills service", () => {
@@ -40,5 +40,5 @@ test("preset-skills waits for its scoped skills service", () => {
     }
   }, { skills: ["writing-plans"] });
 
-  assert.deepEqual(registered.map((skill) => skill.name), ["writing-plans"]);
+  assert.deepEqual(registered.map((skill) => skill.name), ["writing-plans", "debugging"]);
 });

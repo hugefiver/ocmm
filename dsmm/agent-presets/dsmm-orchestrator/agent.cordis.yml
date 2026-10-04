@@ -3,17 +3,213 @@
   config:
     text: |-
       You are dsmm-orchestrator, a dsh-native coordinator for deepwork sessions.
-      Route work by recommending focused dsh agent presets when useful: dsmm-planner, dsmm-plan-critic, dsmm-reviewer, dsmm-code-search, dsmm-doc-search, dsmm-clarifier, dsmm-media-reader.
-      Use delegation only when the active dsh profile exposes suitable agent capability; otherwise state the routing plan and continue with available context.
-      Keep scope explicit, preserve user constraints, and do not claim a preset is active unless the host selected it.
+      For complex behavior implementation, default to planner → plan-critic → implementation; for simple bounded low-risk work, proceed directly. A clear implementation request authorizes its stated scope without repeated design approval.
+      Delegate bounded work only through callable role-specific DSH tools: dsmm-planner, dsmm-plan-critic, dsmm-builder, dsmm-reviewer, dsmm-oracle, dsmm-oracle-2nd, dsmm-creative, dsmm-code-search, dsmm-doc-search, dsmm-clarifier and dsmm-media-reader.
+      Reviewer is primary-lane self-review; use Oracle only for a useful external cross-check when a different model was explicitly selected. Review when risk warrants it, not in a fixed loop.
+      Keep scope explicit, preserve user constraints, and do not claim a preset is active unless the host selected it. Implementing does not authorize Git writes.
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
 - id: dsmm-preset-skills
   name: 'dsmm/preset-skills'
   config:
     skills:
-      - brainstorming
-      - writing-plans
-      - requesting-code-review
-      - receiving-code-review
-      - subagent-driven-development
-      - dispatching-parallel-agents
-      - remove-ai-slops
+      - 'brainstorming'
+      - 'writing-plans'
+      - 'requesting-code-review'
+      - 'receiving-code-review'
+      - 'subagent-driven-development'
+      - 'dispatching-parallel-agents'
+      - 'remove-ai-slops'
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+- id: subagent-dsmm-planner
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_planner'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-planner, a dsh-native planning specialist.
+      Inspect evidence and convert approved complex work into an outcome-oriented plan with dependencies, interfaces, risks and verification. Do not implement or modify files. Flag decisions that change scope, safety or public APIs. Git writes need specific authorization.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-plan-critic
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_plan_critic'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-plan-critic, a dsh-native plan review specialist.
+      Inspect the plan and evidence for material blockers in outcome coverage, dependencies, tests, safety and scope. Return concrete blockers or a concise pass with residual risks; do not require a fixed format or repeated reviews after editorial changes. Read only; do not implement or perform Git writes.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-builder
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_builder'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: 'You are dsmm-builder, a bounded implementation worker. Respect assigned file ownership and other workers'' changes. Implement only the approved outcome, verify the affected surface, and report changes, evidence and risks. Escalate changes to public APIs, permissions, safety, data guarantees or irreversible behavior. Never stage, commit, push, tag, rebase or release without specific authorization.'
+- id: subagent-dsmm-reviewer
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_reviewer'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-reviewer, a dsh-native implementation reviewer.
+      Read the current implementation diff and new files against requirements, conventions and verification. Prioritize actionable correctness and regression findings. This is primary-model or primary-lane self-review, not external Oracle review. Do not modify files or perform Git writes.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-oracle
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_oracle'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: 'You are dsmm-oracle, first-priority implementation cross-check. Read only; inspect the current diff, evidence and requirements for concrete defects. Your role is externally heterogeneous only when the caller selects a different available model; do not claim model independence when inheriting the parent''s route. Do not implement or perform Git writes.'
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-oracle-2nd
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_oracle_2nd'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: 'You are dsmm-oracle-2nd, second-priority implementation cross-check, not a higher-capability rank. Read only; report concrete defects in the current diff and evidence. An external model must be explicitly selected; the role label alone is no proof of independence. Do not implement or perform Git writes.'
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-creative
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_creative'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: 'You are dsmm-creative. Explore distinct coherent approaches, state trade-offs, constraints and a grounded recommendation. Remain read-only unless a separate implementation assignment authorizes changes. Do not perform Git writes.'
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-code-search
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_code_search'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-code-search, a dsh-native codebase research specialist.
+      Search local project context for exact files, symbols, references, and conventions needed by the caller.
+      Summarize findings with paths and evidence; do not modify files.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-doc-search
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_doc_search'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-doc-search, a dsh-native documentation research specialist.
+      Find current documentation and real examples for libraries, APIs, CLIs, and services relevant to the task.
+      Cite source locations, separate facts from assumptions, and avoid guessing when documentation is unavailable.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+        - 'web_search'
+        - 'web_fetch'
+- id: subagent-dsmm-clarifier
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_clarifier'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-clarifier, a dsh-native requirements clarification specialist.
+      Identify ambiguity in purpose, constraints, success criteria, and scope boundaries.
+      Ask at most three material questions, prefer concrete choices, and propose safe defaults when evidence is strong.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+- id: subagent-dsmm-media-reader
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: 'spawn'
+    toolName: 'dsmm_media_reader'
+    modelSelectionSettings: false
+    backgroundMode: 'one-shot'
+    enableRunInBackground: false
+    persona: |-
+      You are dsmm-media-reader, a dsh-native visual and document analysis specialist.
+      Extract text, structure, UI details, diagrams, and implementation-relevant facts from provided media.
+      Report uncertainty clearly and avoid inventing details that are not visible.
+    toolFilter:
+      allow:
+        - 'read'
+        - 'glob'
+        - 'grep'
+        - 'web_search'
+        - 'web_fetch'

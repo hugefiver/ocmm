@@ -62,19 +62,44 @@ test("registerDeepworkPrompt builds a route only from string provider and model 
   assert.doesNotMatch(prompt, /DeepSeek V4 Pro calibration/);
 });
 
+test("prompt calibration follows the committed request header rather than stale Agent options", () => {
+  const sections: DshSystemPromptSection[] = [];
+  const ctx = { systemPrompt: { section: (section: DshSystemPromptSection) => sections.push(section) } };
+  registerDeepworkPrompt(ctx, new DeepworkModeController(ctx), () => DEFAULT_DSMM_SETTINGS);
+  const render = (header: unknown, options = { provider: "deepseek-official", model: "deepseek-v4-pro" }): string => sections[0].text({
+    agent: {
+      options,
+      session: {
+        events: [{ type: DEEPWORK_MODE_EVENT, data: { active: true } }],
+        requestHeader: () => header as ReturnType<NonNullable<import("../lib/dsh-types.js").DshSession["requestHeader"]>>,
+        append() {}
+      }
+    }
+  });
+  const flash = render({ config: { provider: "deepseek-official", model: "deepseek-flash" } });
+  assert.match(flash, /<dsmm-deepseek-flash-calibration>/);
+  assert.doesNotMatch(flash, /<dsmm-deepseek-v4-pro-calibration>/);
+  const changed = render({ config: { provider: "openai", model: "gpt-5.6" } }, { provider: "deepseek-official", model: "deepseek-flash" });
+  assert.doesNotMatch(changed, /<dsmm-deepseek-(?:flash|v4-pro)-calibration>/);
+  for (const malformed of [{}, { config: {} }, { config: { provider: 42, model: "deepseek-flash" } }]) {
+    assert.doesNotMatch(render(malformed), /<dsmm-deepseek-(?:flash|v4-pro)-calibration>/);
+  }
+  assert.match(render(undefined), /<dsmm-deepseek-v4-pro-calibration>/);
+});
+
 test("generic active deepwork emits each enabled skill body exactly once", () => {
   const sections: DshSystemPromptSection[] = [];
   const ctx = { systemPrompt: { section: (section: DshSystemPromptSection) => sections.push(section) } };
   const controller = new DeepworkModeController(ctx);
   const settings = resolveConfig({ skills: { "remove-ai-slops": false } });
   const sentinels = {
-    brainstorming: "Use this skill in dsmm deepwork mode before implementing new behavior.",
-    "writing-plans": "Write a plan before multi-step implementation in dsmm deepwork mode.",
-    "requesting-code-review": "Before declaring dsmm implementation complete, collect the current diff, tests, diagnostics, and user-visible verification evidence. Ask the selected reviewer to check the implementation against the requested behavior and reject stale or conditional verdicts.",
-    "receiving-code-review": "Treat review feedback as claims to verify, not commands to obey blindly.",
-    "subagent-driven-development": "Use this skill after an approved implementation plan exists.",
-    "dispatching-parallel-agents": "Use this skill only when parallel work is genuinely independent.",
-    "remove-ai-slops": "Use this skill when asked to clean AI-generated or low-quality patterns from existing code."
+    brainstorming: "# Brainstorming",
+    "writing-plans": "# Writing Plans",
+    "requesting-code-review": "# Requesting Code Review",
+    "receiving-code-review": "# Receiving Code Review",
+    "subagent-driven-development": "# Subagent-Driven Development",
+    "dispatching-parallel-agents": "# Dispatching Parallel Agents",
+    "remove-ai-slops": "# Remove AI Slops"
   } as const;
 
   registerDeepworkPrompt(ctx, controller, () => settings);

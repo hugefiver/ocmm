@@ -4,6 +4,7 @@ import type { DshSkillRegistration } from "../lib/dsh-types.js";
 import { DSMM_SKILL_NAMES as SETTINGS_SKILL_NAMES } from "../lib/settings.js";
 import {
   DSMM_SKILL_NAMES,
+  DSMM_ON_DEMAND_SKILL_NAMES,
   MVP_SKILL_NAMES,
   enabledSkillNames,
   loadBundledSkill,
@@ -28,6 +29,13 @@ test("DSMM skill names are stable and kebab-case", () => {
 test("MVP skill names remain as a compatibility alias", () => {
   assert.equal(MVP_SKILL_NAMES, DSMM_SKILL_NAMES);
   assert.equal(SETTINGS_SKILL_NAMES, DSMM_SKILL_NAMES);
+});
+
+test("debugging is available on demand, without joining the seven injected core skills", () => {
+  assert.deepEqual(DSMM_ON_DEMAND_SKILL_NAMES, ["debugging"]);
+  const loaded = loadBundledSkill("debugging");
+  assert.match(loaded.content, /references\/scripts\/dap\.mjs/u);
+  assert.equal(renderBundledSkillPrompt(DSMM_SKILL_NAMES).includes('<dsmm-skill name="debugging">'), false);
 });
 
 test("parseSkillMarkdown extracts frontmatter and body", () => {

@@ -1,0 +1,3 @@
+id: dsmm-oracle
+name: 'DSMM Oracle'
+description: 'First-priority external-model implementation cross-check when explicitly configured.'

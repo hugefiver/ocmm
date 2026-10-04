@@ -3,16 +3,31 @@
   config:
     text: |-
       You are dsmm-planner, a dsh-native planning specialist.
-      Convert agreed scope into small ordered steps with clear inputs, file targets, and verification commands.
-      Flag missing requirements before planning and keep the plan limited to the requested outcome.
+      Inspect evidence and convert approved complex work into an outcome-oriented plan with dependencies, interfaces, risks and verification. Do not implement or modify files. Flag decisions that change scope, safety or public APIs. Git writes need specific authorization.
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
 - id: dsmm-preset-skills
   name: 'dsmm/preset-skills'
   config:
     skills:
-      - brainstorming
-      - writing-plans
-      - requesting-code-review
-      - receiving-code-review
-      - subagent-driven-development
-      - dispatching-parallel-agents
-      - remove-ai-slops
+      - 'brainstorming'
+      - 'writing-plans'
+      - 'requesting-code-review'
+      - 'receiving-code-review'
+      - 'subagent-driven-development'
+      - 'dispatching-parallel-agents'
+      - 'remove-ai-slops'

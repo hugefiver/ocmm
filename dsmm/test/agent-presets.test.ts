@@ -29,16 +29,17 @@ test("static agent preset files exactly match role render helpers", () => {
   }
 });
 
-test("static agent cordis files contain exactly the persona and preset-skills rows", () => {
-  const expectedSkills = DSMM_SKILL_NAMES.map((skill) => `      - ${skill}`).join("\n");
+test("static agent cordis files mirror native preset plugin inventory", () => {
+  const expectedSkills = DSMM_SKILL_NAMES.map((skill) => `      - '${skill}'`).join("\n");
 
   for (const role of DSMM_ROLES) {
     const agentCordis = readFileSync(join(packageRoot, "agent-presets", role.id, "agent.cordis.yml"), "utf8");
 
     assert.match(agentCordis, /^- id: persona\r?\n/mu, `${role.id} starts with a top-level list item`);
-    assert.equal((agentCordis.match(/^\s*- id:/gmu) ?? []).length, 2, `${role.id} has two service rows`);
+    assert.ok((agentCordis.match(/^\s*- id:/gmu) ?? []).length >= 7, `${role.id} has working tool rows`);
     assert.equal((agentCordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? []).length, 1, `${role.id} has one persona row`);
     assert.equal((agentCordis.match(/name: 'dsmm\/preset-skills'/gu) ?? []).length, 1, `${role.id} has one preset skill row`);
     assert.ok(agentCordis.includes(`- id: dsmm-preset-skills\n  name: 'dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
+    assert.equal(agentCordis.includes("name: '@deepseek-ai/dsh-tool-subagent'"), role.id === "dsmm-orchestrator" || role.id === "dsmm-builder");
   }
 });

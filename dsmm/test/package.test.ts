@@ -47,7 +47,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "dsmm");
-  assert.equal(pkg.version, "1.0.0");
+  assert.equal(pkg.version, "0.1.0");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -91,8 +91,8 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.equal(pkg.files.includes("lib"), false);
   assert.equal(pkg.files.some((path: string) => path.includes("implementation-plan")), false);
   assert.deepEqual(pkg.engines, { node: ">=22" });
-  assert.deepEqual(pkg.dependencies, { "@deepseek-ai/schemastery": "^3.18.1" });
-  assert.equal(pkg.scripts["smoke:docker:build"], "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.1.1-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.1 ..");
+  assert.deepEqual(pkg.dependencies, { "@deepseek-ai/schemastery": "~3.18.4" });
+  assert.equal(pkg.scripts["smoke:docker:build"], "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..");
   assert.equal(pkg.scripts["check:release"], "node scripts/check-release-readiness.mjs");
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.keys(pkg.exports).some((key) => key.includes("client")), false);
@@ -102,10 +102,13 @@ test("package manifest exposes dsh bundle metadata", () => {
     assert.equal(Object.keys(packageSection).some((name) => /react/i.test(name)), false);
   }
   for (const packageSection of [pkg.peerDependencies, pkg.devDependencies]) {
-    assert.equal(packageSection["@deepseek-ai/cordis"], "^4.0.1");
+    assert.equal(packageSection["@deepseek-ai/cordis"], "~4.0.4");
     for (const name of ["attachment", "brand", "invariants", "llm", "timeout"]) {
-      assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "^0.1.1-rc.2");
+      assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
     }
+  }
+  for (const name of ["system-prompt", "agent", "agent-preset-registry", "tools", "scope", "session"]) {
+    assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
   }
 
   assert.deepEqual(pkg.dsh, { bundle: { patch: "./cordis.patch.yml" } });
@@ -116,118 +119,79 @@ test("README local documentation links are shipped by the package", () => {
   const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
   const localDocs = [...new Set([...readme.matchAll(/\[[^\]]+\]\((docs\/[^)#]+)\)/gu)].map((match) => match[1]))];
 
-  assert.deepEqual(localDocs, ["docs/agent-presets.md", "docs/safety-guards.md", "docs/lsp.md", "docs/model-routing.md", "docs/runtime-recovery.md", "docs/settings-status.md"]);
-  const releaseDocs = ["docs/compatibility.md", "docs/migration-from-ocmm.md", "docs/releasing.md"];
-  assert.ok(readme.indexOf("[compatibility]: docs/compatibility.md") > readme.indexOf("(docs/settings-status.md)"));
-  assert.ok(readme.indexOf("[migration]: docs/migration-from-ocmm.md") > readme.indexOf("[compatibility]: docs/compatibility.md"));
-  assert.ok(readme.indexOf("[releasing]: docs/releasing.md") > readme.indexOf("[migration]: docs/migration-from-ocmm.md"));
-  assert.match(readme, /^## v0\.8 settings and status$/mu);
-  assert.match(readme, /\/dsmm-status\r?\n\/dsmm-status json/u);
-  assert.match(readme, /existing dsh Web command UI/i);
-  assert.match(readme, /Headless profiles remain file-configured/i);
-  assert.match(readme, /future TUI/i);
-  for (const path of [...localDocs, ...releaseDocs]) {
+  for (const required of ["docs/migration-from-ocmm.md", "docs/settings-status.md", "docs/agent-presets.md", "docs/compatibility.md", "docs/releasing.md"]) {
+    assert.ok(localDocs.includes(required), `${required} is linked from README`);
+  }
+  assert.match(readme, /@deepseek-ai\/dsh@0\.2\.0-rc\.2/u);
+  assert.match(readme, /seven scoped core workflow skills/iu);
+  assert.match(readme, /twelve native roles/iu);
+  assert.match(readme, /nine tools including atomic `format`/iu);
+  assert.match(readme, /Headless task text is not a slash-command adapter/u);
+  for (const path of localDocs) {
     assert.ok(pkg.files.includes(path), `${path} is included in package files`);
     assert.equal(existsSync(join(packageRoot, path)), true, `${path} exists`);
   }
 });
 
-test("settings-status documentation ships the v0.8 status and settings contract", () => {
+test("settings-status documentation ships the DSH 0.2 restart-scoped contract", () => {
   const settingsStatus = readFileSync(join(packageRoot, "docs", "settings-status.md"), "utf8");
 
   assert.deepEqual(
     [...settingsStatus.matchAll(/^## (.+)$/gmu)].map((match) => match[1]),
-    ["Command", "Snapshot contract", "Web loopback", "Headless settings", "Future TUI", "Boundaries"]
+    ["Commands and inspection", "DSH 0.2 configuration", "Workflow compatibility", "Other settings", "Snapshot boundaries"]
   );
   assert.match(settingsStatus, /\/dsmm-status\b/u);
   assert.match(settingsStatus, /\/dsmm-status json/u);
-  assert.match(settingsStatus, /empty input.*human/i);
-  assert.match(settingsStatus, /lowercase `json`.*versioned JSON/is);
   assert.match(settingsStatus, /Usage: \/dsmm-status \[json\]/u);
-  assert.match(settingsStatus, /mode.*scope.*route.*calibration.*runtime recovery.*idle continuation/is);
-  assert.match(settingsStatus, /prompt|error/is);
-  assert.match(settingsStatus, /version.*1/is);
-  assert.match(settingsStatus, /policyEffort.*desired.*not.*adapter/is);
-  assert.match(settingsStatus, /defensive copy/i);
-  assert.match(settingsStatus, /existing host command UI/i);
-  assert.match(settingsStatus, /settings\.describe.*independent/i);
-  assert.match(settingsStatus, /no custom.*card.*panel.*client bundle/is);
+  assert.match(settingsStatus, /defensive JSON snapshot with version 1/u);
+  assert.match(settingsStatus, /Commands belong to the native command adapter/u);
+  assert.match(settingsStatus, /restart-scoped/u);
+  assert.match(settingsStatus, /Loader plugin entry/u);
+  assert.match(settingsStatus, /removed `settings\.register\(\)` service/u);
   assert.match(settingsStatus, /\$DSH_HOME\/settings\.yaml/u);
-  assert.match(settingsStatus, /profile files/i);
-  assert.match(settingsStatus, /dump-config/i);
-  assert.match(settingsStatus, /pinned headless.*no interactive command adapter/is);
-  assert.match(settingsStatus, /rc\.2.*no official TUI.*private bridge/is);
-  assert.match(settingsStatus, /no provider.*capability.*network lookup/is);
-  assert.match(settingsStatus, /no process-local.*pending.*count exposure/is);
-  assert.match(settingsStatus, /settings writes.*file.*DSH-owned/is);
+  assert.match(settingsStatus, /explicitly volatile fields/u);
+  assert.match(settingsStatus, /Schema parsing preserves this distinction/u);
+  assert.match(settingsStatus, /twelve role toggles default on/u);
+  assert.match(settingsStatus, /does not perform capability\/network queries/u);
 
   for (const line of [
-    "modeName: deepwork",
-    "defaultActive: false",
-    "promptOrder: 50",
-    "deepseekV4ProCalibration: auto",
-    "deepseekV4ProDefaultReasoningEffort: high",
+    "defaultActive: true",
+    "policy: risk-based",
+    "deepseekFlashCalibration: auto",
+    "deepseekFlashDefaultReasoningEffort: high",
     "- dsmm-plan-critic",
     "- dsmm-reviewer",
-    "brainstorming: true",
-    "writing-plans: true",
-    "requesting-code-review: true",
-    "receiving-code-review: true",
-    "subagent-driven-development: true",
-    "dispatching-parallel-agents: true",
-    "remove-ai-slops: true",
-    "dsmm-orchestrator: true",
-    "dsmm-planner: true",
-    "dsmm-plan-critic: true",
-    "dsmm-reviewer: true",
-    "dsmm-code-search: true",
-    "dsmm-doc-search: true",
-    "dsmm-clarifier: true",
-    "dsmm-media-reader: true",
-    "materialize: false",
-    "strictGates: true",
-    "reviewCap: 5",
-    "finalReviewPolicy: simple-oracle-complex-reviewer",
-    "scope: deepwork-or-dsmm-agent",
-    "shellCommandSafety: true",
-    "gitWriteGuard: ask",
-    "maxInlineBytes: 12000",
-    "planFormatValidation: true",
-    "maxLabelChars: 30",
-    "todoDisciplineHelper: true",
-    "retryOnStatusCodes: [429, 500, 502, 503, 504]",
-    "retryOnCodes: []",
-    "fallbackRoutes: []",
-    "maxFallbackAttempts: 2",
-    "maxContinuations: 3",
-    "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work.",
-    "serverName: dsmm_lsp",
-    "command: ocmm-lsp",
-    "args: [mcp]",
-    "cwd: \"\"",
-    "env: {}",
-    "toolCallTimeoutMs: 60000",
-    "failOnStartupError: true"
+    "runtimeRecovery:",
+    "enabled: false",
+    "lsp:"
   ]) {
     assert.ok(settingsStatus.includes(line), line);
   }
-  assert.match(settingsStatus, /presets\.root.*omitted when unset/i);
-  assert.match(settingsStatus, /restart-scoped/i);
+  assert.match(settingsStatus, /materialization remains off by default/u);
 });
 
 test("model-routing documentation ships the exact calibration contract", () => {
   const modelRouting = readFileSync(join(packageRoot, "docs", "model-routing.md"), "utf8");
 
-  assert.match(modelRouting, /active deepwork mode or a selected DSMM preset/i);
+  assert.match(modelRouting, /deepwork mode or a selected DSMM preset is in scope/i);
   assert.match(modelRouting, /deepseek-official\/deepseek-v4-pro/u);
-  assert.match(modelRouting, /deepseekV4ProCalibration: auto/u);
-  assert.match(modelRouting, /deepseekV4ProDefaultReasoningEffort: high/u);
-  assert.match(modelRouting, /deepseekV4ProMaxReasoningPresets: dsmm-plan-critic, dsmm-reviewer/u);
-  assert.match(modelRouting, /auto.*preserv(?:e|es) explicit.*strict.*override/is);
-  assert.match(modelRouting, /max → high → valid defaultEffort → unchanged/u);
-  assert.match(modelRouting, /exact desired → valid defaultEffort → unchanged/u);
-  assert.match(modelRouting, /one sanitized warning.*downstream config unchanged/is);
-  assert.match(modelRouting, /no provider\/model switch.*text heuristic.*retry\/recovery/is);
+  assert.match(modelRouting, /deepseek-official\/deepseek-flash/u);
+  assert.match(modelRouting, /deepseek-account\/deepseek-flash/u);
+  assert.match(modelRouting, /DeepSeek-V41-Flash/u);
+  for (const name of [
+    "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekV4ProMaxReasoningPresets",
+    "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "deepseekFlashMaxReasoningPresets"
+  ]) assert.ok(modelRouting.includes(name), `${name} is documented`);
+  assert.match(modelRouting, /DSMM does not change the user's default provider\/model/u);
+  assert.match(modelRouting, /`auto` fills an omitted reasoning effort while preserving an explicit upstream effort/u);
+  assert.match(modelRouting, /`strict` may replace an upstream effort only.*advertises a permitted value/u);
+  assert.match(modelRouting, /max → high → valid default → unchanged/u);
+  assert.match(modelRouting, /desired → valid default → unchanged/u);
+  assert.match(modelRouting, /No effort is invented when the model has no reasoning metadata/u);
+  assert.match(modelRouting, /a role label alone cannot trigger external-model routing or prove heterogeneity/u);
+  assert.match(modelRouting, /Runtime recovery chooses any final route before this calibration middleware evaluates it/u);
+  assert.match(modelRouting, /warning is sanitized.*no prompt, credentials, response body or request headers/is);
+  assert.match(modelRouting, /actual persisted request header.*authoritative for the resolved effort/u);
 });
 
 test("runtime-recovery documentation ships the supported recovery contract", () => {
@@ -253,7 +217,7 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
   assert.match(runtimeRecovery, /no timer.*provider call/is);
   assert.match(runtimeRecovery, /downstream.*prepend.*model routing/is);
   assert.match(runtimeRecovery, /removes? stale.*reasoningEffort/is);
-  assert.match(runtimeRecovery, /final exact official V4 Pro route/i);
+  assert.match(runtimeRecovery, /final route.*supported exact V4 Pro or native V41 Flash route/i);
   assert.match(runtimeRecovery, /current-turn todo.*pending.*in_progress.*latest active goal/is);
   assert.match(runtimeRecovery, /cap.*live agent.*turn/is);
   assert.match(runtimeRecovery, /steering failure.*consumes.*attempt.*sanitized warn.*fail-open/is);
@@ -261,8 +225,8 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
   assert.match(runtimeRecovery, /no continuation until.*user.*host.*resumes a turn/is);
   assert.match(runtimeRecovery, /continuable.*one-shot/i);
   assert.match(runtimeRecovery, /subagent\/end.*live(?:-| )only/is);
-  assert.match(runtimeRecovery, /parent.*subagent\/descriptor.*child.*durable.*turn\/end/is);
-  assert.match(runtimeRecovery, /explicitly continue.*known child session/is);
+  assert.match(runtimeRecovery, /native durable descriptor and child control\/session surfaces/is);
+  assert.match(runtimeRecovery, /Explicitly continue a known continuable child/is);
   assert.match(runtimeRecovery, /no fake.*llm\/retry/i);
   assert.match(runtimeRecovery, /no timers?/i);
   assert.match(runtimeRecovery, /no cross-process automatic retry/i);
@@ -274,7 +238,7 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
 test("source entry exports a dsh plugin function and config schema", async () => {
   const mod = await import("../lib/index.js");
   assert.equal(mod.name, "dsmm");
-  assert.deepEqual(mod.inject, ["systemPrompt"]);
+  assert.deepEqual(mod.inject, []);
   assert.equal(typeof mod.Config, "function");
   assert.equal(typeof mod.Config.toJSON, "function");
   assert.equal(typeof mod.apply, "function");

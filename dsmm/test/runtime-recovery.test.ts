@@ -375,6 +375,37 @@ test("only the originating agent and exact coordinates consume a pending handoff
   assert.equal(await harness.request(requestFrame(first.agent), base), base);
 });
 
+test("duplicate failure evidence reserves one fallback even after its handoff is consumed", async () => {
+  const harness = runtimeRecoveryHarness(() => recoverySettings());
+  const agent = harness.createAgent([
+    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
+    { type: "step/start", data: { turn: 1, step: 1 } }
+  ], { config: config() });
+  const frame = errorFrame(agent.agent);
+  assert.deepEqual(await harness.error(frame), { kind: "retry" });
+  assert.equal(await harness.error(frame), undefined);
+  assert.equal((await harness.request(requestFrame(agent.agent), config())).provider, "fallback");
+  assert.equal(await harness.error(frame), undefined);
+});
+
+test("a cancelled or expired step cannot consume or recreate its fallback reservation", async () => {
+  for (const boundary of ["cancel", "step/end", "step/start"] as const) {
+    const harness = runtimeRecoveryHarness(() => recoverySettings());
+    const agent = harness.createAgent([
+      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
+      { type: "step/start", data: { turn: 1, step: 1 } }
+    ], { config: config() });
+    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
+    const abort = new AbortController();
+    if (boundary === "cancel") abort.abort();
+    else agent.events.push({ type: boundary, data: { turn: 1, step: boundary === "step/start" ? 2 : 1 } });
+    const base = config();
+    assert.equal(await harness.request({ ...requestFrame(agent.agent), signal: abort.signal }, base), base, boundary);
+    assert.equal(await harness.error(errorFrame(agent.agent, { signal: abort.signal })), undefined, boundary);
+    assert.equal(await harness.request(requestFrame(agent.agent), base), base, boundary);
+  }
+});
+
 test("an exact durable history tail survives cleanup and re-registration while enforcing the fallback cap", async () => {
   const settings = recoverySettings({
     fallbackRoutes: [

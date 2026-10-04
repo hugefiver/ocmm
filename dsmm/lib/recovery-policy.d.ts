@@ -17,6 +17,7 @@ interface FallbackRouteSelectionInput {
     maxFallbackAttempts: number;
 }
 export declare function classifyRecoveryFailure(failure: DshLlmFailure, settings: DsmmRuntimeRecoverySettings): RecoveryFailureDecision;
+export declare function isCurrentRecoveryStep(events: readonly DshSessionEvent[], turn: number, step: number): boolean;
 export declare function foldAttemptedRecoveryRoutes(events: readonly DshSessionEvent[], turn: number, step: number): DsmmRecoveryRoute[];
 export declare function foldDurableRecoveryWork(events: readonly DshSessionEvent[]): DurableRecoveryWork;
 export declare function selectFallbackRoute({ failedRoute, attemptedRoutes, fallbackRoutes, maxFallbackAttempts }: FallbackRouteSelectionInput): DsmmRecoveryRoute | undefined;

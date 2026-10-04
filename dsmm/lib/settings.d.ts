@@ -11,6 +11,7 @@ export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
 export interface DsmmWorkflowSettings {
+    policy: "risk-based" | "legacy";
     strictGates: boolean;
     reviewCap: number;
     finalReviewPolicy: DsmmFinalReviewPolicy;
@@ -64,6 +65,9 @@ export interface DsmmPluginConfig {
     deepseekV4ProCalibration?: DeepseekCalibration;
     deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
     deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
+    deepseekFlashCalibration?: DeepseekCalibration;
+    deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
+    deepseekFlashMaxReasoningPresets?: DsmmRoleId[];
     defaultActive?: boolean;
     promptOrder?: number;
     skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -81,6 +85,9 @@ export interface DsmmSettings {
     deepseekV4ProCalibration: DeepseekCalibration;
     deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
     deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
+    deepseekFlashCalibration: DeepseekCalibration;
+    deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
+    deepseekFlashMaxReasoningPresets: DsmmRoleId[];
     skills: Record<DsmmSkillName, boolean>;
     roles: Record<DsmmRoleId, boolean>;
     presets: DsmmPresetSettings;

@@ -16,6 +16,7 @@ export interface DsmmStatusSnapshot {
         model?: string;
         family: DsmmModelFamily;
         deepseekV4Pro: boolean;
+        deepseekFlash: boolean;
         currentReasoningEffort?: string;
     };
     calibration: {

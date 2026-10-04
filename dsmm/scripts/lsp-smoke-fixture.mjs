@@ -85,7 +85,7 @@ function runServer() {
   function handle(message) {
     trace(message);
     if (message.method === "initialize") {
-      send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { textDocumentSync: 1 } } });
+      send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { textDocumentSync: 1, documentFormattingProvider: true } } });
       return;
     }
     if (message.method === "textDocument/didOpen") {
@@ -102,6 +102,17 @@ function runServer() {
             message: "dsmm smoke diagnostic"
           }]
         }
+      });
+      return;
+    }
+    if (message.method === "textDocument/formatting") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: [{
+          range: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } },
+          newText: 'const value: number = "wrong";\n'
+        }]
       });
       return;
     }

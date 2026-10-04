@@ -1,0 +1,3 @@
+id: dsmm-builder
+name: 'DSMM Builder'
+description: 'Implements one bounded approved outcome and verifies the changed surface.'

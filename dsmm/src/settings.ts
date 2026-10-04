@@ -17,6 +17,7 @@ export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
 
 export interface DsmmWorkflowSettings {
+  policy: "risk-based" | "legacy";
   strictGates: boolean;
   reviewCap: number;
   finalReviewPolicy: DsmmFinalReviewPolicy;
@@ -77,6 +78,9 @@ export interface DsmmPluginConfig {
   deepseekV4ProCalibration?: DeepseekCalibration;
   deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
   deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
+  deepseekFlashCalibration?: DeepseekCalibration;
+  deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
+  deepseekFlashMaxReasoningPresets?: DsmmRoleId[];
   defaultActive?: boolean;
   promptOrder?: number;
   skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -95,6 +99,9 @@ export interface DsmmSettings {
   deepseekV4ProCalibration: DeepseekCalibration;
   deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
   deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
+  deepseekFlashCalibration: DeepseekCalibration;
+  deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
+  deepseekFlashMaxReasoningPresets: DsmmRoleId[];
   skills: Record<DsmmSkillName, boolean>;
   roles: Record<DsmmRoleId, boolean>;
   presets: DsmmPresetSettings;
@@ -119,12 +126,16 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   deepseekV4ProCalibration: "auto",
   deepseekV4ProDefaultReasoningEffort: "high",
   deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
+  deepseekFlashCalibration: "auto",
+  deepseekFlashDefaultReasoningEffort: "high",
+  deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
   skills: createDefaultSkillSettings(),
   roles: createDefaultRoleSettings(),
   presets: {
     materialize: false
   },
   workflow: {
+    policy: "risk-based",
     strictGates: true,
     reviewCap: 5,
     finalReviewPolicy: "simple-oracle-complex-reviewer"
@@ -181,16 +192,9 @@ const SKILLS_SCHEMA = Schema.object({
   "remove-ai-slops": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["remove-ai-slops"])
 });
 
-const ROLES_SCHEMA = Schema.object({
-  "dsmm-orchestrator": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-orchestrator"]),
-  "dsmm-planner": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-planner"]),
-  "dsmm-plan-critic": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-plan-critic"]),
-  "dsmm-reviewer": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-reviewer"]),
-  "dsmm-code-search": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-code-search"]),
-  "dsmm-doc-search": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-doc-search"]),
-  "dsmm-clarifier": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-clarifier"]),
-  "dsmm-media-reader": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles["dsmm-media-reader"])
-});
+const ROLES_SCHEMA = Schema.object(Object.fromEntries(
+  DSMM_ROLE_IDS.map((id) => [id, Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles[id])])
+)) as Schema<Partial<Record<DsmmRoleId, boolean>>>;
 
 const PRESETS_SCHEMA = Schema.object({
   materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
@@ -204,9 +208,19 @@ const FINAL_REVIEW_POLICY_SCHEMA = Schema.union([
 ]).default(DEFAULT_DSMM_SETTINGS.workflow.finalReviewPolicy);
 
 const WORKFLOW_SCHEMA = Schema.object({
+  policy: Schema.union([Schema.const("risk-based"), Schema.const("legacy")]).default(DEFAULT_DSMM_SETTINGS.workflow.policy),
   strictGates: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.workflow.strictGates),
   reviewCap: Schema.number().default(DEFAULT_DSMM_SETTINGS.workflow.reviewCap),
   finalReviewPolicy: FINAL_REVIEW_POLICY_SCHEMA
+});
+
+const WORKFLOW_CONFIG_SCHEMA = Schema.object({
+  policy: Schema.union([Schema.const("risk-based"), Schema.const("legacy")]),
+  strictGates: Schema.boolean(),
+  reviewCap: Schema.number(),
+  finalReviewPolicy: Schema.union([
+    Schema.const("simple-oracle-complex-reviewer"), Schema.const("reviewer-only"), Schema.const("off")
+  ])
 });
 
 const GUARD_SCOPE_SCHEMA = Schema.union([
@@ -293,10 +307,13 @@ export const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig> = Schema.object({
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
   deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+  deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+  deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+  deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   presets: PRESETS_SCHEMA,
-  workflow: WORKFLOW_SCHEMA,
+  workflow: WORKFLOW_CONFIG_SCHEMA,
   guards: GUARDS_SCHEMA,
   runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
   lsp: LSP_SCHEMA
@@ -309,8 +326,11 @@ export const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings> = Schema.object({
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
   deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+  deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+  deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+  deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
-  roles: ROLES_SCHEMA,
+  roles: ROLES_SCHEMA as Schema<Record<DsmmRoleId, boolean>>,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
   guards: GUARDS_SCHEMA,
@@ -325,7 +345,10 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
     deepseekV4ProCalibration: config.deepseekV4ProCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration,
     deepseekV4ProDefaultReasoningEffort: config.deepseekV4ProDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort,
-    deepseekV4ProMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekV4ProMaxReasoningPresets),
+    deepseekV4ProMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekV4ProMaxReasoningPresets, DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets),
+    deepseekFlashCalibration: config.deepseekFlashCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekFlashCalibration,
+    deepseekFlashDefaultReasoningEffort: config.deepseekFlashDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekFlashDefaultReasoningEffort,
+    deepseekFlashMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekFlashMaxReasoningPresets, DEFAULT_DSMM_SETTINGS.deepseekFlashMaxReasoningPresets),
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     presets: resolvePresetSettings(config.presets),
@@ -336,8 +359,8 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
   };
 }
 
-function resolveMaxReasoningPresets(input: readonly unknown[] | undefined): DsmmRoleId[] {
-  const requested = new Set(input ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets);
+function resolveMaxReasoningPresets(input: readonly unknown[] | undefined, defaults: readonly DsmmRoleId[]): DsmmRoleId[] {
+  const requested = new Set(input ?? defaults);
   return DSMM_ROLE_IDS.filter((id) => requested.has(id));
 }
 
@@ -353,9 +376,11 @@ function resolvePresetSettings(config: DsmmPluginConfig["presets"]): DsmmPresetS
 }
 
 function resolveWorkflowSettings(config: DsmmPluginConfig["workflow"]): DsmmWorkflowSettings {
+  const legacy = config !== undefined && (config.strictGates !== undefined || config.reviewCap !== undefined || config.finalReviewPolicy !== undefined);
   return {
     ...DEFAULT_DSMM_SETTINGS.workflow,
-    ...config
+    ...config,
+    policy: config?.policy ?? (legacy ? "legacy" : "risk-based")
   };
 }
 
@@ -447,6 +472,13 @@ function normalizePositiveInteger(value: number | undefined, defaultValue: numbe
 
 export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {}, options: RegisterSettingsOptions = {}): () => DsmmSettings {
   const base = resolveConfig(config);
+  // Current Cordis loads restart-scoped Config itself; SettingsForms has no register().
+  if (ctx.get !== undefined) {
+    const getSettings = (): DsmmSettings => base;
+    options.onChange?.(base);
+    options.install?.(ctx, getSettings);
+    return getSettings;
+  }
   let getSettings = (): DsmmSettings => base;
   let attached = false;
   const installedSettingsByReadyContext = new WeakMap<DshContext, DshSettingsRegistry>();

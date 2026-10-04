@@ -111,6 +111,16 @@ test("classifyRecoveryFailure uses exact status precedence and lowercased exact 
   assert.deepEqual(classifyRecoveryFailure(failure(noSensitiveAccess), settings), { kind: "retryable", matchedBy: "status" });
 });
 
+test("402 fallback requires an explicit structured status opt-in", () => {
+  assert.deepEqual(classifyRecoveryFailure(failure({ status: 402, code: "etimedout" }), settings), { kind: "ignored" });
+  assert.deepEqual(classifyRecoveryFailure(failure({ status: 402, code: "other" }), {
+    ...settings, retryOnStatusCodes: [...settings.retryOnStatusCodes, 402]
+  }), { kind: "retryable", matchedBy: "status" });
+  assert.deepEqual(classifyRecoveryFailure(failure({ code: "other", message: "payment required status=402" }), {
+    ...settings, retryOnStatusCodes: [402]
+  }), { kind: "ignored" });
+});
+
 test("foldAttemptedRecoveryRoutes inherits the latest valid route and limits headers to the target step", () => {
   const events = [
     header("Primary", "a", "initial"),

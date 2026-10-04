@@ -4,10 +4,12 @@ import { registerDeepworkPrompt } from "./mode.js";
 import { registerModelRouting } from "./model-routing.js";
 import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
+import { registerHeadlessRoleTools } from "./role-subagents.js";
+import { registerRolePresets } from "./preset-registry.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 export const name = "dsmm";
-export const inject = ["systemPrompt"];
+export const inject = [];
 export const Config = DSMM_CONFIG_SCHEMA;
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
@@ -27,8 +29,15 @@ export function apply(ctx, config = {}) {
     const getSettings = registerSettings(ctx, config, {
         install(readyCtx, getReadySettings) {
             registerDeepworkPrompt(readyCtx, controller, getReadySettings, config);
-            registerDeepworkCommand(readyCtx, controller, getReadySettings);
-            registerDsmmStatusCommand(readyCtx, controller, getReadySettings);
+            const installCommands = (commandCtx) => {
+                registerDeepworkCommand(commandCtx, controller, getReadySettings);
+                registerDsmmStatusCommand(commandCtx, controller, getReadySettings);
+            };
+            if (readyCtx.get !== undefined && readyCtx.inject !== undefined)
+                readyCtx.inject(["commands"], installCommands);
+            else
+                installCommands(readyCtx);
+            registerRolePresets(readyCtx, getReadySettings);
             const settings = getReadySettings();
             const root = resolveManagedPresetRoot(settings);
             if (root === undefined)
@@ -38,6 +47,7 @@ export function apply(ctx, config = {}) {
     });
     registerRuntimeRecovery(ctx, controller, getSettings);
     registerModelRouting(ctx, controller, getSettings);
+    registerHeadlessRoleTools(ctx, controller, getSettings);
     registerSafetyGuards(ctx, controller, getSettings);
 }
 export default apply;

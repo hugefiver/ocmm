@@ -8,12 +8,13 @@ import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
 import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
+import { DSMM_CONFIG_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
 import type { DsmmPluginConfig } from "../lib/settings.js";
 
 const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
 const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));
 const DEFAULT_WORKFLOW_SETTINGS = {
+  policy: "risk-based",
   strictGates: true,
   reviewCap: 5,
   finalReviewPolicy: "simple-oracle-complex-reviewer"
@@ -56,6 +57,9 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     deepseekV4ProCalibration: "auto",
     deepseekV4ProDefaultReasoningEffort: "high",
     deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
+    deepseekFlashCalibration: "auto",
+    deepseekFlashDefaultReasoningEffort: "high",
+    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
@@ -72,6 +76,26 @@ test("default settings enable scoped safety guards", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS.guards, DEFAULT_GUARD_SETTINGS);
 });
 
+test("current Loader config installs without legacy settings registration or systemPrompt injection", () => {
+  let installed = 0;
+  const context: DshContext = {
+    get() { return undefined; },
+    inject() { throw new Error("settings must not depend on service injection"); }
+  };
+  const settings = registerSettings(context, { workflow: { policy: "legacy", strictGates: false, reviewCap: 2 }, deepseekFlashCalibration: "off" }, {
+    install(ready, getSettings) {
+      assert.equal(ready, context);
+      assert.equal(getSettings().workflow.policy, "legacy");
+      installed += 1;
+    }
+  })();
+  assert.equal(installed, 1);
+  assert.equal(settings.workflow.strictGates, false);
+  assert.equal(settings.workflow.reviewCap, 2);
+  assert.equal(settings.deepseekFlashCalibration, "off");
+  assert.equal(settings.deepseekV4ProCalibration, "auto");
+});
+
 test("resolveConfig overlays plugin config on defaults", () => {
   assert.deepEqual(resolveConfig({ modeName: "dw", promptOrder: 60, deepseekV4ProCalibration: "off" }), {
     modeName: "dw",
@@ -80,6 +104,9 @@ test("resolveConfig overlays plugin config on defaults", () => {
     deepseekV4ProCalibration: "off",
     deepseekV4ProDefaultReasoningEffort: "high",
     deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
+    deepseekFlashCalibration: "auto",
+    deepseekFlashDefaultReasoningEffort: "high",
+    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {
@@ -292,10 +319,18 @@ test("resolveConfig supports workflow setting overlays", () => {
   const settings = resolveConfig({ workflow: { reviewCap: 2, finalReviewPolicy: "reviewer-only" } });
 
   assert.deepEqual(settings.workflow, {
+    policy: "legacy",
     strictGates: true,
     reviewCap: 2,
     finalReviewPolicy: "reviewer-only"
   });
+});
+
+test("Loader schema preserves explicit legacy workflow provenance", () => {
+  assert.equal(resolveConfig(DSMM_CONFIG_SCHEMA({})).workflow.policy, "risk-based");
+  assert.equal(resolveConfig(DSMM_CONFIG_SCHEMA({ workflow: { reviewCap: 2 } })).workflow.policy, "legacy");
+  assert.equal(resolveConfig(DSMM_CONFIG_SCHEMA({ workflow: { strictGates: true } })).workflow.policy, "legacy");
+  assert.equal(resolveConfig(DSMM_CONFIG_SCHEMA({ workflow: { policy: "risk-based", strictGates: true } })).workflow.policy, "risk-based");
 });
 
 test("resolveConfig supports per-role toggles", () => {
@@ -338,6 +373,9 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     deepseekV4ProCalibration: "auto",
     deepseekV4ProDefaultReasoningEffort: "high",
     deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
+    deepseekFlashCalibration: "auto",
+    deepseekFlashDefaultReasoningEffort: "high",
+    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     presets: {

@@ -1,14 +1,13 @@
 ---
 name: subagent-driven-development
-description: Use in dsmm deepwork mode to execute an approved plan task-by-task with safe subagent delegation and review gates.
+description: Use when executing an approved plan has independent bounded work that benefits from DSH subagent delegation.
 ---
 
 # Subagent-Driven Development
 
-Use this skill after an approved implementation plan exists.
+Delegate only when the actual DSH tool for that logical role is callable and its provider advertises the necessary persona/tool-filter/depth capabilities. A child joins its parent's preset; the role-specific tool must supply its own persona and tool filter. Preset files alone do not prove availability.
 
-1. Work through the plan one task at a time; do not start later tasks until the current task is integrated and checked.
-2. Delegate only bounded, independent implementation or investigation work to subagents. Give each subagent the task, relevant files, acceptance criteria, and verification command.
-3. Require subagents to avoid git writes. Staging, committing, tagging, pushing, rebasing, or history edits stay with the user-approved coordinator.
-4. After each subagent returns, inspect the changed files, resolve conflicts or mismatches, and run the task's verification before marking it complete.
-5. When all tasks are complete, run the plan's final verification and request final review according to the active workflow policy.
+- Direct work is valid when delegation adds no value. Otherwise give a worker approved outcome, exclusive file ownership, constraints, acceptance evidence and no-Git-write boundary.
+- Keep dependent or overlapping work sequential; independent work may proceed together when shared state and tool limits permit.
+- Preserve the host's stricter depth, cancellation, permissions and model availability. Never infer a child task ID or retry authority from prose.
+- Inspect actual changes and evidence on return; integrate and run proportionate verification. Request review only for a concrete risk or explicit requirement, not after every task by default.

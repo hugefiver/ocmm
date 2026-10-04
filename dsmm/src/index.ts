@@ -5,12 +5,14 @@ import { registerDeepworkPrompt } from "./mode.js";
 import { registerModelRouting } from "./model-routing.js";
 import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
+import { registerHeadlessRoleTools } from "./role-subagents.js";
+import { registerRolePresets } from "./preset-registry.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import type { DsmmPluginConfig } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 
 export const name = "dsmm";
-export const inject = ["systemPrompt"] as const;
+export const inject = [] as const;
 
 export type Config = DsmmPluginConfig;
 export const Config = DSMM_CONFIG_SCHEMA;
@@ -43,8 +45,13 @@ export function apply(ctx: DshContext, config: Config = {}): void {
   const getSettings = registerSettings(ctx, config, {
     install(readyCtx, getReadySettings) {
       registerDeepworkPrompt(readyCtx, controller, getReadySettings, config);
-      registerDeepworkCommand(readyCtx, controller, getReadySettings);
-      registerDsmmStatusCommand(readyCtx, controller, getReadySettings);
+      const installCommands = (commandCtx: DshContext): void => {
+        registerDeepworkCommand(commandCtx, controller, getReadySettings);
+        registerDsmmStatusCommand(commandCtx, controller, getReadySettings);
+      };
+      if (readyCtx.get !== undefined && readyCtx.inject !== undefined) readyCtx.inject(["commands"], installCommands);
+      else installCommands(readyCtx);
+      registerRolePresets(readyCtx, getReadySettings);
       const settings = getReadySettings();
       const root = resolveManagedPresetRoot(settings);
       if (root === undefined) return;
@@ -53,6 +60,7 @@ export function apply(ctx: DshContext, config: Config = {}): void {
   });
   registerRuntimeRecovery(ctx, controller, getSettings);
   registerModelRouting(ctx, controller, getSettings);
+  registerHeadlessRoleTools(ctx, controller, getSettings);
   registerSafetyGuards(ctx, controller, getSettings);
 }
 

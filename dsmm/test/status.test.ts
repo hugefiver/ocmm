@@ -88,6 +88,7 @@ function createFormatterFixture(): DsmmStatusSnapshot {
       model: "deepseek-v4-pro",
       family: "deepseek",
       deepseekV4Pro: true,
+      deepseekFlash: false,
       currentReasoningEffort: "high"
     },
     calibration: {
@@ -117,13 +118,14 @@ test("status formatter renders the exact bounded DSMM summary", () => {
     "DSMM status",
     "Mode: inactive (deepwork)",
     "Scope: dsmm-reviewer preset",
+    "Workflow policy: risk-based",
     "Route: deepseek-official/deepseek-v4-pro [deepseek]",
     "Reasoning: auto; policy=max; current=high; action=preserve-explicit",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
     "Effective settings: use /dsmm-status json for the normalized snapshot"
   ].join("\n"));
-  assert.equal(formatted.split("\n").length, 8);
+  assert.equal(formatted.split("\n").length, 9);
   assert.equal(formatted.endsWith("\n"), false);
   for (const excluded of [
     "DISTINCTIVE_IDLE_PROMPT",
@@ -150,7 +152,8 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
     },
     route: {
       family: "unknown",
-      deepseekV4Pro: false
+      deepseekV4Pro: false,
+      deepseekFlash: false
     },
     calibration: {
       mode: "auto",
@@ -173,6 +176,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
     "DSMM status",
     "Mode: inactive (deepwork)",
     "Scope: out of scope",
+    "Workflow policy: risk-based",
     "Route: unavailable/unavailable [unknown]",
     "Reasoning: auto; policy=not applicable; current=provider default; action=out-of-scope",
     "Runtime recovery: disabled; applies=no; fallbacks=0; max attempts=0",
@@ -195,7 +199,8 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
       provider: "openai",
       model: "gpt-5.6",
       family: "gpt",
-      deepseekV4Pro: false
+      deepseekV4Pro: false,
+      deepseekFlash: false
     },
     calibration: {
       mode: "auto",
@@ -208,6 +213,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
     "DSMM status",
     "Mode: active (deepwork)",
     "Scope: active deepwork",
+    "Workflow policy: risk-based",
     "Route: openai/gpt-5.6 [gpt]",
     "Reasoning: auto; policy=not applicable; current=provider default; action=non-target-route",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
@@ -239,7 +245,8 @@ test("status snapshot reports an inactive ordinary session without a route", () 
     },
     route: {
       family: "unknown",
-      deepseekV4Pro: false
+      deepseekV4Pro: false,
+      deepseekFlash: false
     },
     calibration: {
       mode: "auto",
@@ -275,7 +282,8 @@ test("status snapshot reports active generic deepwork as a non-target GPT route"
     provider: "openai",
     model: "gpt-5.6",
     family: "gpt",
-    deepseekV4Pro: false
+    deepseekV4Pro: false,
+    deepseekFlash: false
   });
   assert.deepEqual(snapshot.calibration, {
     mode: "auto",
@@ -324,6 +332,7 @@ test("request headers take complete precedence over stale agent options", () => 
     model: "deepseek-v4-pro",
     family: "deepseek",
     deepseekV4Pro: true,
+    deepseekFlash: false,
     currentReasoningEffort: "high"
   });
   assert.equal(selectedSnapshot.calibration.action, "preserve-explicit");
@@ -341,7 +350,8 @@ test("request headers take complete precedence over stale agent options", () => 
 
   assert.deepEqual(malformedSnapshot.route, {
     family: "unknown",
-    deepseekV4Pro: false
+    deepseekV4Pro: false,
+    deepseekFlash: false
   });
   assert.equal(malformedSnapshot.calibration.action, "non-target-route");
 });

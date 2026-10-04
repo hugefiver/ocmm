@@ -1,5 +1,5 @@
 import Schema from "@deepseek-ai/schemastery";
-import { DSMM_SKILL_NAMES, registerBundledSkills } from "./skills.js";
+import { DSMM_SKILL_NAMES, DSMM_ON_DEMAND_SKILL_NAMES, registerBundledSkills } from "./skills.js";
 export const name = "dsmm/preset-skills";
 export const inject = ["skills"];
 const SKILL_NAME_SCHEMA = Schema.union([
@@ -16,7 +16,7 @@ export const Config = Schema.object({
 });
 export function apply(ctx, config = {}) {
     const skills = config.skills ?? DSMM_SKILL_NAMES;
-    const register = (registry) => registerBundledSkills(registry, skills);
+    const register = (registry) => registerBundledSkills(registry, [...skills, ...DSMM_ON_DEMAND_SKILL_NAMES]);
     if (ctx.inject !== undefined) {
         ctx.inject(["skills"], (readyCtx) => register(readyCtx.skills));
     }

@@ -186,7 +186,7 @@ Expose dsmm settings ergonomically in dsh web-compatible surfaces while keeping 
 
 ## v1.0 — Stable dsmm release
 
-Status: release-ready as dsmm 1.0.0; publication is pending separate authorization.
+Status: initial package release selected as dsmm 0.1.0; the v1.0 stable milestone remains future work.
 
 ### Goal
 

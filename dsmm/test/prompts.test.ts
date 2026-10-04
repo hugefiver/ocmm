@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { BASE_DEEPWORK_PROMPT, DEEPSEEK_V4_PRO_OVERLAY, buildDeepworkPrompt } from "../lib/prompts.js";
+import { BASE_DEEPWORK_PROMPT, DEEPSEEK_FLASH_OVERLAY, DEEPSEEK_V4_PRO_OVERLAY, buildDeepworkPrompt } from "../lib/prompts.js";
 import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -11,6 +11,7 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 test("prompt assets exist and contain activation boundaries", () => {
   const deepwork = readFileSync(join(packageRoot, "prompts", "deepwork.md"), "utf8");
   const v4 = readFileSync(join(packageRoot, "prompts", "deepseek-v4-pro.md"), "utf8");
+  const flash = readFileSync(join(packageRoot, "prompts", "deepseek-flash.md"), "utf8");
 
   assert.match(deepwork, /DEEPWORK MODE ENABLED!/);
   assert.match(deepwork, /\{\{modeName\}\}/);
@@ -26,13 +27,14 @@ test("prompt assets exist and contain activation boundaries", () => {
   assert.match(deepwork, /requesting-code-review/);
   assert.match(deepwork, /receiving-code-review/);
   assert.match(deepwork, /remove-ai-slops/);
-  assert.match(deepwork, /workflow\.strictGates/);
-  assert.match(deepwork, /workflow\.reviewCap/);
-  assert.match(deepwork, /workflow\.finalReviewPolicy/);
-  assert.match(deepwork, /global policy outside active `\{\{modeName\}\}` mode or DSMM-managed preset scope/);
+  assert.match(deepwork, /workflow\.policy=risk-based/);
+  assert.match(deepwork, /planner → plan-critic → implementation/);
+  assert.match(deepwork, /does not authorize a commit/);
   assert.equal(deepwork.trimEnd(), BASE_DEEPWORK_PROMPT);
   assert.match(v4, /DeepSeek V4 Pro calibration/);
   assert.match(v4, /agent\/request/);
+  assert.equal(flash.trimEnd(), DEEPSEEK_FLASH_OVERLAY);
+  assert.match(flash, /deepseek-account\/deepseek-flash/);
 });
 
 test("buildDeepworkPrompt applies calibration only to the exact official route", () => {
@@ -73,7 +75,7 @@ test("buildDeepworkPrompt accepts composition section override", () => {
   assert.match(prompt, /Custom dsmm section for deepwork/);
   assert.doesNotMatch(prompt, /DEEPWORK MODE ENABLED/);
   assert.match(prompt, /DeepSeek V4 Pro calibration/);
-  assert.match(prompt, /finalReviewPolicy: simple-oracle-complex-reviewer/);
+  assert.match(prompt, /policy: risk-based/);
 });
 
 test("buildDeepworkPrompt renders the configured mode name", () => {
@@ -87,6 +89,7 @@ test("buildDeepworkPrompt renders effective workflow policy values", () => {
   const prompt = buildDeepworkPrompt({
     ...DEFAULT_DSMM_SETTINGS,
     workflow: {
+      policy: "legacy",
       strictGates: false,
       reviewCap: 2,
       finalReviewPolicy: "reviewer-only"
@@ -118,13 +121,19 @@ test("exported prompt constants match asset intent", () => {
   assert.match(BASE_DEEPWORK_PROMPT, /receiving-code-review/);
   assert.match(BASE_DEEPWORK_PROMPT, /remove-ai-slops/);
   assert.match(BASE_DEEPWORK_PROMPT, /\[dsmm safety\]/);
-  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.strictGates/);
-  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.reviewCap/);
-  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.finalReviewPolicy/);
-  assert.match(BASE_DEEPWORK_PROMPT, /do not treat those dsmm settings as global policy outside/);
-  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /strictGates: true/);
-  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /reviewCap: 5/);
-  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /finalReviewPolicy: simple-oracle-complex-reviewer/);
+  assert.match(BASE_DEEPWORK_PROMPT, /workflow\.policy=risk-based/);
+  assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /policy: risk-based/);
+  assert.doesNotMatch(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS), /reviewCap: 5/);
   assert.match(DEEPSEEK_V4_PRO_OVERLAY, /DeepSeek V4 Pro calibration/);
   assert.match(DEEPSEEK_V4_PRO_OVERLAY, /agent\/request/);
+});
+
+test("Flash overlay accepts only verified exact providers and preserves legacy policy when explicit", () => {
+  for (const provider of ["deepseek-official", "deepseek-account"]) {
+    assert.match(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route: { provider, model: "deepseek-flash" } }), /DeepSeek-V41-Flash/u);
+  }
+  assert.doesNotMatch(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route: { provider: "openrouter", model: "deepseek-flash" } }), /DeepSeek-V41-Flash/u);
+  const legacy = buildDeepworkPrompt({ ...DEFAULT_DSMM_SETTINGS, workflow: { ...DEFAULT_DSMM_SETTINGS.workflow, policy: "legacy" } });
+  assert.match(legacy, /strictGates: true/);
+  assert.match(legacy, /reviewCap: 5/);
 });

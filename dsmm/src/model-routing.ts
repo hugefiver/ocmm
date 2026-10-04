@@ -1,19 +1,26 @@
-import type { DshContext, DshLlmCallConfig, DshModelReasoningInfo } from "./dsh-types.js";
+import type { DshContext, DshLlmCallConfig, DshLlmRuntime, DshModelReasoningInfo } from "./dsh-types.js";
 import { isDsmmRoleId } from "./roles.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
 import type { DeepseekDefaultReasoningEffort, DsmmSettings } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
 export type DeepseekReasoningEffort = DeepseekDefaultReasoningEffort | "max";
+export type DeepseekModelRoute = "v4-pro" | "flash";
 
 export function isDeepseekV4ProRoute(config: Pick<DshLlmCallConfig, "provider" | "model">): boolean {
   return config.provider.toLowerCase() === "deepseek-official" && config.model.toLowerCase() === "deepseek-v4-pro";
 }
 
-export function desiredDeepseekEffort(settings: DsmmSettings, preset?: string): DeepseekReasoningEffort {
-  return preset !== undefined && settings.deepseekV4ProMaxReasoningPresets.some((configuredPreset) => configuredPreset === preset)
+export function isDeepseekFlashRoute(config: Pick<DshLlmCallConfig, "provider" | "model">): boolean {
+  return ["deepseek-official", "deepseek-account"].includes(config.provider.toLowerCase())
+    && config.model.toLowerCase() === "deepseek-flash";
+}
+
+export function desiredDeepseekEffort(settings: DsmmSettings, preset?: string, route: DeepseekModelRoute = "v4-pro"): DeepseekReasoningEffort {
+  const maxPresets = route === "flash" ? settings.deepseekFlashMaxReasoningPresets : settings.deepseekV4ProMaxReasoningPresets;
+  return preset !== undefined && maxPresets.some((configuredPreset) => configuredPreset === preset)
     ? "max"
-    : settings.deepseekV4ProDefaultReasoningEffort;
+    : route === "flash" ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
 }
 
 export function selectAdvertisedEffort(desired: DeepseekReasoningEffort, reasoning: DshModelReasoningInfo | undefined): string | undefined {
@@ -31,8 +38,6 @@ export function selectAdvertisedEffort(desired: DeepseekReasoningEffort, reasoni
   return advertised.has(desired) ? desired : fallback;
 }
 
-const DEEPSEEK_V4_PRO_ROUTE = "deepseek-official/deepseek-v4-pro";
-
 export function registerModelRouting(ctx: DshContext, controller: DeepworkModeController, getSettings: () => DsmmSettings): void {
   const installedContexts = new WeakSet<DshContext>();
 
@@ -45,25 +50,31 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
       dispose = readyCtx.on("agent/request", async (frame, next) => {
         const downstream = await next();
         const settings = getSettings();
-        if (settings.deepseekV4ProCalibration === "off") return downstream;
+        const route: DeepseekModelRoute | undefined = isDeepseekV4ProRoute(downstream) ? "v4-pro" : isDeepseekFlashRoute(downstream) ? "flash" : undefined;
+        if (route === undefined) return downstream;
+        const calibration = route === "flash" ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration;
+        if (calibration === "off") return downstream;
 
         const preset = resolveSelectedAgentPreset(frame.agent?.session);
         const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);
-        if (!inScope || !isDeepseekV4ProRoute(downstream)) return downstream;
-        if (settings.deepseekV4ProCalibration === "auto" && downstream.reasoningEffort !== undefined) return downstream;
+        if (!inScope) return downstream;
+        if (calibration === "auto" && downstream.reasoningEffort !== undefined) return downstream;
 
-        const desired = desiredDeepseekEffort(settings, preset);
+        const desired = desiredDeepseekEffort(settings, preset, route);
         let selected: string | undefined;
         try {
-          const modelInfo = await readyCtx.llm?.resolveModelInfo(downstream.provider, downstream.model, frame.signal);
+          const agentContext = (frame.agent as { ctx?: DshContext }).ctx;
+          const llm = agentContext?.get?.<DshLlmRuntime>("llm")
+            ?? (readyCtx.get !== undefined ? readyCtx.get<DshLlmRuntime>("llm") : readyCtx.llm);
+          const modelInfo = await llm?.resolveModelInfo(downstream.provider, downstream.model, frame.signal);
           selected = selectAdvertisedEffort(desired, modelInfo?.reasoning);
         } catch {
-          warnUnavailable(readyCtx, ctx, desired);
+          warnUnavailable(readyCtx, ctx, desired, `${downstream.provider}/${downstream.model}`);
           return downstream;
         }
 
         if (selected === undefined) {
-          warnUnavailable(readyCtx, ctx, desired);
+          warnUnavailable(readyCtx, ctx, desired, `${downstream.provider}/${downstream.model}`);
           return downstream;
         }
 
@@ -80,6 +91,12 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
     });
   };
 
+  // Current DSH owns LLM services in Agent realms, invisible to Host injection.
+  if (ctx.get !== undefined) {
+    install(ctx);
+    return;
+  }
+
   if (ctx.inject !== undefined) {
     ctx.inject(["llm"], install);
     return;
@@ -88,9 +105,9 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
   if (Object.prototype.hasOwnProperty.call(ctx, "llm") && Object.prototype.hasOwnProperty.call(ctx, "on")) install(ctx);
 }
 
-function warnUnavailable(readyCtx: DshContext, rootCtx: DshContext, desired: DeepseekReasoningEffort): void {
+function warnUnavailable(readyCtx: DshContext, rootCtx: DshContext, desired: DeepseekReasoningEffort, modelRoute: string): void {
   try {
-    (readyCtx.logger ?? rootCtx.logger)?.warn(`dsmm could not select advertised reasoning effort for ${DEEPSEEK_V4_PRO_ROUTE}; desired ${desired}`);
+    (readyCtx.logger ?? rootCtx.logger)?.warn(`dsmm could not select advertised reasoning effort for ${modelRoute}; desired ${desired}`);
   } catch {
     // Warning emission is diagnostic-only and must not alter routing fail-open behavior.
   }

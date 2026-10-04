@@ -1,0 +1,11 @@
+*
+!Cargo.toml
+!Cargo.lock
+!LICENSE
+!crates/
+!crates/ocmm-lsp/
+!crates/ocmm-lsp/**
+!dsmm/
+!dsmm/**
+dsmm/node_modules/
+dsmm/node_modules/**

@@ -261,13 +261,13 @@ test("question label helper ignores non-dsh question tool names", () => {
   }), DEFAULT_DSMM_SETTINGS, controller()), undefined);
 });
 
-test("todo discipline helper enforces structured content and one active todo while work remains", () => {
+test("legacy todo discipline retains the structured content convention", () => {
   const decision = decidePreToolExecution(exec("todo_write", {
     todos: [
       { content: "fix guards", status: "in_progress" },
       { content: "[docs] [write] to document guards - expect docs", status: "pending" }
     ]
-  }), DEFAULT_DSMM_SETTINGS, controller());
+  }), { ...DEFAULT_DSMM_SETTINGS, workflow: { ...DEFAULT_DSMM_SETTINGS.workflow, policy: "legacy" } }, controller());
 
   assert.equal(decision?.kind, "deny");
   assert.match(decision?.reason ?? "", /todo content must use/);
@@ -282,8 +282,21 @@ test("todo discipline helper rejects missing active todo only for unfinished wor
   }), DEFAULT_DSMM_SETTINGS, controller());
 
   assert.equal(missingActive?.kind, "deny");
-  assert.match(missingActive?.reason ?? "", /exactly one in_progress/);
+  assert.match(missingActive?.reason ?? "", /at least one in_progress/);
   assert.equal(completed, undefined);
+});
+
+test("risk-based todo policy accepts plain imperatives and native parallel work", () => {
+  assert.equal(decidePreToolExecution(exec("todo_write", { todos: [
+    { content: "Update the adapter", status: "in_progress" },
+    { content: "Verify tool contracts", status: "in_progress" }
+  ] }), DEFAULT_DSMM_SETTINGS, controller()), undefined);
+});
+
+test("post-execute preserves error bodies and their metadata without truncation", () => {
+  const result = { isError: true, content: [{ type: "text", text: "e".repeat(15000) }], error: { code: "DENIED" } };
+  const decision = { kind: "accept" as const };
+  assert.equal(decidePostToolExecution(exec("bash", {}), result, decision, DEFAULT_DSMM_SETTINGS, controller()), decision);
 });
 
 test("registerSafetyGuards wires tools/pre-execute and delegates when allowed", async () => {

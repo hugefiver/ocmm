@@ -51,20 +51,37 @@ const expectedExports = {
 };
 
 const expectedDependencies = {
-  "@deepseek-ai/schemastery": "^3.18.1"
+  "@deepseek-ai/schemastery": "~3.18.4"
 };
 
 const expectedPeers = {
-  "@deepseek-ai/cordis": "^4.0.1",
-  "@deepseek-ai/dsh-attachment": "^0.1.1-rc.2",
-  "@deepseek-ai/dsh-brand": "^0.1.1-rc.2",
-  "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
-  "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
-  "@deepseek-ai/dsh-timeout": "^0.1.1-rc.2"
+  "@deepseek-ai/cordis": "~4.0.4",
+  "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-subagent": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-fs": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-fs-search": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-bash": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-pwsh": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-jobs": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-skill-filesystem": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-skill": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-persona": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent-instructions": "0.2.0-rc.2"
 };
 
 const expectedDevDependencies = {
   ...expectedPeers,
+  "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-scope": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-session": "0.2.0-rc.2",
   "@types/node": "^26.0.0",
   "typescript": "^6.0.3"
 };
@@ -75,8 +92,8 @@ const expectedScripts = {
   "typecheck": "tsc -p tsconfig.json --noEmit",
   "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
   "test": "pnpm run build && node --test --experimental-strip-types test/*.test.ts",
-  "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.1.1-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.1 ..",
-  "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.1",
+  "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..",
+  "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.2",
   "smoke:docker": "node scripts/docker-smoke.mjs"
 };
 
@@ -220,7 +237,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "dsmm",
-    version: "1.0.0",
+    version: "0.1.0",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -308,7 +325,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "dsmm") errors.push("npm pack receipt name must equal dsmm");
-  if (entry.version !== "1.0.0") errors.push("npm pack receipt version must equal 1.0.0");
+  if (entry.version !== "0.1.0") errors.push("npm pack receipt version must equal 0.1.0");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
 

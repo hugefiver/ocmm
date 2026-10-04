@@ -15,6 +15,8 @@ export const DSMM_SKILL_NAMES = [
 ] as const;
 export const MVP_SKILL_NAMES = DSMM_SKILL_NAMES;
 export type DsmmSkillName = (typeof DSMM_SKILL_NAMES)[number];
+export const DSMM_ON_DEMAND_SKILL_NAMES = ["debugging"] as const;
+export type DsmmAvailableSkillName = DsmmSkillName | (typeof DSMM_ON_DEMAND_SKILL_NAMES)[number];
 export type MvpSkillName = DsmmSkillName;
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -35,7 +37,7 @@ export function enabledSkillNames(settings: DsmmSettings): readonly DsmmSkillNam
   return DSMM_SKILL_NAMES.filter((name) => settings.skills[name]);
 }
 
-export function loadBundledSkill(name: DsmmSkillName): DshSkillRegistration {
+export function loadBundledSkill(name: DsmmAvailableSkillName): DshSkillRegistration {
   const directory = join(packageRoot, "skills", name);
   const parsed = parseSkillMarkdown(readFileSync(join(directory, "SKILL.md"), "utf8"));
 
@@ -50,10 +52,13 @@ export function loadBundledSkill(name: DsmmSkillName): DshSkillRegistration {
   };
 }
 
-export function registerBundledSkills(skills: DshSkillRegistry | undefined, names: readonly DsmmSkillName[]): void {
+export function registerBundledSkills(skills: DshSkillRegistry | undefined, names: readonly DsmmAvailableSkillName[]): void {
   if (skills === undefined) return;
 
   for (const name of DSMM_SKILL_NAMES) {
+    if (names.includes(name)) skills.register(loadBundledSkill(name));
+  }
+  for (const name of DSMM_ON_DEMAND_SKILL_NAMES) {
     if (names.includes(name)) skills.register(loadBundledSkill(name));
   }
 }

@@ -7,7 +7,8 @@ export const DSMM_LSP_TOOL_NAMES = [
     "find_symbol_related",
     "symbols",
     "prepare_rename",
-    "rename"
+    "rename",
+    "format"
 ];
 export const DEFAULT_DSMM_LSP_SETTINGS = {
     enabled: false,

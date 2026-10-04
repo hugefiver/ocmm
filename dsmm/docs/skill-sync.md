@@ -1,19 +1,20 @@
 # dsmm Skill Sync Policy
 
-dsmm skill text is sourced from ocmm workflow skills, then adapted into concise dsh-native Agent Skills. The v0.3 skill set is intentionally not a verbatim copy of OpenCode-specific workflow text: it preserves the user-facing behavior while removing ocmm-only tool names, hook mechanics, and agent orchestration details that would mislead dsh users.
+dsmm skill text is sourced from current ocmm `skills/v1` behavior, then adapted to DSH-native Agent Skills. Seven core skills remain prompt-injected while deepwork is active. The separate `debugging` skill and its DAP client are bundled for on-demand role-preset use and are never added to every turn's core prompt.
 
-## v0.3 source mapping
+## Source mapping
 
-- `brainstorming` mirrors the ocmm/deepwork brainstorming gate for design-before-implementation.
-- `writing-plans` mirrors the ocmm/deepwork implementation planning workflow.
+- `brainstorming` mirrors scope-first discovery: an explicit implementation request is authority within that scope, while safety/API/irreversible decisions still escalate.
+- `writing-plans` mirrors risk-scaled planning and blocker-focused plan criticism for complex behavior, not a mandatory plan for every multi-step change.
 - `subagent-driven-development` mirrors the ocmm/deepwork decomposition and delegated implementation discipline, scoped to dsh-available tools.
 - `dispatching-parallel-agents` mirrors the ocmm/deepwork guidance for independent parallel work.
-- `requesting-code-review` mirrors the ocmm/deepwork final review request flow.
+- `requesting-code-review` mirrors risk- and evidence-driven reviewer selection, without fixed reviewer counts or unconditional final approval.
 - `receiving-code-review` mirrors the ocmm/deepwork review-feedback handling flow.
 - `remove-ai-slops` mirrors the ocmm cleanup workflow: lock behavior first, remove only behavior-preserving slop, then verify.
+- `debugging` is on demand. `scripts/sync-debugging-assets.mjs` copies self-contained DAP and runtime references from `skills/debugging`, adapts OpenCode-only team wording and excludes the fixture/test scripts from production assets. The original source tests remain usable from the repository; shipped `dap.mjs` needs only Node and an already available adapter.
 
 ## Synchronization rules
 
-When ocmm workflow skills change, review the matching dsmm skill for behavior drift. Port durable workflow intent, safety requirements, and acceptance checks; do not port OpenCode-only implementation details unless dsh exposes an equivalent runtime surface. Keep each dsmm skill short enough for routine model use and update tests/docs whenever the canonical skill list or setting names change.
+When ocmm workflow skills change, review the matching dsmm skill for behavior drift. Port durable intent, safety and acceptance; do not port OpenCode/Codex tool names, hook mechanics or imagined DSH events. Keep the seven auto-injected bodies compact, retain debugging as a separate registered skill, and update tests/docs when core inventory or setting names change.
 
 Future sync work should record the source ocmm skill version or date in the related implementation plan or changelog entry, then run the dsmm verification path before publishing the package.

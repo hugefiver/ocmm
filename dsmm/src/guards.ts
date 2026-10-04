@@ -181,7 +181,7 @@ function questionLabelDecision(exec: DshToolExecution, settings: DsmmSettings): 
   return undefined;
 }
 
-function todoDisciplineDecision(exec: DshToolExecution): DshPreToolDecision | undefined {
+function todoDisciplineDecision(exec: DshToolExecution, settings: DsmmSettings): DshPreToolDecision | undefined {
   if (toolName(exec) !== "todo_write") return undefined;
 
   const todos = asRecord(exec.arguments)?.todos;
@@ -191,14 +191,15 @@ function todoDisciplineDecision(exec: DshToolExecution): DshPreToolDecision | un
   const unfinished = todoRecords.some((todo) => todo?.status !== "completed");
   if (unfinished) {
     const active = todoRecords.filter((todo) => todo?.status === "in_progress").length;
-    if (active !== 1) {
+    if (active === 0) {
       return {
         kind: "deny",
-        reason: `${DSMM_GUARD_PREFIX} todo list must keep exactly one in_progress item while unfinished work remains.`
+        reason: `${DSMM_GUARD_PREFIX} todo list must keep at least one in_progress item while unfinished work remains; parallel work follows the host todo policy.`
       };
     }
   }
 
+  if (settings.workflow.policy !== "legacy") return undefined;
   const malformed = todoRecords.find((todo) => typeof todo?.content === "string" && !STRUCTURED_TODO_PATTERN.test(todo.content));
   if (typeof malformed?.content !== "string") return undefined;
 
@@ -228,7 +229,7 @@ export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSet
   if (question !== undefined) return question;
 
   if (settings.guards.todoDisciplineHelper) {
-    const todo = todoDisciplineDecision(exec);
+    const todo = todoDisciplineDecision(exec, settings);
     if (todo !== undefined) return todo;
   }
 
@@ -244,7 +245,7 @@ export function decidePostToolExecution(
 ): DshPostToolDecision {
   const truncation = settings.guards.toolOutputTruncation;
   if (!truncation.enabled || !isSafetyScopeActive(exec, settings, controller)) return decision;
-  if (decision.kind !== "accept" || "value" in decision) return decision;
+  if (result.isError || decision.kind !== "accept" || "value" in decision) return decision;
 
   const content = decision.content ?? result.content;
   const text = allText(content);

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
@@ -41,6 +41,20 @@ try {
   const diagnosticText = diagnostics.result.content?.[0]?.text ?? "";
   if (!diagnosticText.includes("dsmm smoke diagnostic")) {
     throw new Error(`ocmm-lsp diagnostics response missing smoke diagnostic: ${diagnosticText}`);
+  }
+
+  const format = await request({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: { name: "format", arguments: { filePath: fixture.subject } }
+  });
+  if (format.result?.isError !== false) throw new Error(`ocmm-lsp format failed: ${JSON.stringify(format)}`);
+  if (!format.result.content?.[0]?.text?.includes("Formatting committed atomically.")) {
+    throw new Error(`ocmm-lsp format response did not confirm committed edit: ${JSON.stringify(format)}`);
+  }
+  if (readFileSync(fixture.subject, "utf8") !== 'const value: number = "wrong";\n') {
+    throw new Error("ocmm-lsp format did not update the diagnostic fixture");
   }
 } finally {
   await stopChild(child);

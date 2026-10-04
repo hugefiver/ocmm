@@ -149,31 +149,32 @@ function assertReceiptKeys(receipt: ReleaseReceipt): void {
 }
 
 const expectedCompatibility = [
-  ["Node.js", ">=22", "verified"],
-  ["DSH", "0.1.1-rc.2", "verified"],
-  ["Cordis", "^4.0.1", "supported by contract"],
-  ["DSH component peers", "^0.1.1-rc.2", "supported by contract"],
-  ["Linux container", "Node 22 Bookworm", "verified"],
-  ["Windows", "Node >=22", "supported by contract"],
-  ["macOS", "Node >=22", "supported by contract"],
-  ["Web", "host command/status", "supported by contract"],
-  ["Headless", "file config and --dump-config", "verified"],
-  ["TUI", "DSH 0.1.1-rc.2", "unavailable"],
-  ["LSP/MCP", "external ocmm-lsp mcp", "optional"],
-  ["Runtime recovery", "process-local", "optional"],
-  ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro", "optional"]
+  ["Node.js", ">=22"],
+  ["DSH", "0.2.0-rc.2"],
+  ["Cordis", "~4.0.4"],
+  ["DSH component peers", "0.2.0-rc.2"],
+  ["Linux container", "Node 22 Bookworm"],
+  ["Windows", "Node >=22"],
+  ["macOS", "Node >=22"],
+  ["Web", "host command/status"],
+  ["Headless", "profile config and --dump-config"],
+  ["TUI", "DSH 0.2.0-rc.2"],
+  ["LSP/MCP", "external ocmm-lsp mcp"],
+  ["Runtime recovery", "process-local"],
+  ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
+  ["DeepSeek V41 Flash calibration", "native DeepSeek providers/deepseek-flash"]
 ];
 
 const expectedMigrationStates = new Map([
   ["Deepwork gates", "equivalent core intent"],
   ["Seven workflow skills", "equivalent core intent"],
-  ["Eight role presets", "redesigned for DSH"],
+  ["Twelve role presets", "redesigned for DSH"],
   ["Model routing and DeepSeek calibration", "redesigned for DSH"],
   ["Safety guards", "redesigned for DSH"],
   ["LSP/MCP", "optional/manual"],
   ["Runtime fallback", "redesigned for DSH"],
   ["Idle continuation", "redesigned for DSH"],
-  ["Subagent interruption recovery", "unavailable"],
+  ["Subagent interruption recovery", "redesigned for DSH"],
   ["Settings/status", "redesigned for DSH"],
   ["Prompt/cache hooks", "unavailable"],
   ["OpenCode commands/hooks", "unavailable"],
@@ -192,7 +193,11 @@ const expectedMigrationRolePresets = [
   "dsmm-code-search",
   "dsmm-doc-search",
   "dsmm-clarifier",
-  "dsmm-media-reader"
+  "dsmm-media-reader",
+  "dsmm-builder",
+  "dsmm-oracle",
+  "dsmm-oracle-2nd",
+  "dsmm-creative"
 ];
 
 function normalizeCell(cell: string): string {
@@ -250,8 +255,12 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
   const rows = parseMarkdownTable(compatibility, "## Compatibility matrix", "compatibility matrix");
 
-  assert.deepEqual(rows, expectedCompatibility);
-  assert.equal(rows.length, 13);
+  assert.deepEqual(rows.map(([surface, boundary]) => [surface, boundary]), expectedCompatibility);
+  assert.equal(rows.length, 14);
+  assert.ok(rows.every((row) => row.length === 3 && row[2] !== ""), "each surface states an evidence level");
+  assert.equal(rows.find(([surface]) => surface === "DSH")?.[2], "verified");
+  assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "unavailable");
+  assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.deepEqual(
     [...new Set(rows.map((row) => row[2]))].sort(),
     ["optional", "supported by contract", "unavailable", "verified"]
@@ -271,9 +280,9 @@ test("compatibility authority is pinned to the reviewed rc.2 release", () => {
       "## Evidence limits"
     ]
   );
-  assert.ok(compatibility.includes("@deepseek-ai/dsh@0.1.1-rc.2"));
-  assert.ok(compatibility.includes("b150a551b8d465e31e418e1b2eaf5e79bbb7d28e"));
-  assert.ok(compatibility.includes("Only DSH 0.1.1-rc.2 is verified; peer ranges are installation contracts, not compatibility claims for later DSH releases."));
+  assert.ok(compatibility.includes("@deepseek-ai/dsh@0.2.0-rc.2"));
+  assert.ok(compatibility.includes("0.2.1-alpha.1"));
+  assert.ok(compatibility.includes("Installation ranges are not proof of compatibility with future releases."));
 
   for (const peerPackage of [
     "@deepseek-ai/dsh-attachment",
@@ -291,12 +300,12 @@ test("compatibility document fixes command, headless, platform, and provider bou
 
   assert.ok(compatibility.includes("`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands."));
   assert.ok(compatibility.includes("Web exposes host command/status but has no custom panel."));
-  assert.ok(compatibility.includes("Headless uses `$DSH_HOME/settings.yaml` or profile files plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`."));
-  assert.ok(compatibility.includes("DSH 0.1.1-rc.2 has no official TUI bundle; a future adapter may consume the pure status API."));
-  assert.ok(compatibility.includes("Linux Node 22 Bookworm has complete packed-runtime proof."));
-  assert.ok(compatibility.includes("Windows and macOS have source/package tests only and no runtime claim."));
+  assert.ok(compatibility.includes("Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`."));
+  assert.ok(compatibility.includes("Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file."));
+  assert.ok(compatibility.includes("Windows, Linux, Web, and macOS evidence are not interchangeable."));
   assert.ok(compatibility.includes("LSP/MCP and runtime recovery are disabled by default."));
-  assert.ok(compatibility.includes("DeepSeek V4 Pro calibration applies only to the exact `deepseek-official/deepseek-v4-pro` route."));
+  assert.ok(compatibility.includes("V4 Pro calibration remains limited to the exact `deepseek-official/deepseek-v4-pro` route."));
+  assert.ok(compatibility.includes("`deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`"));
 });
 
 test("migration guide fixes the non-parity feature and cutover contracts", () => {
@@ -314,7 +323,7 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
       "## Coexistence and cutover"
     ]
   );
-  assert.ok(migration.includes("This guide applies to the reviewed working tree before it is published."));
+  assert.ok(migration.includes("updated, unpublished working tree targeting DSH 0.2.0-rc.2"));
 
   const rows = parseMarkdownTable(migration, "## Feature mapping", "feature mapping");
   assert.equal(rows.length, 15);
@@ -334,7 +343,7 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
   ]) {
     assert.ok(migration.includes(`\`${skill}\``), `${skill} is named in the migration guide`);
   }
-  const roleSetMatch = /^For migration planning, the role set is (?<roles>.+?)\. Do not infer automatic availability/mu.exec(migration);
+  const roleSetMatch = /^The role set includes (?<roles>.+?)\. File existence is not callable evidence/mu.exec(migration);
   if (roleSetMatch === null) {
     assert.fail("migration guide has a role-set statement");
   }
@@ -344,23 +353,20 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
   }
   const documentedRolePresets = [...roleSet.matchAll(/`([^`]+)`/gu)].map((match) => match[1]);
   assert.deepEqual(documentedRolePresets, expectedMigrationRolePresets);
-  assert.doesNotMatch(roleSet, /dsmm-oracle/u);
-  assert.ok(migration.includes("`dsmm-oracle` is not a bundled DSMM preset; make it a separately reviewed DSH agent/model configuration if its function is required for cutover."));
-  assert.ok(migration.includes("Oracle/model-category behavior is configured through available DSH agents and models; it is not inherited from ocmm."));
-  assert.ok(migration.includes("Subagent interruption recovery and OpenCode prompt/cache hooks are unavailable in DSMM v1.0."));
-  assert.ok(migration.includes("Release surfaces are local readiness/checklist evidence, not the root ocmm release lane."));
-  assert.ok(migration.includes("Headless configuration is file/profile-based; host commands execute separately where the DSH host exposes them."));
+  assert.ok(migration.includes("Reviewer is primary-lane self-review; Oracle is an external-model cross-check only when the actual user-selected route differs."));
+  assert.ok(migration.includes("Native durable child/session control and explicit continuation; no guessed task IDs"));
+  assert.ok(migration.includes("Headless configuration uses profile files and `--dump-config`; command-capable hosts execute `/deepwork` and `/dsmm-status` through the command adapter"));
 
   const sequence = parseOrderedList(migration, "## Migration sequence", "migration sequence");
   assert.equal(sequence.length, 8);
   assert.match(sequence[0], /isolated `DSH_HOME`.*profile/iu);
-  assert.match(sequence[1], /pinned headless.*`dsmm@1\.0\.0`.*reviewed tarball/iu);
-  assert.match(sequence[2], /provider.*model.*DSH/iu);
-  assert.match(sequence[3], /`defaultActive: true`.*`\/deepwork`/u);
-  assert.match(sequence[4], /optional preset materialization.*discovery root/iu);
-  assert.match(sequence[5], /optional LSP MCP patch/iu);
-  assert.match(sequence[6], /`\/dsmm-status json`.*`--dump-config`/u);
-  assert.match(sequence[7], /retain ocmm.*unavailable.*replacements/iu);
+  assert.match(sequence[1], /packed reviewed DSMM artifact/iu);
+  assert.match(sequence[2], /provider\/model.*credentials/iu);
+  assert.match(sequence[3], /`id: dsmm`.*restart.*settings\.yaml/iu);
+  assert.match(sequence[4], /`workflow\.policy: risk-based`/u);
+  assert.match(sequence[5], /native roles.*role-specific tools/iu);
+  assert.match(sequence[6], /optional LSP\/MCP/iu);
+  assert.match(sequence[7], /real specified model.*read\/write\/tool-result/iu);
 });
 
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
@@ -369,7 +375,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   assert.deepEqual(
     [...release.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
     [
-      "# DSMM v1.0 Release and Rollback",
+      "# DSMM 0.1.0 Release and Rollback",
       "## Preflight",
       "## Authorized publication",
       "## Post-publication verification",
@@ -378,7 +384,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   );
 
   for (const phrase of [
-    "dsmm-v1.0.0",
+    "dsmm-v0.1.0",
     "explicit authorization",
     "npm Trusted Publishing",
     "no DSMM lane",
@@ -411,7 +417,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   assert.match(preflight, /exact checkout.*status/i);
   assert.match(preflight, /npm-name ownership.*recheck/i);
   assert.match(preflight, /registry lookup.*current evidence.*cannot reserve name/is);
-  assert.match(preflight, /DSH 0\.1\.1-rc\.2/u);
+  assert.match(preflight, /DSH 0\.2\.0-rc\.2/u);
   assert.match(preflight, /license parity/i);
   assert.match(preflight, /DSMM test.*build.*checker.*pack.*Docker/is);
   assert.match(preflight, /root.*typecheck.*test.*build/is);
@@ -445,44 +451,36 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   }
   assert.equal(profile, "dsmm-v1-smoke");
 
-  assert.match(readme, /^## v1\.0 release readiness$/mu);
-  for (const link of [
-    "[compatibility]: docs/compatibility.md",
-    "[migration]: docs/migration-from-ocmm.md",
-    "[releasing]: docs/releasing.md"
-  ]) {
-    assert.ok(readme.includes(link), `README links ${link}`);
-  }
+  assert.match(readme, /^## Install and configure$/mu);
+  assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
-    "Current reviewed artifact: install the locally packed dsmm-1.0.0.tgz.",
-    "After separately proven publication: install the exact dsmm@1.0.0 registry version.",
-    "publication is pending separate authorization",
-    "dsh plugin --profile <name> add <tarball-or-exact-version>",
-    "dsh plugin --profile <name> list",
-    "dsh --profile <name> --dump-config",
-    "dsmm.defaultActive: true",
-    "`/deepwork` and `/dsmm-status` are host-adapter commands",
-    "stable packed-runtime proof",
-    "add/list/dump/remove/reinstall/global isolation"
+    "@deepseek-ai/dsh@0.2.0-rc.2",
+    "local readiness checks alone do not represent a published release",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-0.1.0.tgz>",
+    "dsh --profile <profile> --dump-config",
+    "Headless task text is not a slash-command adapter",
+    "pnpm --filter dsmm smoke:docker",
+    "real read/write/model round-trip",
+    "separately authorized publication"
   ]) {
     assert.ok(readme.includes(phrase), `README includes ${phrase}`);
   }
-  assert.doesNotMatch(readme, /Task 5|future checks/u);
-  assert.equal([...readme.matchAll(new RegExp(profile, "gu"))].length, 2);
-  assert.ok(readme.includes(`isolated \`${profile}\` profile`));
-  assert.ok(readme.includes(`dsh --profile ${profile} --dump-config`));
+  assert.ok(readme.includes("(docs/compatibility.md)"));
+  assert.ok(readme.includes("(docs/migration-from-ocmm.md)"));
+  assert.ok(readme.includes("(docs/releasing.md)"));
+  assert.match(profile, /^dsmm-v1-smoke$/u);
 });
 
-test("v1.0 roadmap has exactly the approved release-ready status", () => {
+test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability", () => {
   const roadmap = readFileSync(join(packageRoot, "docs", "roadmap.md"), "utf8");
   const v1Section = roadmapSection(roadmap, "## v1.0 — Stable dsmm release");
-  const status = "Status: release-ready as dsmm 1.0.0; publication is pending separate authorization.";
+  const status = "Status: initial package release selected as dsmm 0.1.0; the v1.0 stable milestone remains future work.";
 
   assert.equal(v1Section.split(status).length - 1, 1, "v1.0 roadmap contains the exact release-ready status once");
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 1.0.0 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.0 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -490,7 +488,7 @@ test("release readiness checker accepts the real 1.0.0 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "dsmm");
-  assert.equal(receipt.version, "1.0.0");
+  assert.equal(receipt.version, "0.1.0");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);

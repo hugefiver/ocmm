@@ -111,7 +111,7 @@ test("reconcileRolePresets materializes enabled roles and skips disabled roles",
         continue;
       }
 
-      assert.equal(readFileSync(join(presetDirectory, "agent.cordis.yml"), "utf8"), renderAgentCordis(role));
+      assert.equal(readFileSync(join(presetDirectory, "agent.cordis.yml"), "utf8"), renderAgentCordis(role, enabledSkillNames(settings), DSMM_ROLES.filter((candidate) => settings.roles[candidate.id]).map((candidate) => candidate.id)));
       assert.equal(readFileSync(join(presetDirectory, "preset.yml"), "utf8"), renderPresetMetadata(role));
       assert.equal(readFileSync(join(presetDirectory, DSMM_MANAGED_PRESET_MARKER), "utf8"), currentMarker(role.id));
     }
@@ -400,9 +400,9 @@ test("materialized roles receive only currently enabled preset-scoped skills", (
     assert.ok(orchestrator);
     const rendered = readFileSync(join(root, orchestrator.id, "agent.cordis.yml"), "utf8");
     assert.equal(rendered, renderAgentCordis(orchestrator, enabledSkillNames(settings)));
-    assert.ok(rendered.includes(`name: 'dsmm/preset-skills'\n  config:\n    skills:\n${enabledSkillNames(settings).map((skill) => `      - ${skill}`).join("\n")}\n`));
-    assert.doesNotMatch(rendered, /- writing-plans$/mu);
-    assert.doesNotMatch(rendered, /- remove-ai-slops$/mu);
+    assert.ok(rendered.includes(`name: 'dsmm/preset-skills'\n  config:\n    skills:\n${enabledSkillNames(settings).map((skill) => `      - '${skill}'`).join("\n")}\n`));
+    assert.doesNotMatch(rendered, /- 'writing-plans'$/mu);
+    assert.doesNotMatch(rendered, /- 'remove-ai-slops'$/mu);
   });
 });
 
@@ -416,7 +416,7 @@ test("materialized roles keep an explicitly empty preset skill list when all ski
     materializeRolePresets({ root, settings });
 
     const rendered = readFileSync(join(root, "dsmm-orchestrator", "agent.cordis.yml"), "utf8");
-    assert.match(rendered, /  config:\n    skills: \[\]\n$/u);
+    assert.match(rendered, /- id: dsmm-preset-skills\n  name: 'dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
     assert.doesNotMatch(rendered, /    skills:\n\n$/u);
   });
 });

@@ -31,7 +31,9 @@ For a host-declined, retryable failure, the failed provider must match the lates
 
 The default recovery `agent/request` listener is downstream of the prepend model routing listener. It first receives the downstream request configuration, then applies a matching pending fallback route and removes stale adapter-owned `reasoningEffort`. All other downstream fields are preserved.
 
-The outer model routing listener sees the final route. It calibrates reasoning only for the final exact official V4 Pro route; a fallback route does not broaden the existing model-routing match.
+The outer model routing listener sees the final route. It calibrates reasoning only for a supported exact V4 Pro or native V41 Flash route; a fallback does not broaden the existing matches. A route change removes stale adapter-owned reasoning effort; DSMM does not set temperature or create a second capability registry, and the final adapter remains responsible for supported call parameters.
+
+Duplicate failure delivery cannot select a second pending fallback. Closed or superseded turn/step boundaries, aborted signals, and expired pending routes are ignored. HTTP 402 requires explicit membership in `retryOnStatusCodes`; generic retry-code membership cannot silently authorize a paid-route change. No real billing/rate-limit error is manufactured for testing.
 
 ## Durable continuation
 
@@ -51,7 +53,7 @@ Durable route/header work can be reconstructed after a cold restart from session
 
 Continuable child sessions differ from one-shot children: a continuable child has a known session that can be resumed deliberately, while a one-shot child has no safe automatic follow-up contract. `subagent/end` is live-only diagnostic information, not a durable recovery trigger.
 
-To investigate an interrupted child, reconstruct the parent `subagent/descriptor` together with the child durable `turn/end` record. Explicitly continue the known child session when the host/user has the required live context. DSMM never synthesizes a parent prompt, parent session, or task ID, and it does not automatically follow up a child or parent.
+To investigate an interrupted child, use the native durable descriptor and child control/session surfaces. Explicitly continue a known continuable child only when the host/user has the required context; one-shot role tools are not continuable sessions. DSMM never synthesizes a parent prompt, parent session, or task ID, and it does not automatically follow up a child or parent. Native delegation depth and permission restrictions remain authoritative; DSMM does not raise the host's default depth.
 
 ## Non-goals and logging
 

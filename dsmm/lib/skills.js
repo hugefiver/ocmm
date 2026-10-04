@@ -11,6 +11,7 @@ export const DSMM_SKILL_NAMES = [
     "remove-ai-slops"
 ];
 export const MVP_SKILL_NAMES = DSMM_SKILL_NAMES;
+export const DSMM_ON_DEMAND_SKILL_NAMES = ["debugging"];
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export function parseSkillMarkdown(markdown) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/u.exec(markdown);
@@ -43,6 +44,10 @@ export function registerBundledSkills(skills, names) {
     if (skills === undefined)
         return;
     for (const name of DSMM_SKILL_NAMES) {
+        if (names.includes(name))
+            skills.register(loadBundledSkill(name));
+    }
+    for (const name of DSMM_ON_DEMAND_SKILL_NAMES) {
         if (names.includes(name))
             skills.register(loadBundledSkill(name));
     }

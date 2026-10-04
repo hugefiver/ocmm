@@ -34,10 +34,12 @@ test("publicLspToolName renders public MCP tool names and validates server names
     "find_symbol_related",
     "symbols",
     "prepare_rename",
-    "rename"
+    "rename",
+    "format"
   ]);
   assert.equal(publicLspToolName("diagnostics"), "mcp__dsmm_lsp__diagnostics");
   assert.equal(publicLspToolName("rename", "custom-lsp_1"), "mcp__custom-lsp_1__rename");
+  assert.equal(publicLspToolName("format"), "mcp__dsmm_lsp__format");
   assert.throws(() => publicLspToolName("status", "invalid.name"), /serverName/u);
 });
 
