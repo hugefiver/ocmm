@@ -80,3 +80,41 @@ export function createBootGraph(rows, revision) {
   const entries = rows.map(({ id, url, inject = [], external = [] }) => ({ id, url, rev: revision, inject, external, immediately: true }));
   return { rev: revision, entries, batches: entries.map(({ id, url, rev }) => ({ phase: id === "@deepseek-ai/dsh-client-modules" ? "bootstrap" : "application", url, rev, entries: [id] })) };
 }
+
+/** Read settled native state; never restart, wrap, or replace a plugin. */
+export async function nativeClientPreflight(scope = window) {
+  const modules = scope.__dsmmNativeModules;
+  const root = scope.__dsmmUiContext?.root;
+  const errorProof = (error) => ({ name: error.name, message: error.message ?? String(error), stack: error.stack });
+  const loader = root?.get("loader");
+  const providers = Reflect.ownKeys(root?.reflect.store ?? {}).map((key) => {
+    const { name, fiber } = root.reflect.store[key];
+    return { service: name, provider: fiber.name, state: fiber.state };
+  });
+  const missingServices = [];
+  const pluginGraph = (modules?.manifest.plugins ?? []).map(({ id, inject }) => {
+    const exports = modules.loadCache.get(id)?.exports;
+    const declared = exports?.inject;
+    const requiredServices = Array.isArray(declared) ? [...declared] : Object.keys(declared ?? {});
+    const services = requiredServices.map((service) => {
+      const available = root !== undefined && root.get(service) !== undefined;
+      if (!available) missingServices.push({ id, service });
+      return { service, available };
+    });
+    const importError = modules.importError(id);
+    return { id, inject, materialized: exports !== undefined, requiredServices, services, ...(importError ? { importError: errorProof(importError) } : {}) };
+  });
+  const entries = [];
+  for (const entry of loader?.entries() ?? []) {
+    const row = { id: entry.id, name: entry.options.name, state: entry.fiber?.state };
+    // Fiber.await is the public API that rethrows its original startup error.
+    // Only a settled FAILED fiber is read, so no new activation is triggered.
+    if (entry.fiber?.state === 3) {
+      try { await entry.fiber.await(); }
+      catch (error) { row.startupError = errorProof(error); }
+    }
+    entries.push(row);
+  }
+  return { rootPresent: root !== undefined, nativeModules: [...(modules?.loadCache.keys() ?? [])], pluginGraph, providers, missingServices, entries,
+    entryState: modules?.entries.state.getSnapshot() };
+}

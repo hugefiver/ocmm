@@ -4,7 +4,7 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { COMPOSITION_ID, bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph } from "./profile-ui-harness-browser.mjs";
 
-const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-api-gateway"];
+export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway"];
 const mime = { ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
 
 /** Serve only run-owned test HTML and exact installed, unmodified artifacts. */
@@ -23,7 +23,7 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256 
   for (const [index, id] of NATIVE_IDS.entries()) {
     const url = `/bundles/native-${index}.js`;
     bundles.set(url, await readFile(nativeRequire.resolve(`${id}/client`)));
-    rows.push({ id, url, inject: id === "@deepseek-ai/dsh-api-gateway" ? [COMPOSITION_ID] : [] });
+    rows.push({ id, url, inject: id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID] : [] });
   }
   bundles.set("/bundles/composition.js", Buffer.from(compositionBundle()));
   rows.push({ id: COMPOSITION_ID, url: "/bundles/composition.js", inject: ["@deepseek-ai/dsh-client-ui-renderer"], external: ["@deepseek-ai/dsh-client-connection/client", "@deepseek-ai/dsh-client-locale/client"] });
@@ -31,7 +31,7 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256 
   rows.push({ id: "@dsmm/dsmm", url: "/bundles/dsmm.js", inject: [COMPOSITION_ID, "@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-renderer"] });
   const graph = createBootGraph(rows, sha256);
   const escapeJson = (value) => JSON.stringify(value).replaceAll("<", "\\u003c");
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DSMM native profile component acceptance</title>${styles.map((name) => `<link rel="stylesheet" href="/native/assets/${name}">`).join("")}<link rel="stylesheet" href="/bundles/native-theme.css"><script>${bootstrapFacade()}${carrierBootstrap()}window.__DSH_BOOT__=${escapeJson(graph)};</script>${rows.map(({ url }) => `<script src="${url}"></script>`).join("")}</head><body><div id="root"></div><script type="module" src="/native/assets/${indexFiles[0]}"></script></body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DSMM native profile component acceptance</title><link rel="icon" href="/native/favicon.svg">${styles.map((name) => `<link rel="stylesheet" href="/native/assets/${name}">`).join("")}<link rel="stylesheet" href="/bundles/native-theme.css"><script>${bootstrapFacade()}${carrierBootstrap()}window.__DSH_BOOT__=${escapeJson(graph)};</script>${rows.map(({ url }) => `<script src="${url}"></script>`).join("")}</head><body><div id="root"></div><script type="module" src="/native/assets/${indexFiles[0]}"></script></body></html>`;
   const errors = [];
   const server = createServer((request, response) => {
     void (async () => {

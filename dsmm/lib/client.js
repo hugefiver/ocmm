@@ -1904,25 +1904,27 @@ var PROFILE_STYLES = `
 var inject = ["slots", "locale", "remote"];
 async function apply(ctx) {
   await ctx.remote.$mount(TYPERT_REMOTE);
-  const controller = new ProfilesController(ctx.remote.dsmmProfiles);
-  ctx.effect(() => () => controller.dispose(), "dsmm: profile editor");
-  ctx.effect(() => ctx.locale.register(NS, { en, zh }), "dsmm: profile locale");
-  ctx.effect(() => {
-    const style = document.createElement("style");
-    style.dataset.dsmmProfiles = "";
-    style.textContent = PROFILE_STYLES;
-    document.head.append(style);
-    return () => style.remove();
-  }, "dsmm: profile styles");
-  const t = ctx.locale.bind(NS);
-  ctx.slots.inject("settings.section", () => ctx.slots.register({
-    name: "settings.section",
-    id: "dsmm-profiles",
-    order: 30,
-    label: () => t("title"),
-    locale: NS,
-    inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions })
-  }, ProfilesSection));
-  void controller.refresh();
+  await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
+    const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
+    profileCtx.effect(() => () => controller.dispose(), "dsmm: profile editor");
+    profileCtx.effect(() => profileCtx.locale.register(NS, { en, zh }), "dsmm: profile locale");
+    profileCtx.effect(() => {
+      const style = document.createElement("style");
+      style.dataset.dsmmProfiles = "";
+      style.textContent = PROFILE_STYLES;
+      document.head.append(style);
+      return () => style.remove();
+    }, "dsmm: profile styles");
+    const t = profileCtx.locale.bind(NS);
+    profileCtx.slots.inject("settings.section", () => profileCtx.slots.register({
+      name: "settings.section",
+      id: "dsmm-profiles",
+      order: 30,
+      label: () => t("title"),
+      locale: NS,
+      inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions })
+    }, ProfilesSection));
+    void controller.refresh();
+  });
 }
 return module.exports; } });

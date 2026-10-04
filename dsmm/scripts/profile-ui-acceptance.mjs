@@ -7,9 +7,18 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
+import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 
 const PROFILE_ID = "browser-native";
 const profileText = (reviewCap, label = "Browser native acceptance profile with a deliberately long display name to check narrow Settings layouts") => `${JSON.stringify({ version: 1, id: PROFILE_ID, label, settings: { defaultActive: true, workflow: { reviewCap } } }, null, 2)}\n`;
+
+export function acceptanceChromium(toolsManifest) {
+  assert.ok(toolsManifest && isAbsolute(toolsManifest), "Docker browser acceptance tools manifest is required; no host dependency fallback");
+  const acceptanceRequire = createRequire(toolsManifest);
+  const { chromium } = acceptanceRequire("playwright");
+  assert.equal(typeof chromium?.launch, "function", "installed Docker Playwright has no public Chromium launch API");
+  return chromium;
+}
 
 export function validatedNativeStorage(nativeStorage, env) {
   assert.ok(nativeStorage && typeof nativeStorage === "object" && !Array.isArray(nativeStorage), "baseline-proven nativeStorage must be passed by the Docker runner");
@@ -104,10 +113,7 @@ export async function apply(ctx, config) {
 }
 
 async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoot, profilePackage, env, workspace, evidenceRoot, nativeStorage }) {
-  const toolsManifest = env.DSMM_ACCEPTANCE_TOOLS_MANIFEST;
-  assert.ok(toolsManifest && isAbsolute(toolsManifest), "Docker browser acceptance tools manifest is required; no host dependency fallback");
-  const acceptanceRequire = createRequire(toolsManifest);
-  const { chromium } = await import(pathToFileURL(acceptanceRequire.resolve("playwright")).href);
+  const chromium = await acceptanceChromium(env.DSMM_ACCEPTANCE_TOOLS_MANIFEST);
   const nativeRequire = createRequire(dshManifest);
   const nativeLoad = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
   const [{ SessionId }, { LlmAdapter, ReasoningEffortId }] = await Promise.all([nativeLoad("@deepseek-ai/dsh-session"), nativeLoad("@deepseek-ai/dsh-llm")]);
@@ -124,6 +130,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
   let server;
   let browser;
   let browserContext;
+  let page;
+  const pageErrors = [];
   let peer;
   let runtime;
   let blockedLock;
@@ -175,8 +183,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     browserContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-US", serviceWorkers: "block" });
     assert.deepEqual(await browserContext.cookies(), [], "new context was not empty");
     await browserContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
-    const page = await browserContext.newPage();
-    const pageErrors = [];
+    page = await browserContext.newPage();
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") pageErrors.push(message.text()); });
     page.on("requestfailed", (request) => pageErrors.push(`${request.url()}: ${request.failure()?.errorText}`));
@@ -238,6 +245,11 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
       report.textContrast[theme] = { measuredElements: result.length, minimumRatio: Math.min(...result.map(({ ratio }) => ratio)) };
     };
     await page.goto(server.origin);
+    await page.waitForFunction(() => document.querySelector(".dsmm-profiles") !== null || document.body.innerText.includes("Failed to load plugins"), undefined, { timeout: 10_000 });
+    report.browserBoot = await page.evaluate(nativeClientPreflight);
+    report.browserBoot.text = await page.evaluate(() => document.body.innerText.slice(0, 4096));
+    assert.deepEqual(report.browserBoot.missingServices, [], `native browser required services unavailable: ${JSON.stringify(report.browserBoot.missingServices)}`);
+    assert.ok(!report.browserBoot.text.includes("Failed to load plugins"), `native browser boot failed: ${report.browserBoot.text}`);
     await page.getByRole("heading", { name: "DSMM Profiles", exact: true }).waitFor();
     await idle();
     report.nativeClient.seed = await page.evaluate(() => window.__dsmmNativeSeedProof);
@@ -376,7 +388,18 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.ok(report.nativeCalls.some(({ domainCode }) => domainCode === "validation") && report.nativeCalls.some(({ domainCode }) => domainCode === "conflict"));
     report.storageProof = { profileDir: join(profileDir, "dsmm-profiles"), savedRevision: saved.revision, appliedRevisionBeforeReset: selected.appliedRevision, latestRawRevision: (await runtime.read(PROFILE_ID)).revision, selectionAfterReset: await runtime.describe(), genuineNativeGateway: true, genuineOperatorPeer: true, cannedProfileRpc: false };
     report.outcome = "COMPLETED";
-  } catch (error) { report.failure = error.stack ?? String(error); }
+  } catch (error) {
+    report.failure = error.stack ?? String(error);
+    report.browserErrors = [...pageErrors];
+    if (page && !page.isClosed()) {
+      if (!report.browserBoot) {
+        try { report.browserBoot = await page.evaluate(nativeClientPreflight); }
+        catch (bootError) { report.browserBootError = bootError.message; }
+      }
+      try { report.failureDom = await page.evaluate(() => document.body.innerText.slice(0, 4096)); }
+      catch (domError) { report.failureDomError = domError.message; }
+    }
+  }
   finally {
     const cleanupErrors = [];
     const cleanup = async (label, operation) => { try { await operation(); } catch (error) { cleanupErrors.push({ label, message: error.message }); } };

@@ -1,14 +1,35 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 // JS harnesses are test-only entrypoints, outside the emitted library program.
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph } from "../scripts/profile-ui-harness-browser.mjs";
+import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, nativeClientPreflight } from "../scripts/profile-ui-harness-browser.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { extractNativeThemeStyles } from "../scripts/profile-ui-harness-server.mjs";
+import { extractNativeThemeStyles, NATIVE_IDS } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { nativeUiStartupPatch, validatedNativeStorage } from "../scripts/profile-ui-acceptance.mjs";
+import { acceptanceChromium, nativeUiStartupPatch, validatedNativeStorage } from "../scripts/profile-ui-acceptance.mjs";
+
+test("acceptance tools load the real required CommonJS face when no synthetic chromium export exists", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "dsmm-playwright-interop-"));
+  try {
+    const packageRoot = join(temporaryRoot, "node_modules", "playwright");
+    await mkdir(packageRoot, { recursive: true });
+    const toolsManifest = join(temporaryRoot, "package.json");
+    await writeFile(toolsManifest, '{"private":true}\n');
+    await writeFile(join(packageRoot, "package.json"), '{"name":"playwright","type":"commonjs","main":"index.js"}\n');
+    await writeFile(join(packageRoot, "index.js"), 'const api = { chromium: { launch() { return "required-face"; } } }; module.exports = api;\n');
+    const toolsRequire = createRequire(toolsManifest);
+    const namespace = await import(pathToFileURL(toolsRequire.resolve("playwright")).href);
+    assert.equal(namespace.chromium, undefined, "fixture must reproduce Playwright's indirect CommonJS export shape");
+    const chromium = await acceptanceChromium(toolsManifest);
+    assert.equal(chromium.launch(), "required-face");
+    assert.equal(chromium, toolsRequire("playwright").chromium, "loader must use the actual required API, not reconstruct a browser face");
+  } finally { await rm(temporaryRoot, { recursive: true, force: false }); }
+});
 
 test("native UI startup retains runner-proved root/zstd and disables only the stock JSONL entry", () => {
   const home = resolve("owned-ui-profile");
@@ -42,6 +63,34 @@ test("owned browser composition preserves native Connection, renderer and lazy D
   assert.match(bootstrapFacade(), /createClientModuleSystem/u);
   assert.match(carrierBootstrap(), /__dsmmNativeBridge/u);
   assert.doesNotMatch(carrierBootstrap(), /fetch\(|WebSocket\(|token=|document\.cookie|localStorage/u);
+});
+
+test("native browser Gateway boots with its real Typert registry provider", () => {
+  assert.ok(NATIVE_IDS.includes("@deepseek-ai/dsh-typert-registry"), "native client Gateway requires the real typert service before it can activate");
+  assert.equal(new Set(NATIVE_IDS).size, NATIVE_IDS.length, "native client providers must materialize once");
+});
+
+test("native client preflight reports all actual service requirements and public startup errors", async () => {
+  const startupError = new Error("native client causal failure");
+  let failedAwaitCalls = 0;
+  const activeFiber = { name: "native-provider", state: 2, await() { throw new Error("must not re-await active plugins"); } };
+  const failedFiber = { name: "dsmm-client", state: 3, async await() { failedAwaitCalls += 1; throw startupError; } };
+  const providers = { [Symbol("slots")]: { name: "slots", fiber: activeFiber } };
+  const loader = { entries: () => [
+    { id: "native", options: { name: "native" }, fiber: activeFiber },
+    { id: "dsmm", options: { name: "@dsmm/dsmm" }, fiber: failedFiber },
+  ] };
+  const root = { reflect: { store: providers }, get(name: string) { return name === "loader" ? loader : name === "slots" ? {} : undefined; } };
+  const modules = { manifest: { plugins: [{ id: "native", inject: [] }, { id: "@dsmm/dsmm", inject: ["native"] }] },
+    loadCache: new Map([["native", { exports: { inject: ["slots"] } }], ["@dsmm/dsmm", { exports: { inject: { locale: null, remote: null } } }]]),
+    entries: { state: { getSnapshot: () => ({ syncing: false, failures: [] }) } }, importError: () => undefined };
+  const report = await nativeClientPreflight({ __dsmmNativeModules: modules, __dsmmUiContext: { root } });
+  assert.deepEqual(report.missingServices, [{ id: "@dsmm/dsmm", service: "locale" }, { id: "@dsmm/dsmm", service: "remote" }]);
+  assert.deepEqual(report.pluginGraph[1].requiredServices, ["locale", "remote"], "package graph edges are not service aliases");
+  assert.deepEqual(report.providers, [{ service: "slots", provider: "native-provider", state: 2 }]);
+  assert.equal(report.entries[1].startupError.message, startupError.message);
+  assert.match(report.entries[1].startupError.stack, /native client causal failure/u);
+  assert.equal(failedAwaitCalls, 1);
 });
 
 test("native theme extraction parses exact literals and fails closed without the native inventory", () => {
