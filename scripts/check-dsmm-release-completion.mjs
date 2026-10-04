@@ -5,13 +5,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import {
   computeDigests, expectedAssetNames, readArtifactIdentity, validateArtifactIdentity, validateDockerReceipt,
-  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact,
+  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory,
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 
 export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
 const REPOSITORY = "hugefiver/ocmm";
 const WORKFLOW = ".github/workflows/dsmm-release.yml";
+export const CONTINUATION_WORKFLOW = ".github/workflows/dsmm-published-continuation.yml";
+export const PUBLISHED_ORIGIN = Object.freeze({
+  repository: REPOSITORY, version: "0.1.4", tag: "dsmm-scoped-v0.1.4",
+  controlSha: "d133475c8f297f81ab20782d6b469e02eadefa2a", releaseSha: "d133475c8f297f81ab20782d6b469e02eadefa2a",
+  workflowId: 374825007, runId: "37240470628", runAttempt: "1",
+  artifactId: 11317741434, artifactName: "dsmm-accepted-37240470628-1", artifactSize: 257969,
+  archiveDigest: "sha256:80ea8dc079a3196cdd159a212ba1f8e73ad94be90a5720a6290ba52af868b627",
+  filename: "dsmm-dsmm-0.1.4.tgz", sha256: "3747bedef856278c30f3869081fed82f42fb15cd7178d464f6fdb30009fe2b61",
+});
+const ORIGIN_JOBS = Object.freeze([
+  ["import-bootstrap", 111548000843, "skipped"], ["prepare", 111548000008, "success"],
+  ["publish", 111548674992, "success"], ["verify", 111548723962, "failure"], ["github-release", 111548765501, "skipped"],
+].map(([name, id, conclusion]) => Object.freeze({ name, id, conclusion })));
 const scriptRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export class EvidenceMismatch extends Error {}
@@ -110,7 +123,7 @@ export function runInstallProbe(identity) {
   }
 }
 
-function github(path) {
+export function github(path) {
   return JSON.parse(execFileSync("gh", ["api", `repos/${REPOSITORY}/${path}`], { encoding: "utf8", timeout: 60_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }));
 }
 
@@ -119,6 +132,192 @@ export async function peelRemoteTag(tag, request = github) {
   for (let depth = 0; object?.type === "tag" && depth < 8; depth++) object = request(`git/tags/${object.sha}`).object;
   requireCondition(object?.type === "commit" && /^[a-f0-9]{40}$/u.test(object.sha), "release tag does not peel to a commit");
   return object.sha;
+}
+
+export function validatePublishedOriginRun(run, workflow, jobs) {
+  const origin = PUBLISHED_ORIGIN;
+  requireCondition(String(run.id) === origin.runId && String(run.run_attempt) === origin.runAttempt, "original workflow run/attempt differs");
+  requireCondition(run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY, "original workflow repository differs");
+  requireCondition(workflow.id === origin.workflowId && run.workflow_id === origin.workflowId && workflow.path === WORKFLOW, "original workflow file/ID differs");
+  requireCondition(run.status === "completed" && run.conclusion === "failure" && run.event === "push"
+    && run.head_sha === origin.controlSha && run.head_branch === origin.tag, "original failed publication history differs");
+  requireCondition(jobs.length === ORIGIN_JOBS.length && new Set(jobs.map(job => job.name)).size === jobs.length, "original job inventory differs");
+  for (const required of ORIGIN_JOBS) {
+    const job = jobs.find(candidate => candidate.name === required.name);
+    requireCondition(job?.id === required.id && job.status === "completed" && job.conclusion === required.conclusion
+      && String(job.run_id) === origin.runId && String(job.run_attempt) === origin.runAttempt, `original ${required.name} history differs`);
+  }
+  return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt }));
+}
+
+export function validatePublishedOriginIdentity(identity) {
+  validateArtifactIdentity(identity);
+  for (const field of ["repository", "version", "tag", "controlSha", "releaseSha", "runId", "runAttempt", "filename", "sha256"])
+    requireCondition(identity[field] === PUBLISHED_ORIGIN[field], `fixed published origin differs: ${field}`);
+  requireCondition(identity.mode === "future" && identity.origin === "ci-built" && identity.provenance === true
+    && identity.sourceChecks === "COMPLETED" && identity.bootstrapImport === null, "published origin is not the original CI-built artifact");
+  return identity;
+}
+
+function completeInventory(response, key) {
+  requireCondition(Array.isArray(response?.[key]) && response.total_count === response[key].length, `incomplete ${key} inventory`);
+  return response[key];
+}
+
+export function selectContinuationArtifact(artifacts, expected, { artifactId, accepted = false } = {}) {
+  const name = accepted ? PUBLISHED_ORIGIN.artifactName : `dsmm-registry-verification-${expected.runId}-${expected.runAttempt}`;
+  const matches = artifacts.filter(artifact => artifact.name === name);
+  requireCondition(matches.length === 1, "exact continuation/origin artifact is missing or ambiguous");
+  const artifact = matches[0];
+  requireCondition(Number.isSafeInteger(artifact.id) && artifact.id > 0 && (artifactId === undefined || String(artifact.id) === String(artifactId))
+    && artifact.expired === false && /^sha256:[a-f0-9]{64}$/u.test(artifact.digest ?? ""), "artifact ID/digest/expiry differs");
+  requireCondition(artifact.workflow_run?.id === Number(expected.runId) && artifact.workflow_run.head_sha === expected.controlSha
+    && artifact.workflow_run.head_branch === (accepted ? PUBLISHED_ORIGIN.tag : "master"), "artifact source run/control differs");
+  requireCondition(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 16 * 1024 * 1024, "artifact size is invalid");
+  if (accepted) requireCondition(artifact.id === PUBLISHED_ORIGIN.artifactId && artifact.digest === PUBLISHED_ORIGIN.archiveDigest
+    && artifact.size_in_bytes === PUBLISHED_ORIGIN.artifactSize, "fixed original artifact identity differs");
+  return artifact;
+}
+
+export async function loadPublishedOrigin(directory, { request = github, downloadArtifact = defaultDownloadArtifact } = {}) {
+  const expected = PUBLISHED_ORIGIN;
+  // Never consult the mutable latest-attempt endpoint for historical publication evidence.
+  const run = request(`actions/runs/${expected.runId}/attempts/${expected.runAttempt}`);
+  const workflow = request(`actions/workflows/${expected.workflowId}`);
+  const jobs = validatePublishedOriginRun(run, workflow,
+    completeInventory(request(`actions/runs/${expected.runId}/attempts/${expected.runAttempt}/jobs?per_page=100`), "jobs"));
+  const artifacts = completeInventory(request(`actions/runs/${expected.runId}/artifacts?per_page=100`), "artifacts");
+  requireCondition(!artifacts.some(artifact => artifact.name === `dsmm-bootstrap-${expected.runId}-${expected.runAttempt}`), "original future release unexpectedly imported bootstrap");
+  const artifact = selectContinuationArtifact(artifacts, expected, { accepted: true });
+  requireCondition(await peelRemoteTag(expected.tag, request) === expected.releaseSha, "immutable published tag changed");
+  await downloadArtifact(artifact, directory, expected);
+  requireCondition(readdirSync(directory).every(name => lstatSync(join(directory, name)).isFile()
+    && !lstatSync(join(directory, name)).isSymbolicLink()), "original artifact contains links or directories");
+  const context = JSON.parse(readFileSync(join(directory, "context.json"), "utf8"));
+  const identity = validatePublishedOriginIdentity(validateArtifactDirectory(directory, context));
+  const { files } = validateTarballBuffer(readFileSync(join(directory, identity.filename)), { version: identity.version, expectedDigests: identity });
+  return { run, workflow, jobs, artifact, context, identity, files };
+}
+
+export function validateContinuationContext(context, expected = context) {
+  requireCondition(context?.schemaVersion === 1 && context.repository === REPOSITORY && context.defaultBranch === "master", "continuation repository/default branch differs");
+  requireCondition(context.eventName === "workflow_dispatch" && context.ref === "refs/heads/master"
+    && context.inputs && typeof context.inputs === "object" && !Array.isArray(context.inputs) && Object.keys(context.inputs).length === 0, "continuation dispatch/ref/inputs differs");
+  requireCondition(/^[a-f0-9]{40}$/u.test(context.controlSha ?? "") && context.controlSha !== PUBLISHED_ORIGIN.controlSha
+    && context.eventSha === context.controlSha && context.workflow?.sha === context.controlSha, "continuation checkout/event/workflow SHA differs");
+  requireCondition(context.workflow.file === CONTINUATION_WORKFLOW
+    && context.workflow.ref === `${REPOSITORY}/${CONTINUATION_WORKFLOW}@refs/heads/master`, "continuation workflow ref differs");
+  requireCondition(/^[1-9][0-9]*$/u.test(context.runId ?? "") && /^[1-9][0-9]*$/u.test(context.runAttempt ?? "")
+    && context.runId !== PUBLISHED_ORIGIN.runId, "continuation run/attempt invalid");
+  requireCondition(context.controlInDefaultHistory === true && context.controlsPresent === true, "continuation control is not in trusted default history");
+  requireCondition(context.runtime?.platform === "linux" && context.runtime.nodeMajor === 24, "continuation requires Linux/Node 24 native verification");
+  for (const field of ["runId", "runAttempt", "controlSha"]) requireCondition(context[field] === expected[field], `continuation proof ${field} differs`);
+  return context;
+}
+
+export function validateContinuationJobs(jobs, context, { terminal = true } = {}) {
+  requireCondition(jobs.length === 2 && new Set(jobs.map(job => job.name)).size === 2 && new Set(jobs.map(job => job.id)).size === 2, "continuation must have exactly two distinct jobs");
+  for (const name of ["verify", "github-release"]) {
+    const job = jobs.find(candidate => candidate.name === name);
+    requireCondition(Number.isSafeInteger(job?.id) && job.id > 0 && String(job.run_id) === context.runId
+      && String(job.run_attempt) === context.runAttempt, `continuation ${name} job identity differs`);
+    if (terminal || name === "verify") requireCondition(job.status === "completed" && job.conclusion === "success", `continuation ${name} did not succeed`);
+    else requireCondition(job.status === "in_progress" && job.conclusion === null, "continuation finalizer is not the actual running job");
+    requireCondition(job.labels?.includes("ubuntu-latest"), `continuation ${name} is not the Linux CI job`);
+  }
+  return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt }));
+}
+
+export function loadContinuationRun(context, { request = github, stage = "terminal" } = {}) {
+  validateContinuationContext(context);
+  const run = request(`actions/runs/${context.runId}/attempts/${context.runAttempt}`);
+  requireCondition(String(run.id) === context.runId && String(run.run_attempt) === context.runAttempt
+    && run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY, "continuation actual run/repository differs");
+  requireCondition(run.event === "workflow_dispatch" && run.head_branch === "master" && run.head_sha === context.controlSha, "continuation actual dispatch/control differs");
+  if (stage === "terminal") {
+    if (run.status !== "completed") throw new Error("continuation workflow is still running");
+    requireCondition(run.conclusion === "success", "continuation workflow did not succeed");
+  } else requireCondition(run.status === "in_progress" && run.conclusion === null, "continuation workflow is not genuinely running");
+  const workflow = request(`actions/workflows/${run.workflow_id}`);
+  requireCondition(Number.isSafeInteger(workflow.id) && workflow.id > 0 && workflow.id === run.workflow_id && workflow.path === CONTINUATION_WORKFLOW, "continuation workflow file/ID differs");
+  const comparison = request(`compare/${context.controlSha}...master`);
+  requireCondition(["ahead", "identical"].includes(comparison.status) && comparison.merge_base_commit?.sha === context.controlSha, "continuation control left default-branch history");
+  for (const path of [CONTINUATION_WORKFLOW, "scripts/dsmm-release-continuation.mjs", "scripts/check-dsmm-release-completion.mjs", "scripts/dsmm-release.mjs", "scripts/dsmm-registry-install-probe.mjs"]) {
+    const source = request(`contents/${path}?ref=${context.controlSha}`);
+    requireCondition(source.type === "file" && source.path === path && source.encoding === "base64" && typeof source.content === "string", "trusted continuation controls are missing");
+    if (path === CONTINUATION_WORKFLOW) {
+      const yaml = Buffer.from(source.content, "base64").toString("utf8");
+      const events = yaml.match(/^on:\r?\n([\s\S]*?)(?=^[^\s#])/mu)?.[1];
+      requireCondition(events?.trim() === "workflow_dispatch:", "continuation workflow is not no-input dispatch-only");
+      requireCondition(!/id-token:|NPM_TOKEN|NODE_AUTH_TOKEN|--clobber|npm publish|pnpm publish/u.test(yaml), "continuation workflow contains publishing permissions/actions");
+    }
+  }
+  let jobs = [];
+  if (stage !== "verify") jobs = validateContinuationJobs(completeInventory(request(`actions/runs/${context.runId}/attempts/${context.runAttempt}/jobs?per_page=100`), "jobs"), context, { terminal: stage === "terminal" });
+  return { run, workflow, jobs };
+}
+
+export function validateContinuationVerification(envelope, origin, expected) {
+  requireCondition(envelope?.schemaVersion === 2 && envelope.mode === "published-continuation" && envelope.outcome === "COMPLETED", "continuation envelope schema/mode/outcome differs");
+  validateContinuationContext(envelope.continuation, expected);
+  requireCondition(envelope.originAcceptedArtifact?.id === PUBLISHED_ORIGIN.artifactId
+    && envelope.originAcceptedArtifact.archiveDigest === PUBLISHED_ORIGIN.archiveDigest
+    && envelope.originAcceptedArtifact.runId === PUBLISHED_ORIGIN.runId && envelope.originAcceptedArtifact.runAttempt === PUBLISHED_ORIGIN.runAttempt, "continuation origin archive binding differs");
+  requireCondition(envelope.verification?.schemaVersion === 1, "continuation must wrap the original raw verification schema");
+  const verification = validateVerificationReceipt(envelope.verification, origin.identity);
+  const provenance = verification.registry.provenance;
+  requireCondition(provenance?.outcome === "COMPLETED" && provenance.source === "npm-registry-served-validated-attestation-over-https"
+    && provenance.predicateType === "https://slsa.dev/provenance/v1" && provenance.workflowFile === WORKFLOW
+    && provenance.sourceSha === PUBLISHED_ORIGIN.releaseSha && provenance.runId === PUBLISHED_ORIGIN.runId
+    && provenance.runAttempt === PUBLISHED_ORIGIN.runAttempt && provenance.independentSigstoreVerification === false, "continuation changed original npm provenance");
+  validateInstalledFileHashes(verification.freshInstall, origin.files);
+  return verification;
+}
+
+export async function loadContinuationProof(directory, origin, context, { request = github, downloadArtifact = defaultDownloadArtifact, artifactId } = {}) {
+  const artifacts = completeInventory(request(`actions/runs/${context.runId}/artifacts?per_page=100`), "artifacts");
+  const artifact = selectContinuationArtifact(artifacts, context, { artifactId });
+  await downloadArtifact(artifact, directory, context);
+  const path = join(directory, "dsmm-registry-verification.json");
+  requireCondition(JSON.stringify(readdirSync(directory)) === JSON.stringify(["dsmm-registry-verification.json"])
+    && lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(), "continuation verification file set/links differs");
+  const envelope = JSON.parse(readFileSync(path, "utf8"));
+  const verification = validateContinuationVerification(envelope, origin, context);
+  return { artifact, envelope, verification };
+}
+
+export async function checkTerminalPublishedContinuation(expected, { request = github, downloadArtifact = defaultDownloadArtifact,
+  publishedCheck = verifyPublishedArtifact, fetchAsset = defaultFetchAsset, originLoader = loadPublishedOrigin } = {}) {
+  const owner = createOwnedRoot();
+  try {
+    const acceptedDirectory = join(owner.root, "accepted"); mkdirSync(acceptedDirectory);
+    const origin = await originLoader(acceptedDirectory, { request, downloadArtifact });
+    const proofDirectory = join(owner.root, "verification"); mkdirSync(proofDirectory);
+    const { artifact: proofArtifact, envelope, verification } = await loadContinuationProof(proofDirectory, origin, expected, { request, downloadArtifact });
+    const continuation = loadContinuationRun(envelope.continuation, { request });
+    requireCondition(await peelRemoteTag(PUBLISHED_ORIGIN.tag, request) === PUBLISHED_ORIGIN.releaseSha, "immutable published tag changed");
+    const release = request(`releases/tags/${PUBLISHED_ORIGIN.tag}`);
+    requireCondition(release.draft === false && release.prerelease === false, "continued Release is not public stable");
+    requireCondition(JSON.stringify(release.assets?.map(asset => asset.name).sort()) === JSON.stringify(expectedAssetNames(origin.identity.version).sort()), "continued Release asset set differs");
+    const assets = new Map();
+    for (const asset of release.assets) assets.set(asset.name, await fetchAsset(asset, origin.identity));
+    validateTransportAssets(release, assets, origin.identity, { requireDraft: false });
+    const publication = await publishedCheck(origin.identity, { installProbe: async () => verification.freshInstall });
+    validateContinuationVerification({ ...envelope, verification: publication }, origin, expected);
+    return {
+      schemaVersion: 2, mode: "published-continuation", outcome: "COMPLETED", repository: REPOSITORY,
+      originWorkflow: { file: WORKFLOW, id: origin.workflow.id, runId: PUBLISHED_ORIGIN.runId, runAttempt: PUBLISHED_ORIGIN.runAttempt,
+        controlSha: PUBLISHED_ORIGIN.controlSha, status: origin.run.status, conclusion: origin.run.conclusion, jobs: origin.jobs },
+      continuationWorkflow: { file: CONTINUATION_WORKFLOW, id: continuation.workflow.id, ...expected,
+        status: continuation.run.status, conclusion: continuation.run.conclusion, jobs: continuation.jobs },
+      originAcceptedArtifact: { id: origin.artifact.id, archiveDigest: origin.artifact.digest },
+      verificationProof: { id: proofArtifact.id, archiveDigest: proofArtifact.digest, runId: expected.runId, runAttempt: expected.runAttempt },
+      artifact: origin.identity, publication,
+      githubRelease: { id: release.id, tag: release.tag_name, draft: false, assetIds: release.assets.map(({ id, name }) => ({ id, name })) },
+      freshInstallEvidence: { origin: "CI continuation verify job, Linux/Node 24", artifactId: proofArtifact.id, runId: expected.runId, runAttempt: expected.runAttempt },
+      nonclaims: { ...publication.nonclaims, originalWorkflowSuccess: "NOT_CLAIMED_ORIGINAL_FAILURE_PRESERVED", terminalHostNativeInstall: "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
+    };
+  } finally { cleanupOwnedRoot(owner); }
 }
 
 export async function checkTerminalCompletion(expected, { request = github, downloadArtifact = defaultDownloadArtifact, publishedCheck = verifyPublishedArtifact, fetchAsset = defaultFetchAsset } = {}) {
@@ -233,22 +432,31 @@ async function defaultFetchAsset(asset, identity) {
   return buffer;
 }
 
-function defaultDownloadArtifact(artifact, output, expected) {
-  requireCondition(Number.isSafeInteger(artifact.id) && artifact.id > 0, "invalid Actions artifact ID");
-  requireCondition(artifact.workflow_run?.id === Number(expected.runId), "wrong Actions artifact run");
-  const archive = execFileSync("gh", ["api", `repos/${REPOSITORY}/actions/artifacts/${artifact.id}/zip`], { timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
-  requireCondition(artifact.digest === `sha256:${computeDigests(archive).sha256}`, "Actions artifact archive digest differs");
-  const archivePath = `${output}.zip`;
-  writeFileSync(archivePath, archive, { flag: "wx" });
-  const windows = process.platform === "win32";
-  const members = execFileSync(windows ? "tar" : "unzip", windows ? ["-tf", archivePath] : ["-Z1", archivePath], { encoding: "utf8", timeout: 30_000, windowsHide: true }).trim().split(/\r?\n/u);
+export function validateArtifactMembers(members, artifact, expected) {
   if (artifact.name === `dsmm-registry-verification-${expected.runId}-${expected.runAttempt}`) requireCondition(JSON.stringify(members) === JSON.stringify(["dsmm-registry-verification.json"]), "unsafe verification archive membership");
   else {
     requireCondition([`dsmm-accepted-${expected.runId}-${expected.runAttempt}`, `dsmm-bootstrap-${expected.runId}-${expected.runAttempt}`].includes(artifact.name), "unexpected accepted/import artifact identity");
     const fixed = ["context.json", "identity.json", "docker-receipt-native-session-control.json", "SHA256SUMS.txt"];
     requireCondition(members.length === 5 && fixed.every(name => members.includes(name)) && members.filter(name => /^dsmm-dsmm-(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.tgz$/u.test(name)).length === 1, "unsafe accepted archive membership");
   }
+}
+
+export function defaultDownloadArtifact(artifact, output, expected) {
+  requireCondition(Number.isSafeInteger(artifact.id) && artifact.id > 0, "invalid Actions artifact ID");
+  requireCondition(artifact.workflow_run?.id === Number(expected.runId), "wrong Actions artifact run");
+  const archive = execFileSync("gh", ["api", `repos/${REPOSITORY}/actions/artifacts/${artifact.id}/zip`], { timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  validateArtifactArchive(archive, artifact);
+  const archivePath = `${output}.zip`;
+  writeFileSync(archivePath, archive, { flag: "wx" });
+  const windows = process.platform === "win32";
+  const members = execFileSync(windows ? "tar" : "unzip", windows ? ["-tf", archivePath] : ["-Z1", archivePath], { encoding: "utf8", timeout: 30_000, windowsHide: true }).trim().split(/\r?\n/u);
+  validateArtifactMembers(members, artifact, expected);
   execFileSync(windows ? "tar" : "unzip", windows ? ["-xf", archivePath, "-C", output] : ["-q", archivePath, "-d", output], { stdio: "pipe", timeout: 30_000, windowsHide: true });
+}
+
+export function validateArtifactArchive(archive, artifact) {
+  requireCondition(artifact.digest === `sha256:${computeDigests(archive).sha256}`, "Actions artifact archive digest differs");
+  if (artifact.size_in_bytes !== undefined) requireCondition(archive.length === artifact.size_in_bytes, "Actions artifact archive size differs");
 }
 
 export function parseCompletionArguments(args) {
@@ -256,7 +464,7 @@ export function parseCompletionArguments(args) {
     "artifact-dir": { type: "string" }, "run-id": { type: "string" }, "run-attempt": { type: "string" },
     "control-sha": { type: "string" }, receipt: { type: "string" },
   } });
-  requireCondition(positionals.length === 1 && ["verify", "terminal"].includes(positionals[0]), "choose verify or terminal mode");
+  requireCondition(positionals.length === 1 && ["verify", "terminal", "terminal-continuation"].includes(positionals[0]), "choose verify, terminal or terminal-continuation mode");
   requireCondition(typeof values.receipt === "string" && values.receipt.length > 0, "--receipt is required");
   if (positionals[0] === "verify") requireCondition(Boolean(values["artifact-dir"]), "--artifact-dir is required");
   else {
@@ -274,10 +482,15 @@ export async function main(args = process.argv.slice(2)) {
     if (options.mode === "verify") {
       const identity = readArtifactIdentity(join(resolve(options["artifact-dir"]), "identity.json"));
       receipt = await verifyPublishedArtifact(identity);
-    } else receipt = await checkTerminalCompletion({ runId: options["run-id"], runAttempt: options["run-attempt"], controlSha: options["control-sha"] });
+    } else {
+      const expected = { runId: options["run-id"], runAttempt: options["run-attempt"], controlSha: options["control-sha"] };
+      receipt = await (options.mode === "terminal-continuation" ? checkTerminalPublishedContinuation : checkTerminalCompletion)(expected);
+    }
   } catch (error) {
     // Failed state preserves all tags, assets and registry identities.
-    receipt = { schemaVersion: 1, outcome: error instanceof EvidenceMismatch ? "FAILED" : "UNRESOLVED", reason: "required release evidence could not be established; immutable surfaces were not changed" };
+    receipt = { schemaVersion: options?.mode === "terminal-continuation" ? 2 : 1,
+      ...(options?.mode === "terminal-continuation" ? { mode: "published-continuation" } : {}),
+      outcome: error instanceof EvidenceMismatch ? "FAILED" : "UNRESOLVED", reason: "required release evidence could not be established; immutable surfaces were not changed" };
   }
   if (options) writeFileSync(resolve(options.receipt), `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
   process.stdout.write(`${JSON.stringify(receipt)}\n`);

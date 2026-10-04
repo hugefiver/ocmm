@@ -69,6 +69,29 @@ For 0.1.3 and later, Docker evidence must also bind all twelve exact DW preset l
 
 ## Completion and failures
 
+### Published 0.1.4 continuation
+
+The authorized `dsmm-scoped-v0.1.4` tag is immutable at `d133475c8f297f81ab20782d6b469e02eadefa2a`.
+Original workflow `374825007`, run `37240470628`, attempt `1` published the accepted package successfully, then failed registry verification on a registry 404 immediately after publication. Its actual five-job history remains `import-bootstrap: skipped`, `prepare: success`, `publish: success`, `verify: failure`, `github-release: skipped`. Neither a local Linux installation nor a successful later dispatch makes this original run green.
+
+The fixed original accepted artifact is `11317741434`, named `dsmm-accepted-37240470628-1`, ZIP SHA256 `80ea8dc079a3196cdd159a212ba1f8e73ad94be90a5720a6290ba52af868b627`, 257969 bytes. The original package is `dsmm-dsmm-0.1.4.tgz`, SHA256 `3747bedef856278c30f3869081fed82f42fb15cd7178d464f6fdb30009fe2b61`. Original source checks, all fourteen Docker UI checks, accepted receipt/checksums and npm CI provenance remain bound to that original run and tag.
+
+After reviewing and committing the continuation controls to trusted `master`, record the actual control commit and dispatch **only** `dsmm-published-continuation.yml` from `master`, with no inputs. This is a same-identity published-version continuation, not a rerun of the publisher, bootstrap, source build or packing. The two-job workflow shares the existing non-cancelling publication concurrency group. It has no OIDC permission or npm publishing credential and never uploads to a registry, changes a tag, rebuilds, repacks or reuploads the accepted artifact.
+
+The `verify` job independently downloads the exact original artifact by ID, verifies ZIP digest and safe five-file membership, rechecks attempt-specific original history and the peeled tag, and validates every original artifact/receipt byte. Its unchanged public-registry and fresh isolated Linux/Node 24 native DSH `0.2.0-rc.2`/pnpm `11.9.0` installation must pass, including installed exports/profile/client and native English/Chinese metadata hashes. The retained schema-2 verification envelope separates the actual continuation run/attempt/master control identity from its raw, original-run-bound registry/native proof. Registry provenance invocation remains original run `37240470628/1`.
+
+Only after successful verification does `github-release` independently reload both the original accepted artifact and the exact new verification artifact ID/digest. It performs complete authenticated draft discovery and requires that the original tag's Release is absent. It creates the missing draft once using the original tarball, `docker-receipt-native-session-control.json` and `SHA256SUMS.txt`; the existing strict finalizer rechecks registry bytes, tag and exact draft assets before making the same Release public. An existing public Release or partial draft stops mutations and reports its ID/asset IDs. It is never silently adopted, overwritten or repaired. A retry may repeat verification while the Release remains absent; partial state returns to the workflow owner under the existing same-identity authority.
+
+After the genuine new run has terminated, use its **actual** run/attempt and recorded master control SHA:
+
+```text
+node scripts/check-dsmm-release-completion.mjs terminal-continuation --run-id <actual-continuation-run> --run-attempt <actual-attempt> --control-sha <actual-master-control-sha> --receipt <new-receipt-path>
+```
+
+This additive authority requires the truthful failed origin history, a separate genuinely successful two-job continuation, trusted default-branch control ancestry, the exact original accepted archive, the exact new proof archive, public stable original-byte Release/assets/checksums, unchanged tag, and current registry bytes/original provenance. Its schema-2 `published-continuation` receipt keeps `originWorkflow` and `continuationWorkflow` separate. `artifact`, `publication` and `githubRelease` retain their ordinary consumer meanings; native evidence comes from the actual new CI verification job, not a terminal-host reinstall. Only exit `0` / `COMPLETED` unlocks subsequent work. Exit `1` / `FAILED` or `2` / `UNRESOLVED` preserves published state and blocks rollout, Flash, Desktop and real-session work. The ordinary terminal's five successful-mode-specific gates are unchanged and still reject this original failed run.
+
+### Ordinary complete release runs
+
 Run the DSMM-specific terminal checker after the fixed workflow run/attempt has finished:
 
 ```text

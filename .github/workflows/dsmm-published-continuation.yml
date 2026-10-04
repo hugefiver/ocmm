@@ -1,0 +1,81 @@
+name: DSMM Published Continuation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dsmm-npm-publication
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.9.0"
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact-id: ${{ steps.proof.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+      - name: Revalidate original publication and verify fresh public native installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node control/scripts/dsmm-release-continuation.mjs verify --control-root control --receipt "$RUNNER_TEMP/dsmm-registry-verification.json"
+      - name: Retain separate actual-run verification envelope
+        id: proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dsmm-registry-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dsmm-registry-verification.json
+          if-no-files-found: error
+          retention-days: 30
+
+  github-release:
+    name: github-release
+    needs: verify
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Create only missing original-byte Release and finalize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DSMM_PROOF_ARTIFACT_ID: ${{ needs.verify.outputs.artifact-id }}
+        run: node control/scripts/dsmm-release-continuation.mjs finalize --control-root control --proof-artifact-id "$DSMM_PROOF_ARTIFACT_ID"
