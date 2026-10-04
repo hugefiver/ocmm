@@ -161,7 +161,7 @@ function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly str
 
 function readRoute(value: unknown): DsmmRecoveryRoute | undefined {
   if (!isRecord(value) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.model)) return undefined;
-  return { provider: value.provider, model: value.model };
+  return { provider: value.provider, model: value.model, ...(isNonEmptyString(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
 }
 
 function sameRoute(left: DsmmRecoveryRoute, right: DsmmRecoveryRoute): boolean {

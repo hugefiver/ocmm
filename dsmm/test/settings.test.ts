@@ -62,6 +62,7 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
+    roleRouting: {},
     presets: {
       materialize: false
     },
@@ -109,6 +110,7 @@ test("resolveConfig overlays plugin config on defaults", () => {
     deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
+    roleRouting: {},
     presets: {
       materialize: false
     },
@@ -378,6 +380,7 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
+    roleRouting: {},
     presets: {
       materialize: false
     },
@@ -826,7 +829,7 @@ test("apply registers recovery request hooks before the existing llm model-routi
   assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "settings,systemPrompt"), [["settings", "systemPrompt"]]);
   assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "llm"), [["llm"]]);
   assert.deepEqual(registrations.slice(1, 4), [
-    { event: "agent/request", options: undefined },
+    { event: "agent/request", options: { prepend: true } },
     { event: "agent/request-error", options: { prepend: true } },
     { event: "agent/turn-stopping", options: undefined }
   ]);

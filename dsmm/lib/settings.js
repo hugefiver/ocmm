@@ -17,6 +17,7 @@ export const DEFAULT_DSMM_SETTINGS = {
     deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: createDefaultSkillSettings(),
     roles: createDefaultRoleSettings(),
+    roleRouting: {},
     presets: {
         materialize: false
     },
@@ -74,6 +75,29 @@ const SKILLS_SCHEMA = Schema.object({
     "remove-ai-slops": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["remove-ai-slops"])
 });
 const ROLES_SCHEMA = Schema.object(Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles[id])])));
+const MODEL_ROUTE_SCHEMA = Schema.object({
+    provider: Schema.string().required(),
+    model: Schema.string().required(),
+    reasoningEffort: Schema.string()
+});
+// A dictionary retains unknown keys for fail-closed validation by the resolver.
+const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
+    primary: Schema.union([Schema.const(undefined), MODEL_ROUTE_SCHEMA]),
+    fallbackRoutes: Schema.union([Schema.const(undefined), Schema.array(MODEL_ROUTE_SCHEMA)])
+}).required()).default({});
+// Schemastery treats null like an omitted default. Validate the untouched map
+// before object defaults can erase an explicitly malformed routing policy.
+const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input) => {
+    if (!isRoutingRecord(input))
+        return input;
+    if (isRoutingRecord(input.runtimeRecovery) && Array.isArray(input.runtimeRecovery.fallbackRoutes)) {
+        for (const route of input.runtimeRecovery.fallbackRoutes) {
+            if (isRoutingRecord(route))
+                normalizeRecoveryEffort(route);
+        }
+    }
+    return { roleRouting: resolveRoleRouting(input.roleRouting) };
+});
 const PRESETS_SCHEMA = Schema.object({
     materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
     root: Schema.string()
@@ -135,7 +159,8 @@ const RUNTIME_RECOVERY_SCHEMA = Schema.object({
     retryOnCodes: Schema.array(String).default([...DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnCodes]),
     fallbackRoutes: Schema.array(Schema.object({
         provider: Schema.string(),
-        model: Schema.string()
+        model: Schema.string(),
+        reasoningEffort: Schema.string()
     })).default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route }))),
     maxFallbackAttempts: Schema.number().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.maxFallbackAttempts),
     idleContinuation: RUNTIME_RECOVERY_IDLE_CONTINUATION_SCHEMA
@@ -162,43 +187,45 @@ const LSP_SCHEMA = Schema.object({
     toolCallTimeoutMs: Schema.number().default(DEFAULT_DSMM_SETTINGS.lsp.toolCallTimeoutMs),
     failOnStartupError: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.failOnStartupError)
 });
-export const DSMM_CONFIG_SCHEMA = Schema.object({
-    modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
-    section: Schema.string(),
-    defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
-    promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
-    deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-    deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-    deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
-    deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-    deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-    deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
-    skills: SKILLS_SCHEMA,
-    roles: ROLES_SCHEMA,
-    presets: PRESETS_SCHEMA,
-    workflow: WORKFLOW_CONFIG_SCHEMA,
-    guards: GUARDS_SCHEMA,
-    runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
-    lsp: LSP_SCHEMA
-});
-export const DSMM_SETTINGS_SCHEMA = Schema.object({
-    modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
-    defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
-    promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
-    deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-    deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-    deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
-    deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-    deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-    deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
-    skills: SKILLS_SCHEMA,
-    roles: ROLES_SCHEMA,
-    presets: PRESETS_SCHEMA,
-    workflow: WORKFLOW_SCHEMA,
-    guards: GUARDS_SCHEMA,
-    runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
-    lsp: LSP_SCHEMA
-});
+export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+        modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
+        section: Schema.string(),
+        defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
+        promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
+        deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+        deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+        deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+        deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+        deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+        deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+        skills: SKILLS_SCHEMA,
+        roles: ROLES_SCHEMA,
+        roleRouting: ROLE_ROUTING_SCHEMA,
+        presets: PRESETS_SCHEMA,
+        workflow: WORKFLOW_CONFIG_SCHEMA,
+        guards: GUARDS_SCHEMA,
+        runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
+        lsp: LSP_SCHEMA
+    })]).default({});
+export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+        modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
+        defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
+        promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
+        deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+        deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+        deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+        deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
+        deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
+        deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
+        skills: SKILLS_SCHEMA,
+        roles: ROLES_SCHEMA,
+        roleRouting: ROLE_ROUTING_SCHEMA,
+        presets: PRESETS_SCHEMA,
+        workflow: WORKFLOW_SCHEMA,
+        guards: GUARDS_SCHEMA,
+        runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
+        lsp: LSP_SCHEMA
+    })]).default({});
 export function resolveConfig(config = {}) {
     return {
         modeName: normalizeModeName(config.modeName),
@@ -212,6 +239,7 @@ export function resolveConfig(config = {}) {
         deepseekFlashMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekFlashMaxReasoningPresets, DEFAULT_DSMM_SETTINGS.deepseekFlashMaxReasoningPresets),
         skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
         roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
+        roleRouting: resolveRoleRouting(config.roleRouting),
         presets: resolvePresetSettings(config.presets),
         workflow: resolveWorkflowSettings(config.workflow),
         guards: resolveGuardSettings(config.guards),
@@ -222,6 +250,53 @@ export function resolveConfig(config = {}) {
 function resolveMaxReasoningPresets(input, defaults) {
     const requested = new Set(input ?? defaults);
     return DSMM_ROLE_IDS.filter((id) => requested.has(id));
+}
+export function resolveRoleRouting(input) {
+    if (input === undefined)
+        return {};
+    if (!isRoutingRecord(input))
+        throw new TypeError("dsmm roleRouting must be an object");
+    const result = {};
+    for (const [key, value] of Object.entries(input)) {
+        if (!DSMM_ROLE_IDS.includes(key))
+            throw new TypeError("dsmm roleRouting contains an unknown role");
+        if (!isRoutingRecord(value) || Object.keys(value).some((field) => field !== "primary" && field !== "fallbackRoutes")) {
+            throw new TypeError("dsmm roleRouting role policy must contain only primary and fallbackRoutes");
+        }
+        const policy = {};
+        if (Object.hasOwn(value, "primary"))
+            policy.primary = normalizeExplicitRoute(value.primary);
+        if (Object.hasOwn(value, "fallbackRoutes")) {
+            if (!Array.isArray(value.fallbackRoutes))
+                throw new TypeError("dsmm roleRouting fallbackRoutes must be an array");
+            policy.fallbackRoutes = [];
+            for (const entry of value.fallbackRoutes) {
+                const route = normalizeExplicitRoute(entry);
+                if (!policy.fallbackRoutes.some((existing) => existing.provider === route.provider && existing.model === route.model))
+                    policy.fallbackRoutes.push(route);
+            }
+        }
+        result[key] = policy;
+    }
+    return result;
+}
+function isRoutingRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function normalizeExplicitRoute(value) {
+    if (!isRoutingRecord(value) || Object.keys(value).some((field) => !["provider", "model", "reasoningEffort"].includes(field))) {
+        throw new TypeError("dsmm explicit model route must contain provider, model and optional reasoningEffort");
+    }
+    if (typeof value.provider !== "string" || value.provider.trim() === "" || typeof value.model !== "string" || value.model.trim() === "") {
+        throw new TypeError("dsmm explicit model route requires nonempty provider and model");
+    }
+    if (Object.hasOwn(value, "reasoningEffort") && (typeof value.reasoningEffort !== "string" || value.reasoningEffort.trim() === "")) {
+        throw new TypeError("dsmm explicit model route reasoningEffort must be nonempty");
+    }
+    return {
+        provider: value.provider.trim(), model: value.model.trim(),
+        ...(typeof value.reasoningEffort === "string" ? { reasoningEffort: value.reasoningEffort.trim() } : {})
+    };
 }
 export function isRoleEnabled(settings, role) {
     return settings.roles[role];
@@ -292,13 +367,22 @@ function normalizeRetryCodes(input, defaults) {
 function normalizeRecoveryRoutes(input, defaults) {
     const normalized = [];
     for (const route of input ?? defaults) {
+        const reasoningEffort = normalizeRecoveryEffort(route);
         const provider = route.provider?.trim() ?? "";
         const model = route.model?.trim() ?? "";
         if (provider === "" || model === "" || normalized.some((candidate) => candidate.provider === provider && candidate.model === model))
             continue;
-        normalized.push({ provider, model });
+        normalized.push({ provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) });
     }
     return normalized;
+}
+function normalizeRecoveryEffort(route) {
+    if (!Object.hasOwn(route, "reasoningEffort"))
+        return undefined;
+    const value = route.reasoningEffort;
+    if (typeof value !== "string" || value.trim() === "")
+        throw new TypeError("dsmm recovery route reasoningEffort must be nonempty");
+    return value.trim();
 }
 function normalizeBoundedInteger(value, defaultValue) {
     if (value === undefined || !Number.isFinite(value))

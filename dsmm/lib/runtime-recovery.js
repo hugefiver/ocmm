@@ -1,7 +1,8 @@
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, isCurrentRecoveryStep, selectFallbackRoute } from "./recovery-policy.js";
 import { isDsmmRoleId } from "./roles.js";
-import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
+import { applyModelRoute, effectiveRoleFallbackRoutes, recordAdmittedRecoveryRoute, rolePolicyIdentity, sameModelRoute } from "./role-routing.js";
+import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
 const installedContexts = new WeakSet();
 const RECOVERY_WARNING = "dsmm runtime recovery could not evaluate fallback; preserving the host request-error decision";
 const CONTINUATION_WARNING = "dsmm runtime recovery continuation steering failed for turn";
@@ -10,6 +11,9 @@ function warnSafely(ctx, message) {
         ctx.logger?.warn(message);
     }
     catch { }
+}
+function recoveryEvents(agent) {
+    return agent.session.header?.origin === "subagent" ? childOwnedSessionEvents(agent.session) : sessionEvents(agent.session);
 }
 export function registerRuntimeRecovery(ctx, controller, getSettings) {
     if (installedContexts.has(ctx) || ctx.on === undefined)
@@ -45,20 +49,31 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             const pending = pendingByAgent.get(frame.agent);
             if (pending === undefined)
                 return downstream;
-            if (frame.signal.aborted || !isCurrentRecoveryStep(sessionEvents(frame.agent.session), pending.turn, pending.step)) {
+            if (frame.signal.aborted || !isCurrentRecoveryStep(recoveryEvents(frame.agent), pending.turn, pending.step)) {
                 pendingByAgent.delete(frame.agent);
                 return downstream;
             }
             if (pending.turn !== frame.turn || pending.step !== frame.step)
                 return downstream;
+            if (pending.policy !== undefined) {
+                const settings = getSettings();
+                const role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
+                if (role !== pending.role || rolePolicyIdentity(settings, role) !== pending.policy) {
+                    pendingByAgent.delete(frame.agent);
+                    reservedByAgent.delete(frame.agent);
+                    return downstream;
+                }
+            }
+            const reserved = reservedByAgent.get(frame.agent);
+            const accepted = frame.agent.session.requestHeader?.()?.config;
+            if (reserved !== undefined && accepted !== undefined && !sameModelRoute(accepted, reserved.route) && !sameModelRoute(accepted, pending.route)) {
+                pendingByAgent.delete(frame.agent);
+                return downstream;
+            }
             pendingByAgent.delete(frame.agent);
-            const { reasoningEffort: _reasoningEffort, ...preserved } = downstream;
-            return {
-                ...preserved,
-                provider: pending.route.provider,
-                model: pending.route.model
-            };
-        });
+            recordAdmittedRecoveryRoute(frame, pending.route);
+            return applyModelRoute(downstream, pending.route);
+        }, { prepend: true });
         disposeRequestError = ctx.on("agent/request-error", async (frame, next) => {
             const downstream = await next();
             if (downstream?.kind === "retry") {
@@ -68,20 +83,24 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             try {
                 const settings = getSettings();
                 if (!settings.runtimeRecovery.enabled || frame.signal.aborted
-                    || !isCurrentRecoveryStep(sessionEvents(frame.agent.session), frame.turn, frame.step))
+                    || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step))
                     return downstream;
                 const preset = resolveSelectedAgentPreset(frame.agent.session);
-                const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);
+                const role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
+                const inScope = role !== undefined || controller.active(frame.agent, settings.defaultActive)
+                    || (frame.agent.session.header?.origin !== "subagent" && isDsmmRoleId(preset) && settings.roles[preset]);
                 if (!inScope || classifyRecoveryFailure(frame.failure, settings.runtimeRecovery).kind !== "retryable")
                     return downstream;
                 const header = frame.agent.session.requestHeader?.();
                 if (header === undefined || header.config.provider !== frame.provider)
                     return downstream;
+                const policy = rolePolicyIdentity(settings, role);
                 const reserved = reservedByAgent.get(frame.agent);
                 if (reserved?.turn === frame.turn && reserved.step === frame.step
+                    && reserved.policy === policy
                     && reserved.route.provider === header.config.provider && reserved.route.model === header.config.model)
                     return downstream;
-                const attemptedRoutes = foldAttemptedRecoveryRoutes(sessionEvents(frame.agent.session), frame.turn, frame.step);
+                const attemptedRoutes = foldAttemptedRecoveryRoutes(recoveryEvents(frame.agent), frame.turn, frame.step);
                 const lastAttemptedRoute = attemptedRoutes.at(-1);
                 if (lastAttemptedRoute === undefined
                     || lastAttemptedRoute.provider !== header.config.provider
@@ -90,16 +109,16 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 const route = selectFallbackRoute({
                     failedRoute: { provider: header.config.provider, model: header.config.model },
                     attemptedRoutes,
-                    fallbackRoutes: settings.runtimeRecovery.fallbackRoutes,
+                    fallbackRoutes: effectiveRoleFallbackRoutes(settings, role),
                     maxFallbackAttempts: settings.runtimeRecovery.maxFallbackAttempts
                 });
                 if (route === undefined)
                     return downstream;
                 reservedByAgent.set(frame.agent, {
                     turn: frame.turn, step: frame.step,
-                    route: { provider: header.config.provider, model: header.config.model }
+                    route: { provider: header.config.provider, model: header.config.model }, role, policy
                 });
-                pendingByAgent.set(frame.agent, { turn: frame.turn, step: frame.step, route });
+                pendingByAgent.set(frame.agent, { turn: frame.turn, step: frame.step, route, role, policy });
                 return { kind: "retry" };
             }
             catch {

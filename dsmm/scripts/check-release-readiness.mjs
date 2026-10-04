@@ -63,6 +63,7 @@ const expectedPeers = {
   "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-subagent": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-fs": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-fs-search": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-bash": "0.2.0-rc.2",
@@ -78,10 +79,13 @@ const expectedDevDependencies = {
   ...expectedPeers,
   "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent-loop": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
   "@deepseek-ai/dsh-scope": "0.2.0-rc.2",
   "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-subagent-spawn-in-process": "0.2.0-rc.2",
   "@types/node": "^26.0.0",
   "typescript": "^6.0.3"
 };
@@ -237,7 +241,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.0",
+    version: "0.1.1",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -325,7 +329,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.0") errors.push("npm pack receipt version must equal 0.1.0");
+  if (entry.version !== "0.1.1") errors.push("npm pack receipt version must equal 0.1.1");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerRolePresets } from "../lib/preset-registry.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
+import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DshContext } from "../lib/dsh-types.js";
 
 test("native DSH registration declares enabled roles with real plugins, not filesystem roots", async () => {
@@ -102,4 +102,28 @@ test("read-only restriction follows native blank preset switches without stickin
   assert.throws(() => events.get("tools/change")?.(), /requires DSH tools guard\/restrict/u);
   assert.match(guard({ name: "write", agent }) ?? "", /read-only role/u);
   events.get("agent/disposed")?.({ agent });
+});
+
+test("native preset registration threads configured role routes and disabled retained policies into child inventory", async () => {
+  const primary = { provider: "fixture", model: "review-primary", reasoningEffort: "max" };
+  const settings = resolveConfig({ roles: { "dsmm-builder": false }, roleRouting: {
+    "dsmm-reviewer": { primary }, "dsmm-builder": { primary: { provider: "fixture", model: "disabled-policy" } }
+  } });
+  const definitions: Array<{ id: string; plugins: Array<{ config?: Record<string, unknown> }> }> = [];
+  let install: ((ctx: DshContext) => unknown) | undefined;
+  registerRolePresets({ inject(_deps, callback) { install = callback; } }, () => settings);
+  assert.ok(install);
+  await install({ get: (name) => (name === "agentPresets" ? {
+    async register(definition: typeof definitions[number]) { definitions.push(definition); return async () => {}; },
+    composedPreset() { return undefined; }
+  } : name === "agents" ? { list: () => [] } : undefined) as never, on() {} });
+  assert.equal(definitions.some((definition) => definition.id === "dsmm-builder"), false);
+  const orchestrator = definitions.find((definition) => definition.id === "dsmm-orchestrator")!;
+  const tool = orchestrator.plugins.find((row) => row.config?.toolName === "dsmm_reviewer")!.config!;
+  assert.deepEqual(tool.agentOptions, primary);
+  assert.equal(tool.provider, "dsmm-role-reviewer");
+  assert.equal(tool.modelSelectionSettings, false);
+  assert.deepEqual(tool.toolFilter, { allow: ["read", "glob", "grep"] });
+  assert.equal(orchestrator.plugins.some((row) => row.config?.toolName === "dsmm_builder"), false);
+  assert.equal(Object.hasOwn(orchestrator.plugins.find((row) => row.config?.toolName === "dsmm_oracle")!.config!, "agentOptions"), false);
 });

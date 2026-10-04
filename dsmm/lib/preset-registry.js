@@ -19,7 +19,7 @@ export function registerRolePresets(ctx, getSettings) {
                     name: role.name,
                     description: role.description,
                     order: role.order,
-                    plugins: rolePluginRows(role, enabledSkillNames(settings), enabled)
+                    plugins: rolePluginRows(role, enabledSkillNames(settings), enabled, settings.roleRouting)
                 }));
             }
             // A direct selection of a read-only preset must be restricted at the Agent

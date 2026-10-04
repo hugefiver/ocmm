@@ -19,6 +19,14 @@ runtimeRecovery:
 
 `maxFallbackAttempts` and `idleContinuation.maxContinuations` are finite integer caps floored and clamped to `0..10`. An empty `fallbackRoutes` list is valid and supplies no provider/model fallback. When runtime recovery is disabled (`enabled` is false), recovery is isolated: it does not disable or alter DSMM prompts, skills, guards, LSP, or model routing.
 
+## Role-specific chains (0.1.1)
+
+`roleRouting.<role>.fallbackRoutes` uses the same route shape, with optional exact native `reasoningEffort`. The existing `runtimeRecovery.enabled` gate is required for both role and global fallback; configuring a primary or a chain does not implicitly enable recovery or idle continuation.
+
+For a known enabled role, an explicitly supplied chain takes precedence over the global list. `[]` suppresses global fallback for that role; an omitted chain preserves legacy global behavior. Routes retain configured order and deduplicate by provider/model identity, so changing effort does not create additional retry opportunities. Unrecognized children never inherit their parent's role chain.
+
+To migrate only explicit ocmm role chains, set `runtimeRecovery.enabled:true`, keep its global `fallbackRoutes:[]`, and leave `idleContinuation.enabled:false`. This deliberately enables role fallback without enabling a generic model chain or autonomous continuation. Provider retry remains host-owned.
+
 ## Host retry and fallback routes
 
 The host `agent/request-error` decision wins by identity. DSMM calls downstream first and acts only after the host declines to retry. It classifies failures using exact integer status membership and lowercased exact code membership only; it performs no message parsing or provider-message classification.
@@ -29,9 +37,9 @@ For a host-declined, retryable failure, the failed provider must match the lates
 
 ## Request ordering
 
-The default recovery `agent/request` listener is downstream of the prepend model routing listener. It first receives the downstream request configuration, then applies a matching pending fallback route and removes stale adapter-owned `reasoningEffort`. All other downstream fields are preserved.
+The recovery request path applies a matching pending fallback route after native request selection. A named fallback effort is preserved exactly; omission clears stale adapter-owned `reasoningEffort`. All unrelated downstream fields are preserved. Explicit role primary policy must not replace the admitted fallback on that or a later request in the same recovery scope.
 
-The outer model routing listener sees the final route. It calibrates reasoning only for a supported exact V4 Pro or native V41 Flash route; a fallback does not broaden the existing matches. A route change removes stale adapter-owned reasoning effort; DSMM does not set temperature or create a second capability registry, and the final adapter remains responsible for supported call parameters.
+Model routing evaluates the final route. Legacy calibration still recognizes only exact V4 Pro or native V41 Flash routes; a fallback does not broaden those matches. Explicit configured efforts bypass legacy degradation and are checked through the native model capability seam. DSMM does not set temperature or create a second capability registry, and the final adapter remains responsible for supported call parameters.
 
 Duplicate failure delivery cannot select a second pending fallback. Closed or superseded turn/step boundaries, aborted signals, and expired pending routes are ignored. HTTP 402 requires explicit membership in `retryOnStatusCodes`; generic retry-code membership cannot silently authorize a paid-route change. No real billing/rate-limit error is manufactured for testing.
 

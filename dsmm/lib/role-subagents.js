@@ -8,7 +8,7 @@ export function registerHeadlessRoleTools(ctx, controller, getSettings) {
     const onCreated = async ({ agent }) => {
         const profile = agent.ctx.get?.("profileContext")
             ?? ctx.get?.("profileContext")
-            ?? ctx.profileContext;
+            ?? (ctx.get === undefined ? ctx.profileContext : undefined);
         if (!profile?.startedBundles.includes("@deepseek-ai/dsh-headless"))
             return;
         if (agent.session.header?.origin === "subagent")
@@ -38,7 +38,7 @@ export function registerHeadlessRoleTools(ctx, controller, getSettings) {
                 // Agent creation is awaited before first prompt assembly. Mounting here
                 // sees the Agent-isolated systemPrompt/tools and avoids leaking tools to
                 // its sibling sessions or the read-only child being delegated.
-                await agentCtx.plugin(nativeSubagentTool, roleSubagentConfig(role, availableTools));
+                await agentCtx.plugin(nativeSubagentTool, roleSubagentConfig(role, availableTools, settings.roleRouting[role.id]?.primary));
             }
             agentCtx.effect?.(() => () => installed.delete(agentCtx));
         }

@@ -37,7 +37,7 @@ test("native blank preset switch applies and lifts Agent-scoped read-only restri
       async execute() { return name; }
     });
     for (const name of ["read", "write", "edit", "dsmm_builder"]) builderTools.register(tool(name));
-    for (const name of ["read", "write", "edit"]) reviewerTools.register(tool(name));
+    for (const name of ["read", "write", "edit", "bash", "pwsh", "dsmm_builder", "dsmm_reviewer"]) reviewerTools.register(tool(name));
     hostTools.register(tool("write"));
     const rawBuilderTools = (builderTools as unknown as Record<symbol, typeof builderTools>)[symbols.original];
     const rawReviewerTools = (reviewerTools as unknown as Record<symbol, typeof reviewerTools>)[symbols.original];
@@ -87,6 +87,10 @@ test("native blank preset switch applies and lifts Agent-scoped read-only restri
     assert.ok(hostTools.get("write", agent), "Host tools coexist, but the selected preset realm is the restriction target");
     const denied = await reviewerTools.execute({ callId: ToolCallId("readonly-write"), agent, name: "write", arguments: {}, signal: new AbortController().signal });
     assert.equal(denied.isError, true);
+    for (const name of ["edit", "bash", "pwsh", "dsmm_builder", "dsmm_reviewer"]) {
+      const readonlyDenied: { isError: boolean } = await reviewerTools.execute({ callId: ToolCallId(`readonly-${name}`), agent, name, arguments: {}, signal: new AbortController().signal });
+      assert.equal(readonlyDenied.isError, true, `${name} is denied on a directly selected read-only native preset`);
+    }
 
     // The raw preset service is not Agent-bound; the public Cordis trace must
     // bind it before restrict(), otherwise the same-scope write survives.

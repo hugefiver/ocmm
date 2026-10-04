@@ -161,6 +161,7 @@ const expectedCompatibility = [
   ["TUI", "DSH 0.2.0-rc.2"],
   ["LSP/MCP", "external ocmm-lsp mcp"],
   ["Runtime recovery", "process-local"],
+  ["Per-role model/effort/fallback policy", "native request, subagent and descriptor seams"],
   ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
   ["DeepSeek V41 Flash calibration", "native DeepSeek providers/deepseek-flash"]
 ];
@@ -169,7 +170,7 @@ const expectedMigrationStates = new Map([
   ["Deepwork gates", "equivalent core intent"],
   ["Seven workflow skills", "equivalent core intent"],
   ["Twelve role presets", "redesigned for DSH"],
-  ["Model routing and DeepSeek calibration", "redesigned for DSH"],
+  ["Per-role model/effort and DeepSeek calibration", "redesigned for DSH"],
   ["Safety guards", "redesigned for DSH"],
   ["LSP/MCP", "optional/manual"],
   ["Runtime fallback", "redesigned for DSH"],
@@ -256,14 +257,14 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   const rows = parseMarkdownTable(compatibility, "## Compatibility matrix", "compatibility matrix");
 
   assert.deepEqual(rows.map(([surface, boundary]) => [surface, boundary]), expectedCompatibility);
-  assert.equal(rows.length, 14);
+  assert.equal(rows.length, 15);
   assert.ok(rows.every((row) => row.length === 3 && row[2] !== ""), "each surface states an evidence level");
   assert.equal(rows.find(([surface]) => surface === "DSH")?.[2], "verified");
   assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "unavailable");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.deepEqual(
     [...new Set(rows.map((row) => row[2]))].sort(),
-    ["optional", "supported by contract", "unavailable", "verified"]
+    ["opt-in; exact configured capability required", "optional", "supported by contract", "unavailable", "verified"]
   );
 });
 
@@ -273,7 +274,7 @@ test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   assert.deepEqual(
     [...compatibility.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
     [
-      "# DSMM v1.0 Compatibility",
+      "# DSMM 0.1.1 Compatibility",
       "## Compatibility authority",
       "## Compatibility matrix",
       "## Command and runtime boundaries",
@@ -285,11 +286,7 @@ test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   assert.ok(compatibility.includes("Installation ranges are not proof of compatibility with future releases."));
 
   for (const peerPackage of [
-    "@deepseek-ai/dsh-attachment",
-    "@deepseek-ai/dsh-brand",
-    "@deepseek-ai/dsh-invariants",
-    "@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-timeout"
+    "@deepseek-ai/dsh-subagent"
   ]) {
     assert.ok(compatibility.includes(peerPackage), `${peerPackage} is named as a peer installation contract`);
   }
@@ -312,18 +309,18 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
   const migration = readFileSync(migrationPath, "utf8");
   const opening = "DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH.";
 
-  assert.ok(migration.startsWith(`# Migrating from ocmm to DSMM v1.0\n\n${opening}`));
+  assert.ok(migration.startsWith(`# Migrating from ocmm to DSMM 0.1.1\n\n${opening}`));
   assert.deepEqual(
     [...migration.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
     [
-      "# Migrating from ocmm to DSMM v1.0",
+      "# Migrating from ocmm to DSMM 0.1.1",
       "## Hard boundary",
       "## Feature mapping",
       "## Migration sequence",
       "## Coexistence and cutover"
     ]
   );
-  assert.ok(migration.includes("updated, unpublished working tree targeting DSH 0.2.0-rc.2"));
+  assert.ok(migration.includes("0.1.1 routing surface targeting DSH 0.2.0-rc.2"));
 
   const rows = parseMarkdownTable(migration, "## Feature mapping", "feature mapping");
   assert.equal(rows.length, 15);
@@ -375,7 +372,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   assert.deepEqual(
     [...release.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
     [
-      "# DSMM 0.1.0 Release and Rollback",
+      "# DSMM 0.1.1 Release and Rollback",
       "## Preflight",
       "## Authorized publication",
       "## Post-publication verification",
@@ -384,7 +381,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   );
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.0",
+    "dsmm-scoped-v0.1.1",
     "explicit authorization",
     "npm Trusted Publishing",
     "no DSMM lane",
@@ -455,8 +452,8 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "local readiness checks alone do not represent a published release",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.0.tgz>",
+    "Local readiness checks alone do not represent a published release",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.1.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
@@ -474,13 +471,13 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
 test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability", () => {
   const roadmap = readFileSync(join(packageRoot, "docs", "roadmap.md"), "utf8");
   const v1Section = roadmapSection(roadmap, "## v1.0 — Stable dsmm release");
-  const status = "Status: initial package release selected as dsmm 0.1.0; the v1.0 stable milestone remains future work.";
+  const status = "Status: the initial scoped package is `@dsmm/dsmm@0.1.0`; `0.1.1` adds native per-role model/effort policies and ordered role fallbacks. The v1.0 stable milestone remains future work and does not imply all OpenCode hooks or client surfaces are compatible.";
 
   assert.equal(v1Section.split(status).length - 1, 1, "v1.0 roadmap contains the exact release-ready status once");
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.0 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.1 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -488,7 +485,7 @@ test("release readiness checker accepts the real 0.1.0 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.0");
+  assert.equal(receipt.version, "0.1.1");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);

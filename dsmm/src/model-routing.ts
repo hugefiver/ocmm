@@ -1,6 +1,7 @@
 import type { DshContext, DshLlmCallConfig, DshLlmRuntime, DshModelReasoningInfo } from "./dsh-types.js";
 import { isDsmmRoleId } from "./roles.js";
-import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { applyModelRoute, effectiveRoleFallbackRoutes, establishRolePolicy, persistedRoleRoute, sameModelRoute, takeAdmittedRecoveryRoute } from "./role-routing.js";
+import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 import type { DeepseekDefaultReasoningEffort, DsmmSettings } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
@@ -48,15 +49,35 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
     let dispose: unknown;
     try {
       dispose = readyCtx.on("agent/request", async (frame, next) => {
-        const downstream = await next();
+        let downstream = await next();
         const settings = getSettings();
+        const admitted = takeAdmittedRecoveryRoute(frame);
+        const active = controller.active(frame.agent, settings.defaultActive);
+        const role = resolveEffectiveDsmmRole(frame.agent, settings, active);
+        const policy = role === undefined ? undefined : settings.roleRouting[role];
+        const primary = policy?.primary;
+        const identity = await establishRolePolicy(frame, settings, role);
+        if (admitted !== undefined) {
+          downstream = applyModelRoute(downstream, admitted);
+          if (admitted.reasoningEffort !== undefined || primary !== undefined
+            || (role !== undefined && settings.roleRouting[role]?.fallbackRoutes !== undefined)) return downstream;
+        }
+        const fallbacks = effectiveRoleFallbackRoutes(settings, role);
+        if (primary !== undefined) return applyModelRoute(downstream, persistedRoleRoute(frame, primary, fallbacks, identity) ?? primary);
+        if (settings.runtimeRecovery.enabled && policy?.fallbackRoutes !== undefined) {
+          const accepted = persistedRoleRoute(frame, undefined, fallbacks, identity);
+          if (accepted !== undefined) return applyModelRoute(downstream, accepted);
+        }
+        // Named fallback efforts are native policy IDs, never legacy calibration inputs.
+        if (fallbacks.some((fallback) => fallback.reasoningEffort !== undefined
+          && sameModelRoute(fallback, downstream) && fallback.reasoningEffort === downstream.reasoningEffort)) return downstream;
         const route: DeepseekModelRoute | undefined = isDeepseekV4ProRoute(downstream) ? "v4-pro" : isDeepseekFlashRoute(downstream) ? "flash" : undefined;
         if (route === undefined) return downstream;
         const calibration = route === "flash" ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration;
         if (calibration === "off") return downstream;
 
         const preset = resolveSelectedAgentPreset(frame.agent?.session);
-        const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);
+        const inScope = active || isDsmmRoleId(preset);
         if (!inScope) return downstream;
         if (calibration === "auto" && downstream.reasoningEffort !== undefined) return downstream;
 

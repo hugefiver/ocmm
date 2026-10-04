@@ -17,6 +17,8 @@ import type {
   DshTodoWriteEventData,
   DsmmStatusSnapshot,
   DsmmRecoveryRoute,
+  DsmmModelRoute,
+  DsmmRoleRoutingConfig,
   DsmmRuntimeRecoverySettings,
   DurableRecoveryWork,
   RecoveryFailureDecision
@@ -27,6 +29,8 @@ const publicRuntimeRecoveryTypes = null as unknown as [
   RecoveryFailureDecision,
   DurableRecoveryWork,
   DsmmRecoveryRoute,
+  DsmmModelRoute,
+  DsmmRoleRoutingConfig,
   DsmmRuntimeRecoverySettings,
   DshLlmFailure,
   DshEpochHeader,
@@ -47,7 +51,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.version, "0.1.1");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -103,11 +107,11 @@ test("package manifest exposes dsh bundle metadata", () => {
   }
   for (const packageSection of [pkg.peerDependencies, pkg.devDependencies]) {
     assert.equal(packageSection["@deepseek-ai/cordis"], "~4.0.4");
-    for (const name of ["attachment", "brand", "invariants", "llm", "timeout"]) {
+    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent"]) {
       assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
     }
   }
-  for (const name of ["system-prompt", "agent", "agent-preset-registry", "tools", "scope", "session"]) {
+  for (const name of ["system-prompt", "agent", "agent-loop", "agent-preset-registry", "tools", "scope", "session", "session-projection", "subagent-spawn-in-process"]) {
     assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
   }
 
@@ -182,14 +186,14 @@ test("model-routing documentation ships the exact calibration contract", () => {
     "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekV4ProMaxReasoningPresets",
     "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "deepseekFlashMaxReasoningPresets"
   ]) assert.ok(modelRouting.includes(name), `${name} is documented`);
-  assert.match(modelRouting, /DSMM does not change the user's default provider\/model/u);
+  assert.match(modelRouting.slice(modelRouting.indexOf("## Legacy exact-route calibration")), /DSMM does not change the user's default provider\/model/u);
   assert.match(modelRouting, /`auto` fills an omitted reasoning effort while preserving an explicit upstream effort/u);
   assert.match(modelRouting, /`strict` may replace an upstream effort only.*advertises a permitted value/u);
   assert.match(modelRouting, /max → high → valid default → unchanged/u);
   assert.match(modelRouting, /desired → valid default → unchanged/u);
   assert.match(modelRouting, /No effort is invented when the model has no reasoning metadata/u);
-  assert.match(modelRouting, /a role label alone cannot trigger external-model routing or prove heterogeneity/u);
-  assert.match(modelRouting, /Runtime recovery chooses any final route before this calibration middleware evaluates it/u);
+  assert.match(modelRouting, /role label alone.*(?:cannot|does not).*heterogeneity/i);
+  assert.match(modelRouting, /Runtime recovery chooses any final route before calibration evaluates it/u);
   assert.match(modelRouting, /warning is sanitized.*no prompt, credentials, response body or request headers/is);
   assert.match(modelRouting, /actual persisted request header.*authoritative for the resolved effort/u);
 });
@@ -215,9 +219,9 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
   assert.match(runtimeRecovery, /configured order/i);
   assert.match(runtimeRecovery, /one-shot.*agent,?\s*turn,?\s*step/is);
   assert.match(runtimeRecovery, /no timer.*provider call/is);
-  assert.match(runtimeRecovery, /downstream.*prepend.*model routing/is);
-  assert.match(runtimeRecovery, /removes? stale.*reasoningEffort/is);
-  assert.match(runtimeRecovery, /final route.*supported exact V4 Pro or native V41 Flash route/i);
+  assert.match(runtimeRecovery, /pending fallback route after native request selection/is);
+  assert.match(runtimeRecovery, /named fallback effort.*preserved exactly.*omission clears stale.*reasoningEffort/is);
+  assert.match(runtimeRecovery, /final route.*recognizes only exact V4 Pro or native V41 Flash route/is);
   assert.match(runtimeRecovery, /current-turn todo.*pending.*in_progress.*latest active goal/is);
   assert.match(runtimeRecovery, /cap.*live agent.*turn/is);
   assert.match(runtimeRecovery, /steering failure.*consumes.*attempt.*sanitized warn.*fail-open/is);

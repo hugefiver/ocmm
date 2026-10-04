@@ -49,7 +49,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
           name: role.name,
           description: role.description,
           order: role.order,
-          plugins: rolePluginRows(role, enabledSkillNames(settings), enabled)
+          plugins: rolePluginRows(role, enabledSkillNames(settings), enabled, settings.roleRouting)
         }));
       }
 

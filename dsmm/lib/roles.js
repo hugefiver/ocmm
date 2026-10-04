@@ -1,4 +1,5 @@
 import { DSMM_SKILL_NAMES } from "./skills.js";
+import { roleProviderName } from "./role-providers.js";
 export const DSMM_ROLE_IDS = [
     "dsmm-orchestrator",
     "dsmm-planner",
@@ -140,11 +141,11 @@ Report uncertainty clearly and avoid inventing details that are not visible.`
 export function isDsmmRoleId(value) {
     return typeof value === "string" && DSMM_ROLE_IDS.includes(value);
 }
-export function renderAgentCordis(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS) {
-    return rolePluginRows(role, skills, enabledRoles).map(renderPluginRow).join("");
+export function renderAgentCordis(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS, roleRouting = {}) {
+    return rolePluginRows(role, skills, enabledRoles, roleRouting).map(renderPluginRow).join("");
 }
 /** The native PresetDefinition and the static YAML mirror use this same inventory. */
-export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS) {
+export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = DSMM_ROLE_IDS, roleRouting = {}) {
     const rows = [
         { id: "persona", name: "@deepseek-ai/dsh-persona", config: { text: role.persona } },
         { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions" },
@@ -161,18 +162,18 @@ export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = D
         rows.push({ id: "tool-jobs", name: "@deepseek-ai/dsh-tool-jobs" });
     }
     if (role.id === "dsmm-orchestrator" || role.id === "dsmm-builder")
-        rows.push(...roleSubagentPluginRows(enabledRoles));
+        rows.push(...roleSubagentPluginRows(enabledRoles, roleRouting));
     return rows;
 }
 /** DSH's spawn provider joins the parent's preset; persona/filter give each child its own role. */
-export function roleSubagentPluginRows(enabledRoles = DSMM_ROLE_IDS) {
+export function roleSubagentPluginRows(enabledRoles = DSMM_ROLE_IDS, roleRouting = {}) {
     return DSMM_ROLES.filter((role) => role.id !== "dsmm-orchestrator" && enabledRoles.includes(role.id)).map((role) => ({
         id: `subagent-${role.id}`,
         name: "@deepseek-ai/dsh-tool-subagent",
-        config: roleSubagentConfig(role)
+        config: roleSubagentConfig(role, [], roleRouting[role.id]?.primary)
     }));
 }
-export function roleSubagentConfig(role, availableTools = []) {
+export function roleSubagentConfig(role, availableTools = [], primary) {
     const readOnlyTools = ["read", "glob", "grep"];
     if (role.id === "dsmm-doc-search" || role.id === "dsmm-media-reader") {
         readOnlyTools.push("web_search", "web_fetch");
@@ -182,7 +183,8 @@ export function roleSubagentConfig(role, availableTools = []) {
     if (role.id === "dsmm-media-reader" && availableTools.includes("read_image"))
         readOnlyTools.push("read_image");
     return {
-        provider: "spawn",
+        provider: roleProviderName(role.id),
+        ...(primary === undefined ? {} : { agentOptions: { ...primary } }),
         toolName: role.id.replace(/-/gu, "_"),
         // A standing preset with modelSelectionSettings=true re-registers tools in
         // each child Agent's own scope. DSH restrictions filter inherited tools,
@@ -225,7 +227,7 @@ function renderPluginRow(row) {
                 if (Array.isArray(nestedValue))
                     output += nestedValue.length === 0 ? `      ${nestedKey}: []\n` : `      ${nestedKey}:\n${nestedValue.map((item) => `        - ${quoteYamlString(String(item))}\n`).join("")}`;
                 else
-                    output += `      ${nestedKey}: ${String(nestedValue)}\n`;
+                    output += `      ${nestedKey}: ${typeof nestedValue === "string" ? quoteYamlString(nestedValue) : String(nestedValue)}\n`;
             }
         }
         else

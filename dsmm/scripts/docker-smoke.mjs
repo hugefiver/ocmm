@@ -129,7 +129,7 @@ async function runInnerSmoke() {
     const dshRequire = pinnedDshRequire();
     success(spawnSync("pnpm", ["--dir", root, "pack", "--pack-destination", workspace], { env, encoding: "utf8" }), "pnpm pack dsmm");
     const tarballs = readdirSync(workspace).filter((name) => name.endsWith(".tgz"));
-    if (tarballs.length !== 1 || tarballs[0] !== "dsmm-dsmm-0.1.0.tgz") throw new Error("pnpm pack did not produce exactly one scoped dsmm 0.1.0 tarball");
+    if (tarballs.length !== 1 || tarballs[0] !== "dsmm-dsmm-0.1.1.tgz") throw new Error("pnpm pack did not produce exactly one scoped dsmm 0.1.1 tarball");
     const tarball = join(workspace, tarballs[0]);
     inside(tarball, workspace, "dsmm tarball");
 
@@ -194,7 +194,7 @@ async function assertPackedExports(profilePackage, home) {
     throw new Error("profile did not resolve the packed dsmm entry points");
   }
   const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
-  if (manifest.name !== PACKAGE_NAME || manifest.version !== "0.1.0" || manifest.dsh?.bundle?.patch !== "./cordis.patch.yml" || !existsSync(join(packageRoot, manifest.dsh.bundle.patch))) {
+  if (manifest.name !== PACKAGE_NAME || manifest.version !== "0.1.1" || manifest.dsh?.bundle?.patch !== "./cordis.patch.yml" || !existsSync(join(packageRoot, manifest.dsh.bundle.patch))) {
     throw new Error("installed dsmm manifest or patch does not match packed bundle");
   }
   for (const name of requiredRolePlugins) profileRequire.resolve(`@deepseek-ai/${name}`);

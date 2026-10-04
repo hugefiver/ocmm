@@ -97,6 +97,7 @@ function createFormatterFixture(): DsmmStatusSnapshot {
       policyEffort: "max",
       action: "preserve-explicit"
     },
+    rolePolicy: { role: "dsmm-reviewer", applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global" },
     runtimeRecovery: {
       enabled: true,
       applies: true,
@@ -120,12 +121,13 @@ test("status formatter renders the exact bounded DSMM summary", () => {
     "Scope: dsmm-reviewer preset",
     "Workflow policy: risk-based",
     "Route: deepseek-official/deepseek-v4-pro [deepseek]",
+    "Role policy: dsmm-reviewer; primary=inherit; fallbacks=global",
     "Reasoning: auto; policy=max; current=high; action=preserve-explicit",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
     "Effective settings: use /dsmm-status json for the normalized snapshot"
   ].join("\n"));
-  assert.equal(formatted.split("\n").length, 9);
+  assert.equal(formatted.split("\n").length, 10);
   assert.equal(formatted.endsWith("\n"), false);
   for (const excluded of [
     "DISTINCTIVE_IDLE_PROMPT",
@@ -169,7 +171,8 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
         enabled: false,
         maxContinuations: 3
       }
-    }
+    },
+    rolePolicy: { applies: false, fallbackRoutes: [], fallbackSource: "disabled" }
   });
 
   assert.equal(formatted, [
@@ -178,6 +181,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
     "Scope: out of scope",
     "Workflow policy: risk-based",
     "Route: unavailable/unavailable [unknown]",
+    "Role policy: none; primary=inherit; fallbacks=disabled",
     "Reasoning: auto; policy=not applicable; current=provider default; action=out-of-scope",
     "Runtime recovery: disabled; applies=no; fallbacks=0; max attempts=0",
     "Idle continuation: disabled; max=3",
@@ -206,7 +210,8 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
       mode: "auto",
       applies: false,
       action: "non-target-route"
-    }
+    },
+    rolePolicy: { role: "dsmm-orchestrator", applies: false, fallbackRoutes: fixture.rolePolicy.fallbackRoutes, fallbackSource: "global" }
   });
 
   assert.equal(formatted, [
@@ -215,6 +220,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
     "Scope: active deepwork",
     "Workflow policy: risk-based",
     "Route: openai/gpt-5.6 [gpt]",
+    "Role policy: dsmm-orchestrator; primary=inherit; fallbacks=global",
     "Reasoning: auto; policy=not applicable; current=provider default; action=non-target-route",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
@@ -253,6 +259,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
       applies: false,
       action: "out-of-scope"
     },
+    rolePolicy: { applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global" },
     runtimeRecovery: {
       enabled: true,
       applies: false,

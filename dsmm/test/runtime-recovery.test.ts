@@ -15,7 +15,7 @@ import type {
 } from "../lib/dsh-types.js";
 import { foldAttemptedRecoveryRoutes } from "../lib/recovery-policy.js";
 import { registerRuntimeRecovery } from "../lib/runtime-recovery.js";
-import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
+import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DsmmSettings } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
 
@@ -837,7 +837,7 @@ test("registration is idempotent, cleanup disposes all three listeners, and repl
   registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
   registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
   assert.deepEqual(harness.registrations.filter((registration) => registration.active).map((registration) => [registration.event, registration.options]), [
-    ["agent/request", undefined],
+    ["agent/request", { prepend: true }],
     ["agent/request-error", { prepend: true }],
     ["agent/turn-stopping", undefined]
   ]);
@@ -890,9 +890,80 @@ test("every listener and effect registration failure rolls back prior listeners 
     fail = false;
     assert.doesNotThrow(() => registerRuntimeRecovery(context, new DeepworkModeController({}), () => continuationSettings()), failureBoundary);
     assert.deepEqual(registrations.filter((registration) => registration.active).map((registration) => [registration.event, registration.options]), [
-      ["agent/request", undefined],
+      ["agent/request", { prepend: true }],
       ["agent/request-error", { prepend: true }],
       ["agent/turn-stopping", undefined]
     ], failureBoundary);
+  }
+});
+
+test("role-specific reservations remain per-Agent, exact-effort, duplicate-safe and independent of globals", async () => {
+  const settings = resolveConfig({ defaultActive: true, runtimeRecovery: { enabled: true, fallbackRoutes: [{ provider: "global", model: "wrong" }] }, roleRouting: {
+    "dsmm-reviewer": { fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] },
+    "dsmm-oracle": { fallbackRoutes: [{ provider: "oracle", model: "backup", reasoningEffort: "high" }] }
+  } });
+  const harness = runtimeRecoveryHarness(() => settings);
+  const make = (preset: string) => {
+    const agent = harness.createAgent([
+      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
+      { type: "step/start", data: { turn: 1, step: 1 } }
+    ], { config: config() });
+    agent.setPreset(preset);
+    return agent;
+  };
+  const reviewer = make("dsmm-reviewer");
+  const oracle = make("dsmm-oracle");
+  const results = await Promise.all([harness.error(errorFrame(reviewer.agent)), harness.error(errorFrame(oracle.agent))]);
+  assert.deepEqual(results, [{ kind: "retry" }, { kind: "retry" }]);
+  assert.equal(await harness.error(errorFrame(reviewer.agent)), undefined);
+  assert.equal(await harness.error(errorFrame(oracle.agent)), undefined);
+  assert.deepEqual(await harness.request(requestFrame(oracle.agent), config({ reasoningEffort: "max" })), { provider: "oracle", model: "backup", reasoningEffort: "high" });
+  assert.deepEqual(await harness.request(requestFrame(reviewer.agent), config({ reasoningEffort: "low" })), { provider: "review", model: "backup", reasoningEffort: "max" });
+  assert.equal(await harness.error(errorFrame(reviewer.agent)), undefined);
+  assert.equal(await harness.error(errorFrame(oracle.agent)), undefined);
+});
+
+test("role-specific pending handoffs are fenced by cancellation, stale step, disposal and host durable changes", async () => {
+  for (const boundary of ["cancel", "step/end", "step/start", "dispose", "host-change"] as const) {
+    const settings = resolveConfig({ defaultActive: true, runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] } } });
+    const harness = runtimeRecoveryHarness(() => settings);
+    const agent = harness.createAgent([
+      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
+      { type: "step/start", data: { turn: 1, step: 1 } }
+    ], { config: config() });
+    agent.setPreset("dsmm-reviewer");
+    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
+    const abort = new AbortController();
+    let downstream = config();
+    if (boundary === "cancel") abort.abort();
+    else if (boundary === "dispose") harness.dispose();
+    else if (boundary === "host-change") {
+      downstream = config({ provider: "host", model: "durable", reasoningEffort: "high" });
+      agent.events.push({ type: "request/header", data: { reason: "change", header: { config: downstream } } });
+      agent.setHeader({ config: downstream });
+    } else agent.events.push({ type: boundary, data: { turn: 1, step: boundary === "step/start" ? 2 : 1 } });
+    assert.equal(await harness.request({ ...requestFrame(agent.agent), signal: abort.signal }, downstream), downstream, boundary);
+    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, `${boundary}: no stale reactivation`);
+  }
+});
+
+test("edited role policy invalidates an admitted pending fallback even when Agent and coordinates still match", async () => {
+  const original = { runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: { provider: "primary", model: "primary-model", reasoningEffort: "max" }, fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] } } };
+  for (const edit of ["effort", "chain", "gate"] as const) {
+    let settings = resolveConfig(original);
+    const harness = runtimeRecoveryHarness(() => settings);
+    const agent = harness.createAgent([
+      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
+      { type: "step/start", data: { turn: 1, step: 1 } }
+    ], { config: config() });
+    agent.setPreset("dsmm-reviewer");
+    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
+    settings = resolveConfig({ ...original,
+      ...(edit === "gate" ? { runtimeRecovery: { enabled: false } } : {}),
+      roleRouting: { "dsmm-reviewer": { primary: { ...original.roleRouting["dsmm-reviewer"].primary, ...(edit === "effort" ? { reasoningEffort: "high" } : {}) }, fallbackRoutes: edit === "chain" ? [] : original.roleRouting["dsmm-reviewer"].fallbackRoutes } }
+    });
+    const downstream = config();
+    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, edit);
+    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, `${edit}: consumed invalid reservation cannot reappear`);
   }
 });

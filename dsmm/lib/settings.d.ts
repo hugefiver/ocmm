@@ -35,10 +35,18 @@ export interface DsmmGuardSettings {
     };
     todoDisciplineHelper: boolean;
 }
-export interface DsmmRecoveryRoute {
+export interface DsmmModelRoute {
     provider: string;
     model: string;
+    reasoningEffort?: string;
 }
+export interface DsmmRecoveryRoute extends DsmmModelRoute {
+}
+export interface DsmmRoleRoutingConfig {
+    primary?: DsmmModelRoute;
+    fallbackRoutes?: DsmmModelRoute[];
+}
+export type DsmmRoleRouting = Partial<Record<DsmmRoleId, DsmmRoleRoutingConfig>>;
 export interface DsmmRuntimeRecoverySettings {
     enabled: boolean;
     retryOnStatusCodes: number[];
@@ -72,6 +80,7 @@ export interface DsmmPluginConfig {
     promptOrder?: number;
     skills?: Partial<Record<DsmmSkillName, boolean>>;
     roles?: Partial<Record<DsmmRoleId, boolean>>;
+    roleRouting?: DsmmRoleRouting;
     presets?: Partial<DsmmPresetSettings>;
     workflow?: Partial<DsmmWorkflowSettings>;
     guards?: DsmmGuardConfig;
@@ -90,6 +99,7 @@ export interface DsmmSettings {
     deepseekFlashMaxReasoningPresets: DsmmRoleId[];
     skills: Record<DsmmSkillName, boolean>;
     roles: Record<DsmmRoleId, boolean>;
+    roleRouting: DsmmRoleRouting;
     presets: DsmmPresetSettings;
     workflow: DsmmWorkflowSettings;
     guards: DsmmGuardSettings;
@@ -106,6 +116,7 @@ export declare const DEFAULT_DSMM_SETTINGS: DsmmSettings;
 export declare const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
 export declare const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings>;
 export declare function resolveConfig(config?: DsmmPluginConfig): DsmmSettings;
+export declare function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting;
 export declare function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean;
 export declare function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings;
 export declare function registerSettings(ctx: DshContext, config?: DsmmPluginConfig, options?: RegisterSettingsOptions): () => DsmmSettings;

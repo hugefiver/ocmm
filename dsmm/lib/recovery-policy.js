@@ -125,7 +125,7 @@ function hasExactKeys(value, expectedKeys) {
 function readRoute(value) {
     if (!isRecord(value) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.model))
         return undefined;
-    return { provider: value.provider, model: value.model };
+    return { provider: value.provider, model: value.model, ...(isNonEmptyString(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
 }
 function sameRoute(left, right) {
     return left.provider === right.provider && left.model === right.model;

@@ -40,7 +40,7 @@
 - id: subagent-dsmm-planner
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-planner'
     toolName: 'dsmm_planner'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -56,7 +56,7 @@
 - id: subagent-dsmm-plan-critic
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-plan-critic'
     toolName: 'dsmm_plan_critic'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -72,7 +72,7 @@
 - id: subagent-dsmm-builder
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-builder'
     toolName: 'dsmm_builder'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -81,7 +81,7 @@
 - id: subagent-dsmm-reviewer
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-reviewer'
     toolName: 'dsmm_reviewer'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -97,7 +97,7 @@
 - id: subagent-dsmm-oracle
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-oracle'
     toolName: 'dsmm_oracle'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -111,7 +111,7 @@
 - id: subagent-dsmm-oracle-2nd
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-oracle-2nd'
     toolName: 'dsmm_oracle_2nd'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -125,7 +125,7 @@
 - id: subagent-dsmm-creative
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-creative'
     toolName: 'dsmm_creative'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -139,7 +139,7 @@
 - id: subagent-dsmm-code-search
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-code-search'
     toolName: 'dsmm_code_search'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -156,7 +156,7 @@
 - id: subagent-dsmm-doc-search
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-doc-search'
     toolName: 'dsmm_doc_search'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -175,7 +175,7 @@
 - id: subagent-dsmm-clarifier
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-clarifier'
     toolName: 'dsmm_clarifier'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'
@@ -192,7 +192,7 @@
 - id: subagent-dsmm-media-reader
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
-    provider: 'spawn'
+    provider: 'dsmm-role-media-reader'
     toolName: 'dsmm_media_reader'
     modelSelectionSettings: false
     backgroundMode: 'one-shot'

@@ -6,6 +6,7 @@ import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
 import { registerHeadlessRoleTools } from "./role-subagents.js";
 import { registerRolePresets } from "./preset-registry.js";
+import { registerRoleProviders } from "./role-providers.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 export const name = "dsmm";
@@ -19,10 +20,12 @@ export { classifyModelFamily } from "./model-family.js";
 export { desiredDeepseekEffort, isDeepseekV4ProRoute, registerModelRouting, selectAdvertisedEffort } from "./model-routing.js";
 export { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "./recovery-policy.js";
 export { registerRuntimeRecovery } from "./runtime-recovery.js";
-export { resolveSelectedAgentPreset } from "./session-scope.js";
+export { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
+export { roleFromProviderName, roleProviderName, registerRoleProviders } from "./role-providers.js";
+export { effectiveRoleFallbackRoutes } from "./role-routing.js";
 export { DSMM_STATUS_COMMAND, registerDsmmStatusCommand } from "./commands.js";
 export { DSMM_STATUS_VERSION, createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
-export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, registerSettings } from "./settings.js";
+export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export function apply(ctx, config = {}) {
     const controller = new DeepworkModeController(ctx);
@@ -37,6 +40,7 @@ export function apply(ctx, config = {}) {
                 readyCtx.inject(["commands"], installCommands);
             else
                 installCommands(readyCtx);
+            registerRoleProviders(readyCtx, getReadySettings);
             registerRolePresets(readyCtx, getReadySettings);
             const settings = getReadySettings();
             const root = resolveManagedPresetRoot(settings);

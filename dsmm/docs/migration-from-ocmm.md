@@ -1,6 +1,6 @@
-# Migrating from ocmm to DSMM v1.0
+# Migrating from ocmm to DSMM 0.1.1
 
-DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH. This guide describes the updated, unpublished working tree targeting DSH 0.2.0-rc.2, not a full host-feature parity claim.
+DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH. This guide describes the 0.1.1 routing surface targeting DSH 0.2.0-rc.2, not a full host-feature parity claim.
 
 ## Hard boundary
 
@@ -13,10 +13,10 @@ Model selection, authentication, permissions, session ownership, and package loa
 | Deepwork gates | Risk-scaled discovery; authorized bounded implementation proceeds; complex behavior uses planner → critic → implementation; completion requires relevant evidence. | equivalent core intent |
 | Seven workflow skills | Current workflow intent adapted to native DSH tools, scopes, authorization, and review ownership. | equivalent core intent |
 | Twelve role presets | Native definitions plus role-specific delegation composition, including builder, creative, reviewer, oracle, and oracle-2nd. | redesigned for DSH |
-| Model routing and DeepSeek calibration | Exact native V41 Flash routes and preserved V4 Pro configuration, adapter-advertised effort only. | redesigned for DSH |
+| Per-role model/effort and DeepSeek calibration | Explicit `roleRouting`, fixed native child options, direct-role request policy, exact configured efforts, and compatible legacy calibration. | redesigned for DSH |
 | Safety guards | Native pre/post tool policies; host approval/cancellation remain authoritative. | redesigned for DSH |
 | LSP/MCP | Optional external ocmm-lsp with nine tools including atomic format; debugging/DAP is a separate on-demand skill. | optional/manual |
-| Runtime fallback | Host-first, opt-in, explicitly configured routes with cancellation, duplicate, and step fences. | redesigned for DSH |
+| Runtime fallback | Host-first, opt-in role/global ordered chains with exact efforts, cancellation, duplicate, and step fences. | redesigned for DSH |
 | Idle continuation | Separately enabled, bounded steering from durable unfinished work. | redesigned for DSH |
 | Subagent interruption recovery | Native durable child/session control and explicit continuation; no guessed task IDs, synthesized parent messages, or independent automatic retry dispatcher. | redesigned for DSH |
 | Settings/status | Restart-scoped Loader plugin config and normalized read-only status; old settings namespaces need explicit migration. | redesigned for DSH |
@@ -40,6 +40,12 @@ The role set includes `dsmm-orchestrator`, `dsmm-planner`, `dsmm-plan-critic`, `
 6. Inspect native roles and role-specific tools; do not configure removed `roots/includeUserRoot` or count exported template directories as discovery.
 7. Enable optional LSP/MCP only with a usable external ocmm-lsp executable; recovery stays disabled unless explicitly configured.
 8. Validate the packed profile and the real specified model's read/write/tool-result round-trip before changing your default workflow.
+
+Model IDs belong to their native provider routes: `deepseek-account/deepseek-flash` and a custom `hoo/deepseek-v4.1-flash` are distinct routes. Configure custom routes through DSH's pi-ai adapter, using credential references rather than literal keys. Provider SDK identity alone is not wire-protocol proof. For the inspected Anthropic gateway, terminal `/v1` must be removed from its source SDK baseURL to retain the same native request path; adaptive thinking compatibility and exact high/max declarations preserve effort. This rule is not a global URL rewrite for other protocols.
+
+Translate source agents into canonical `roleRouting` entries with primary and ordered fallback efforts. Keep explicit disabled roles disabled. A source `explore` alias to code-search maps to `dsmm-code-search`, not a new role/tool. Missing source model capabilities require discovery and actual validation; do not copy another version's vision capabilities or silently replace the media model. The checkout migration helper defaults to a sanitized dry run; applying credentials/profile changes is explicit and requires concurrency/backup safeguards.
+
+The inspected pi-ai adapter exposes stable transient codes but no stable HTTP status. The migration candidate explicitly opts in to `RATE_LIMIT`, `SERVER`, `TIMEOUT`, and `TRANSPORT` through `runtimeRecovery.retryOnCodes`, after native host retries decline. Authentication, quota, and invalid-request failures are not included. Package recovery defaults remain unchanged.
 
 ## Coexistence and cutover
 

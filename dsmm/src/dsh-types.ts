@@ -19,16 +19,18 @@ export interface DshSessionHeader {
 }
 
 export interface DshSession {
+  inheritedEventCount?: number;
   events?: readonly DshSessionEvent[];
   snapshotEvents?(): readonly DshSessionEvent[];
   header?: DshSessionHeader;
   requestHeader?(): DshEpochHeader | undefined;
   append(type: "deepwork/mode", payload: { active: boolean }): unknown | Promise<unknown>;
+  append(type: "dsmm/role-policy", payload: import("./dsh-events.js").DsmmRolePolicyEventData): unknown | Promise<unknown>;
 }
 
 export interface DshAgent {
   session: DshSession;
-  options?: { provider?: string; model?: string };
+  options?: { provider?: string; model?: string; reasoningEffort?: string };
   steer?(message: unknown): unknown | Promise<unknown>;
   inject?(message: unknown): unknown | Promise<unknown>;
 }
@@ -272,6 +274,7 @@ export interface PreStepDecision {
 }
 
 export interface DshContext {
+  subagents?: import("./role-providers.js").DsmmSubagentRegistry;
   settings?: DshSettingsRegistry;
   systemPrompt?: DshSystemPromptRegistry;
   skills?: DshSkillRegistry;

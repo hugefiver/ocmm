@@ -1,4 +1,4 @@
-# DSMM v1.0 Compatibility
+# DSMM 0.1.1 Compatibility
 
 ## Compatibility authority
 
@@ -6,7 +6,7 @@ The current migration targets `@deepseek-ai/dsh@0.2.0-rc.2`, the official npm la
 
 DSH 0.1.1-rc.2 was the historical baseline; it is not the authority for this updated working tree. Installation ranges are not proof of compatibility with future releases.
 
-The installation contracts are `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/schemastery@~3.18.4`, and `@deepseek-ai/dsh-attachment`, `@deepseek-ai/dsh-brand`, `@deepseek-ai/dsh-invariants`, `@deepseek-ai/dsh-llm`, and `@deepseek-ai/dsh-timeout` pinned to `0.2.0-rc.2`.
+The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/schemastery@~3.18.4`, and the package's declared DSH component peers pinned to `0.2.0-rc.2`. Role identity additionally consumes the native `@deepseek-ai/dsh-subagent` public contract; a child lifecycle or descriptor is not reimplemented.
 
 ## Compatibility matrix
 
@@ -24,6 +24,7 @@ The installation contracts are `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/schem
 | TUI | `DSH 0.2.0-rc.2` | unavailable |
 | LSP/MCP | `external ocmm-lsp mcp` | optional |
 | Runtime recovery | `process-local` | optional |
+| Per-role model/effort/fallback policy | native request, subagent and descriptor seams | opt-in; exact configured capability required |
 | DeepSeek V4 Pro calibration | `deepseek-official/deepseek-v4-pro` | optional |
 | DeepSeek V41 Flash calibration | `native DeepSeek providers/deepseek-flash` | optional |
 
@@ -44,3 +45,5 @@ The matrix separates observed CLI/configuration and source-contract evidence fro
 LSP/MCP and runtime recovery are disabled by default. V4 Pro calibration remains limited to the exact `deepseek-official/deepseek-v4-pro` route. V41 Flash calibration recognizes only `deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`, whose native DSH catalog label is `DeepSeek-V41-Flash`; similarly named third-party models do not match.
 
 A credentialed smoke must prove the actual selected request route, DSMM prompt, successful tools, and subsequent model response without substituting another model. Account and API-key authentication are distinct; an AAPI key is not assumed valid for the official endpoint. No publication, browser/UI, untested OS, or future-release claim follows from these checks.
+
+Desktop package management uses the installation-owned `dsh.cmd` only while the app is fully quit. Even that carrier cannot boot or dump the reserved Desktop profile. Installation/manifest checks and isolated native model tests do not prove actual Electron-host activation: use an authorized native inventory or the desktop UI, never an anonymous RPC workaround.

@@ -518,12 +518,13 @@ function composedRoutingHarness(settings: DsmmSettings): ComposedRoutingHarness 
   };
   const controller = new DeepworkModeController({});
   registerRuntimeRecovery(context, controller, () => settings);
+  const recoveryRequest = registrations.find((registration) => registration.event === "agent/request");
   registerModelRouting(context, controller, () => settings);
 
   const ordered = (event: string): ComposedRegistration[] => {
     const matching = registrations.filter((registration) => registration.event === event);
     return [
-      ...matching.filter((registration) => isPrepend(registration.options)),
+      ...matching.filter((registration) => isPrepend(registration.options)).reverse(),
       ...matching.filter((registration) => !isPrepend(registration.options))
     ];
   };
@@ -547,7 +548,7 @@ function composedRoutingHarness(settings: DsmmSettings): ComposedRoutingHarness 
           return downstream;
         }
         const registration = listeners[index];
-        const label = isPrepend(registration.options) ? "model-routing" : "recovery";
+        const label = registration === recoveryRequest ? "recovery" : "model-routing";
         order.push(`${label}:before-next`);
         const result = await (registration.listener as AgentRequestListener)(frame, () => invoke(index + 1));
         order.push(`${label}:after-next`);

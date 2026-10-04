@@ -7,6 +7,7 @@ import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
 import { registerHeadlessRoleTools } from "./role-subagents.js";
 import { registerRolePresets } from "./preset-registry.js";
+import { registerRoleProviders } from "./role-providers.js";
 import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import type { DsmmPluginConfig } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
@@ -31,13 +32,15 @@ export type { DeepseekReasoningEffort } from "./model-routing.js";
 export { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "./recovery-policy.js";
 export type { DurableRecoveryWork, RecoveryFailureDecision } from "./recovery-policy.js";
 export { registerRuntimeRecovery } from "./runtime-recovery.js";
-export { resolveSelectedAgentPreset } from "./session-scope.js";
+export { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
+export { roleFromProviderName, roleProviderName, registerRoleProviders } from "./role-providers.js";
+export { effectiveRoleFallbackRoutes } from "./role-routing.js";
 export { DSMM_STATUS_COMMAND, registerDsmmStatusCommand } from "./commands.js";
 export { DSMM_STATUS_VERSION, createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
 export type { DsmmStatusSnapshot } from "./status.js";
 export type { AgentRequestErrorFrame, AgentRequestFrame, AgentTurnStoppingFrame, DshEpochHeader, DshGoalChangeEventData, DshGoalSnapshot, DshLlmCallConfig, DshLlmFailure, DshModelReasoningInfo, DshReasoningEffortInfo, DshRequestErrorAction, DshRequestHeaderEventData, DshResolvedModelInfo, DshStepBoundaryEventData, DshTodoItem, DshTodoWriteEventData } from "./dsh-types.js";
-export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, registerSettings } from "./settings.js";
-export type { DeepseekCalibration, DeepseekDefaultReasoningEffort, DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmRecoveryRoute, DsmmRuntimeRecoverySettings, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
+export type { DeepseekCalibration, DeepseekDefaultReasoningEffort, DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmModelRoute, DsmmRoleRoutingConfig, DsmmRoleRouting, DsmmRecoveryRoute, DsmmRuntimeRecoverySettings, DsmmSettings, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 
 export function apply(ctx: DshContext, config: Config = {}): void {
@@ -51,6 +54,7 @@ export function apply(ctx: DshContext, config: Config = {}): void {
       };
       if (readyCtx.get !== undefined && readyCtx.inject !== undefined) readyCtx.inject(["commands"], installCommands);
       else installCommands(readyCtx);
+      registerRoleProviders(readyCtx, getReadySettings);
       registerRolePresets(readyCtx, getReadySettings);
       const settings = getReadySettings();
       const root = resolveManagedPresetRoot(settings);

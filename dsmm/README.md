@@ -2,7 +2,7 @@
 
 DSMM adapts ocmm's deepwork workflow to DeepSeek Harness. It is a DSH-native Cordis bundle, not an OpenCode compatibility layer.
 
-This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The first scoped release is `@dsmm/dsmm@0.1.0`; local readiness checks alone do not represent a published release. Runtime settings and role IDs retain the `dsmm` namespace.
+This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. Version `0.1.1` adds explicit role model/effort policies and role-aware fallbacks to the first scoped `0.1.0` release. Local readiness checks alone do not represent a published release. Runtime settings and role IDs retain the `dsmm` namespace.
 
 ## Current functionality
 
@@ -10,6 +10,7 @@ This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on
 - Seven scoped core workflow skills synchronized with current ocmm: risk-based discovery, complex-work planning and criticism, bounded implementation, evidence-led review, parallel execution, and behavior-preserving cleanup.
 - Twelve native roles, including Builder, Creative, Reviewer, Oracle, and second-priority Oracle. Read-only role constraints are enforced through native tool composition. Models remain user-selected; Oracle names alone do not guarantee model heterogeneity.
 - Exact-route V41 Flash calibration for `deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`, preserving V4 Pro settings. Runtime selects only adapter-advertised reasoning efforts.
+- Restart-scoped `roleRouting` for fixed role provider/model/effort selection on direct presets and delegated children; exact configured efforts are not silently downgraded. Ordered role fallbacks use the existing opt-in host-first recovery controller.
 - Scoped shell/Git/plan/question/todo guards, optional host-first fallback and bounded continuation.
 - Optional external `ocmm-lsp mcp` integration with nine tools including atomic `format`. Debugging/DAP is an on-demand skill, not additional LSP tools or automatic prompt injection.
 
@@ -17,14 +18,14 @@ The native host owns child-session controls, depth limits, permission checks, ca
 
 ## Install and configure
 
-Install the exact registry version after publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.0`. For isolated local verification, use a built and packed artifact:
+Install the exact registry version after publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.1`. For isolated local verification, use a built and packed artifact:
 
 ```powershell
 pnpm --dir dsmm build
 pnpm --dir dsmm pack --pack-destination <temporary-artifact-directory>
 $env:DSH_HOME = "<disposable-test-home>"
 dsh --profile <profile> --from-default-profile headless --dump-config
-dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.0.tgz>
+dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.1.tgz>
 dsh --profile <profile> --dump-config
 ```
 
@@ -43,6 +44,8 @@ On DSH 0.2, restart-scoped settings belong to the profile's `cordis.patch.yml`:
 ```
 
 Do not copy the old `settings.yaml` namespace or preset-discovery roots into the new host. See [migration](docs/migration-from-ocmm.md), [settings/status](docs/settings-status.md), and [agent roles](docs/agent-presets.md).
+
+For a role-specific model, configure `roleRouting.dsmm-reviewer.primary` with native `provider`, `model`, and optional `reasoningEffort`. There are no built-in provider routes or API keys. See [model routing](docs/model-routing.md) for policy precedence and [runtime recovery](docs/runtime-recovery.md) for the opt-in fallback gate.
 
 Without active mode or a selected DSMM preset, DSMM workflow prompts and default-scoped guards do not apply. Headless task text is not a slash-command adapter.
 

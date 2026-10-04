@@ -146,7 +146,7 @@ function updateOwnedRoleDirectory(canonicalRoot, knownDirectory, settings, files
         throw new Error(`dsmm preset directory is not owned and cannot be updated: ${knownDirectory.directory}`);
     }
     const files = [
-        ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings), enabledRoles(settings))],
+        ["agent.cordis.yml", renderAgentCordis(knownDirectory.role, enabledSkillNames(settings), enabledRoles(settings), settings.roleRouting)],
         ["preset.yml", renderPresetMetadata(knownDirectory.role)],
         [DSMM_MANAGED_PRESET_MARKER, renderManagedPresetMarker(knownDirectory.role.id)]
     ];
@@ -183,7 +183,7 @@ function publishNewRoleDirectory(canonicalRoot, root, role, settings, filesystem
         }
         assertDirectoryNotLinked(temporaryDirectory, temporaryStatus, `temporary preset directory for ${role}`);
         assertCanonicalChild(canonicalRoot, filesystem.realpathSync(temporaryDirectory), `temporary preset directory for ${role}`);
-        filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings), enabledRoles(settings)), "utf8");
+        filesystem.writeFileSync(join(temporaryDirectory, "agent.cordis.yml"), renderAgentCordis(findRole(role), enabledSkillNames(settings), enabledRoles(settings), settings.roleRouting), "utf8");
         filesystem.writeFileSync(join(temporaryDirectory, "preset.yml"), renderPresetMetadata(findRole(role)), "utf8");
         filesystem.writeFileSync(join(temporaryDirectory, DSMM_MANAGED_PRESET_MARKER), renderManagedPresetMarker(role), "utf8");
         if (lstatIfExists(finalDirectory, filesystem) !== undefined) {

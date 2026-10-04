@@ -186,7 +186,7 @@ Expose dsmm settings ergonomically in dsh web-compatible surfaces while keeping 
 
 ## v1.0 — Stable dsmm release
 
-Status: initial package release selected as dsmm 0.1.0; the v1.0 stable milestone remains future work.
+Status: the initial scoped package is `@dsmm/dsmm@0.1.0`; `0.1.1` adds native per-role model/effort policies and ordered role fallbacks. The v1.0 stable milestone remains future work and does not imply all OpenCode hooks or client surfaces are compatible.
 
 ### Goal
 

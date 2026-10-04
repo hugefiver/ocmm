@@ -1,6 +1,7 @@
 import type { DshAgent } from "./dsh-types.js";
 import type { DsmmModelFamily } from "./model-family.js";
-import type { DeepseekCalibration, DsmmSettings } from "./settings.js";
+import type { DsmmRoleId } from "./roles.js";
+import type { DeepseekCalibration, DsmmModelRoute, DsmmSettings } from "./settings.js";
 export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
     version: typeof DSMM_STATUS_VERSION;
@@ -23,7 +24,15 @@ export interface DsmmStatusSnapshot {
         mode: DeepseekCalibration;
         applies: boolean;
         policyEffort?: "off" | "low" | "high" | "max";
-        action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce";
+        action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce" | "fixed-role-policy";
+    };
+    rolePolicy: {
+        role?: DsmmRoleId;
+        applies: boolean;
+        primary?: DsmmModelRoute;
+        fallbackRoutes: DsmmModelRoute[];
+        fallbackSource: "role" | "global" | "disabled";
+        diagnostic?: "invalid-child-descriptor";
     };
     runtimeRecovery: {
         enabled: boolean;
