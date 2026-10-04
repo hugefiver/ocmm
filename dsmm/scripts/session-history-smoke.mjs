@@ -7,15 +7,17 @@ import { pathToFileURL } from "node:url";
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 
 /** Actual packed operator scripts, ordinary pinned SDK install, synthetic history only. */
-export async function runSessionHistorySmoke({ artifact, sha256, ownedRoot, operatorPackageRoot, operatorRequire }) {
+export async function runSessionHistorySmoke({ artifact, sha256, ownedRoot, operatorPackageRoot, operatorRequire, expectedPackage }) {
   assert.equal(digest(await readFile(artifact)), sha256);
   const owned = await realpath(ownedRoot);
   const packageRoot = await realpath(operatorPackageRoot);
   const subpath = relative(owned, packageRoot);
   assert.ok(subpath && !subpath.startsWith("..") && !isAbsolute(subpath));
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  assert.equal(manifest.name, "@dsmm/dsmm");
-  assert.equal(manifest.version, "0.1.2");
+  assert.equal(expectedPackage?.name, "@dsmm/dsmm", "frozen package identity is required");
+  assert.match(expectedPackage?.version ?? "", /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
+  assert.equal(manifest.name, expectedPackage.name);
+  assert.equal(manifest.version, expectedPackage.version);
   const load = specifier => import(pathToFileURL(operatorRequire.resolve(specifier)).href);
   const [{ Context }, { Session, SessionId }, { default: Jsonl }, { createUserMessage }, repair, verifier] = await Promise.all([
     load("@deepseek-ai/cordis"), load("@deepseek-ai/dsh-session"), load("@deepseek-ai/dsh-session-persistence-jsonl"),

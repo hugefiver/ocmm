@@ -266,6 +266,7 @@ async function runInnerArtifactSmoke(options) {
     const history = await import(pathToFileURL(join(root, "scripts", "session-history-smoke.mjs")).href);
     if (typeof history.runSessionHistorySmoke !== "function") throw new Error("operator harness must export runSessionHistorySmoke(inputs)");
     receipt.sessionHistory = await history.runSessionHistorySmoke({ artifact: options.artifact, sha256: options.sha256, dshManifest,
+      expectedPackage: { name: manifest.name, version: manifest.version },
       ownedRoot: owned, operatorRoot, operatorPackageRoot, operatorRequire, nativeRequire: dshRequire, env: operatorEnv });
     if (receipt.sessionHistory?.outcome !== "COMPLETED") throw new Error("packed operator session-history acceptance did not complete");
     receipt.sessionHistory.installedPackage = { name: operatorManifest.name, version: operatorManifest.version };

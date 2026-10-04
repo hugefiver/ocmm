@@ -6,6 +6,12 @@ import { test } from "node:test";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
+test("packed history receives exact package identity from the frozen artifact rather than its installed manifest", () => {
+  const source = readFileSync(join(packageRoot, "scripts", "docker-smoke.mjs"), "utf8");
+  assert.match(source, /history\.runSessionHistorySmoke\(\{[\s\S]*?expectedPackage: \{ name: manifest\.name, version: manifest\.version \}/u);
+  assert.doesNotMatch(source, /expectedPackage: \{ name: operatorManifest\.name/u);
+});
+
 test("Docker cleanup preserves the primary failure and all cleanup failures", async () => {
   const { throwAfterCleanup } = await import(pathToFileURL(join(packageRoot, "scripts", "docker-cleanup-errors.mjs")).href);
   assert.doesNotThrow(() => throwAfterCleanup(undefined, [], "cleanup failed"));
