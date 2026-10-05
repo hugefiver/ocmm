@@ -22,7 +22,7 @@ test("native preflight chooses first native-resolvable candidate without a prima
     primary: { provider: "missing-native-adapter", model: "unavailable" }, fallbackRoutes: [backup, last]
   } } });
   try {
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
     await runFixtureTurn(agent); await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [backup]);
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [backup.model, backup.model]);
@@ -56,7 +56,7 @@ test("startup-lock owns finite RATE_LIMIT retries even when legacy recovery is d
     let hostCalls = 0;
     fixture.ctx.on("agent/request-error", async () => { hostCalls++; return { kind: "retry" }; });
     fixture.adapter.beforeStream = async () => { throw rateFailure(); };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
     await runFixtureTurn(agent);
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model, primary.model, primary.model]);
     assert.deepEqual(headerRoutes(agent), [primary]); assert.equal(hostCalls, 0);
@@ -72,7 +72,7 @@ test("rate-limit-fallback counts distinct native failures and advances ordered r
   } } });
   try {
     fixture.adapter.beforeStream = async (call) => { if (call.model !== last.model) throw rateFailure(); };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
     await runFixtureTurn(agent); await runFixtureTurn(agent);
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model, primary.model, backup.model, backup.model, last.model, last.model]);
     assert.deepEqual(headerRoutes(agent), [primary, backup, { ...last, reasoningEffort: "high" }]);
@@ -96,7 +96,7 @@ for (const strategy of ["startup-lock", "rate-limit-fallback"] as const) {
           else yield { type: "block-end", index: 0, block: { type: "text", text: "completed output" } };
           throw rateFailure();
         };
-        const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+        const agent = await fixture.createAuxiliary("dsmm-reviewer");
         await runFixtureTurn(agent);
         assert.equal(fixture.adapter.calls.length, 1); assert.equal(hostCalls, 0); assert.equal(tools, 0);
         assert.equal(agent.session.snapshotEvents().some((event) => event.type === "tool/call" || event.type === "tool/result"), false);
@@ -112,7 +112,7 @@ test("first actual native unavailable request may safely advance, but generic/au
     const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], rateLimit: immediate } } });
     try {
       fixture.adapter.beforeStream = async (call) => { if (call.model === primary.model) throw new LlmError("deterministic classified failure", code); };
-      const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+      const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
       assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), ["NO_ADAPTER", "UNKNOWN_MODEL"].includes(code) ? [primary.model, backup.model] : [primary.model]);
     } finally { await fixture.dispose(); }
   }
@@ -124,7 +124,7 @@ test("native UNKNOWN_MODEL preflight advances but unsupported exact effort is a 
     try {
       if (unavailable) fixture.adapter.unavailableModels.add(primary.model);
       else fixture.adapter.unsupportedMaxModels.add(primary.model);
-      const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+      const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
       assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), unavailable ? [backup.model] : []);
       assert.deepEqual(headerRoutes(agent), unavailable ? [backup] : []);
     } finally { await fixture.dispose(); }
@@ -136,7 +136,7 @@ test("contradictory unavailable codes never classify auth/payment/rate-limit HTT
     const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], rateLimit: { ...immediate, maxRetries: 0 } } } });
     try {
       fixture.adapter.beforeStream = async () => { throw new LlmError("contradictory native unavailable signal", "NO_ADAPTER", { status }); };
-      const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+      const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
       assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model], String(status));
       assert.deepEqual(headerRoutes(agent), [primary], String(status));
     } finally { await fixture.dispose(); }
@@ -147,7 +147,7 @@ test("an inherited UNKNOWN_MODEL route preflights the effective global chain bef
   const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: false, fallbackRoutes: [backup] } });
   try {
     fixture.adapter.unavailableModels.add("native-default");
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     assert.deepEqual(runtime.getSettings(agent as unknown as DshAgent).runtimeRecovery.fallbackRoutes, [backup]);
     assert.deepEqual(await selectInitialModelRoute(agent.ctx.get("llm") as unknown as DshLlmRuntime,
@@ -163,7 +163,7 @@ test("no native-resolvable configured route refuses before any header or provide
     primary: { provider: "missing-a", model: "absent-a" }, fallbackRoutes: [{ provider: "missing-b", model: "absent-b" }]
   } } });
   try {
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     assert.equal(fixture.adapter.calls.length, 0); assert.deepEqual(headerRoutes(agent), []);
     assert.equal(agent.session.snapshotEvents().some((event) => event.type === "turn/end" && event.data.reason.kind === "error"), true);
     assert.equal(agent.session.snapshotEvents().some((event) => event.type === "assistant/attempt"), false);
@@ -174,7 +174,7 @@ test("an advisory-empty native catalog does not reject an exact manually configu
   const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary } } });
   try {
     assert.deepEqual(await fixture.adapter.listModels(primary.provider), []);
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [primary]); assert.equal(fixture.adapter.calls.length, 1);
   } finally { await fixture.dispose(); }
 });
@@ -183,7 +183,7 @@ test("initial legacy calibration becomes a concrete effort lock instead of recal
   const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict" });
   try {
     const selection: ModelSelectionRef = { current: { provider: "deepseek-official", model: "deepseek-v4-pro", reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer", selection); await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [{ provider: "deepseek-official", model: "deepseek-v4-pro", reasoningEffort: "max" }]);
     fixture.adapter.unsupportedMaxModels.add("deepseek-v4-pro");
     await runFixtureTurn(agent);
@@ -197,7 +197,7 @@ test("retry budget below rollover threshold and exhausted switch budget both sto
     const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup, last], strategy: "rate-limit-fallback", rateLimit: { ...immediate, ...bounds } } } });
     try {
       fixture.adapter.beforeStream = async () => { throw rateFailure(); };
-      const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+      const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
       assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), bounds.switchAfterRateLimits === 3 ? [primary.model, primary.model] : [primary.model, backup.model]);
       assert.equal(fixture.adapter.calls.some(({ model }) => model === last.model), false);
     } finally { await fixture.dispose(); }
@@ -210,7 +210,7 @@ test("zero retry budget and Retry-After above either cap terminate before host r
     const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], rateLimit: bounds } } });
     try {
       fixture.adapter.beforeStream = async () => { throw new LlmError("server minimum", "RATE_LIMIT", { status: 429, providerRetryAfterMs: 10 }); };
-      const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+      const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
       assert.equal(fixture.adapter.calls.length, 1);
     } finally { await fixture.dispose(); }
   }
@@ -219,7 +219,7 @@ test("zero retry budget and Retry-After above either cap terminate before host r
 test("absent correlated attempt evidence refuses the owned RATE_LIMIT branch without calling host retry", async () => {
   const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], rateLimit: immediate } } });
   try {
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     let hostCalls = 0;
     const action = await agentEvents(fixture.ctx, agent).waterfall("agent/request-error", { turn: 1, step: 1, provider: "fixture", failure: rateFailure().failure,
       retryPolicy: { mode: "always", initialDelayMs: 0, maxDelayMs: 0, jitterRatio: 0 }, signal: new AbortController().signal }, async () => { hostCalls++; return { kind: "retry" }; });
@@ -232,11 +232,11 @@ test("fresh native cold Agent re-admits primary from its pinned profile instead 
     rateLimit: { ...immediate, switchAfterRateLimits: 1, maxSwitches: 1 } } } });
   try {
     fixture.adapter.beforeStream = async (call) => { if (call.model === primary.model) throw rateFailure(); };
-    const original = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(original);
+    const original = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(original);
     assert.deepEqual(headerRoutes(original), [primary, backup]);
     const persisted = JSON.parse(JSON.stringify(original.session.snapshotEvents()));
     fixture.adapter.beforeStream = undefined;
-    const restored = await fixture.create({ agentPreset: "dsmm-reviewer" }, undefined, { seed: persisted });
+    const restored = await fixture.createAuxiliary("dsmm-reviewer", undefined, { seed: persisted });
     await runFixtureTurn(restored);
     assert.deepEqual(headerRoutes(restored).at(-1), primary);
     const markers = restored.session.snapshotEvents().filter((event) => event.type === "dsmm/role-policy");
@@ -257,8 +257,8 @@ test("native roles own independent strategies and counters, and success resets c
       const count = failed.get(call.model) ?? 0; failed.set(call.model, count + 1);
       if (call.model === "planner-primary" || count % 2 === 0) throw rateFailure();
     };
-    const reviewer = await fixture.create({ agentPreset: "dsmm-reviewer" });
-    const planner = await fixture.create({ agentPreset: "dsmm-planner" });
+    const reviewer = await fixture.createAuxiliary("dsmm-reviewer");
+    const planner = await fixture.createAuxiliary("dsmm-planner");
     await Promise.all([runFixtureTurn(reviewer), runFixtureTurn(planner)]);
     await runFixtureTurn(reviewer);
     assert.deepEqual(fixture.adapter.calls.filter(({ model }) => model === primary.model).map(({ model }) => model), Array(4).fill(primary.model));
@@ -275,7 +275,7 @@ test("abort while awaiting bounded Retry-After cancels pending native retry and 
     const firstFailure = new Promise<void>((resolve) => { ended = resolve; });
     fixture.ctx.on("agent/assistant-stream", ({ frame }) => { if (frame.type === "end") ended(); });
     fixture.adapter.beforeStream = async () => { throw rateFailure(); };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
     const turn = runFixtureTurn(agent); await firstFailure;
     agent.cancel({ kind: "hook", reason: "deterministic abort during bounded backoff" }); await turn;
     assert.equal(fixture.adapter.calls.length, 1);
@@ -294,7 +294,7 @@ test("duplicate request-error delivery and mismatched native failure identity ca
       return first;
     }, { prepend: true });
     fixture.adapter.beforeStream = async () => { throw rateFailure(); };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     assert.equal(fixture.adapter.calls.length, 2); assert.equal(duplicateRefusals, 2);
   } finally { await fixture.dispose(); }
 });
@@ -309,10 +309,10 @@ test("two admitted profiles independently select different strategies for the sa
         rateLimit: { ...immediate, maxRetries: 1, switchAfterRateLimits: 1, maxSwitches: 1 } } } } }) });
     const a = await save("profile-a", "startup-lock");
     await runtime.select({ id: a.id, expectedRevision: a.revision, expectedSelectionRevision: "absent" });
-    const first = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const first = await fixture.createAuxiliary("dsmm-reviewer");
     const b = await save("profile-b", "rate-limit-fallback");
     await runtime.select({ id: b.id, expectedRevision: b.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
-    const second = await fixture.create({ agentPreset: "dsmm-reviewer" });
+    const second = await fixture.createAuxiliary("dsmm-reviewer");
     fixture.adapter.beforeStream = async (call) => { if (call.model === primary.model) throw rateFailure(); };
     await Promise.all([runFixtureTurn(first), runFixtureTurn(second)]);
     assert.deepEqual(headerRoutes(first), [primary]);
@@ -339,7 +339,7 @@ test("accepted previous-step tools are executed once and never replayed by a lat
         yield { type: "finish", reason: { kind: "stop" } };
       }
     };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     assert.equal(fixture.adapter.calls.length, 3); assert.equal(tools, 1);
     assert.equal(agent.session.snapshotEvents().filter((event) => event.type === "tool/call").length, 1);
     assert.equal(agent.session.snapshotEvents().filter((event) => event.type === "tool/result").length, 1);
@@ -350,7 +350,7 @@ test("accepted previous-step tools are executed once and never replayed by a lat
 test("a later unavailable failure cannot reopen startup admission after a successful native attempt", async () => {
   const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup] } } });
   try {
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     fixture.adapter.beforeStream = async () => { throw new LlmError("late exact route absence", "UNKNOWN_MODEL"); };
     await runFixtureTurn(agent);
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model, primary.model]);
@@ -365,7 +365,7 @@ test("bounded server Retry-After delay spends the total budget and cannot be byp
     let hostCalls = 0;
     fixture.ctx.on("agent/request-error", async () => { hostCalls++; return { kind: "retry" }; });
     fixture.adapter.beforeStream = async () => { throw new LlmError("bounded server minimum", "RATE_LIMIT", { status: 429, providerRetryAfterMs: 3 }); };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     assert.equal(fixture.adapter.calls.length, 2); assert.equal(hostCalls, 0);
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const admission = runtime.getSettings.admission!(agent as unknown as DshAgent);
@@ -392,7 +392,7 @@ test("native RATE_LIMIT rollover changes provider channel with exact effort, fin
         yield { type: "finish", reason: { kind: "tool-calls" } };
       } else throw rateFailure();
     };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }); await runFixtureTurn(agent);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
     const routes = (adapter: RoutingFixtureAdapter) => adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort }));
     assert.deepEqual(routes(fixture.adapter), [primary, primary, primary]);
     assert.deepEqual(routes(secondaryAdapter), [secondaryRoute, secondaryRoute]);

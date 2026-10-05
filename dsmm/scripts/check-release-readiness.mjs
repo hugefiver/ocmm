@@ -103,6 +103,7 @@ const expectedDevDependencies = {
   "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-model-selection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
@@ -111,6 +112,8 @@ const expectedDevDependencies = {
   "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
   "@types/react": "^18.3.27",
+  "immer": "10.1.1",
+  "zustand": "4.4.7",
   "esbuild": "^0.25.12",
   "react": "^18.3.1",
   "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
@@ -285,7 +288,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.5",
+    version: "0.1.6",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -433,7 +436,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.5") errors.push("npm pack receipt version must equal 0.1.5");
+  if (entry.version !== "0.1.6") errors.push("npm pack receipt version must equal 0.1.6");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);

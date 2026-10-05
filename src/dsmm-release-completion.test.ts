@@ -246,7 +246,7 @@ test("DSMM YAML keeps pnpm, isolated permissions and complete frozen Docker gate
   assert.match(yaml, /pnpm install --frozen-lockfile/u);
   assert.match(yaml, /pnpm --dir control\/dsmm pack/u);
   assert.match(yaml, /--expected-sha256 "\$DSMM_FROZEN_SHA256"/u);
-  for (const required of ["--require-hook", "--acceptance-hook", "profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs"]) assert.ok(yaml.includes(required));
+  for (const required of ["--require-hook", "--acceptance-hook", "profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs", "native-picker-harness.mjs", "native-picker-browser.mjs", "native-picker-proof.mjs"]) assert.ok(yaml.includes(required));
   assert.doesNotMatch(yaml, /NPM_TOKEN|NODE_AUTH_TOKEN|--clobber|npm publish/u);
   assert.equal((yaml.match(/artifact-ids: \$\{\{ needs\.prepare\.outputs\.artifact-id \}\}/gu) ?? []).length, 3);
   const importer = yaml.split("  import-bootstrap:\n")[1].split("  prepare:\n")[0];

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { requiresNativePickerProof } from "./native-picker-proof.mjs";
 
 /** Historical receipts deliberately keep their original fourteen-check grammar. */
 export function requiresSessionProfileProof(version) {
@@ -127,8 +128,10 @@ function validateAttempt(scenario, attempt, index) {
 }
 
 /** Check observed attempts, disk digests and native snapshots; check booleans are not proof. */
-export function validateSessionProfileProof(proof, { artifactSha256, installedRoot }) {
-  assert.equal(proof?.schemaVersion, 1, "successor proof schema missing");
+export function validateSessionProfileProof(proof, { artifactSha256, installedRoot, version }) {
+  const nativeOwnedRoot = requiresNativePickerProof(version);
+  const schemaVersion = nativeOwnedRoot ? 2 : 1;
+  assert.equal(proof?.schemaVersion, schemaVersion, "successor proof schema missing or differs from trusted version");
   assert.equal(proof.artifactSha256, artifactSha256, "successor proof artifact differs");
   assert.equal(proof.installedRoot, installedRoot, "successor proof imported checkout code");
   const editor = proof.editor;
@@ -230,6 +233,14 @@ export function validateSessionProfileProof(proof, { artifactSha256, installedRo
     "profile-beta-reviewer": ["RATE_LIMIT", "RATE_LIMIT", "completed"], "profile-alpha-planner": ["RATE_LIMIT", "RATE_LIMIT", "completed"],
   };
   for (const scenario of scenarios) {
+    if (nativeOwnedRoot) {
+      assert.equal(scenario.roleScope, "child", "role strategy must execute a genuine native child");
+      assert.equal(scenario.nativeOrigin, "subagent", "role strategy ran as a native root");
+      assert.equal(scenario.nativeDescriptor?.mode, "one-shot", "native child descriptor is missing");
+      const expectedRole = scenario.name === "profile-alpha-planner" ? "dsmm-planner" : "dsmm-reviewer";
+      assert.equal(scenario.role, expectedRole, "native strategy child role differs");
+      assert.equal(scenario.nativeDescriptor.provider, `dsmm-role-${expectedRole.slice("dsmm-".length)}`, "native child descriptor role differs");
+    }
     id(scenario.sessionId, "scenario native session"); id(scenario.admissionEpoch, "scenario admission epoch");
     const expectedStrategy = scenario.name.startsWith("rate-limit") || scenario.name.startsWith("profile-") ? "rate-limit-fallback" : "startup-lock";
     assert.equal(scenario.strategy, expectedStrategy, "actual resolved scenario strategy differs");
@@ -292,11 +303,11 @@ export function validateSessionProfileProof(proof, { artifactSha256, installedRo
   assert.equal(byName.get("profile-alpha-planner").profileRevision, byName.get("startup-primary-lock").profileRevision, "same-profile role strategies were tested on different revisions");
   assert.deepEqual(models("profile-beta-reviewer"), ["profile-beta-reviewer", "profile-beta-reviewer", "beta-reviewer-fallback"]);
   assert.deepEqual(models("profile-alpha-planner"), ["profile-alpha-planner", "profile-alpha-planner", "alpha-planner-fallback"]);
-  validateNativeModelSelectionProof(proof.nativeSelection);
-  return { schemaVersion: 1, scenarios: scenarios.length, independentSessions: sessions.roots.length };
+  validateNativeModelSelectionProof(proof.nativeSelection, nativeOwnedRoot);
+  return { schemaVersion, scenarios: scenarios.length, independentSessions: sessions.roots.length };
 }
 
-function validateNativeModelSelectionProof(selection) {
+function validateNativeModelSelectionProof(selection, nativeOwnedRoot) {
   assert.equal(selection?.endpoint, "session/selectModel", "manual selection did not use the public native endpoint");
   assert.equal(selection.nativeLoop, "followup/whenIdle");
   assert.equal(selection.role, "dsmm-orchestrator"); assert.equal(selection.enabledDeepwork, true);
@@ -306,6 +317,7 @@ function validateNativeModelSelectionProof(selection) {
   id(selection.sessionId, "native selected session"); digest(selection.profileRevision, "native choice profile revision");
   assert.equal(selection.profileId, "native-manual-selection");
   const primary = { provider: "dsmm-selection-fixture", model: "role-default", reasoningEffort: "max" };
+  const inherited = { provider: "dsmm-selection-fixture", model: "native-inherited", reasoningEffort: "high" };
   const low = { provider: "dsmm-selection-fixture", model: "native-chosen", reasoningEffort: "low" };
   const high = { ...low, reasoningEffort: "high" };
   assert.deepEqual(selection.configuredPrimary, primary);
@@ -318,7 +330,7 @@ function validateNativeModelSelectionProof(selection) {
     integer(choice.eventSeq, 0, 100_000, "durable native user intent sequence");
     if (index > 0) assert.ok(choice.eventSeq > selection.choices[index - 1].eventSeq, "same-value native selection did not produce fresh intent");
   });
-  const phases = ["profile-default", "native-model-choice", "subsequent-turn", "effort-only-choice", "profile-reapply", "same-value-reselection", "cold-resume"];
+  const phases = [nativeOwnedRoot ? "native-default" : "profile-default", "native-model-choice", "subsequent-turn", "effort-only-choice", "profile-reapply", "same-value-reselection", "cold-resume"];
   assert.equal(selection.attempts?.length, phases.length, "actual selected-route requests are missing");
   assert.equal(selection.headers?.length, phases.length);
   assert.deepEqual(selection.attempts.map(({ phase }) => phase), phases);
@@ -326,7 +338,7 @@ function validateNativeModelSelectionProof(selection) {
   assert.equal(new Set(selection.attempts.map(({ agentLifecycle, attemptId }) => `${agentLifecycle}:${attemptId}`)).size, phases.length, "duplicate native attempt within one actual Agent lifecycle");
   selection.attempts.forEach((attempt, index) => {
     validateAttempt(selection, attempt, index);
-    assert.deepEqual(route(attempt), index === 0 ? primary : index < 3 ? low : high, "native user route was overridden by the profile default");
+    assert.deepEqual(route(attempt), index === 0 ? nativeOwnedRoot ? inherited : primary : index < 3 ? low : high, "native user route was overridden by the profile default");
     assert.equal(attempt.result, "completed"); assert.equal(attempt.terminal, "completed");
     assert.equal(attempt.settlementType, "assistant/message"); assert.deepEqual(attempt.toolExecutions, []);
     assert.ok(attempt.outputKinds.includes("text-delta") && attempt.outputKinds.includes("block-end"));
@@ -347,11 +359,15 @@ function validateNativeModelSelectionProof(selection) {
 }
 
 /** Native host services + the exact installed DSMM package, never source fixtures. */
-export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot, workspace }) {
+export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot, workspace, roleScope = "root" }) {
+  assert.ok(roleScope === "root" || roleScope === "child", "native strategy scope must be explicit root or child");
   const load = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
   const [{ LlmAdapter, LlmError, ReasoningEffortId, ToolCallId, createUserMessage, expandAssistantStream }, { SessionId }] = await Promise.all([
     load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session"),
   ]);
+  // Historical release controllers retain their original root path. New
+  // acceptance executes genuine auxiliary Session boundaries.
+  const subagent = roleScope === "child" ? await load("@deepseek-ai/dsh-subagent") : undefined;
   const installedManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   assert.equal(installedManifest.name, "@dsmm/dsmm");
   const runtime = ctx.get("dsmmProfileRuntime");
@@ -435,10 +451,14 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
       const existing = (await runtime.describe()).profiles.find(({ id }) => id === profileId);
       const saved = await runtime.save({ id: profileId, expectedRevision: existing?.revision ?? null, content: `${JSON.stringify({ version: 1, id: profileId, settings }, null, 2)}\n` });
       await runtime.select({ id: profileId, expectedRevision: saved.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
-      const handle = await agents.create({ sessionId: SessionId(`dsmm-successor-${name}`), meta: { cwd: workspace, agentPreset: role },
+      const handle = await agents.create({ sessionId: SessionId(`dsmm-successor-${name}`), meta: { cwd: workspace, agentPreset: role, ...(roleScope === "child" ? { origin: "subagent" } : {}) },
         agentOptions: { provider: "dsmm-strategy-fixture", model: "native-inherited", reasoningEffort: ReasoningEffortId("low") } });
       handles.push(handle);
       const agent = handle.agent;
+      if (roleScope === "child") {
+        assert.equal(agent.session.header.origin, "subagent");
+        agent.session.append("subagent/descriptor", subagent.snapshotSubagentDescriptor({ mode: "one-shot", provider: `dsmm-role-${role.slice("dsmm-".length)}` }));
+      }
       active = { name, agent, calls: [], live: [], toolExecutions: [], downstreamAlwaysCalls: 0 };
       const turns = ["startup-primary-lock", "startup-first-available", "unavailable-later"].includes(name) ? 2 : 1;
       for (let turn = 0; turn < turns; turn += 1) {
@@ -466,6 +486,7 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
       });
       const actualPolicy = resolveRoleRuntimePolicy(runtime.getSettings(agent), role);
       scenarios.push({ name, profileId: runtime.admission(agent).selectedId, profileRevision: runtime.admission(agent).appliedRevision, role, strategy: actualPolicy.strategy, policy: actualPolicy.rateLimit, recoveryEnabled: runtime.getSettings(agent).runtimeRecovery.enabled,
+        ...(roleScope === "child" ? { roleScope, nativeOrigin: agent.session.header.origin, nativeDescriptor: subagent.foldSubagentDescriptor(events.slice(agent.session.inheritedEventCount)) } : {}),
         sessionId: agent.id, admissionEpoch: runtime.admission(agent).epoch, nativeLoop: "followup/whenIdle", headers, attempts,
         downstreamAlwaysCalls: active.downstreamAlwaysCalls, toolExecutions: events.filter(({ type }) => type === "tool/call" || type === "tool/result").map(({ type, seq }) => ({ type, seq })),
         terminal: events.filter(({ type }) => type === "turn/end").at(-1).data.reason.kind });
@@ -482,7 +503,9 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
 
 /** Real authenticated native selection in an isolated owned Host, not editor RPC. */
 export async function runNativeModelSelectionScenario(ctx, { nativeRequire, packageRoot, workspace, gateway, peer, nativeCalls }) {
-  assert.equal(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).name, "@dsmm/dsmm");
+  const installed = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  assert.equal(installed.name, "@dsmm/dsmm");
+  const nativeOwnedRoot = requiresNativePickerProof(installed.version);
   const load = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
   const [{ LlmAdapter, ReasoningEffortId, createUserMessage, expandAssistantStream }, { SessionId }] = await Promise.all([load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session")]);
   const runtime = ctx.get("dsmmProfileRuntime");
@@ -577,7 +600,7 @@ export async function runNativeModelSelectionScenario(ctx, { nativeRequire, pack
     handles.push(handle); agent = handle.agent; initialAgent = agent;
     const epochBefore = runtime.admission(agent).epoch;
     assert.equal(runtime.getSettings(agent).defaultActive, true);
-    await runTurn("profile-default");
+    await runTurn(nativeOwnedRoot ? "native-default" : "profile-default");
     await choose("model-and-effort", manualLow);
     await runTurn("native-model-choice");
     await runTurn("subsequent-turn");

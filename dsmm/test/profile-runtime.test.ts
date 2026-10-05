@@ -196,17 +196,17 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
       defaultActive: true, workflow: { policy: "legacy", reviewCap: 4 }, guards: { scope: "always", gitWriteGuard: "off" }, runtimeRecovery: { enabled: true },
       roleRouting: { "dsmm-orchestrator": { primary: route("root-b"), fallbackRoutes: [route("backup-b")] }, "dsmm-reviewer": { primary: route("review-b") }, "dsmm-builder": { primary: route("disabled-builder") } }
     }) });
-    fixture.adapter.failModels.add("root-a");
+    fixture.adapter.failModels.add("native-default");
     let switched = false;
     fixture.adapter.beforeStream = async (call) => {
-      if (call.model === "root-a" && !switched) {
+      if (call.model === "native-default" && !switched) {
         switched = true;
         await runtime.select({ id: "b", expectedRevision: b.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
       }
     };
     await runFixtureTurn(parent);
     assert.equal(switched, true);
-    assert.deepEqual(headerRoutes(parent).map((value) => value.model), ["root-a"], "a generic transient failure does not imply fallback under migrated startup-lock defaults");
+    assert.deepEqual(headerRoutes(parent).map((value) => value.model), ["native-default"], "ordinary-root failures retain the native model rather than imply profile routing");
     assert.equal(runtime.admission(parent as unknown as DshAgent).appliedRevision, a.revision);
     const child = await fixture.subagents.start("dsmm-role-reviewer", {
       parent, prompt: [{ type: "text", text: "Complete local profile inheritance fixture" }],
@@ -224,13 +224,13 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
     } finally { await child.dispose(); }
     const newRoot = await fixture.create({ agentPreset: "dsmm-orchestrator" });
     await runFixtureTurn(newRoot);
-    assert.equal(headerRoutes(newRoot).at(-1)?.model, "root-b");
+    assert.equal(headerRoutes(newRoot).at(-1)?.model, "native-default");
     assert.equal(runtime.getSettings(newRoot as unknown as DshAgent).roles["dsmm-builder"], false);
     assert.equal(fixture.subagents.getProvider("dsmm-role-builder"), undefined);
     blank.session.append("agent-preset/selected", { agentPreset: "dsmm-orchestrator" });
     fixture.ctx.emit("agent-preset/selected", blank.id, "dsmm-orchestrator");
     await runFixtureTurn(blank);
-    assert.equal(headerRoutes(blank).at(-1)?.model, "root-a", "an admitted blank root still uses A after selecting a native preset; generic failures remain locked");
+    assert.equal(headerRoutes(blank).at(-1)?.model, "native-default", "changing the native preset does not apply the profile's declared model");
     const executeGit = (agent: typeof parent) => agent.ctx.get("tools")!.execute({ callId: ToolCallId(`profile-guard-${agent.id}`), name: "bash", arguments: { command: "git commit -m never-executed-by-fixture" }, agent, signal: new AbortController().signal });
     assert.equal((await executeGit(parent)).isError, true);
     assert.equal((await executeGit(newRoot)).isError, false);
@@ -248,7 +248,7 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
     const cold = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const restored = await fixture.create({ agentPreset: "dsmm-orchestrator" }, undefined, { seed: persisted });
     await runFixtureTurn(restored);
-    assert.equal(headerRoutes(restored).at(-1)?.model, "root-b", "a fresh native Host recreating an Agent over a durable A transcript uses current B");
+    assert.equal(headerRoutes(restored).at(-1)?.model, "native-default", "cold profile admission still leaves the ordinary root model native-owned");
     assert.equal(cold.admission(restored as unknown as DshAgent).appliedRevision, b.revision);
     const restoredChild = await fixture.create({ origin: "subagent", agentPreset: "dsmm-orchestrator" }, undefined, { seed: persistedChild });
     await runFixtureTurn(restoredChild);

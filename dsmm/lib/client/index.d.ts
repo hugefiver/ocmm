@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
-export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue } from "./controller.js";
+export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue, SessionApplyOptions, ProfileModelSelectorRemote } from "./controller.js";
 export { ProfilesSection } from "./ProfilesSection.js";
 export type { ProfilesSectionProps, ProfilesInjected } from "./ProfilesSection.js";
 export { NS, en, zh } from "./locales.js";

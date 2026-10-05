@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Release controller is an independently executed JS surface.
-import { UI_CHECKS, UI_CHECKS_015, uiChecksForVersion, validateDockerReceipt, verifyRegistryArtifact, resolveReleaseContext, createArtifactIdentity, computeDigests, POLICY } from "../scripts/dsmm-release.mjs";
+import { UI_CHECKS, UI_CHECKS_015, UI_CHECKS_016, uiChecksForVersion, validateDockerReceipt, verifyRegistryArtifact, resolveReleaseContext, createArtifactIdentity, computeDigests, POLICY } from "../scripts/dsmm-release.mjs";
 // @ts-expect-error Mutation-only JS fixture.
 import { successorReceiptFixture } from "./dsmm015-release-fixtures.mjs";
 // @ts-expect-error Historical fixtures stay unchanged.
@@ -17,7 +17,8 @@ test("0.1.5 successor checks are exact and version gated without changing histor
   assert.equal(UI_CHECKS.length, 14);
   assert.deepEqual(uiChecksForVersion("0.1.4"), UI_CHECKS);
   assert.deepEqual(uiChecksForVersion("0.1.5"), [...UI_CHECKS, ...UI_CHECKS_015]);
-  assert.deepEqual(uiChecksForVersion("0.2.0"), [...UI_CHECKS, ...UI_CHECKS_015]);
+  assert.deepEqual(uiChecksForVersion("0.1.6"), [...UI_CHECKS, ...UI_CHECKS_015, ...UI_CHECKS_016]);
+  assert.deepEqual(uiChecksForVersion("0.2.0"), [...UI_CHECKS, ...UI_CHECKS_015, ...UI_CHECKS_016]);
   assert.equal(validateDockerReceipt(receiptFixture("0.1.4", identity.sha256), { ...identity, version: "0.1.4" }).uiCheckCount, 14);
   assert.equal(validateDockerReceipt(successorReceiptFixture(), identity).uiCheckCount, 26);
   assert.throws(() => validateDockerReceipt(receiptFixture("0.1.5", identity.sha256), identity), /exact UI check set/);

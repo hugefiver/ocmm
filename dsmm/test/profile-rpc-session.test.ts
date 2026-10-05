@@ -118,6 +118,15 @@ test("additive session descriptors are strict and carry no caller-supplied autho
   const rateLimit = { maxRetries: 3, initialDelayMs: 500, maxDelayMs: 10000, maxTotalDelayMs: 30000, switchAfterRateLimits: 3, maxSwitches: 2 };
   const policy = { role: "dsmm-planner", strategy: "startup-lock", rateLimit, retries: 0, rateLimitFailures: 0, switches: 0, totalDelayMs: 0, route: { provider: "manual-route", model: "m".repeat(512), reasoningEffort: "high" } };
   assert.deepEqual(result.create().parse({ ...snapshot, rolePolicy: policy }), { ...snapshot, rolePolicy: policy });
+  assert.deepEqual(result.create().parse({ ...snapshot, profileModel: policy.route }), { ...snapshot, profileModel: policy.route });
+  assert.deepEqual(result.create().parse({ ...snapshot, profileModel: { provider: "manual-provider", model: "manual/model" } }), { ...snapshot, profileModel: { provider: "manual-provider", model: "manual/model" } });
+  for (const invalid of [
+    null, { provider: "fixture", model: "model", auth: "hidden" }, { provider: "fixture", model: "model", nextModelRoute: {} },
+    { provider: "https://private", model: "model" }, { provider: "fixture", model: "https://private" },
+    { provider: "p".repeat(129), model: "model" }, { provider: "fixture", model: "m".repeat(513) },
+    { provider: "fixture", model: "model", reasoningEffort: "e".repeat(65) }, { provider: "fixture", model: "model", reasoningEffort: "" },
+    { provider: "fixture", model: "bad\0model" }, { provider: "fixture", model: "\uD800" },
+  ]) assert.throws(() => result.create().parse({ ...snapshot, profileModel: invalid }));
   for (const invalid of [
     { ...policy, credentials: {} }, { ...policy, role: "not-a-dw-role" }, { ...policy, retries: Infinity }, { ...policy, switches: 11 },
     { ...policy, rateLimit: { ...rateLimit, maxRetries: -1 } }, { ...policy, rateLimit: { ...rateLimit, peer: true } },

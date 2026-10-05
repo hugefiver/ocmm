@@ -5,7 +5,7 @@ import { registerModelRouting } from "../lib/model-routing.js";
 import { resolveConfig } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
 
-test("Host routing installs without an injectable LLM and resolves the requesting Agent's realm", async () => {
+test("auxiliary Host routing installs without an injectable LLM and resolves the requesting Agent's realm", async () => {
   let request: ((frame: AgentRequestFrame, next: () => Promise<DshLlmCallConfig>) => Promise<DshLlmCallConfig>) | undefined;
   let queried = 0;
   const root: DshContext = {
@@ -20,7 +20,7 @@ test("Host routing installs without an injectable LLM and resolves the requestin
     }
   };
   const frame = {
-    agent: { ctx: { get<T>(name: string) { return (name === "llm" ? llm : undefined) as T | undefined; } }, session: { snapshotEvents() { return []; }, append() {} } },
+    agent: { ctx: { get<T>(name: string) { return (name === "llm" ? llm : undefined) as T | undefined; } }, session: { header: { origin: "subagent" }, snapshotEvents() { return []; }, append() {} } },
     turn: 1, step: 1, signal: new AbortController().signal
   } satisfies AgentRequestFrame & { agent: { ctx: unknown } };
   registerModelRouting(root, new DeepworkModeController(root), () => resolveConfig({ defaultActive: true, deepseekFlashDefaultReasoningEffort: "low" }));

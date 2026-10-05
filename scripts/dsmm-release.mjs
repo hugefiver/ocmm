@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { UI_CHECKS_015, requiresSessionProfileProof, validateSessionProfileProof } from "../dsmm/scripts/profile-ui-harness-native.mjs";
+import { requiresNativePickerProof, validateNativePickerProof } from "../dsmm/scripts/native-picker-proof.mjs";
 
 export const POLICY = Object.freeze({
   repository: "hugefiver/ocmm", packageName: "@dsmm/dsmm", defaultBranch: "master",
@@ -98,8 +99,10 @@ export const UI_CHECKS = Object.freeze([
   "pointerKeyboardReducedMotionZoomAndResponsive", "realNativeSessionScopeAndControlObserver",
 ]);
 
-export { UI_CHECKS_015, requiresSessionProfileProof };
-export const uiChecksForVersion = (version) => requiresSessionProfileProof(version) ? [...UI_CHECKS, ...UI_CHECKS_015] : [...UI_CHECKS];
+export { UI_CHECKS_015, requiresSessionProfileProof, requiresNativePickerProof };
+export const UI_CHECKS_016 = Object.freeze(["nativePickerCompactProfileAcceptance"]);
+export const uiChecksForVersion = (version) => requiresNativePickerProof(version) ? [...UI_CHECKS, ...UI_CHECKS_015, ...UI_CHECKS_016]
+  : requiresSessionProfileProof(version) ? [...UI_CHECKS, ...UI_CHECKS_015] : [...UI_CHECKS];
 
 export function assertSanitizedReceipt(receipt) {
   const inspect = (value) => {
@@ -209,7 +212,8 @@ export function validateDockerReceipt(receipt, identity) {
     invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "successor scoped native RPC methods required");
     invariant(ui.nativeCalls.some((call) => call.endpoint === "session/modelCatalog" && call.strictGateway === true && call.result === "accepted"), "actual native parameterless catalog RPC required");
     invariant(ui.nativeCalls.some((call) => call.endpoint === "session/selectModel" && call.strictGateway === true && call.result === "accepted"), "actual native user model-selection RPC required");
-    validateSessionProfileProof(ui.successorProof, { artifactSha256: identity.sha256, installedRoot: ui.installedRoot });
+    validateSessionProfileProof(ui.successorProof, { artifactSha256: identity.sha256, installedRoot: ui.installedRoot, version: identity.version });
+    if (requiresNativePickerProof(identity.version)) validateNativePickerProof(ui.nativePickerProof, { artifactSha256: identity.sha256, packageVersion: identity.version });
   }
   const history = receipt.sessionHistory;
   complete(history, "session history"); equal(history.artifactSha256, identity.sha256, "session-history digest");

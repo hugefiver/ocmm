@@ -50,6 +50,7 @@ export declare class DsmmProfileRuntime {
     select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
     private prepare;
     private profileAdmission;
+    private declaredProfileModel;
     private agents;
     private bind;
     private owner;

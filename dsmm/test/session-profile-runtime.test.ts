@@ -9,6 +9,7 @@ import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionLogOffset } from "@deepseek-ai/dsh-session";
 import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
 import { createProfileRuntime, DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { ProfileStore } from "../lib/profile-store.js";
@@ -43,8 +44,8 @@ test("native idle switches isolate two roots and global default; old/new childre
     const runtime = runtimeOf(f);
     const a = await runtime.save({ id: "a", content: profile("a", "session-a"), expectedRevision: null });
     const b = await runtime.save({ id: "b", content: profile("b", "session-b"), expectedRevision: null });
-    const first = await f.create({ agentPreset: "dsmm-orchestrator" });
-    const second = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const first = await f.create({ agentPreset: "dsmm-orchestrator" }, undefined, { agentOptions: { provider: "fixture", model: "native-a", reasoningEffort: ReasoningEffortId("low") } });
+    const second = await f.create({ agentPreset: "dsmm-orchestrator" }, undefined, { agentOptions: { provider: "fixture", model: "native-b", reasoningEffort: ReasoningEffortId("low") } });
     const beforeGlobal = await runtime.describe();
     const switchedA = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     const oldAdmission = runtime.admission(structural(first));
@@ -52,8 +53,10 @@ test("native idle switches isolate two roots and global default; old/new childre
     assert.equal(runtime.admission(structural(oldChild)), oldAdmission);
     const switchedB = await runtime.selectSession(await request(runtime, second, "b", b.revision), structural(second));
     await runFixtureTurn(first); await runFixtureTurn(second);
-    assert.equal(headerRoutes(first).at(-1)?.model, "session-a");
-    assert.equal(headerRoutes(second).at(-1)?.model, "session-b");
+    assert.equal(headerRoutes(first).at(-1)?.model, "native-a", "profile switch preserves the first root's native model");
+    assert.equal(headerRoutes(second).at(-1)?.model, "native-b", "the second root's native model remains independent");
+    assert.deepEqual(switchedA.profileModel, route("session-a"));
+    assert.deepEqual(switchedB.profileModel, route("session-b"));
     assert.notEqual(switchedA.admissionEpoch, switchedB.admissionEpoch);
     assert.deepEqual(switchedA.globalDefault, { selectedId: beforeGlobal.selectedId, appliedRevision: beforeGlobal.appliedRevision, selectionRevision: beforeGlobal.selectionRevision });
     assert.equal(existsSync(join(f.profileDir, "dsmm-profiles", ".selection.json")), false);
@@ -104,9 +107,57 @@ test("an unscoped root displays its exact captured global profile after the futu
     assert.equal(snapshot.admittedSelection?.selectedId, "a");
     assert.equal(snapshot.admittedSelection?.appliedRevision, a.revision);
     assert.equal(snapshot.globalDefault.selectedId, "b");
+    assert.deepEqual(snapshot.profileModel, route("captured-a"), "explicit model action metadata comes from the captured admission, not future global B");
     assert.equal(snapshot.admissionEpoch, admission.epoch);
     await runFixtureTurn(captured);
-    assert.equal(headerRoutes(captured).at(-1)?.model, "captured-a");
+    assert.equal(headerRoutes(captured).at(-1)?.model, "native-default", "profile metadata never implicitly applies a main model");
+  } finally { await f.dispose(); }
+});
+
+test("profile model metadata follows the admitted ordinary root role without changing native selection or locks", async () => {
+  const f = await nativeRoutingFixture();
+  try {
+    const runtime = runtimeOf(f);
+    const nativeSelection: ModelSelectionRef = { current: { provider: "fixture", model: "native-tab", reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
+    const root = await f.create({ agentPreset: "dsmm-orchestrator" }, nativeSelection);
+    const draft = await runtime.save({ id: "metadata", expectedRevision: null, content: JSON.stringify({ version: 1, id: "metadata", settings: {
+      defaultActive: false, roleRouting: {
+        "dsmm-orchestrator": { primary: { provider: "fixture", model: "declared-main", reasoningEffort: "max" }, fallbackRoutes: [route("not-the-primary")] },
+        "dsmm-planner": { primary: { provider: "fixture", model: "declared-planner" } },
+        "dsmm-reviewer": { primary: route("declared-reviewer") },
+      },
+    } }) });
+    const selected = await runtime.selectSession(await request(runtime, root, draft.id, draft.revision), structural(root));
+    assert.deepEqual(selected.profileModel, { provider: "fixture", model: "declared-main", reasoningEffort: "max" });
+    assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
+    await runFixtureTurn(root);
+    assert.deepEqual(headerRoutes(root).at(-1), { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
+    let resolutions = 0;
+    const resolve = f.adapter.resolveModel.bind(f.adapter);
+    f.adapter.resolveModel = async (provider, model) => { resolutions++; return resolve(provider, model); };
+    const events = JSON.stringify(root.session.snapshotEvents());
+    const first = await runtime.getSession(structural(root));
+    const next = await runtime.getSession(structural(root));
+    assert.deepEqual(first.rolePolicy, next.rolePolicy, "read-only metadata does not reset any route/counter lock");
+    assert.deepEqual(first.rolePolicy?.route, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
+    assert.equal(JSON.stringify(root.session.snapshotEvents()), events);
+    assert.equal(resolutions, 0, "describe does no LLM preflight or catalog work");
+    first.profileModel!.model = "caller-edited-copy";
+    assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
+    root.session.append("agent-preset/selected", { agentPreset: "dsmm-planner" });
+    assert.deepEqual((await runtime.getSession(structural(root))).profileModel, { provider: "fixture", model: "declared-planner" }, "omitted effort is not replaced by an adapter default");
+    root.session.append("agent-preset/selected", { agentPreset: "dsmm-reviewer" });
+    assert.deepEqual((await runtime.getSession(structural(root))).profileModel, route("declared-reviewer"), "any top-level effective role can declare an optional model action");
+    root.session.append("agent-preset/selected", { agentPreset: "standard" });
+    assert.equal((await runtime.getSession(structural(root))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
+    root.session.append("deepwork/mode", { active: true });
+    assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
+    const child = await f.create({ origin: "subagent" }, undefined, { parentAgent: root });
+    await assert.rejects(runtime.getSession(structural(child)), { code: "not-owned" });
+    const noPrimary = await runtime.save({ id: "no-primary", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-primary", settings: { roleRouting: { "dsmm-orchestrator": { fallbackRoutes: [route("fallback-only")] } } } }) });
+    const applied = await runtime.selectSession(await request(runtime, root, noPrimary.id, noPrimary.revision), structural(root));
+    assert.equal(applied.profileModel, undefined, "fallbacks and actual native route never become a declared profile primary");
+    assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
   } finally { await f.dispose(); }
 });
 
@@ -141,7 +192,8 @@ test("native running and foreign maintenance activities refuse immediately; a qu
     assert.equal(f.adapter.calls.length, 1, "queued wake cannot begin before durable profile publication");
     validation.release(); const committed = await pending; await agent.whenIdle();
     assert.notEqual(committed.admissionEpoch, oldEpoch);
-    assert.equal(headerRoutes(agent).at(-1)?.model, "wake-new");
+    assert.equal(headerRoutes(agent).at(-1)?.model, "native-default", "queued wake observes new profile policy without an implicit model change");
+    assert.deepEqual(committed.profileModel, route("wake-new"));
   } finally { wait.release(); await f.dispose(); }
 });
 
@@ -338,7 +390,8 @@ test("native persisted resume honors explicit immutable session pins and baselin
         assert.equal(admitted.appliedRevision, index === 0 ? saved.revision : index === 1 ? null : b.revision);
         if (index === 0) assert.equal(admitted.epoch, pinnedEpoch);
         await runFixtureTurn(handle.agent);
-        assert.equal(headerRoutes(handle.agent).at(-1)?.model, index === 0 ? "pinned-a" : index === 1 ? "native-default" : "global-b");
+        assert.equal(headerRoutes(handle.agent).at(-1)?.model, "native-default", "cold profile pins do not replace native model authority");
+        assert.deepEqual((await runtimeOf(f).getSession(structural(handle.agent))).profileModel, index === 0 ? route("pinned-a") : index === 1 ? undefined : route("global-b"));
       } finally { await handle.dispose(); }
     }
     const sidecar = join(profileDir, "dsmm-profiles", ".sessions", `${createHash("sha256").update(ids[0]!).digest("hex")}.json`);

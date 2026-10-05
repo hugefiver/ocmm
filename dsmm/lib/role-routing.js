@@ -82,7 +82,7 @@ export function roleRouteRuntimeState(agent, settings, role, epoch) {
     const resolved = resolveRoleRuntimePolicy(settings, role);
     const identity = liveRolePolicyIdentity(agent, settings, role, epoch);
     const lock = identity === undefined ? undefined : roleRouteLock(agent, identity);
-    return { ...(role === undefined ? {} : { role }), strategy: resolved.strategy, rateLimit: { ...resolved.rateLimit },
+    return { ...(role === undefined ? {} : { role }), strategy: agent.session.header?.origin === "subagent" ? resolved.strategy : "startup-lock", rateLimit: { ...resolved.rateLimit },
         ...(lock === undefined ? {} : { route: { ...lock.route } }), retries: lock?.retries ?? 0,
         rateLimitFailures: lock?.rateLimits ?? 0, switches: lock?.switches ?? 0, totalDelayMs: lock?.totalDelayMs ?? 0 };
 }

@@ -383,14 +383,14 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.match(release, /^# Deepwork 0\.1\.5 Release and Rollback$/mu);
+  assert.match(release, /^# Deepwork 0\.1\.6 Release and Rollback$/mu);
   const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
   const phaseOffsets = phases.map((phase) => release.indexOf(phase));
   assert.ok(phaseOffsets.every((offset) => offset >= 0));
   assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.5",
+    "dsmm-scoped-v0.1.6",
     "explicit authorization",
     "npm Trusted Publisher registration",
     ".github/workflows/dsmm-release.yml",
@@ -449,7 +449,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
     "registry installation",
-    "plugin --profile dsmm-0.1.5-verify list",
+    "plugin --profile dsmm-0.1.6-verify list",
     "--dump-config",
     "installed registry package",
     "scripts/check-dsmm-release-completion.mjs",
@@ -461,7 +461,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
   assert.match(postPublication, /import-bootstrap.*skipped \/ NOT_APPLICABLE/u);
   assert.match(postPublication, /Workflow success alone is insufficient/u);
-  assert.match(desktopGate, /Only after terminal 0\.1\.5 completion/u);
+  assert.match(desktopGate, /Only after terminal 0\.1\.6 completion/u);
   assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
   assert.match(desktopGate, /actual Deepwork Profiles UI create\/edit\/save\/apply\/reset/u);
   const rollback = release.slice(release.indexOf("## Rollback"));
@@ -488,8 +488,8 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "0.1.5 publication and Desktop acceptance remain pending",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.5.tgz>",
+    "0.1.6 publication and Desktop acceptance remain pending",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.6.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
@@ -504,6 +504,31 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(profile, /^dsmm-v1-smoke$/u);
 });
 
+test("0.1.6 guides preserve completed release history and native root model authority", () => {
+  const readme = readFileSync(readmePath, "utf8");
+  const release = readFileSync(releasePath, "utf8");
+  for (const document of [readme, release]) {
+    assert.match(document, /completed 0\.1\.5 publication/u);
+    assert.match(document, /0\.1\.2.*untouched and unpublished/u);
+    assert.match(document, /37235817488/u);
+    assert.match(document, /0\.1\.4.*continuation/u);
+    assert.doesNotMatch(document, /0\.1\.5 publication and Desktop acceptance remain pending/u);
+    assert.doesNotMatch(document, /completed 0\.1\.6 publication/u);
+    assert.ok(document.includes("Switch and use profile model"));
+    assert.match(document, /normal.*switching keeps the current model/iu);
+    assert.match(document, /native.*default.*Models tab/iu);
+    assert.match(document, /newer native choice/u);
+  }
+  assert.match(readme, /Ordinary roots keep their native initial model and exact effort/u);
+  assert.match(readme, /profile reapply and cold resume/u);
+  assert.match(release, /ordinary roots are native-owned/u);
+  assert.match(release, /before any explicit model-selection event/u);
+  assert.match(release, /genuinely owned delegated children/u);
+  assert.match(release, /fourteen UI checks and nine installed compiled-file checks remain unchanged/u);
+  assert.match(release, /New proof requirements are version-gated/u);
+  assert.match(release, /failed `installProfiles` child through its public parent-fiber ownership/u);
+});
+
 test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability", () => {
   const roadmap = readFileSync(join(packageRoot, "docs", "roadmap.md"), "utf8");
   const v1Section = roadmapSection(roadmap, "## v1.0 — Stable dsmm release");
@@ -513,7 +538,7 @@ test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.5 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.6 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -521,7 +546,7 @@ test("release readiness checker accepts the real 0.1.5 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.5");
+  assert.equal(receipt.version, "0.1.6");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -551,14 +576,14 @@ test("release readiness checker rejects the superseded unscoped package identity
 });
 
 test("release readiness checker rejects a stale or manifest-selected release version", () => {
-  for (const version of ["0.1.2", "0.1.3", "0.1.4", "0.1.6"]) {
+  for (const version of ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.7"]) {
     const fixtureRoot = createReleaseFixture();
     try {
       updateFixtureManifest(fixtureRoot, (manifest) => { manifest.version = version; });
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1, version);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.5"]);
+      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.6"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });

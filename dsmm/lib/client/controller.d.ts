@@ -1,8 +1,11 @@
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
+import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
+import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller/client";
+import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
 import type { DsmmProfilesRemote } from "../profile-remote.js";
 import type { ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
 import type { SessionProfileSnapshot } from "../profile-types.js";
-import type { ModelCatalog } from "@deepseek-ai/dsh-api-session-controller";
+import type { ModelCatalog, SessionSelectModelRequest, SessionSelectModelValue } from "@deepseek-ai/dsh-api-session-controller";
 import type { JsonPath } from "./structured.js";
 export interface ProfileEditor {
     id: string;
@@ -18,7 +21,10 @@ export interface ProfilesIssue {
     code: string;
     message?: string;
     field?: string;
-    source?: "selection";
+    source?: "selection" | "profile-model";
+}
+export interface SessionApplyOptions {
+    useProfileModel?: boolean;
 }
 export interface ProfilesViewSnapshot {
     snapshot: ProfileSnapshot | null;
@@ -36,7 +42,7 @@ export interface ProfilesViewSnapshot {
     sessionChoice: string | null;
     sessionBusy: "read" | "apply" | "reset" | null;
     sessionIssue: ProfilesIssue | null;
-    sessionNotice: "applied" | "reset" | null;
+    sessionNotice: "applied" | "reset" | "applied-with-model" | null;
     invalidFields: string[];
     editorEpoch: number;
 }
@@ -58,13 +64,17 @@ export interface ProfilesActions {
     refreshCatalog(): Promise<void>;
     refreshSession(): Promise<void>;
     chooseSessionProfile(id: string | null): void;
-    applySession(): Promise<void>;
+    applySession(options?: SessionApplyOptions): Promise<void>;
     resetSession(): Promise<void>;
     setFieldInvalid(field: string, invalid: boolean): void;
 }
 export interface ModelCatalogRemote {
     modelCatalog(): Promise<RemoteResult<ModelCatalog>>;
 }
+export interface ProfileModelSelectorRemote {
+    selectModel(request: SessionSelectModelRequest): Promise<RemoteResult<SessionSelectModelValue>>;
+}
+type ModelInteractionSource = HostObservable<Pick<ModelDirectoryState, "status">>;
 export declare const NEW_PROFILE_CONTENT = "{\n  \"version\": 1,\n  \"id\": \"new-profile\",\n  \"label\": \"New profile\",\n  \"settings\": {\n    // Runtime overlay only. Omitted fields inherit the deployment baseline.\n    \"defaultActive\": true\n  }\n}\n";
 /** A valid external CAS conflict is reconcilable; corruption is never reset implicitly. */
 export declare function canReconcileSelection(snapshot: ProfileSnapshot | null): boolean;
@@ -79,6 +89,21 @@ export declare class ProfilesController {
     private sessionGeneration;
     private catalogGeneration;
     private catalogRemote;
+    private modelSelectorGeneration;
+    private modelSelector;
+    private modelSelectionSource;
+    private modelSelectionSessionId;
+    private modelSelectionGeneration;
+    private stopModelSelection;
+    private modelEvents;
+    private modelEventsSessionId;
+    private modelEventsGeneration;
+    private modelEventsWatermark;
+    private stopModelEvents;
+    private modelInteraction;
+    private modelInteractionSessionId;
+    private modelInteractionGeneration;
+    private stopModelInteraction;
     readonly store: {
         getSnapshot: () => ProfilesViewSnapshot;
         subscribe: (listener: () => void) => (() => void);
@@ -86,6 +111,10 @@ export declare class ProfilesController {
     readonly actions: ProfilesActions;
     constructor(remote: DsmmProfilesRemote);
     dispose(): void;
+    attachModelSelector(remote: ProfileModelSelectorRemote | null): void;
+    attachModelSelectionSource(sessionId: string | null, source: HostObservable<unknown> | null): void;
+    attachModelEventSource(sessionId: string | null, source: SessionEventSource | null): void;
+    attachModelInteractionSource(sessionId: string | null, source: ModelInteractionSource | null): void;
     attachCatalog(remote: ModelCatalogRemote | null): void;
     setSession(id: string | null): void;
     refreshCatalog(): Promise<void>;

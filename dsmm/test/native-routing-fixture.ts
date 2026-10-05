@@ -10,13 +10,14 @@ import { LlmAdapter, LlmError, LlmRuntime, ReasoningEffortId, createUserMessage 
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionStore } from "@deepseek-ai/dsh-session";
 import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
-import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
+import { SubagentRuntime, foldSubagentDescriptor, snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import * as nativeSpawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { apply } from "../lib/index.js";
 import type { DsmmPluginConfig } from "../lib/index.js";
 import type { DshContext } from "../lib/dsh-types.js";
+import type { DsmmRoleId } from "../lib/roles.js";
 
 /** All requests terminate inside this adapter; no credentials, network or shell. */
 export class RoutingFixtureAdapter extends LlmAdapter {
@@ -100,6 +101,14 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       });
       handles.push(handle);
       return handle.agent;
+    },
+    /** Genuine unowned auxiliary Sessions; this grants no live-parent ownership. */
+    async createAuxiliary(role: DsmmRoleId = "dsmm-reviewer", selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> {
+      const agent = await this.create({ origin: "subagent", agentPreset: role }, selection, extra);
+      if (foldSubagentDescriptor(agent.session.snapshotEvents().slice(agent.session.inheritedEventCount)) === undefined) {
+        agent.session.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "one-shot", provider: `dsmm-role-${role.slice("dsmm-".length)}` }));
+      }
+      return agent;
     },
     async dispose() {
       for (const handle of [...handles].reverse()) await handle.dispose();

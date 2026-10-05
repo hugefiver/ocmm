@@ -69,8 +69,10 @@ export class DsmmProfileRuntime {
         }
         const reason = this.switching.has(agent) ? "maintenance" : agent.status === "running" ? "busy" : agent.runMaintenance === undefined ? "unavailable" : undefined;
         const role = resolveEffectiveDsmmRole(agent, admitted.settings, isDeepworkActive(sessionEvents(agent.session), admitted.settings.defaultActive));
+        const profileModel = this.declaredProfileModel(admitted.settings, role);
         return { sessionId: agent.id, globalDefault: selectionState(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
             rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch),
+            ...(profileModel === undefined ? {} : { profileModel }),
             admissionEpoch: admitted.epoch, switchAllowed: reason === undefined, ...(reason === undefined ? {} : { switchUnavailableReason: reason }) };
     }
     /** The fourth argument is trusted native caller authority, never wire data. */
@@ -99,9 +101,12 @@ export class DsmmProfileRuntime {
                 try {
                     assertCurrent(maintenanceSignal);
                     const epoch = newEpoch();
+                    let profileModel;
                     const result = await this.store.selectSession(request, epoch, async (document) => {
                         const prepared = immutableSettings(resolveProfileSettings(this.baseline, document?.settings ?? {}));
                         await this.validate(prepared, agent, maintenanceSignal);
+                        const role = resolveEffectiveDsmmRole(agent, prepared, isDeepworkActive(sessionEvents(agent.session), prepared.defaultActive));
+                        profileModel = this.declaredProfileModel(prepared, role);
                         assertCurrent(maintenanceSignal);
                         return prepared;
                     }, {
@@ -113,6 +118,7 @@ export class DsmmProfileRuntime {
                     // A committed selection remains a successful transaction even if a
                     // queued wake or disposal wins immediately when maintenance releases.
                     return { sessionId: request.sessionId, globalDefault: selectionState(this.current), selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
+                        ...(profileModel === undefined ? {} : { profileModel }),
                         scope: request.id === null ? "deployment-baseline" : "session-override", admissionEpoch: epoch, switchAllowed: true };
                 }
                 finally {
@@ -177,6 +183,11 @@ export class DsmmProfileRuntime {
     }
     profileAdmission(selection, settings, epoch, scope) {
         return Object.freeze({ ...selectionState(selection), settings, epoch, scope, profile: selection.selectedId === null || selection.appliedRevision === null ? null : Object.freeze({ id: selection.selectedId, revision: selection.appliedRevision }) });
+    }
+    declaredProfileModel(settings, role) {
+        const primary = role === undefined ? undefined : settings.roleRouting[role]?.primary;
+        return primary === undefined ? undefined : { provider: primary.provider, model: primary.model,
+            ...(primary.reasoningEffort === undefined ? {} : { reasoningEffort: primary.reasoningEffort }) };
     }
     agents() { return this.ctx.get?.("agents"); }
     bind(agent) {

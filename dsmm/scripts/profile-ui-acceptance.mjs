@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 import { UI_CHECKS_015, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
+import { runFrozenNativePickerAcceptance } from "./native-picker-harness.mjs";
+import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -88,8 +90,15 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
     if (report.outcome === "COMPLETED" && requiresSessionProfileProof(installed.version)) {
       try {
         report.successorProof.startupLock = await runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage });
-        validateSessionProfileProof(report.successorProof, { artifactSha256: sha256, installedRoot: packageRoot });
+        validateSessionProfileProof(report.successorProof, { artifactSha256: sha256, installedRoot: packageRoot, version: installed.version });
         for (const check of UI_CHECKS_015) report.checks[check] = true;
+        if (requiresNativePickerProof(installed.version)) {
+          report.nativePickerProof = await runFrozenNativePickerAcceptance({ artifact, sha256, packageVersion: installed.version,
+            dshManifest, toolsManifest: env.DSMM_ACCEPTANCE_TOOLS_MANIFEST, browserExecutable: env.DSMM_BROWSER_EXECUTABLE,
+            evidenceRoot: join(evidenceRoot, "native-picker"), env });
+          validateNativePickerProof(report.nativePickerProof, { artifactSha256: sha256, packageVersion: installed.version });
+          report.checks.nativePickerCompactProfileAcceptance = true;
+        }
       } catch (error) { report.outcome = "FAILED"; report.failure = error.stack ?? String(error); }
     }
   } finally { await removeOwnedUiRoot(runRoot, token); }
@@ -375,7 +384,9 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     const gateway = ctx.get("typertGateway");
     assert.ok(gateway && ctx.get("dsmmProfiles"), "native profile RPC service was not installed");
     assert.equal(ctx.get("dsmmProfiles").backend, runtime, "native RPC is not wired to the installed runtime manager");
-    const successor = requiresSessionProfileProof(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).version);
+    const installedVersion = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).version;
+    const successor = requiresSessionProfileProof(installedVersion);
+    const nativeOwnedRoot = requiresNativePickerProof(installedVersion);
     report.strictDescriptors = ["describe", "read", "save", "select", ...(successor ? ["describeSession", "selectSession"] : [])].map((method) => {
       const descriptor = ctx.get("typert").local.get(`dsmmProfiles/${method}`);
       assert.ok(descriptor, `native strict descriptor for ${method} was not registered`);
@@ -631,7 +642,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
       report.successorProof = await runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileDir, workspace, screenshot, report });
       report.successorProof.artifactSha256 = sha256;
       report.successorProof.installedRoot = packageRoot;
-      report.successorProof.routeScenarios = await runNativeRouteScenarios(ctx, { nativeRequire, packageRoot, workspace });
+      report.successorProof.schemaVersion = nativeOwnedRoot ? 2 : 1;
+      report.successorProof.routeScenarios = await runNativeRouteScenarios(ctx, { nativeRequire, packageRoot, workspace, roleScope: nativeOwnedRoot ? "child" : "root" });
       report.successorProof.nativeSelection = await runNativeModelSelectionScenario(ctx, { nativeRequire, packageRoot, workspace, gateway, peer, nativeCalls: report.nativeCalls });
       ownedSessionRequests = false;
     }

@@ -52,6 +52,7 @@ function activeFrame(preset?: string): AgentRequestFrame {
   return {
     agent: {
       session: {
+        header: { origin: "subagent" },
         events,
         append() {}
       }
@@ -67,6 +68,7 @@ function inactiveFrame(preset?: string): AgentRequestFrame {
     ...activeFrame(preset),
     agent: {
       session: {
+        header: { origin: "subagent" },
         events: preset === undefined ? [] : [{ type: "agent-preset/selected", data: { agentPreset: preset } }],
         append() {}
       }
@@ -567,6 +569,7 @@ function isPrepend(options: unknown): boolean {
 function composedAgent(events: DshSessionEvent[], header: DshEpochHeader): DshAgent {
   return {
     session: {
+      header: { origin: "subagent" },
       events,
       requestHeader() {
         return header;

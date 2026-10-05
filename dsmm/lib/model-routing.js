@@ -58,6 +58,7 @@ export function registerModelRouting(ctx, controller, getSettings) {
                 if (frame.signal.aborted)
                     return downstream;
                 const settings = getSettings(frame.agent);
+                const ordinaryRoot = frame.agent.session.header?.origin !== "subagent";
                 const admitted = takeAdmittedRecoveryRoute(frame);
                 const active = controller.active(frame.agent, settings.defaultActive);
                 const role = resolveEffectiveDsmmRole(frame.agent, settings, active);
@@ -75,6 +76,18 @@ export function registerModelRouting(ctx, controller, getSettings) {
                     const exactPolicy = primary !== undefined || policy?.fallbackRoutes !== undefined || fallbacks.length > 0;
                     const captured = assembledSelections.get(frame.agent);
                     const manual = captured?.signal === frame.signal ? captured.intent : undefined;
+                    if (ordinaryRoot) {
+                        const selected = { provider: downstream.provider, model: downstream.model,
+                            ...(downstream.reasoningEffort === undefined ? {} : { reasoningEffort: downstream.reasoningEffort }) };
+                        if (lock === undefined || !sameExactModelRoute(lock.route, selected) || lock.manualSelectionSeq !== manual?.seq) {
+                            const generation = (lock?.generation ?? -1) + 1;
+                            lock = pinRoleRoute(frame.agent, identity, selected, [selected]);
+                            lock.manualSelectionSeq = manual?.seq;
+                            lock.generation = generation;
+                            lockedAgents.add(frame.agent);
+                        }
+                        return downstream;
+                    }
                     if (manual !== undefined && lock?.manualSelectionSeq !== manual.seq
                         && (sameExactModelRoute(downstream, manual.route) || nativeModelSelectionWasAccepted(frame.agent, manual))) {
                         const llm = frame.agent.ctx?.get?.("llm")
@@ -124,6 +137,9 @@ export function registerModelRouting(ctx, controller, getSettings) {
                     if (exactPolicy || lock.attempts > 0)
                         return downstream;
                 }
+                // Ordinary roots belong to the native model tab, including its exact effort.
+                if (ordinaryRoot)
+                    return downstream;
                 // Named fallback efforts are native policy IDs, never legacy calibration inputs.
                 if (fallbacks.some((fallback) => fallback.reasoningEffort !== undefined
                     && sameModelRoute(fallback, downstream) && fallback.reasoningEffort === downstream.reasoningEffort))

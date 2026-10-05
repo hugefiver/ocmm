@@ -1,5 +1,12 @@
 import { isProfileId } from "../profile-remote.js";
 import { editStructuredPath, moveFallback } from "./structured.js";
+function modelSelectionWatermark(window) {
+    let watermark = -1;
+    for (const entry of window.entries)
+        if (entry.type === "event" && entry.event.type === "model/selection")
+            watermark = Math.max(watermark, Number(entry.event.seq));
+    return watermark;
+}
 const NEW_EDITOR = "";
 export const NEW_PROFILE_CONTENT = '{\n  "version": 1,\n  "id": "new-profile",\n  "label": "New profile",\n  "settings": {\n    // Runtime overlay only. Omitted fields inherit the deployment baseline.\n    "defaultActive": true\n  }\n}\n';
 /** A valid external CAS conflict is reconcilable; corruption is never reset implicitly. */
@@ -19,6 +26,21 @@ export class ProfilesController {
     sessionGeneration = 0;
     catalogGeneration = 0;
     catalogRemote = null;
+    modelSelectorGeneration = 0;
+    modelSelector = null;
+    modelSelectionSource = null;
+    modelSelectionSessionId = null;
+    modelSelectionGeneration = 0;
+    stopModelSelection = null;
+    modelEvents = null;
+    modelEventsSessionId = null;
+    modelEventsGeneration = 0;
+    modelEventsWatermark = -1;
+    stopModelEvents = null;
+    modelInteraction = null;
+    modelInteractionSessionId = null;
+    modelInteractionGeneration = 0;
+    stopModelInteraction = null;
     store = {
         getSnapshot: () => this.current,
         subscribe: (listener) => {
@@ -36,7 +58,7 @@ export class ProfilesController {
         refreshCatalog: () => this.refreshCatalog(), refreshSession: () => this.refreshSession(),
         chooseSessionProfile: (id) => { if (!this.disposed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty)
             this.publish({ sessionChoice: id, sessionNotice: null }); },
-        applySession: () => this.selectSession(false), resetSession: () => this.selectSession(true),
+        applySession: (options) => this.selectSession(false, options), resetSession: () => this.selectSession(true),
         setFieldInvalid: (field, invalid) => {
             if (this.disposed)
                 return;
@@ -50,7 +72,54 @@ export class ProfilesController {
     constructor(remote) {
         this.remote = remote;
     }
-    dispose() { this.disposed = true; this.generation += 1; this.sessionGeneration += 1; this.catalogGeneration += 1; this.catalogRemote = null; this.listeners.clear(); }
+    dispose() { this.disposed = true; this.generation += 1; this.sessionGeneration += 1; this.catalogGeneration += 1; this.modelSelectorGeneration += 1; this.modelSelectionGeneration += 1; this.stopModelSelection?.(); this.stopModelEvents?.(); this.stopModelInteraction?.(); this.stopModelSelection = null; this.stopModelEvents = null; this.stopModelInteraction = null; this.modelSelectionSource = null; this.modelEvents = null; this.modelInteraction = null; this.catalogRemote = null; this.modelSelector = null; this.listeners.clear(); }
+    attachModelSelector(remote) {
+        if (this.disposed)
+            return;
+        this.modelSelectorGeneration += 1;
+        this.modelSelector = remote;
+    }
+    attachModelSelectionSource(sessionId, source) {
+        if (this.disposed || (sessionId === this.modelSelectionSessionId && source === this.modelSelectionSource))
+            return;
+        this.modelSelectionGeneration += 1;
+        this.stopModelSelection?.();
+        this.modelSelectionSessionId = sessionId;
+        this.modelSelectionSource = source;
+        this.stopModelSelection = source?.subscribe(() => { this.modelSelectionGeneration += 1; }) ?? null;
+    }
+    attachModelEventSource(sessionId, source) {
+        if (this.disposed || (sessionId === this.modelEventsSessionId && source === this.modelEvents))
+            return;
+        this.modelEventsGeneration += 1;
+        this.stopModelEvents?.();
+        this.modelEventsSessionId = sessionId;
+        this.modelEvents = source;
+        this.modelEventsWatermark = source === null ? -1 : modelSelectionWatermark(source.getSnapshot());
+        this.stopModelEvents = source?.subscribe(() => {
+            const window = source.getSnapshot(), change = window.change;
+            if (change.kind === "settle-assistant")
+                return;
+            let watermark = change.kind === "replace" ? -1 : this.modelEventsWatermark;
+            for (const entry of change.entries)
+                if (entry.type === "event" && entry.event.type === "model/selection")
+                    watermark = Math.max(watermark, Number(entry.event.seq));
+            if (watermark !== this.modelEventsWatermark) {
+                this.modelEventsWatermark = watermark;
+                this.modelEventsGeneration += 1;
+            }
+        }) ?? null;
+    }
+    attachModelInteractionSource(sessionId, source) {
+        if (this.disposed || (sessionId === this.modelInteractionSessionId && source === this.modelInteraction))
+            return;
+        this.modelInteractionGeneration += 1;
+        this.stopModelInteraction?.();
+        this.modelInteractionSessionId = sessionId;
+        this.modelInteraction = source;
+        this.stopModelInteraction = source?.subscribe(() => { if (source.getSnapshot().status === "selecting")
+            this.modelInteractionGeneration += 1; }) ?? null;
+    }
     attachCatalog(remote) {
         if (this.disposed)
             return;
@@ -64,6 +133,12 @@ export class ProfilesController {
         if (this.disposed || id === this.current.currentSessionId)
             return;
         this.sessionGeneration += 1;
+        if (id !== this.modelSelectionSessionId)
+            this.attachModelSelectionSource(null, null);
+        if (id !== this.modelEventsSessionId)
+            this.attachModelEventSource(null, null);
+        if (id !== this.modelInteractionSessionId)
+            this.attachModelInteractionSource(null, null);
         this.publish({ currentSessionId: id, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null });
         if (id !== null)
             void this.refreshSession();
@@ -110,7 +185,7 @@ export class ProfilesController {
                 this.publish({ sessionBusy: null });
         }
     }
-    async selectSession(reset) {
+    async selectSession(reset, options) {
         const { currentSessionId: id, session, sessionChoice, snapshot } = this.current;
         if (this.disposed || id === null || session === null || !session.switchAllowed || this.current.sessionBusy !== null
             || this.current.busy !== null || this.current.dirty || this.current.pendingEditor !== null)
@@ -120,7 +195,16 @@ export class ProfilesController {
         if (selectedId !== null && revision == null)
             return;
         const generation = ++this.sessionGeneration;
+        const useProfileModel = !reset && options?.useProfileModel === true;
+        const selector = this.modelSelector, selectorGeneration = this.modelSelectorGeneration;
+        const modelSource = this.modelSelectionSource, modelGeneration = this.modelSelectionGeneration;
+        const modelSnapshot = modelSource?.getSnapshot();
+        const eventSource = this.modelEvents, eventGeneration = this.modelEventsGeneration;
+        const eventWatermark = eventSource === null ? -1 : modelSelectionWatermark(eventSource.getSnapshot());
+        const interaction = this.modelInteraction, interactionGeneration = this.modelInteractionGeneration;
+        const pendingNativeChoice = interaction?.getSnapshot().status === "selecting";
         const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
+        const selectorLive = () => live() && selector !== null && selector === this.modelSelector && selectorGeneration === this.modelSelectorGeneration;
         this.publish({ sessionBusy: reset ? "reset" : "apply", sessionIssue: null, sessionNotice: null });
         try {
             const accepted = await this.unwrap(this.remote.selectSession(id, {
@@ -129,8 +213,53 @@ export class ProfilesController {
             }));
             if (accepted.sessionId !== id)
                 throw { kind: "assembly", code: "unavailable" };
-            if (live())
-                this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: reset ? "reset" : "applied" });
+            if (!live())
+                return;
+            this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
+            if (!useProfileModel || !live())
+                return;
+            if (accepted.profileModel === undefined) {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-unconfigured", source: "profile-model" } });
+                return;
+            }
+            if (!selectorLive()) {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
+                return;
+            }
+            if (modelSource === null || modelSnapshot === undefined || this.modelSelectionSessionId !== id || modelSource !== this.modelSelectionSource || modelSource.getSnapshot() === undefined) {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-observation-unavailable", source: "profile-model" } });
+                return;
+            }
+            // Projection fences cover observed view changes, including a frame whose
+            // notification has not fired. The raw sequence fence below covers deduped intent.
+            if (modelGeneration !== this.modelSelectionGeneration || !Object.is(modelSnapshot, modelSource.getSnapshot())) {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-choice-changed", source: "profile-model" } });
+                return;
+            }
+            if (eventSource === null || eventSource !== this.modelEvents || this.modelEventsSessionId !== id
+                || interaction === null || interaction !== this.modelInteraction || this.modelInteractionSessionId !== id) {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-observation-unavailable", source: "profile-model" } });
+                return;
+            }
+            if (eventGeneration !== this.modelEventsGeneration || eventWatermark !== modelSelectionWatermark(eventSource.getSnapshot())
+                || interactionGeneration !== this.modelInteractionGeneration || pendingNativeChoice || interaction.getSnapshot().status === "selecting") {
+                this.publish({ sessionIssue: { kind: "assembly", code: "model-choice-changed", source: "profile-model" } });
+                return;
+            }
+            try {
+                // The accepted DTO and current native view have the same validated ID;
+                // native strict codecs remain authoritative for its branded wire type.
+                await this.unwrap(selector.selectModel({ sessionId: id, ...accepted.profileModel }));
+                // Never echo the returned model locally: native projections own the
+                // actual picker, and a later native Models-tab selection must win.
+                if (live())
+                    this.publish(selectorLive() && modelSource === this.modelSelectionSource && this.modelSelectionSessionId === id ? { sessionNotice: "applied-with-model" }
+                        : { sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
+            }
+            catch {
+                if (live())
+                    this.publish({ sessionIssue: { kind: "assembly", code: selectorLive() ? "model-selection-failed" : "model-service-unavailable", source: "profile-model" } });
+            }
         }
         catch (error) {
             if (live())

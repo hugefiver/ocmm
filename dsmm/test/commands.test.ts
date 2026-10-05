@@ -146,7 +146,9 @@ test("registered status command reads live settings and has no status-only sessi
   assert.equal(snapshot.mode.active, true);
   assert.equal(snapshot.effectiveSettings.defaultActive, true);
   assert.equal(snapshot.effectiveSettings.deepseekV4ProCalibration, "strict");
-  assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 2);
+  assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
+  assert.equal(snapshot.effectiveSettings.runtimeRecovery.fallbackRoutes.length, 2, "declared profile routes remain available without implying root switches");
+  assert.equal(snapshot.calibration.action, "native-owned");
   assert.deepEqual(snapshot.runtimeRecovery.idleContinuation, { enabled: true, maxContinuations: 7 });
   assert.deepEqual({ appended: appended.length, steered: steered.length, events: events.length }, jsonBaseline);
   assert.equal(settingsCalls, 2);

@@ -136,22 +136,23 @@ function rolePolicy(value) {
         switches: integer(item.switches, "switches", 10),
         totalDelayMs: integer(item.totalDelayMs, "totalDelayMs", 120000),
         ...optional(item, "role", role),
-        ...optional(item, "route", (input) => {
-            const route = object(input, ["provider", "model"], ["reasoningEffort"]);
-            const provider = routeText(route.provider, "provider", 128);
-            const model = routeText(route.model, "model", 512);
-            if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://"))
-                fail("route");
-            return { provider, model, ...optional(route, "reasoningEffort", (value) => routeText(value, "reasoningEffort", 64)) };
-        }),
+        ...optional(item, "route", modelRoute),
     };
+}
+function modelRoute(value) {
+    const route = object(value, ["provider", "model"], ["reasoningEffort"]);
+    const provider = routeText(route.provider, "provider", 128);
+    const model = routeText(route.model, "model", 512);
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://"))
+        fail("route");
+    return { provider, model, ...optional(route, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
 }
 function selectionState(value) {
     const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
     return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value) {
-    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy"]);
+    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel"]);
     if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope))
         fail("scope");
     return {
@@ -164,6 +165,7 @@ function sessionSnapshot(value) {
             return input;
         }),
         ...optional(item, "rolePolicy", rolePolicy),
+        ...optional(item, "profileModel", modelRoute),
     };
 }
 function saveRequest(value) {

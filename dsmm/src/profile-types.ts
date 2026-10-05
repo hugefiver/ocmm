@@ -83,6 +83,8 @@ export interface SessionProfileSnapshot {
   switchAllowed: boolean;
   switchUnavailableReason?: "busy" | "maintenance" | "disposed" | "not-owned" | "unavailable";
   rolePolicy?: DsmmRoleRuntimeState;
+  /** Declared profile primary for the current ordinary root role, not an applied native selection. */
+  profileModel?: DsmmModelRoute;
 }
 
 export interface SessionProfileSelectRequest extends ProfileSelectRequest {

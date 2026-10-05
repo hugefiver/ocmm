@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import type { DshAgent, DshSessionEvent } from "../lib/dsh-types.js";
+import type { DsmmRoleId } from "../lib/roles.js";
 import {
   DSMM_STATUS_VERSION,
   createDsmmStatusSnapshot,
@@ -13,6 +15,8 @@ import type { DsmmSettings } from "../lib/settings.js";
 interface AgentOptions {
   events?: DshSessionEvent[];
   headerPreset?: string;
+  origin?: "subagent";
+  descriptorRole?: DsmmRoleId;
   requestHeader?: NonNullable<DshAgent["session"]["requestHeader"]>;
   provider?: string;
   model?: string;
@@ -26,12 +30,19 @@ interface AgentHarness {
 function createAgent(options: AgentOptions = {}): AgentHarness {
   let appendCount = 0;
   const requestHeader = options.requestHeader;
+  const events = [...(options.events ?? [])];
+  if (options.descriptorRole !== undefined) events.push({ type: "subagent/descriptor", data: snapshotSubagentDescriptor({
+    mode: "one-shot", provider: `dsmm-role-${options.descriptorRole.slice("dsmm-".length)}`
+  }) });
 
   return {
     agent: {
       session: {
-        events: options.events ?? [],
-        ...(options.headerPreset === undefined ? {} : { header: { agentPreset: options.headerPreset } }),
+        events,
+        ...(options.headerPreset === undefined && options.origin === undefined ? {} : { header: {
+          ...(options.headerPreset === undefined ? {} : { agentPreset: options.headerPreset }),
+          ...(options.origin === undefined ? {} : { origin: options.origin })
+        } }),
         ...(requestHeader === undefined ? {} : { requestHeader }),
         append() {
           appendCount += 1;
@@ -111,6 +122,23 @@ function createFormatterFixture(): DsmmStatusSnapshot {
     effectiveSettings: settings
   };
 }
+
+test("ordinary-root status reports native-owned model selection instead of dormant profile routing and calibration", () => {
+  const settings = resolveConfig({ deepseekV4ProCalibration: "strict", roleRouting: { "dsmm-reviewer": {
+    primary: { provider: "configured", model: "profile-primary", reasoningEffort: "max" },
+    fallbackRoutes: [{ provider: "configured", model: "profile-backup" }], strategy: "rate-limit-fallback"
+  } }, runtimeRecovery: { enabled: true, fallbackRoutes: [{ provider: "configured", model: "global-backup" }] } });
+  const { agent, appended } = createAgent({ headerPreset: "dsmm-reviewer", ...officialRoute("low") });
+  const snapshot = createDsmmStatusSnapshot({ agent, settings, modeActive: true });
+  assert.equal(snapshot.calibration.action, "native-owned"); assert.equal(snapshot.calibration.applies, false);
+  assert.equal(snapshot.calibration.policyEffort, undefined);
+  assert.equal(snapshot.rolePolicy.strategy, "startup-lock"); assert.equal(snapshot.rolePolicy.primary, undefined);
+  assert.deepEqual(snapshot.rolePolicy.fallbackRoutes, []); assert.equal(snapshot.rolePolicy.fallbackSource, "disabled");
+  assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
+  assert.equal(snapshot.route.currentReasoningEffort, "low");
+  assert.deepEqual(snapshot.effectiveSettings, settings, "declared profile configuration remains available to the explicit profile editor");
+  assert.equal(appended(), 0);
+});
 
 test("status formatter renders the exact bounded Deepwork summary with DW role labels", () => {
   const formatted = formatDsmmStatus(createFormatterFixture());
@@ -257,13 +285,13 @@ test("status snapshot reports an inactive ordinary session without a route", () 
     calibration: {
       mode: "auto",
       applies: false,
-      action: "out-of-scope"
+      action: "native-owned"
     },
-    rolePolicy: { applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
+    rolePolicy: { applies: false, fallbackRoutes: [], fallbackSource: "disabled", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
     runtimeRecovery: {
       enabled: true,
       applies: false,
-      fallbackRouteCount: 1,
+      fallbackRouteCount: 0,
       maxFallbackAttempts: 4,
       idleContinuation: {
         enabled: true,
@@ -295,7 +323,7 @@ test("status snapshot reports active generic deepwork as a non-target GPT route"
   assert.deepEqual(snapshot.calibration, {
     mode: "auto",
     applies: false,
-    action: "non-target-route"
+    action: "native-owned"
   });
 });
 
@@ -318,8 +346,8 @@ test("newest valid DSMM preset creates preset-only scope", () => {
     dsmmPreset: true,
     inScope: true
   });
-  assert.equal(snapshot.calibration.policyEffort, "max");
-  assert.equal(snapshot.calibration.action, "fill-missing");
+  assert.equal(snapshot.calibration.policyEffort, undefined);
+  assert.equal(snapshot.calibration.action, "native-owned");
 });
 
 test("request headers take complete precedence over stale agent options", () => {
@@ -342,7 +370,7 @@ test("request headers take complete precedence over stale agent options", () => 
     deepseekFlash: false,
     currentReasoningEffort: "high"
   });
-  assert.equal(selectedSnapshot.calibration.action, "preserve-explicit");
+  assert.equal(selectedSnapshot.calibration.action, "native-owned");
 
   const malformedHeader = createAgent({
     provider: "deepseek-official",
@@ -360,10 +388,10 @@ test("request headers take complete precedence over stale agent options", () => 
     deepseekV4Pro: false,
     deepseekFlash: false
   });
-  assert.equal(malformedSnapshot.calibration.action, "non-target-route");
+  assert.equal(malformedSnapshot.calibration.action, "native-owned");
 });
 
-test("status snapshot applies the complete calibration action matrix", () => {
+test("auxiliary status snapshot applies the complete calibration action matrix", () => {
   const cases: Array<{
     name: string;
     settings: DsmmSettings;
@@ -428,7 +456,7 @@ test("status snapshot applies the complete calibration action matrix", () => {
 
   for (const scenario of cases) {
     const snapshot = createDsmmStatusSnapshot({
-      agent: createAgent(scenario.agent).agent,
+      agent: createAgent({ ...scenario.agent, origin: "subagent" }).agent,
       settings: scenario.settings,
       modeActive: scenario.modeActive
     });
@@ -438,8 +466,9 @@ test("status snapshot applies the complete calibration action matrix", () => {
   }
 });
 
-test("status snapshot uses configured max reasoning presets only after role narrowing", () => {
+test("auxiliary status snapshot uses configured max reasoning presets only after role narrowing", () => {
   const reviewer = createAgent({
+    origin: "subagent", descriptorRole: "dsmm-reviewer",
     events: [{ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } }],
     ...officialRoute()
   });
@@ -487,11 +516,14 @@ test("runtime recovery summary reports configuration separately from applicabili
   assert.deepEqual(inactive.runtimeRecovery, {
     enabled: true,
     applies: false,
-    fallbackRouteCount: 2,
+    fallbackRouteCount: 0,
     maxFallbackAttempts: 7,
     idleContinuation: { enabled: true, maxContinuations: 5 }
   });
   assert.equal(active.runtimeRecovery.applies, true);
+  assert.equal(active.effectiveSettings.runtimeRecovery.fallbackRoutes.length, 2, "declared root configuration is retained separately");
+  const auxiliary = createDsmmStatusSnapshot({ agent: createAgent({ origin: "subagent" }).agent, settings, modeActive: true });
+  assert.equal(auxiliary.runtimeRecovery.fallbackRouteCount, 2, "auxiliary global fallback reporting is unchanged");
 });
 
 test("effective settings are an exhaustive defensive copy", () => {
@@ -604,7 +636,7 @@ test("status copies independent role strategy, nested retry overrides and scoped
   const runtimeState = { role: "dsmm-reviewer" as const, strategy: "startup-lock" as const,
     rateLimit: { ...settings.runtimePolicy.rateLimit, maxRetries: 1, maxSwitches: 0 },
     route: { provider: "p", model: "m", reasoningEffort: "high" }, retries: 1, rateLimitFailures: 2, switches: 0, totalDelayMs: 500 };
-  const snapshot = createDsmmStatusSnapshot({ agent: createAgent({ headerPreset: "dsmm-reviewer" }).agent, settings, modeActive: false, admission, roleRuntimeState: runtimeState });
+  const snapshot = createDsmmStatusSnapshot({ agent: createAgent({ headerPreset: "dsmm-reviewer", origin: "subagent", descriptorRole: "dsmm-reviewer" }).agent, settings, modeActive: false, admission, roleRuntimeState: runtimeState });
   assert.equal(snapshot.rolePolicy.strategy, "startup-lock");
   assert.equal(snapshot.rolePolicy.rateLimit.maxRetries, 1);
   assert.equal(snapshot.rolePolicy.rateLimit.maxSwitches, 0);

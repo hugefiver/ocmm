@@ -4,7 +4,9 @@
 
 Every enabled DSMM role in each profile independently selects `startup-lock` (default) or `rate-limit-fallback`. Optional `runtimePolicy` supplies inherited defaults; a role's `strategy` / `rateLimit` overrides only explicit fields. Different profiles can assign different strategies to the same role. No profile contains native account/auth configuration.
 
-Native preparation admits the primary or first resolvable ordered candidate without sending a sacrificial completion. Catalog listing is advisory, not account/network health. `startup-lock` then retains that exact route/effort across turns and bounded RATE_LIMIT retries. `rate-limit-fallback` may advance the ordered chain after its threshold of distinct safe RATE_LIMIT failures. Success resets consecutive counts; duplicate delivery does not count twice and exhausted chains never wrap.
+For child Agents, native preparation admits the primary or first resolvable ordered candidate without sending a sacrificial completion. Catalog listing is advisory, not account/network health. `startup-lock` then retains that exact route/effort across turns and bounded RATE_LIMIT retries. `rate-limit-fallback` may advance the ordered chain after its threshold of distinct safe RATE_LIMIT failures. Success resets consecutive counts; duplicate delivery does not count twice and exhausted chains never wrap.
+
+Ordinary top-level Agents always honor the native model tab's assembled provider/model/effort, even before a first explicit selection event. Their finite, positively no-output-safe RATE_LIMIT retries stay on that route; role/global primary and fallback chains do not automatically replace it. Roots are never legacy-calibrated. Switching a profile normally preserves the native model; only the explicit switch-and-use-profile-model action submits a native model selection and updates the picker.
 
 | Policy field | Default | Strict integer bound |
 | --- | --- | --- |

@@ -7,11 +7,11 @@ import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 // @ts-expect-error Test-only native acceptance harness, deliberately not published.
 import { runNativeRouteScenarios, NATIVE_SCENARIOS_015 } from "../scripts/profile-ui-harness-native.mjs";
 
-test("successor acceptance observes actual package-compiled native loop routes and correlated durable streams", async () => {
+test("source auxiliary policy acceptance observes actual package-compiled native child routes and correlated durable streams", async () => {
   const fixture = await nativeRoutingFixture({ defaultActive: true });
   try {
     const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-    const scenarios = await runNativeRouteScenarios(fixture.ctx, { nativeRequire: createRequire(`${packageRoot}/package.json`), packageRoot, workspace: fixture.profileDir });
+    const scenarios = await runNativeRouteScenarios(fixture.ctx, { nativeRequire: createRequire(`${packageRoot}/package.json`), packageRoot, workspace: fixture.profileDir, roleScope: "child" });
     assert.deepEqual(scenarios.map(({ name }: { name: string }) => name), NATIVE_SCENARIOS_015);
     const byName = new Map<string, any>(scenarios.map((scenario: any) => [scenario.name, scenario]));
     const models = (name: string) => byName.get(name).attempts.map(({ model }: { model: string }) => model);
@@ -23,6 +23,10 @@ test("successor acceptance observes actual package-compiled native loop routes a
     assert.deepEqual(models("unavailable-partial"), ["unavailable-partial"]);
     assert.deepEqual(models("unavailable-later"), ["unavailable-later", "unavailable-later"]);
     for (const scenario of scenarios) {
+      assert.equal(scenario.roleScope, "child", scenario.name);
+      assert.equal(scenario.nativeOrigin, "subagent", scenario.name);
+      assert.equal(scenario.nativeDescriptor.mode, "one-shot", scenario.name);
+      assert.equal(scenario.nativeDescriptor.provider, `dsmm-role-${scenario.role.slice("dsmm-".length)}`, scenario.name);
       assert.equal(scenario.downstreamAlwaysCalls, 0, scenario.name);
       assert.deepEqual(scenario.toolExecutions, [], scenario.name);
       assert.ok(scenario.attempts.length > 0, scenario.name);

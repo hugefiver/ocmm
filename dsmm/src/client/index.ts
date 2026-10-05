@@ -7,6 +7,9 @@ import type {} from "@deepseek-ai/dsh-api-session-controller/client";
 import type {} from "@deepseek-ai/dsh-api-session-controller/remote";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type {} from "@deepseek-ai/dsh-client-ui-model-selection/client";
+import type { SessionId } from "@deepseek-ai/dsh-session/types";
+import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client";
 import { TYPERT_REMOTE } from "../profile-remote.js";
 import { ProfilesController } from "./controller.js";
 import { NS, en, zh } from "./locales.js";
@@ -15,7 +18,7 @@ import { PROFILE_STYLES } from "./styles.js";
 import { SessionProfiles } from "./SessionProfiles.js";
 
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
-export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue } from "./controller.js";
+export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue, SessionApplyOptions, ProfileModelSelectorRemote } from "./controller.js";
 export { ProfilesSection } from "./ProfilesSection.js";
 export type { ProfilesSectionProps, ProfilesInjected } from "./ProfilesSection.js";
 export { NS, en, zh } from "./locales.js";
@@ -49,14 +52,34 @@ export async function apply(ctx: Context): Promise<void> {
     // make sessionless Settings depend on a Conversation/session provider.
     void profileCtx.inject(["remote.session"], (catalogCtx) => {
       controller.attachCatalog(catalogCtx.remote.session);
-      catalogCtx.effect(() => () => controller.attachCatalog(null), "dsmm: native catalog lifetime");
+      controller.attachModelSelector(catalogCtx.remote.session);
+      catalogCtx.effect(() => () => { controller.attachModelSelector(null); controller.attachCatalog(null); }, "dsmm: native catalog/selector lifetime");
     });
-    void profileCtx.inject(["uiSession"], (sessionCtx) => {
+    void profileCtx.inject(["uiSession", "sessions"], (sessionCtx) => {
       const source = sessionCtx.uiSession.adapter.current;
-      const update = () => controller.setSession(source.getSnapshot().key ?? null);
+      // This adapter compiles with both Host and Client Cordis declarations;
+      // the injected browser service has the public Client Sessions face.
+      const nativeSessions = sessionCtx.sessions as unknown as ISessions;
+      const update = () => {
+        const binding = source.getSnapshot();
+        controller.setSession(binding.key ?? null);
+        controller.attachModelSelectionSource(binding.key ?? null, binding.key === undefined ? null : binding.keyedHooks.projection?.("modelSelection") ?? null);
+        controller.attachModelEventSource(binding.key ?? null, binding.key === undefined ? null : nativeSessions.binding(binding.key as SessionId)?.eventSource ?? null);
+      };
       update();
       sessionCtx.effect(() => source.subscribe(update), "dsmm: current native session");
-      sessionCtx.effect(() => () => controller.setSession(null), "dsmm: native session withdrawal");
+      sessionCtx.effect(() => () => { controller.attachModelSelectionSource(null, null); controller.attachModelEventSource(null, null); controller.attachModelInteractionSource(null, null); controller.setSession(null); }, "dsmm: native session withdrawal");
+      void sessionCtx.inject(["modelDirectories", "remote.session"], (modelCtx) => {
+        const updateInteraction = () => {
+          const id = source.getSnapshot().key;
+          if (id === undefined || nativeSessions.binding(id as SessionId) === undefined) { controller.attachModelInteractionSource(null, null); return; }
+          try { controller.attachModelInteractionSource(id, modelCtx.modelDirectories.directoryFor(id as SessionId).store); }
+          catch { controller.attachModelInteractionSource(null, null); } // An ended native scope fails closed for the optional model stage.
+        };
+        updateInteraction();
+        modelCtx.effect(() => source.subscribe(updateInteraction), "dsmm: native model interaction binding");
+        modelCtx.effect(() => () => controller.attachModelInteractionSource(null, null), "dsmm: native model interaction withdrawal");
+      });
       sessionCtx.slots.inject("conversation.session.header.utilities", () => sessionCtx.slots.register({
         name: "conversation.session.header.utilities", id: "dsmm-session-profiles", order: 30, locale: NS,
         inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions }),

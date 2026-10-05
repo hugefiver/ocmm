@@ -12,7 +12,9 @@ export const PROFILE_STYLES = `
 .dsmm-profiles summary{cursor:pointer;color:var(--dsw-alias-label-primary);min-height:32px;line-height:32px}
 .dsmm-profiles summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 .dsmm-profiles .dsmm-advanced[open]>div{margin-top:8px}
-.dsmm-header-profiles{width:auto;max-width:760px}
+.dsmm-profiles.dsmm-header-profiles{width:auto;max-width:min(100%,max(0px,calc(100cqw - 24px)));flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px}
+.dsmm-profiles.dsmm-header-profiles select{width:240px;max-width:100%;flex:1 1 0}
+.dsmm-header-profiles span{min-width:0;max-width:100%;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles p{margin:0;overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-hint{color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles .dsmm-field{min-width:0;display:flex;flex-direction:column;gap:6px}

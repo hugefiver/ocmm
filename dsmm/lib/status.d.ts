@@ -27,7 +27,7 @@ export interface DsmmStatusSnapshot {
         mode: DeepseekCalibration;
         applies: boolean;
         policyEffort?: "off" | "low" | "high" | "max";
-        action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce" | "fixed-role-policy";
+        action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce" | "native-owned" | "fixed-role-policy";
     };
     rolePolicy: {
         role?: DsmmRoleId;

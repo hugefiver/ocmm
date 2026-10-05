@@ -203,6 +203,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       }
 
       pendingByAgent.delete(frame.agent);
+      if (frame.agent.session.header?.origin !== "subagent") return downstream;
       lock.route = { ...pending.route };
       recordAdmittedRecoveryRoute(frame, pending.route);
       return applyModelRoute(downstream, pending.route);
@@ -240,7 +241,8 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
         } else {
           lock.startupSettled = true;
           lock.rateLimits += 1;
-          switching = resolved.strategy === "rate-limit-fallback" && lock.rateLimits >= bounds.switchAfterRateLimits;
+          switching = frame.agent.session.header?.origin === "subagent"
+            && resolved.strategy === "rate-limit-fallback" && lock.rateLimits >= bounds.switchAfterRateLimits;
           if (!switching && lock.retries >= bounds.maxRetries) return undefined;
         }
         if (switching) {
