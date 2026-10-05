@@ -4,6 +4,7 @@ type Injected = ProfilesActions & {
     hooks: {
         profiles: ProfilesController["store"];
     };
+    readProfileView: ProfilesController["store"]["getSnapshot"];
 };
 export type SessionProfilesProps = InjectFace<Injected> & PropsLocale<"settings.dsmm-profiles"> & {
     sessionId?: string;
@@ -13,7 +14,7 @@ export declare function SessionScope({ state, actions, t, compact }: PropsLocale
     actions: ProfilesActions;
     compact?: boolean;
 }): import("react").JSX.Element;
-/** Additive native header contribution; never operates on a different view seat. */
+/** Root-scoped native menu; an explicitly scoped foreign occurrence still refuses. */
 export declare function SessionProfiles(props: SessionProfilesProps): import("react").JSX.Element | null;
 export {};
 //# sourceMappingURL=SessionProfiles.d.ts.map

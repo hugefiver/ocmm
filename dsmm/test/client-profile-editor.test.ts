@@ -14,6 +14,7 @@ import { DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
 import { isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ProfilesActions, ProfilesViewSnapshot } from "../lib/client/controller.js";
 import type { DsmmProfilesRemote } from "../lib/profile-remote.js";
 import type { ProfileSnapshot, SessionProfileSnapshot, SessionProfileSelectRequest } from "../lib/profile-types.js";
@@ -93,8 +94,11 @@ async function settle(controller: ProfilesController) {
   assert.equal(controller.store.getSnapshot().sessionBusy, null);
 }
 
-type HeaderInput = ProfilesActions & { sessionId?: string; useProfiles(selector: (value: ProfilesViewSnapshot) => ProfilesViewSnapshot): ProfilesViewSnapshot; t: PropsLocale<"settings.dsmm-profiles">["t"] };
+type HeaderInput = ProfilesActions & { sessionId?: string; readProfileView(): ProfilesViewSnapshot; useProfiles(selector: (value: ProfilesViewSnapshot) => ProfilesViewSnapshot): ProfilesViewSnapshot; t: PropsLocale<"settings.dsmm-profiles">["t"] };
 type HeaderComponent = (props: HeaderInput) => unknown;
+function NativeProfileMenu() { throw new Error("Tree contract only; native Menu browser behavior is verified separately"); }
+function NativeProfileButton() { throw new Error("Tree contract only; native Button is not rendered in this fixture"); }
+function NativeProfileIcon() { throw new Error("Tree contract only; native SVG is not rendered in this fixture"); }
 async function nativeHeaderComponent(): Promise<HeaderComponent> {
   const require = createRequire(import.meta.url);
   let factory: ((require: (id: string) => unknown) => { SessionProfiles: HeaderComponent }) | undefined;
@@ -106,23 +110,72 @@ async function nativeHeaderComponent(): Promise<HeaderComponent> {
   return factory((id) => {
     // JSX tree contract only, not a renderer/browser substitute. All header
     // behavior runs from the compiled production module and real controller.
-    if (id === "react") return { ...require("react"), useId: () => "header-unit" };
-    if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button() { throw new Error("The compact header must not render action buttons"); }, Input() { throw new Error("The compact header must use a native select"); } };
+    if (id === "react") return { ...require("react"), useId: () => "header-unit", useState: () => [false, () => {}], useEffect: () => {} };
+    if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: NativeProfileButton, Menu: NativeProfileMenu, IconBranchOutlineRegular: NativeProfileIcon, Input() { throw new Error("Header tree must not render an editor"); } };
     assert.equal(id, "react/jsx-runtime");
     return require(id);
   }).SessionProfiles;
 }
 function headerTree(component: HeaderComponent, controller: ProfilesController, id = controller.store.getSnapshot().currentSessionId): unknown {
-  return component({ ...controller.actions, sessionId: id ?? undefined, useProfiles: (select) => select(controller.store.getSnapshot()), t: translate });
+  return component({ ...controller.actions, readProfileView: controller.store.getSnapshot, sessionId: id ?? undefined, useProfiles: (select) => select(controller.store.getSnapshot()), t: translate });
 }
 function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
   if (Array.isArray(tree)) return tree.flatMap(elements);
   if (!isValidElement<Record<string, unknown>>(tree)) return [];
-  return [tree, ...elements(tree.props.children)];
+  return [tree, ...elements(tree.props.children), ...elements(tree.props.anchor), ...elements(tree.props.icon)];
 }
-function headerSelect(tree: unknown) {
-  const select = elements(tree).find((element) => element.type === "select"); assert.ok(select);
-  return select as ReactElement<{ value: string; disabled: boolean; "aria-label": string; onChange(event: { currentTarget: { value: string } }): void }>;
+
+test("profile control is an icon-only native portaled menu with no standalone visible label or status", async () => {
+  assert.match(PROFILE_STYLES, /\.dsmm-profile-menu \[role=presentation\]\{[^}]*font:inherit;/u);
+  const component = await nativeHeaderComponent(), f = fixture();
+  await f.controller.refresh(); f.controller.setSession("native-menu-root"); await settle(f.controller);
+  const nodes = elements(headerTree(component, f.controller));
+  const menu = nodes.find((node) => node.type === NativeProfileMenu);
+  assert.ok(menu, "released labeled select must be replaced by the actual native Menu primitive");
+  assert.equal(menu.props.portal, true); assert.equal(menu.props.autoFocus, true);
+  assert.equal(nodes.some((node) => ["label", "select", "p", "details", "summary"].includes(String(node.type))), false);
+  const trigger = nodes.find((node) => node.type === NativeProfileButton); assert.ok(trigger);
+  assert.equal(trigger.props.children, undefined); assert.equal(trigger.props["aria-label"], "Current-session profile (header)");
+  assert.ok(nodes.some((node) => node.type === NativeProfileIcon));
+  f.controller.dispose();
+});
+
+test("true sessionless welcome keeps the profile control inspectable without enabling a mutation", async () => {
+  const component = await nativeHeaderComponent(), f = fixture(); await f.controller.refresh();
+  const tree = component({ ...f.controller.actions, readProfileView: f.controller.store.getSnapshot, sessionId: undefined, useProfiles: (select) => select(f.controller.store.getSnapshot()), t: translate });
+  assert.notEqual(tree, null, "undefined native identity and null controller identity are the same honest sessionless state");
+  const menu = elements(tree).find((node) => node.type === NativeProfileMenu); assert.ok(menu);
+  const entries = menu.props.items as MenuEntry[];
+  assert.ok(entries.some((entry) => "type" in entry && entry.type === "label" && entry.id === "@status" && entry.text === en.noSession));
+  assert.ok(entries.filter((entry) => !("type" in entry)).every((entry) => "disabled" in entry && entry.disabled));
+  assert.equal(f.controller.store.getSnapshot().currentSessionId, null); assert.deepEqual(f.selections, []);
+  f.controller.dispose();
+});
+
+test("the same root menu enables on an owned blank binding and rejects a retained sessionless action", async () => {
+  const component = await nativeHeaderComponent(), f = fixture(); await f.controller.refresh();
+  const props: HeaderInput = { ...f.controller.actions, readProfileView: f.controller.store.getSnapshot, useProfiles: (select) => select(f.controller.store.getSnapshot()), t: translate };
+  const sessionless = headerMenu(component(props));
+  f.controller.setSession("owned-native-blank"); await settle(f.controller);
+  const blank = component(props); assert.notEqual(blank, null);
+  assert.equal(menuRowDisabled(blank), false, "root placement needs no session-only header prop to follow a real current binding");
+  sessionless.props.onSelect("p"); await settle(f.controller);
+  assert.equal(f.selections.length, 0, "stale sessionless menu must not act after a new view binds");
+  headerMenu(blank).props.onSelect("p"); await settle(f.controller);
+  assert.equal(f.selections.length, 1); assert.equal(f.selections[0].sessionId, "owned-native-blank");
+  f.controller.dispose();
+});
+function headerMenu(tree: unknown) {
+  const menu = elements(tree).find((element) => element.type === NativeProfileMenu); assert.ok(menu);
+  return menu as ReactElement<{ selectedId: string; items: MenuEntry[]; onSelect(id: string): void }>;
+}
+function menuRowDisabled(tree: unknown, id = "p"): boolean {
+  const entry = headerMenu(tree).props.items.find((entry) => entry.id === id && !("type" in entry)); assert.ok(entry);
+  return "disabled" in entry && entry.disabled === true;
+}
+function menuFeedback(tree: unknown): string {
+  const entry = headerMenu(tree).props.items.find((entry) => entry.id === "@status");
+  return entry !== undefined && "type" in entry && entry.type === "label" ? entry.text : "";
 }
 
 test("structured path editing preserves unrelated JSONC and explicit inheritance/empty-chain semantics", () => {
@@ -228,30 +281,28 @@ test("old session DTO labels remain honest when exact admitted identity is absen
   assert.ok(sessionProfileLabels(explicit, translate).admitted.includes("pinned-old (revision aaaaaaaaaaaa)"));
 });
 
-test("compiled header exposes one keyboard-named dropdown and no Settings disclosure/action paragraphs", async () => {
+test("native profile menu retains admitted unavailable identity without standalone profile text", async () => {
   const component = await nativeHeaderComponent();
   const admitted = { ...session("header-root"), admittedSelection: { selectedId: "missing-pinned", appliedRevision: revision, selectionRevision: revision } };
   const f = fixture({ describeSession: async () => success(admitted) });
   await f.controller.refresh(); f.controller.setSession(admitted.sessionId); await settle(f.controller);
   const tree = headerTree(component, f.controller);
   const nodes = elements(tree);
-  assert.equal(nodes.filter((node) => node.type === "select").length, 1);
-  assert.equal(nodes.filter((node) => ["button", "details", "summary", "p"].includes(String(node.type))).length, 0);
-  const select = headerSelect(tree);
-  assert.equal(select.props["aria-label"], "Current-session profile (header)");
-  assert.equal(select.props.value, "missing-pinned", "an absent sidecar must not mislabel the admitted profile as baseline");
-  const retained = nodes.find((node) => node.type === "option" && node.props.value === "missing-pinned");
-  assert.ok(retained); assert.equal(retained.props.disabled, true);
+  assert.equal(nodes.filter((node) => node.type === NativeProfileMenu).length, 1);
+  assert.equal(nodes.filter((node) => ["label", "select", "details", "summary", "p"].includes(String(node.type))).length, 0);
+  const menu = headerMenu(tree);
+  assert.equal(menu.props.selectedId, "missing-pinned", "an absent sidecar must not mislabel the admitted profile as baseline");
+  assert.equal(menuRowDisabled(tree, "missing-pinned"), true);
   assert.deepEqual(f.selections, []);
   f.controller.dispose();
 });
 
-test("header dropdown immediately applies with existing CAS, then displays accepted admission without global mutation", async () => {
+test("native menu immediately applies with existing CAS, then displays accepted admission without global mutation", async () => {
   const component = await nativeHeaderComponent();
   const f = fixture(); await f.controller.refresh(); f.controller.setSession("header-root"); await settle(f.controller);
-  headerSelect(headerTree(component, f.controller)).props.onChange({ currentTarget: { value: "p" } }); await settle(f.controller);
+  headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
   assert.deepEqual(f.selections, [{ sessionId: "header-root", id: "p", expectedRevision: revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "epoch-1" }]);
-  assert.equal(headerSelect(headerTree(component, f.controller)).props.value, "p");
+  assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p");
   assert.equal(f.calls.includes("select"), false);
   f.controller.dispose();
 });
@@ -261,46 +312,80 @@ test("header refusal retains admitted selection and dirty drafts disable selecti
   const admitted = { ...session("header-root"), admittedSelection: { selectedId: "old-profile", appliedRevision: revision, selectionRevision: revision } };
   const f = fixture({ describeSession: async () => success(admitted), selectSession: async () => ({ ok: false, error: new RemoteError("dsmm-profiles/refused", "refused", { code: "conflict", message: "Epoch changed" }) }) });
   await f.controller.refresh(); f.controller.setSession(admitted.sessionId); await settle(f.controller);
-  headerSelect(headerTree(component, f.controller)).props.onChange({ currentTarget: { value: "p" } }); await settle(f.controller);
+  headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
   const refused = headerTree(component, f.controller);
-  assert.equal(headerSelect(refused).props.value, "old-profile");
+  assert.equal(headerMenu(refused).props.selectedId, "old-profile");
+  assert.equal(menuFeedback(refused), en.headerConflict);
   assert.ok(elements(refused).some((node) => node.type === "span" && node.props.role === "alert"));
   await f.controller.open("p"); f.controller.actions.editPath(["label"], "Keep dirty header draft");
   const draft = f.controller.store.getSnapshot().editor!.content;
-  const dirty = headerTree(component, f.controller); assert.equal(headerSelect(dirty).props.disabled, true);
-  headerSelect(dirty).props.onChange({ currentTarget: { value: "" } }); await settle(f.controller);
+  const dirty = headerTree(component, f.controller); assert.equal(menuRowDisabled(dirty), true);
+  headerMenu(dirty).props.onSelect(""); await settle(f.controller);
   assert.equal(f.controller.store.getSnapshot().editor!.content, draft);
   assert.equal(f.controller.store.getSnapshot().session!.admissionEpoch, "epoch-1");
   f.controller.dispose();
+});
+
+test("refused activation exposes only its canonical code and configuration field with an in-menu recovery hint", async () => {
+  const component = await nativeHeaderComponent();
+  const field = "settings.roleRouting.dsmm-doc-search.primary";
+  const f = fixture({ selectSession: async () => ({ ok: false, error: new RemoteError("dsmm-profiles/refused", "PRIVATE_PROVIDER_TOKEN must not be rendered", { code: "activation", field, message: "PRIVATE_PROVIDER_TOKEN must not be rendered" }) }) });
+  await f.controller.refresh(); f.controller.setSession("activation-refused"); await settle(f.controller);
+  headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
+  const menu = headerMenu(headerTree(component, f.controller));
+  const diagnostics = menu.props.items.filter((entry) => "type" in entry && entry.type === "label").map((entry) => "text" in entry ? entry.text : "").join(" ");
+  assert.ok(diagnostics.includes("activation"), "generic refusal copy currently hides the actionable refusal code");
+  assert.ok(diagnostics.includes(field), "canonical configuration fields must remain actionable");
+  assert.ok(diagnostics.includes("Refresh") && diagnostics.includes("retry"));
+  assert.equal(diagnostics.includes("PRIVATE_PROVIDER_TOKEN"), false);
+  assert.equal(f.controller.store.getSnapshot().session!.admissionEpoch, "epoch-1");
+  f.controller.dispose();
+});
+
+test("refusal menu never echoes raw messages, filesystem paths or credential-shaped fields", async () => {
+  const component = await nativeHeaderComponent();
+  for (const field of ["C:\\private\\PRIVATE_PATH", "../../PRIVATE_PATH", "settings.roleRouting.dsmm-doc-search.primary?token=PRIVATE_TOKEN", "settings.roleRouting.custom-secret.primary"]) {
+    const f = fixture({ selectSession: async () => ({ ok: false, error: new RemoteError("dsmm-profiles/refused", "PRIVATE_MESSAGE", { code: "activation", field, message: "PRIVATE_MESSAGE" }) }) });
+    await f.controller.refresh(); f.controller.setSession("private-refusal"); await settle(f.controller);
+    headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
+    const diagnostics = JSON.stringify(headerMenu(headerTree(component, f.controller)).props.items);
+    assert.ok(diagnostics.includes("activation"));
+    assert.equal(diagnostics.includes(field), false); assert.equal(/PRIVATE_|custom-secret/u.test(diagnostics), false);
+    f.controller.dispose();
+  }
 });
 
 test("header distinguishes unknown captured defaults from explicit baseline and fences old-view response", async () => {
   const component = await nativeHeaderComponent(); const pending = deferred<RemoteResult<SessionProfileSnapshot>>();
   const baseline = fixture({ describeSession: async (id) => success({ ...session(id), scope: "deployment-baseline", admittedSelection: { selectedId: null, appliedRevision: null, selectionRevision: revision } }) });
   await baseline.controller.refresh(); baseline.controller.setSession("explicit-baseline"); await settle(baseline.controller);
-  assert.equal(headerSelect(headerTree(component, baseline.controller)).props.value, "");
+  assert.equal(headerMenu(headerTree(component, baseline.controller)).props.selectedId, "");
   baseline.controller.dispose();
   const f = fixture({ selectSession: async () => pending.promise });
   await f.controller.refresh(); f.controller.setSession("old-header"); await settle(f.controller);
-  assert.equal(headerSelect(headerTree(component, f.controller)).props.value, "__dsmm_captured_default__");
-  headerSelect(headerTree(component, f.controller)).props.onChange({ currentTarget: { value: "p" } });
-  assert.equal(headerSelect(headerTree(component, f.controller)).props.disabled, true);
+  assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "__dsmm_captured_default__");
+  const retainedMenu = headerMenu(headerTree(component, f.controller));
+  retainedMenu.props.onSelect("p");
+  assert.equal(menuRowDisabled(headerTree(component, f.controller)), true);
   f.controller.setSession("new-header"); await settle(f.controller);
   pending.resolve(success({ ...session("old-header", "old-new-epoch"), scope: "session-override", selection: { selectedId: "p", appliedRevision: revision, selectionRevision: otherRevision } })); await setImmediate();
   assert.equal(headerTree(component, f.controller, "old-header"), null);
-  assert.equal(headerSelect(headerTree(component, f.controller)).props.value, "__dsmm_captured_default__");
+  assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "__dsmm_captured_default__");
+  const count = f.selections.length; retainedMenu.props.onSelect("p"); await settle(f.controller);
+  assert.equal(f.selections.length, count, "a retained foreign-view menu callback cannot act on the new current session");
   assert.equal(f.controller.store.getSnapshot().sessionNotice, null);
   f.controller.dispose();
 });
 
-test("header busy-session feedback disables the dropdown and existing controller refuses an apply", async () => {
+test("busy-session menu keeps its trigger inspectable, explains refusal inside and disables mutation rows", async () => {
   const component = await nativeHeaderComponent();
   const f = fixture({ describeSession: async (id) => success({ ...session(id), switchAllowed: false, switchUnavailableReason: "busy" }) });
   await f.controller.refresh(); f.controller.setSession("busy-header"); await settle(f.controller);
   const tree = headerTree(component, f.controller);
-  assert.equal(headerSelect(tree).props.disabled, true);
-  assert.ok(elements(tree).some((node) => node.type === "span" && node.props.children === "Session is busy."));
-  headerSelect(tree).props.onChange({ currentTarget: { value: "p" } }); await settle(f.controller);
+  assert.equal(menuRowDisabled(tree), true);
+  assert.equal(menuFeedback(tree), "Session is busy.");
+  const trigger = elements(tree).find((node) => node.type === NativeProfileButton); assert.ok(trigger); assert.notEqual(trigger.props.disabled, true);
+  headerMenu(tree).props.onSelect("p"); await settle(f.controller);
   assert.deepEqual(f.selections, []);
   f.controller.dispose();
 });
@@ -331,15 +416,16 @@ test("explicit switch-and-use-model group invokes native selection only after ac
   f.controller.attachModelSelector({ selectModel: async (request) => { calls.push(request); return success({ selected: request }); } });
   await f.controller.refresh(); f.controller.setSession("explicit-native"); await settle(f.controller);
   const tree = headerTree(component, f.controller);
-  const group = elements(tree).find((node) => node.type === "optgroup" && node.props.label === "Switch and use profile model"); assert.ok(group);
-  const option = elements(group).find((node) => node.type === "option" && node.props.value === "@model:p"); assert.ok(option);
-  assert.equal(isProfileId(String(option.props.value)), false, "model-action options cannot collide with any profile ID");
-  headerSelect(tree).props.onChange({ currentTarget: { value: "@model:p" } });
+  const menu = headerMenu(tree);
+  assert.ok(menu.props.items.some((entry) => "type" in entry && entry.type === "label" && entry.text === "Switch and use profile model"));
+  const option = menu.props.items.find((entry) => entry.id === "@model:p"); assert.ok(option);
+  assert.equal(isProfileId(option.id), false, "model-action options cannot collide with any profile ID");
+  menu.props.onSelect("@model:p");
   assert.deepEqual(calls, []);
   accepted.resolve(success(appliedWithModel("explicit-native"))); await settle(f.controller);
   assert.deepEqual(calls, [{ sessionId: "explicit-native", provider: "manual-provider", model: "profile-main", reasoningEffort: "exact-profile-effort" }]);
   assert.equal(f.controller.store.getSnapshot().sessionNotice, "applied-with-model");
-  assert.equal(headerSelect(headerTree(component, f.controller)).props.value, "p", "the admitted ID, never an action prefix, remains selected");
+  assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p", "the admitted ID, never an action prefix, remains selected");
   assert.equal(f.controller.store.getSnapshot().snapshot!.selectedId, null);
   f.controller.dispose();
 });
@@ -356,7 +442,7 @@ test("native model selection failure preserves the accepted profile and reports 
   assert.equal(state.sessionIssue!.message, undefined);
   assert.equal(state.snapshot!.selectedId, null);
   const component = await nativeHeaderComponent();
-  assert.ok(elements(headerTree(component, f.controller)).some((node) => node.type === "span" && node.props.children === "Profile applied; model change unconfirmed. Check Models/Settings."));
+  assert.equal(menuFeedback(headerTree(component, f.controller)), "Profile applied; model change unconfirmed. Check Models/Settings.");
   f.controller.dispose();
 });
 

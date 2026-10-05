@@ -19,6 +19,67 @@ const targetRoute = Object.freeze({ provider, model: "target", reasoningEffort: 
 const profileRoute = Object.freeze({ provider, model: "configured-default", reasoningEffort: "max" });
 const ownedProfileIds = new Set(["picker-b", "picker-no-model"]);
 
+/** Closed release contracts: a future version needs its own reviewed gate. */
+export function nativePickerContract(version) {
+  assert.ok(version === "0.1.6" || version === "0.1.7", "unsupported native picker proof version");
+  return version === "0.1.7" ? "native-menu-017" : "native-select-016";
+}
+
+export function nativePickerDiagnosticContract(version) {
+  return version === "0.1.5" ? "native-select-016" : nativePickerContract(version);
+}
+
+export function validateNativeMenuGeometry(geometry) {
+  const finite = value => assert.ok(Number.isFinite(value), "menu geometry must be numeric");
+  for (const value of [geometry.viewportWidth, geometry.viewportHeight, geometry.seat.left, geometry.seat.right]) finite(value);
+  assert.ok(geometry.viewportWidth > 0 && geometry.viewportHeight > 0);
+  assert.equal(geometry.triggerHeight, 28);
+  assert.equal(geometry.focus, true);
+  assert.equal(geometry.portaled, true);
+  const check = (element, left, right, top, bottom) => {
+    for (const key of ["left", "right", "top", "bottom", "clientWidth", "scrollWidth", "outlineExtent"]) finite(element[key]);
+    assert.equal(typeof element.focused, "boolean");
+    assert.ok(element.clientWidth >= 0 && element.scrollWidth >= 0 && element.outlineExtent >= 0);
+    const margin = element.focused ? element.outlineExtent : 0;
+    assert.ok(element.left - margin >= left - 1 && element.right + margin <= right + 1, `${element.kind} clipped horizontally`);
+    assert.ok(element.top - margin >= top - 1 && element.bottom + margin <= bottom + 1, `${element.kind} clipped vertically`);
+    assert.ok(element.scrollWidth <= element.clientWidth + 1, `${element.kind} clipped readable content`);
+  };
+  check(geometry.trigger, Math.max(0, geometry.seat.left), Math.min(geometry.viewportWidth, geometry.seat.right), 0, geometry.viewportHeight);
+  assert.ok(geometry.trigger.outlineExtent >= 2, "native keyboard trigger focus indicator is missing");
+  check(geometry.menu, 0, geometry.viewportWidth, 0, geometry.viewportHeight);
+  assert.ok(geometry.labels.length >= 3);
+  for (const label of geometry.labels) {
+    check(label, geometry.menu.left, geometry.menu.right, geometry.menu.top, geometry.menu.bottom);
+    assert.equal(label.fontSize, 14); assert.equal(label.lineHeight, 22);
+  }
+}
+
+/** DOM observations only. Native Menu remains the sole owner of the popup. */
+export function nativeMenuSnapshot(scope = window) {
+  const header = scope.document.querySelector("[data-dsmm-header-profile]");
+  const trigger = header?.querySelector("button");
+  const announcement = header?.querySelector(".dsmm-profile-announcement");
+  const popup = scope.document.querySelector(".dsmm-profile-menu[role='menu']");
+  const visibleText = [];
+  if (header) {
+    const walker = scope.document.createTreeWalker(header, scope.NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (announcement?.contains(node) || !node.textContent?.trim()) continue;
+      const range = scope.document.createRange(); range.selectNode(node);
+      if ([...range.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) visibleText.push(node.textContent.trim());
+    }
+  }
+  return { headers: header ? [{ selects: header.querySelectorAll("select").length, buttons: header.querySelectorAll("button").length,
+    visibleText: visibleText.join(" "), busy: header.getAttribute("aria-busy"), triggerName: trigger?.getAttribute("aria-label"), triggerText: trigger?.textContent?.trim(),
+    iconCount: trigger?.querySelectorAll("svg").length, triggerDisabled: trigger?.disabled, expanded: trigger?.getAttribute("aria-expanded"),
+    announcement: announcement?.textContent?.trim(), announcementRole: announcement?.getAttribute("role"), announcementHidden: announcement ? scope.getComputedStyle(announcement).clipPath !== "none" || scope.getComputedStyle(announcement).clip !== "auto" || announcement.getBoundingClientRect().width <= 1 : false }] : [],
+    menu: popup ? { role: popup.getAttribute("role"), portaled: !header?.contains(popup) && popup.parentElement === scope.document.body,
+      text: popup.textContent?.trim(), labels: [...popup.querySelectorAll("[role='presentation']")].filter(node => !node.querySelector("[role='presentation'],button[role='menuitem']")).map(node => node.textContent?.trim()),
+      items: [...popup.querySelectorAll("button[role='menuitem']")].map(node => ({ text: node.textContent?.trim(), disabled: node.disabled, focused: scope.document.activeElement === node, checked: node.querySelector("svg") !== null })),
+      focused: popup.contains(scope.document.activeElement) } : null };
+}
+
 /** Local AFTER candidates never borrow the immutable registry BEFORE identity. */
 export function pickerArtifactOptions(args) {
   if (args.length === 0) return { kind: "published-before", url: PICKER_ARTIFACT_URL, sha256: PICKER_ARTIFACT_SHA256, lanes: ["absent", "present"], receiptName: "picker-ab-receipt.json" };
@@ -41,6 +102,7 @@ export function frozenPickerArtifactOptions({ artifact, sha256, packageVersion }
   assert.match(packageVersion, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u, "frozen picker requires a trusted stable package version");
   const [major, minor, patch] = packageVersion.split(".").map(Number);
   assert.ok(major > 0 || minor > 1 || (minor === 1 && patch >= 6), "frozen picker is a 0.1.6-or-later acceptance gate");
+  nativePickerContract(packageVersion);
   return { kind: "ci-frozen-artifact", artifact, sha256, packageVersion, lanes: ["present"], receiptName: "picker-frozen-receipt.json" };
 }
 
@@ -78,7 +140,8 @@ export function nativePickerPublicState(scope = window) {
   let directory, directoryFailure;
   try { directory = id === undefined ? undefined : root?.get("modelDirectories")?.directoryFor(id).store.getSnapshot(); }
   catch (error) { directoryFailure = String(error); }
-  const entry = root?.get("slots")?.entries("conversation.session.header.utilities").find((entry) => entry.options.id === "dsmm-session-profiles");
+  const leading = root?.get("slots")?.entries("conversation.header.leading").find((entry) => entry.options.priority === Number.MAX_SAFE_INTEGER && entry.inject?.()?.hooks?.profiles);
+  const entry = leading ?? root?.get("slots")?.entries("conversation.session.header.utilities").find((entry) => entry.options.id === "dsmm-session-profiles");
   const controller = entry?.inject?.(id)?.hooks?.profiles?.getSnapshot();
   const header = scope.document.querySelector("[data-dsmm-header-profile]");
   const ancestors = [];
@@ -92,7 +155,8 @@ export function nativePickerPublicState(scope = window) {
     projectionFactoryPresent: typeof binding?.keyedHooks?.projection === "function", projectionSourcePresent: projection !== undefined, projectionSnapshotPresent: projection?.getSnapshot() !== undefined,
     projectionSnapshot: projection?.getSnapshot(), directoryPresent: directory !== undefined, directoryStatus: directory?.status, directoryPending: directory?.pending, directoryFailure,
     selectorPresent: typeof root?.get("remote.session")?.selectModel === "function",
-    controller: controller === undefined ? null : { currentSessionId: controller.currentSessionId, sessionIssue: controller.sessionIssue, sessionBusy: controller.sessionBusy, sessionNotice: controller.sessionNotice, sessionChoice: controller.sessionChoice },
+    profileSlot: leading ? { name: "conversation.header.leading", priority: leading.options.priority, rootScoped: true } : { name: "conversation.session.header.utilities", rootScoped: false },
+    controller: controller === undefined ? null : { currentSessionId: controller.currentSessionId, sessionIssue: controller.sessionIssue, sessionBusy: controller.sessionBusy, sessionNotice: controller.sessionNotice, sessionChoice: controller.sessionChoice, dirty: controller.dirty, busy: controller.busy },
     headerAncestors: ancestors, viewportWidth: scope.innerWidth };
 }
 
@@ -140,12 +204,14 @@ export async function runPickerLane(ctx, config) {
   const gate = () => { const value = ownedGate(); heldGates.push(value); return value; };
   let lastStart;
   let profileGate, providerGate, modelGate, refuseModelAfterCommit = false, modelRefused = false;
+  let describeGate, activationRefused = false, menuCandidate = false;
   const report = { outcome: "BOUNDARY", lane: config.lane, artifactSha256: config.sha256, artifactKind: config.artifactKind, sourceIdentity: config.sourceIdentity, dsmm: config.lane === "present", nativeCalls, providerCalls: calls, steps: [], compactSteps: [],
     authentication: { signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false }, cleanup: {} };
   class PickerAdapter extends LlmAdapter {
     async listModels(routeProvider) { return [["target", "Target Model"], ["other", "Other Model"], ["configured-default", "Configured Default"]].map(([id, name]) => ({ provider: routeProvider, id, name, inputModalities: ["text"], reasoning: { efforts: ["low", "high", "max"].map((id) => ({ id: ReasoningEffortId(id), name: id })), defaultEffort: ReasoningEffortId("high") } })); }
     async resolveModel(routeProvider, model) {
       if (modelRefused && model === profileRoute.model) throw new Error("Owned fixture model became unavailable after profile CAS");
+      if (activationRefused && model === profileRoute.model) throw new Error("Owned candidate route unavailable before profile CAS; raw fixture detail is not displayable");
       return { ...(await this.listModels(routeProvider)).find(({ id }) => id === model), provider: routeProvider, id: model, name: model, inputModalities: ["text"] };
     }
     async *stream(options) {
@@ -171,11 +237,13 @@ export async function runPickerLane(ctx, config) {
     const installedManifest = JSON.parse(await readFile(join(config.packageRoot, "package.json"), "utf8"));
     assert.equal(installedManifest.name, "@dsmm/dsmm");
     if (config.artifactKind === "ci-frozen-artifact") assert.equal(installedManifest.version, config.packageVersion, "frozen picker installed a different package version");
+    menuCandidate = (config.artifactKind === "ci-frozen-artifact" ? nativePickerContract(installedManifest.version) : nativePickerDiagnosticContract(installedManifest.version)) === "native-menu-017";
+    if (menuCandidate) report.menuSteps = [];
     report.installedCandidate = { packageRoot: config.packageRoot, name: installedManifest.name, version: installedManifest.version,
       hostSha256: hash(await readFile(join(config.packageRoot, "lib", "index.js"))), clientSha256: hash(await readFile(join(config.packageRoot, "lib", "client.js"))), publicationClaimed: false };
     report.seededProfiles = [];
     for (const id of ownedProfileIds) {
-      const content = `${JSON.stringify({ version: 1, id, label: id === "picker-b" ? "Picker profile B" : "Profile without main model", settings: id === "picker-b" ? {
+      const content = `${JSON.stringify({ version: 1, id, label: id === "picker-b" ? menuCandidate ? "Picker profile B with a deliberately long readable native menu label" : "Picker profile B" : "Profile without main model", settings: id === "picker-b" ? {
         defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary: profileRoute, fallbackRoutes: [], strategy: "startup-lock" } },
       } : { defaultActive: false } }, null, 2)}\n`;
       const saved = await gateway.invoke({ namespace: "dsmmProfiles", method: "save", args: { request: { id, content, expectedRevision: null } }, peer, signal: new AbortController().signal });
@@ -208,7 +276,7 @@ export async function runPickerLane(ctx, config) {
       const scopedProfileSelection = currentCandidate && endpoint === "dsmmProfiles/selectSession";
       assert.ok(scopedProfileSelection || !/^(?:settings|directoryPicker|dsmmProfiles)\/(?:save|set|select|update|delete|remove|write|pick)/u.test(endpoint), "picker may not change deployment/account/global profile/directory settings");
       const control = new AbortController();
-      const record = { endpoint, operation, strictGateway: true, nativePeer: peer.id, result: "pending", nativeInvocationStarted: false, ...(["session/selectModel", "dsmmProfiles/selectSession"].includes(endpoint) ? { payload } : {}) };
+      const record = { endpoint, operation, strictGateway: true, nativePeer: peer.id, result: "pending", nativeInvocationStarted: false, ...(["session/selectModel", "dsmmProfiles/selectSession", "workspace/archiveSession"].includes(endpoint) ? { payload } : {}) };
       nativeCalls.push(record); pending.set(id, { control });
       try {
         if (operation === "open") {
@@ -218,6 +286,7 @@ export async function runPickerLane(ctx, config) {
         }
         const [namespace, method] = endpoint.split("/");
         const args = decodeNativePickerArgs(payload);
+        if (endpoint === "dsmmProfiles/describe" && describeGate) { const held = describeGate; describeGate = undefined; held.started = true; record.ownedReadHold = true; await held.promise; control.signal.throwIfAborted(); }
         if (scopedProfileSelection) {
           assert.ok(args.request?.id === null || ownedProfileIds.has(args.request?.id), "only declared owned fixture profiles may be selected");
           if (profileGate) { const gate = profileGate; profileGate = undefined; gate.started = true; record.ownedCarrierHold = true; await gate.promise; control.signal.throwIfAborted(); }
@@ -230,18 +299,70 @@ export async function runPickerLane(ctx, config) {
           if (refuseModelAfterCommit) { refuseModelAfterCommit = false; modelRefused = true; record.ownedFixtureModelWithdrawnAfterCommit = true; }
         }
         return { ok: true, value };
-      } catch (error) { const failure = gateway.wireStream.failure(error); record.result = failure.code; record.failure = failure.message; record.cancelled = control.signal.aborted; return { ok: false, error: failure }; }
+      } catch (error) { const failure = gateway.wireStream.failure(error); record.result = failure.code; record.failure = failure.message; if (failure.code === "dsmm-profiles/refused") record.refused = { code: failure.details?.code, ...(failure.details?.field ? { field: failure.details.field } : {}) }; record.cancelled = control.signal.aborted; return { ok: false, error: failure }; }
     });
     await page.goto(server.origin);
     await page.waitForFunction(() => window.__dsmmUiContext?.root.get("modelDirectories") && window.__dsmmUiContext.root.get("uiWorkspace") && window.__dsmmUiContext.root.get("conversation"), { timeout: 30_000 });
     report.preflight = await page.evaluate(nativeClientPreflight);
+    const menuTrigger = page.locator("[data-dsmm-header-profile] button[aria-haspopup='menu']");
+    const menuPopup = page.locator(".dsmm-profile-menu[role='menu']");
+    const openProfileMenu = async () => {
+      await menuTrigger.waitFor();
+      if (!await menuPopup.isVisible()) await menuTrigger.click();
+      await menuPopup.waitFor();
+      await page.waitForFunction(() => { const menu = document.querySelector(".dsmm-profile-menu"); return menu && getComputedStyle(menu).position === "fixed" && menu.getBoundingClientRect().left >= 0; });
+    };
+    const closeProfileMenu = async () => { if (await menuPopup.isVisible()) { await page.keyboard.press("Escape"); await menuPopup.waitFor({ state: "hidden" }); } };
+    const menuSnapshot = async () => {
+      const observed = await page.evaluate(nativeMenuSnapshot);
+      const publicNativeState = await page.evaluate(nativePickerPublicState);
+      const id = publicNativeState.currentSessionId;
+      const agent = id === undefined ? undefined : ctx.get("agents").get(id);
+      const admission = agent === undefined ? undefined : ctx.get("dsmmProfileRuntime").admission(agent);
+      const inventory = await gateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {}, peer, signal: new AbortController().signal });
+      const saved = inventory.profiles.find(profile => profile.id === admission?.selectedId);
+      return { compactHeader: observed.headers, menu: observed.menu, publicNativeState,
+        nativeProfileDisplay: { sessionId: id ?? null, admittedId: admission?.selectedId ?? null, admissionEpoch: admission?.epoch ?? null,
+          scope: admission?.scope ?? null, savedAvailable: saved !== undefined, savedLabel: saved?.label ?? null } };
+    };
+    const menuEvidence = async (phase, extra = {}) => {
+      await openProfileMenu();
+      const screenshot = `${phase}.png`;
+      const result = { phase, snapshot: await menuSnapshot(), screenshot, ...extra };
+      assert.equal(result.snapshot.compactHeader.length, 1); assert.equal(result.snapshot.compactHeader[0].selects, 0);
+      assert.equal(result.snapshot.compactHeader[0].visibleText, ""); assert.equal(result.snapshot.menu.portaled, true);
+      await page.screenshot({ path: join(config.evidenceRoot, screenshot), fullPage: true });
+      report.menuSteps.push(result); await closeProfileMenu(); return result;
+    };
+    if (menuCandidate) {
+      await page.waitForFunction(() => window.__dsmmUiContext.root.get("uiSession").adapter.current.getSnapshot().key !== undefined);
+      const archiveStart = nativeCalls.length;
+      const archivedSessionId = await page.evaluate(async () => {
+        const root = window.__dsmmUiContext.root;
+        const id = root.get("uiSession").adapter.current.getSnapshot().key;
+        if (id === undefined) throw new Error("Native initial blank Session was not retained");
+        await root.get("uiWorkspace").archiveSession(id);
+        return id;
+      });
+      await page.waitForFunction(() => {
+        const root = window.__dsmmUiContext.root;
+        const entry = root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles);
+        const state = entry?.inject().hooks.profiles.getSnapshot();
+        return root.get("uiSession").adapter.current.getSnapshot().key === undefined && state?.currentSessionId === null && state.busy === null && state.snapshot !== null;
+      });
+      await menuEvidence("menu-sessionless-readonly", { entryPoint: "public UiWorkspace.archiveSession of the owned initial blank Session; native mainView released", archivedSessionId, nativeCalls: nativeCalls.slice(archiveStart), providerRequests: calls.length });
+    }
     const snapshot = async (sessionId) => {
       const agent = ctx.get("agents").get(sessionId);
       const projections = ctx.get("sessionProjections");
       const runtime = ctx.get("dsmmProfileRuntime");
       const admission = agent && runtime ? runtime.admission(agent) : undefined;
       const catalog = await gateway.invoke({ namespace: "session", method: "modelCatalog", args: {}, peer, signal: new AbortController().signal });
-      return { displayedButtons: await page.getByRole("button").evaluateAll((buttons) => buttons.map((button) => ({ text: button.textContent?.trim(), aria: button.getAttribute("aria-label") })).filter(({ text, aria }) => /Target Model|Other Model|Configured Default|model/i.test(`${text} ${aria}`))),
+      const alreadyOpen = menuCandidate && await menuPopup.isVisible();
+      if (menuCandidate) await openProfileMenu();
+      const menuObserved = menuCandidate ? await menuSnapshot() : undefined;
+      if (menuCandidate && !alreadyOpen) await closeProfileMenu();
+      return { displayedButtons: await page.getByRole("button").evaluateAll((buttons) => buttons.map((button) => ({ text: button.textContent?.trim(), aria: button.getAttribute("aria-label") })).filter(({ text, aria }) => /Select model|Target Model|Other Model|Configured Default/i.test(`${text} ${aria}`))),
         directory: await page.evaluate((id) => window.__dsmmUiContext.root.get("modelDirectories").directoryFor(id).store.getSnapshot(), sessionId),
         catalogDefault: catalog.default, modelProjection: agent && projections ? projections.stateOf(agent.session, "modelSelection") : null,
         admission: admission ? { epoch: admission.epoch, profileId: admission.selectedId, profileRevision: admission.appliedRevision, primary: runtime.getSettings(agent).roleRouting["dsmm-orchestrator"]?.primary } : null,
@@ -253,7 +374,7 @@ export async function runPickerLane(ctx, config) {
           const binding = window.__dsmmUiContext.root.get("sessions").binding(id);
           return binding?.eventSource.getSnapshot().entries.flatMap((entry) => entry.type === "event" && entry.event.type === "model/selection" ? [{ seq: entry.event.seq, data: entry.event.data }] : []) ?? [];
         }, sessionId),
-        compactHeader: await page.locator("[data-dsmm-header-profile]").evaluateAll((headers) => headers.map((header) => ({ text: header.textContent?.trim(), html: header.outerHTML, selects: header.querySelectorAll("select").length, buttons: header.querySelectorAll("button").length, busy: header.getAttribute("aria-busy"), value: header.querySelector("select")?.value, disabled: header.querySelector("select")?.disabled }))) };
+        ...(menuCandidate ? { compactHeader: menuObserved.compactHeader, menu: menuObserved.menu, nativeProfileDisplay: menuObserved.nativeProfileDisplay } : { compactHeader: await page.locator("[data-dsmm-header-profile]").evaluateAll((headers) => headers.map((header) => ({ text: header.textContent?.trim(), html: header.outerHTML, selects: header.querySelectorAll("select").length, buttons: header.querySelectorAll("button").length, busy: header.getAttribute("aria-busy"), value: header.querySelector("select")?.value, disabled: header.querySelector("select")?.disabled }))) }) };
     };
     const newSession = async () => {
       const id = await page.evaluate(async (cwd) => {
@@ -264,6 +385,13 @@ export async function runPickerLane(ctx, config) {
         return sessionId;
       }, workspaceId);
       await page.getByRole("button", { name: /Target Model/ }).first().waitFor({ timeout: 20_000 });
+      if (menuCandidate) await page.waitForFunction(id => {
+        const root = window.__dsmmUiContext.root;
+        const entry = root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles);
+        const state = entry.inject().hooks.profiles.getSnapshot();
+        return state.currentSessionId === id && state.sessionBusy === null && state.session !== null;
+      }, id);
+      if (menuCandidate && !report.menuSteps.some(step => step.phase === "menu-retained-blank")) await menuEvidence("menu-retained-blank", { providerRequests: calls.length });
       await page.screenshot({ path: join(config.evidenceRoot, `${config.lane}-${report.steps.length}-new-session.png`), fullPage: true });
       return id;
     };
@@ -321,18 +449,34 @@ export async function runPickerLane(ctx, config) {
     report.steps.push(step);
     if (currentCandidate) {
       const header = page.locator("[data-dsmm-header-profile]");
-      const select = header.getByRole("combobox", { name: "Current-session profile (header)", exact: true });
+      const profileLabel = "Picker profile B with a deliberately long readable native menu label";
+      const profileItem = (value) => menuPopup.getByRole("menuitem", { name: value.startsWith("@model:") ? `Use profile model: ${value === "@model:picker-b" ? profileLabel : value === "@model:picker-no-model" ? "Profile without main model" : "deployment baseline"}` : value === "picker-b" ? profileLabel : value === "picker-no-model" ? "Profile without main model" : "deployment baseline", exact: true });
+      const select = menuCandidate ? {
+        waitFor: () => menuTrigger.waitFor(), focus: () => menuTrigger.focus(), hover: () => menuTrigger.hover(),
+        isDisabled: async () => { await openProfileMenu(); const disabled = await profileItem("picker-b").isDisabled(); await closeProfileMenu(); return disabled; },
+        selectOption: async (value) => { await openProfileMenu(); await profileItem(value).click(); await menuPopup.waitFor({ state: "hidden" }); },
+      } : header.getByRole("combobox", { name: "Current-session profile (header)", exact: true });
+      const feedback = () => menuCandidate ? header.locator(".dsmm-profile-announcement").textContent() : header.innerText();
       const settledHeader = async () => {
         await select.waitFor();
         await page.waitForFunction(() => document.querySelector("[data-dsmm-header-profile]")?.getAttribute("aria-busy") === "false");
       };
       await settledHeader();
-      assert.equal(await header.count(), 1); assert.equal(await header.locator("select").count(), 1); assert.equal(await header.getByRole("button").count(), 0);
-      report.compactShape = { nativeSelects: 1, additionalButtons: 0, nativeRootAndHeaderOwners: true };
+      assert.equal(await header.count(), 1); assert.equal(await header.locator("select").count(), menuCandidate ? 0 : 1); assert.equal(await header.getByRole("button").count(), menuCandidate ? 1 : 0);
+      report.compactShape = menuCandidate ? { nativeSelects: 0, iconButtons: 1, nativeMenu: true, nativeRootLeadingOwner: true } : { nativeSelects: 1, additionalButtons: 0, nativeRootAndHeaderOwners: true };
+      if (menuCandidate) await menuEvidence("menu-active");
       const normalBefore = await snapshot(sessionId);
       let rpcStart = nativeCalls.length;
-      await select.focus(); await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
-      await page.waitForFunction(() => document.querySelector("[data-dsmm-header-profile] select")?.value === "picker-b");
+      await select.focus();
+      if (menuCandidate) {
+        await page.keyboard.press("Enter"); await menuPopup.waitFor();
+        await page.keyboard.press("Home"); await page.keyboard.press("ArrowDown");
+        assert.equal(await profileItem("picker-b").evaluate(node => node === document.activeElement), true);
+        await page.keyboard.press("Enter"); await menuPopup.waitFor({ state: "hidden" });
+      } else {
+        await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
+        await page.waitForFunction(() => document.querySelector("[data-dsmm-header-profile] select")?.value === "picker-b");
+      }
       await settledHeader();
       let after = await snapshot(sessionId);
       assert.equal(after.admission.profileId, "picker-b"); assert.deepEqual(after.admission.primary, profileRoute);
@@ -342,8 +486,29 @@ export async function runPickerLane(ctx, config) {
       for (const call of normalCalls) { assert.deepEqual(route(call), targetRoute); assert.deepEqual(call.header, targetRoute); }
       report.compactSteps.push({ phase: "keyboard-normal-profile-keeps-native-model", sessionId, before: normalBefore, after, afterRequest: await snapshot(sessionId), nativeCalls: nativeCalls.slice(rpcStart), actualCalls: normalCalls });
 
+      const menuGeometry = async () => {
+        await openProfileMenu();
+        await page.keyboard.press("ArrowDown");
+        await menuTrigger.focus();
+        return await header.evaluate((element) => {
+          const trigger = element.querySelector("button"), popup = document.querySelector(".dsmm-profile-menu"), owner = element.closest("header").getBoundingClientRect();
+          const shape = (node, kind) => { const bounds = node.getBoundingClientRect(), style = getComputedStyle(node); return { kind, left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, focused: document.activeElement === node,
+            outlineExtent: style.outlineStyle === "none" ? 0 : parseFloat(style.outlineWidth) + Math.max(0, parseFloat(style.outlineOffset)), fontSize: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight) }; };
+          return { viewportWidth: innerWidth, viewportHeight: innerHeight, triggerHeight: trigger.getBoundingClientRect().height, focus: document.activeElement === trigger, portaled: popup.parentElement === document.body && !element.contains(popup), seat: { left: owner.left, right: owner.right },
+            trigger: shape(trigger, "icon-trigger"), menu: shape(popup, "native-menu"), labels: [...popup.querySelectorAll("[role='presentation']")].filter(node => !node.querySelector("[role='presentation'],button[role='menuitem']")).map(node => shape(node, "readable-label")) };
+        });
+      };
+
       const compactBreakpoints = async (phase) => { for (const width of [375, 768, 1280]) {
         await page.setViewportSize({ width, height: 900 });
+        if (menuCandidate) {
+          await menuTrigger.hover();
+          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry);
+          const observed = await menuSnapshot();
+          await page.screenshot({ path: join(config.evidenceRoot, `after-menu-${width}-${phase}.png`), fullPage: true });
+          report.compactSteps.push({ phase: `responsive-${phase}`, viewport: width, geometry, header: observed.compactHeader, menu: observed.menu, publicNativeState: observed.publicNativeState, nativeProfileDisplay: observed.nativeProfileDisplay });
+          await closeProfileMenu(); continue;
+        }
         await select.hover(); if (!await select.isDisabled()) await select.focus();
         await page.evaluate(async () => {
           let previous, stable = 0;
@@ -447,7 +612,7 @@ export async function runPickerLane(ctx, config) {
       const samePendingRpcs = nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel");
       assert.equal(samePendingRpcs.length, 1, "same-pending event watermark failed to fence delayed profile-model dispatch");
       assert.equal(decodeNativePickerArgs(samePendingRpcs[0].payload).request.model, "target");
-      assert.match(await header.innerText(), /newer native model choice kept/iu);
+      assert.match(await feedback(), /newer native model choice kept/iu);
       const samePendingCalls = await submit(sessionId, "same-pending-native-choice-during-profile-cas");
       for (const call of samePendingCalls) { assert.deepEqual(route(call), targetRoute); assert.deepEqual(call.header, targetRoute); }
       report.compactSteps.push({ phase: "same-pending-native-selection-dedup-during-profile-cas", sessionId, pendingNativeSubmission, repeatedNativeSubmission, before: samePendingBefore, afterSubmission: samePendingAfter,
@@ -468,7 +633,7 @@ export async function runPickerLane(ctx, config) {
       const preAckRpcs = nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel");
       assert.equal(preAckRpcs.length, 1, "profile dispatched over the later native pre-ack selection");
       assert.equal(preAckRpcs[0].result, "pending");
-      assert.match(await header.innerText(), /newer native model choice kept/iu);
+      assert.match(await feedback(), /newer native model choice kept/iu);
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-native-choice-preack.png"), fullPage: true });
       lagNativeGate.release();
       const lagResult = await page.evaluate(async () => { const result = await window.__dsmmOwnedLateNativeSelect; delete window.__dsmmOwnedLateNativeSelect; return result; });
@@ -494,7 +659,7 @@ export async function runPickerLane(ctx, config) {
       const prestartRpcs = nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel");
       assert.equal(prestartRpcs.length, 1, "profile overrode the native choice that was pending when CAS began");
       assert.equal(decodeNativePickerArgs(prestartRpcs[0].payload).request.model, "target");
-      assert.match(await header.innerText(), /newer native model choice kept/iu);
+      assert.match(await feedback(), /newer native model choice kept/iu);
       const prestartCalls = await submit(sessionId, "native-choice-pending-before-profile-cas");
       for (const call of prestartCalls) { assert.deepEqual(route(call), targetRoute); assert.deepEqual(call.header, targetRoute); }
       report.compactSteps.push({ phase: "native-choice-pending-before-profile-cas", sessionId, prestart, beforeCasResponse, afterRequest: await snapshot(sessionId), nativeCalls: nativeCalls.slice(rpcStart), actualCalls: prestartCalls });
@@ -504,6 +669,8 @@ export async function runPickerLane(ctx, config) {
       await until(() => runGate.started, "owned real provider request is running");
       const busyHeader = await snapshot(sessionId);
       const disabledWhileRunning = await select.isDisabled();
+      let disabledMenu;
+      if (menuCandidate && disabledWhileRunning) { await openProfileMenu(); disabledMenu = await menuSnapshot(); await closeProfileMenu(); }
       if (!disabledWhileRunning) {
         await select.selectOption("picker-no-model"); await settledHeader();
         assert.equal(ctx.get("dsmmProfileRuntime").admission(ctx.get("agents").get(sessionId)).selectedId, "picker-b", "busy native root accepted profile mutation");
@@ -511,7 +678,7 @@ export async function runPickerLane(ctx, config) {
       }
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-native-running.png"), fullPage: true });
       runGate.release(); await busyRequest;
-      report.compactSteps.push({ phase: "native-running-profile-guard", sessionId, disabledWhileRunning, before: busyHeader, after: await snapshot(sessionId), nativeCalls: nativeCalls.slice(rpcStart) });
+      report.compactSteps.push({ phase: "native-running-profile-guard", sessionId, disabledWhileRunning, ...(disabledMenu ? { disabledMenu } : {}), before: busyHeader, after: await snapshot(sessionId), nativeCalls: nativeCalls.slice(rpcStart) });
 
       rpcStart = nativeCalls.length; refuseModelAfterCommit = true;
       await select.selectOption("@model:picker-b"); await settledHeader();
@@ -519,7 +686,7 @@ export async function runPickerLane(ctx, config) {
       assert.equal(after.admission.profileId, "picker-b"); assert.deepEqual(after.directory.current, targetRoute);
       const failedSelection = nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel");
       assert.equal(failedSelection.length, 1); assert.notEqual(failedSelection[0].result, "accepted");
-      assert.match(await header.innerText(), /Profile applied.*model change unconfirmed/iu);
+      assert.match(await feedback(), /Profile applied.*model change unconfirmed/iu);
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-model-partial-failure.png"), fullPage: true });
       report.compactSteps.push({ phase: "profile-accepted-native-model-unavailable", sessionId, after, nativeCalls: nativeCalls.slice(rpcStart), fixture: "actual adapter becomes unavailable after accepted profile CAS; native selector is not replaced" });
       await compactBreakpoints("model-partial-failure");
@@ -529,7 +696,7 @@ export async function runPickerLane(ctx, config) {
       after = await snapshot(sessionId);
       assert.equal(after.admission.profileId, "picker-no-model"); assert.deepEqual(after.directory.current, targetRoute);
       assert.equal(nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel").length, 0);
-      assert.match(await header.innerText(), /Profile applied.*no main model/iu);
+      assert.match(await feedback(), /Profile applied.*no main model/iu);
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-no-profile-model.png"), fullPage: true });
       report.compactSteps.push({ phase: "profile-accepted-no-main-model", sessionId, after, nativeCalls: nativeCalls.slice(rpcStart) });
       await compactBreakpoints("no-profile-model");
@@ -539,9 +706,8 @@ export async function runPickerLane(ctx, config) {
       await select.selectOption("@model:picker-b"); await until(() => viewGate.started, "held actual profile CAS before view change");
       const oldSessionId = sessionId, beforeViewWithdrawal = await snapshot(sessionId);
       sessionId = await newSession();
-      // Native blank Sessions show Welcome, not the Conversation header. The
-      // old seat must disappear before a first real request opens the new one.
-      await header.waitFor({ state: "hidden" });
+      // 017 root leading survives Welcome; the old 016 utilities seat does not.
+      await header.waitFor({ state: menuCandidate ? "visible" : "hidden" });
       const blankPublicState = await page.evaluate(nativePickerPublicState);
       assert.equal(blankPublicState.currentSessionId, sessionId); assert.equal(blankPublicState.controller.currentSessionId, sessionId);
       viewGate.release(); await until(() => nativeCalls.slice(rpcStart).some(({ endpoint, result }) => endpoint === "dsmmProfiles/selectSession" && result !== "pending"), "old-session native CAS settles after view withdrawal");
@@ -556,10 +722,86 @@ export async function runPickerLane(ctx, config) {
       after = await snapshot(sessionId); assert.equal(after.admission.profileId, null); assert.deepEqual(after.directory.current, targetRoute);
       const newViewCalls = await submit(sessionId, "native-view-withdrawal-new-first-request");
       for (const call of newViewCalls) { assert.deepEqual(route(call), targetRoute); assert.deepEqual(call.header, targetRoute); }
-      await settledHeader(); assert.equal(await header.locator("select").count(), 1); assert.equal(await header.getByRole("button").count(), 0);
+      await settledHeader(); assert.equal(await header.locator("select").count(), menuCandidate ? 0 : 1); assert.equal(await header.getByRole("button").count(), menuCandidate ? 1 : 0);
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-view-withdrawal.png"), fullPage: true });
       report.compactSteps.push({ phase: "native-main-view-withdrawal-during-profile-cas", oldSessionId, currentSessionId: sessionId, beforeViewWithdrawal, blankPublicState, after, afterRequest: await snapshot(sessionId), nativeCalls: nativeCalls.slice(rpcStart), actualCalls: newViewCalls,
-        boundary: "public native openSession withdraws old mainView; new blank Welcome has no header until its first real user request; no service/cache/DOM replacement" });
+        boundary: menuCandidate ? "public native openSession withdraws old mainView; root native menu persists in blank Welcome; no service/cache/DOM replacement" : "public native openSession withdraws old mainView; new blank Welcome has no header until its first real user request; no service/cache/DOM replacement" });
+      if (menuCandidate) {
+        const publicAction = async (action, args = []) => page.evaluate(async ({ action, args }) => {
+          const entry = window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles);
+          const face = entry.inject();
+          if (typeof face[action] !== "function") throw new Error(`No public injected profile action ${action}`);
+          await face[action](...args);
+        }, { action, args });
+        await menuTrigger.focus(); await page.keyboard.press("Enter"); await menuPopup.waitFor();
+        const beforeArrow = await menuPopup.getByRole("menuitem").evaluateAll(items => items.findIndex(item => item === document.activeElement));
+        await page.keyboard.press("ArrowDown");
+        const afterArrow = await menuPopup.getByRole("menuitem").evaluateAll(items => items.findIndex(item => item === document.activeElement));
+        assert.notEqual(beforeArrow, afterArrow);
+        await page.keyboard.press("Escape"); await menuPopup.waitFor({ state: "hidden" });
+        const escapeFocusReturned = await menuTrigger.evaluate(node => node === document.activeElement);
+        await openProfileMenu(); await page.mouse.click(1275, 895); await menuPopup.waitFor({ state: "hidden" });
+        await select.selectOption("picker-b"); await settledHeader();
+        const selectionFocusReturned = await menuTrigger.evaluate(node => node === document.activeElement);
+        await menuEvidence("menu-keyboard-dismiss-focus", { keyboard: { openedByEnter: true, arrowMoved: beforeArrow !== afterArrow, escapeClosed: true, escapeFocusReturned, outsideClosed: true, selectionFocusReturned } });
+
+        const readGate = gate(); describeGate = readGate; rpcStart = nativeCalls.length;
+        const refreshing = publicAction("refresh"); await until(() => readGate.started, "actual native profile inventory read held");
+        await menuEvidence("menu-loading-readonly", { actualReadHeld: true, nativeCalls: nativeCalls.slice(rpcStart) });
+        readGate.release(); await refreshing;
+
+        rpcStart = nativeCalls.length; await publicAction("open", ["picker-b"]);
+        const originalDraft = await page.evaluate(() => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().editor.content);
+        const dirtyDraft = `${originalDraft}\n`;
+        await publicAction("editContent", [dirtyDraft]);
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        const draftPreserved = await page.evaluate(content => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().editor.content === content, dirtyDraft);
+        await menuEvidence("menu-dirty-readonly", { draftPreserved, nativeCalls: nativeCalls.slice(rpcStart) });
+        await publicAction("open", ["picker-no-model"]); await publicAction("discardAndOpen");
+
+        const beforeMaintenance = await snapshot(sessionId);
+        const maintenanceGate = gate();
+        const maintenance = ctx.get("agents").get(sessionId).runMaintenance(async () => { maintenanceGate.started = true; await maintenanceGate.promise; });
+        await until(() => maintenanceGate.started, "actual foreign native maintenance owns idle root");
+        rpcStart = nativeCalls.length; await select.selectOption("picker-no-model"); await settledHeader();
+        const refusedMaintenance = await snapshot(sessionId);
+        assert.equal(refusedMaintenance.admission.epoch, beforeMaintenance.admission.epoch);
+        const maintenanceStep = await menuEvidence("menu-maintenance-refusal-refresh-explicit-retry", { sessionId, beforeEpoch: beforeMaintenance.admission.epoch, refusedEpoch: refusedMaintenance.admission.epoch, refusedNativeModel: refusedMaintenance.directory.current.model });
+        maintenanceGate.release(); await maintenance;
+        const beforeRefreshCalls = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length;
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        maintenanceStep.refreshedWithoutApply = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length === beforeRefreshCalls;
+        await select.selectOption("picker-b"); await settledHeader();
+        maintenanceStep.explicitRetryAccepted = nativeCalls.slice(rpcStart).filter(call => call.endpoint === "dsmmProfiles/selectSession").at(-1)?.result === "accepted";
+        maintenanceStep.nativeCalls = nativeCalls.slice(rpcStart);
+
+        const beforeActivation = await snapshot(sessionId); activationRefused = true; rpcStart = nativeCalls.length;
+        await select.selectOption("picker-b"); await settledHeader();
+        const refusedActivation = await snapshot(sessionId);
+        assert.equal(refusedActivation.admission.epoch, beforeActivation.admission.epoch);
+        const activationStep = await menuEvidence("menu-activation-refusal-safe-field", { sessionId, beforeEpoch: beforeActivation.admission.epoch, refusedEpoch: refusedActivation.admission.epoch, refusedNativeModel: refusedActivation.directory.current.model });
+        const beforeActivationRefresh = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length;
+        activationRefused = false;
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        activationStep.refreshedWithoutApply = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length === beforeActivationRefresh;
+        activationStep.nativeCalls = nativeCalls.slice(rpcStart);
+
+        const theme = await page.evaluate(() => window.__dsmmUiContext.root.get("theme")?.getTheme());
+        report.nativeThemeObservation = theme;
+        assert.equal(theme?.preference, "system", "owned empty native theme must follow the browser media preference without a settings write");
+        for (const width of [375, 768, 1280]) for (const appearance of ["light", "dark", "reduced"]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.emulateMedia({ colorScheme: appearance === "dark" ? "dark" : "light", reducedMotion: appearance === "reduced" ? "reduce" : "no-preference" });
+          // Native system preference follows the genuine media-query event;
+          // no settings write or body/DOM/CSS substitution is necessary.
+          await page.waitForFunction(dark => document.body.hasAttribute("data-ds-dark-theme") === dark, appearance === "dark");
+          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry);
+          const observed = await menuSnapshot(); const screenshot = `menu-appearance-${width}-${appearance}.png`;
+          const appearanceObserved = await page.evaluate(appearance => appearance === "reduced" ? matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduced" : "invalid" : document.body.hasAttribute("data-ds-dark-theme") ? "dark" : "light", appearance);
+          report.menuSteps.push({ phase: "menu-appearance", viewport: width, appearance, appearanceObserved, geometry, snapshot: observed, screenshot });
+          await page.screenshot({ path: join(config.evidenceRoot, screenshot), fullPage: true }); await closeProfileMenu();
+        }
+      }
       report.limitations = ["Owned anonymous browser/native carrier, not authenticated Desktop/Web login E2E", "No Lighthouse or render-performance audit", "Settings dirty-draft/source-provider disposal branches remain covered by focused source tests, not claimed by this native picker run"];
     }
     report.outcome = "OBSERVED";
@@ -609,7 +851,7 @@ async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest,
   const workspace = join(owned, "workspace");
   await mkdir(workspace);
   const report = { artifactKind: candidate.kind, artifactSha256: candidate.sha256,
-    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: "frozen-artifact-native-picker-and-compact-profile" }
+    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: nativePickerContract(candidate.packageVersion) === "native-menu-017" ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile" }
       : candidate.sourceIdentity ? { sourceIdentity: candidate.sourceIdentity, publicationClaimed: false, proofScope: observerDiagnostic ? "observer-attachment-diagnostic-only" : "current-source-native-picker-and-compact-profile", immutableBeforeSha256: PICKER_ARTIFACT_SHA256 }
       : { artifactUrl: candidate.url }), lanes: [] };
   try {

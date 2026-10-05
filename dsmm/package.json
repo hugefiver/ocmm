@@ -1,6 +1,6 @@
 {
   "name": "@dsmm/dsmm",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "DeepSeek Harness deepwork mode bundle for ocmm-style agentic workflows.",
   "author": "Hugefiver",
   "license": "LicenseRef-AAAPL",

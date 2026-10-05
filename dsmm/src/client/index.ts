@@ -48,6 +48,12 @@ export async function apply(ctx: Context): Promise<void> {
       label: () => t("title"), locale: NS,
       inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions }),
     }, ProfilesSection));
+    // Lowest numeric priority wins in native SlotCore. This root-scoped
+    // fallback never replaces ordinary native/plugin leading navigation.
+    profileCtx.slots.inject("conversation.header.leading", () => profileCtx.slots.register({
+      name: "conversation.header.leading", priority: Number.MAX_SAFE_INTEGER, locale: NS,
+      inject: () => ({ hooks: { profiles: controller.store }, readProfileView: controller.store.getSnapshot, ...controller.actions }),
+    }, SessionProfiles));
     // Optional native services have their own lifetime. Do not await them or
     // make sessionless Settings depend on a Conversation/session provider.
     void profileCtx.inject(["remote.session"], (catalogCtx) => {
@@ -80,10 +86,6 @@ export async function apply(ctx: Context): Promise<void> {
         modelCtx.effect(() => source.subscribe(updateInteraction), "dsmm: native model interaction binding");
         modelCtx.effect(() => () => controller.attachModelInteractionSource(null, null), "dsmm: native model interaction withdrawal");
       });
-      sessionCtx.slots.inject("conversation.session.header.utilities", () => sessionCtx.slots.register({
-        name: "conversation.session.header.utilities", id: "dsmm-session-profiles", order: 30, locale: NS,
-        inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions }),
-      }, SessionProfiles));
     });
     void controller.refresh();
   });

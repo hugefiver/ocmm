@@ -65,7 +65,7 @@ async function nativeClient<T>(packageName: string, document: ReturnType<typeof 
   });
 }
 
-const SettingsShell: SlotComponent<ComposedProps<"root", string, "settings.section", undefined, object>> = (props) => props.renderSlot("settings.section", { close() {} });
+const SettingsShell: SlotComponent<ComposedProps<"root", string, "settings.section" | "conversation.header.leading", undefined, object>> = (props) => [props.renderSlot("settings.section", { close() {} }), props.renderSlot("conversation.header.leading", {})];
 
 async function fixture(sourceOverride?: string, deferUi = false) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-client-startup-"));
@@ -114,7 +114,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
     if (!deferUi) await installUi();
     const entry = client.plugin(production);
     return { host, client, production, entry, remoteFiber, calls, styles: dom.styles, installUi,
-      declareSettings: () => client.slots.register({ name: "root", children: { "settings.section": { kind: "list", scope: "root" } } }, SettingsShell),
+      declareSettings: () => client.slots.register({ name: "root", children: { "settings.section": { kind: "list", scope: "root" }, "conversation.header.leading": { kind: "single", scope: "root" } } }, SettingsShell),
       async dispose() { await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true }); },
     };
   } catch (error) {
@@ -240,6 +240,22 @@ test("production client activates after mounting the independently injected nati
     assert.equal(f.calls.length, calls, "retained actions cannot send requests after their owner disposes");
     assert.equal(face.hooks.profiles.getSnapshot(), snapshot);
     await collapseReplacement();
+  } finally { await f.dispose(); }
+});
+
+test("profile icon uses the persistent root leading slot at fallback priority and yields to foreign navigation", async () => {
+  const f = await fixture();
+  try {
+    f.declareSettings(); await f.entry.await(); await namespaceChild(f).await();
+    const leading = f.client.slots.entries("conversation.header.leading"); assert.equal(leading.length, 1);
+    assert.equal(f.client.slots.spec("conversation.header.leading")?.scope, "root");
+    assert.equal(leading[0].options.priority, Number.MAX_SAFE_INTEGER, "native lowest-numeric winner gives this entry the lowest precedence");
+    assert.deepEqual(f.client.slots.entriesOfSlot("conversation.header.leading"), leading);
+    assert.equal(f.client.slots.entries("conversation.session.header.utilities").length, 0, "there is only one profile control, not an active-only duplicate");
+    const ForeignNavigation = () => null;
+    const withdrawForeign = f.client.slots.register({ name: "conversation.header.leading", priority: 0 }, ForeignNavigation);
+    assert.equal(f.client.slots.entriesOfSlot("conversation.header.leading")[0].component, ForeignNavigation, "foreign native navigation remains the active owner");
+    withdrawForeign(); assert.equal(f.client.slots.entriesOfSlot("conversation.header.leading")[0], leading[0]);
   } finally { await f.dispose(); }
 });
 

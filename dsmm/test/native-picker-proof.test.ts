@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Source-only release verifier is deliberately not published.
-import { requiresNativePickerProof, validateNativePickerProof } from "../scripts/native-picker-proof.mjs";
+import { MENU_PHASES_017, MENU_APPEARANCES_017, requiresNativePickerProof, validateNativePickerProof } from "../scripts/native-picker-proof.mjs";
 
 const artifactSha256 = "a".repeat(64), epoch = "b".repeat(64);
 const target = { provider: "dsmm-picker-fixture", model: "target", reasoningEffort: "high" };
@@ -123,4 +123,109 @@ test("numeric geometry and model-selection sequences are not accepted through JS
   const nullGeometry = fixture(), geometry = index(nullGeometry, "responsive-hover-focus");
   replace(nullGeometry, ["lanes", 0, "compactSteps", geometry, "geometry", "root", "right"], null);
   assert.throws(() => validate(nullGeometry));
+});
+
+function iconHeader() {
+  return { selects: 0, buttons: 1, visibleText: "", triggerText: "", triggerName: "Current-session profile (header)", iconCount: 1,
+    triggerDisabled: false, busy: "false", expanded: "true", announcementHidden: true, announcementRole: "alert" };
+}
+function menuSnapshot(readonly = false, admittedId: string | null = "picker-b") {
+  const savedLabel = admittedId === "picker-b" ? "Picker profile B" : admittedId === "picker-no-model" ? "Profile without main model" : null;
+  const suffix = admittedId === null ? " — captured global default" : "";
+  const currentName = admittedId === null ? "deployment baseline" : `${savedLabel} (${admittedId})`;
+  return { compactHeader: [iconHeader()], publicNativeState: { currentSessionId: sessionId,
+    profileSlot: { name: "conversation.header.leading", priority: Number.MAX_SAFE_INTEGER, rootScoped: true }, controller: { dirty: false, busy: null } },
+    nativeProfileDisplay: { sessionId, admittedId, admissionEpoch: epoch, scope: admittedId === null ? "global-default" : "session-override", savedAvailable: admittedId !== null, savedLabel },
+    menu: { role: "menu", portaled: true, text: "Native profile menu", labels: [`Current profile: ${currentName}${suffix}`, "Switch profile — keep current model", "Switch and use profile model"],
+      items: ["deployment baseline", "Picker profile B", "Profile without main model", "deployment baseline", "Use profile model: Picker profile B", "Use profile model: Profile without main model", "Refresh profiles and current-session state"].map((text, index) => ({ text: index === 0 ? `${text}${suffix}` : text,
+        checked: index === (admittedId === null ? 0 : admittedId === "picker-b" ? 1 : 2), disabled: readonly && text !== "Refresh profiles and current-session state" })) } };
+}
+function menuGeometry(viewportWidth = 375) {
+  const shape = (kind: string, left: number, right: number, top: number, bottom: number, focused = false) => ({ kind, left, right, top, bottom,
+    clientWidth: right - left, scrollWidth: right - left, focused, outlineExtent: focused ? 4 : 0, fontSize: 14, lineHeight: 22 });
+  return { viewportWidth, viewportHeight: 900, triggerHeight: 28, focus: true, portaled: true, seat: { left: 0, right: viewportWidth },
+    trigger: shape("icon-trigger", 30, 58, 20, 48, true), menu: shape("native-menu", 20, 350, 60, 760),
+    labels: [shape("label", 30, 340, 70, 92), shape("label", 30, 340, 120, 142), shape("label", 30, 340, 220, 242)] };
+}
+function fixture017() {
+  const receipt = fixture();
+  replace(receipt, ["packageVersion"], "0.1.7"); replace(receipt, ["proofScope"], "frozen-artifact-native-picker-and-native-menu-017");
+  replace(receipt, ["lanes", 0, "installedCandidate", "version"], "0.1.7");
+  replace(receipt, ["lanes", 0, "compactShape"], { nativeSelects: 0, iconButtons: 1, nativeMenu: true, nativeRootLeadingOwner: true });
+  const convert = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    if (Object.hasOwn(value, "compactHeader")) {
+      const admission = Reflect.get(value, "admission");
+      const admittedId = admission?.profileId ?? null;
+      const observed = menuSnapshot(false, admittedId);
+      Object.assign(value, observed);
+    }
+    for (const child of Object.values(value)) convert(child);
+  };
+  convert(receipt);
+  for (const step of receipt.lanes[0].compactSteps) {
+    if (String(step.phase).startsWith("responsive-")) {
+      const observed = menuSnapshot();
+      if (step.phase === "responsive-pending-cas") { observed.compactHeader[0].busy = "true"; for (const item of observed.menu.items) item.disabled = true; }
+      Object.assign(step, { header: observed.compactHeader, menu: observed.menu, publicNativeState: observed.publicNativeState, nativeProfileDisplay: observed.nativeProfileDisplay, geometry: menuGeometry(Number(step.viewport)) });
+    }
+    if (step.phase === "native-main-view-withdrawal-during-profile-cas") step.blankPublicState = { currentSessionId: "session-new", profileSlot: menuSnapshot().publicNativeState.profileSlot };
+  }
+  const menuSteps = MENU_PHASES_017.map((phase: string) => {
+    const observed = menuSnapshot(["menu-sessionless-readonly", "menu-loading-readonly", "menu-dirty-readonly"].includes(phase));
+    const nativeCalls = [];
+    if (phase === "menu-sessionless-readonly") {
+      Reflect.deleteProperty(observed.publicNativeState, "currentSessionId");
+      Object.assign(observed.nativeProfileDisplay, { sessionId: null, admittedId: null, admissionEpoch: null, scope: null, savedAvailable: false, savedLabel: null });
+      observed.menu.labels[0] = "Current profile: Profile unavailable.";
+      for (const item of observed.menu.items) item.checked = false;
+      nativeCalls.push(rpc("workspace/archiveSession", "owned-initial-blank"));
+    }
+    if (phase === "menu-loading-readonly") Reflect.set(observed.publicNativeState.controller, "busy", "refresh");
+    if (phase === "menu-dirty-readonly") observed.publicNativeState.controller.dirty = true;
+    if (phase.includes("refusal")) {
+      const code = phase.includes("maintenance") ? "maintenance" : "activation";
+      const field = code === "activation" ? "settings.roleRouting.dsmm-orchestrator.primary" : undefined;
+      observed.menu.text = `Reason: ${code}. ${field ? `Configuration field: ${field}.` : ""} Refresh and retry.`;
+      observed.menu.labels.push(`Reason: ${code}.${field ? ` Configuration field: ${field}.` : ""}`);
+      Reflect.set(observed.publicNativeState.controller, "sessionIssue", { code, ...(field ? { field } : {}) });
+      const refused = rpc("dsmmProfiles/selectSession", sessionId, "dsmm-profiles/refused");
+      Reflect.set(refused, "refused", { code, ...(field ? { field } : {}) }); nativeCalls.push(refused);
+      if (code === "maintenance") nativeCalls.push(rpc("dsmmProfiles/selectSession"));
+    }
+    return { phase, snapshot: observed, screenshot: `${phase}.png`, nativeCalls, sessionId, archivedSessionId: "owned-initial-blank", providerRequests: 0, actualReadHeld: true, draftPreserved: true,
+      keyboard: { openedByEnter: true, arrowMoved: true, escapeClosed: true, escapeFocusReturned: true, outsideClosed: true, selectionFocusReturned: true },
+      beforeEpoch: epoch, refusedEpoch: epoch, refusedNativeModel: "target", refreshedWithoutApply: true, explicitRetryAccepted: true };
+  });
+  Reflect.set(receipt.lanes[0], "menuSteps", [...menuSteps, ...[375, 768, 1280].flatMap(viewport => MENU_APPEARANCES_017.map((appearance: string) => ({ phase: "menu-appearance", viewport, appearance, appearanceObserved: appearance, geometry: menuGeometry(viewport), snapshot: menuSnapshot(), screenshot: `menu-appearance-${viewport}-${appearance}.png` })))]);
+  return receipt;
+}
+const validate017 = (receipt: ReturnType<typeof fixture017>) => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.7" });
+
+test("trusted 017 native menu contract retains all legacy native-model safeguards and adds a closed real-menu inventory", () => {
+  assert.deepEqual(validate017(fixture017()), { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: 11, raceScenarios: 4, responsiveStates: 12, menuScenarios: 8, menuAppearances: 9 });
+  assert.throws(() => validate017(fixture()), "016 cannot be relabelled into a menu proof");
+  const relabelled = fixture(); replace(relabelled, ["packageVersion"], "0.1.7"); replace(relabelled, ["lanes", 0, "installedCandidate", "version"], "0.1.7");
+  assert.throws(() => validate017(relabelled));
+  assert.throws(() => validateNativePickerProof(fixture017(), { artifactSha256, packageVersion: "0.1.8" }), "future versions cannot bypass review by inheriting receipt flags");
+});
+test("017 rejects SELECT/header-text/old-seat/missing-menu/wrong-identity and incomplete appearance evidence", () => {
+  for (const [path, value] of [
+    [["artifactSha256"], "c".repeat(64)], [["packageVersion"], "0.1.6"], [["lanes", 0, "menuSteps"], []],
+    [["lanes", 0, "menuSteps", 0, "snapshot", "compactHeader", 0, "selects"], 1],
+    [["lanes", 0, "menuSteps", 0, "snapshot", "compactHeader", 0, "visibleText"], "Profile"],
+    [["lanes", 0, "menuSteps", 0, "snapshot", "publicNativeState", "profileSlot", "name"], "conversation.session.header.utilities"],
+    [["lanes", 0, "menuSteps", 0, "snapshot", "menu", "portaled"], false],
+    [["lanes", 0, "menuSteps", 3, "keyboard", "escapeFocusReturned"], false],
+    [["lanes", 0, "menuSteps", 8, "geometry", "menu", "right"], 475],
+    [["lanes", 0, "menuSteps", 8, "appearanceObserved"], "dark"],
+    [["lanes", 0, "menuSteps", 6, "snapshot", "menu", "labels", 3], "Reason: maintenance. C:/private/provider/secret"],
+    [["lanes", 0, "menuSteps", 7, "snapshot", "publicNativeState", "controller", "sessionIssue", "field"], "credential.apiKey"],
+    [["lanes", 0, "menuSteps", 6, "refreshedWithoutApply"], false],
+    [["lanes", 0, "menuSteps", 6, "refusedEpoch"], "c".repeat(64)],
+    [["lanes", 0, "menuSteps", 7, "nativeCalls", 0, "refused", "code"], "conflict"],
+    [["lanes", 0, "menuSteps", 1, "snapshot", "menu", "labels", 0], "Current profile: wrong-session-profile"],
+    [["lanes", 0, "menuSteps", 1, "snapshot", "menu", "items", 1, "checked"], false],
+    [["lanes", 0, "menuSteps", 1, "snapshot", "nativeProfileDisplay", "admittedId"], "wrong-profile"],
+  ] as [(string | number)[], unknown][]) { const receipt = fixture017(); replace(receipt, path, value); assert.throws(() => validate017(receipt)); }
 });

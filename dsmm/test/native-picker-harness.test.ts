@@ -6,7 +6,7 @@ import test from "node:test";
 // @ts-expect-error Owned diagnostic harnesses are not published library modules.
 import { nativePickerClosure, pickerCompositionBundle, PICKER_ENTRY_PACKAGES } from "../scripts/native-picker-browser.mjs";
 // @ts-expect-error Owned diagnostic harnesses are not published library modules.
-import { decodeNativePickerArgs, pickerArtifactOptions, frozenPickerArtifactOptions, runFrozenNativePickerAcceptance, validateNativePickerAfterStep, validateCompactHeaderGeometry, PICKER_ARTIFACT_SHA256, PICKER_ARTIFACT_URL } from "../scripts/native-picker-harness.mjs";
+import { decodeNativePickerArgs, nativePickerContract, nativePickerDiagnosticContract, pickerArtifactOptions, frozenPickerArtifactOptions, runFrozenNativePickerAcceptance, validateNativePickerAfterStep, validateCompactHeaderGeometry, validateNativeMenuGeometry, PICKER_ARTIFACT_SHA256, PICKER_ARTIFACT_URL } from "../scripts/native-picker-harness.mjs";
 
 test("picker diagnostic decodes only the native singleton wire envelope without renaming strict descriptor fields", () => {
   const args = { request: { sessionId: "owned", provider: "fixture", model: "target" } };
@@ -83,4 +83,25 @@ test("compact geometry rejects native-seat clipping even when the document and o
   assert.doesNotThrow(() => validateCompactHeaderGeometry(geometry));
   assert.throws(() => validateCompactHeaderGeometry({ ...geometry, root: { ...root, right: 475.3125, clientWidth: 388, scrollWidth: 388 }, clientWidth: 388, scrollWidth: 388 }));
   assert.throws(() => validateCompactHeaderGeometry({ ...geometry, elements: [{ ...geometry.elements[0], right: 374 }] }));
+});
+
+test("release identity selects only the exact reviewed 016 SELECT or 017 native-menu contract", () => {
+  assert.equal(nativePickerContract("0.1.6"), "native-select-016"); assert.equal(nativePickerContract("0.1.7"), "native-menu-017");
+  for (const version of ["0.1.5", "0.1.8", "0.2.0", "1.0.0", "0.1.7-beta", "0.1.07", undefined]) assert.throws(() => nativePickerContract(version));
+});
+test("historical source-after 015 diagnostics remain SELECT-only without admitting 015 or future versions to frozen CI", () => {
+  assert.equal(nativePickerDiagnosticContract("0.1.5"), "native-select-016");
+  assert.equal(nativePickerDiagnosticContract("0.1.6"), "native-select-016");
+  assert.equal(nativePickerDiagnosticContract("0.1.7"), "native-menu-017");
+  assert.throws(() => nativePickerContract("0.1.5")); assert.throws(() => nativePickerDiagnosticContract("0.1.8"));
+});
+test("menu geometry rejects portal clipping, missing keyboard focus, unreadable labels and coercible coordinates", () => {
+  const shape = { kind: "label", left: 40, right: 320, top: 90, bottom: 112, clientWidth: 280, scrollWidth: 280, focused: false, outlineExtent: 0, fontSize: 14, lineHeight: 22 };
+  const geometry = { viewportWidth: 375, viewportHeight: 900, seat: { left: 20, right: 375 }, triggerHeight: 28, focus: true, portaled: true,
+    trigger: { ...shape, kind: "trigger", left: 30, right: 58, top: 20, bottom: 48, clientWidth: 28, scrollWidth: 28, focused: true, outlineExtent: 4 },
+    menu: { ...shape, kind: "menu", left: 30, right: 330, top: 60, bottom: 760, clientWidth: 300, scrollWidth: 300 }, labels: [shape, shape, shape] };
+  assert.doesNotThrow(() => validateNativeMenuGeometry(geometry));
+  for (const mutation of [{ portaled: false }, { focus: false }, { trigger: { ...geometry.trigger, outlineExtent: 0 } },
+    { menu: { ...geometry.menu, right: 476 } }, { viewportWidth: "375" }, { labels: [{ ...shape, fontSize: 11 }, shape, shape] },
+    { labels: [{ ...shape, scrollWidth: 480 }, shape, shape] }]) assert.throws(() => validateNativeMenuGeometry({ ...geometry, ...mutation }));
 });

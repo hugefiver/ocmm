@@ -53,6 +53,9 @@ export declare const en: {
     headerProfileLabel: string;
     headerCaptured: string;
     headerSavedUnavailable: string;
+    headerCurrentProfile: string;
+    headerRefresh: string;
+    headerUseModelAction: string;
     headerLoading: string;
     headerApplying: string;
     headerApplied: string;
@@ -68,6 +71,16 @@ export declare const en: {
     headerModelUnconfirmed: string;
     headerAppliedWithModel: string;
     headerModelChoiceChanged: string;
+    headerActivationRefused: string;
+    headerSelectionRefused: string;
+    headerIssueCode: string;
+    headerIssueField: string;
+    headerRetryHint: string;
+    headerMaintenanceRefused: string;
+    headerBusyRefused: string;
+    headerCancelledRefused: string;
+    headerUnavailableRefused: string;
+    headerWaitRetryHint: string;
     noSession: string;
     sessionUnavailable: string;
     sessionBusy: string;

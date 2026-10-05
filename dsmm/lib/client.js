@@ -2226,13 +2226,16 @@ var en = {
   headerProfileLabel: "Current-session profile (header)",
   headerCaptured: "captured global default",
   headerSavedUnavailable: "saved profile unavailable",
+  headerCurrentProfile: "Current profile: {profile}",
+  headerRefresh: "Refresh profiles and current-session state",
+  headerUseModelAction: "Use profile model: {profile}",
   headerLoading: "Loading profile…",
   headerApplying: "Applying profile…",
   headerApplied: "Profile applied.",
   headerBusy: "Session is busy.",
   headerUnavailable: "Profile unavailable.",
   headerDraft: "Save or discard the draft in Settings.",
-  headerConflict: "Profile changed elsewhere. Refresh in Settings.",
+  headerConflict: "The session profile or admission changed elsewhere. Refresh current-session state before retrying.",
   headerRefused: "Profile change unconfirmed. Check Settings.",
   headerKeepModelGroup: "Switch profile — keep current model",
   headerUseModelGroup: "Switch and use profile model",
@@ -2241,6 +2244,16 @@ var en = {
   headerModelUnconfirmed: "Profile applied; model change unconfirmed. Check Models/Settings.",
   headerAppliedWithModel: "Profile and native model applied.",
   headerModelChoiceChanged: "Profile applied; newer native model choice kept.",
+  headerActivationRefused: "Profile activation was refused. Check its configuration and native model catalog.",
+  headerSelectionRefused: "The profile change could not be confirmed.",
+  headerIssueCode: "Reason: {code}.",
+  headerIssueField: "Configuration field: {field}.",
+  headerRetryHint: "Refresh profiles and current-session state, resolve the indicated issue in Settings or native Models, then retry when the session is idle.",
+  headerMaintenanceRefused: "Native maintenance owns this session. The previous profile is kept.",
+  headerBusyRefused: "The session is busy. The previous profile is kept.",
+  headerCancelledRefused: "The profile request was cancelled. Refresh current-session state before retrying; do not assume a change completed.",
+  headerUnavailableRefused: "The native session or profile service is unavailable. Reconnect and refresh before retrying.",
+  headerWaitRetryHint: "Wait for the native work or maintenance to finish, then Refresh and retry. No profile change is queued automatically.",
   noSession: "No native session is selected. Session Apply is disabled; global defaults and drafts remain editable.",
   sessionUnavailable: "The current session could not be confirmed. Refresh its state before retrying; the prior policy is kept.",
   sessionBusy: "Switching is unavailable: {reason}. The Host must reserve a truly idle ordinary session before applying.",
@@ -2374,13 +2387,16 @@ var zh = {
   headerProfileLabel: "当前会话配置档（会话栏）",
   headerCaptured: "已捕获的全局默认值",
   headerSavedUnavailable: "保存的配置档不可用",
+  headerCurrentProfile: "当前配置档：{profile}",
+  headerRefresh: "刷新配置档和当前会话状态",
+  headerUseModelAction: "使用配置档模型：{profile}",
   headerLoading: "加载配置档…",
   headerApplying: "应用配置档…",
   headerApplied: "配置档已应用。",
   headerBusy: "会话忙碌。",
   headerUnavailable: "配置档不可用。",
   headerDraft: "请在设置中保存或丢弃草稿。",
-  headerConflict: "配置档已在其他位置改变，请在设置中刷新。",
+  headerConflict: "会话配置档或准入代次已在其他位置改变，请刷新当前会话状态后重试。",
   headerRefused: "未确认配置档更改，请检查设置。",
   headerKeepModelGroup: "切换配置档 — 保留当前模型",
   headerUseModelGroup: "切换并使用配置档模型",
@@ -2389,6 +2405,16 @@ var zh = {
   headerModelUnconfirmed: "配置档已应用，模型更改未确认。请检查模型或设置页。",
   headerAppliedWithModel: "配置档和原生模型已应用。",
   headerModelChoiceChanged: "配置档已应用，已保留更新的原生模型选择。",
+  headerActivationRefused: "配置档启用被拒绝，请检查其配置和原生模型目录。",
+  headerSelectionRefused: "无法确认配置档更改。",
+  headerIssueCode: "原因：{code}。",
+  headerIssueField: "配置字段：{field}。",
+  headerRetryHint: "请刷新配置档和当前会话状态，在设置或原生模型页解决所示问题，然后在会话空闲时重试。",
+  headerMaintenanceRefused: "原生维护正在占用此会话，原配置档已保留。",
+  headerBusyRefused: "会话正在运行，原配置档已保留。",
+  headerCancelledRefused: "配置档请求已取消，请刷新当前会话状态后重试，不要假定更改已完成。",
+  headerUnavailableRefused: "原生会话或配置档服务不可用，请重新连接并刷新后重试。",
+  headerWaitRetryHint: "请等待原生运行或维护结束，然后刷新并重试。不会自动排队应用配置档。",
   noSession: "未选择原生会话。会话应用已禁用；仍可编辑全局默认值和草稿。",
   sessionUnavailable: "无法确认当前会话。重试前请刷新状态；原策略已保留。",
   sessionBusy: "暂不可切换：{reason}。Host 必须先保留真正空闲的普通会话。",
@@ -2704,6 +2730,14 @@ function sessionProfileLabels(session, t) {
 
 // src/client/SessionProfiles.tsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
+var MENU_ISSUE_CODES = /* @__PURE__ */ new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled", "model-unconfigured", "model-choice-changed", "model-service-unavailable", "model-observation-unavailable", "model-selection-failed"]);
+var MENU_ROLE_FIELD = /^(?:settings\.roleRouting\.)?dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)(?:\.(?:primary|fallbackRoutes)(?:\[[0-7]\])?(?:\.(?:provider|model|reasoningEffort))?|\.strategy|\.rateLimit(?:\.(?:maxRetries|initialDelayMs|maxDelayMs|maxTotalDelayMs|switchAfterRateLimits|maxSwitches))?)?$/u;
+var MENU_COMMON_FIELD = /^(?:version|id|label|content|sessionId|expectedRevision|expectedSelectionRevision|expectedAdmissionEpoch|settings(?:\.(?:defaultActive|roleRouting|workflow|guards|runtimeRecovery|runtimePolicy))?)$/u;
+function menuIssue(issue) {
+  const code = MENU_ISSUE_CODES.has(issue.code) ? issue.code : issue.kind === "transport" ? "transport" : "unavailable";
+  const field = issue.field;
+  return { code, ...typeof field === "string" && field.length <= 128 && (MENU_ROLE_FIELD.test(field) || MENU_COMMON_FIELD.test(field)) ? { field } : {} };
+}
 function SessionScope({ state, actions, t, compact = false }) {
   const prefix = (0, import_react2.useId)();
   const session = state.session;
@@ -2747,7 +2781,12 @@ function SessionScope({ state, actions, t, compact = false }) {
 function SessionProfiles(props) {
   const prefix = (0, import_react2.useId)();
   const state = props.useProfiles((snapshot2) => snapshot2);
-  if (props.sessionId !== state.currentSessionId) return null;
+  const id2 = state.currentSessionId;
+  const [openFor, setOpenFor] = (0, import_react2.useState)(void 0);
+  (0, import_react2.useEffect)(() => {
+    setOpenFor(void 0);
+  }, [id2]);
+  if (props.sessionId !== void 0 && props.sessionId !== id2) return null;
   const { t } = props;
   const session = state.session;
   const admission = session?.admittedSelection ?? (session?.scope === "global-default" ? void 0 : session?.selection);
@@ -2756,51 +2795,70 @@ function SessionProfiles(props) {
   const profiles = state.snapshot?.profiles ?? [];
   const currentSaved = profiles.find((profile) => profile.id === current);
   const committing = state.sessionBusy !== null;
-  const disabled = committing || state.busy !== null || state.pendingEditor !== null || state.dirty || state.invalidFields.length > 0 || session === null || !session.switchAllowed || state.snapshot === null;
+  const disabled = id2 === null || committing || state.busy !== null || state.pendingEditor !== null || state.dirty || state.invalidFields.length > 0 || session === null || !session.switchAllowed || state.snapshot === null;
   let feedback = "";
-  if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed" : state.sessionIssue.code === "conflict" ? "headerConflict" : "headerRefused");
-  else if (committing) feedback = t(state.sessionBusy === "read" ? "headerLoading" : "headerApplying");
+  if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed" : state.sessionIssue.code === "conflict" ? "headerConflict" : state.sessionIssue.code === "activation" ? "headerActivationRefused" : state.sessionIssue.code === "maintenance" ? "headerMaintenanceRefused" : state.sessionIssue.code === "busy" ? "headerBusyRefused" : state.sessionIssue.code === "cancelled" ? "headerCancelledRefused" : state.sessionIssue.code === "unavailable" || state.sessionIssue.kind === "assembly" ? "headerUnavailableRefused" : "headerSelectionRefused");
+  else if (committing || state.busy !== null) feedback = t(state.sessionBusy === "apply" || state.sessionBusy === "reset" ? "headerApplying" : "headerLoading");
   else if (state.dirty || state.invalidFields.length > 0 || state.pendingEditor !== null) feedback = t("headerDraft");
+  else if (id2 === null) feedback = t("noSession");
   else if (session === null || state.snapshot === null) feedback = t("headerUnavailable");
   else if (!session.switchAllowed) feedback = t("headerBusy");
   else if (state.sessionNotice !== null) feedback = t(state.sessionNotice === "applied-with-model" ? "headerAppliedWithModel" : "headerApplied");
   const capturedSuffix = session?.scope === "global-default" && !unknownCaptured ? ` — ${t("headerCaptured")}` : "";
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dsmm-profiles dsmm-header-profiles", "data-dsmm-header-profile": true, "aria-busy": committing, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("label", { htmlFor: `${prefix}-profile`, children: t("headerProfile") }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("select", { id: `${prefix}-profile`, "aria-label": t("headerProfileLabel"), title: t("headerModelDefaultHint"), "aria-describedby": feedback === "" ? void 0 : `${prefix}-feedback`, value: current, disabled, onChange: (event) => {
-      const value = event.currentTarget.value;
-      const useProfileModel = value.startsWith("@model:");
-      props.chooseSessionProfile((useProfileModel ? value.slice("@model:".length) : value) || null);
-      void props.applySession(useProfileModel ? { useProfileModel: true } : void 0);
-    }, children: [
-      session === null && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "__dsmm_session_unavailable__", disabled: true, children: t("headerUnavailable") }),
-      unknownCaptured && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "__dsmm_captured_default__", disabled: true, children: t("headerCaptured") }),
-      admission?.selectedId != null && currentSaved === void 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("option", { value: admission.selectedId, disabled: true, children: [
-        admission.selectedId,
-        " — ",
-        t("headerSavedUnavailable"),
-        capturedSuffix
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("optgroup", { label: t("headerKeepModelGroup"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("option", { value: "", children: [
-          t("sessionBaseline"),
-          current === "" ? capturedSuffix : ""
-        ] }),
-        profiles.map((profile) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("option", { value: profile.id, disabled: profile.revision === null || profile.error !== void 0, children: [
-          profile.label ?? profile.id,
-          profile.id === current ? capturedSuffix : "",
-          profile.error === void 0 && profile.revision !== null ? "" : ` — ${t("headerSavedUnavailable")}`
-        ] }, profile.id))
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("optgroup", { label: t("headerUseModelGroup"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "@model:", children: t("sessionBaseline") }),
-        profiles.map((profile) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("option", { value: `@model:${profile.id}`, disabled: profile.revision === null || profile.error !== void 0, children: [
-          profile.label ?? profile.id,
-          profile.error === void 0 && profile.revision !== null ? "" : ` — ${t("headerSavedUnavailable")}`
-        ] }, profile.id))
-      ] })
-    ] }),
-    feedback !== "" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { id: `${prefix}-feedback`, role: state.sessionIssue === null ? "status" : "alert", "aria-live": "polite", children: feedback })
+  const profileName = unknownCaptured ? t("headerCaptured") : currentSaved?.label === void 0 ? admission?.selectedId ?? t("sessionBaseline") : `${currentSaved.label} (${currentSaved.id})`;
+  const currentLabel = t("headerCurrentProfile", { profile: session === null ? t("headerUnavailable") : profileName + capturedSuffix });
+  const entries = [{ type: "label", id: "@current", text: currentLabel }];
+  if (id2 === null && state.snapshot !== null) entries.push({ type: "label", id: "@future", text: t("sessionFutureDefault", { profile: state.snapshot.profiles.find((profile) => profile.id === state.snapshot.selectedId)?.label ?? state.snapshot.selectedId ?? t("sessionBaseline") }) });
+  if (feedback !== "") entries.push({ type: "label", id: "@status", text: feedback });
+  const diagnostic = state.sessionIssue === null ? null : menuIssue(state.sessionIssue);
+  const diagnosticText = diagnostic === null ? "" : t("headerIssueCode", { code: diagnostic.code }) + (diagnostic.field === void 0 ? "" : ` ${t("headerIssueField", { field: diagnostic.field })}`);
+  const retryHint = t(diagnostic?.code === "maintenance" || diagnostic?.code === "busy" ? "headerWaitRetryHint" : "headerRetryHint");
+  if (diagnostic !== null) entries.push({ type: "label", id: "@diagnostic", text: diagnosticText }, { type: "label", id: "@retry", text: retryHint });
+  if (admission?.selectedId != null && currentSaved === void 0) entries.push({ id: admission.selectedId, label: `${admission.selectedId} — ${t("headerSavedUnavailable")}${capturedSuffix}`, disabled: true });
+  if (unknownCaptured) entries.push({ id: "__dsmm_captured_default__", label: t("headerCaptured"), disabled: true });
+  entries.push({ type: "separator", id: "@keep-separator" }, { type: "label", id: "@keep-heading", text: t("headerKeepModelGroup") }, { id: "", label: t("sessionBaseline") + (current === "" ? capturedSuffix : ""), disabled });
+  for (const profile of profiles) entries.push({ id: profile.id, label: (profile.label ?? profile.id) + (profile.id === current ? capturedSuffix : "") + (profile.error === void 0 && profile.revision !== null ? "" : ` — ${t("headerSavedUnavailable")}`), disabled: disabled || profile.revision === null || profile.error !== void 0 });
+  entries.push({ type: "separator", id: "@model-separator" }, { type: "label", id: "@model-heading", text: t("headerUseModelGroup") }, { type: "label", id: "@model-hint", text: t("headerModelDefaultHint") }, { id: "@model:", label: t("sessionBaseline"), disabled });
+  for (const profile of profiles) entries.push({ id: `@model:${profile.id}`, label: t("headerUseModelAction", { profile: profile.label ?? profile.id }) + (profile.error === void 0 && profile.revision !== null ? "" : ` — ${t("headerSavedUnavailable")}`), disabled: disabled || profile.revision === null || profile.error !== void 0 });
+  const open = openFor === id2;
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dsmm-header-profiles", "data-dsmm-header-profile": true, "aria-busy": committing, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      import_dsh_client_ui_primitives2.Menu,
+      {
+        open,
+        autoFocus: true,
+        portal: true,
+        align: "start",
+        className: "dsmm-profile-anchor",
+        listClassName: "dsmm-profile-menu",
+        items: entries,
+        selectedId: current,
+        footer: [{ id: "@refresh", label: t("headerRefresh"), disabled: committing || state.busy !== null }],
+        anchor: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", size: "sm", variant: "toolbar", className: "dsmm-profile-trigger", icon: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives2.IconBranchOutlineRegular, {}), "aria-label": t("headerProfileLabel"), "aria-haspopup": "menu", "aria-expanded": open, "aria-describedby": `${prefix}-feedback`, onClick: () => setOpenFor(open ? void 0 : id2) }),
+        onClose: () => setOpenFor(void 0),
+        onSelect: (value) => {
+          if (props.readProfileView().currentSessionId !== id2) return;
+          if (value === "@refresh") {
+            if (committing || state.busy !== null) return;
+            void (async () => {
+              await props.refresh();
+              if (id2 !== null && props.readProfileView().currentSessionId === id2) await props.refreshSession();
+            })();
+          } else {
+            const row = entries.find((entry) => entry.id === value && !("type" in entry));
+            if (row === void 0 || !("disabled" in row) || row.disabled) return;
+            const useProfileModel = value.startsWith("@model:");
+            props.chooseSessionProfile((useProfileModel ? value.slice("@model:".length) : value) || null);
+            void props.applySession(useProfileModel ? { useProfileModel: true } : void 0);
+          }
+          setOpenFor(void 0);
+        }
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "dsmm-profile-announcement", id: `${prefix}-feedback`, role: state.sessionIssue === null ? "status" : "alert", "aria-live": "polite", "aria-atomic": "true", children: [
+      feedback || currentLabel,
+      diagnostic === null ? "" : ` ${diagnosticText} ${retryHint}`
+    ] })
   ] });
 }
 
@@ -2967,9 +3025,14 @@ var PROFILE_STYLES = `
 .dsmm-profiles summary{cursor:pointer;color:var(--dsw-alias-label-primary);min-height:32px;line-height:32px}
 .dsmm-profiles summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 .dsmm-profiles .dsmm-advanced[open]>div{margin-top:8px}
-.dsmm-profiles.dsmm-header-profiles{width:auto;max-width:min(100%,max(0px,calc(100cqw - 24px)));flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px}
-.dsmm-profiles.dsmm-header-profiles select{width:240px;max-width:100%;flex:1 1 0}
-.dsmm-header-profiles span{min-width:0;max-width:100%;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
+.dsmm-header-profiles{display:inline-flex;align-items:center;min-width:0;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary)}
+.dsmm-header-profiles .dsmm-profile-trigger{width:28px;height:28px;min-height:28px;padding:6px;justify-content:center}
+.dsmm-profile-trigger:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.dsmm-profile-menu{font-family:var(--dsw-font-family);font-size:14px;line-height:22px;max-width:calc(100vw - 24px);color:var(--dsw-alias-label-primary)}
+.dsmm-profile-menu [role=presentation]{font:inherit;white-space:normal;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
+.dsmm-profile-menu [role=menuitem]{font:inherit}
+.dsmm-profile-menu [role=menuitem]>span{white-space:normal;overflow-wrap:anywhere}
+.dsmm-profile-announcement{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 .dsmm-profiles p{margin:0;overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-hint{color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles .dsmm-field{min-width:0;display:flex;flex-direction:column;gap:6px}
@@ -3015,6 +3078,12 @@ async function apply(ctx) {
       locale: NS,
       inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions })
     }, ProfilesSection));
+    profileCtx.slots.inject("conversation.header.leading", () => profileCtx.slots.register({
+      name: "conversation.header.leading",
+      priority: Number.MAX_SAFE_INTEGER,
+      locale: NS,
+      inject: () => ({ hooks: { profiles: controller.store }, readProfileView: controller.store.getSnapshot, ...controller.actions })
+    }, SessionProfiles));
     void profileCtx.inject(["remote.session"], (catalogCtx) => {
       controller.attachCatalog(catalogCtx.remote.session);
       controller.attachModelSelector(catalogCtx.remote.session);
@@ -3057,13 +3126,6 @@ async function apply(ctx) {
         modelCtx.effect(() => source.subscribe(updateInteraction), "dsmm: native model interaction binding");
         modelCtx.effect(() => () => controller.attachModelInteractionSource(null, null), "dsmm: native model interaction withdrawal");
       });
-      sessionCtx.slots.inject("conversation.session.header.utilities", () => sessionCtx.slots.register({
-        name: "conversation.session.header.utilities",
-        id: "dsmm-session-profiles",
-        order: 30,
-        locale: NS,
-        inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions })
-      }, SessionProfiles));
     });
     void controller.refresh();
   });

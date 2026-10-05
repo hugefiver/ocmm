@@ -649,7 +649,7 @@ export async function registryVersion(version, fetcher = fetch) {
   return JSON.parse((await responseBuffer(response, 2 * 1024 * 1024)).toString("utf8"));
 }
 
-export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
+export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = identity?.version === "0.1.7" ? 300_000 : 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
   validateArtifactIdentity(identity);
   // This is an after-publication read path only. Absence checks used by the
   // publisher stay single-shot and can never admit a collision or republish.

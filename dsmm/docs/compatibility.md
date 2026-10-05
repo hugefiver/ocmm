@@ -1,8 +1,8 @@
-# Deepwork 0.1.5 Compatibility and Upgrade
+# Deepwork 0.1.7 Compatibility and Upgrade
 
-This document describes the 0.1.5 source contract and required acceptance evidence. It does not claim that the final 0.1.5 artifact has passed Docker, been published, or been activated in Desktop. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
+This document describes the 0.1.7 source contract and required acceptance evidence. It does not claim that the final 0.1.7 artifact has passed Docker, been published, or been activated in Desktop. Completed 0.1.5 and 0.1.6 publication/continuation evidence stays immutable and does not prove 0.1.7. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
 
-The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts. 0.1.4's published-origin bytes and failed original verify/404 history are preserved by their separate fixed continuation controls, not rewritten by 0.1.5. The 0.1.5 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
+The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts. 0.1.4's published-origin bytes and failed original verify/404 history are preserved by their separate fixed continuation controls, not rewritten by a successor. The 0.1.7 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
 
 Deepwork is the native plugin title in both exported metadata locales, with localized descriptions. Profiles are displayed as **Deepwork Profiles** / **Deepwork 配置档**, and twelve roles as `DW …`. Package `@dsmm/dsmm`, Loader `dsmm`, role/tool/provider IDs, commands, schemas and persistence vocabulary remain compatible. Native metadata-reader and actual UI evidence must prove the display names; a manifest `displayName` is not a supported substitute.
 
@@ -27,7 +27,7 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 | macOS | `Node >=22` | supported by contract |
 | Native Settings | additive Deepwork Profiles client and authenticated RPC | compiled UI/RPC/storage and actual Desktop are separate proofs |
 | Headless | deployment config and native role tools | no Agent preset selection in the one-shot runner |
-| TUI | `DSH 0.2.0-rc.2` | unavailable |
+| TUI | `DSH 0.2.0-rc.2` | existing official 0.1.6 CLI/TUI installation verified; new 0.1.7 menu proof is Web/Desktop only |
 | LSP/MCP | `external ocmm-lsp mcp` | optional |
 | Runtime recovery | `process-local` | optional |
 | Per-role model/effort/fallback policy | native request, subagent and descriptor seams | opt-in; exact configured capability required |
@@ -40,13 +40,15 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 
 `/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands. The current native client provides Settings → Deepwork Profiles without replacing native navigation, provider/account UI, or the Agent preset selector. There are no model-visible profile-management tools or anonymous file endpoints.
 
+The 0.1.7 Web/Desktop header contributes one icon-only native profile menu in sessionless, blank and active views, yielding to native navigation ownership. Normal selection keeps the current model; only the distinct explicit profile-model action requests native model selection after successful profile CAS. Disabled mutations leave the menu inspectable and refreshable. Safe refusal details use allowlisted codes/fields and refresh/retry guidance, never raw messages or paths. These are required new-menu contracts, not a claim of authenticated Desktop acceptance; the historical 0.1.6 SELECT proof remains unchanged.
+
 Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`. Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file.
 
 The old directory discovery `roots/includeUserRoot` no longer configures the native preset registry. DSMM registers only enabled `primary`/`all` roots: Orchestrator, Builder and Planner. Disabled Builder is absent from both selector and child tools. The other nine roles remain auxiliary delegation roles; all twelve static `agent-presets/` directories are inspection templates, not scan roots. The loading correction is native `persona.prefix` plus instructions `maxBytes: 65536`.
 
 DSH's headless one-shot runner does not select or compose Agent presets: headless role delegation must use native role tools, not a registry default. Native preset selection must be tested through a preset-capable host with a blank session. The managed preset-directory materializer remains an opt-in export facility, not discovery evidence.
 
-Trusted live, owned, zero-prefix native one-shot children preserve supported explicit provider/model/effort overrides through final request headers. The role primary supplies alias defaults; it is not an unconditional child override. Roots, cold/unowned children and parent-seeded forks retain profile-primary resolution. `modelSelectionSettings:false` and native tool/permission/depth/cancellation limits are unchanged; this adds no model-visible model-selection authority. See [model routing](model-routing.md).
+Trusted live, owned, zero-prefix native one-shot children preserve supported explicit provider/model/effort overrides through final request headers. The role primary supplies alias defaults; it is not an unconditional child override. Ordinary roots preserve their native initial and explicit provider/model/exact effort rather than profile-primary resolution, including later turns, profile reapply and cold resume. Delegated-child policies retain their separate ownership and request-preflight restrictions. `modelSelectionSettings:false` and native tool/permission/depth/cancellation limits are unchanged; this adds no model-visible model-selection authority. See [model routing](model-routing.md).
 
 ## Session persistence compatibility
 
@@ -93,7 +95,7 @@ Global/system Desktop migration is the **third phase**: independent frozen-artif
 
 The Linux packed-lifecycle smoke pins pnpm `12.8.1` and retains DSH's native `nodeLinker: hoisted` profile layout. On Linux Node 22, pnpm `11.9.0` with that layout and DSMM's auto-installed peer graph can print `Done` after removal without exiting; the same failure was reproduced directly without DSH, while `12.8.1` returned normally. A printed `Done` is not uninstall completion. This does not claim the same failure on Windows or modify a user's existing package manager or profile. The smoke enforces a bounded fail-closed timeout and checks actual remove/reinstall exits and profile state.
 
-The matrix separates required 0.1.5 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable.
+The matrix separates required 0.1.7 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable. The already verified official CLI/TUI 0.1.6 installation is not unfinished rollout work and must not be repeated as part of the new Desktop upgrade.
 
 The independent Docker gate installs the exact frozen tarball into a fresh pinned native runtime/home and verifies root selection, actual read-only child denials, aliased-parent route preflight, runtime snapshot behavior, and the **same compiled DSMM UI** using native client/slots/RPC and real profile storage. A supported composition-owned in-process operator/Gateway carrier and test-owned browser bridge provide no-credential native component/RPC/storage proof. No user login, copied cookie, launcher token, browser state, Desktop data, account records or authentication bypass is permitted. This proof is not authenticated Desktop/Web-launch proof; actual Desktop mounting and authorized operations remain the later check.
 
