@@ -1,6 +1,7 @@
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SessionEventSource, SessionEventWindow } from "@deepseek-ai/dsh-api-session-controller/client";
+import type {} from "@deepseek-ai/dsh-agent-preset-registry";
 import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
 import type { DsmmProfilesRemote } from "../profile-remote.js";
 import { isProfileId } from "../profile-remote.js";
@@ -28,9 +29,9 @@ export interface ProfilesViewSnapshot {
   currentSessionId: string | null;
   session: SessionProfileSnapshot | null;
   sessionChoice: string | null;
-  sessionBusy: "read" | "apply" | "reset" | null;
+  sessionBusy: "read" | "apply" | "reset" | "mode" | null;
   sessionIssue: ProfilesIssue | null;
-  sessionNotice: "applied" | "reset" | "applied-with-model" | null;
+  sessionNotice: "applied" | "reset" | "applied-with-model" | "mode-on" | "mode-off" | null;
   invalidFields: string[];
   editorEpoch: number;
 }
@@ -54,6 +55,8 @@ export interface ProfilesActions {
   chooseSessionProfile(id: string | null): void;
   applySession(options?: SessionApplyOptions): Promise<void>;
   resetSession(): Promise<void>;
+  setDeepwork(active: boolean): Promise<void>;
+  useSessionProfileModel(): Promise<void>;
   setFieldInvalid(field: string, invalid: boolean): void;
 }
 export interface ModelCatalogRemote { modelCatalog(): Promise<RemoteResult<ModelCatalog>> }
@@ -62,6 +65,11 @@ type ModelInteractionSource = HostObservable<Pick<ModelDirectoryState, "status">
 function modelSelectionWatermark(window: SessionEventWindow): number {
   let watermark = -1;
   for (const entry of window.entries) if (entry.type === "event" && entry.event.type === "model/selection") watermark = Math.max(watermark, Number(entry.event.seq));
+  return watermark;
+}
+function modeIntentWatermark(window: SessionEventWindow): number {
+  let watermark = -1;
+  for (const entry of window.entries) if (entry.type === "event" && (entry.event.type === "deepwork/mode" || entry.event.type === "agent-preset/selected")) watermark = Math.max(watermark, Number(entry.event.seq));
   return watermark;
 }
 
@@ -95,6 +103,8 @@ export class ProfilesController {
   private modelEventsSessionId: string | null = null;
   private modelEventsGeneration = 0;
   private modelEventsWatermark = -1;
+  private modeEventsWatermark = -1;
+  private modeRefreshPending = false;
   private stopModelEvents: (() => void) | null = null;
   private modelInteraction: ModelInteractionSource | null = null;
   private modelInteractionSessionId: string | null = null;
@@ -117,6 +127,7 @@ export class ProfilesController {
     refreshCatalog: () => this.refreshCatalog(), refreshSession: () => this.refreshSession(),
     chooseSessionProfile: (id) => { if (!this.disposed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty) this.publish({ sessionChoice: id, sessionNotice: null }); },
     applySession: (options) => this.selectSession(false, options), resetSession: () => this.selectSession(true),
+    setDeepwork: (active) => this.setDeepwork(active), useSessionProfileModel: () => this.selectSession(false, { useProfileModel: true }, true),
     setFieldInvalid: (field, invalid) => {
       if (this.disposed) return;
       const invalidFields = this.current.invalidFields.filter((candidate) => candidate !== field);
@@ -146,12 +157,19 @@ export class ProfilesController {
     this.modelEventsSessionId = sessionId;
     this.modelEvents = source;
     this.modelEventsWatermark = source === null ? -1 : modelSelectionWatermark(source.getSnapshot());
+    this.modeEventsWatermark = source === null ? -1 : modeIntentWatermark(source.getSnapshot());
     this.stopModelEvents = source?.subscribe(() => {
       const window = source.getSnapshot(), change = window.change;
       if (change.kind === "settle-assistant") return;
       let watermark = change.kind === "replace" ? -1 : this.modelEventsWatermark;
       for (const entry of change.entries) if (entry.type === "event" && entry.event.type === "model/selection") watermark = Math.max(watermark, Number(entry.event.seq));
       if (watermark !== this.modelEventsWatermark) { this.modelEventsWatermark = watermark; this.modelEventsGeneration += 1; }
+      let modeWatermark = change.kind === "replace" ? -1 : this.modeEventsWatermark;
+      for (const entry of change.entries) if (entry.type === "event" && (entry.event.type === "deepwork/mode" || entry.event.type === "agent-preset/selected")) modeWatermark = Math.max(modeWatermark, Number(entry.event.seq));
+      if (modeWatermark !== this.modeEventsWatermark) {
+        this.modeEventsWatermark = modeWatermark;
+        if (sessionId === this.current.currentSessionId) { this.modeRefreshPending = true; this.refreshObservedMode(); }
+      }
     }) ?? null;
   }
   attachModelInteractionSource(sessionId: string | null, source: ModelInteractionSource | null): void {
@@ -172,6 +190,7 @@ export class ProfilesController {
   setSession(id: string | null): void {
     if (this.disposed || id === this.current.currentSessionId) return;
     this.sessionGeneration += 1;
+    this.modeRefreshPending = false;
     if (id !== this.modelSelectionSessionId) this.attachModelSelectionSource(null, null);
     if (id !== this.modelEventsSessionId) this.attachModelEventSource(null, null);
     if (id !== this.modelInteractionSessionId) this.attachModelInteractionSource(null, null);
@@ -189,26 +208,45 @@ export class ProfilesController {
       if (!this.disposed && generation === this.catalogGeneration) this.publish({ catalogUnavailable: true });
     } finally { if (!this.disposed && generation === this.catalogGeneration) this.publish({ catalogBusy: false }); }
   }
-  async refreshSession(): Promise<void> {
+  private refreshObservedMode(): void {
+    if (!this.disposed && this.modeRefreshPending && this.current.sessionBusy === null) void this.refreshSession(true);
+  }
+  async refreshSession(preserveFeedback = false): Promise<void> {
     const id = this.current.currentSessionId;
     if (this.disposed || id === null || this.current.sessionBusy !== null) return;
+    this.modeRefreshPending = false;
     const generation = ++this.sessionGeneration;
     const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
-    this.publish({ sessionBusy: "read", sessionIssue: null, sessionNotice: null });
+    this.publish({ sessionBusy: "read", ...(preserveFeedback ? {} : { sessionIssue: null, sessionNotice: null }) });
     try {
       const session = await this.unwrap(this.remote.describeSession(id));
       if (session.sessionId !== id) throw { kind: "assembly", code: "unavailable" };
       if (live()) this.publish({ session, sessionChoice: session.selection.selectedId });
     } catch (error) { if (live()) this.publish({ sessionIssue: this.issue(error) }); }
-    finally { if (live()) this.publish({ sessionBusy: null }); }
+    finally { if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); } }
   }
-  private async selectSession(reset: boolean, options?: SessionApplyOptions): Promise<void> {
+  private async setDeepwork(active: boolean): Promise<void> {
+    const { currentSessionId: id, session } = this.current;
+    if (this.disposed || id === null || session?.deepwork === undefined || session.deepwork.locked || !session.switchAllowed
+      || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === undefined) return;
+    const generation = ++this.sessionGeneration;
+    const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
+    this.publish({ sessionBusy: "mode", sessionIssue: null, sessionNotice: null });
+    try {
+      const accepted = await this.unwrap(this.remote.selectMode(id, { sessionId: id, active,
+        expectedModeRevision: session.deepwork.revision, expectedAdmissionEpoch: session.admissionEpoch }));
+      if (accepted.sessionId !== id || accepted.deepwork?.active !== active || !accepted.deepwork.explicit) throw { kind: "assembly", code: "unavailable" };
+      if (live()) this.publish({ session: accepted, sessionNotice: active ? "mode-on" : "mode-off" });
+    } catch (error) { if (live()) this.publish({ sessionIssue: this.issue(error) }); }
+    finally { if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); } }
+  }
+  private async selectSession(reset: boolean, options?: SessionApplyOptions, modelOnly = false): Promise<void> {
     const { currentSessionId: id, session, sessionChoice, snapshot } = this.current;
     if (this.disposed || id === null || session === null || !session.switchAllowed || this.current.sessionBusy !== null
       || this.current.busy !== null || this.current.dirty || this.current.pendingEditor !== null) return;
     const selectedId = reset ? null : sessionChoice;
     const revision = snapshot?.profiles.find((profile) => profile.id === selectedId)?.revision;
-    if (selectedId !== null && revision == null) return;
+    if (!modelOnly && selectedId !== null && revision == null) return;
     const generation = ++this.sessionGeneration;
     const useProfileModel = !reset && options?.useProfileModel === true;
     const selector = this.modelSelector, selectorGeneration = this.modelSelectorGeneration;
@@ -216,17 +254,19 @@ export class ProfilesController {
     const modelSnapshot = modelSource?.getSnapshot();
     const eventSource = this.modelEvents, eventGeneration = this.modelEventsGeneration;
     const eventWatermark = eventSource === null ? -1 : modelSelectionWatermark(eventSource.getSnapshot());
+    const modeWatermark = eventSource === null ? -1 : modeIntentWatermark(eventSource.getSnapshot());
     const interaction = this.modelInteraction, interactionGeneration = this.modelInteractionGeneration;
     const pendingNativeChoice = interaction?.getSnapshot().status === "selecting";
     const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
     const selectorLive = () => live() && selector !== null && selector === this.modelSelector && selectorGeneration === this.modelSelectorGeneration;
     this.publish({ sessionBusy: reset ? "reset" : "apply", sessionIssue: null, sessionNotice: null });
     try {
-      const accepted = await this.unwrap(this.remote.selectSession(id, {
+      const accepted = await this.unwrap(modelOnly ? this.remote.describeSession(id) : this.remote.selectSession(id, {
         sessionId: id, id: selectedId, ...(selectedId === null ? {} : { expectedRevision: revision! }),
         expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch,
       }));
       if (accepted.sessionId !== id) throw { kind: "assembly", code: "unavailable" };
+      if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision || !accepted.switchAllowed)) throw { kind: "domain", code: "conflict" };
       if (!live()) return;
       this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
       if (!useProfileModel || !live()) return;
@@ -254,6 +294,7 @@ export class ProfilesController {
         return;
       }
       if (eventGeneration !== this.modelEventsGeneration || eventWatermark !== modelSelectionWatermark(eventSource.getSnapshot())
+        || (modelOnly && modeWatermark !== modeIntentWatermark(eventSource.getSnapshot()))
         || interactionGeneration !== this.modelInteractionGeneration || pendingNativeChoice || interaction.getSnapshot().status === "selecting") {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-choice-changed", source: "profile-model" } });
         return;
@@ -270,7 +311,7 @@ export class ProfilesController {
         if (live()) this.publish({ sessionIssue: { kind: "assembly", code: selectorLive() ? "model-selection-failed" : "model-service-unavailable", source: "profile-model" } });
       }
     } catch (error) { if (live()) this.publish({ sessionIssue: this.issue(error) }); }
-    finally { if (live()) this.publish({ sessionBusy: null }); }
+    finally { if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); } }
   }
   private publish(patch: Partial<ProfilesViewSnapshot>): void {
     if (this.disposed) return;

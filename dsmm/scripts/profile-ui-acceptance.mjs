@@ -10,7 +10,7 @@ import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 import { UI_CHECKS_015, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { runFrozenNativePickerAcceptance } from "./native-picker-harness.mjs";
-import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
+import { requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "./native-picker-proof.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -96,7 +96,8 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
           report.nativePickerProof = await runFrozenNativePickerAcceptance({ artifact, sha256, packageVersion: installed.version,
             dshManifest, toolsManifest: env.DSMM_ACCEPTANCE_TOOLS_MANIFEST, browserExecutable: env.DSMM_BROWSER_EXECUTABLE,
             evidenceRoot: join(evidenceRoot, "native-picker"), env });
-          validateNativePickerProof(report.nativePickerProof, { artifactSha256: sha256, packageVersion: installed.version });
+          const pickerSummary = validateNativePickerProof(report.nativePickerProof, { artifactSha256: sha256, packageVersion: installed.version });
+          if (requiresSessionModeProof(installed.version)) assert.equal(pickerSummary.modeScenarios, 8, "018 Docker acceptance omitted native mode persistence scenarios");
           report.checks.nativePickerCompactProfileAcceptance = true;
         }
       } catch (error) { report.outcome = "FAILED"; report.failure = error.stack ?? String(error); }

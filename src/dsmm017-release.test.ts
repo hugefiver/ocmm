@@ -19,13 +19,13 @@ function pollingIdentity(version: string) {
     workflow: { ...identity.workflow, ref: `${POLICY.repository}/${POLICY.workflowFile}@${ref}` } };
 }
 
-test("0.1.7 gets a finite 300-second registry visibility budget without changing historical defaults", async () => {
-  for (const [version, expectedMs, expectedCalls] of [["0.1.4", 0, 1], ["0.1.5", 120_000, 61], ["0.1.6", 120_000, 61], ["0.1.7", 300_000, 151], ["0.1.8", 120_000, 61]] as const) {
+test("0.1.7 retains its finite registry visibility budget and 0.1.8 uses the reviewed shared budget", async () => {
+  for (const [version, expectedMs, expectedCalls] of [["0.1.4", 0, 1], ["0.1.5", 120_000, 61], ["0.1.6", 120_000, 61], ["0.1.7", 300_000, 151], ["0.1.8", 300_000, 150]] as const) {
     let clock = 0, calls = 0;
     await assert.rejects(verifyRegistryArtifact(pollingIdentity(version), async (url: string) => {
       assert.equal(url, `${POLICY.registry}@dsmm%2fdsmm/${version}`);
       calls++; return new Response("", { status: 404 });
-    }, { now: () => clock, wait: async (ms: number) => { assert.ok(ms > 0 && ms <= 2000); clock += ms; } }), /absent/);
+    }, { now: () => clock, wait: async (ms: number) => { assert.ok(ms > 0 && ms <= 2000); clock += ms; } }), version === "0.1.8" ? /VISIBILITY_DEADLINE/ : /absent/);
     assert.equal(clock, expectedMs, version); assert.equal(calls, expectedCalls, version);
   }
 });

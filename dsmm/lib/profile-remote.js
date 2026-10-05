@@ -152,7 +152,7 @@ function selectionState(value) {
     return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value) {
-    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel"]);
+    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork"]);
     if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope))
         fail("scope");
     return {
@@ -166,6 +166,10 @@ function sessionSnapshot(value) {
         }),
         ...optional(item, "rolePolicy", rolePolicy),
         ...optional(item, "profileModel", modelRoute),
+        ...optional(item, "deepwork", (input) => {
+            const mode = object(input, ["active", "explicit", "locked", "revision"]);
+            return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
+        }),
     };
 }
 function saveRequest(value) {
@@ -186,6 +190,10 @@ function sessionSelectRequest(value) {
     const { sessionId: inputSessionId, expectedAdmissionEpoch, ...profileRequest } = item;
     return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: revision(expectedAdmissionEpoch) };
 }
+function modeSelectRequest(value) {
+    const item = object(value, ["sessionId", "active", "expectedModeRevision", "expectedAdmissionEpoch"]);
+    return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: revision(item.expectedModeRevision), expectedAdmissionEpoch: revision(item.expectedAdmissionEpoch) };
+}
 function codec(symbol, parse) {
     return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse }) };
 }
@@ -196,6 +204,13 @@ function descriptor(method, result, parameter) {
 export const TYPERT_REMOTE = {
     package: "@dsmm/dsmm",
     descriptors: [
+        {
+            ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
+            parameters: [
+                { name: "sessionId", wire: "sessionId", source: "json", codec: codec("NativeSessionId", sessionId) },
+                { name: "request", wire: "request", source: "json", codec: codec("SessionModeSelectRequest", modeSelectRequest) },
+            ],
+        },
         descriptor("describe", codec("ProfileSnapshot", snapshot)),
         descriptor("read", codec("ProfileReadResult", readResult), { name: "id", codec: codec("ProfileId", id) }),
         descriptor("save", codec("ProfileReadResult", readResult), { name: "request", codec: codec("ProfileSaveRequest", saveRequest) }),

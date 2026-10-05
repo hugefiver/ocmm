@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import {
   computeDigests, expectedAssetNames, readArtifactIdentity, validateArtifactIdentity, validateDockerReceipt,
-  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory,
+  validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory, registryVerificationFailure,
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 
@@ -44,6 +44,14 @@ const ORIGIN_POLICIES = Object.freeze({
 const scriptRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export class EvidenceMismatch extends Error {}
+
+class NativeInstallEvidenceMismatch extends EvidenceMismatch {}
+
+export function verificationFailureForError(error) {
+  return error instanceof NativeInstallEvidenceMismatch
+    ? { stage: "native-install", code: "INSTALL_PROOF_REJECTED" }
+    : registryVerificationFailure(error);
+}
 
 function requireCondition(condition, message) {
   if (!condition) throw new EvidenceMismatch(message);
@@ -114,7 +122,12 @@ export function validateBootstrapImportArtifact(artifact, identity, acceptedFile
 export async function verifyPublishedArtifact(identity, { registryCheck = verifyRegistryArtifact, installProbe = runInstallProbe } = {}) {
   validateArtifactIdentity(identity);
   const { tarball: _tarball, ...registry } = await registryCheck(identity);
-  const freshInstall = await installProbe(identity);
+  let freshInstall;
+  try { freshInstall = await installProbe(identity); }
+  catch (error) {
+    if (identity.version !== "0.1.8") throw error;
+    throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
+  }
   const receipt = {
     schemaVersion: 1,
     outcome: "COMPLETED",
@@ -123,7 +136,11 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
     freshInstall,
     nonclaims: { authenticatedDesktop: "NOT_EXERCISED", paidModel: "NOT_EXERCISED" },
   };
-  return validateVerificationReceipt(receipt, identity);
+  try { return validateVerificationReceipt(receipt, identity); }
+  catch (error) {
+    if (identity.version !== "0.1.8") throw error;
+    throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
+  }
 }
 
 export function runInstallProbe(identity) {
@@ -538,7 +555,8 @@ export async function main(args = process.argv.slice(2)) {
     // Failed state preserves all tags, assets and registry identities.
     receipt = { schemaVersion: options?.mode === "terminal-continuation" ? 2 : 1,
       ...(options?.mode === "terminal-continuation" ? { mode: "published-continuation" } : {}),
-      outcome: error instanceof EvidenceMismatch ? "FAILED" : "UNRESOLVED", reason: "required release evidence could not be established; immutable surfaces were not changed" };
+      outcome: error instanceof EvidenceMismatch ? "FAILED" : "UNRESOLVED", reason: "required release evidence could not be established; immutable surfaces were not changed",
+      ...(verificationFailureForError(error) ? { failure: verificationFailureForError(error) } : {}) };
   }
   if (options) writeFileSync(resolve(options.receipt), `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
   process.stdout.write(`${JSON.stringify(receipt)}\n`);

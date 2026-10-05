@@ -123,7 +123,7 @@ function applyRuntime(ctx: DshContext, config: Config): void | Promise<void> {
       }
       requiresNativeProfiles = true;
       const installProfiles = async (profileCtx: DshContext): Promise<void> => {
-        runtime = await createProfileRuntime(profileCtx, getReadySettings());
+        runtime = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller });
         profileCtx.provide?.("dsmmProfileRuntime", runtime);
         const manager = runtime;
         profileCtx.inject?.(["typert"], (rpcCtx) => {

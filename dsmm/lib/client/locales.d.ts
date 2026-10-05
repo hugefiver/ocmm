@@ -1,5 +1,15 @@
 export declare const NS = "settings.dsmm-profiles";
 export declare const en: {
+    headerCompactProfiles: string;
+    headerCompactRefresh: string;
+    headerNoSession: string;
+    headerModeEnable: string;
+    headerModeDisable: string;
+    headerModePreset: string;
+    headerModeUnavailable: string;
+    headerModeOn: string;
+    headerModeOff: string;
+    headerUseCurrentModel: string;
     title: string;
     description: string;
     newSessions: string;

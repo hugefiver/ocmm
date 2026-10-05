@@ -19,9 +19,10 @@ const targetRoute = Object.freeze({ provider, model: "target", reasoningEffort: 
 const profileRoute = Object.freeze({ provider, model: "configured-default", reasoningEffort: "max" });
 const ownedProfileIds = new Set(["picker-b", "picker-no-model"]);
 
-/** Closed release contracts: a future version needs its own reviewed gate. */
+/** Closed reviewed grammars; unreviewed future versions fail closed. */
 export function nativePickerContract(version) {
-  assert.ok(version === "0.1.6" || version === "0.1.7", "unsupported native picker proof version");
+  assert.ok(version === "0.1.6" || version === "0.1.7" || version === "0.1.8", "unsupported native picker proof version");
+  if (version === "0.1.8") return "native-menu-mode-018";
   return version === "0.1.7" ? "native-menu-017" : "native-select-016";
 }
 
@@ -29,7 +30,7 @@ export function nativePickerDiagnosticContract(version) {
   return version === "0.1.5" ? "native-select-016" : nativePickerContract(version);
 }
 
-export function validateNativeMenuGeometry(geometry) {
+export function validateNativeMenuGeometry(geometry, { minimumLabels = 3 } = {}) {
   const finite = value => assert.ok(Number.isFinite(value), "menu geometry must be numeric");
   for (const value of [geometry.viewportWidth, geometry.viewportHeight, geometry.seat.left, geometry.seat.right]) finite(value);
   assert.ok(geometry.viewportWidth > 0 && geometry.viewportHeight > 0);
@@ -48,7 +49,7 @@ export function validateNativeMenuGeometry(geometry) {
   check(geometry.trigger, Math.max(0, geometry.seat.left), Math.min(geometry.viewportWidth, geometry.seat.right), 0, geometry.viewportHeight);
   assert.ok(geometry.trigger.outlineExtent >= 2, "native keyboard trigger focus indicator is missing");
   check(geometry.menu, 0, geometry.viewportWidth, 0, geometry.viewportHeight);
-  assert.ok(geometry.labels.length >= 3);
+  assert.ok(geometry.labels.length >= minimumLabels);
   for (const label of geometry.labels) {
     check(label, geometry.menu.left, geometry.menu.right, geometry.menu.top, geometry.menu.bottom);
     assert.equal(label.fontSize, 14); assert.equal(label.lineHeight, 22);
@@ -156,7 +157,7 @@ export function nativePickerPublicState(scope = window) {
     projectionSnapshot: projection?.getSnapshot(), directoryPresent: directory !== undefined, directoryStatus: directory?.status, directoryPending: directory?.pending, directoryFailure,
     selectorPresent: typeof root?.get("remote.session")?.selectModel === "function",
     profileSlot: leading ? { name: "conversation.header.leading", priority: leading.options.priority, rootScoped: true } : { name: "conversation.session.header.utilities", rootScoped: false },
-    controller: controller === undefined ? null : { currentSessionId: controller.currentSessionId, sessionIssue: controller.sessionIssue, sessionBusy: controller.sessionBusy, sessionNotice: controller.sessionNotice, sessionChoice: controller.sessionChoice, dirty: controller.dirty, busy: controller.busy },
+    controller: controller === undefined ? null : { currentSessionId: controller.currentSessionId, sessionIssue: controller.sessionIssue, sessionBusy: controller.sessionBusy, sessionNotice: controller.sessionNotice, sessionChoice: controller.sessionChoice, session: controller.session, dirty: controller.dirty, busy: controller.busy },
     headerAncestors: ancestors, viewportWidth: scope.innerWidth };
 }
 
@@ -170,6 +171,23 @@ export function decodeNativePickerArgs(payload) {
 }
 export const name = "dsmm-native-picker-owned-diagnostic";
 export const inject = ["appReady", "appExit", "llm", "agents", "connection", "typertGateway", "agentDefaultModel"];
+
+/** Raw creator-owned mode roots have no Workspace composer registration. */
+export async function submitOwnedNativeFollowup(agent, createUserMessage, phase) {
+  agent.followup(createUserMessage({ content: [{ type: "text", text: `Owned native mode ${phase}` }], source: { kind: "user" } }));
+  await agent.whenIdle();
+}
+
+export function profileSwitchKeyboardKeys(modeCandidate) {
+  return modeCandidate ? ["Home", "ArrowDown", "ArrowDown"] : ["Home", "ArrowDown"];
+}
+
+export function heldProfileIntentCall(calls, endpoint, sessionId) {
+  const matches = calls.filter(call => call.endpoint === endpoint && call.ownedCarrierHold === true
+    && (call.payload?.args?.sessionId ?? call.payload?.args?.request?.sessionId) === sessionId);
+  assert.equal(matches.length, 1, "view withdrawal requires exactly one held native old-session intent");
+  return matches[0];
+}
 
 export function apply(ctx, config) {
   let started = false;
@@ -196,7 +214,7 @@ export async function runPickerLane(ctx, config) {
   const currentCandidate = config.artifactKind === "local-current-source" || config.artifactKind === "ci-frozen-artifact";
   const nativeRequire = createRequire(config.dshManifest);
   const load = (id) => import(pathToFileURL(nativeRequire.resolve(id)).href);
-  const { LlmAdapter, ReasoningEffortId } = await load("@deepseek-ai/dsh-llm");
+  const { LlmAdapter, ReasoningEffortId, createUserMessage } = await load("@deepseek-ai/dsh-llm");
   const calls = [];
   const nativeCalls = [];
   const pending = new Map();
@@ -204,7 +222,7 @@ export async function runPickerLane(ctx, config) {
   const gate = () => { const value = ownedGate(); heldGates.push(value); return value; };
   let lastStart;
   let profileGate, providerGate, modelGate, refuseModelAfterCommit = false, modelRefused = false;
-  let describeGate, activationRefused = false, menuCandidate = false;
+  let describeGate, activationRefused = false, menuCandidate = false, modeCandidate = false;
   const report = { outcome: "BOUNDARY", lane: config.lane, artifactSha256: config.sha256, artifactKind: config.artifactKind, sourceIdentity: config.sourceIdentity, dsmm: config.lane === "present", nativeCalls, providerCalls: calls, steps: [], compactSteps: [],
     authentication: { signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false }, cleanup: {} };
   class PickerAdapter extends LlmAdapter {
@@ -237,7 +255,9 @@ export async function runPickerLane(ctx, config) {
     const installedManifest = JSON.parse(await readFile(join(config.packageRoot, "package.json"), "utf8"));
     assert.equal(installedManifest.name, "@dsmm/dsmm");
     if (config.artifactKind === "ci-frozen-artifact") assert.equal(installedManifest.version, config.packageVersion, "frozen picker installed a different package version");
-    menuCandidate = (config.artifactKind === "ci-frozen-artifact" ? nativePickerContract(installedManifest.version) : nativePickerDiagnosticContract(installedManifest.version)) === "native-menu-017";
+    const contract = config.artifactKind === "ci-frozen-artifact" ? nativePickerContract(installedManifest.version) : nativePickerDiagnosticContract(installedManifest.version);
+    modeCandidate = contract === "native-menu-mode-018" || config.artifactKind === "local-current-source" && (await readFile(join(config.packageRoot, "lib", "client.js"), "utf8")).includes("@use-model");
+    menuCandidate = modeCandidate || contract === "native-menu-017";
     if (menuCandidate) report.menuSteps = [];
     report.installedCandidate = { packageRoot: config.packageRoot, name: installedManifest.name, version: installedManifest.version,
       hostSha256: hash(await readFile(join(config.packageRoot, "lib", "index.js"))), clientSha256: hash(await readFile(join(config.packageRoot, "lib", "client.js"))), publicationClaimed: false };
@@ -255,6 +275,8 @@ export async function runPickerLane(ctx, config) {
   try {
     server = await startNativePickerServer({ nativeRequire, packageRoot: config.packageRoot, revision: config.sha256, dsmm: report.dsmm, observerTrace: config.observerDiagnostic === true });
     report.nativePackages = server.nativePackages;
+    report.nativeClientArtifacts = server.nativeClientArtifacts;
+    report.rewrittenProductionBundles = server.rewrittenProductionBundles;
     const { chromium } = createRequire(config.toolsManifest)("playwright");
     browser = await chromium.launch({ executablePath: config.browserExecutable, headless: false, args: ["--disable-extensions", "--disable-sync", "--no-sandbox"] });
     context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-US", serviceWorkers: "block" });
@@ -274,9 +296,10 @@ export async function runPickerLane(ctx, config) {
       assert.equal(channel, "/api");
       assert.ok(endpoint === "$events" || /^(?:session|workspace|settings|commands|directoryPicker|dsmmProfiles)\//u.test(endpoint), `unexpected native picker namespace ${endpoint}`);
       const scopedProfileSelection = currentCandidate && endpoint === "dsmmProfiles/selectSession";
-      assert.ok(scopedProfileSelection || !/^(?:settings|directoryPicker|dsmmProfiles)\/(?:save|set|select|update|delete|remove|write|pick)/u.test(endpoint), "picker may not change deployment/account/global profile/directory settings");
+      const scopedModeSelection = modeCandidate && endpoint === "dsmmProfiles/selectMode";
+      assert.ok(scopedProfileSelection || scopedModeSelection || !/^(?:settings|directoryPicker|dsmmProfiles)\/(?:save|set|select|update|delete|remove|write|pick)/u.test(endpoint), "picker may not change deployment/account/global profile/directory settings");
       const control = new AbortController();
-      const record = { endpoint, operation, strictGateway: true, nativePeer: peer.id, result: "pending", nativeInvocationStarted: false, ...(["session/selectModel", "dsmmProfiles/selectSession", "workspace/archiveSession"].includes(endpoint) ? { payload } : {}) };
+      const record = { endpoint, operation, strictGateway: true, nativePeer: peer.id, result: "pending", nativeInvocationStarted: false, ...(["session/selectModel", "dsmmProfiles/selectSession", "dsmmProfiles/selectMode", "dsmmProfiles/describeSession", "workspace/archiveSession"].includes(endpoint) ? { payload } : {}) };
       nativeCalls.push(record); pending.set(id, { control });
       try {
         if (operation === "open") {
@@ -287,7 +310,8 @@ export async function runPickerLane(ctx, config) {
         const [namespace, method] = endpoint.split("/");
         const args = decodeNativePickerArgs(payload);
         if (endpoint === "dsmmProfiles/describe" && describeGate) { const held = describeGate; describeGate = undefined; held.started = true; record.ownedReadHold = true; await held.promise; control.signal.throwIfAborted(); }
-        if (scopedProfileSelection) {
+        if (scopedProfileSelection || modeCandidate && endpoint === "dsmmProfiles/describeSession") {
+          if (scopedProfileSelection)
           assert.ok(args.request?.id === null || ownedProfileIds.has(args.request?.id), "only declared owned fixture profiles may be selected");
           if (profileGate) { const gate = profileGate; profileGate = undefined; gate.started = true; record.ownedCarrierHold = true; await gate.promise; control.signal.throwIfAborted(); }
         }
@@ -298,11 +322,19 @@ export async function runPickerLane(ctx, config) {
           record.accepted = { sessionId: value.sessionId, selectedId: value.selection.selectedId, admissionEpoch: value.admissionEpoch, profileModel: value.profileModel };
           if (refuseModelAfterCommit) { refuseModelAfterCommit = false; modelRefused = true; record.ownedFixtureModelWithdrawnAfterCommit = true; }
         }
+        if (modeCandidate && endpoint === "dsmmProfiles/describeSession" || scopedModeSelection) {
+          record.accepted = { sessionId: value.sessionId, selectedId: value.selection.selectedId, admissionEpoch: value.admissionEpoch, profileModel: value.profileModel, deepwork: value.deepwork };
+          if (refuseModelAfterCommit) { refuseModelAfterCommit = false; modelRefused = true; record.ownedFixtureModelWithdrawnAfterRead = true; }
+        }
         return { ok: true, value };
       } catch (error) { const failure = gateway.wireStream.failure(error); record.result = failure.code; record.failure = failure.message; if (failure.code === "dsmm-profiles/refused") record.refused = { code: failure.details?.code, ...(failure.details?.field ? { field: failure.details.field } : {}) }; record.cancelled = control.signal.aborted; return { ok: false, error: failure }; }
     });
     await page.goto(server.origin);
     await page.waitForFunction(() => window.__dsmmUiContext?.root.get("modelDirectories") && window.__dsmmUiContext.root.get("uiWorkspace") && window.__dsmmUiContext.root.get("conversation"), { timeout: 30_000 });
+    if (modeCandidate) {
+      const publicExports = await page.evaluate(async () => Object.keys(await window.__dsmmNativeModules.import("@deepseek-ai/dsh-client-store")).sort());
+      report.nativeStoreLibrary = { ...server.nativeStoreLibrary, publicExports };
+    }
     report.preflight = await page.evaluate(nativeClientPreflight);
     const menuTrigger = page.locator("[data-dsmm-header-profile] button[aria-haspopup='menu']");
     const menuPopup = page.locator(".dsmm-profile-menu[role='menu']");
@@ -323,7 +355,8 @@ export async function runPickerLane(ctx, config) {
       const saved = inventory.profiles.find(profile => profile.id === admission?.selectedId);
       return { compactHeader: observed.headers, menu: observed.menu, publicNativeState,
         nativeProfileDisplay: { sessionId: id ?? null, admittedId: admission?.selectedId ?? null, admissionEpoch: admission?.epoch ?? null,
-          scope: admission?.scope ?? null, savedAvailable: saved !== undefined, savedLabel: saved?.label ?? null } };
+          scope: admission?.scope ?? null, savedAvailable: saved !== undefined, savedLabel: saved?.label ?? null },
+        ...(modeCandidate && agent ? { nativeMode: (await gateway.invoke({ namespace: "dsmmProfiles", method: "describeSession", args: { sessionId: id }, peer, signal: new AbortController().signal })).deepwork } : {}) };
     };
     const menuEvidence = async (phase, extra = {}) => {
       await openProfileMenu();
@@ -374,7 +407,7 @@ export async function runPickerLane(ctx, config) {
           const binding = window.__dsmmUiContext.root.get("sessions").binding(id);
           return binding?.eventSource.getSnapshot().entries.flatMap((entry) => entry.type === "event" && entry.event.type === "model/selection" ? [{ seq: entry.event.seq, data: entry.event.data }] : []) ?? [];
         }, sessionId),
-        ...(menuCandidate ? { compactHeader: menuObserved.compactHeader, menu: menuObserved.menu, nativeProfileDisplay: menuObserved.nativeProfileDisplay } : { compactHeader: await page.locator("[data-dsmm-header-profile]").evaluateAll((headers) => headers.map((header) => ({ text: header.textContent?.trim(), html: header.outerHTML, selects: header.querySelectorAll("select").length, buttons: header.querySelectorAll("button").length, busy: header.getAttribute("aria-busy"), value: header.querySelector("select")?.value, disabled: header.querySelector("select")?.disabled }))) }) };
+        ...(menuCandidate ? { compactHeader: menuObserved.compactHeader, menu: menuObserved.menu, nativeProfileDisplay: menuObserved.nativeProfileDisplay, ...(modeCandidate ? { nativeMode: menuObserved.nativeMode } : {}) } : { compactHeader: await page.locator("[data-dsmm-header-profile]").evaluateAll((headers) => headers.map((header) => ({ text: header.textContent?.trim(), html: header.outerHTML, selects: header.querySelectorAll("select").length, buttons: header.querySelectorAll("button").length, busy: header.getAttribute("aria-busy"), value: header.querySelector("select")?.value, disabled: header.querySelector("select")?.disabled }))) }) };
     };
     const newSession = async () => {
       const id = await page.evaluate(async (cwd) => {
@@ -425,6 +458,14 @@ export async function runPickerLane(ctx, config) {
       await page.screenshot({ path: join(config.evidenceRoot, `${config.lane}-${phase}.png`), fullPage: true });
       return calls.slice(beforeCalls);
     };
+    const submitNativeMode = async (sessionId, phase) => {
+      const beforeCalls = calls.length;
+      await submitOwnedNativeFollowup(ctx.get("agents").get(sessionId), createUserMessage, phase);
+      await until(() => calls.length > beforeCalls, `${phase} native followup provider request`);
+      await converged(sessionId, route(calls.at(-1)));
+      await page.screenshot({ path: join(config.evidenceRoot, `${config.lane}-${phase}.png`), fullPage: true });
+      return calls.slice(beforeCalls);
+    };
     let sessionId = await newSession();
     for (const phase of ["direct-target-new", "direct-target-existing", "other-then-target-existing"]) {
       const before = await snapshot(sessionId);
@@ -450,7 +491,8 @@ export async function runPickerLane(ctx, config) {
     if (currentCandidate) {
       const header = page.locator("[data-dsmm-header-profile]");
       const profileLabel = "Picker profile B with a deliberately long readable native menu label";
-      const profileItem = (value) => menuPopup.getByRole("menuitem", { name: value.startsWith("@model:") ? `Use profile model: ${value === "@model:picker-b" ? profileLabel : value === "@model:picker-no-model" ? "Profile without main model" : "deployment baseline"}` : value === "picker-b" ? profileLabel : value === "picker-no-model" ? "Profile without main model" : "deployment baseline", exact: true });
+      const refreshLabel = modeCandidate ? "Refresh" : "Refresh profiles and current-session state";
+      const profileItem = (value) => menuPopup.getByRole("menuitem", { name: value.startsWith("@model:") ? modeCandidate ? "Use profile model" : `Use profile model: ${value === "@model:picker-b" ? profileLabel : value === "@model:picker-no-model" ? "Profile without main model" : "deployment baseline"}` : value === "picker-b" ? profileLabel : value === "picker-no-model" ? "Profile without main model" : "deployment baseline", exact: true });
       const select = menuCandidate ? {
         waitFor: () => menuTrigger.waitFor(), focus: () => menuTrigger.focus(), hover: () => menuTrigger.hover(),
         isDisabled: async () => { await openProfileMenu(); const disabled = await profileItem("picker-b").isDisabled(); await closeProfileMenu(); return disabled; },
@@ -465,12 +507,121 @@ export async function runPickerLane(ctx, config) {
       assert.equal(await header.count(), 1); assert.equal(await header.locator("select").count(), menuCandidate ? 0 : 1); assert.equal(await header.getByRole("button").count(), menuCandidate ? 1 : 0);
       report.compactShape = menuCandidate ? { nativeSelects: 0, iconButtons: 1, nativeMenu: true, nativeRootLeadingOwner: true } : { nativeSelects: 1, additionalButtons: 0, nativeRootAndHeaderOwners: true };
       if (menuCandidate) await menuEvidence("menu-active");
+      if (modeCandidate) {
+        const retainedSession = sessionId;
+        const { SessionId, Session } = await load("@deepseek-ai/dsh-session");
+        const { Context } = await load("@deepseek-ai/cordis");
+        const { default: StockPersistence } = await load("@deepseek-ai/dsh-session-persistence-jsonl");
+        const modeHandles = [];
+        const storedModes = async (id) => {
+          await ctx.get("sessionPersistence").flush();
+          const readerCtx = new Context();
+          try {
+            await readerCtx.plugin(StockPersistence, { ...ctx.get("sessionPersistence").config }).await();
+            const reader = await readerCtx.get("sessionPersistence").open(id, "read");
+            try { return (await reader.read()).events.filter(event => event.type === "deepwork/mode"); }
+            finally { await reader.close(); }
+          } finally { await readerCtx.fiber.dispose(); }
+        };
+        const openOwned = async (preset) => {
+          const handle = await ctx.get("agents").create({ sessionId: SessionId(`dsmm-picker-mode-${randomUUID()}`), meta: { cwd: config.workspace, agentPreset: preset },
+            agentOptions: { ...targetRoute, reasoningEffort: ReasoningEffortId(targetRoute.reasoningEffort) }, setup: async (agentCtx) => { await ctx.get("agentPresets").mount(agentCtx, preset); } });
+          modeHandles.push(handle);
+          sessionId = handle.agent.id;
+          await page.evaluate(id => window.__dsmmUiContext.root.get("uiWorkspace").openSession(id), sessionId);
+          await page.waitForFunction(id => window.__dsmmUiContext.root.get("uiSession").adapter.current.getSnapshot().key === id, sessionId);
+          await settledHeader();
+          await page.waitForFunction(id => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().session?.sessionId === id, sessionId);
+          return handle;
+        };
+        const modeEvidence = async (phase, before, rpcStart, extra = {}) => {
+          const after = await snapshot(sessionId);
+          assert.deepEqual(after.directory.current, targetRoute); assert.deepEqual(after.nativeSelections, before.nativeSelections); assert.deepEqual(after.actualCurrentHeader, before.actualCurrentHeader);
+          const native = nativeCalls.slice(rpcStart);
+          assert.equal(native.filter(call => call.endpoint === "session/selectModel").length, 0);
+          const screenshot = `${phase}.png`;
+          await openProfileMenu(); await page.screenshot({ path: join(config.evidenceRoot, screenshot), fullPage: true }); await closeProfileMenu();
+          report.modeSteps.push({ phase, sessionId, before, after, nativeCalls: native, screenshot, ...extra });
+          return after;
+        };
+        report.modeSteps = [];
+        try {
+          const standardHandle = await openOwned("standard");
+          let beforeMode = await snapshot(sessionId), modeStart = nativeCalls.length;
+          assert.equal(beforeMode.nativeMode.active, true); assert.equal(beforeMode.nativeMode.explicit, false);
+          await modeEvidence("mode-standard-configured-default", beforeMode, modeStart, { preset: "standard" });
+          const minimalHandle = await openOwned("minimal");
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          assert.equal(beforeMode.nativeMode.active, false); assert.equal(beforeMode.nativeMode.explicit, false);
+          await modeEvidence("mode-minimal-default-off", beforeMode, modeStart, { preset: "minimal", configuredDefault: ctx.get("dsmmProfileRuntime").getSettings(minimalHandle.agent).defaultActive });
+          const toggle = async (active) => {
+            await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: active ? "Enable Deepwork" : "Disable Deepwork", exact: true }).click(); await menuPopup.waitFor({ state: "hidden" }); await settledHeader();
+          };
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          const oldSeq = minimalHandle.agent.session.snapshotEvents().at(-1)?.seq ?? -1;
+          await toggle(true);
+          await modeEvidence("mode-enable-native-write", beforeMode, modeStart, { metadata: minimalHandle.agent.session.snapshotEvents().filter(event => event.seq > oldSeq && event.type === "deepwork/mode"), storedMetadata: await storedModes(sessionId) });
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          await select.selectOption("picker-no-model"); await settledHeader();
+          await modeEvidence("mode-explicit-profile-switch", beforeMode, modeStart);
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          await ctx.get("agentPresets").select(minimalHandle.agent, "standard");
+          await page.evaluate(async () => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().refreshSession());
+          await settledHeader();
+          await modeEvidence("mode-explicit-native-preset-change", beforeMode, modeStart, { preset: "standard", presetEvents: minimalHandle.agent.session.snapshotEvents().filter(event => event.type === "agent-preset/selected") });
+          // Cold reopen uses the creator-owned native disposer, stock JSONL
+          // reader and ordinary operator RPC; no replacement store or loader.
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          const coldId = sessionId, oldAgent = minimalHandle.agent;
+          const visibleBeforeSha256 = hash(JSON.stringify(oldAgent.session.deriveMessages()));
+          const headersBeforeSha256 = hash(JSON.stringify(oldAgent.session.requestHeader() ?? null));
+          await page.evaluate(id => window.__dsmmUiContext.root.get("uiWorkspace").openSession(id), standardHandle.agent.id);
+          await minimalHandle.dispose(); await ctx.get("sessionPersistence").flush();
+          assert.equal(ctx.get("agents").get(coldId), undefined);
+          const readerCtx = new Context();
+          let stockProof;
+          try {
+            await readerCtx.plugin(StockPersistence, { ...ctx.get("sessionPersistence").config }).await();
+            const reader = await readerCtx.get("sessionPersistence").open(coldId, "read");
+            try {
+              const stored = await reader.read();
+              const restored = Session.fromRestore(coldId, stored.events, reader.header, reader.inheritedEventCount, stored.eventState);
+              stockProof = { stockEvents: stored.events.length, stockMetadata: stored.events.filter(event => event.type === "deepwork/mode"), visibleBeforeSha256, visibleAfterSha256: hash(JSON.stringify(restored.deriveMessages())), headersBeforeSha256, headersAfterSha256: hash(JSON.stringify(restored.requestHeader() ?? null)) };
+            } finally { await reader.close(); }
+          } finally { await readerCtx.fiber.dispose(); }
+          await gateway.invoke({ namespace: "dsmmProfiles", method: "describeSession", args: { sessionId: coldId }, peer, signal: new AbortController().signal });
+          const resumed = ctx.get("agents").get(coldId); assert.ok(resumed && resumed !== oldAgent);
+          await page.evaluate(id => window.__dsmmUiContext.root.get("uiWorkspace").openSession(id), coldId);
+          await page.waitForFunction(id => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().session?.sessionId === id, coldId);
+          await settledHeader();
+          await modeEvidence("mode-explicit-cold-reopen", beforeMode, modeStart, { ...stockProof, nativeAgentReplaced: resumed !== oldAgent });
+          beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          const beforeDisableSeq = resumed.session.snapshotEvents().at(-1)?.seq ?? -1;
+          await toggle(false);
+          await modeEvidence("mode-disable-native-write", beforeMode, modeStart, { metadata: resumed.session.snapshotEvents().filter(event => event.seq > beforeDisableSeq && event.type === "deepwork/mode"), storedMetadata: await storedModes(sessionId) });
+          const modeOffStep = report.modeSteps.at(-1);
+          modeOffStep.submission = "native-agent-followup";
+          modeOffStep.actualCalls = await submitNativeMode(sessionId, "mode-disabled-preserves-native-route"); modeOffStep.afterRequest = await snapshot(sessionId);
+          await openOwned("dsmm-orchestrator"); beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          await openProfileMenu(); assert.equal(await menuPopup.getByRole("menuitem", { name: "Deepwork · DW preset", exact: true }).isDisabled(), true); await closeProfileMenu();
+          await modeEvidence("mode-dw-preset-owned", beforeMode, modeStart, { preset: "dsmm-orchestrator" });
+          const modeOwnedStep = report.modeSteps.at(-1);
+          modeOwnedStep.submission = "native-agent-followup";
+          modeOwnedStep.actualCalls = await submitNativeMode(sessionId, "dw-preset-owned-preserves-native-route"); modeOwnedStep.afterRequest = await snapshot(sessionId);
+        } finally {
+          sessionId = retainedSession;
+          await page.evaluate(id => window.__dsmmUiContext.root.get("uiWorkspace").openSession(id), retainedSession);
+          for (const handle of modeHandles) await handle.dispose();
+          await settledHeader();
+          await page.waitForFunction(id => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().session?.sessionId === id, retainedSession);
+        }
+      }
       const normalBefore = await snapshot(sessionId);
       let rpcStart = nativeCalls.length;
       await select.focus();
       if (menuCandidate) {
         await page.keyboard.press("Enter"); await menuPopup.waitFor();
-        await page.keyboard.press("Home"); await page.keyboard.press("ArrowDown");
+        for (const key of profileSwitchKeyboardKeys(modeCandidate)) await page.keyboard.press(key);
         assert.equal(await profileItem("picker-b").evaluate(node => node === document.activeElement), true);
         await page.keyboard.press("Enter"); await menuPopup.waitFor({ state: "hidden" });
       } else {
@@ -503,7 +654,7 @@ export async function runPickerLane(ctx, config) {
         await page.setViewportSize({ width, height: 900 });
         if (menuCandidate) {
           await menuTrigger.hover();
-          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry);
+          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry, { minimumLabels: modeCandidate ? 2 : 3 });
           const observed = await menuSnapshot();
           await page.screenshot({ path: join(config.evidenceRoot, `after-menu-${width}-${phase}.png`), fullPage: true });
           report.compactSteps.push({ phase: `responsive-${phase}`, viewport: width, geometry, header: observed.compactHeader, menu: observed.menu, publicNativeState: observed.publicNativeState, nativeProfileDisplay: observed.nativeProfileDisplay });
@@ -692,11 +843,18 @@ export async function runPickerLane(ctx, config) {
       await compactBreakpoints("model-partial-failure");
       modelRefused = false;
 
-      rpcStart = nativeCalls.length; await select.selectOption("@model:picker-no-model"); await settledHeader();
+      if (modeCandidate) { await select.selectOption("picker-no-model"); await settledHeader(); }
+      rpcStart = nativeCalls.length;
+      if (modeCandidate) {
+        // A disabled real menu action is not clicked; additionally exercise its
+        // public injected business face to prove the missing-model refusal.
+        await page.evaluate(async () => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().useSessionProfileModel());
+      } else await select.selectOption("@model:picker-no-model");
+      await settledHeader();
       after = await snapshot(sessionId);
       assert.equal(after.admission.profileId, "picker-no-model"); assert.deepEqual(after.directory.current, targetRoute);
       assert.equal(nativeCalls.slice(rpcStart).filter(({ endpoint }) => endpoint === "session/selectModel").length, 0);
-      assert.match(await feedback(), /Profile applied.*no main model/iu);
+      assert.match(await feedback(), modeCandidate ? /no main model/iu : /Profile applied.*no main model/iu);
       await page.screenshot({ path: join(config.evidenceRoot, "after-compact-no-profile-model.png"), fullPage: true });
       report.compactSteps.push({ phase: "profile-accepted-no-main-model", sessionId, after, nativeCalls: nativeCalls.slice(rpcStart) });
       await compactBreakpoints("no-profile-model");
@@ -710,8 +868,9 @@ export async function runPickerLane(ctx, config) {
       await header.waitFor({ state: menuCandidate ? "visible" : "hidden" });
       const blankPublicState = await page.evaluate(nativePickerPublicState);
       assert.equal(blankPublicState.currentSessionId, sessionId); assert.equal(blankPublicState.controller.currentSessionId, sessionId);
-      viewGate.release(); await until(() => nativeCalls.slice(rpcStart).some(({ endpoint, result }) => endpoint === "dsmmProfiles/selectSession" && result !== "pending"), "old-session native CAS settles after view withdrawal");
-      const oldCas = nativeCalls.slice(rpcStart).find(({ endpoint }) => endpoint === "dsmmProfiles/selectSession");
+      const intentEndpoint = modeCandidate ? "dsmmProfiles/describeSession" : "dsmmProfiles/selectSession";
+      const oldCas = heldProfileIntentCall(nativeCalls.slice(rpcStart), intentEndpoint, oldSessionId);
+      viewGate.release(); await until(() => oldCas.result !== "pending", "exact held old-session native operation settles after view withdrawal");
       if (oldCas.result !== "accepted") {
         assert.equal(oldCas.cancelled, true, "view withdrawal produced an unexplained native CAS refusal");
         assert.equal(ctx.get("dsmmProfileRuntime").admission(ctx.get("agents").get(oldSessionId)).epoch, beforeViewWithdrawal.admission.epoch, "cancelled old-view operation changed its admission");
@@ -754,7 +913,7 @@ export async function runPickerLane(ctx, config) {
         const originalDraft = await page.evaluate(() => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().editor.content);
         const dirtyDraft = `${originalDraft}\n`;
         await publicAction("editContent", [dirtyDraft]);
-        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: refreshLabel, exact: true }).click(); await settledHeader();
         const draftPreserved = await page.evaluate(content => window.__dsmmUiContext.root.get("slots").entries("conversation.header.leading").find(entry => entry.inject?.()?.hooks?.profiles).inject().hooks.profiles.getSnapshot().editor.content === content, dirtyDraft);
         await menuEvidence("menu-dirty-readonly", { draftPreserved, nativeCalls: nativeCalls.slice(rpcStart) });
         await publicAction("open", ["picker-no-model"]); await publicAction("discardAndOpen");
@@ -769,7 +928,7 @@ export async function runPickerLane(ctx, config) {
         const maintenanceStep = await menuEvidence("menu-maintenance-refusal-refresh-explicit-retry", { sessionId, beforeEpoch: beforeMaintenance.admission.epoch, refusedEpoch: refusedMaintenance.admission.epoch, refusedNativeModel: refusedMaintenance.directory.current.model });
         maintenanceGate.release(); await maintenance;
         const beforeRefreshCalls = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length;
-        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: refreshLabel, exact: true }).click(); await settledHeader();
         maintenanceStep.refreshedWithoutApply = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length === beforeRefreshCalls;
         await select.selectOption("picker-b"); await settledHeader();
         maintenanceStep.explicitRetryAccepted = nativeCalls.slice(rpcStart).filter(call => call.endpoint === "dsmmProfiles/selectSession").at(-1)?.result === "accepted";
@@ -782,7 +941,7 @@ export async function runPickerLane(ctx, config) {
         const activationStep = await menuEvidence("menu-activation-refusal-safe-field", { sessionId, beforeEpoch: beforeActivation.admission.epoch, refusedEpoch: refusedActivation.admission.epoch, refusedNativeModel: refusedActivation.directory.current.model });
         const beforeActivationRefresh = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length;
         activationRefused = false;
-        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: "Refresh profiles and current-session state", exact: true }).click(); await settledHeader();
+        await openProfileMenu(); await menuPopup.getByRole("menuitem", { name: refreshLabel, exact: true }).click(); await settledHeader();
         activationStep.refreshedWithoutApply = nativeCalls.filter(call => call.endpoint === "dsmmProfiles/selectSession").length === beforeActivationRefresh;
         activationStep.nativeCalls = nativeCalls.slice(rpcStart);
 
@@ -795,7 +954,7 @@ export async function runPickerLane(ctx, config) {
           // Native system preference follows the genuine media-query event;
           // no settings write or body/DOM/CSS substitution is necessary.
           await page.waitForFunction(dark => document.body.hasAttribute("data-ds-dark-theme") === dark, appearance === "dark");
-          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry);
+          const geometry = await menuGeometry(); validateNativeMenuGeometry(geometry, { minimumLabels: modeCandidate ? 2 : 3 });
           const observed = await menuSnapshot(); const screenshot = `menu-appearance-${width}-${appearance}.png`;
           const appearanceObserved = await page.evaluate(appearance => appearance === "reduced" ? matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduced" : "invalid" : document.body.hasAttribute("data-ds-dark-theme") ? "dark" : "light", appearance);
           report.menuSteps.push({ phase: "menu-appearance", viewport: width, appearance, appearanceObserved, geometry, snapshot: observed, screenshot });
@@ -851,7 +1010,7 @@ async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest,
   const workspace = join(owned, "workspace");
   await mkdir(workspace);
   const report = { artifactKind: candidate.kind, artifactSha256: candidate.sha256,
-    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: nativePickerContract(candidate.packageVersion) === "native-menu-017" ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile" }
+    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: nativePickerContract(candidate.packageVersion) === "native-menu-mode-018" ? "frozen-artifact-native-picker-and-native-menu-mode-018" : nativePickerContract(candidate.packageVersion) === "native-menu-017" ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile" }
       : candidate.sourceIdentity ? { sourceIdentity: candidate.sourceIdentity, publicationClaimed: false, proofScope: observerDiagnostic ? "observer-attachment-diagnostic-only" : "current-source-native-picker-and-compact-profile", immutableBeforeSha256: PICKER_ARTIFACT_SHA256 }
       : { artifactUrl: candidate.url }), lanes: [] };
   try {

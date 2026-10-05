@@ -5,7 +5,7 @@ import { DsmmProfileError, resolveProfileSettings } from "./profiles.js";
 import { DSMM_ROLES, isRootRole } from "./roles.js";
 import { roleRouteRuntimeState, selectInitialModelRoute } from "./role-routing.js";
 import { resolveEffectiveDsmmRole, sessionEvents } from "./session-scope.js";
-import { isDeepworkActive } from "./state.js";
+import { DeepworkModeController, hasOpenTurn } from "./state.js";
 import { resolveRoleRuntimePolicy } from "./settings.js";
 function immutableSettings(settings) {
     const copy = structuredClone(settings);
@@ -33,11 +33,13 @@ export class DsmmProfileRuntime {
     switching = new WeakSet();
     disposed = false;
     selectionQueue = Promise.resolve();
+    mode;
     constructor(ctx, baseline, store, options = {}) {
         this.ctx = ctx;
         this.store = store;
         this.options = options;
         this.baseline = immutableSettings(baseline);
+        this.mode = options.modeController ?? new DeepworkModeController({ get: (name) => ctx.get?.(name) });
         this.current = this.prepare(null, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
         this.getSettings.admission = (agent) => this.admission(agent);
     }
@@ -68,14 +70,69 @@ export class DsmmProfileRuntime {
             throw new DsmmProfileError("conflict", "The session choice changed outside this Host. Its admitted policy was retained; refresh or resume explicitly.");
         }
         const reason = this.switching.has(agent) ? "maintenance" : agent.status === "running" ? "busy" : agent.runMaintenance === undefined ? "unavailable" : undefined;
-        const role = resolveEffectiveDsmmRole(agent, admitted.settings, isDeepworkActive(sessionEvents(agent.session), admitted.settings.defaultActive));
+        const role = resolveEffectiveDsmmRole(agent, admitted.settings, this.mode.active(agent, admitted.settings.defaultActive));
         const profileModel = this.declaredProfileModel(admitted.settings, role);
         return { sessionId: agent.id, globalDefault: selectionState(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
-            rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch),
+            rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch), deepwork: this.mode.describe(agent, admitted.settings.defaultActive),
             ...(profileModel === undefined ? {} : { profileModel }),
             admissionEpoch: admitted.epoch, switchAllowed: reason === undefined, ...(reason === undefined ? {} : { switchUnavailableReason: reason }) };
     }
     /** The fourth argument is trusted native caller authority, never wire data. */
+    async selectMode(request, agent, signal, assertAuthority) {
+        this.assertRoot(agent);
+        if (request.sessionId !== agent.id)
+            throw new DsmmProfileError("not-owned", "The native session does not match the captured Agent.");
+        const admitted = this.bind(agent);
+        const assertCurrent = (maintenanceSignal) => {
+            this.assertRoot(agent);
+            if (signal?.aborted || maintenanceSignal?.aborted)
+                throw new DsmmProfileError("cancelled", "The Deepwork change was cancelled.");
+            const mode = this.mode.describe(agent, admitted.settings.defaultActive);
+            if (this.bind(agent) !== admitted || admitted.epoch !== request.expectedAdmissionEpoch || mode.revision !== request.expectedModeRevision) {
+                throw new DsmmProfileError("conflict", "The session profile, preset or mode changed. Refresh before retrying.");
+            }
+            if (mode.locked)
+                throw new DsmmProfileError("validation", "A DW preset owns its Deepwork composition.");
+            assertAuthority?.();
+        };
+        assertCurrent();
+        if (agent.status === "running")
+            throw new DsmmProfileError("busy", "Wait for the session to become idle.");
+        if (agent.runMaintenance === undefined)
+            throw new DsmmProfileError("unavailable", "Native idle maintenance is unavailable.");
+        // Read before the write, so a later read failure cannot misreport a commit.
+        const before = await this.getSession(agent);
+        assertCurrent();
+        try {
+            return await agent.runMaintenance(async (maintenanceSignal) => {
+                this.switching.add(agent);
+                try {
+                    assertCurrent(maintenanceSignal);
+                    if (hasOpenTurn(sessionEvents(agent.session)))
+                        throw new DsmmProfileError("busy", "A session turn is still open.");
+                    try {
+                        await this.mode.selectIdle(agent, request.active, admitted.settings.defaultActive);
+                    }
+                    catch {
+                        throw new DsmmProfileError("io", "The session mode could not be saved. Refresh before retrying.");
+                    }
+                    const role = resolveEffectiveDsmmRole(agent, admitted.settings, this.mode.active(agent, admitted.settings.defaultActive));
+                    const profileModel = this.declaredProfileModel(admitted.settings, role);
+                    const { profileModel: _previousModel, rolePolicy: _previousPolicy, ...snapshot } = before;
+                    return { ...snapshot, deepwork: this.mode.describe(agent, admitted.settings.defaultActive),
+                        rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch), ...(profileModel === undefined ? {} : { profileModel }) };
+                }
+                finally {
+                    this.switching.delete(agent);
+                }
+            });
+        }
+        catch (error) {
+            if (error instanceof DsmmProfileError)
+                throw error;
+            throw new DsmmProfileError("maintenance", "The native session refused the Deepwork change. Refresh before retrying.");
+        }
+    }
     selectSession(request, agent, signal, assertAuthority) {
         this.assertRoot(agent);
         if (request.sessionId !== agent.id)
@@ -105,7 +162,7 @@ export class DsmmProfileRuntime {
                     const result = await this.store.selectSession(request, epoch, async (document) => {
                         const prepared = immutableSettings(resolveProfileSettings(this.baseline, document?.settings ?? {}));
                         await this.validate(prepared, agent, maintenanceSignal);
-                        const role = resolveEffectiveDsmmRole(agent, prepared, isDeepworkActive(sessionEvents(agent.session), prepared.defaultActive));
+                        const role = resolveEffectiveDsmmRole(agent, prepared, this.mode.active(agent, prepared.defaultActive));
                         profileModel = this.declaredProfileModel(prepared, role);
                         assertCurrent(maintenanceSignal);
                         return prepared;
@@ -118,6 +175,7 @@ export class DsmmProfileRuntime {
                     // A committed selection remains a successful transaction even if a
                     // queued wake or disposal wins immediately when maintenance releases.
                     return { sessionId: request.sessionId, globalDefault: selectionState(this.current), selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
+                        deepwork: this.mode.describe(agent, result.prepared.defaultActive),
                         ...(profileModel === undefined ? {} : { profileModel }),
                         scope: request.id === null ? "deployment-baseline" : "session-override", admissionEpoch: epoch, switchAllowed: true };
                 }
@@ -310,11 +368,11 @@ function selectionState(selection) {
     return { selectedId: selection.selectedId, appliedRevision: selection.appliedRevision, selectionRevision: selection.selectionRevision };
 }
 /** No guessed home fallback: native deployment context owns this directory. */
-export async function createProfileRuntime(ctx, baseline) {
+export async function createProfileRuntime(ctx, baseline, options = {}) {
     const profile = ctx.get?.("profileContext");
     if (typeof profile?.dir !== "string" || profile.dir.trim() === "")
         throw new DsmmProfileError("activation", "Deepwork profiles require the native deployment profile directory.");
-    const runtime = new DsmmProfileRuntime(ctx, baseline, new ProfileStore(join(profile.dir, "dsmm-profiles")));
+    const runtime = new DsmmProfileRuntime(ctx, baseline, new ProfileStore(join(profile.dir, "dsmm-profiles")), options);
     await runtime.initialize();
     return runtime;
 }

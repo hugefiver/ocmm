@@ -649,7 +649,18 @@ export async function registryVersion(version, fetcher = fetch) {
   return JSON.parse((await responseBuffer(response, 2 * 1024 * 1024)).toString("utf8"));
 }
 
-export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = identity?.version === "0.1.7" ? 300_000 : 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
+class RegistryVerificationError extends Error {
+  constructor(stage, code, httpStatus) {
+    super(code);
+    Object.defineProperty(this, "failure", { value: Object.freeze({ stage, code, ...(httpStatus === undefined ? {} : { httpStatus }) }) });
+  }
+}
+
+export function registryVerificationFailure(error) {
+  return error instanceof RegistryVerificationError ? { ...error.failure } : null;
+}
+
+export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = ["0.1.7", "0.1.8"].includes(identity?.version) ? 300_000 : 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
   validateArtifactIdentity(identity);
   // This is an after-publication read path only. Absence checks used by the
   // publisher stay single-shot and can never admit a collision or republish.
@@ -657,33 +668,64 @@ export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibi
   invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= 300_000, "invalid registry visibility deadline");
   invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
   const deadline = now() + visibilityDeadlineMs;
-  let metadata;
-  do {
-    metadata = await registryVersion(identity.version, fetcher);
-    if (metadata !== null || !poll404 || now() >= deadline) break;
-    await wait(Math.min(visibilityPollMs, deadline - now()));
-  } while (now() <= deadline);
-  invariant(metadata !== null, "exact registry version is absent"); validateRegistryMetadata(metadata, identity);
-  const response = await fetcher(metadata.dist.tarball, { signal: AbortSignal.timeout(60000), redirect: "error" });
-  invariant(response.ok, `registry tarball download failed (HTTP ${response.status})`);
-  const bytes = await responseBuffer(response);
-  const artifact = validateTarballBuffer(bytes, { version: identity.version, expectedDigests: identity });
-  let provenance;
-  if (identity.mode === "bootstrap") {
-    invariant(metadata.dist.attestations?.provenance == null, "frozen local bootstrap must not have CI-built provenance");
-    provenance = { outcome: "NOT_CLAIMED_FROZEN_LOCAL_BOOTSTRAP", enabled: false, independentSigstoreVerification: false };
-  } else {
-    const expectedUrl = `${POLICY.registry}-/npm/v1/attestations/@dsmm%2fdsmm@${identity.version}`;
-    equal(metadata.dist.attestations?.url, expectedUrl, "npm attestation URL");
-    equal(metadata.dist.attestations?.provenance?.predicateType, "https://slsa.dev/provenance/v1", "npm provenance type");
-    const attestationResponse = await fetcher(expectedUrl, { signal: AbortSignal.timeout(60000), redirect: "error" });
-    invariant(attestationResponse.ok, "npm provenance unavailable");
-    const attestationBytes = await responseBuffer(attestationResponse, 2 * 1024 * 1024);
-    provenance = validateRegistryProvenance(JSON.parse(attestationBytes.toString("utf8")), identity);
+  const prospective = identity.mode === "future" && identity.version === "0.1.8";
+  let stage = "registry-metadata";
+  // The reviewed 0.1.8 contract bounds every public visibility read to one
+  // deadline. Historical contracts and all publisher absence checks stay intact.
+  const readVisible = async (url, options) => {
+    for (;;) {
+      const remaining = deadline - now();
+      if (remaining <= 0) throw new RegistryVerificationError(stage, "VISIBILITY_DEADLINE");
+      let response;
+      try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(Math.min(60_000, remaining)) }); }
+      catch { throw new RegistryVerificationError(stage, "FETCH_FAILED"); }
+      if (response.status !== 404) {
+        if (!response.ok) throw new RegistryVerificationError(stage, "HTTP_FAILURE", response.status);
+        if (now() > deadline) throw new RegistryVerificationError(stage, "VISIBILITY_DEADLINE");
+        return response;
+      }
+      await response.body?.cancel();
+      if (now() >= deadline) throw new RegistryVerificationError(stage, "VISIBILITY_DEADLINE", 404);
+      await wait(Math.min(visibilityPollMs, deadline - now()));
+      if (now() >= deadline) throw new RegistryVerificationError(stage, "VISIBILITY_DEADLINE", 404);
+    }
+  };
+  const registryFetch = prospective ? readVisible : fetcher;
+  try {
+    let metadata;
+    do {
+      metadata = await registryVersion(identity.version, registryFetch);
+      if (metadata !== null || !poll404 || now() >= deadline) break;
+      await wait(Math.min(visibilityPollMs, deadline - now()));
+    } while (now() <= deadline);
+    invariant(metadata !== null, "exact registry version is absent"); validateRegistryMetadata(metadata, identity);
+    stage = "registry-tarball";
+    const response = await registryFetch(metadata.dist.tarball, { signal: AbortSignal.timeout(60000), redirect: "error" });
+    invariant(response.ok, `registry tarball download failed (HTTP ${response.status})`);
+    const bytes = await responseBuffer(response);
+    const artifact = validateTarballBuffer(bytes, { version: identity.version, expectedDigests: identity });
+    let provenance;
+    stage = "registry-provenance";
+    if (identity.mode === "bootstrap") {
+      invariant(metadata.dist.attestations?.provenance == null, "frozen local bootstrap must not have CI-built provenance");
+      provenance = { outcome: "NOT_CLAIMED_FROZEN_LOCAL_BOOTSTRAP", enabled: false, independentSigstoreVerification: false };
+    } else {
+      const expectedUrl = `${POLICY.registry}-/npm/v1/attestations/@dsmm%2fdsmm@${identity.version}`;
+      equal(metadata.dist.attestations?.url, expectedUrl, "npm attestation URL");
+      equal(metadata.dist.attestations?.provenance?.predicateType, "https://slsa.dev/provenance/v1", "npm provenance type");
+      const attestationResponse = await registryFetch(expectedUrl, { signal: AbortSignal.timeout(60000), redirect: "error" });
+      invariant(attestationResponse.ok, "npm provenance unavailable");
+      const attestationBytes = await responseBuffer(attestationResponse, 2 * 1024 * 1024);
+      provenance = validateRegistryProvenance(JSON.parse(attestationBytes.toString("utf8")), identity);
+    }
+    if (prospective && now() > deadline) throw new RegistryVerificationError(stage, "VISIBILITY_DEADLINE");
+    return { outcome: "COMPLETED", registry: POLICY.registry, name: POLICY.packageName, version: identity.version,
+      size: artifact.size, sha256: artifact.sha256, sha1: artifact.sha1, integrity: artifact.integrity,
+      metadata: { name: metadata.name, version: metadata.version, dist: metadata.dist }, provenance, tarball: bytes };
+  } catch (error) {
+    if (!prospective || error instanceof RegistryVerificationError) throw error;
+    throw new RegistryVerificationError(stage, "EVIDENCE_REJECTED");
   }
-  return { outcome: "COMPLETED", registry: POLICY.registry, name: POLICY.packageName, version: identity.version,
-    size: artifact.size, sha256: artifact.sha256, sha1: artifact.sha1, integrity: artifact.integrity,
-    metadata: { name: metadata.name, version: metadata.version, dist: metadata.dist }, provenance, tarball: bytes };
 }
 
 export function assertPublishEnvironment(env) {

@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { requiresNativePickerProof } from "./native-picker-proof.mjs";
 
-/** Historical receipts deliberately keep their original fourteen-check grammar. */
+/** Historical receipts deliberately keep their original fourteen-check grammar.
+ * 018 session-mode browser proof is separately version-gated by the frozen
+ * native picker lane, not retrofitted into this native routing proof. */
 export function requiresSessionProfileProof(version) {
   assert.match(version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
   const [major, minor, patch] = version.split(".").map(Number);

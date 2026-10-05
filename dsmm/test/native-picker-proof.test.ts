@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Source-only release verifier is deliberately not published.
-import { MENU_PHASES_017, MENU_APPEARANCES_017, requiresNativePickerProof, validateNativePickerProof } from "../scripts/native-picker-proof.mjs";
+import { MENU_PHASES_017, MENU_APPEARANCES_017, MODE_PHASES_018, requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "../scripts/native-picker-proof.mjs";
 
 const artifactSha256 = "a".repeat(64), epoch = "b".repeat(64);
 const target = { provider: "dsmm-picker-fixture", model: "target", reasoningEffort: "high" };
@@ -228,4 +228,116 @@ test("017 rejects SELECT/header-text/old-seat/missing-menu/wrong-identity and in
     [["lanes", 0, "menuSteps", 1, "snapshot", "menu", "items", 1, "checked"], false],
     [["lanes", 0, "menuSteps", 1, "snapshot", "nativeProfileDisplay", "admittedId"], "wrong-profile"],
   ] as [(string | number)[], unknown][]) { const receipt = fixture017(); replace(receipt, path, value); assert.throws(() => validate017(receipt)); }
+});
+
+const modeRevision = "d".repeat(64);
+function decorate018(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const menu = Reflect.get(value, "menu"), state = Reflect.get(value, "publicNativeState");
+  if (menu && state) {
+    menu.labels = menu.labels.filter((label: string) => !["Switch profile — keep current model", "Switch and use profile model"].includes(label)).map((label: string) => label.replace(" — captured global default", ""));
+    menu.labels.push("Profiles · keep model");
+    menu.items = menu.items.slice(0, 3).map((item: { text: string }) => ({ ...item, text: item.text.replace(" — captured global default", "") }));
+    const unavailable = state.currentSessionId === undefined;
+    const readonly = unavailable || state.controller?.dirty || state.controller?.busy !== null;
+    const mode = { active: true, explicit: false, locked: false, revision: modeRevision };
+    const admittedId = Reflect.get(value, "nativeProfileDisplay")?.admittedId;
+    state.controller.session = { ...(admittedId === "picker-no-model" ? {} : { profileModel: profile }), ...(unavailable ? {} : { deepwork: mode }) };
+    if (!unavailable) Reflect.set(value, "nativeMode", mode);
+    menu.items.push({ text: unavailable ? "Deepwork unavailable" : "Disable Deepwork", disabled: Boolean(unavailable || state.controller?.busy !== null), checked: false }, { text: "Use profile model", disabled: Boolean(readonly || admittedId === "picker-no-model"), checked: false }, { text: "Refresh", disabled: false, checked: false });
+  }
+  for (const child of Object.values(value)) decorate018(child);
+}
+function fixture018() {
+  const receipt = fixture017();
+  replace(receipt, ["packageVersion"], "0.1.8"); replace(receipt, ["proofScope"], "frozen-artifact-native-picker-and-native-menu-mode-018");
+  replace(receipt, ["lanes", 0, "installedCandidate", "version"], "0.1.8");
+  Reflect.set(receipt.lanes[0], "rewrittenProductionBundles", false);
+  Reflect.set(receipt.lanes[0], "nativeClientArtifacts", ["@deepseek-ai/dsh-client-ui-model-selection", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-api-gateway"].map(id => ({ id, version: "0.2.0-rc.2", sha256: artifactSha256, rewritten: false })));
+  Reflect.set(receipt.lanes[0], "nativeStoreLibrary", { id: "@deepseek-ai/dsh-client-store", version: "0.2.0-rc.2", delivery: "native-web-frontend-seed", declaredClientAsset: false, installedEntrySha256: artifactSha256, frontendSha256: artifactSha256, consumerId: "@deepseek-ai/dsh-client-ui-model-selection", consumerSha256: artifactSha256, rewritten: false, publicExports: ["defineStore", "createSnapshotStore"] });
+  decorate018(receipt);
+  const modelPhases = ["explicit-profile-model-native-projection", "same-session-manual-choice-during-profile-cas", "same-pending-native-selection-dedup-during-profile-cas", "same-pending-native-choice-before-host-ack", "native-choice-pending-before-profile-cas", "profile-accepted-native-model-unavailable", "native-main-view-withdrawal-during-profile-cas"];
+  for (const step of receipt.lanes[0].compactSteps) {
+    if (modelPhases.includes(String(step.phase))) {
+      const calls = Reflect.get(step, "nativeCalls"); assert.ok(Array.isArray(calls));
+      for (const call of calls) if (call.endpoint === "dsmmProfiles/selectSession") {
+        call.endpoint = "dsmmProfiles/describeSession";
+        Reflect.set(call, "payload", { args: { sessionId } });
+      }
+    }
+    if (step.phase === "profile-accepted-no-main-model") step.nativeCalls = [];
+    if (step.phase === "responsive-pending-cas") {
+      const menu = Reflect.get(step, "menu"); assert.ok(menu && typeof menu === "object");
+      const items = Reflect.get(menu, "items"); assert.ok(Array.isArray(items));
+      for (const item of items) item.disabled = true;
+    }
+  }
+  const modeSteps = MODE_PHASES_018.map((phase: string) => {
+    const before = { ...snapshot(), ...menuSnapshot(), nativeSelections: [], nativeMode: { active: true, explicit: false, locked: false, revision: modeRevision } };
+    const after = structuredClone(before); decorate018(before); decorate018(after);
+    const mode = after.nativeMode;
+    const nativeCalls = [];
+    let metadata: { type: string; seq: number; time: number; data: { active: boolean } }[] = [];
+    if (phase === "mode-minimal-default-off") mode.active = false;
+    if (phase.startsWith("mode-explicit-")) mode.explicit = true;
+    if (phase === "mode-enable-native-write" || phase === "mode-disable-native-write") {
+      mode.active = phase === "mode-enable-native-write"; mode.explicit = true; mode.revision = "e".repeat(64);
+      const write = rpc("dsmmProfiles/selectMode");
+      Reflect.set(write, "payload", { args: { sessionId, request: { sessionId, active: mode.active, expectedModeRevision: before.nativeMode.revision, expectedAdmissionEpoch: before.admission.epoch } } });
+      Reflect.set(write.accepted, "deepwork", mode); nativeCalls.push(write);
+      metadata = [{ type: "deepwork/mode", seq: 3, time: 1, data: { active: mode.active } }];
+    }
+    if (phase === "mode-explicit-profile-switch") {
+      const selected = rpc("dsmmProfiles/selectSession"); selected.accepted.selectedId = "picker-no-model"; selected.accepted.admissionEpoch = "f".repeat(64);
+      nativeCalls.push(selected); after.admission.epoch = selected.accepted.admissionEpoch;
+      Object.assign(after.nativeProfileDisplay, { admittedId: "picker-no-model", admissionEpoch: after.admission.epoch, savedLabel: "Profile without main model" });
+      after.menu.labels[0] = "Current profile: Profile without main model (picker-no-model)";
+      after.menu.items[1].checked = false; after.menu.items[2].checked = true;
+    }
+    if (phase === "mode-explicit-native-preset-change") mode.revision = "e".repeat(64);
+    if (phase === "mode-dw-preset-owned") mode.locked = true;
+    if (phase === "mode-explicit-cold-reopen") before.nativeMode.explicit = true;
+    Reflect.get(after.publicNativeState.controller, "session").deepwork = mode;
+    const modeRow = after.menu.items.find(item => item.text === "Disable Deepwork");
+    assert.ok(modeRow); modeRow.text = mode.locked ? "Deepwork · DW preset" : mode.active ? "Disable Deepwork" : "Enable Deepwork"; modeRow.disabled = mode.locked;
+    return { phase, sessionId, before, after, nativeCalls, metadata, storedMetadata: metadata.map(event => ({ ...event, ignorable: true })), configuredDefault: true, submission: "native-agent-followup", actualCalls: [actualCall(target)], afterRequest: snapshot(),
+      preset: phase === "mode-minimal-default-off" ? "minimal" : phase === "mode-dw-preset-owned" ? "dsmm-orchestrator" : "standard",
+      presetEvents: [{ type: "agent-preset/selected", data: { agentPreset: "standard" } }], nativeAgentReplaced: true, stockEvents: 1,
+      stockMetadata: [{ type: "deepwork/mode", ignorable: true, data: { active: true } }], visibleBeforeSha256: epoch, visibleAfterSha256: epoch, headersBeforeSha256: epoch, headersAfterSha256: epoch };
+  });
+  Reflect.set(receipt.lanes[0], "modeSteps", modeSteps);
+  return receipt;
+}
+const validate018 = (receipt: ReturnType<typeof fixture018>) => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.8" });
+
+test("018 requires compact single-model action, admitted read races and native persisted mode scenarios", () => {
+  assert.deepEqual(validate018(fixture018()), { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: 11, raceScenarios: 4, responsiveStates: 12, menuScenarios: 8, menuAppearances: 9, modeScenarios: 8 });
+  const old = fixture017(); replace(old, ["packageVersion"], "0.1.8"); replace(old, ["lanes", 0, "installedCandidate", "version"], "0.1.8");
+  assert.throws(() => validate018(old), "historical receipt cannot be relabelled to gain mode proof");
+  assert.equal(validate017(fixture017()).outcome, "COMPLETED", "historical receipts retain their original grammar");
+});
+
+test("mode proof boundary is reviewed stable 018 only, and never changes older receipts", () => {
+  for (const version of ["0.1.1", "0.1.5", "0.1.6", "0.1.7"]) assert.equal(requiresSessionModeProof(version), false);
+  assert.equal(requiresSessionModeProof("0.1.8"), true);
+  for (const version of ["0.1.9", "0.2.0", "1.0.0", "0.1.08", "0.1.8-beta", "0.1.8\n", "9007199254740992.0.0"]) assert.throws(() => requiresSessionModeProof(version));
+});
+
+test("018 rejects missing mode persistence, implicit mode, model mutation, stale write fences and repeated model lists", () => {
+  for (const [path, value] of [
+    [["lanes", 0, "modeSteps"], []], [["lanes", 0, "modeSteps", 1, "after", "nativeMode", "active"], true],
+    [["lanes", 0, "rewrittenProductionBundles"], true], [["lanes", 0, "nativeClientArtifacts", 0, "rewritten"], true],
+    [["lanes", 0, "nativeStoreLibrary", "declaredClientAsset"], true], [["lanes", 0, "nativeStoreLibrary", "delivery"], "served-client-plugin"],
+    [["lanes", 0, "nativeStoreLibrary", "consumerSha256"], epoch], [["lanes", 0, "nativeStoreLibrary", "publicExports"], []],
+    [["lanes", 0, "nativeStoreLibrary", "frontendSha256"], "not-a-hash"], [["lanes", 0, "modeSteps", 6, "storedMetadata", 0, "data", "active"], true],
+    [["lanes", 0, "modeSteps", 2, "storedMetadata", 0, "ignorable"], false],
+    [["lanes", 0, "modeSteps", 2, "nativeCalls", 0, "payload", "args", "request", "expectedModeRevision"], epoch],
+    [["lanes", 0, "modeSteps", 3, "after", "nativeMode", "explicit"], false],
+    [["lanes", 0, "modeSteps", 4, "presetEvents"], []], [["lanes", 0, "modeSteps", 5, "nativeAgentReplaced"], false],
+    [["lanes", 0, "modeSteps", 5, "visibleAfterSha256"], modeRevision], [["lanes", 0, "modeSteps", 6, "after", "directory", "current"], profile],
+    [["lanes", 0, "modeSteps", 6, "submission"], "native-ui-composer"],
+    [["lanes", 0, "modeSteps", 7, "after", "nativeMode", "locked"], false],
+    [["lanes", 0, "menuSteps", 2, "snapshot", "menu", "labels", 1], "Switch and use profile model"],
+    [["lanes", 0, "compactSteps", 1, "nativeCalls", 0, "endpoint"], "dsmmProfiles/selectSession"],
+  ] as [(string | number)[], unknown][]) { const receipt = fixture018(); replace(receipt, path, value); assert.throws(() => validate018(receipt), path.join(".")); }
 });

@@ -14,6 +14,47 @@ const compactPhases = ["keyboard-normal-profile-keeps-native-model", "explicit-p
 const widths = [375, 768, 1280];
 export const MENU_PHASES_017 = Object.freeze(["menu-sessionless-readonly", "menu-retained-blank", "menu-active", "menu-keyboard-dismiss-focus", "menu-loading-readonly", "menu-dirty-readonly", "menu-maintenance-refusal-refresh-explicit-retry", "menu-activation-refusal-safe-field"]);
 export const MENU_APPEARANCES_017 = Object.freeze(["light", "dark", "reduced"]);
+export const MODE_PHASES_018 = Object.freeze(["mode-standard-configured-default", "mode-minimal-default-off", "mode-enable-native-write", "mode-explicit-profile-switch", "mode-explicit-native-preset-change", "mode-explicit-cold-reopen", "mode-disable-native-write", "mode-dw-preset-owned"]);
+
+export function validateSessionModeSteps(steps) {
+  assert.ok(Array.isArray(steps), "018 native session mode scenarios are missing");
+  exactInventory(steps.map(step => step.phase), MODE_PHASES_018);
+  for (const step of steps) {
+    const mode = step.after?.nativeMode;
+    assert.equal(typeof step.sessionId, "string"); assert.ok(step.sessionId.length > 0);
+    assert.equal(typeof mode?.active, "boolean"); assert.equal(typeof mode.explicit, "boolean"); assert.equal(typeof mode.locked, "boolean"); assert.match(mode.revision, sha256);
+    openMenu(step.after, false, true);
+    modelCalls(step, 0); assert.deepEqual(step.after.directory.current, target);
+    assert.deepEqual(step.after.nativeSelections, step.before.nativeSelections, "mode/preset/profile operation changed native model intent");
+    assert.deepEqual(step.after.actualCurrentHeader, step.before.actualCurrentHeader, "mode operation rewrote native request route");
+    const writes = rpcCalls(step, "dsmmProfiles/selectMode");
+    if (["mode-enable-native-write", "mode-disable-native-write"].includes(step.phase)) {
+      assert.equal(writes.length, 1); const value = request(writes[0], step.sessionId);
+      assert.equal(value.active, step.phase === "mode-enable-native-write");
+      assert.equal(value.expectedModeRevision, step.before.nativeMode.revision); assert.equal(value.expectedAdmissionEpoch, step.before.admission.epoch);
+      assert.deepEqual(writes[0].accepted.deepwork, mode); assert.equal(mode.active, value.active); assert.equal(mode.explicit, true); assert.equal(mode.locked, false);
+      assert.equal(step.metadata.length, 1); const event = step.metadata[0]; assert.equal(event.type, "deepwork/mode"); assert.deepEqual(event.data, { active: value.active });
+      assert.ok(Number.isSafeInteger(event.seq) && event.seq >= 0); assert.ok(Number.isSafeInteger(event.time));
+      assert.ok(Array.isArray(step.storedMetadata));
+      const persisted = step.storedMetadata.filter(record => record.seq === event.seq); assert.equal(persisted.length, 1);
+      assert.deepEqual(persisted[0], { ...event, ignorable: true }, "stock durable mode readback must match the actual native event and remain ignorable");
+      assert.notEqual(mode.revision, step.before.nativeMode.revision);
+    } else assert.equal(writes.length, 0);
+    if (step.phase === "mode-standard-configured-default") { assert.equal(mode.active, true); assert.equal(mode.explicit, false); assert.equal(mode.locked, false); assert.equal(step.preset, "standard"); }
+    if (step.phase === "mode-minimal-default-off") { assert.equal(mode.active, false); assert.equal(mode.explicit, false); assert.equal(mode.locked, false); assert.equal(step.preset, "minimal"); assert.equal(step.configuredDefault, true); }
+    if (step.phase.startsWith("mode-explicit-")) { assert.equal(mode.active, true); assert.equal(mode.explicit, true); assert.equal(mode.locked, false); }
+    if (step.phase === "mode-explicit-profile-switch") { acceptedProfile(step, step.sessionId, "picker-no-model"); assert.notEqual(step.after.admission.epoch, step.before.admission.epoch); }
+    if (step.phase === "mode-explicit-native-preset-change") { assert.equal(step.preset, "standard"); assert.ok(step.presetEvents.some(event => event.type === "agent-preset/selected" && event.data.agentPreset === "standard")); assert.notEqual(mode.revision, step.before.nativeMode.revision); }
+    if (step.phase === "mode-explicit-cold-reopen") {
+      assert.equal(step.nativeAgentReplaced, true); assert.equal(mode.revision, step.before.nativeMode.revision);
+      assert.ok(step.stockEvents > 0 && Number.isSafeInteger(step.stockEvents)); assert.ok(step.stockMetadata.some(event => event.type === "deepwork/mode" && event.ignorable === true && event.data.active === true));
+      assert.match(step.visibleBeforeSha256, sha256); assert.equal(step.visibleAfterSha256, step.visibleBeforeSha256); assert.match(step.headersBeforeSha256, sha256); assert.equal(step.headersAfterSha256, step.headersBeforeSha256);
+    }
+    if (step.phase === "mode-dw-preset-owned") { assert.equal(mode.active, true); assert.equal(mode.locked, true); assert.equal(step.preset, "dsmm-orchestrator"); }
+    if (["mode-disable-native-write", "mode-dw-preset-owned"].includes(step.phase)) { assert.equal(step.submission, "native-agent-followup"); completedRequest(step, target); }
+  }
+  return { modeScenarios: MODE_PHASES_018.length };
+}
 
 function menuHeader(snapshot, alert = false) {
   assert.equal(snapshot.compactHeader?.length, 1);
@@ -28,14 +69,33 @@ function menuHeader(snapshot, alert = false) {
 function nativeOwner(state) {
   assert.deepEqual(state?.profileSlot, { name: "conversation.header.leading", priority: Number.MAX_SAFE_INTEGER, rootScoped: true });
 }
-function openMenu(snapshot, readonly = false) {
+function openMenu(snapshot, readonly = false, modeContract = false) {
   menuHeader(snapshot); nativeOwner(snapshot.publicNativeState);
   const menu = snapshot.menu;
   assert.equal(menu?.role, "menu"); assert.equal(menu.portaled, true);
-  assert.ok(menu.labels.includes("Switch profile — keep current model"));
-  assert.ok(menu.labels.includes("Switch and use profile model"));
-  assert.ok(menu.items.length >= 7);
-  assert.ok(menu.items.some(item => item.text === "Refresh profiles and current-session state"));
+  const refresh = modeContract ? "Refresh" : "Refresh profiles and current-session state";
+  if (modeContract) {
+    assert.equal(menu.labels.filter(label => label === "Profiles · keep model").length, 1);
+    assert.ok(!menu.labels.includes("Switch profile — keep current model"));
+    assert.ok(!menu.labels.includes("Switch and use profile model"));
+    assert.equal(menu.items.filter(item => item.text === "Use profile model").length, 1);
+    assert.ok(menu.items.every(item => !item.text.startsWith("Use profile model:")));
+    assert.ok(!menu.text.includes("Normal profile switching"), "removed model explanation reappeared");
+    const modes = menu.items.filter(item => ["Enable Deepwork", "Disable Deepwork", "Deepwork · DW preset", "Deepwork unavailable"].includes(item.text));
+    assert.equal(modes.length, 1);
+    const mode = snapshot.nativeMode ?? snapshot.publicNativeState.controller?.session?.deepwork;
+    if (mode !== undefined) {
+      assert.equal(typeof mode.active, "boolean"); assert.equal(typeof mode.explicit, "boolean"); assert.equal(typeof mode.locked, "boolean"); assert.match(mode.revision, sha256);
+      assert.equal(modes[0].text, mode.locked ? "Deepwork · DW preset" : mode.active ? "Disable Deepwork" : "Enable Deepwork");
+      if (mode.locked) { assert.equal(mode.active, true); assert.equal(modes[0].disabled, true); }
+    } else { assert.equal(modes[0].text, "Deepwork unavailable"); assert.equal(modes[0].disabled, true); }
+    for (const message of ["Profile applied.", "Deepwork enabled.", "Deepwork disabled.", "Profile and native model applied."]) assert.ok(!menu.labels.includes(message), "success is only a live announcement");
+  } else {
+    assert.ok(menu.labels.includes("Switch profile — keep current model"));
+    assert.ok(menu.labels.includes("Switch and use profile model"));
+    assert.ok(menu.items.length >= 7);
+  }
+  assert.ok(menu.items.some(item => item.text === refresh));
   const display = snapshot.nativeProfileDisplay;
   assert.ok(display, "independent native admission/profile display evidence is missing");
   const selected = menu.items.filter(item => item.checked === true);
@@ -48,7 +108,7 @@ function openMenu(snapshot, readonly = false) {
     assert.equal(display.sessionId, snapshot.publicNativeState.currentSessionId);
     assert.match(display.admissionEpoch, sha256);
     assert.ok(["global-default", "session-override", "deployment-baseline"].includes(display.scope));
-    const suffix = display.scope === "global-default" ? " — captured global default" : "";
+    const suffix = !modeContract && display.scope === "global-default" ? " — captured global default" : "";
     const name = display.admittedId === null ? "deployment baseline" : display.savedLabel === null ? display.admittedId : `${display.savedLabel} (${display.admittedId})`;
     assert.equal(menu.labels[0], `Current profile: ${name}${suffix}`, "rendered current profile does not match native admitted identity");
     assert.equal(selected.length, 1, "native menu must check exactly the admitted row");
@@ -61,10 +121,14 @@ function openMenu(snapshot, readonly = false) {
     const codes = ["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled", "model-unconfigured", "model-choice-changed", "model-service-unavailable", "model-observation-unavailable", "model-selection-failed", "transport"];
     assert.ok(codes.includes(issue.code), "menu diagnostics have an unknown code");
     const field = issue.field;
-    assert.ok(field === undefined || typeof field === "string" && field.length <= 128 && /^(?:settings\.roleRouting\.dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)\.(?:primary|fallbackRoutes)(?:\[[0-7]\])?(?:\.(?:provider|model|reasoningEffort))?|version|id|label|content|sessionId|expectedRevision|expectedSelectionRevision|expectedAdmissionEpoch)$/u.test(field), "menu diagnostics have an unapproved field");
+    assert.ok(field === undefined || typeof field === "string" && field.length <= 128 && /^(?:settings\.roleRouting\.dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)\.(?:primary|fallbackRoutes)(?:\[[0-7]\])?(?:\.(?:provider|model|reasoningEffort))?|version|id|label|content|sessionId|expectedRevision|expectedSelectionRevision|expectedAdmissionEpoch|expectedModeRevision|active)$/u.test(field), "menu diagnostics have an unapproved field");
     assert.deepEqual(diagnostics, [`Reason: ${issue.code}.${field === undefined ? "" : ` Configuration field: ${field}.`}`]);
   } else assert.deepEqual(diagnostics, []);
-  if (readonly) assert.ok(menu.items.filter(item => item.text !== "Refresh profiles and current-session state").every(item => item.disabled));
+  if (readonly) {
+    const independentMode = modeContract && snapshot.publicNativeState.controller?.dirty === true;
+    assert.ok(menu.items.filter(item => item.text !== refresh && !(independentMode && ["Enable Deepwork", "Disable Deepwork"].includes(item.text))).every(item => item.disabled));
+    if (independentMode) for (const item of menu.items.filter(item => ["Enable Deepwork", "Disable Deepwork"].includes(item.text))) assert.equal(item.disabled, false, "independent session mode must not discard or apply a dirty profile draft");
+  }
 }
 
 export function requiresNativePickerProof(version) {
@@ -72,6 +136,10 @@ export function requiresNativePickerProof(version) {
   const [major, minor, patch] = version.split(".").map(Number);
   assert.ok([major, minor, patch].every(Number.isSafeInteger));
   return major > 0 || minor > 1 || minor === 1 && patch >= 6;
+}
+export function requiresSessionModeProof(version) {
+  if (!requiresNativePickerProof(version)) return false;
+  return nativePickerContract(version) === "native-menu-mode-018";
 }
 
 function exactInventory(actual, expected) {
@@ -99,6 +167,15 @@ function acceptedProfile(step, sessionId = step.sessionId, selectedId = "picker-
   assert.equal(calls[0].accepted.selectedId, selectedId);
   assert.match(calls[0].accepted.admissionEpoch, sha256);
   return calls[0];
+}
+function admittedModelRead(step, sessionId = step.sessionId, selectedId = "picker-b") {
+  assert.equal(rpcCalls(step, "dsmmProfiles/selectSession").length, 0, "use-current-model must not reapply a profile");
+  const calls = rpcCalls(step, "dsmmProfiles/describeSession").filter(call => call.accepted?.selectedId === selectedId && call.accepted?.sessionId === sessionId);
+  assert.ok(calls.length >= 1, "current admitted profile read missing");
+  const call = calls[0];
+  assert.equal(call.operation, "call"); assert.equal(call.strictGateway, true); assert.equal(call.nativeInvocationStarted, true); assert.equal(call.result, "accepted");
+  assert.equal(call.payload?.args?.sessionId, sessionId); assert.match(call.accepted.admissionEpoch, sha256);
+  return call;
 }
 function modelCalls(step, count, sessionId = step.sessionId) {
   const calls = rpcCalls(step, "session/selectModel");
@@ -133,14 +210,16 @@ function completedRequest(step, expected, sessionId = step.sessionId) {
 /** Version-selected by the trusted release identity, never by a receipt flag. */
 export function validateNativePickerProof(receipt, { artifactSha256, packageVersion }) {
   assert.equal(requiresNativePickerProof(packageVersion), true);
-  const menu = nativePickerContract(packageVersion) === "native-menu-017";
+  const contract = nativePickerContract(packageVersion), modeContract = contract === "native-menu-mode-018", menu = contract !== "native-select-016";
+  const checkMenu = (snapshot, readonly = false) => openMenu(snapshot, readonly, modeContract);
+  const acceptedIntent = modeContract ? admittedModelRead : acceptedProfile;
   const checkHeader = (snapshot, value, alert = false) => {
-    if (menu) { menuHeader(snapshot, alert); openMenu(snapshot); assert.equal(snapshot.nativeProfileDisplay.admittedId, value || null); assert.equal(snapshot.nativeProfileDisplay.admissionEpoch, snapshot.admission.epoch); }
+    if (menu) { menuHeader(snapshot, alert); checkMenu(snapshot); assert.equal(snapshot.nativeProfileDisplay.admittedId, value || null); assert.equal(snapshot.nativeProfileDisplay.admissionEpoch, snapshot.admission.epoch); }
     else compactHeader(snapshot, value, alert);
   };
   assert.match(artifactSha256, sha256);
   assert.equal(receipt?.artifactKind, "ci-frozen-artifact");
-  assert.equal(receipt.proofScope, menu ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile");
+  assert.equal(receipt.proofScope, modeContract ? "frozen-artifact-native-picker-and-native-menu-mode-018" : menu ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile");
   assert.equal(receipt.packageVersion, packageVersion);
   assert.equal(receipt.artifactSha256, artifactSha256);
   assert.equal(receipt.publicationClaimed, false);
@@ -152,6 +231,22 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   assert.equal(lane.artifactSha256, artifactSha256);
   assert.equal(lane.outcome, "OBSERVED"); assert.deepEqual(lane.exit, { code: 0, signal: null });
   assert.deepEqual(lane.browserErrors, []); assert.deepEqual(lane.serverErrors, []);
+  if (modeContract) {
+    assert.equal(lane.rewrittenProductionBundles, false, "native DSH module rewrite invalidates mode proof");
+    assert.ok(Array.isArray(lane.nativeClientArtifacts));
+    for (const id of ["@deepseek-ai/dsh-client-ui-model-selection", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-api-gateway"]) {
+      const rows = lane.nativeClientArtifacts.filter(row => row.id === id); assert.equal(rows.length, 1);
+      assert.equal(rows[0].version, "0.2.0-rc.2"); assert.equal(rows[0].rewritten, false); assert.match(rows[0].sha256, sha256);
+    }
+    const store = lane.nativeStoreLibrary;
+    assert.equal(store?.id, "@deepseek-ai/dsh-client-store"); assert.equal(store.version, "0.2.0-rc.2"); assert.equal(store.delivery, "native-web-frontend-seed");
+    assert.equal(store.declaredClientAsset, false); assert.equal(store.rewritten, false);
+    for (const digest of [store.installedEntrySha256, store.frontendSha256, store.consumerSha256]) assert.match(digest, sha256);
+    assert.equal(store.consumerId, "@deepseek-ai/dsh-client-ui-model-selection");
+    assert.equal(store.consumerSha256, lane.nativeClientArtifacts.find(row => row.id === store.consumerId).sha256);
+    assert.ok(Array.isArray(store.publicExports) && store.publicExports.includes("defineStore") && store.publicExports.includes("createSnapshotStore"), "actual native Store public exports are missing");
+    assert.equal(lane.nativeClientArtifacts.some(row => row.id === store.id), false, "Store library cannot be relabelled into a served client-plugin asset");
+  }
   assert.deepEqual(lane.authentication, { signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false });
   assert.deepEqual(lane.cleanup, { browserClosed: true, ownedContextClosed: true, hostDisposal: "appExit", serverClosed: true });
   assert.deepEqual(lane.compactShape, menu ? { nativeSelects: 0, iconButtons: 1, nativeMenu: true, nativeRootLeadingOwner: true } : { nativeSelects: 1, additionalButtons: 0, nativeRootAndHeaderOwners: true });
@@ -177,7 +272,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   acceptedProfile(normal); modelCalls(normal, 0); completedRequest(normal, target);
   checkHeader(normal.afterRequest, "picker-b");
   const explicit = phase(compactPhases[1]);
-  const cas = acceptedProfile(explicit);
+  const cas = acceptedIntent(explicit);
   const selection = modelCalls(explicit, 1)[0];
   assert.ok(explicit.nativeCalls.indexOf(cas) < explicit.nativeCalls.indexOf(selection), "model dispatch preceded accepted profile CAS");
   assert.deepEqual(route(cas.accepted.profileModel), profile);
@@ -189,7 +284,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   const manual = phase(compactPhases[2]);
   assert.equal(modelCalls(manual, 1)[0].payload.args.request.model, "target"); completedRequest(manual, target);
   for (const name of racePhases) {
-    const step = phase(name), accepted = acceptedProfile(step);
+    const step = phase(name), accepted = acceptedIntent(step);
     assert.equal(accepted.ownedCarrierHold, true);
     assert.equal(modelCalls(step, 1)[0].payload.args.request.model, "target");
     completedRequest(step, target); checkHeader(step.afterRequest, "picker-b", true);
@@ -211,22 +306,30 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   const busy = phase("native-running-profile-guard");
   modelCalls(busy, 0);
   const refusal = rpcCalls(busy, "dsmmProfiles/selectSession");
-  if (menu && busy.disabledWhileRunning === true) { assert.equal(refusal.length, 0); openMenu(busy.disabledMenu, true); }
+  if (menu && busy.disabledWhileRunning === true) { assert.equal(refusal.length, 0); checkMenu(busy.disabledMenu, true); }
   else { assert.equal(refusal.length, 1); request(refusal[0], busy.sessionId, "dsmm-profiles/refused"); }
   assert.equal(busy.after.admission.epoch, busy.before.admission.epoch);
   const unavailable = phase("profile-accepted-native-model-unavailable");
-  const committed = acceptedProfile(unavailable);
+  const committed = acceptedIntent(unavailable);
   const failed = rpcCalls(unavailable, "session/selectModel"); assert.equal(failed.length, 1);
   assert.deepEqual(route(request(failed[0], unavailable.sessionId, "session/model-unavailable")), profile);
   assert.equal(unavailable.after.admission.epoch, committed.accepted.admissionEpoch);
   assert.deepEqual(unavailable.after.directory.current, target); checkHeader(unavailable.after, "picker-b", true);
   const noModel = phase("profile-accepted-no-main-model");
-  assert.equal(acceptedProfile(noModel, noModel.sessionId, "picker-no-model").accepted.profileModel, undefined);
+  if (modeContract) { assert.equal(rpcCalls(noModel, "dsmmProfiles/selectSession").length, 0); assert.equal(noModel.after.publicNativeState.controller?.session?.profileModel, undefined); }
+  else assert.equal(acceptedProfile(noModel, noModel.sessionId, "picker-no-model").accepted.profileModel, undefined);
   modelCalls(noModel, 0); assert.deepEqual(noModel.after.directory.current, target);
   checkHeader(noModel.after, "picker-no-model", true);
   const withdrawn = phase("native-main-view-withdrawal-during-profile-cas");
   assert.notEqual(withdrawn.oldSessionId, withdrawn.currentSessionId);
-  acceptedProfile(withdrawn, withdrawn.oldSessionId); modelCalls(withdrawn, 0, withdrawn.oldSessionId);
+  if (modeContract) {
+    assert.equal(rpcCalls(withdrawn, "dsmmProfiles/selectSession").length, 0);
+    const reads = rpcCalls(withdrawn, "dsmmProfiles/describeSession").filter(call => call.payload?.args?.sessionId === withdrawn.oldSessionId);
+    assert.ok(reads.length >= 1);
+    if (reads.some(call => call.result === "accepted")) admittedModelRead(withdrawn, withdrawn.oldSessionId);
+    else { assert.equal(reads[0].strictGateway, true); assert.equal(reads[0].cancelled, true); assert.equal(reads[0].ownedCarrierHold, true); }
+  } else acceptedProfile(withdrawn, withdrawn.oldSessionId);
+  modelCalls(withdrawn, 0, withdrawn.oldSessionId);
   assert.equal(withdrawn.blankPublicState.currentSessionId, withdrawn.currentSessionId);
   if (menu) { menuHeader(withdrawn.after); nativeOwner(withdrawn.blankPublicState); }
   else assert.deepEqual(withdrawn.after.compactHeader, []);
@@ -235,7 +338,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   for (const step of lane.compactSteps.filter(step => responsivePhases.includes(step.phase))) {
     assert.equal(step.geometry.viewportWidth, step.viewport);
     if (menu) {
-      validateNativeMenuGeometry(step.geometry); openMenu({ compactHeader: step.header, menu: step.menu, publicNativeState: step.publicNativeState, nativeProfileDisplay: step.nativeProfileDisplay });
+      validateNativeMenuGeometry(step.geometry, { minimumLabels: modeContract ? 2 : 3 }); checkMenu({ compactHeader: step.header, menu: step.menu, publicNativeState: step.publicNativeState, nativeProfileDisplay: step.nativeProfileDisplay });
       if (step.phase === "responsive-pending-cas") {
         assert.equal(step.header[0].busy, "true");
         assert.ok(step.menu.items.every(item => item.disabled));
@@ -262,7 +365,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
       ...MENU_PHASES_017.map(phase => `${phase}:-:-`), ...widths.flatMap(width => MENU_APPEARANCES_017.map(appearance => `menu-appearance:${width}:${appearance}`)),
     ]);
     for (const step of lane.menuSteps) {
-      openMenu(step.snapshot, ["menu-sessionless-readonly", "menu-loading-readonly", "menu-dirty-readonly"].includes(step.phase));
+      checkMenu(step.snapshot, ["menu-sessionless-readonly", "menu-loading-readonly", "menu-dirty-readonly"].includes(step.phase));
       assert.match(step.screenshot, /^[a-z0-9-]+\.png$/u);
       if (step.phase === "menu-sessionless-readonly") {
         assert.equal(step.snapshot.publicNativeState.currentSessionId, undefined); modelCalls(step, 0); assert.equal(rpcCalls(step, "dsmmProfiles/selectSession").length, 0);
@@ -275,7 +378,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
       }
       if (step.phase === "menu-dirty-readonly") { assert.equal(step.snapshot.publicNativeState.controller.dirty, true); assert.equal(step.draftPreserved, true); modelCalls(step, 0); assert.equal(rpcCalls(step, "dsmmProfiles/selectSession").length, 0); }
       if (step.phase === "menu-loading-readonly") { assert.equal(step.snapshot.publicNativeState.controller.busy, "refresh"); assert.equal(step.actualReadHeld, true); modelCalls(step, 0); }
-      if (step.phase === "menu-appearance") { assert.equal(step.geometry.viewportWidth, step.viewport); validateNativeMenuGeometry(step.geometry); assert.equal(step.appearanceObserved, step.appearance); }
+      if (step.phase === "menu-appearance") { assert.equal(step.geometry.viewportWidth, step.viewport); validateNativeMenuGeometry(step.geometry, { minimumLabels: modeContract ? 2 : 3 }); assert.equal(step.appearanceObserved, step.appearance); }
       if (["menu-maintenance-refusal-refresh-explicit-retry", "menu-activation-refusal-safe-field"].includes(step.phase)) {
         const calls = rpcCalls(step, "dsmmProfiles/selectSession"); assert.ok(calls.length >= 1);
         request(calls[0], step.sessionId, "dsmm-profiles/refused");
@@ -294,7 +397,8 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
         }
       }
     }
-    return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12, menuScenarios: MENU_PHASES_017.length, menuAppearances: 9 };
+    if (modeContract) validateSessionModeSteps(lane.modeSteps);
+    return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12, menuScenarios: MENU_PHASES_017.length, menuAppearances: 9, ...(modeContract ? { modeScenarios: MODE_PHASES_018.length } : {}) };
   }
   return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12 };
 }

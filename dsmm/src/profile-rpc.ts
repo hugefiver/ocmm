@@ -6,7 +6,7 @@ import type { SessionController } from "@deepseek-ai/dsh-api-session-controller"
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
 import { TYPERT_HOST } from "./profile-remote.js";
-import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import type { DshAgent, DshAgentsRegistry } from "./dsh-types.js";
 
@@ -20,6 +20,7 @@ export interface ProfilesBackend {
   select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
   getSession(agent: DshAgent): Promise<SessionProfileSnapshot>;
   selectSession(request: SessionProfileSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
+  selectMode?(request: SessionModeSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
 }
 
 /** Business service addressed only by native Typert Gateway invocations. */
@@ -133,6 +134,17 @@ export class DsmmProfilesHost extends TypertRemoteService {
       return this.invoke(async () => { throw new DsmmProfileError("validation", "The requested session identities must match.", "sessionId"); });
     }
     return this.invokeSession(sessionId, (agent, signal, assertAuthority) => this.backend.selectSession(request, agent, signal, assertAuthority));
+  }
+
+  @Remote
+  selectMode(sessionId: string, request: SessionModeSelectRequest): Promise<SessionProfileSnapshot> {
+    if (request.sessionId !== sessionId) {
+      return this.invoke(async () => { throw new DsmmProfileError("validation", "The requested session identities must match.", "sessionId"); });
+    }
+    return this.invokeSession(sessionId, (agent, signal, assertAuthority) => {
+      if (this.backend.selectMode === undefined) throw new DsmmProfileError("unavailable", "Session mode selection is unavailable.");
+      return this.backend.selectMode(request, agent, signal, assertAuthority);
+    });
   }
 }
 

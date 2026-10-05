@@ -270,7 +270,7 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   assert.equal(rows.length, 17);
   assert.ok(rows.every((row) => row.length === 3 && row[2] !== ""), "each surface states an evidence level");
   assert.match(rows.find(([surface]) => surface === "DSH")?.[2] ?? "", /pinned authority.*acceptance required/u);
-  assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "existing official 0.1.6 CLI/TUI installation verified; new 0.1.7 menu proof is Web/Desktop only");
+  assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "existing official 0.1.6 CLI/TUI installation verified; new 0.1.8 menu proof is Web/Desktop only");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.match(rows.find(([surface]) => surface === "Native Settings")?.[2] ?? "", /actual Desktop.*separate proofs/u);
   assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /global new-Agent.*idle session epochs.*cold sidecar retention/u);
@@ -280,7 +280,7 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
 test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
-  assert.match(compatibility, /^# Deepwork 0\.1\.7 Compatibility/mu);
+  assert.match(compatibility, /^# Deepwork 0\.1\.8 Compatibility/mu);
   for (const heading of ["Compatibility authority", "Compatibility matrix", "Command and runtime boundaries", "Evidence limits"]) {
     assert.match(compatibility, new RegExp(`^## ${heading}$`, "mu"));
   }
@@ -383,14 +383,14 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.match(release, /^# Deepwork 0\.1\.7 Release and Rollback$/mu);
+  assert.match(release, /^# Deepwork 0\.1\.8 Release and Rollback$/mu);
   const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
   const phaseOffsets = phases.map((phase) => release.indexOf(phase));
   assert.ok(phaseOffsets.every((offset) => offset >= 0));
   assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.7",
+    "dsmm-scoped-v0.1.8",
     "explicit authorization",
     "npm Trusted Publisher registration",
     ".github/workflows/dsmm-release.yml",
@@ -449,7 +449,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
     "registry installation",
-    "plugin --profile dsmm-0.1.7-verify list",
+    "plugin --profile dsmm-0.1.8-verify list",
     "--dump-config",
     "installed registry package",
     "scripts/check-dsmm-release-completion.mjs",
@@ -461,7 +461,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
   assert.match(postPublication, /import-bootstrap.*skipped \/ NOT_APPLICABLE/u);
   assert.match(postPublication, /Workflow success alone is insufficient/u);
-  assert.match(desktopGate, /Only after terminal 0\.1\.7 completion/u);
+  assert.match(desktopGate, /Only after terminal 0\.1\.8 completion/u);
   assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
   assert.match(desktopGate, /actual Deepwork Profiles UI create\/edit\/save\/apply\/reset/u);
   const rollback = release.slice(release.indexOf("## Rollback"));
@@ -488,8 +488,8 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "0.1.7 publication and Desktop acceptance remain pending",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.7.tgz>",
+    "0.1.8 publication and Desktop acceptance remain pending",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.8.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
@@ -504,7 +504,7 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(profile, /^dsmm-v1-smoke$/u);
 });
 
-test("0.1.7 guides preserve completed release history and native root model authority", () => {
+test("0.1.8 guides preserve completed release history and native root model authority", () => {
   const readme = readFileSync(readmePath, "utf8");
   const release = readFileSync(releasePath, "utf8");
   for (const document of [readme, release]) {
@@ -515,8 +515,9 @@ test("0.1.7 guides preserve completed release history and native root model auth
     assert.match(document, /0\.1\.4.*continuation/u);
     assert.doesNotMatch(document, /0\.1\.5 publication and Desktop acceptance remain pending/u);
     assert.doesNotMatch(document, /0\.1\.6 publication and Desktop acceptance remain pending/u);
-    assert.doesNotMatch(document, /completed 0\.1\.7 publication/u);
-    assert.ok(document.includes("Switch and use profile model"));
+    assert.doesNotMatch(document, /completed 0\.1\.8 publication/u);
+    assert.ok(document.includes("Use profile model"));
+    assert.doesNotMatch(document, /Switch and use profile model/u);
     assert.match(document, /normal.*switching keeps the current model/iu);
     assert.match(document, /native.*default.*Models tab/iu);
     assert.match(document, /newer native choice/u);
@@ -531,25 +532,27 @@ test("0.1.7 guides preserve completed release history and native root model auth
   assert.match(release, /failed `installProfiles` child through its public parent-fiber ownership/u);
 });
 
-test("0.1.7 menu guidance preserves immutable 0.1.6 continuation and completed TUI scope", () => {
+test("0.1.8 menu guidance preserves immutable 0.1.6 continuation and completed TUI scope", () => {
   const readme = readFileSync(readmePath, "utf8");
   const release = readFileSync(releasePath, "utf8");
   const compatibility = readFileSync(compatibilityPath, "utf8");
   for (const document of [readme, release, compatibility]) {
-    assert.match(document, /one icon-only native profile menu/u);
+    assert.match(document, /one icon-only native profile menu/iu);
     assert.match(document, /sessionless, blank and active/u);
-    assert.match(document, /after successful profile CAS/u);
+    assert.match(document, /successful profile CAS/u);
     assert.match(document, /allowlisted codes\/fields/u);
     assert.match(document, /refresh\/retry guidance/u);
     assert.match(document, /not unfinished rollout work/u);
   }
   assert.match(readme, /existing official CLI\/TUI `@dsmm\/dsmm@0\.1\.6` installation is already verified and enabled/u);
-  assert.ok(readme.includes("dsh plugin --profile dsh-tui add @dsmm/dsmm@0.1.7 --save-exact"));
-  assert.match(release, /trusted artifact version alone chooses historical 0\.1\.6 SELECT proof versus 0\.1\.7 native-menu proof; later versions require an explicitly reviewed proof contract/u);
+  assert.ok(readme.includes("dsh plugin --profile dsh-tui add @dsmm/dsmm@0.1.8 --save-exact"));
+  assert.match(release, /historical 0\.1\.6 SELECT and 0\.1\.7 native-menu grammars remain unchanged/u);
+  assert.match(release, /compact-menu\/mode proof is version-gated to reviewed 0\.1\.8 only, never applied retroactively/u);
+  assert.match(release, /Later versions require their own explicitly reviewed proof contract and fail closed until reviewed/u);
   assert.match(release, /zero header SELECTs/u);
   assert.match(release, /Historical audit reference only/u);
   assert.match(release, /Do not dispatch it again/u);
-  assert.match(release, /not permission for the new 0\.1\.7 rollout/u);
+  assert.match(release, /not permission for the new 0\.1\.8 rollout/u);
   for (const identity of [
     "dsmm-scoped-v0.1.6", "37281521750/1", "d2e499b3a61ef76033d417efbec3402a4739a8fe",
     "11332299033", "359262", "3fedc92c35a88f0a75fdfc6ac8ef9a37ef138d902e5698f90ac969f66f6f4eb9",
@@ -557,6 +560,51 @@ test("0.1.7 menu guidance preserves immutable 0.1.6 continuation and completed T
     ".github/workflows/dsmm-published-continuation-016.yml", "--origin-version 0.1.6"
   ]) assert.ok(release.includes(identity), `historical 0.1.6 identity remains ${identity}`);
   assert.match(compatibility, /Ordinary roots preserve their native initial and explicit provider\/model\/exact effort rather than profile-primary resolution/u);
+});
+
+test("0.1.8 documentation requires explicit durable mode and a single admitted-profile model action", () => {
+  for (const path of [readmePath, releasePath, compatibilityPath, join(packageRoot, "docs", "profiles.md"), join(packageRoot, "docs", "settings-status.md"), join(packageRoot, "DESIGN.md")]) {
+    const document = readFileSync(path, "utf8");
+    assert.match(document, /Deepwork.*toggle/iu, path);
+    assert.match(document, /official minimal[^.\n]*defaults? off|defaults? off[^.\n]*official minimal/iu, path);
+    assert.match(document, /saved explicit `deepwork\/mode`/u, path);
+    assert.match(document, /same-default.*(?:persist|intent)/iu, path);
+    assert.match(document, /profile changes and reopen|profile changes and fresh-process reopen/iu, path);
+    assert.match(document, /standing DW presets.*locked enabled/iu, path);
+    assert.match(document, /one profile list/iu, path);
+    assert.match(document, /`@use-model`/u, path);
+    assert.match(document, /Use profile model/u, path);
+    assert.match(document, /(?:admitted immutable profile|admitted profile model)/u, path);
+    assert.match(document, /without reapplying|does not reapply/iu, path);
+    assert.match(document, /(?:live announcements only|successes only|announces successful outcomes)/iu, path);
+    assert.match(document, /(?:short sanitized|errors are short sanitized)/iu, path);
+    assert.doesNotMatch(document, /Switch and use profile model|both selection groups|separately labelled opt-in group/u, path);
+  }
+});
+
+test("0.1.7 npm and Desktop facts never replace failed terminal authority or authorize in-place repair", () => {
+  for (const path of [readmePath, releasePath, compatibilityPath]) {
+    const document = readFileSync(path, "utf8");
+    assert.match(document, /0\.1\.7 is (?:already )?npm published/iu, path);
+    assert.match(document, /Desktop.*installed|installed in Desktop/iu, path);
+    assert.ok(document.includes("dsmm-scoped-v0.1.7"), path);
+    assert.ok(document.includes("1ca0bf6e89916d17ddc663e1e06f6c15256cf453"), path);
+    assert.ok(document.includes("37312038470/1"), path);
+    assert.match(document, /failed verification|failed terminal verification/iu, path);
+    assert.match(document, /GitHub (?:job )?was skipped|GitHub job was skipped/iu, path);
+    assert.ok(document.includes("`UNRESOLVED`/`FAILED`"), path);
+    assert.match(document, /not a completed GitHub Release/u, path);
+    assert.match(document, /(?:Desktop.*waits|installation waits|upgrade waits)/iu, path);
+  }
+});
+
+test("0.1.8 verification visibility is bounded and never becomes publish retry authority", () => {
+  const release = readFileSync(releasePath, "utf8");
+  assert.match(release, /one shared 300-second visibility deadline/u);
+  assert.match(release, /Only HTTP 404 reads may wait/u);
+  assert.match(release, /never retries publishing or weakens publisher absence checks/u);
+  assert.match(release, /finite stage\/code\/HTTP-status diagnostics/u);
+  assert.match(release, /original 0\.1\.7 CI cause remains unproven/u);
 });
 
 test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability", () => {
@@ -568,7 +616,7 @@ test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.7 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.8 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -576,7 +624,7 @@ test("release readiness checker accepts the real 0.1.7 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.7");
+  assert.equal(receipt.version, "0.1.8");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -606,14 +654,14 @@ test("release readiness checker rejects the superseded unscoped package identity
 });
 
 test("release readiness checker rejects a stale or manifest-selected release version", () => {
-  for (const version of ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.8"]) {
+  for (const version of ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.9"]) {
     const fixtureRoot = createReleaseFixture();
     try {
       updateFixtureManifest(fixtureRoot, (manifest) => { manifest.version = version; });
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1, version);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.7"]);
+      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.8"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
@@ -832,6 +880,20 @@ test("release readiness checker rejects invalid, eager and Host-leaking client b
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1, label);
       assert.ok(receipt.errors.some((error) => error.startsWith("native client bundle must ")), label);
+    } finally { removeReleaseFixture(fixtureRoot); }
+  }
+});
+
+test("release readiness checker rejects an absent or foreign selectMode remote descriptor", () => {
+  const installed = readFileSync(join(packageRoot, "lib", "client.js"), "utf8");
+  assert.ok(installed.includes('descriptor("selectMode",'), "compiled mode descriptor exists");
+  for (const replacement of ['descriptor("describeSession",', 'descriptor("foreignMode",']) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      writeFixtureFile(fixtureRoot, "lib/client.js", installed.replace('descriptor("selectMode",', replacement));
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1);
+      assert.ok(receipt.errors.includes("native client bundle must lazily register @dsmm/dsmm with apply and inject exports"));
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });

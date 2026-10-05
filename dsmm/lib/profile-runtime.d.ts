@@ -1,8 +1,9 @@
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import type { LoadedProfileSelection, LoadedSessionProfileSelection, SessionProfileCommit } from "./profile-store.js";
-import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { DsmmProfileDocument } from "./profiles.js";
 import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
+import { DeepworkModeController } from "./state.js";
 export interface DsmmProfileRuntimeStore {
     loadSelection(): Promise<LoadedProfileSelection>;
     describe(): Promise<ProfileSnapshot>;
@@ -21,6 +22,7 @@ export interface DsmmProfileRuntimeStore {
 export interface DsmmProfileRuntimeOptions {
     /** Trusted test/integration seam, never a wire-supplied path or callback. */
     validateCandidate?: (settings: DsmmSettings) => void | Promise<void>;
+    modeController?: DeepworkModeController;
 }
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission {
 }
@@ -38,11 +40,13 @@ export declare class DsmmProfileRuntime {
     private readonly switching;
     private disposed;
     private selectionQueue;
+    private readonly mode;
     constructor(ctx: DshContext, baseline: DsmmSettings, store: DsmmProfileRuntimeStore, options?: DsmmProfileRuntimeOptions);
     initialize(): Promise<void>;
     admission(agent?: DshAgent): AdmittedProfile;
     getSession(agent: DshAgent): Promise<SessionProfileSnapshot>;
     /** The fourth argument is trusted native caller authority, never wire data. */
+    selectMode(request: SessionModeSelectRequest, agent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
     selectSession(request: SessionProfileSelectRequest, agent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
@@ -59,6 +63,6 @@ export declare class DsmmProfileRuntime {
     private validate;
 }
 /** No guessed home fallback: native deployment context owns this directory. */
-export declare function createProfileRuntime(ctx: DshContext, baseline: DsmmSettings): Promise<DsmmProfileRuntime>;
+export declare function createProfileRuntime(ctx: DshContext, baseline: DsmmSettings, options?: DsmmProfileRuntimeOptions): Promise<DsmmProfileRuntime>;
 export {};
 //# sourceMappingURL=profile-runtime.d.ts.map

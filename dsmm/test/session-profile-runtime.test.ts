@@ -38,6 +38,58 @@ async function localRuntime(f: Awaited<ReturnType<typeof nativeRoutingFixture>>,
   return runtime;
 }
 
+test("minimal default and native idle mode writes survive profile changes/reopen without model selection", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true });
+  try {
+    const runtime = runtimeOf(f);
+    const minimal = await f.create({ agentPreset: "minimal" });
+    const standard = await f.create({ agentPreset: "standard" });
+    const before = await runtime.getSession(structural(minimal));
+    assert.equal(before.deepwork!.active, false); assert.equal(before.deepwork!.explicit, false);
+    assert.equal((await runtime.getSession(structural(standard))).deepwork!.active, true);
+    const toggle = (state: Awaited<ReturnType<DsmmProfileRuntime["getSession"]>>, active: boolean) => ({ sessionId: state.sessionId, active, expectedModeRevision: state.deepwork!.revision, expectedAdmissionEpoch: state.admissionEpoch });
+    const nativeChoice = structuredClone(minimal.options);
+    const enabled = await runtime.selectMode(toggle(before, true), structural(minimal));
+    assert.equal(enabled.deepwork!.active, true); assert.equal(enabled.deepwork!.explicit, true); assert.deepEqual(minimal.options, nativeChoice);
+    await runFixtureTurn(minimal);
+    assert.match(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
+    const saved = await runtime.save({ id: "mode-off-default", content: '{"version":1,"id":"mode-off-default","settings":{"defaultActive":false}}', expectedRevision: null });
+    const switched = await runtime.selectSession(await request(runtime, minimal, saved.id, saved.revision), structural(minimal));
+    assert.equal(switched.deepwork!.active, true); assert.equal(switched.deepwork!.explicit, true);
+    await assert.rejects(runtime.selectMode(toggle(enabled, false), structural(minimal)), { code: "conflict" });
+    const disabled = await runtime.selectMode(toggle(switched, false), structural(minimal));
+    assert.equal(disabled.deepwork!.active, false); assert.equal(disabled.deepwork!.explicit, true);
+    await runFixtureTurn(minimal); assert.doesNotMatch(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
+    const seed = minimal.session.snapshotEvents();
+    const resumed = await f.create({ agentPreset: "minimal" }, undefined, { seed });
+    assert.equal((await runtime.getSession(structural(resumed))).deepwork!.active, false);
+    assert.equal((await runtime.getSession(structural(resumed))).deepwork!.explicit, true);
+    assert.equal(minimal.session.snapshotEvents().filter((event) => event.type === "model/selection").length, 0);
+    const dw = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const managed = await runtime.getSession(structural(dw));
+    assert.equal(managed.deepwork!.active, true); assert.equal(managed.deepwork!.locked, true);
+    await assert.rejects(runtime.selectMode(toggle(managed, false), structural(dw)), { code: "validation" });
+  } finally { await f.dispose(); }
+});
+
+test("native maintenance race and mode persistence refusal leave accepted mode and model unchanged", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true });
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "minimal" });
+    const structuralAgent = structural(agent), before = await runtime.getSession(structuralAgent);
+    const input = { sessionId: before.sessionId, active: true, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch };
+    const barrier = gate(); const maintenance = agent.runMaintenance(() => barrier.promise);
+    try { await assert.rejects(runtime.selectMode(input, structuralAgent), { code: "maintenance" }); }
+    finally { barrier.release(); await maintenance; }
+    const append = structuralAgent.session.append;
+    structuralAgent.session.append = () => { throw new Error("PRIVATE_DISK_ERROR"); };
+    try { await assert.rejects(runtime.selectMode(input, structuralAgent), { code: "io" }); }
+    finally { structuralAgent.session.append = append; }
+    assert.deepEqual((await runtime.getSession(structuralAgent)).deepwork, before.deepwork);
+    assert.equal(agent.session.snapshotEvents().filter((event) => event.type === "deepwork/mode").length, 0);
+  } finally { await f.dispose(); }
+});
+
 test("native idle switches isolate two roots and global default; old/new children keep their exact admission snapshots", async () => {
   const f = await nativeRoutingFixture({}, { headless: true });
   try {

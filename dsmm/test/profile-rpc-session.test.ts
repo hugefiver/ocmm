@@ -82,6 +82,72 @@ function selectRequest(snapshot: SessionProfileSnapshot, id: string | null, revi
   return { sessionId: snapshot.sessionId, id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch };
 }
 
+function modeRequest(snapshot: SessionProfileSnapshot, active: boolean) {
+  return { sessionId: snapshot.sessionId, active, expectedModeRevision: snapshot.deepwork!.revision, expectedAdmissionEpoch: snapshot.admissionEpoch };
+}
+
+test("strict additive mode codecs reject unknown fields and retain old optional snapshot compatibility", () => {
+  const descriptor = TYPERT_REMOTE.descriptors.find((row) => row.method === "selectMode")!;
+  const requestCodec = descriptor.parameters[1].codec, resultCodec = descriptor.result;
+  assert.equal(requestCodec.mode, "strict"); assert.equal(resultCodec.mode, "strict");
+  if (requestCodec.mode !== "strict" || resultCodec.mode !== "strict") return;
+  const request = { sessionId: "ordinary-mode", active: false, expectedModeRevision: "a".repeat(64), expectedAdmissionEpoch: "b".repeat(64) };
+  assert.deepEqual(requestCodec.create().parse(request), request);
+  for (const invalid of [{ ...request, active: "false" }, { ...request, peer: "private" }, { ...request, expectedModeRevision: "absent" }, { ...request, expectedAdmissionEpoch: "old" }]) assert.throws(() => requestCodec.create().parse(invalid));
+  const snapshot = { sessionId: request.sessionId, globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "global-default", admissionEpoch: request.expectedAdmissionEpoch, switchAllowed: true };
+  assert.deepEqual(resultCodec.create().parse(snapshot), snapshot);
+  const mode = { active: false, explicit: false, locked: false, revision: request.expectedModeRevision };
+  assert.deepEqual(resultCodec.create().parse({ ...snapshot, deepwork: mode }), { ...snapshot, deepwork: mode });
+  for (const invalid of [{ ...mode, active: "true" }, { ...mode, secret: true }, { ...mode, revision: "absent" }]) assert.throws(() => resultCodec.create().parse({ ...snapshot, deepwork: invalid }));
+});
+
+test("native mode RPC changes only the owned root, preserves profile epoch/global and rejects stale mode intent", async () => {
+  const f = await fixture();
+  try {
+    const a = await f.createRoot("mode-rpc-a"), b = await f.createRoot("mode-rpc-b");
+    const before = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: a.id });
+    const other = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: b.id });
+    const global = await f.runtime.describe();
+    const request = modeRequest(before, true);
+    const selected = await f.invoke<SessionProfileSnapshot>("selectMode", { sessionId: a.id, request });
+    assert.equal(selected.deepwork!.active, true); assert.equal(selected.deepwork!.explicit, true);
+    assert.equal(selected.admissionEpoch, before.admissionEpoch); assert.deepEqual(selected.selection, before.selection);
+    assert.notEqual(selected.deepwork!.revision, before.deepwork!.revision);
+    assert.deepEqual(await f.runtime.describe(), global); assert.deepEqual(await f.runtime.getSession(b), other);
+    await assert.rejects(f.invoke("selectMode", { sessionId: a.id, request }), refused("conflict"));
+    const operator = f.ctx.connection.operator;
+    const wrongPeer = { id: operator.id, ctx: new Context(), async dispose() {} };
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: a.id, request: modeRequest(selected, false) }, peer: wrongPeer }), refused("not-owned"));
+    await assert.rejects(f.invoke("selectMode", { sessionId: b.id, request: modeRequest(selected, false) }), refused("validation"));
+    const child = await f.createRoot("mode-rpc-child", "subagent");
+    await assert.rejects(f.invoke("selectMode", { sessionId: child.id, request: { ...modeRequest(selected, false), sessionId: child.id } }), refused("not-owned"));
+    const off = await f.invoke<SessionProfileSnapshot>("selectMode", { sessionId: a.id, request: modeRequest(selected, false) });
+    assert.equal(off.deepwork!.active, false); assert.equal(off.deepwork!.explicit, true);
+  } finally { await f.dispose(); }
+});
+
+test("mode RPC rejects busy, cancellation, unowned cold lookups and malformed input before writes", async () => {
+  const f = await fixture();
+  try {
+    const agent = await f.createRoot("mode-rpc-busy");
+    const before = await f.runtime.getSession(agent), request = modeRequest(before, true);
+    Object.defineProperty(agent, "status", { value: "running", configurable: true });
+    await assert.rejects(f.invoke("selectMode", { sessionId: agent.id, request }), refused("busy"));
+    Object.defineProperty(agent, "status", { value: "idle", configurable: true });
+    const cancelled = new AbortController(); cancelled.abort();
+    await assert.rejects(f.invoke("selectMode", { sessionId: agent.id, request }, cancelled.signal));
+    let resumes = 0;
+    f.ctx.provide("sessionController", { async resolveAgent() { resumes++; throw new Error("PRIVATE_RESUME"); } });
+    const cold = { ...request, sessionId: "cold-mode" };
+    for (const invalid of [{ ...cold, peer: true }, { ...cold, active: "true" }, { ...cold, expectedModeRevision: "bad" }]) {
+      await assert.rejects(f.invoke("selectMode", { sessionId: "cold-mode", request: invalid }));
+    }
+    const operator = f.ctx.connection.operator;
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: "cold-mode", request: cold }, peer: { id: operator.id, ctx: new Context(), async dispose() {} } }), refused("not-owned"));
+    assert.equal(resumes, 0); assert.deepEqual(await f.runtime.getSession(agent), before);
+  } finally { await f.dispose(); }
+});
+
 function gate() {
   let release!: () => void;
   const promise = new Promise<void>((resolve) => { release = resolve; });

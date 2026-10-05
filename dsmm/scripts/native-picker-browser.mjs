@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -71,14 +72,30 @@ export async function startNativePickerServer({ nativeRequire, packageRoot, revi
   const declarations = await nativePickerClosure(nativeRequire);
   declarations.set("@deepseek-ai/dsh-client-modules", {});
   const bundles = new Map();
+  const nativeClientArtifacts = [];
   const rows = [];
   for (const [id, declaration] of declarations) {
     const url = `/bundles/native-${rows.length}.js`;
-    bundles.set(url, await readFile(nativeRequire.resolve(`${id}/client`)));
+    const bytes = await readFile(nativeRequire.resolve(`${id}/client`));
+    bundles.set(url, bytes);
+    nativeClientArtifacts.push({ id, version: "0.2.0-rc.2", sha256: createHash("sha256").update(bytes).digest("hex"), rewritten: false });
     const inject = [...(declaration.inject ?? [])];
     if (id === "@deepseek-ai/dsh-api-gateway") inject.push(PICKER_COMPOSITION_ID);
     rows.push({ id, url, inject, external: declaration.external ?? [] });
   }
+  const storeId = "@deepseek-ai/dsh-client-store";
+  const storeManifest = JSON.parse(await readFile(nativeRequire.resolve(`${storeId}/package.json`), "utf8"));
+  assert.equal(storeManifest.version, "0.2.0-rc.2");
+  assert.equal(storeManifest.dsh?.client, undefined, "Store must be described as a native frontend seed, not a declared client plugin");
+  const frontendBytes = await readFile(join(frontend, "assets", main[0]));
+  assert.ok(frontendBytes.includes(Buffer.from(`"${storeId}"`)), "native frontend must supply the actual Store seed");
+  const modelClientId = "@deepseek-ai/dsh-client-ui-model-selection";
+  const modelClientBytes = await readFile(nativeRequire.resolve(`${modelClientId}/client`));
+  assert.ok(modelClientBytes.includes(Buffer.from(`require("${storeId}")`)), "native ModelDirectory client must consume the Store seed");
+  const nativeStoreLibrary = { id: storeId, version: storeManifest.version, delivery: "native-web-frontend-seed", declaredClientAsset: false,
+    installedEntrySha256: createHash("sha256").update(await readFile(nativeRequire.resolve(storeId))).digest("hex"),
+    frontendSha256: createHash("sha256").update(frontendBytes).digest("hex"),
+    consumerId: modelClientId, consumerSha256: createHash("sha256").update(modelClientBytes).digest("hex"), rewritten: false };
   bundles.set("/bundles/owned-carrier.js", Buffer.from(pickerCompositionBundle()));
   rows.push({ id: PICKER_COMPOSITION_ID, url: "/bundles/owned-carrier.js", inject: ["@deepseek-ai/dsh-client-ui-renderer"], external: ["@deepseek-ai/dsh-client-connection/client", "@deepseek-ai/dsh-client-locale/client"] });
   if (dsmm) {
@@ -109,6 +126,6 @@ export async function startNativePickerServer({ nativeRequire, packageRoot, revi
   await new Promise((settle, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", settle); });
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  return { origin: `http://127.0.0.1:${address.port}`, errors, nativePackages: [...declarations.keys()], rewrittenProductionBundles: false,
+  return { origin: `http://127.0.0.1:${address.port}`, errors, nativePackages: [...declarations.keys()], nativeClientArtifacts, nativeStoreLibrary, rewrittenProductionBundles: false,
     async close() { server.closeAllConnections(); await new Promise((settle, reject) => server.close((error) => error ? reject(error) : settle())); } };
 }

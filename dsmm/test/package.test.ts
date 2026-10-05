@@ -51,7 +51,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.1.7");
+  assert.equal(pkg.version, "0.1.8");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -240,7 +240,7 @@ test("model-routing documentation ships the exact calibration contract", () => {
 
 test("runtime profile documentation distinguishes draft, revision, selection and live Agent authority", () => {
   const profiles = readFileSync(join(packageRoot, "docs", "profiles.md"), "utf8");
-  assert.match(profiles, /^# Deepwork runtime profiles \(0\.1\.7 source contract\)/u);
+  assert.match(profiles, /^# Deepwork runtime profiles \(0\.1\.8 source contract\)/u);
   assert.match(profiles, /native `profileContext\.dir` is the only storage authority/u);
   assert.match(profiles, /dsmm-profiles\/<id>\.jsonc/u);
   assert.match(profiles, /\.revisions\/<sha256>\.jsonc/u);

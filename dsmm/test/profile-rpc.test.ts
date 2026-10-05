@@ -154,7 +154,7 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     assert.equal(rpcFibers[0].state, 2, "the native RPC injection must remain ACTIVE");
     assert.ok(ctx.get("dsmmProfileRuntime"));
     assert.ok(ctx.get("dsmmProfiles"));
-    assert.deepEqual(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").map((descriptor) => descriptor.method), ["describe", "read", "save", "select", "describeSession", "selectSession"]);
+    assert.deepEqual(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").map((descriptor) => descriptor.method), ["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"]);
     const described = await ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }) as Awaited<ReturnType<DsmmProfileRuntime["describe"]>>;
     assert.deepEqual({ profiles: described.profiles, selectedId: described.selectedId, appliedRevision: described.appliedRevision, selectionRevision: described.selectionRevision }, {
       profiles: [], selectedId: null, appliedRevision: null, selectionRevision: "absent",

@@ -20,6 +20,62 @@ test("isDeepworkActive uses defaultActive until an explicit mode event appears",
   assert.equal(isDeepworkActive([{ type: DEEPWORK_MODE_EVENT, data: { active: true } }], false), true);
 });
 
+test("official minimal defaults off but explicit session intent wins across preset changes", async () => {
+  const events: DshSessionEvent[] = [];
+  const agent: DshAgent = { session: { header: { agentPreset: "minimal" }, events, append(type, data) { events.push({ type, data }); } } };
+  const controller = new DeepworkModeController({});
+  assert.equal(controller.active(agent, true), false);
+  assert.equal(controller.describe(agent, true).explicit, false);
+  assert.equal(await controller.select(agent, false, true), "committed", "same-default off must still record explicit intent");
+  events.push({ type: "agent-preset/selected", data: { agentPreset: "standard" } });
+  assert.equal(controller.active(agent, true), false);
+  await controller.select(agent, true, false);
+  events.push({ type: "agent-preset/selected", data: { agentPreset: "minimal" } });
+  assert.equal(new DeepworkModeController({}).active(agent, false), true, "reopened minimal retains explicit on");
+  assert.equal(isDeepworkActive([], true, "minimal"), false);
+  assert.equal(isDeepworkActive([], true, "custom-minimal"), true, "custom IDs are not official minimal");
+});
+
+test("same-default on persists and strict idle append failure changes neither intent nor revision", async () => {
+  const events: DshSessionEvent[] = [];
+  let fail = false;
+  const agent: DshAgent = { session: { events, append(type, data) { if (fail) throw new Error("disk failed"); events.push({ type, data }); } } };
+  const controller = new DeepworkModeController({});
+  await controller.selectIdle(agent, true, true);
+  assert.equal(controller.active(agent, false), true, "profile defaults cannot erase an explicit same-default choice");
+  const before = controller.describe(agent, false);
+  fail = true;
+  await assert.rejects(controller.selectIdle(agent, false, false));
+  assert.deepEqual(controller.describe(agent, false), before);
+  await assert.rejects(controller.select(agent, false, false));
+  assert.deepEqual(controller.describe(agent, false), before);
+});
+
+test("mode revision fences pending and preset ABA intent without being invalidated by unrelated events", async () => {
+  const events: DshSessionEvent[] = [{ type: "turn/start" }];
+  const agent: DshAgent = { session: { events, header: { agentPreset: "standard" }, append(type, data) { events.push({ type, data }); } } };
+  const controller = new DeepworkModeController({});
+  const original = controller.describe(agent, false).revision;
+  events.push({ type: "unrelated/event" });
+  assert.equal(controller.describe(agent, false).revision, original);
+  await controller.select(agent, true);
+  assert.notEqual(controller.describe(agent, false).revision, original);
+  const pending = controller.describe(agent, false).revision;
+  events.push({ type: "agent-preset/selected", data: { agentPreset: "minimal" } }, { type: "agent-preset/selected", data: { agentPreset: "standard" } });
+  assert.notEqual(controller.describe(agent, false).revision, pending);
+  await assert.rejects(controller.selectIdle(agent, false, false));
+  assert.equal(controller.active(agent, false), true, "refused idle mutation retains the earlier pending CLI intent");
+});
+
+test("overlapping failed idle command appends cannot resurrect either rejected intent", async () => {
+  const controller = new DeepworkModeController({});
+  const agent: DshAgent = { session: { events: [], append() { throw new Error("disk failed"); } } };
+  const before = controller.describe(agent, false);
+  const outcomes = await Promise.allSettled([controller.select(agent, true, false), controller.select(agent, false, false)]);
+  assert.deepEqual(outcomes.map((outcome) => outcome.status), ["rejected", "rejected"]);
+  assert.deepEqual(controller.describe(agent, false), before);
+});
+
 test("hasOpenTurn tracks turn/start and turn/end", () => {
   assert.equal(hasOpenTurn(), false);
   assert.equal(hasOpenTurn([{ type: "turn/start" }]), true);

@@ -40,9 +40,9 @@ export interface ProfilesViewSnapshot {
     currentSessionId: string | null;
     session: SessionProfileSnapshot | null;
     sessionChoice: string | null;
-    sessionBusy: "read" | "apply" | "reset" | null;
+    sessionBusy: "read" | "apply" | "reset" | "mode" | null;
     sessionIssue: ProfilesIssue | null;
-    sessionNotice: "applied" | "reset" | "applied-with-model" | null;
+    sessionNotice: "applied" | "reset" | "applied-with-model" | "mode-on" | "mode-off" | null;
     invalidFields: string[];
     editorEpoch: number;
 }
@@ -66,6 +66,8 @@ export interface ProfilesActions {
     chooseSessionProfile(id: string | null): void;
     applySession(options?: SessionApplyOptions): Promise<void>;
     resetSession(): Promise<void>;
+    setDeepwork(active: boolean): Promise<void>;
+    useSessionProfileModel(): Promise<void>;
     setFieldInvalid(field: string, invalid: boolean): void;
 }
 export interface ModelCatalogRemote {
@@ -99,6 +101,8 @@ export declare class ProfilesController {
     private modelEventsSessionId;
     private modelEventsGeneration;
     private modelEventsWatermark;
+    private modeEventsWatermark;
+    private modeRefreshPending;
     private stopModelEvents;
     private modelInteraction;
     private modelInteractionSessionId;
@@ -118,7 +122,9 @@ export declare class ProfilesController {
     attachCatalog(remote: ModelCatalogRemote | null): void;
     setSession(id: string | null): void;
     refreshCatalog(): Promise<void>;
-    refreshSession(): Promise<void>;
+    private refreshObservedMode;
+    refreshSession(preserveFeedback?: boolean): Promise<void>;
+    private setDeepwork;
     private selectSession;
     private publish;
     private accept;

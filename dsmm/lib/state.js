@@ -1,5 +1,7 @@
-import { sessionEvents } from "./session-scope.js";
+import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
 import { assertDsmmMetadataPersistence } from "./session-metadata.js";
+import { createHash } from "node:crypto";
+import { isDsmmRoleId } from "./roles.js";
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 function activeFromEvent(event) {
     if (event.type !== DEEPWORK_MODE_EVENT)
@@ -9,8 +11,8 @@ function activeFromEvent(event) {
         ? data.active
         : undefined;
 }
-export function isDeepworkActive(events = [], defaultActive = false) {
-    let active = defaultActive;
+export function isDeepworkActive(events = [], defaultActive = false, selectedPreset) {
+    let active = selectedPreset === "minimal" ? false : defaultActive;
     for (const event of events)
         active = activeFromEvent(event) ?? active;
     return active;
@@ -47,22 +49,45 @@ export class DeepworkModeController {
     active(agent, defaultActive) {
         if (agent === undefined)
             return false;
-        return this.pending.get(agent.session)?.active ?? isDeepworkActive(sessionEvents(agent.session), defaultActive);
+        return this.pending.get(agent.session)?.active ?? isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
+    }
+    describe(agent, defaultActive) {
+        const events = sessionEvents(agent.session);
+        const preset = resolveSelectedAgentPreset(agent.session);
+        const intents = events.map(activeFromEvent).filter((value) => value !== undefined);
+        const pending = this.pending.get(agent.session);
+        const locked = isDsmmRoleId(preset);
+        return { active: locked || this.active(agent, defaultActive), explicit: intents.length > 0 || pending !== undefined, locked,
+            revision: createHash("sha256").update(JSON.stringify({ preset, defaultActive, intents,
+                presetChanges: events.filter((event) => event.type === "agent-preset/selected").length, pending: pending?.active })).digest("hex") };
     }
     async select(agent, active, defaultActive = false) {
         const current = this.active(agent, defaultActive);
-        if (current === active && !this.pending.has(agent.session))
+        const explicit = sessionEvents(agent.session).some((event) => activeFromEvent(event) !== undefined);
+        if (current === active && explicit && !this.pending.has(agent.session))
             return "unchanged";
-        this.pending.set(agent.session, { active });
-        if (hasOpenTurn(sessionEvents(agent.session)))
+        if (hasOpenTurn(sessionEvents(agent.session))) {
+            this.pending.set(agent.session, { active });
             return "pending";
+        }
         await this.commit(agent.session, active);
         return "committed";
     }
+    /** Native idle maintenance owns this write; never stage an uncommitted UI intent. */
+    async selectIdle(agent, active, defaultActive) {
+        if (hasOpenTurn(sessionEvents(agent.session)))
+            throw new Error("Deepwork mode requires an idle session");
+        const mode = this.describe(agent, defaultActive);
+        if (mode.explicit && mode.active === active && !this.pending.has(agent.session))
+            return;
+        await this.commit(agent.session, active);
+    }
     async commit(session, active) {
+        const pending = this.pending.get(session);
         assertDsmmMetadataPersistence(this.ctx);
         await session.append(DEEPWORK_MODE_EVENT, { active });
-        this.pending.delete(session);
+        if (this.pending.get(session) === pending)
+            this.pending.delete(session);
     }
 }
 //# sourceMappingURL=state.js.map

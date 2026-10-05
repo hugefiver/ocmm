@@ -2,9 +2,11 @@
 
 Deepwork adapts ocmm's deepwork workflow to DeepSeek Harness. Its package remains `@dsmm/dsmm`: a DSH-native Cordis bundle, not an OpenCode compatibility layer.
 
-This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The current `0.1.7` source contract preserves native root-model authority and provides one icon-only native profile menu in sessionless, blank and active conversation views, alongside structured native route controls, independent session profiles and delegated-role route strategies. Human-facing names remain **Deepwork** and **DW Role**. 0.1.7 publication and Desktop acceptance remain pending. The completed 0.1.5 publication and completed 0.1.6 publication/continuation are immutable historical evidence, not proof for 0.1.7; older identities, including 0.1.4's separately controlled published-origin continuation, stay unchanged. Package, configuration, tool and role IDs retain the `dsmm` namespace.
+This package targets `@deepseek-ai/dsh@0.2.0-rc.2`, the npm `latest` resolved on 2026-10-03. The prospective `0.1.8` source contract adds a durable Deepwork toggle and simplifies the existing icon-only native profile menu in sessionless, blank and active conversation views, while preserving native root-model authority, structured native route controls, independent session profiles and delegated-role route strategies. Human-facing names remain **Deepwork** and **DW Role**. 0.1.8 publication and Desktop acceptance remain pending. The completed 0.1.5 publication and completed 0.1.6 publication/continuation are immutable historical evidence, not proof for 0.1.8; older identities, including 0.1.4's separately controlled published-origin continuation, stay unchanged. Package, configuration, tool and role IDs retain the `dsmm` namespace.
 
-The immutable `dsmm-scoped-v0.1.3` tag remains at `2bdea4b`. Its CI run `37235817488` failed before packing or publication because pnpm 11 ignored the required esbuild/koffi build scripts. The later 0.1.4 origin published accepted bytes but its original verification saw a registry 404; its completed fixed-origin continuation preserves that failed original CI history. The stopped 0.1.2 frozen tag/artifact and draft Release remain untouched and unpublished. The successor target is 0.1.7; none of these facts authorizes rewriting earlier identities.
+0.1.7 is already npm published and locally installed in Desktop, but it is not a completed GitHub Release. Its immutable `dsmm-scoped-v0.1.7` source is `1ca0bf6e89916d17ddc663e1e06f6c15256cf453`; original run `37312038470/1` failed verification, its GitHub job was skipped, and terminal evidence remained `UNRESOLVED`/`FAILED`. Preserve that package, tag, source and failed history. The authorized successor is `@dsmm/dsmm@0.1.8` / `dsmm-scoped-v0.1.8`; its Desktop installation waits for its own terminal `COMPLETED` proof.
+
+The immutable `dsmm-scoped-v0.1.3` tag remains at `2bdea4b`. Its CI run `37235817488` failed before packing or publication because pnpm 11 ignored the required esbuild/koffi build scripts. The later 0.1.4 origin published accepted bytes but its original verification saw a registry 404; its completed fixed-origin continuation preserves that failed original CI history. The stopped 0.1.2 frozen tag/artifact and draft Release remain untouched and unpublished. The successor target is 0.1.8; none of these facts authorizes rewriting earlier identities.
 
 ## Current functionality
 
@@ -14,7 +16,8 @@ The immutable `dsmm-scoped-v0.1.3` tag remains at `2bdea4b`. Its CI run `3723581
 - Exact-route V41 Flash calibration for `deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`, preserving V4 Pro settings. Runtime selects only adapter-advertised reasoning efforts.
 - Delegated-role provider/model/exact-effort controls, ordered candidates, independent per-role `startup-lock` (default) or explicit `rate-limit-fallback`, and finite correlated no-output-safe retries. Ordinary roots keep their native initial model and exact effort, not a profile-role primary; explicit native model choices remain authoritative across later turns, profile reapply and cold resume. Supported explicit overrides survive for trusted live, owned, zero-prefix one-shot children. No new model-visible model-selection permission is added; exact configured efforts are not downgraded.
 - Native Settings → Deepwork Profiles (`Deepwork 配置档`) with structured role/retry controls and byte-preserving Advanced JSONC. Global default and current-session Apply are distinct; CAS-protected sidecars pin independent immutable revisions and admission epochs. Save alone activates neither scope.
-- Icon-only native header profile menu: normal switching keeps the current model. The separate explicit “Switch and use profile model” choice invokes native model selection only after successful profile CAS and saves its native default, like the Models tab. Sessionless and blank views retain an inspectable menu; disabled mutations do not hide current state or refresh. A committed profile remains applied if model selection is unavailable or unconfirmed; the UI reports the separate model result and preserves newer native choices. Refusal feedback shows only allowlisted codes/fields and refresh/retry guidance, never raw wire messages or paths.
+- One icon-only native profile menu with one profile list: normal profile switching keeps the current model after successful profile CAS and never selects a model. The single `@use-model` action, **Use profile model**, reads the current admitted immutable profile's model without reapplying a subsequently saved draft revision. It uses native model selection and native-default persistence like the Models tab, with existing manual-model-intent race fencing; a newer native choice remains authoritative. Sessionless and blank views retain an inspectable menu; disabled mutations do not hide state or refresh. Successes use accessible live announcements only, never persistent visible success prose; errors are short sanitized allowlisted codes/fields with refresh/retry guidance, never raw wire messages or paths.
+- **Deepwork** toggle for other native presets: official minimal conversations default off unless a saved explicit `deepwork/mode` event says otherwise. Explicit same-default choices are persisted, and mode intent survives profile changes and reopen. Standing DW presets are locked enabled with a clear label, not an operable off action; sessionless, busy or unavailable mutations fail closed.
 - Scoped shell/Git/plan/question/todo guards and separately opt-in bounded idle continuation.
 - Optional external `ocmm-lsp mcp` integration with nine tools including atomic `format`. Debugging/DAP is an on-demand skill, not additional LSP tools or automatic prompt injection.
 
@@ -26,16 +29,16 @@ Durable session metadata requires explicit deployment-only `sessionPersistence: 
 
 ## Install and configure
 
-Install the exact registry version after terminal verified publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.7`. For isolated development verification, use a built and packed artifact:
+Install the exact registry version after terminal verified publication with `dsh plugin --profile <profile> add @dsmm/dsmm@0.1.8`. For isolated development verification, use a built and packed artifact:
 
-Desktop and CLI/TUI have independent native deployment profiles. Installing into `desktop` does not install into `dsh-tui`. The existing official CLI/TUI `@dsmm/dsmm@0.1.6` installation is already verified and enabled with `defaultActive: true`; it is not unfinished rollout work and this Desktop upgrade does not repeat TUI setup. For a separately authorized future TUI upgrade after 0.1.7 terminal completion, the exact-version command is `dsh plugin --profile dsh-tui add @dsmm/dsmm@0.1.7 --save-exact`. Launch with `dsh --profile dsh-tui` (or the TUI launcher); a bare `dsh` does not select the Desktop profile. Keep the existing TUI bundle, provider, model, effort and environment-based preset/resume settings. Do not copy Desktop credentials or providers. When enabling durable Deepwork metadata, also follow the single-provider [persistence startup procedure](docs/compatibility.md#session-persistence-compatibility), preserving the existing root and compression. Merely adding the package does not activate Deepwork.
+Desktop and CLI/TUI have independent native deployment profiles. Installing into `desktop` does not install into `dsh-tui`. The existing official CLI/TUI `@dsmm/dsmm@0.1.6` installation is already verified and enabled with `defaultActive: true`; it is not unfinished rollout work and this Desktop upgrade does not repeat TUI setup. For a separately authorized future TUI upgrade after 0.1.8 terminal completion, the exact-version command is `dsh plugin --profile dsh-tui add @dsmm/dsmm@0.1.8 --save-exact`. Launch with `dsh --profile dsh-tui` (or the TUI launcher); a bare `dsh` does not select the Desktop profile. Keep the existing TUI bundle, provider, model, effort and environment-based preset/resume settings. Do not copy Desktop credentials or providers. When enabling durable Deepwork metadata, also follow the single-provider [persistence startup procedure](docs/compatibility.md#session-persistence-compatibility), preserving the existing root and compression. Merely adding the package does not activate Deepwork.
 
 ```powershell
 pnpm --dir dsmm build
 pnpm --dir dsmm pack --pack-destination <temporary-artifact-directory>
 $env:DSH_HOME = "<disposable-test-home>"
 dsh --profile <profile> --from-default-profile headless --dump-config
-dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.7.tgz>
+dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.8.tgz>
 dsh --profile <profile> --dump-config
 ```
 
@@ -57,7 +60,7 @@ This runtime-baseline example is not the full durable-persistence patch. Native 
 
 Do not copy the old `settings.yaml` namespace or preset-discovery roots into the new host. Runtime drafts instead live at `<profileContext.dir>/dsmm-profiles/<id>.jsonc`; there is no embedded profiles object in plugin config. See [runtime profiles](docs/profiles.md), [settings/status](docs/settings-status.md), and [agent roles](docs/agent-presets.md).
 
-The [historical 0.1.1 migration guide](docs/migration-from-ocmm.md) explains the earlier ocmm/DSH adapter migration; use the current profile and upgrade guides above for 0.1.7 behavior.
+The [historical 0.1.1 migration guide](docs/migration-from-ocmm.md) explains the earlier ocmm/DSH adapter migration; use the current profile and upgrade guides above for 0.1.8 behavior.
 
 For a delegated-role model, configure `roleRouting.dsmm-reviewer.primary` with native `provider`, `model`, and optional `reasoningEffort`, then choose its strategy/retry policy where needed. These policies do not silently replace the ordinary root's native model; using a profile's main-model choice is an explicit user action. There are no built-in provider routes or API keys. See [model routing](docs/model-routing.md) and [runtime recovery](docs/runtime-recovery.md) for admission, bounded RATE_LIMIT rollover and migration from old generic automatic fallback.
 
@@ -72,7 +75,7 @@ pnpm --dir dsmm check:release
 pnpm --dir dsmm smoke:docker
 ```
 
-A separately authorized credentialed, packed real-model diagnostic is also available from this checkout. It is **not** the independent 0.1.7 Docker/UI release gate; that gate must not copy credentials, sessions, Desktop configuration or browser authentication:
+A separately authorized credentialed, packed real-model diagnostic is also available from this checkout. It is **not** the independent 0.1.8 Docker/UI release gate; that gate must not copy credentials, sessions, Desktop configuration or browser authentication:
 
 ```powershell
 node dsmm/scripts/live-dsh-smoke.mjs --runtime <npm-prefix-with-pinned-dsh> --package <packed-dsmm.tgz> --provider deepseek-account --credentials <existing-dsh-credentials-file> --receipt <sanitized-receipt.json>
@@ -82,4 +85,4 @@ Add `--delegate` to verify the actual `dsmm_reviewer` child persona, inherited F
 
 The test copies only native account records into a temporary home, verifies a real read/write/model round-trip, checks the exact route and DSMM prompt, and removes temporary credentials and sessions. It does not print reasoning or credentials, log into a browser, modify the original credential file, or silently use a different model. API-key testing uses `--provider deepseek-official` and an existing `DEEPSEEK_API_KEY` environment variable.
 
-These commands are verification procedures, not a claim they have passed for the final 0.1.7 artifact. The dedicated DSMM workflow builds a fresh CI tarball with pnpm, Docker-gates its exact bytes, and publishes through OIDC with genuine provenance; the old 0.1.2 bootstrap is not used. See [compatibility](docs/compatibility.md) and [release policy](docs/releasing.md) for terminal publication and later Desktop evidence boundaries.
+These commands are verification procedures, not a claim they have passed for the final 0.1.8 artifact. The dedicated DSMM workflow builds a fresh CI tarball with pnpm, Docker-gates its exact bytes, and publishes through OIDC with genuine provenance; the old 0.1.2 bootstrap is not used. See [compatibility](docs/compatibility.md) and [release policy](docs/releasing.md) for terminal publication and later Desktop evidence boundaries.

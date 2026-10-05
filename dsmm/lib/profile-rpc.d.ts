@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
-import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { DshAgent } from "./dsh-types.js";
 export interface ProfilesBackend {
     describe(): Promise<ProfileSnapshot>;
@@ -9,6 +9,7 @@ export interface ProfilesBackend {
     select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
     getSession(agent: DshAgent): Promise<SessionProfileSnapshot>;
     selectSession(request: SessionProfileSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
+    selectMode?(request: SessionModeSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
 }
 /** Business service addressed only by native Typert Gateway invocations. */
 export declare class DsmmProfilesHost extends TypertRemoteService {
@@ -24,6 +25,7 @@ export declare class DsmmProfilesHost extends TypertRemoteService {
     private invokeSession;
     describeSession(sessionId: string): Promise<SessionProfileSnapshot>;
     selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<SessionProfileSnapshot>;
+    selectMode(sessionId: string, request: SessionModeSelectRequest): Promise<SessionProfileSnapshot>;
 }
 declare module "@deepseek-ai/cordis" {
     interface Context {

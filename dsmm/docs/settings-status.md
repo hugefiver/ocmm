@@ -4,13 +4,13 @@
 
 `/deepwork [off|message]` changes the receiving session's mode. `/dsmm-status` reports bounded normalized state; `/dsmm-status json` returns a defensive JSON snapshot with version 1. Other input returns `Usage: /dsmm-status [json]`.
 
-Human-facing status/mode copy uses Deepwork. The technical commands, JSON fields, namespace and configurable `modeName` remain unchanged in 0.1.5.
+Human-facing status/mode copy uses Deepwork. The technical commands, JSON fields, namespace and configurable `modeName` remain unchanged. The prospective 0.1.8 menu adds a **Deepwork** toggle for other native presets; it defaults off in official minimal conversations unless a saved explicit `deepwork/mode` says otherwise. Even a same-default choice is persisted. This mode intent survives profile changes and reopen. Standing DW presets show a locked enabled label rather than an off action; sessionless, busy and unavailable mutations fail closed. These source requirements do not claim 0.1.8 publication or Desktop acceptance.
 
 Commands belong to the native command adapter. Headless task text is not a slash-command invocation.
 
 ## DSH 0.2 deployment configuration
 
-The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; the 0.1.5 source contract includes runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
+The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; the prospective 0.1.8 source contract includes runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
 
 ```yaml
 - id: dsmm
@@ -30,7 +30,7 @@ The Loader plugin entry remains the deployment baseline. Structural fields are *
       enabled: false
 ```
 
-The 0.1.5 source contract includes the additive native Settings **Deepwork Profiles** / **Deepwork 配置档** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
+The prospective 0.1.8 source contract includes the additive native Settings **Deepwork Profiles** / **Deepwork 配置档** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
 
 Save changes only the draft. Global Apply pins an immutable revision for **new unscoped Agents only**; existing even-blank Agents retain their admissions. The separate current-session selector uses the native view's actual session ID and idle maintenance/CAS/epoch fences. It changes only that ordinary root and future children; old children retain their old epoch. Cold resume honors an explicit sidecar or, when absent, the current global default. Global reset and session baseline pinning are distinct and leave drafts intact.
 
@@ -42,7 +42,7 @@ Risk-based behavior scales discovery, planning, and review to uncertainty and in
 
 ## Other settings
 
-`roleRouting` defaults to an empty map. Each canonical role accepts optional `primary`, ordered `fallbackRoutes`, `strategy` and bounded `rateLimit` fields. Profile-level `runtimePolicy` supplies inherited strategy/retry defaults. Child Agents use their configured startup lock or explicit per-role rate-limit rollover. Ordinary top-level Agents instead preserve the native model tab's exact model/effort and only retry on that same route. Native catalog/form controls edit JSONC paths without changing native global model defaults. Only the explicit header option to switch a profile and use its model invokes native model selection; a normal profile switch does not. The deployment-only `roles` enable map remains separate. Unknown keys/malformed routes fail; omitted and explicit empty chains differ. See [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md).
+`roleRouting` defaults to an empty map. Each canonical role accepts optional `primary`, ordered `fallbackRoutes`, `strategy` and bounded `rateLimit` fields. Profile-level `runtimePolicy` supplies inherited strategy/retry defaults. Child Agents use their configured startup lock or explicit per-role rate-limit rollover. Ordinary top-level Agents instead preserve the native model tab's exact model/effort and only retry on that same route. Native catalog/form controls edit JSONC paths without changing native global model defaults. The compact header menu has one profile list and one `@use-model` **Use profile model** action; a normal profile switch never selects a model. The action reads the current admitted immutable profile model without reapplying a later saved revision, uses native-default persistence like the Models tab, and preserves newer manual intent through existing race fencing. Successes are accessible live announcements only; visible errors are short sanitized codes/fields, not verbose normal menu descriptions. The deployment-only `roles` enable map remains separate. Unknown keys/malformed routes fail; omitted and explicit empty chains differ. See [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md).
 
 The public schema and exported `DEFAULT_DSMM_SETTINGS` are the complete defaults. Seven core skill toggles and all twelve role toggles default on; effective application is scoped to active mode or a selected DSMM role, not global task policy. Managed preset-directory materialization remains off by default and is an export facility rather than native discovery.
 

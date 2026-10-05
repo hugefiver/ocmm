@@ -47,6 +47,7 @@ let DsmmProfilesHost = (() => {
     let _select_decorators;
     let _describeSession_decorators;
     let _selectSession_decorators;
+    let _selectMode_decorators;
     return class DsmmProfilesHost extends _classSuper {
         static {
             const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
@@ -56,12 +57,14 @@ let DsmmProfilesHost = (() => {
             _select_decorators = [Remote];
             _describeSession_decorators = [Remote];
             _selectSession_decorators = [Remote];
+            _selectMode_decorators = [Remote];
             __esDecorate(this, null, _describe_decorators, { kind: "method", name: "describe", static: false, private: false, access: { has: obj => "describe" in obj, get: obj => obj.describe }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _read_decorators, { kind: "method", name: "read", static: false, private: false, access: { has: obj => "read" in obj, get: obj => obj.read }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _save_decorators, { kind: "method", name: "save", static: false, private: false, access: { has: obj => "save" in obj, get: obj => obj.save }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _select_decorators, { kind: "method", name: "select", static: false, private: false, access: { has: obj => "select" in obj, get: obj => obj.select }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _describeSession_decorators, { kind: "method", name: "describeSession", static: false, private: false, access: { has: obj => "describeSession" in obj, get: obj => obj.describeSession }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _selectSession_decorators, { kind: "method", name: "selectSession", static: false, private: false, access: { has: obj => "selectSession" in obj, get: obj => obj.selectSession }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _selectMode_decorators, { kind: "method", name: "selectMode", static: false, private: false, access: { has: obj => "selectMode" in obj, get: obj => obj.selectMode }, metadata: _metadata }, null, _instanceExtraInitializers);
             if (_metadata) Object.defineProperty(this, Symbol.metadata, { enumerable: true, configurable: true, writable: true, value: _metadata });
         }
         backend = __runInitializers(this, _instanceExtraInitializers);
@@ -174,6 +177,16 @@ let DsmmProfilesHost = (() => {
                 return this.invoke(async () => { throw new DsmmProfileError("validation", "The requested session identities must match.", "sessionId"); });
             }
             return this.invokeSession(sessionId, (agent, signal, assertAuthority) => this.backend.selectSession(request, agent, signal, assertAuthority));
+        }
+        selectMode(sessionId, request) {
+            if (request.sessionId !== sessionId) {
+                return this.invoke(async () => { throw new DsmmProfileError("validation", "The requested session identities must match.", "sessionId"); });
+            }
+            return this.invokeSession(sessionId, (agent, signal, assertAuthority) => {
+                if (this.backend.selectMode === undefined)
+                    throw new DsmmProfileError("unavailable", "Session mode selection is unavailable.");
+                return this.backend.selectMode(request, agent, signal, assertAuthority);
+            });
         }
     };
 })();

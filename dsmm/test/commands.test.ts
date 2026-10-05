@@ -261,7 +261,7 @@ test("registered command turns mode off without steering", async () => {
     }
   } satisfies DshCommandInvocation);
 
-  assert.deepEqual(appended, []);
+  assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: false } }]);
   assert.equal(steered.length, 0);
   assert.deepEqual(result, { kind: "success", text: "Leaving deepwork mode." });
 });

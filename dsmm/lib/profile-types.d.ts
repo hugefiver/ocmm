@@ -73,6 +73,21 @@ export interface SessionProfileSnapshot {
     rolePolicy?: DsmmRoleRuntimeState;
     /** Declared profile primary for the current ordinary root role, not an applied native selection. */
     profileModel?: DsmmModelRoute;
+    /** Optional for older Hosts; explicit session intent always beats defaults. */
+    deepwork?: SessionDeepworkState;
+}
+export interface SessionDeepworkState {
+    active: boolean;
+    explicit: boolean;
+    /** Standing DW presets own their composition; only ordinary presets toggle. */
+    locked: boolean;
+    revision: string;
+}
+export interface SessionModeSelectRequest {
+    sessionId: string;
+    active: boolean;
+    expectedModeRevision: string;
+    expectedAdmissionEpoch: string;
 }
 export interface SessionProfileSelectRequest extends ProfileSelectRequest {
     sessionId: string;

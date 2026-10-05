@@ -1,5 +1,7 @@
 export const NS = "settings.dsmm-profiles";
 export const en = {
+    headerCompactProfiles: "Profiles · keep model", headerCompactRefresh: "Refresh", headerNoSession: "Select a session to make changes.",
+    headerModeEnable: "Enable Deepwork", headerModeDisable: "Disable Deepwork", headerModePreset: "Deepwork · DW preset", headerModeUnavailable: "Deepwork unavailable", headerModeOn: "Deepwork enabled.", headerModeOff: "Deepwork disabled.", headerUseCurrentModel: "Use profile model",
     title: "Deepwork Profiles", description: "Save independent runtime configurations and choose which one new sessions use.",
     newSessions: "Global apply and reset affect future unscoped sessions only. Current-session actions below are separate. A cold resume retains an explicit saved session choice; otherwise it inherits the global default.",
     editorSelect: "Profile to edit", choose: "Choose a profile", newDraft: "New unsaved profile", new: "New profile",
@@ -56,6 +58,8 @@ export const en = {
     advanced: "Advanced JSONC", rawInvalid: "Structured editing is unavailable for this invalid raw draft. Correct Advanced JSONC; no fields, comments or bytes have been normalized.", invalidNumber: "Correct this bounded integer before saving or changing roles. The invalid value has not replaced the saved draft policy.",
 };
 export const zh = {
+    headerCompactProfiles: "配置档 · 保留模型", headerCompactRefresh: "刷新", headerNoSession: "选择会话后可更改。",
+    headerModeEnable: "启用 Deepwork", headerModeDisable: "关闭 Deepwork", headerModePreset: "Deepwork · DW 预设", headerModeUnavailable: "Deepwork 不可用", headerModeOn: "Deepwork 已启用。", headerModeOff: "Deepwork 已关闭。", headerUseCurrentModel: "使用配置档模型",
     title: "Deepwork 配置档", description: "保存独立的运行时配置，并选择新会话使用的配置档。",
     newSessions: "全局应用和重置仅影响之后没有独立选择的新会话。下方当前会话操作相互独立。冷恢复保留明确保存的会话选择，否则继承全局默认值。",
     editorSelect: "要编辑的配置档", choose: "选择配置档", newDraft: "新的未保存配置档", new: "新建配置档",

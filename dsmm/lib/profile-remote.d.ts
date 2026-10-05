@@ -1,6 +1,6 @@
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry";
-import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 export interface DsmmProfilesRemote {
     describe(): Promise<RemoteResult<ProfileSnapshot>>;
     read(id: string): Promise<RemoteResult<ProfileReadResult>>;
@@ -8,6 +8,7 @@ export interface DsmmProfilesRemote {
     select(request: ProfileSelectRequest): Promise<RemoteResult<ProfileSnapshot>>;
     describeSession(sessionId: string): Promise<RemoteResult<SessionProfileSnapshot>>;
     selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<RemoteResult<SessionProfileSnapshot>>;
+    selectMode?(sessionId: string, request: SessionModeSelectRequest): Promise<RemoteResult<SessionProfileSnapshot>>;
 }
 declare module "@deepseek-ai/dsh-typert-protocol/types" {
     interface TypertRemoteMap {
@@ -17,6 +18,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
         "dsmmProfiles/select": DsmmProfilesRemote["select"];
         "dsmmProfiles/describeSession": DsmmProfilesRemote["describeSession"];
         "dsmmProfiles/selectSession": DsmmProfilesRemote["selectSession"];
+        "dsmmProfiles/selectMode": NonNullable<DsmmProfilesRemote["selectMode"]>;
     }
     interface TypertRemoteNamespaceMap {
         dsmmProfiles: DsmmProfilesRemote;

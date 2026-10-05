@@ -23,6 +23,8 @@ import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import type { ModelCatalog } from "@deepseek-ai/dsh-api-session-controller";
 import type { SessionSelectModelRequest } from "@deepseek-ai/dsh-api-session-controller";
 import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller/client";
+import type { SessionEventWindow } from "@deepseek-ai/dsh-api-session-controller/client";
+import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { isProfileId } from "../lib/profile-remote.js";
 
 const revision = "a".repeat(64), otherRevision = "b".repeat(64);
@@ -146,7 +148,7 @@ test("true sessionless welcome keeps the profile control inspectable without ena
   assert.notEqual(tree, null, "undefined native identity and null controller identity are the same honest sessionless state");
   const menu = elements(tree).find((node) => node.type === NativeProfileMenu); assert.ok(menu);
   const entries = menu.props.items as MenuEntry[];
-  assert.ok(entries.some((entry) => "type" in entry && entry.type === "label" && entry.id === "@status" && entry.text === en.noSession));
+  assert.ok(entries.some((entry) => "type" in entry && entry.type === "label" && entry.id === "@status" && entry.text === en.headerNoSession));
   assert.ok(entries.filter((entry) => !("type" in entry)).every((entry) => "disabled" in entry && entry.disabled));
   assert.equal(f.controller.store.getSnapshot().currentSessionId, null); assert.deepEqual(f.selections, []);
   f.controller.dispose();
@@ -409,24 +411,135 @@ test("normal switches, profile saves, model-field edits and session reads never 
   f.controller.dispose();
 });
 
-test("explicit switch-and-use-model group invokes native selection only after accepted profile CAS", async () => {
+test("compact menu has one profile list and a model-only action using the admitted snapshot", async () => {
   const component = await nativeHeaderComponent(); const accepted = deferred<RemoteResult<SessionProfileSnapshot>>();
   const calls: SessionSelectModelRequest[] = [];
-  const f = fixture({ selectSession: async () => accepted.promise });
+  let hold = false;
+  const f = fixture({ describeSession: async (id) => hold ? accepted.promise : success(appliedWithModel(id)) });
   f.controller.attachModelSelector({ selectModel: async (request) => { calls.push(request); return success({ selected: request }); } });
   await f.controller.refresh(); f.controller.setSession("explicit-native"); await settle(f.controller);
   const tree = headerTree(component, f.controller);
   const menu = headerMenu(tree);
-  assert.ok(menu.props.items.some((entry) => "type" in entry && entry.type === "label" && entry.text === "Switch and use profile model"));
-  const option = menu.props.items.find((entry) => entry.id === "@model:p"); assert.ok(option);
+  assert.equal(menu.props.items.filter((entry) => entry.id === "p").length, 1);
+  assert.equal(menu.props.items.some((entry) => entry.id === "@model-hint" || entry.id.startsWith("@model:")), false);
+  const option = menu.props.items.find((entry) => entry.id === "@use-model"); assert.ok(option);
   assert.equal(isProfileId(option.id), false, "model-action options cannot collide with any profile ID");
-  menu.props.onSelect("@model:p");
+  hold = true;
+  menu.props.onSelect("@use-model");
   assert.deepEqual(calls, []);
   accepted.resolve(success(appliedWithModel("explicit-native"))); await settle(f.controller);
   assert.deepEqual(calls, [{ sessionId: "explicit-native", provider: "manual-provider", model: "profile-main", reasoningEffort: "exact-profile-effort" }]);
   assert.equal(f.controller.store.getSnapshot().sessionNotice, "applied-with-model");
   assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p", "the admitted ID, never an action prefix, remains selected");
   assert.equal(f.controller.store.getSnapshot().snapshot!.selectedId, null);
+  assert.equal(f.selections.length, 0, "model-only action never re-admits the saved profile's latest revision");
+  f.controller.dispose();
+});
+
+test("menu mode control uses accepted session state, preserves a dirty draft and never changes native models", async () => {
+  const component = await nativeHeaderComponent();
+  const writes: unknown[] = [], models: unknown[] = [];
+  let mode = { active: false, explicit: false, locked: false, revision };
+  const f = fixture({ describeSession: async (id) => success({ ...session(id), deepwork: mode }), selectMode: async (id, request) => {
+    writes.push(request); mode = { ...mode, active: request.active, explicit: true, revision: otherRevision };
+    return success({ ...session(id), deepwork: mode });
+  } });
+  f.controller.attachModelSelector({ selectModel: async (request) => { models.push(request); return success({ selected: request }); } });
+  await f.controller.refresh(); f.controller.setSession("mode-menu"); await settle(f.controller);
+  await f.controller.open("p"); f.controller.actions.editContent(content + "\n// draft retained");
+  const draft = f.controller.store.getSnapshot().editor!.content;
+  const tree = headerTree(component, f.controller);
+  assert.equal(menuRowDisabled(tree, "@mode"), false, "mode intent is independent of unsaved profile edits");
+  headerMenu(tree).props.onSelect("@mode"); await settle(f.controller);
+  assert.deepEqual(writes, [{ sessionId: "mode-menu", active: true, expectedModeRevision: revision, expectedAdmissionEpoch: session("mode-menu").admissionEpoch }]);
+  assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, true);
+  assert.equal(f.controller.store.getSnapshot().editor!.content, draft); assert.equal(f.controller.store.getSnapshot().dirty, true);
+  assert.equal(f.controller.store.getSnapshot().sessionNotice, "mode-on"); assert.deepEqual(models, []); assert.deepEqual(f.selections, []);
+  f.controller.dispose();
+});
+
+test("failed or late mode writes cannot optimistically toggle or publish into a different native session", async () => {
+  const pending = deferred<RemoteResult<SessionProfileSnapshot>>();
+  const f = fixture({ describeSession: async (id) => success({ ...session(id), deepwork: { active: false, explicit: false, locked: false, revision } }), selectMode: async () => pending.promise });
+  f.controller.setSession("first-mode"); await settle(f.controller);
+  const changing = f.controller.actions.setDeepwork(true);
+  assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, false);
+  f.controller.setSession("second-mode"); await settle(f.controller);
+  pending.resolve(success({ ...session("first-mode"), deepwork: { active: true, explicit: true, locked: false, revision: otherRevision } }));
+  await changing;
+  assert.equal(f.controller.store.getSnapshot().session!.sessionId, "second-mode"); assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, false);
+  f.controller.dispose();
+  const failed = fixture({ describeSession: async (id) => success({ ...session(id), deepwork: { active: false, explicit: false, locked: false, revision } }), selectMode: async () => { throw new Error("PRIVATE_PROVIDER_KEY"); } });
+  failed.controller.setSession("failed-mode"); await settle(failed.controller); await failed.controller.actions.setDeepwork(true);
+  assert.equal(failed.controller.store.getSnapshot().session!.deepwork!.active, false); assert.equal(failed.controller.store.getSnapshot().sessionNotice, null);
+  assert.doesNotMatch(JSON.stringify(failed.controller.store.getSnapshot()), /PRIVATE_PROVIDER_KEY/u);
+  failed.controller.dispose();
+});
+
+test("model-only action fences a changed admission and newer native model intent without profile CAS", async () => {
+  let reads = 0;
+  const f = fixture({ describeSession: async (id) => success({ ...appliedWithModel(id), ...(reads++ > 0 ? { admissionEpoch: otherRevision } : {}) }) });
+  const models: unknown[] = [];
+  f.controller.attachModelSelector({ selectModel: async (request) => { models.push(request); return success({ selected: request }); } });
+  f.controller.setSession("model-only-conflict"); await settle(f.controller); await f.controller.actions.useSessionProfileModel();
+  assert.equal(f.controller.store.getSnapshot().sessionIssue!.code, "conflict"); assert.deepEqual(models, []); assert.deepEqual(f.selections, []);
+  f.controller.dispose();
+});
+
+test("resident native mode and preset events refresh the menu without loading history or applying profiles", async () => {
+  let active = false, reads = 0;
+  const f = fixture({ describeSession: async (id) => { reads++; return success({ ...session(id), deepwork: { active, explicit: true, locked: false, revision: active ? otherRevision : revision } }); } });
+  f.controller.setSession("observed-mode"); await settle(f.controller);
+  const native = Session.create(SessionId("observed-mode"));
+  let window: SessionEventWindow = { entries: [], revision: 0, hasMore: false, change: { kind: "replace", entries: [] } };
+  let notify = () => {};
+  f.controller.attachModelEventSource("observed-mode", { getSnapshot: () => window, subscribe: (listener) => { notify = listener; return () => { notify = () => {}; }; } });
+  const emit = (event: ReturnType<typeof native.append>) => {
+    const row = { type: "event" as const, event };
+    window = { ...window, entries: [...window.entries, row], revision: window.revision + 1, change: { kind: "append", entries: [row] } };
+    notify();
+  };
+  active = true; emit(native.append("deepwork/mode", { active: true })); await settle(f.controller);
+  assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, true); assert.equal(reads, 2);
+  notify(); await settle(f.controller); assert.equal(reads, 2, "identical observed metadata does not loop-refresh");
+  active = false; emit(native.append("agent-preset/selected", { agentPreset: "minimal" })); await settle(f.controller);
+  assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, false); assert.equal(reads, 3);
+  assert.deepEqual(f.selections, []); f.controller.dispose();
+});
+
+test("mode/preset events during an older in-flight read coalesce one follow-up read instead of leaving stale mode", async () => {
+  const oldRead = deferred<RemoteResult<SessionProfileSnapshot>>(); let reads = 0;
+  const mode = (active: boolean) => ({ active, explicit: active, locked: false, revision: active ? otherRevision : revision });
+  const f = fixture({ describeSession: async (id) => { reads++; return reads === 1 ? oldRead.promise : success({ ...session(id), deepwork: mode(true) }); } });
+  f.controller.setSession("mode-inflight");
+  const native = Session.create(SessionId("mode-inflight"));
+  let window: SessionEventWindow = { entries: [], revision: 0, hasMore: false, change: { kind: "replace", entries: [] } };
+  let notify = () => {};
+  f.controller.attachModelEventSource("mode-inflight", { getSnapshot: () => window, subscribe: (listener) => { notify = listener; return () => {}; } });
+  const rows = [native.append("deepwork/mode", { active: true }), native.append("agent-preset/selected", { agentPreset: "minimal" })].map(event => ({ type: "event" as const, event }));
+  window = { ...window, entries: rows, revision: 1, change: { kind: "append", entries: rows } }; notify(); notify();
+  assert.equal(reads, 1);
+  oldRead.resolve(success({ ...session("mode-inflight"), deepwork: mode(false) })); await settle(f.controller);
+  assert.equal(reads, 2); assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, true);
+  assert.deepEqual(f.selections, []); f.controller.dispose();
+});
+
+test("model-only read also fences newer same-session preset intent before native selection", async () => {
+  const accepted = deferred<RemoteResult<SessionProfileSnapshot>>(); let hold = false;
+  const state = (id: string) => ({ ...appliedWithModel(id), deepwork: { active: true, explicit: false, locked: false, revision } });
+  const f = fixture({ describeSession: async (id) => hold ? accepted.promise : success(state(id)) });
+  let calls = 0;
+  f.controller.attachModelSelector({ selectModel: async (request) => { calls++; return success({ selected: request }); } });
+  f.controller.setSession("model-preset-race"); await settle(f.controller);
+  const native = Session.create(SessionId("model-preset-race"));
+  let window: SessionEventWindow = { entries: [], revision: 0, hasMore: false, change: { kind: "replace", entries: [] } };
+  let notify = () => {};
+  f.controller.attachModelEventSource("model-preset-race", { getSnapshot: () => window, subscribe: (listener) => { notify = listener; return () => {}; } });
+  hold = true; const selecting = f.controller.actions.useSessionProfileModel();
+  const row = { type: "event" as const, event: native.append("agent-preset/selected", { agentPreset: "minimal" }) };
+  window = { ...window, entries: [row], revision: 1, change: { kind: "append", entries: [row] } }; notify();
+  accepted.resolve(success(state("model-preset-race"))); await selecting;
+  assert.equal(calls, 0); assert.equal(f.controller.store.getSnapshot().sessionIssue!.code, "model-choice-changed"); assert.deepEqual(f.selections, []);
   f.controller.dispose();
 });
 

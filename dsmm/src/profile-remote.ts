@@ -1,6 +1,6 @@
 import type { InvocationDescriptor, RemoteResult, TypertCodec, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry";
-import type { DsmmRoleRuntimeState, ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { DsmmRoleRuntimeState, ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimitPolicy, normalizeRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute } from "./settings.js";
@@ -12,6 +12,7 @@ export interface DsmmProfilesRemote {
   select(request: ProfileSelectRequest): Promise<RemoteResult<ProfileSnapshot>>;
   describeSession(sessionId: string): Promise<RemoteResult<SessionProfileSnapshot>>;
   selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<RemoteResult<SessionProfileSnapshot>>;
+  selectMode?(sessionId: string, request: SessionModeSelectRequest): Promise<RemoteResult<SessionProfileSnapshot>>;
 }
 
 declare module "@deepseek-ai/dsh-typert-protocol/types" {
@@ -22,6 +23,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     "dsmmProfiles/select": DsmmProfilesRemote["select"];
     "dsmmProfiles/describeSession": DsmmProfilesRemote["describeSession"];
     "dsmmProfiles/selectSession": DsmmProfilesRemote["selectSession"];
+    "dsmmProfiles/selectMode": NonNullable<DsmmProfilesRemote["selectMode"]>;
   }
   interface TypertRemoteNamespaceMap { dsmmProfiles: DsmmProfilesRemote }
   interface RemoteErrorDetailsMap {
@@ -169,7 +171,7 @@ function selectionState(value: unknown): ProfileSelectionState {
   return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value: unknown): SessionProfileSnapshot {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel"]);
+  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
   return {
     sessionId: sessionId(item.sessionId), globalDefault: selectionState(item.globalDefault), selection: selectionState(item.selection),
@@ -181,6 +183,10 @@ function sessionSnapshot(value: unknown): SessionProfileSnapshot {
     }),
     ...optional(item, "rolePolicy", rolePolicy),
     ...optional(item, "profileModel", modelRoute),
+    ...optional(item, "deepwork", (input) => {
+      const mode = object(input, ["active", "explicit", "locked", "revision"]);
+      return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
+    }),
   };
 }
 function saveRequest(value: unknown): ProfileSaveRequest {
@@ -199,6 +205,10 @@ function sessionSelectRequest(value: unknown): SessionProfileSelectRequest {
   const { sessionId: inputSessionId, expectedAdmissionEpoch, ...profileRequest } = item;
   return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: revision(expectedAdmissionEpoch) };
 }
+function modeSelectRequest(value: unknown): SessionModeSelectRequest {
+  const item = object(value, ["sessionId", "active", "expectedModeRevision", "expectedAdmissionEpoch"]);
+  return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: revision(item.expectedModeRevision), expectedAdmissionEpoch: revision(item.expectedAdmissionEpoch) };
+}
 function codec(symbol: string, parse: (value: unknown) => unknown): TypertCodec {
   return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse }) };
 }
@@ -210,6 +220,13 @@ function descriptor(method: string, result: TypertCodec, parameter?: { name: str
 export const TYPERT_REMOTE: TypertRemoteContribution = {
   package: "@dsmm/dsmm",
   descriptors: [
+    {
+      ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
+      parameters: [
+        { name: "sessionId", wire: "sessionId", source: "json", codec: codec("NativeSessionId", sessionId) },
+        { name: "request", wire: "request", source: "json", codec: codec("SessionModeSelectRequest", modeSelectRequest) },
+      ],
+    },
     descriptor("describe", codec("ProfileSnapshot", snapshot)),
     descriptor("read", codec("ProfileReadResult", readResult), { name: "id", codec: codec("ProfileId", id) }),
     descriptor("save", codec("ProfileReadResult", readResult), { name: "request", codec: codec("ProfileSaveRequest", saveRequest) }),
