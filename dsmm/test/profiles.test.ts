@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { DsmmProfileError, MAX_PROFILE_BYTES, mergeProfileConfig, parseProfileDocument, profileErrorInfo, resolveProfileSettings, validateProfileId } from "../lib/profiles.js";
 import type { DsmmPluginConfig } from "../lib/settings.js";
+import { resolveRoleRuntimePolicy } from "../lib/settings.js";
+import { DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
 
 function content(settings: unknown = {}, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ version: 1, id: "focus", settings, ...extra });
@@ -143,4 +145,63 @@ test("overlay merge preserves false, explicit empty arrays, nested baseline and 
   assert.deepEqual(merged.runtimeRecovery?.idleContinuation, { enabled: false, maxContinuations: 2 });
   merged.lsp!.env!.FIXTURE_ONLY = "changed";
   assert.equal(baseline.lsp?.env?.FIXTURE_ONLY, "retained", "result must own deep copies of unchanged baseline fields");
+});
+
+test("profile role strategy overrides are independent and never rewrite omitted JSONC fields", () => {
+  const firstRaw = content({ roleRouting: {
+    "dsmm-reviewer": { strategy: "startup-lock", rateLimit: { maxRetries: 1 } },
+    "dsmm-planner": { strategy: "rate-limit-fallback", rateLimit: { maxRetries: 5, switchAfterRateLimits: 4 } }
+  } });
+  const first = parseProfileDocument(firstRaw);
+  const second = parseProfileDocument(content({ roleRouting: { "dsmm-reviewer": { strategy: "rate-limit-fallback" } } }));
+  const baseline: DsmmPluginConfig = { runtimeRecovery: { enabled: true, fallbackRoutes: [{ provider: "p", model: "fallback" }] } };
+  const firstSettings = resolveProfileSettings(baseline, first.settings);
+  const secondSettings = resolveProfileSettings(baseline, second.settings);
+  assert.equal(resolveRoleRuntimePolicy(firstSettings, "dsmm-reviewer").strategy, "startup-lock");
+  assert.equal(resolveRoleRuntimePolicy(firstSettings, "dsmm-planner").strategy, "rate-limit-fallback");
+  assert.equal(resolveRoleRuntimePolicy(secondSettings, "dsmm-reviewer").strategy, "rate-limit-fallback");
+  assert.equal(resolveRoleRuntimePolicy(firstSettings, "dsmm-planner").rateLimit.switchAfterRateLimits, 4);
+  assert.equal(resolveRoleRuntimePolicy(secondSettings, "dsmm-reviewer").rateLimit.maxRetries, 3);
+  assert.equal(Object.hasOwn(first.settings, "runtimePolicy"), false);
+  assert.equal(JSON.stringify(first), firstRaw);
+  const oldRaw = content({ roleRouting: { "dsmm-reviewer": { fallbackRoutes: [] } } });
+  const old = parseProfileDocument(oldRaw);
+  assert.equal(resolveRoleRuntimePolicy(resolveProfileSettings(baseline, old.settings), "dsmm-reviewer").strategy, "startup-lock");
+  assert.equal(JSON.stringify(old), oldRaw);
+});
+
+test("profile policy inheritance preserves deployment defaults and explicit per-role overrides", () => {
+  const baseline: DsmmPluginConfig = {
+    runtimePolicy: { strategy: "rate-limit-fallback", rateLimit: { maxRetries: 7, maxSwitches: 5 } },
+    roleRouting: { "dsmm-reviewer": { strategy: "startup-lock", rateLimit: { maxRetries: 2 } } }
+  };
+  const overlay = parseProfileDocument(content({
+    runtimePolicy: { rateLimit: { maxSwitches: 1 } },
+    roleRouting: { "dsmm-reviewer": { rateLimit: { switchAfterRateLimits: 2 } } }
+  })).settings;
+  const settings = resolveProfileSettings(baseline, overlay);
+  assert.equal(resolveRoleRuntimePolicy(settings, "dsmm-planner").strategy, "rate-limit-fallback");
+  const reviewer = resolveRoleRuntimePolicy(settings, "dsmm-reviewer");
+  assert.equal(reviewer.strategy, "startup-lock");
+  assert.equal(reviewer.rateLimit.maxRetries, 2);
+  assert.equal(reviewer.rateLimit.maxSwitches, 1);
+  assert.equal(reviewer.rateLimit.switchAfterRateLimits, 2);
+  const limited = parseProfileDocument(content({ runtimePolicy: { rateLimit: { maxDelayMs: 100 } } }));
+  assert.equal(resolveProfileSettings({ runtimePolicy: { rateLimit: { initialDelayMs: 0 } } }, limited.settings).runtimePolicy.rateLimit.maxDelayMs, 100,
+    "a bounded overlay must not be rejected against standalone defaults before deployment inheritance");
+});
+
+test("profile policy grammar rejects unknown fields, invalid strategies and every invalid bound", () => {
+  for (const policy of [null, [], { strategy: null }, { strategy: "always" }, { other: true }, { rateLimit: null }, { rateLimit: { unexpected: 1 } }]) {
+    validation(() => parseProfileDocument(content({ runtimePolicy: policy })));
+  }
+  for (const policy of [{ strategy: null }, { strategy: "always" }, { rateLimit: null }, { rateLimit: { unexpected: 1 } }]) {
+    validation(() => parseProfileDocument(content({ roleRouting: { "dsmm-reviewer": policy } })));
+  }
+  for (const [field, [minimum, maximum]] of Object.entries(DSMM_RATE_LIMIT_BOUNDS)) {
+    for (const value of [minimum - 1, maximum + 1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "3", null]) {
+      validation(() => parseProfileDocument(content({ runtimePolicy: { rateLimit: { [field]: value } } })));
+      validation(() => parseProfileDocument(content({ roleRouting: { "dsmm-reviewer": { rateLimit: { [field]: value } } } })));
+    }
+  }
 });

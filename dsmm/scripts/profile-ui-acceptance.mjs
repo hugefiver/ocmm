@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
+import { UI_CHECKS_015, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -84,12 +85,220 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
     try { report = JSON.parse(await readFile(nativeReceipt, "utf8")); }
     catch { report = { outcome: "FAILED", kind: "native-client-component-owned-carrier", artifactSha256: sha256, failure: "Native Host did not reach the appReady browser acceptance plugin.", nativeExit: result, diagnostic: diagnostic.replace(/([?&]token=)[^\s'"<>]+/gu, "$1[redacted]") }; }
     if (result.code !== 0) { report.outcome = "FAILED"; report.nativeExit = result; }
+    if (report.outcome === "COMPLETED" && requiresSessionProfileProof(installed.version)) {
+      try {
+        report.successorProof.startupLock = await runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage });
+        validateSessionProfileProof(report.successorProof, { artifactSha256: sha256, installedRoot: packageRoot });
+        for (const check of UI_CHECKS_015) report.checks[check] = true;
+      } catch (error) { report.outcome = "FAILED"; report.failure = error.stack ?? String(error); }
+    }
   } finally { await removeOwnedUiRoot(runRoot, token); }
   const receipt = join(evidenceRoot, "native-profile-ui-receipt.json");
   report.receipt = receipt;
   report.cleanup = { ...report.cleanup, ownedTemporaryRootRemoved: true, nativeHostExited: true };
   await writeFile(receipt, `${JSON.stringify(report, null, 2)}\n`);
   return report;
+}
+
+/** Place an owned regular lock before a second real DSH Loader is launched. */
+async function runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage }) {
+  const profileDir = join(dirname(profilePackage), "dsmm-profiles");
+  const pointer = join(profileDir, ".selection.json");
+  const lock = join(profileDir, ".lock");
+  const pointerBefore = await readFile(pointer);
+  const owner = `${randomUUID()}\n`;
+  await writeFile(lock, owner, { flag: "wx", mode: 0o600 });
+  try {
+    const receipt = join(runRoot, "startup-lock-receipt.json");
+    const patchPath = join(runRoot, "startup-lock.patch.yml");
+    const rows = nativeUiStartupPatch({ nativeStorage: storage, env, auditConfig: {} });
+    rows[3] = { insert: [{ id: "dsmm-successor-startup-lock-audit", name: new URL("./profile-ui-harness-native.mjs", import.meta.url).href, config: { receipt } }] };
+    await writeFile(patchPath, nativeRequire("js-yaml").dump(rows));
+    const child = spawn("dsh", ["--profile", basename(dirname(profilePackage)), "--patch", patchPath, "--no-open", "--host", "127.0.0.1", "--port", "0"], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
+    let diagnostic = "";
+    for (const stream of [child.stdout, child.stderr]) stream.on("data", (bytes) => { diagnostic = `${diagnostic}${bytes.toString()}`.slice(-8000); });
+    const timeout = setTimeout(() => child.kill("SIGTERM"), 25_000);
+    let result;
+    try { result = await new Promise((settle, reject) => { child.once("error", reject); child.once("exit", (code, signal) => settle({ code, signal })); }); }
+    finally { clearTimeout(timeout); }
+    const proof = await readFile(receipt, "utf8").then(JSON.parse, () => undefined);
+    const safeDiagnostic = diagnostic.replace(/([?&]token=)[^\s'"<>]+/gu, "$1[redacted]");
+    assert.deepEqual(result, { code: 1, signal: null }, `official startup failure exit changed: ${JSON.stringify({ proof, diagnostic: safeDiagnostic, result })}`);
+    assert.ok(proof, "real startup lock audit did not write its native receipt");
+    assert.equal(proof.startupOutcome, "refused", `real startup lock audit failed: ${JSON.stringify(proof)}`);
+    const pointerAfter = await readFile(pointer);
+    const ownerAfter = await readFile(lock);
+    assert.deepEqual(pointerAfter, pointerBefore); assert.equal(ownerAfter.toString("utf8"), owner);
+    return { ...proof, nativeExit: result, pathBasename: ".lock", pointerBeforeSha256: proofDigest(pointerBefore), pointerAfterSha256: proofDigest(pointerAfter), ownerBeforeSha256: proofDigest(owner), ownerAfterSha256: proofDigest(ownerAfter) };
+  } finally {
+    assert.equal(await readFile(lock, "utf8"), owner, "startup lock owner changed; do not delete another process's lock");
+    await unlink(lock);
+  }
+}
+
+async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileDir, workspace, screenshot, report }) {
+  const load = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
+  const [{ createUserMessage }, { Session, SessionId }, { Context }, { default: StockPersistence }] = await Promise.all([
+    load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session"), load("@deepseek-ai/cordis"), load("@deepseek-ai/dsh-session-persistence-jsonl"),
+  ]);
+  const parse = createRequire(join(packageRoot, "package.json"))("jsonc-parser").parse;
+  const field = (name) => page.getByLabel(name, { exact: true });
+  const invoke = async (method, args) => {
+    const record = { endpoint: `dsmmProfiles/${method}`, strictGateway: true, nativePeer: peer.id, result: "pending" };
+    report.nativeCalls.push(record);
+    try { const value = await gateway.invoke({ namespace: "dsmmProfiles", method, args, peer, signal: new AbortController().signal }); record.result = "accepted"; return value; }
+    catch (error) { record.result = gateway.wireStream.failure(error).code; throw error; }
+  };
+  const describeSession = (agent) => invoke("describeSession", { sessionId: agent.id });
+  const selectSession = (agent, saved, snapshot) => invoke("selectSession", { sessionId: agent.id, request: { sessionId: agent.id, id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch } });
+  const sidecarPath = (agent) => join(profileDir, "dsmm-profiles", ".sessions", `${proofDigest(agent.id)}.json`);
+  const pointerPath = join(profileDir, "dsmm-profiles", ".selection.json");
+  const globalPointerBefore = proofDigest(await readFile(pointerPath));
+  const globalSelectionBefore = (await runtime.describe()).selectionRevision;
+  assert.equal(await page.getByRole("button", { name: "Apply profile to current session", exact: true }).count(), 0, "sessionless Settings fabricated a current session");
+  await action("New profile").click();
+  await field("Profile ID (name)").fill("structured-native");
+  const rawBefore = '{\n  "version": 1,\n  "id": "structured-native",\n  "settings": {\n    // preserved acceptance comment\n    "defaultActive": true,\n    "workflow": {"reviewCap": 6},\n    "guards": {"shellCommandSafety": true}\n  }\n}\n';
+  await editor.fill(rawBefore);
+  await field("Agent role to edit").selectOption("dsmm-reviewer");
+  await field("DW Reviewer primary route").selectOption("explicit");
+  await field("DW Reviewer primary provider").selectOption("dsmm-ui-fixture");
+  await field("DW Reviewer primary model").selectOption("local-catalog");
+  await field("DW Reviewer primary exact effort").selectOption("max");
+  for (const [index, model] of ["fallback-first", "fallback-second"].entries()) {
+    await action("Add fallback for DW Reviewer").click();
+    await field(`DW Reviewer fallback ${index + 1} provider`).selectOption("dsmm-ui-fixture");
+    await field(`DW Reviewer fallback ${index + 1} model`).selectOption(model);
+  }
+  await action("Move up DW Reviewer fallback 2").focus(); await page.keyboard.press("Enter");
+  await field("DW Reviewer strategy").selectOption("rate-limit-fallback");
+  await field("DW Reviewer retry count").fill("2"); await field("DW Reviewer rate-limit failures before switch").fill("2");
+  await action("Save profile").click(); await idle();
+  const saved = await runtime.read("structured-native");
+  const savedDocument = parse(saved.content);
+  const catalogCallsBefore = report.nativeCalls.filter(({ endpoint }) => endpoint === "session/modelCatalog").length;
+  assert.ok(catalogCallsBefore >= 1, "native catalog did not load through the actual gateway");
+  await action("Refresh model catalog").click();
+  await page.waitForFunction(() => [...document.querySelectorAll("button")].some((button) => button.textContent === "Refresh model catalog" && !button.disabled));
+  assert.equal(await editor.inputValue(), saved.content, "catalog refresh changed saved manual or exact policy bytes");
+  // Saving publishes the accepted document and remounts the role editor. Select
+  // the role again through its real control rather than assuming draft UI state.
+  await field("Agent role to edit").selectOption("dsmm-reviewer");
+  await field("DW Reviewer primary model").selectOption("__dsmm_manual__");
+  await field("DW Reviewer primary manual model").fill("custom-manual-unlisted");
+  await field("DW Reviewer primary manual exact effort").fill("low");
+  const manualRoute = parse(await editor.inputValue()).settings.roleRouting["dsmm-reviewer"].primary;
+  const nativeResolvedManual = await ctx.get("llm").resolveCallConfig(manualRoute);
+  const nativeResolvedManualRoute = { provider: nativeResolvedManual.provider, model: nativeResolvedManual.model, reasoningEffort: nativeResolvedManual.reasoningEffort };
+  const manualBeforeRefresh = await editor.inputValue();
+  await action("Refresh model catalog").click();
+  await page.waitForFunction(() => [...document.querySelectorAll("button")].some((button) => button.textContent === "Refresh model catalog" && !button.disabled));
+  const manualAfterRefresh = await editor.inputValue();
+  const catalog = await gateway.invoke({ namespace: "session", method: "modelCatalog", args: {}, peer, signal: new AbortController().signal });
+  const models = catalog.groups.flatMap((group) => group.models.map((model) => ({ provider: group.id, id: model.id })));
+  await editor.fill("{ broken successor JSONC");
+  await page.locator("[data-dsmm-structured-invalid]").waitFor();
+  assert.equal(await page.locator("[data-dsmm-structured]").count(), 0, "invalid JSONC was silently normalized into structured controls");
+  const invalidRawAfterStructuredRefusal = await editor.inputValue();
+  await action("Reload saved profile").click(); await action("Discard changes").click(); await idle();
+  const editorProof = { catalogEndpoint: "session/modelCatalog", catalogCalls: report.nativeCalls.filter(({ endpoint, result }) => endpoint === "session/modelCatalog" && result === "accepted").length, models, rawBefore, rawAfter: saved.content,
+    beforeSha256: proofDigest(rawBefore), afterSha256: proofDigest(saved.content), savedPolicy: savedDocument.settings.roleRouting["dsmm-reviewer"],
+    untouchedBefore: { workflow: parse(rawBefore).settings.workflow, guards: parse(rawBefore).settings.guards }, untouchedAfter: { workflow: savedDocument.settings.workflow, guards: savedDocument.settings.guards },
+    invalidRaw: "{ broken successor JSONC", invalidRawAfterStructuredRefusal, manualRoute, nativeResolvedManualRoute, manualBeforeRefresh, manualAfterRefresh,
+    globalSelectionBefore, globalSelectionAfter: (await runtime.describe()).selectionRevision };
+  const secondSaved = await runtime.save({ id: "session-independent", expectedRevision: null, content: `${JSON.stringify({ version: 1, id: "session-independent", settings: { defaultActive: true, workflow: { reviewCap: 3 }, roleRouting: { "dsmm-reviewer": { strategy: "startup-lock" } } } }, null, 2)}\n` });
+  await action("Refresh profiles").click(); await idle();
+  const roots = [await createRoot(), await createRoot()];
+  const before = await Promise.all(roots.map(describeSession));
+  const child = async (label) => {
+    const handle = await ctx.get("agents").create({ sessionId: SessionId(`dsmm-successor-${label}`), parentAgent: roots[0], meta: { cwd: workspace, origin: "subagent" }, agentOptions: { provider: "dsmm-ui-fixture", model: "local-catalog" } });
+    handles.push(handle); assert.equal(ctx.get("agents").isOwnedBy(handle.agent.id, roots[0]), true);
+    return handle.agent;
+  };
+  const oldChild = await child("old-epoch-child");
+  await page.evaluate(async (sessionId) => {
+    const sessions = window.__dsmmUiContext.root.get("sessions");
+    window.__dsmmRetainedSession?.release();
+    window.__dsmmRetainedSession = sessions.retain(sessionId, { source: "mainView" });
+    await window.__dsmmRetainedSession.ready;
+  }, roots[0].id);
+  await field("Current-session profile").waitFor();
+  await field("Current-session profile").selectOption(saved.id);
+  await action("Apply profile to current session").click();
+  await page.waitForFunction(() => document.querySelector("[data-dsmm-session-scope]")?.getAttribute("aria-busy") === "false");
+  const after = [await describeSession(roots[0]), await selectSession(roots[1], secondSaved, before[1])];
+  assert.equal(runtime.admission(oldChild).epoch, before[0].admissionEpoch);
+  const newChild = await child("new-epoch-child");
+  assert.equal(runtime.admission(newChild).epoch, after[0].admissionEpoch);
+  await screenshot("current-session-structured-1280");
+  const rootProof = await Promise.all(roots.map(async (agent, index) => ({ sessionId: agent.id, selectedId: after[index].selection.selectedId, appliedRevision: after[index].selection.appliedRevision,
+    epochBefore: before[index].admissionEpoch, epochAfter: after[index].admissionEpoch, sidecarSha256: proofDigest(await readFile(sidecarPath(agent))), snapshot: after[index] })));
+  const refusals = [];
+  const refusal = async (code, operation) => {
+    const bytesBefore = proofDigest(await readFile(sidecarPath(roots[0])));
+    await assert.rejects(operation, (error) => {
+      const failure = gateway.wireStream.failure(error);
+      return error.code === code || failure.details?.code === code;
+    }, `native ${code} mutation was not refused`);
+    refusals.push({ code, beforeSha256: bytesBefore, afterSha256: proofDigest(await readFile(sidecarPath(roots[0]))) });
+  };
+  await refusal("conflict", () => selectSession(roots[0], saved, before[0]));
+  let maintenanceEntered; const enteredMaintenance = new Promise((settle) => { maintenanceEntered = settle; });
+  let releaseMaintenance; const maintenanceGate = new Promise((settle) => { releaseMaintenance = settle; });
+  const maintenance = roots[0].runMaintenance(async () => { maintenanceEntered(); await maintenanceGate; });
+  try { await enteredMaintenance; await refusal("maintenance", () => selectSession(roots[0], saved, after[0])); }
+  finally { releaseMaintenance(); await maintenance; }
+  let requestEntered; const enteredRequest = new Promise((settle) => { requestEntered = settle; });
+  let releaseRequest; const requestGate = new Promise((settle) => { releaseRequest = settle; });
+  const disposeGate = ctx.on("agent/request", async ({ agent }, next) => { if (agent === roots[0]) { requestEntered(); await requestGate; } return await next(); }, { global: true, prepend: true });
+  try {
+    roots[0].followup(createUserMessage({ content: [{ type: "text", text: "Owned session persistence proof" }], source: { kind: "user" } }));
+    await enteredRequest;
+    await refusal("busy", () => selectSession(roots[0], saved, after[0]));
+  } finally { releaseRequest(); if (typeof disposeGate === "function") disposeGate(); await roots[0].whenIdle(); }
+  await refusal("not-owned", () => invoke("selectSession", { sessionId: oldChild.id, request: { sessionId: oldChild.id, id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: runtime.admission(oldChild).epoch } }));
+  const reapplied = await selectSession(roots[0], saved, await describeSession(roots[0]));
+  const reappliedSidecarSha256 = proofDigest(await readFile(sidecarPath(roots[0])));
+  const globalPointerAfter = proofDigest(await readFile(pointerPath));
+  assert.equal(globalPointerAfter, globalPointerBefore);
+  const visibleBeforeSha256 = proofDigest(JSON.stringify(roots[0].session.deriveMessages()));
+  const headersBeforeSha256 = proofDigest(JSON.stringify(roots[0].session.requestHeader()));
+  await page.evaluate(() => { window.__dsmmRetainedSession.release(); window.__dsmmRetainedSession = undefined; });
+  const rootHandle = handles.find((handle) => handle.agent === roots[0]);
+  await rootHandle.dispose();
+  await ctx.get("sessionPersistence").flush();
+  const globalDraft = await runtime.read(PROFILE_ID);
+  await runtime.select({ id: PROFILE_ID, expectedRevision: globalDraft.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+  // Native API owns the resume/lease. DSMM does not create an alternate loader.
+  const coldSnapshot = await invoke("describeSession", { sessionId: roots[0].id });
+  const resumed = ctx.get("agents").get(roots[0].id);
+  assert.ok(resumed && resumed !== roots[0], "scoped native RPC did not cold-resume the actual ordinary root");
+  assert.equal(coldSnapshot.admissionEpoch, reapplied.admissionEpoch);
+  const readerCtx = new Context();
+  let cold;
+  try {
+    const readerFiber = readerCtx.plugin(StockPersistence, { ...ctx.get("sessionPersistence").config });
+    await readerFiber.await();
+    const reader = await readerCtx.get("sessionPersistence").open(resumed.id, "read");
+    try {
+      const stored = await reader.read();
+      const restored = Session.fromRestore(resumed.id, stored.events, reader.header, reader.inheritedEventCount, stored.eventState);
+      cold = { sessionId: resumed.id, selectedId: coldSnapshot.selection.selectedId, appliedRevision: coldSnapshot.selection.appliedRevision, admissionEpoch: coldSnapshot.admissionEpoch,
+        sidecarSha256: proofDigest(await readFile(sidecarPath(resumed))), changedGlobalRevision: globalDraft.revision,
+        stockEvents: stored.events.length, coreEvents: stored.events.filter(({ type }) => !["deepwork/mode", "dsmm/role-policy"].includes(type)).length,
+        visibleBeforeSha256, visibleAfterSha256: proofDigest(JSON.stringify(restored.deriveMessages())), headersBeforeSha256, headersAfterSha256: proofDigest(JSON.stringify(restored.requestHeader())) };
+    } finally { await reader.close(); }
+  } finally { await readerCtx.fiber.dispose(); }
+  await runtime.select({ id: null, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+  for (const width of [375, 768, 1280]) for (const dark of [false, true]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate((enabled) => { if (enabled) document.body.setAttribute("data-ds-dark-theme", ""); else document.body.removeAttribute("data-ds-dark-theme"); }, dark);
+    await page.emulateMedia({ reducedMotion: dark ? "reduce" : "no-preference" });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "structured successor controls overflowed");
+    await screenshot(`structured-${dark ? "dark-reduced" : "light"}-${width}`);
+  }
+  return { schemaVersion: 1, editor: editorProof, sessions: { globalPointerBefore, globalPointerAfter, roots: rootProof, uiSelectedSessionId: roots[0].id, uiAppliedEpoch: after[0].admissionEpoch,
+    reappliedEpoch: reapplied.admissionEpoch, reappliedSidecarSha256, refusals, children: [oldChild, newChild].map((agent) => ({ sessionId: agent.id, epoch: runtime.admission(agent).epoch, nativeOwnedBy: roots[0].id })) }, cold };
 }
 
 export const name = "dsmm-native-ui-acceptance";
@@ -126,6 +335,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
   const report = { outcome: "FAILED", postAppReady: true, kind: "native-client-component-owned-carrier", artifactSha256: sha256, installedRoot: packageRoot,
     authentication: { realWebOrDesktopLogin: "NOT_EXERCISED", signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false },
     performance: { lighthouse: "NOT_RUN_COMPONENT_ACCEPTANCE", scoreClaim: false }, checks: {}, evidence, nativeCalls: [], nativeStreams: [] };
+  report.headerProfileConvenience = { outcome: "NOT_EXERCISED", reason: "This owned native client composition exercises Settings session apply, not the full Conversation header owner." };
   const handles = [];
   const pending = new Map();
   let server;
@@ -136,6 +346,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
   let peer;
   let runtime;
   let blockedLock;
+  let ownedSessionRequests = false;
   const gates = new Map();
   const activeGates = new Set();
   try {
@@ -147,8 +358,15 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.equal(persistence.config.compression, storage.compression, "native UI startup changed the proved session compression");
     report.nativeStorage = { ...storage, provider: persistence.name, ignorableEventCapability: true, passedByRunner: true, startupOnly: true, companionLoaderEntry: false };
     class LocalModelCatalog extends LlmAdapter {
+      async listModels(provider) { return ["local-catalog", "fallback-first", "fallback-second"].map((id) => ({ provider, id, name: id })); }
       async resolveModel(provider, model) { return { provider, id: model, name: model, inputModalities: ["text"], reasoning: { efforts: ["off", "low", "high", "max"].map((id) => ({ id: ReasoningEffortId(id), name: id })), defaultEffort: ReasoningEffortId("high") } }; }
-      async *stream() { throw new Error("UI component acceptance must not issue a model request"); }
+      async *stream() {
+        assert.equal(ownedSessionRequests, true, "baseline UI component acceptance must not issue a model request");
+        yield { type: "block-start", index: 0, blockType: "text" };
+        yield { type: "text-delta", index: 0, text: "owned session acceptance complete" };
+        yield { type: "block-end", index: 0, block: { type: "text", text: "owned session acceptance complete" } };
+        yield { type: "finish", reason: { kind: "stop" } };
+      }
     }
     ctx.get("llm").registerAdapter(["dsmm-ui-fixture"], new LocalModelCatalog());
     const profileDir = ctx.get("profileContext").dir;
@@ -157,7 +375,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     const gateway = ctx.get("typertGateway");
     assert.ok(gateway && ctx.get("dsmmProfiles"), "native profile RPC service was not installed");
     assert.equal(ctx.get("dsmmProfiles").backend, runtime, "native RPC is not wired to the installed runtime manager");
-    report.strictDescriptors = ["describe", "read", "save", "select"].map((method) => {
+    const successor = requiresSessionProfileProof(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).version);
+    report.strictDescriptors = ["describe", "read", "save", "select", ...(successor ? ["describeSession", "selectSession"] : [])].map((method) => {
       const descriptor = ctx.get("typert").local.get(`dsmmProfiles/${method}`);
       assert.ok(descriptor, `native strict descriptor for ${method} was not registered`);
       assert.equal(descriptor.result.mode, "strict");
@@ -221,7 +440,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
         } catch (error) { const failure = gateway.wireStream.failure(error); record.result = failure.code; pending.delete(id); return { ok: false, error: failure }; }
       }
       assert.equal(operation, "call");
-      assert.match(endpoint, /^dsmmProfiles\/(describe|read|save|select)$/u);
+      assert.ok(/^dsmmProfiles\/(describe|read|save|select|describeSession|selectSession)$/u.test(endpoint) || endpoint === "session/modelCatalog", "owned bridge call is outside the exact native profile/catalog inventory");
       const [namespace, method] = endpoint.split("/");
       const record = { endpoint, strictGateway: true, nativePeer: peer.id, result: "pending" };
       report.nativeCalls.push(record);
@@ -286,7 +505,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     await editor.fill(profileText(7));
     assert.equal(await action("Apply saved profile").isDisabled(), true);
     await action("Save profile").click(); await idle();
-    await assertText(page.getByRole("status"), /Saved browser-native/u);
+    await assertText(page.locator(".dsmm-profiles > [role=status]"), /Saved browser-native/u);
     const saved = await runtime.read(PROFILE_ID);
     assert.equal(saved.content, profileText(7));
     assert.equal((await runtime.describe()).selectedId, null, "saving alone changed selection");
@@ -375,8 +594,10 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     await screenshot("profiles-dark-reduced-1280");
     await page.setViewportSize({ width: 375, height: 900 });
     await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "200% zoom caused horizontal overflow");
     await screenshot("profiles-dark-reduced-zoom200-375");
+    const zoomGeometry = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: innerWidth, offenders: [...document.querySelectorAll(".dsmm-profiles, .dsmm-profiles *")].filter((node) => node.getBoundingClientRect().right > innerWidth + 1 || node.scrollWidth > node.clientWidth + 1).slice(0, 20).map((node) => ({ tag: node.tagName, label: node.getAttribute("aria-label") ?? node.textContent?.trim().slice(0, 80), width: node.getBoundingClientRect().width, right: node.getBoundingClientRect().right, scroll: node.scrollWidth, client: node.clientWidth })) }));
+    report.zoomGeometry = zoomGeometry;
+    assert.ok(zoomGeometry.document <= zoomGeometry.viewport, `200% zoom caused horizontal overflow: ${JSON.stringify(zoomGeometry)}`);
     await page.evaluate(() => { document.documentElement.style.zoom = ""; document.body.removeAttribute("data-ds-dark-theme"); });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -405,6 +626,15 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.deepEqual(server.errors, [], "owned static server failed");
     assert.ok(report.nativeCalls.some(({ domainCode }) => domainCode === "validation") && report.nativeCalls.some(({ domainCode }) => domainCode === "conflict"));
     report.storageProof = { profileDir: join(profileDir, "dsmm-profiles"), savedRevision: saved.revision, appliedRevisionBeforeReset: selected.appliedRevision, latestRawRevision: (await runtime.read(PROFILE_ID)).revision, selectionAfterReset: await runtime.describe(), genuineNativeGateway: true, genuineOperatorPeer: true, cannedProfileRpc: false };
+    if (successor) {
+      ownedSessionRequests = true;
+      report.successorProof = await runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileDir, workspace, screenshot, report });
+      report.successorProof.artifactSha256 = sha256;
+      report.successorProof.installedRoot = packageRoot;
+      report.successorProof.routeScenarios = await runNativeRouteScenarios(ctx, { nativeRequire, packageRoot, workspace });
+      report.successorProof.nativeSelection = await runNativeModelSelectionScenario(ctx, { nativeRequire, packageRoot, workspace, gateway, peer, nativeCalls: report.nativeCalls });
+      ownedSessionRequests = false;
+    }
     report.outcome = "COMPLETED";
   } catch (error) {
     report.failure = error.stack ?? String(error);
@@ -416,6 +646,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
       }
       try { report.failureDom = await page.evaluate(() => document.body.innerText.slice(0, 4096)); }
       catch (domError) { report.failureDomError = domError.message; }
+      try { const path = join(evidenceRoot, "failure-state.png"); await page.screenshot({ path, fullPage: true }); evidence.push({ kind: "screenshot", path, width: page.viewportSize().width }); }
+      catch (screenshotError) { report.failureScreenshotError = screenshotError.message; }
     }
   }
   finally {

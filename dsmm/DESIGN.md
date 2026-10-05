@@ -66,6 +66,8 @@ Native settings also contain 13px labels and 12px hints. DSMM's own essential la
 
 ## 4. Spacing & Layout
 
+At narrow widths and 200% zoom, labels, legends and disclosure summaries wrap within their own available width (`overflow-wrap: anywhere`, `min-width: 0`, `max-width: 100%`); do not clip content or hide document overflow. Retry controls use readable English/Chinese field descriptions with units instead of raw camelCase backend keys. IDs and JSONC policy paths remain exact technical identifiers.
+
 The native interface uses a 4px rhythm plus explicit compact-control exceptions. These named values are the allowed geometry references for DSMM styles, not newly exported host tokens:
 
 | Name | Value | Use |
@@ -101,6 +103,13 @@ This matrix is the pre-implementation checklist for the new section, not documen
 | Configuration editor | Labeled native `<textarea>`; code font; visible focus ring | Prevent conflicting edits while save is pending; readable content | Explain expected overlay shape; preserve invalid/conflicting draft with actionable error |
 | Save/create/select/reset actions | Native `Button`; clear action label; keyboard activation; visible ring | Native disabled plus busy label; no width-changing replacement | Announce actual commit; error does not masquerade as success |
 | Status and diagnostics | Persistent semantic text in a stable position | Loading text and `aria-busy` where applicable | Distinguish unavailable service, empty store, conflict, validation and I/O refusal; offer relevant recovery |
+| Structured route fields | Labeled native provider/model/exact-effort selects plus explicit manual inputs; keyboard and pointer parity | Disabled while profile mutation is pending; catalog loading never replaces configured values | Advisory catalog failures and unlisted values are explained; explicit model changes clear stale effort, refresh does not |
+| Ordered fallback rows | Numbered route groups and native add/remove/move buttons with route-specific names | Boundary moves disabled; preserve focus on the surviving row/action | Empty means an explicit empty chain; inherit is a separate choice; status explains draft-only changes |
+| Role/profile strategy and retry fields | Explicit startup-lock/rate-limit-fallback/inherit selects and native bounded numeric inputs | Native disabled controls during mutations; inherited effective values remain readable | Invalid raw policy disables structured mutation without normalizing content; explicit inherit removes only the changed override |
+| Advanced JSONC disclosure | Native keyboard-operable details/summary; same underlying draft as structured fields | Readable invalid draft retained during errors | Invalid JSONC refuses structured edits; unchanged comments/unrelated fields remain byte-preserved |
+| Current-session profile scope | Distinct named selector and apply/baseline actions; public native current-session adapter only | Sessionless/unavailable/busy state explains refusal; stale view requests never publish to a new session | Accepted CAS/epoch snapshot proves success; global-default apply remains a separate action |
+
+Current-session scope text displays the exact live admitted profile/revision separately from the future global default. Session-selection CAS continues to use only the sidecar selection state; an absent sidecar is not relabeled as baseline or as a newly changed global default. Older responses without the optional admitted identity use explicit captured-default wording.
 
 Use `Button`, `Input` and, if needed, existing SVG icons from `@deepseek-ai/dsh-client-ui-primitives`. Their native exports contain no `Select` or `Textarea`; do not invent imports. Use semantic HTML for those controls, adapting the existing Models input/select geometry and host tokens. Keep the browser's native select affordance rather than copying a hardcoded-color SVG arrow.
 
@@ -110,7 +119,9 @@ Native `SettingsFormModel`/`configForms` manage the host plugin-config document,
 
 ### Implemented Reusable Patterns
 
-No package-owned reusable client pattern is documented here. Add one only after a real pattern is implemented and used at least twice; the host primitives above are dependencies, not package-owned implementations.
+The host primitives above are dependencies, not package-owned implementations. Package-owned patterns below are implemented and reused at least twice.
+
+The structured editor uses a reusable route field group for primary and fallback candidates and a reusable runtime-policy group for profile defaults and role overrides. Both use the host primitives and the geometry above, with borders-only fieldsets and wrapping action rows. Their selectors are advisory, and exact manual values remain editable without a catalog listing.
 
 ## 6. Motion & Interaction
 

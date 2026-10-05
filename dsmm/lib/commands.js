@@ -27,6 +27,7 @@ function handleDsmmStatusCommand(controller, getSettings, invocation) {
     const snapshot = createDsmmStatusSnapshot({
         agent: invocation.agent,
         settings,
+        admission: getSettings.admission?.(invocation.agent),
         modeActive: controller.active(invocation.agent, settings.defaultActive)
     });
     return {

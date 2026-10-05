@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { COMPILED_FILES, DW_PRESET_NAMES, LOCALE_FILES, lifecycleCommands, publicExportsForVersion, requiredChecksForVersion, requiresDeepworkMetadata, validateLocaleResources } from "../scripts/dsmm-registry-install-probe.mjs";
+import { COMPILED_FILES, compiledFilesForVersion, DW_PRESET_NAMES, LOCALE_FILES, lifecycleCommands, publicExportsForVersion, requiredChecksForVersion, requiresDeepworkMetadata, validateLocaleResources } from "../scripts/dsmm-registry-install-probe.mjs";
 import { BOOTSTRAP, POLICY, UI_CHECKS, computeDigests, createArtifactIdentity, deterministicChecksums, manifestExportsForVersion, resolveReleaseContext, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
 
 export function contextInput(bootstrap = false) {
@@ -82,7 +82,7 @@ export function packageFiles(version = "0.1.3") {
     ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
     ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`),
     "agent-presets/default.yml", "docs/research/reference.md", "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
-  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...COMPILED_FILES])].map((name) => [name, Buffer.from("fixture\n")]),
+  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...compiledFilesForVersion(version)])].map((name) => [name, Buffer.from("fixture\n")]),
     ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, readFileSync(new URL(`../dsmm/${path}`, import.meta.url))]) : [])]);
 }
 
@@ -113,7 +113,7 @@ export function makeInstallFixture({ identity, tarball }) {
       binSha256: hash, headless: true, profileList: true, dumpConfig: true, profile,
       commands: lifecycleCommands(profile, identity.version).map((command) => ({ ...command, status: 0, stdoutSha256: hash, stderrSha256: hash })) },
     exports: Object.fromEntries(Object.entries(publicExports).map(([name, path]) => [name, fileIdentity(path)])),
-    compiledFiles: Object.fromEntries(COMPILED_FILES.map((path) => [path, fileIdentity(path)])),
+    compiledFiles: Object.fromEntries(compiledFilesForVersion(identity.version).map((path) => [path, fileIdentity(path)])),
     checks: Object.fromEntries(requiredChecksForVersion(identity.version).map((name) => [name, true])), temporaryRootRemoved: true, cleanup: { outcome: "COMPLETED" },
     ...(requiresDeepworkMetadata(identity.version) ? { nativeMetadata: { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: POLICY.dshVersion,
       readerSha256: hash, packageName: POLICY.packageName, version: identity.version, source: "profile-owned-installed-package",

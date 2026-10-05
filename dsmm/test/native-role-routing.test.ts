@@ -10,7 +10,17 @@ import type { ResolvedSubagentStartRequest, SubagentProvider, SubagentResult } f
 import { apply, createDsmmStatusSnapshot, resolveConfig, resolveEffectiveDsmmRole } from "../lib/index.js";
 import type { DsmmPluginConfig } from "../lib/index.js";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
-import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+import { headerRoutes, nativeRoutingFixture as createNativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+
+/** Earlier fallback fixtures opt in explicitly; production omission remains startup-lock. */
+function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: Parameters<typeof createNativeRoutingFixture>[1] = {}) {
+  return createNativeRoutingFixture(config.runtimeRecovery?.enabled ? {
+    ...config, runtimePolicy: { strategy: "rate-limit-fallback", rateLimit: {
+      initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0, maxRetries: 0,
+      switchAfterRateLimits: 1, maxSwitches: config.runtimeRecovery.maxFallbackAttempts ?? 2
+    }, ...config.runtimePolicy }
+  } : config, options);
+}
 
 const reviewer = { provider: "fixture", model: "review-primary", reasoningEffort: "max" };
 const backup = { provider: "fixture", model: "review-backup", reasoningEffort: "max" };
@@ -83,7 +93,7 @@ test("live explicit child routes retain ordered exact profile fallbacks on later
   const fixture = await nativeRoutingFixture({ defaultActive: true, runtimeRecovery: { enabled: true, maxFallbackAttempts: 2 }, roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [firstBackup, secondBackup] } } });
   try {
     const parent = await fixture.create();
-    fixture.adapter.failModels.add(explicit.model); fixture.adapter.failModels.add(firstBackup.model);
+    fixture.adapter.rateLimitModels.add(explicit.model); fixture.adapter.rateLimitModels.add(firstBackup.model);
     const child = await fixture.subagents.start("dsmm-role-reviewer", {
       parent, prompt: [{ type: "text", text: "Verify explicit child fallback ownership" }], signal: new AbortController().signal,
       agentOptions: { ...explicit, reasoningEffort: ReasoningEffortId(explicit.reasoningEffort) }, toolFilter: { allow: ["read", "glob", "grep"] }
@@ -98,7 +108,7 @@ test("live explicit child routes retain ordered exact profile fallbacks on later
       assert.deepEqual(headerRoutes(child.localAgent).at(-1), secondBackup, "the live child's fallback remains exact instead of reverting to explicit or configured primary");
       persisted = JSON.parse(JSON.stringify(child.localAgent.session.snapshotEvents()));
     } finally { await child.dispose(); }
-    fixture.adapter.failModels.clear();
+    fixture.adapter.rateLimitModels.clear();
     const restored = await fixture.create({ origin: "subagent", agentPreset: "dsmm-orchestrator" }, undefined, { seed: persisted });
     assert.equal(fixture.agents.isOwnedBy(restored.id, parent), false);
     await runFixtureTurn(restored);
@@ -126,7 +136,7 @@ test("native local failure fixture persists exact role fallback despite sticky h
     roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } }
   });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     const selection: ModelSelectionRef = { current: { provider: "fixture", model: "host-inherited", reasoningEffort: ReasoningEffortId("high") }, assembled: undefined };
     const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection);
     await runFixtureTurn(agent);
@@ -138,18 +148,20 @@ test("native local failure fixture persists exact role fallback despite sticky h
   } finally { await fixture.dispose(); }
 });
 
-test("native role recovery sole gate, empty suppression and missing-chain legacy inheritance", async () => {
+test("explicit rollover is independent of the legacy continuation gate, respects empty chains and inherits omitted chains", async () => {
   for (const scenario of [
-    { enabled: false, chain: [backup], expected: [reviewer.model] },
+    { enabled: false, chain: [backup], expected: [reviewer.model, backup.model] },
     { enabled: true, chain: [], expected: [reviewer.model] },
     { enabled: true, chain: undefined, expected: [reviewer.model, "global-backup"] }
   ]) {
     const fixture = await nativeRoutingFixture({
       runtimeRecovery: { enabled: scenario.enabled, fallbackRoutes: [{ provider: "fixture", model: "global-backup", reasoningEffort: "high" }] },
-      roleRouting: { "dsmm-reviewer": { primary: reviewer, ...(scenario.chain === undefined ? {} : { fallbackRoutes: scenario.chain }) } }
+      roleRouting: { "dsmm-reviewer": { primary: reviewer, strategy: "rate-limit-fallback", rateLimit: {
+        initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0, maxRetries: 0, switchAfterRateLimits: 1, maxSwitches: 2
+      }, ...(scenario.chain === undefined ? {} : { fallbackRoutes: scenario.chain }) } }
     });
     try {
-      fixture.adapter.failModels.add(reviewer.model);
+      fixture.adapter.rateLimitModels.add(reviewer.model);
       const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
       await runFixtureTurn(agent);
       assert.deepEqual(fixture.adapter.calls.map((call) => call.model), scenario.expected);
@@ -164,7 +176,7 @@ test("native route with omitted effort clears incompatible inherited and primary
     roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [{ provider: "fixture", model: "default-effort-backup" }] } }
   });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
     await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [reviewer, { provider: "fixture", model: "default-effort-backup", reasoningEffort: "high" }]);
@@ -233,7 +245,7 @@ test("native trusted siblings persist independent aliases and routed read-only c
     "dsmm-oracle": { primary: oracle, fallbackRoutes: [] }
   } }, { headless: true });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     const parent = await fixture.create({ agentPreset: "dsmm-orchestrator" });
     const runs = await Promise.all(["reviewer", "oracle"].map((role) => fixture.subagents.start(`dsmm-role-${role}`, {
       parent, prompt: [{ type: "text", text: "Complete local sibling" }],
@@ -400,7 +412,7 @@ test("native headless role tool fixes child options while retaining alias identi
 test("native role fallback-only chain retains admitted choice across later sticky-selection turns", async () => {
   const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { fallbackRoutes: [backup] } } });
   try {
-    fixture.adapter.failModels.add("host-inherited");
+    fixture.adapter.rateLimitModels.add("host-inherited");
     const selection: ModelSelectionRef = { current: { provider: "fixture", model: "host-inherited", reasoningEffort: ReasoningEffortId("high") }, assembled: undefined };
     const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection);
     await runFixtureTurn(agent);
@@ -437,7 +449,7 @@ test("native host-owned durable route change wins over primary and DSMM global f
 test("native host durable header change after admitted fallback abandons pending DSMM choice", async () => {
   const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     const host = { provider: "fixture", model: "host-after-admission", reasoningEffort: ReasoningEffortId("high") };
     let changed = false;
     fixture.ctx.on("agent/request-error", async (frame, next) => {
@@ -464,8 +476,8 @@ test("native ordered role fallback is bounded and duplicate effort variants do n
     fallbackRoutes: [backup, { ...backup, reasoningEffort: "high" }, { provider: "fixture", model: "never-reached", reasoningEffort: "high" }]
   } } });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
-    fixture.adapter.failModels.add(backup.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(backup.model);
     const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
     await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [reviewer, backup]);
@@ -474,12 +486,12 @@ test("native ordered role fallback is bounded and duplicate effort variants do n
   } finally { await fixture.dispose(); }
 });
 
-test("native cold reload retains unchanged policy fallback but applies edited effort or removed role chain", async (t) => {
+test("native cold Agent re-admits its pinned policy primary after prior fallback, edited effort or removed chain", async (t) => {
   const originalConfig: DsmmPluginConfig = { runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } };
   for (const variant of ["unchanged", "primary-effort", "remove-chain", "both"] as const) await t.test(variant, async () => {
     const fixture = await nativeRoutingFixture(originalConfig);
     try {
-      fixture.adapter.failModels.add(reviewer.model);
+      fixture.adapter.rateLimitModels.add(reviewer.model);
       const original = await fixture.create({ agentPreset: "dsmm-reviewer" });
       await runFixtureTurn(original);
       assert.deepEqual(headerRoutes(original).at(-1), backup);
@@ -502,11 +514,11 @@ test("native cold reload retains unchanged policy fallback but applies edited ef
       const edited: DsmmPluginConfig = { runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: editedPrimary, fallbackRoutes } } };
       const replacement = fixture.ctx.plugin({ name: `dsmm-reloaded-${variant}`, apply(ready: Context) { return apply(ready as unknown as DshContext, edited); } });
       await replacement.await();
-      fixture.adapter.failModels.delete(reviewer.model);
+      fixture.adapter.rateLimitModels.delete(reviewer.model);
       const restored = await fixture.create({ agentPreset: "dsmm-reviewer" }, undefined, { seed: persisted });
       await runFixtureTurn(restored);
-      assert.deepEqual(headerRoutes(restored).at(-1), variant === "unchanged" ? backup : editedPrimary, variant);
-      assert.equal(restored.session.snapshotEvents().filter((event) => event.type === "dsmm/role-policy").length, variant === "unchanged" ? 1 : 2, `${variant}: new epoch only for changed policy`);
+      assert.deepEqual(headerRoutes(restored).at(-1), editedPrimary, variant);
+      assert.equal(restored.session.snapshotEvents().filter((event) => event.type === "dsmm/role-policy").length, 2, `${variant}: every fresh Agent entry creates a new route epoch`);
     } finally { await fixture.dispose(); }
   });
 });
@@ -566,7 +578,7 @@ test("native policy events are absent for default inheritance and malformed own 
 test("native child never borrows ancestor policy epoch or ancestor admitted fallback", async () => {
   const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     const ancestor = await fixture.create({ agentPreset: "dsmm-reviewer" });
     await runFixtureTurn(ancestor);
     assert.deepEqual(headerRoutes(ancestor).at(-1), backup);
@@ -576,7 +588,7 @@ test("native child never borrows ancestor policy epoch or ancestor admitted fall
     childSeed.append("turn/start", { turn: 2 });
     childSeed.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "one-shot", provider: "dsmm-role-reviewer" }));
     childSeed.append("turn/end", { turn: 2, reason: { kind: "completed" } });
-    fixture.adapter.failModels.delete(reviewer.model);
+    fixture.adapter.rateLimitModels.delete(reviewer.model);
     const child = await fixture.create({ origin: "subagent", parentSession: ancestor.id, isSeeded: true, agentPreset: "dsmm-orchestrator" }, undefined, {
       seed: childSeed.snapshotEvents(), inheritedEventCount: SessionLogOffset(inherited.length), parentAgent: ancestor
     });
@@ -588,7 +600,7 @@ test("native child never borrows ancestor policy epoch or ancestor admitted fall
   } finally { await fixture.dispose(); }
 });
 
-test("native unchanged cold-reloaded policy retains a host-owned durable route decision", async () => {
+test("native fresh cold Agent does not retain a former live host-owned route decision", async () => {
   const config: DsmmPluginConfig = { runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } };
   const fixture = await nativeRoutingFixture(config);
   try {
@@ -606,7 +618,7 @@ test("native unchanged cold-reloaded policy retains a host-owned durable route d
     await replacement.await();
     const restored = await fixture.create({ agentPreset: "dsmm-reviewer" }, undefined, { seed: persisted });
     await runFixtureTurn(restored);
-    assert.deepEqual(headerRoutes(restored).at(-1), host);
+    assert.deepEqual(headerRoutes(restored).at(-1), reviewer);
   } finally { await fixture.dispose(); }
 });
 
@@ -619,7 +631,7 @@ test("native removed, disabled or inactive policy gap starts a fresh epoch when 
     };
     const fixture = await nativeRoutingFixture(originalConfig);
     try {
-      fixture.adapter.failModels.add(reviewer.model);
+      fixture.adapter.rateLimitModels.add(reviewer.model);
       const meta = gap === "mode-inactive" ? {} : { agentPreset: "dsmm-reviewer" };
       const first = await fixture.create(meta);
       await runFixtureTurn(first);
@@ -652,7 +664,7 @@ test("native removed, disabled or inactive policy gap starts a fresh epoch when 
       await inactive.dispose();
       const reactivated = fixture.ctx.plugin({ name: `dsmm-policy-reactivated-${gap}`, apply(ready: Context) { return apply(ready as unknown as DshContext, originalConfig); } });
       await reactivated.await();
-      fixture.adapter.failModels.delete(reviewer.model);
+      fixture.adapter.rateLimitModels.delete(reviewer.model);
       const last = await fixture.create(meta, { current: nativeGapRoute, assembled: undefined }, { seed: gapEvents });
       await runFixtureTurn(last);
       assert.deepEqual(headerRoutes(last).at(-1), reviewer, "reactivated fixed policy must not retain a route chosen while that policy was absent");
@@ -685,7 +697,7 @@ test("native cancellation after downstream next returns does not create a policy
 test("native cancellation after downstream next cannot consume an admitted fallback as durable ownership", async () => {
   const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } });
   try {
-    fixture.adapter.failModels.add(reviewer.model);
+    fixture.adapter.rateLimitModels.add(reviewer.model);
     let requests = 0;
     const stopCancelling = fixture.ctx.on("agent/request", async (frame, next) => {
       const config = await next();
@@ -699,7 +711,7 @@ test("native cancellation after downstream next cannot consume an admitted fallb
     assert.deepEqual(headerRoutes(agent), [reviewer]);
     assert.equal(agent.session.snapshotEvents().filter((event) => event.type === "dsmm/role-policy").length, 1);
     stopCancelling();
-    fixture.adapter.failModels.delete(reviewer.model);
+    fixture.adapter.rateLimitModels.delete(reviewer.model);
     await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent).at(-1), reviewer);
     assert.deepEqual(fixture.adapter.calls.map((call) => call.model), [reviewer.model, reviewer.model]);
@@ -724,7 +736,7 @@ test("native stale request frame cannot close an epoch before a real inert-polic
   } finally { await fixture.dispose(); }
 });
 
-test("native statusless failures use explicit transient codes without permitting authentication, quota or invalid-request fallback", async () => {
+test("native only statusless RATE_LIMIT permits explicit rollover; other transient/auth/quota/request failures do not", async () => {
   const transient = ["RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT"];
   for (const code of [...transient, "AUTH", "QUOTA", "INVALID_REQUEST"]) {
     const fixture = await nativeRoutingFixture({ runtimeRecovery: { enabled: true, retryOnCodes: transient }, roleRouting: { "dsmm-reviewer": { primary: reviewer, fallbackRoutes: [backup] } } });
@@ -734,7 +746,7 @@ test("native statusless failures use explicit transient codes without permitting
       };
       const agent = await fixture.create({ agentPreset: "dsmm-reviewer" });
       await runFixtureTurn(agent);
-      const expected = transient.includes(code) ? [reviewer, backup] : [reviewer];
+      const expected = code === "RATE_LIMIT" ? [reviewer, backup] : [reviewer];
       assert.deepEqual(headerRoutes(agent), expected, code);
       assert.deepEqual(fixture.adapter.calls.map((call) => call.model), expected.map((route) => route.model), `${code}: no implicit route`);
     } finally { await fixture.dispose(); }

@@ -154,10 +154,13 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     assert.equal(rpcFibers[0].state, 2, "the native RPC injection must remain ACTIVE");
     assert.ok(ctx.get("dsmmProfileRuntime"));
     assert.ok(ctx.get("dsmmProfiles"));
-    assert.equal(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").length, 4);
-    assert.deepEqual(await ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }), {
+    assert.deepEqual(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").map((descriptor) => descriptor.method), ["describe", "read", "save", "select", "describeSession", "selectSession"]);
+    const described = await ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }) as Awaited<ReturnType<DsmmProfileRuntime["describe"]>>;
+    assert.deepEqual({ profiles: described.profiles, selectedId: described.selectedId, appliedRevision: described.appliedRevision, selectionRevision: described.selectionRevision }, {
       profiles: [], selectedId: null, appliedRevision: null, selectionRevision: "absent",
     });
+    assert.equal(described.roles?.length, 12);
+    assert.equal(described.editorDefaults?.strategy, "startup-lock");
     let persistedSession: Session | undefined;
     const storageFibers = [...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers])
       .filter((fiber) => ownedByEntry(fiber) && fiber.runtime?.callback === DsmmSessionPersistence);

@@ -1,6 +1,8 @@
-const errorCodes = new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit"]);
+import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimitPolicy, normalizeRoutingStrategy } from "./routing-policy.js";
+const errorCodes = new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled"]);
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
+const rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)$/u;
 /** Shared wire grammar for native codec validation and local form feedback. */
 export function isProfileId(value) {
     return typeof value === "string" && idPattern.test(value)
@@ -25,6 +27,39 @@ function revision(value) {
     return result;
 }
 function selectionRevision(value) { return value === "absent" ? value : revision(value); }
+/** Opaque native identities are never interpreted as paths. */
+export function isNativeSessionId(value) {
+    return typeof value === "string" && value.length > 0 && value.length <= 256
+        && !/[\u0000-\u001f\u007f]/u.test(value)
+        && new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) === value;
+}
+function sessionId(value) {
+    if (!isNativeSessionId(value))
+        fail("sessionId");
+    return value;
+}
+function boolean(value, field) {
+    if (typeof value !== "boolean")
+        fail(field);
+    return value;
+}
+function integer(value, field, maximum = Number.MAX_SAFE_INTEGER) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum)
+        fail(field);
+    return value;
+}
+function routeText(value, field, maximum) {
+    const result = text(value, field, maximum);
+    if (result.trim() === "" || /[\u0000-\u001f\u007f]/u.test(result)
+        || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(result)) !== result)
+        fail(field);
+    return result;
+}
+function role(value) {
+    if (typeof value !== "string" || !rolePattern.test(value))
+        fail("role");
+    return value;
+}
 function object(value, required, optional = []) {
     if (value === null || typeof value !== "object" || Array.isArray(value))
         fail("object");
@@ -55,7 +90,7 @@ function content(value) {
     return result;
 }
 function snapshot(value) {
-    const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError"]);
+    const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults"]);
     if (!Array.isArray(item.profiles) || item.profiles.length > 128)
         fail("profiles");
     return {
@@ -67,6 +102,68 @@ function snapshot(value) {
         appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision),
         selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
         ...optional(item, "selectionError", errorInfo),
+        ...optional(item, "roles", (input) => {
+            if (!Array.isArray(input) || input.length > 12)
+                fail("roles");
+            const result = input.map((value) => {
+                const row = object(value, ["id", "label", "enabled"], ["runtimePolicy"]);
+                return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "runtimePolicy", (input) => {
+                        const policy = object(input, [], ["strategy", "rateLimit"]);
+                        return { ...optional(policy, "strategy", normalizeRoutingStrategy), ...optional(policy, "rateLimit", normalizeRateLimitOverrides) };
+                    }) };
+            });
+            if (new Set(result.map((row) => row.id)).size !== result.length)
+                fail("roles");
+            return result;
+        }),
+        ...optional(item, "editorDefaults", runtimePolicy),
+    };
+}
+function rateLimit(value) {
+    const item = object(value, Object.keys(DSMM_RATE_LIMIT_BOUNDS));
+    return normalizeRateLimitPolicy(item);
+}
+function runtimePolicy(value) {
+    const item = object(value, ["strategy", "rateLimit"]);
+    return { strategy: normalizeRoutingStrategy(item.strategy), rateLimit: rateLimit(item.rateLimit) };
+}
+function rolePolicy(value) {
+    const item = object(value, ["strategy", "rateLimit", "retries", "rateLimitFailures", "switches", "totalDelayMs"], ["role", "route"]);
+    return {
+        ...runtimePolicy({ strategy: item.strategy, rateLimit: item.rateLimit }),
+        retries: integer(item.retries, "retries", 10),
+        rateLimitFailures: integer(item.rateLimitFailures, "rateLimitFailures"),
+        switches: integer(item.switches, "switches", 10),
+        totalDelayMs: integer(item.totalDelayMs, "totalDelayMs", 120000),
+        ...optional(item, "role", role),
+        ...optional(item, "route", (input) => {
+            const route = object(input, ["provider", "model"], ["reasoningEffort"]);
+            const provider = routeText(route.provider, "provider", 128);
+            const model = routeText(route.model, "model", 512);
+            if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://"))
+                fail("route");
+            return { provider, model, ...optional(route, "reasoningEffort", (value) => routeText(value, "reasoningEffort", 64)) };
+        }),
+    };
+}
+function selectionState(value) {
+    const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
+    return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
+}
+function sessionSnapshot(value) {
+    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy"]);
+    if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope))
+        fail("scope");
+    return {
+        sessionId: sessionId(item.sessionId), globalDefault: selectionState(item.globalDefault), selection: selectionState(item.selection),
+        scope: item.scope, admissionEpoch: revision(item.admissionEpoch), switchAllowed: boolean(item.switchAllowed, "switchAllowed"),
+        ...optional(item, "admittedSelection", selectionState),
+        ...optional(item, "switchUnavailableReason", (input) => {
+            if (typeof input !== "string" || !["busy", "maintenance", "disposed", "not-owned", "unavailable"].includes(input))
+                fail("switchUnavailableReason");
+            return input;
+        }),
+        ...optional(item, "rolePolicy", rolePolicy),
     };
 }
 function saveRequest(value) {
@@ -82,6 +179,11 @@ function selectRequest(value) {
         fail("expectedRevision");
     return result;
 }
+function sessionSelectRequest(value) {
+    const item = object(value, ["sessionId", "id", "expectedSelectionRevision", "expectedAdmissionEpoch"], ["expectedRevision"]);
+    const { sessionId: inputSessionId, expectedAdmissionEpoch, ...profileRequest } = item;
+    return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: revision(expectedAdmissionEpoch) };
+}
 function codec(symbol, parse) {
     return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse }) };
 }
@@ -96,6 +198,17 @@ export const TYPERT_REMOTE = {
         descriptor("read", codec("ProfileReadResult", readResult), { name: "id", codec: codec("ProfileId", id) }),
         descriptor("save", codec("ProfileReadResult", readResult), { name: "request", codec: codec("ProfileSaveRequest", saveRequest) }),
         descriptor("select", codec("ProfileSnapshot", snapshot), { name: "request", codec: codec("ProfileSelectRequest", selectRequest) }),
+        {
+            ...descriptor("describeSession", codec("SessionProfileSnapshot", sessionSnapshot)),
+            parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: codec("NativeSessionId", sessionId) }],
+        },
+        {
+            ...descriptor("selectSession", codec("SessionProfileSnapshot", sessionSnapshot)),
+            parameters: [
+                { name: "sessionId", wire: "sessionId", source: "json", codec: codec("NativeSessionId", sessionId) },
+                { name: "request", wire: "request", source: "json", codec: codec("SessionProfileSelectRequest", sessionSelectRequest) },
+            ],
+        },
     ],
 };
 export const TYPERT_HOST = {

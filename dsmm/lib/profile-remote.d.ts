@@ -1,11 +1,13 @@
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry";
-import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot } from "./profile-types.js";
+import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 export interface DsmmProfilesRemote {
     describe(): Promise<RemoteResult<ProfileSnapshot>>;
     read(id: string): Promise<RemoteResult<ProfileReadResult>>;
     save(request: ProfileSaveRequest): Promise<RemoteResult<ProfileReadResult>>;
     select(request: ProfileSelectRequest): Promise<RemoteResult<ProfileSnapshot>>;
+    describeSession(sessionId: string): Promise<RemoteResult<SessionProfileSnapshot>>;
+    selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<RemoteResult<SessionProfileSnapshot>>;
 }
 declare module "@deepseek-ai/dsh-typert-protocol/types" {
     interface TypertRemoteMap {
@@ -13,6 +15,8 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
         "dsmmProfiles/read": DsmmProfilesRemote["read"];
         "dsmmProfiles/save": DsmmProfilesRemote["save"];
         "dsmmProfiles/select": DsmmProfilesRemote["select"];
+        "dsmmProfiles/describeSession": DsmmProfilesRemote["describeSession"];
+        "dsmmProfiles/selectSession": DsmmProfilesRemote["selectSession"];
     }
     interface TypertRemoteNamespaceMap {
         dsmmProfiles: DsmmProfilesRemote;
@@ -24,6 +28,8 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
 }
 /** Shared wire grammar for native codec validation and local form feedback. */
 export declare function isProfileId(value: unknown): value is string;
+/** Opaque native identities are never interpreted as paths. */
+export declare function isNativeSessionId(value: unknown): value is string;
 /** Explicit strict Host contract; no SRC fallback or browser-supplied authority. */
 export declare const TYPERT_REMOTE: TypertRemoteContribution;
 export declare const TYPERT_HOST: TypertContribution;

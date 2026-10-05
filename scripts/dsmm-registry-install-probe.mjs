@@ -35,6 +35,18 @@ export const COMPILED_FILES = Object.freeze([
   "lib/profile-runtime.js", "lib/profile-store.js", "lib/profile-rpc.js", "lib/profile-remote.js",
   "lib/profile-types.js", "lib/profiles.js", "lib/client/index.js", "lib/client/controller.js", "lib/client/ProfilesSection.js",
 ]);
+export const COMPILED_FILES_015 = Object.freeze([
+  ...COMPILED_FILES,
+  ...["routing-policy", "settings", "status", "model-routing", "role-routing", "role-providers", "runtime-recovery", "recovery-policy", "session-scope",
+    "client/structured", "client/StructuredEditor", "client/SessionProfiles", "client/session-labels", "client/locales", "client/styles"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...COMPILED_FILES.map((path) => path.replace(/\.js$/u, ".d.ts")),
+]);
+
+export function compiledFilesForVersion(version) {
+  requireFact(validVersion(version), "INVALID_COMPILED_POLICY_VERSION");
+  const [major, minor, patch] = version.split(".").map(Number);
+  return major > 0 || minor > 1 || (minor === 1 && patch >= 5) ? [...COMPILED_FILES_015] : [...COMPILED_FILES];
+}
 export const REQUIRED_CHECKS = Object.freeze([
   "registryIdentity", "registryBytes", "pinnedPackageManager", "pinnedNativeRuntime", "isolatedEnvironment",
   "exactNativeInstall", "profileOwnedResolution", "publicExports", "compiledProfileClient", "installedBytes",
@@ -320,7 +332,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
     exports[name] = verifyFile(path, profileRequire.resolve(name === "." ? PACKAGE_NAME : `${PACKAGE_NAME}${name.slice(1)}`));
   }
   const compiledFiles = {};
-  for (const path of COMPILED_FILES) compiledFiles[path] = verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
+  for (const path of compiledFilesForVersion(version)) compiledFiles[path] = verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
   const resources = new Map([...expected].filter(([path]) => path.startsWith("locale/")).map(([path, entry]) => [path, entry.bytes]));
   validateLocaleResources(resources, version);
   if (requiresDeepworkMetadata(version)) {
@@ -589,7 +601,8 @@ export function validateInstallReceipt(receipt, { version, sha256 }) {
     }), "INSTALL_RECEIPT_COMMANDS_INVALID");
   requireFact(exactKeys(receipt.exports, Object.keys(publicExports)) && Object.entries(publicExports).every(([name, path]) =>
     receipt.exports[name]?.path === path && SHA256.test(receipt.exports[name]?.sha256 ?? "")), "INSTALL_RECEIPT_EXPORTS_INVALID");
-  requireFact(exactKeys(receipt.compiledFiles, COMPILED_FILES) && COMPILED_FILES.every((path) =>
+  const requiredCompiled = compiledFilesForVersion(version);
+  requireFact(exactKeys(receipt.compiledFiles, requiredCompiled) && requiredCompiled.every((path) =>
     receipt.compiledFiles[path]?.path === path && SHA256.test(receipt.compiledFiles[path]?.sha256 ?? "")), "INSTALL_RECEIPT_COMPILED_FILES_INVALID");
   requireFact(exactKeys(receipt.checks, requiredChecks) && requiredChecks.every((key) => receipt.checks[key] === true)
     && receipt.temporaryRootRemoved === true && receipt.cleanup?.outcome === "COMPLETED", "INSTALL_RECEIPT_CHECKS_INCOMPLETE");

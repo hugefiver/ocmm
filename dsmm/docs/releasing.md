@@ -1,8 +1,10 @@
-# Deepwork 0.1.4 Release and Rollback
+# Deepwork 0.1.5 Release and Rollback
 
-This is a future procedure for 0.1.4, not a completed-release receipt. The new identities are `@dsmm/dsmm@0.1.4`, tag `dsmm-scoped-v0.1.4`, and `dsmm-dsmm-0.1.4.tgz`. Deepwork/DW display names do not rename package or protocol IDs. Existing 0.1.1 and older releases remain immutable. The stopped 0.1.2 tag, frozen artifact and draft Release remain untouched and unpublished: do not dispatch its bootstrap publisher, finalize its draft, overwrite its bytes or move/delete/recreate its tag.
+This is a future procedure for 0.1.5, not a completed-release receipt. The new identities are `@dsmm/dsmm@0.1.5`, tag `dsmm-scoped-v0.1.5`, and `dsmm-dsmm-0.1.5.tgz`. Deepwork/DW display names do not rename package or protocol IDs. Existing 0.1.1 and older releases remain immutable. The stopped 0.1.2 tag, frozen artifact and draft Release remain untouched and unpublished: do not dispatch its bootstrap publisher, finalize its draft, overwrite its bytes or move/delete/recreate its tag.
 
-The `dsmm-scoped-v0.1.3` tag at `2bdea4b` is immutable too. Run `37235817488` failed **before pack/publish** because pnpm 11 ignored esbuild/koffi build scripts. Preserve that tag and its historical plan; do not reroute it to the successor. 0.1.4 must obtain its own fresh source, clean Linux build, packed bytes and receipt.
+The `dsmm-scoped-v0.1.3` tag at `2bdea4b` is immutable too. Run `37235817488` failed **before pack/publish** because pnpm 11 ignored esbuild/koffi build scripts. Preserve that tag and its historical plan; do not reroute it to the successor. 0.1.5 must obtain its own fresh source, clean Linux build, packed bytes and receipt.
+
+The completed 0.1.4 publication and its separately authorized continuation remain historical evidence: original run `37240470628/1` and continuation `37243216939/1` are not 0.1.5 proof. Their exact fourteen UI checks and nine installed compiled-file checks remain unchanged.
 
 The mandatory sequence is **fresh CI pack → independent frozen-byte Docker acceptance → verified OIDC npm/GitHub publication and terminal completion → authorized official-carrier Desktop rollout**. No global/system DSH, Desktop configuration, account/provider, credential, or real-session writes may occur before terminal verified publication. Local readiness alone does not authorize publication or migration.
 
@@ -29,11 +31,11 @@ The root typecheck, test and build must pass before committing. Build before gen
 
 Use pnpm for actual install/build/test/**pack/publish**. The `npm pack --dry-run --json` above is only the existing read-only, size-rich metadata diagnostic, not release packaging. Do not blindly substitute pnpm's differently shaped preview JSON or fabricate missing size fields. Source-checkout Docker runs are development evidence; final acceptance must use the CI-frozen artifact and expected SHA256 without building or repacking. A checker or successful install is not runtime, UI, publication or Desktop proof.
 
-For 0.1.4, clean Linux install/build verification must exercise the reviewed pnpm `allowBuilds` policy for exactly `esbuild@0.25.12` and `koffi@3.1.1`, with `strictDepBuilds: true`. A cached native binary or pre-existing `lib` tree cannot establish that the ignored-script failure is repaired. This is distinct from the deliberately script-free metadata dry-run above; do not weaken that diagnostic's lifecycle-script protection or approve all dependency scripts.
+For 0.1.5, clean Linux install/build verification must exercise the reviewed pnpm `allowBuilds` policy for exactly `esbuild@0.25.12` and `koffi@3.1.1`, with `strictDepBuilds: true`. A cached native binary or pre-existing `lib` tree cannot establish that the ignored-script failure is repaired. This is distinct from the deliberately script-free metadata dry-run above; do not weaken that diagnostic's lifecycle-script protection or approve all dependency scripts.
 
 ## Phase 1: frozen artifact and independent Docker gate
 
-Use the dedicated `.github/workflows/dsmm-release.yml` **future tag path** for the authorized `dsmm-scoped-v0.1.4` push, not the old bootstrap dispatch. Tag/version, peeled source commit, control commit and event identity must agree. CI uses pinned Node 24 / pnpm 11.9.0, checks/builds the exact source, verifies generated assets, and packs **one new actual tarball** with pnpm. Inspect `dsmm-dsmm-0.1.4.tgz`, record its actual size/SHA256/SHA1/SHA512 integrity, and freeze it. Never reuse the old 0.1.2 hash/receipt/artifact.
+Use the dedicated `.github/workflows/dsmm-release.yml` **future tag path** for the authorized `dsmm-scoped-v0.1.5` push, not the old bootstrap dispatch. Tag/version, peeled source commit, control commit and event identity must agree. CI uses pinned Node 24 / pnpm 11.9.0, checks/builds the exact source, verifies generated assets, and packs **one new actual tarball** with pnpm. Inspect `dsmm-dsmm-0.1.5.tgz`, record its actual size/SHA256/SHA1/SHA512 integrity, and freeze it. Never reuse the old 0.1.2 hash/receipt/artifact.
 
 Run the full independent Docker runner with that **explicit artifact path and expected SHA256**, required compiled-UI hook and trusted support files. It must fail closed if required inputs are missing/mismatched and must not build, repack, or silently choose another tarball. The new completed receipt's `packedSha256` must match the fresh frozen file and its run/attempt/source identity. Only these accepted unchanged bytes may proceed to publish.
 
@@ -45,13 +47,19 @@ Use a fresh image/process/home and exact pinned DSH, installing the packed packa
 - Save without activation; new-Agent-only apply; existing even-blank Agent retention; inherited child/recovery settings; fresh-process pinned current selection despite a subsequently edited draft; truthful cold-resume/removed auxiliary-root limitations.
 - Existing native web/headless, session-persistence/history compatibility, LSP, sentinel and cleanup scenarios remain required; naming checks do not replace these runtime contracts.
 
+Successor acceptance additionally requires the compiled structured editor's native catalog round-trip, comment/unrelated-setting preservation, ordered fallback controls, unlisted native-resolvable routes, and invalid raw retention. Exercise real current-session UI apply, two independent roots, sidecar CAS and fresh epochs, busy/maintenance/child refusal, old/new child isolation and same-revision reapply. Cold-resume the exact pinned sidecar after changing the global default, then compare stock native visible history and request headers. Place an owned regular profile lock **before** a second real native Loader starts; prove visible refusal and unchanged pointer/lock ownership, with a truthful observed root-roster disposition.
+
+Actual native `followup/whenIdle` requests must prove primary/first-available startup locks, finite same-route rate-limit exhaustion, threshold-ordered rollover, same-profile/different-role and different-profile isolation, first-request unavailable versus partial/later refusal, and both strategies' partial-text/tool-fragment no-retry fences. Bind each real provider call to its native request header, live attempt ID, matching durable stream and settlement; successful outputs and terminal outcomes must agree. A competing native always-retry handler must remain unused and tools must not replay. The added native model-selection scenario must invoke strict public `session/selectModel`, demonstrate a route different from the Orchestrator profile primary, exact effort-only changes and subsequent-request retention, and validate the final native headers rather than an acknowledgement alone.
+
+Bind the hook and all three support files explicitly: `profile-ui-harness-server.mjs`, `profile-ui-harness-browser.mjs`, and `profile-ui-harness-native.mjs`. The successor receipt's exact check and installed compiled-file inventories are version-gated; historical receipt grammars are not expanded. CI source/pack/publish/installed verification uses Node 24 / pnpm 11.9.0; the independent borrowed Docker runtime uses its recorded Node 22 / pnpm 12.8.1 environment. These are distinct evidence surfaces, not interchangeable build claims.
+
 The native component/RPC/storage test uses a supported composition-owned in-process carrier, not an anonymous production route or copied login. It is distinct from authenticated Desktop activation. Preserve sanitized scenario evidence and inspect the full intended diff before parent-owned authorized release operations. If any required scenario fails or the frozen bytes change, stop before publication/global migration.
 
 ## Phase 2: authorized immutable publication
 
-Publication requires explicit authorization for the new identity. Recheck `@dsmm/dsmm@0.1.4` and `dsmm-scoped-v0.1.4` are absent. Confirm the one-time npm Trusted Publisher registration for repository `hugefiver/ocmm`, workflow filename `dsmm-release.yml`, with direct publish allowed. If supported setup/MFA is still missing, request that step; do not add a static token fallback or recurring manual release gate. The main ocmm workflow/checker does not cover DSMM: its dedicated workflow and DSMM terminal checker do.
+Publication requires explicit authorization for the new identity. Recheck `@dsmm/dsmm@0.1.5` and `dsmm-scoped-v0.1.5` are absent. Confirm the one-time npm Trusted Publisher registration for repository `hugefiver/ocmm`, workflow filename `dsmm-release.yml`, with direct publish allowed. If supported setup/MFA is still missing, request that step; do not add a static token fallback or recurring manual release gate. The main ocmm workflow/checker does not cover DSMM: its dedicated workflow and DSMM terminal checker do.
 
-The earlier unscoped `dsmm-v0.1.0` GitHub release, scoped 0.1.0 release and scoped 0.1.1 release stay intact. A new-release authorization covers ordinary commit/push/tag/npm/GitHub actions for 0.1.4 only, not rewriting prior publications, the old 0.1.2 draft, app upgrades, global package-manager changes or authentication workarounds.
+The earlier unscoped `dsmm-v0.1.0` GitHub release, scoped 0.1.0 release and scoped 0.1.1 release stay intact. A new-release authorization covers ordinary commit/push/tag/npm/GitHub actions for 0.1.5 only, not rewriting prior publications, the old 0.1.2 draft, app upgrades, global package-manager changes or authentication workarounds.
 
 The future publish job revalidates the accepted run/attempt-bound bytes and publishes **that exact tarball with native pnpm**, public npmjs access, lifecycle scripts ignored, OIDC and genuine provenance enabled. Do not forge GitHub identity variables, use the old bootstrap's `provenance=false`, or repack after acceptance. Preserve non-canceling package-wide publication concurrency and least-permission separated jobs. Registry byte/integrity and fresh installed-package verification precede non-overwriting public GitHub finalization with the same tarball and `SHA256SUMS.txt`.
 
@@ -65,22 +73,22 @@ After the matching workflow terminates, run `scripts/check-dsmm-release-completi
 
 ```powershell
 $env:DSH_HOME = "<fresh-task-owned-verification-home>"
-dsh --profile dsmm-0.1.4-verify --from-default-profile headless --dump-config
-dsh plugin --profile dsmm-0.1.4-verify add @dsmm/dsmm@0.1.4
-dsh plugin --profile dsmm-0.1.4-verify list
-dsh --profile dsmm-0.1.4-verify --dump-config
-npm view @dsmm/dsmm@0.1.4 dist.integrity --registry "https://registry.npmjs.org/"
+dsh --profile dsmm-0.1.5-verify --from-default-profile headless --dump-config
+dsh plugin --profile dsmm-0.1.5-verify add @dsmm/dsmm@0.1.5
+dsh plugin --profile dsmm-0.1.5-verify list
+dsh --profile dsmm-0.1.5-verify --dump-config
+npm view @dsmm/dsmm@0.1.5 dist.integrity --registry "https://registry.npmjs.org/"
 ```
 
 ## Phase 3: official installed-carrier Desktop rollout
 
-Only after terminal 0.1.4 completion may authorized global migration begin. First perform the separately bounded isolated real-model/tool check against the exact registry package. Coordinate a fully quit Desktop, recheck concurrent edits, and preserve a recoverable local snapshot of only task-changed package-manager/DSMM-owned files—not the entire credential or session store. Use the exact installed official Desktop carrier to install `@dsmm/dsmm@0.1.4`. It may manage packages while the app is quit; it may **not** boot/dump the reserved Desktop profile. Never substitute standalone npm DSH, a renamed/copied profile, checkout imports, `app.asar` patches, global PATH/pnpm changes, or auth bypasses.
+Only after terminal 0.1.5 completion may authorized global migration begin. First perform the separately bounded isolated real-model/tool check against the exact registry package. Coordinate a fully quit Desktop, recheck concurrent edits, and preserve a recoverable local snapshot of only task-changed package-manager/DSMM-owned files—not the entire credential or session store. Use the exact installed official Desktop carrier to install `@dsmm/dsmm@0.1.5`. It may manage packages while the app is quit; it may **not** boot/dump the reserved Desktop profile. Never substitute standalone npm DSH, a renamed/copied profile, checkout imports, `app.asar` patches, global PATH/pnpm changes, or auth bypasses.
 
-Preserve base/web bundles, deployment roles/skills, nine configured policies, disabled Builder, active mode, provider/model catalog, account state and UI preferences. Saving supported baseline settings as a runtime draft is explicit and reversible; it does not change structural configuration. Disclose current-selection cold resume and the unknown removed auxiliary-root ID limitation in [compatibility](compatibility.md) before rollout. Do not silently substitute personas or delete history.
+Preserve base/web bundles, deployment roles/skills, all configured policies, disabled Builder, active mode, provider/model catalog, account state and UI preferences. Saving supported baseline settings as a runtime draft is explicit and reversible; it does not change structural configuration. Disclose committed-sidecar versus absent-sidecar cold resume and the unknown removed auxiliary-root ID limitation in [compatibility](compatibility.md) before rollout. Do not silently substitute personas or delete history.
 
 Any old unmarked-log repair remains a separately authorized exact private target, native-lease-held, same-directory backup-first, metadata-only operation with concurrency checks and actual installed-reader parity. The naming release does not itself authorize session edits, and an old observed digest is not permission to overwrite newer history.
 
-After a supported restart, verify actual Desktop package 0.1.4 activation, native Deepwork metadata, healthy selectable DW root names, retained auxiliary delegation/read-only denial, and actual Deepwork Profiles UI create/edit/save/apply/reset with independent file/pointer bytes. Verify live even-blank Agents remain unchanged on apply and current pinned selection persists across restart. Check unrelated deployment/provider/account/UI state remained intact. If authenticated native Desktop behavior cannot be observed, report that pending boundary; disk files, native metadata reads, headless tests and Docker component proof alone are insufficient for complete integration.
+After a supported restart, verify actual Desktop package 0.1.5 activation, native Deepwork metadata, healthy selectable DW root names, retained auxiliary delegation/read-only denial, and actual Deepwork Profiles UI create/edit/save/apply/reset with independent file/pointer bytes. Verify live even-blank Agents remain unchanged on apply and current pinned selection persists across restart. Check unrelated deployment/provider/account/UI state remained intact. If authenticated native Desktop behavior cannot be observed, report that pending boundary; disk files, native metadata reads, headless tests and Docker component proof alone are insufficient for complete integration.
 
 ## Rollback
 

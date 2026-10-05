@@ -1,10 +1,13 @@
 import type { DshAgent } from "./dsh-types.js";
 import type { DsmmModelFamily } from "./model-family.js";
 import type { DsmmRoleId } from "./roles.js";
-import type { DeepseekCalibration, DsmmModelRoute, DsmmSettings } from "./settings.js";
+import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
+import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
+import type { DsmmRoleRuntimeState } from "./profile-types.js";
 export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
     version: typeof DSMM_STATUS_VERSION;
+    admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
     mode: {
         name: string;
         active: boolean;
@@ -32,6 +35,9 @@ export interface DsmmStatusSnapshot {
         primary?: DsmmModelRoute;
         fallbackRoutes: DsmmModelRoute[];
         fallbackSource: "role" | "global" | "disabled";
+        strategy: DsmmRoutingStrategy;
+        rateLimit: DsmmRateLimitPolicy;
+        runtimeState?: DsmmRoleRuntimeState;
         diagnostic?: "invalid-child-descriptor";
     };
     runtimeRecovery: {
@@ -50,6 +56,8 @@ export declare function createDsmmStatusSnapshot(input: {
     agent: DshAgent;
     settings: DsmmSettings;
     modeActive: boolean;
+    admission?: DsmmProfileAdmission;
+    roleRuntimeState?: DsmmRoleRuntimeState;
 }): DsmmStatusSnapshot;
 export declare function formatDsmmStatus(snapshot: DsmmStatusSnapshot): string;
 //# sourceMappingURL=status.d.ts.map

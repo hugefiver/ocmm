@@ -170,7 +170,7 @@ const expectedCompatibility = [
   ["LSP/MCP", "external ocmm-lsp mcp"],
   ["Runtime recovery", "process-local"],
   ["Per-role model/effort/fallback policy", "native request, subagent and descriptor seams"],
-  ["Runtime profiles", "independent drafts, immutable revisions, minimal pointer"],
+  ["Runtime profiles", "independent drafts, immutable revisions, global pointer and scoped CAS sidecars"],
   ["Durable DSMM metadata", "deployment-only `sessionPersistence` on main DSMM entry"],
   ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
   ["DeepSeek V41 Flash calibration", "native DeepSeek providers/deepseek-flash"]
@@ -273,14 +273,14 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "unavailable");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.match(rows.find(([surface]) => surface === "Native Settings")?.[2] ?? "", /actual Desktop.*separate proofs/u);
-  assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /new-Agent.*no historical snapshot guarantee/u);
+  assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /global new-Agent.*idle session epochs.*cold sidecar retention/u);
   assert.match(rows.find(([surface]) => surface === "Durable DSMM metadata")?.[2] ?? "", /explicit startup integration.*acceptance pending/u);
 });
 
 test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
-  assert.match(compatibility, /^# Deepwork 0\.1\.4 Compatibility/mu);
+  assert.match(compatibility, /^# Deepwork 0\.1\.5 Compatibility/mu);
   for (const heading of ["Compatibility authority", "Compatibility matrix", "Command and runtime boundaries", "Evidence limits"]) {
     assert.match(compatibility, new RegExp(`^## ${heading}$`, "mu"));
   }
@@ -307,8 +307,9 @@ test("compatibility document fixes command, headless, platform, and provider bou
   assert.ok(compatibility.includes("LSP/MCP and runtime recovery are disabled by default."));
   assert.ok(compatibility.includes("V4 Pro calibration remains limited to the exact `deepseek-official/deepseek-v4-pro` route."));
   assert.ok(compatibility.includes("`deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`"));
-  assert.match(compatibility, /including a blank Agent.*retains.*admitted runtime settings/u);
-  assert.match(compatibility, /cold-resumed sessions use the current selected revision/u);
+  assert.match(compatibility, /including a blank Agent.*retains.*admitted settings.*global default/u);
+  assert.match(compatibility, /Sidecar cold resume retains the exact pinned revision\/baseline/u);
+  assert.match(compatibility, /Sessions without a sidecar keep the old global-current behavior/u);
   assert.match(compatibility, /auxiliary roles can fail native cold resume/u);
   assert.match(compatibility, /third phase/u);
 });
@@ -325,10 +326,15 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
       "## Hard boundary",
       "## Feature mapping",
       "## Migration sequence",
-      "## Coexistence and cutover"
+      "## Coexistence and cutover",
+      "## Successor 0.1.5 migration note"
     ]
   );
   assert.ok(migration.includes("0.1.1 routing surface targeting DSH 0.2.0-rc.2"));
+  assert.match(migration, /mapping above is the historical 0\.1\.1 contract/u);
+  assert.match(migration, /explicit idle current-session apply commits only that root's sidecar and admission epoch/u);
+  assert.match(migration, /omitted strategy now means `startup-lock`/u);
+  assert.match(migration, /native user's explicit provider\/model\/exact effort remains authoritative/u);
 
   const rows = parseMarkdownTable(migration, "## Feature mapping", "feature mapping");
   assert.equal(rows.length, 15);
@@ -377,14 +383,14 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
 test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.match(release, /^# Deepwork 0\.1\.4 Release and Rollback$/mu);
+  assert.match(release, /^# Deepwork 0\.1\.5 Release and Rollback$/mu);
   const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
   const phaseOffsets = phases.map((phase) => release.indexOf(phase));
   assert.ok(phaseOffsets.every((offset) => offset >= 0));
   assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
-    "dsmm-scoped-v0.1.4",
+    "dsmm-scoped-v0.1.5",
     "explicit authorization",
     "npm Trusted Publisher registration",
     ".github/workflows/dsmm-release.yml",
@@ -443,7 +449,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
     "registry installation",
-    "plugin --profile dsmm-0.1.4-verify list",
+    "plugin --profile dsmm-0.1.5-verify list",
     "--dump-config",
     "installed registry package",
     "scripts/check-dsmm-release-completion.mjs",
@@ -455,7 +461,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
   assert.match(postPublication, /import-bootstrap.*skipped \/ NOT_APPLICABLE/u);
   assert.match(postPublication, /Workflow success alone is insufficient/u);
-  assert.match(desktopGate, /Only after terminal 0\.1\.4 completion/u);
+  assert.match(desktopGate, /Only after terminal 0\.1\.5 completion/u);
   assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
   assert.match(desktopGate, /actual Deepwork Profiles UI create\/edit\/save\/apply\/reset/u);
   const rollback = release.slice(release.indexOf("## Rollback"));
@@ -482,8 +488,8 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "Publication and Desktop acceptance remain pending",
-    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.4.tgz>",
+    "0.1.5 publication and Desktop acceptance remain pending",
+    "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.5.tgz>",
     "dsh --profile <profile> --dump-config",
     "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
@@ -507,7 +513,7 @@ test("v1.0 roadmap distinguishes the initial 0.1.0 release from future stability
   assert.doesNotMatch(v1Section, /\b(?:released|published|available on npm|(?:tag|tagged)\s+(?:has\s+been\s+)?created|created\s+(?:a\s+)?tag)\b/iu);
 });
 
-test("release readiness checker accepts the real 0.1.4 package without creating a tarball", () => {
+test("release readiness checker accepts the real 0.1.5 package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -515,7 +521,7 @@ test("release readiness checker accepts the real 0.1.4 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.1.4");
+  assert.equal(receipt.version, "0.1.5");
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -545,14 +551,14 @@ test("release readiness checker rejects the superseded unscoped package identity
 });
 
 test("release readiness checker rejects a stale or manifest-selected release version", () => {
-  for (const version of ["0.1.2", "0.1.3", "0.1.5"]) {
+  for (const version of ["0.1.2", "0.1.3", "0.1.4", "0.1.6"]) {
     const fixtureRoot = createReleaseFixture();
     try {
       updateFixtureManifest(fixtureRoot, (manifest) => { manifest.version = version; });
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1, version);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.4"]);
+      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.1.5"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });

@@ -18,6 +18,9 @@ import type { DsmmSettingsGetter } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 import DsmmSessionPersistence from "./session-persistence.js";
 import { isAbsolute } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import type { DsmmProfileAdmission, DsmmSettings } from "./settings.js";
+import { DsmmProfileError } from "./profiles.js";
 
 export const name = "dsmm";
 export const inject = ["profileContext"] as const;
@@ -73,7 +76,29 @@ function applyRuntime(ctx: DshContext, config: Config): void | Promise<void> {
   const controller = new DeepworkModeController(ctx);
   let runtime: DsmmProfileRuntime | undefined;
   let profileInitialization: Promise<void> | undefined;
-  const getBoundSettings: DsmmSettingsGetter = (agent) => runtime?.getSettings(agent) ?? getSettings();
+  let requiresNativeProfiles = ctx.get !== undefined;
+  const requireProfileAdmission = (): void => {
+    if (requiresNativeProfiles && runtime === undefined) {
+      throw new DsmmProfileError("unavailable", "Native Deepwork profile admission is not ready. No provider request or tool work is allowed.");
+    }
+  };
+  const getBoundSettings: DsmmSettingsGetter = (agent) => {
+    requireProfileAdmission();
+    return runtime?.getSettings(agent) ?? getSettings();
+  };
+  const deploymentAdmissions = new WeakMap<DsmmSettings, DsmmProfileAdmission>();
+  getBoundSettings.admission = (agent) => {
+    requireProfileAdmission();
+    const nativeAdmission = runtime?.getSettings.admission?.(agent);
+    if (nativeAdmission !== undefined) return nativeAdmission;
+    const settings = getSettings();
+    let admission = deploymentAdmissions.get(settings);
+    if (admission === undefined) {
+      admission = Object.freeze({ settings, profile: null, scope: "deployment-baseline", epoch: createHash("sha256").update(randomUUID()).digest("hex") });
+      deploymentAdmissions.set(settings, admission);
+    }
+    return admission;
+  };
   const getSettings = registerSettings(ctx, config, {
     install(readyCtx, getReadySettings) {
       const install = (installCtx: DshContext, settingsGetter: DsmmSettingsGetter): void => {
@@ -96,6 +121,7 @@ function applyRuntime(ctx: DshContext, config: Config): void | Promise<void> {
         install(readyCtx, getReadySettings);
         return;
       }
+      requiresNativeProfiles = true;
       const installProfiles = async (profileCtx: DshContext): Promise<void> => {
         runtime = await createProfileRuntime(profileCtx, getReadySettings());
         profileCtx.provide?.("dsmmProfileRuntime", runtime);

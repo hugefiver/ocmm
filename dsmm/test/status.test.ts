@@ -97,7 +97,7 @@ function createFormatterFixture(): DsmmStatusSnapshot {
       policyEffort: "max",
       action: "preserve-explicit"
     },
-    rolePolicy: { role: "dsmm-reviewer", applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global" },
+    rolePolicy: { role: "dsmm-reviewer", applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
     runtimeRecovery: {
       enabled: true,
       applies: true,
@@ -121,7 +121,7 @@ test("status formatter renders the exact bounded Deepwork summary with DW role l
     "Scope: DW Reviewer preset",
     "Workflow policy: risk-based",
     "Route: deepseek-official/deepseek-v4-pro [deepseek]",
-    "Role policy: DW Reviewer; primary=inherit; fallbacks=global",
+    "Role policy: DW Reviewer; strategy=startup-lock; primary=inherit; fallbacks=global; retries=3; threshold=3; switches=2",
     "Reasoning: auto; policy=max; current=high; action=preserve-explicit",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
@@ -172,7 +172,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
         maxContinuations: 3
       }
     },
-    rolePolicy: { applies: false, fallbackRoutes: [], fallbackSource: "disabled" }
+    rolePolicy: { applies: false, fallbackRoutes: [], fallbackSource: "disabled", strategy: "startup-lock", rateLimit: { ...fixture.effectiveSettings.runtimePolicy.rateLimit } }
   });
 
   assert.equal(formatted, [
@@ -181,7 +181,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
     "Scope: out of scope",
     "Workflow policy: risk-based",
     "Route: unavailable/unavailable [unknown]",
-    "Role policy: none; primary=inherit; fallbacks=disabled",
+    "Role policy: none; strategy=startup-lock; primary=inherit; fallbacks=disabled; retries=3; threshold=3; switches=2",
     "Reasoning: auto; policy=not applicable; current=provider default; action=out-of-scope",
     "Runtime recovery: disabled; applies=no; fallbacks=0; max attempts=0",
     "Idle continuation: disabled; max=3",
@@ -211,7 +211,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
       applies: false,
       action: "non-target-route"
     },
-    rolePolicy: { role: "dsmm-orchestrator", applies: false, fallbackRoutes: fixture.rolePolicy.fallbackRoutes, fallbackSource: "global" }
+    rolePolicy: { role: "dsmm-orchestrator", applies: false, fallbackRoutes: fixture.rolePolicy.fallbackRoutes, fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...fixture.effectiveSettings.runtimePolicy.rateLimit } }
   });
 
   assert.equal(formatted, [
@@ -220,7 +220,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
     "Scope: active deepwork",
     "Workflow policy: risk-based",
     "Route: openai/gpt-5.6 [gpt]",
-    "Role policy: DW Orchestrator; primary=inherit; fallbacks=global",
+    "Role policy: DW Orchestrator; strategy=startup-lock; primary=inherit; fallbacks=global; retries=3; threshold=3; switches=2",
     "Reasoning: auto; policy=not applicable; current=provider default; action=non-target-route",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
@@ -259,7 +259,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
       applies: false,
       action: "out-of-scope"
     },
-    rolePolicy: { applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global" },
+    rolePolicy: { applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
     runtimeRecovery: {
       enabled: true,
       applies: false,
@@ -592,4 +592,42 @@ test("effective settings are an exhaustive defensive copy", () => {
   Object.assign(copy.lsp.env, { SNAPSHOT_ONLY: "yes" });
   assert.equal(settings.runtimeRecovery.fallbackRoutes[0].model, "backup-model");
   assert.equal(Object.hasOwn(settings.lsp.env, "SNAPSHOT_ONLY"), false);
+});
+
+test("status copies independent role strategy, nested retry overrides and scoped admission provenance", () => {
+  const settings = resolveConfig({
+    runtimePolicy: { strategy: "rate-limit-fallback", rateLimit: { maxRetries: 6 } },
+    roleRouting: { "dsmm-reviewer": { strategy: "startup-lock", rateLimit: { maxRetries: 1, maxSwitches: 0 },
+      primary: { provider: "p", model: "m", reasoningEffort: "high" }, fallbackRoutes: [] } }
+  });
+  const admission = { settings, profile: { id: "focus", revision: "a".repeat(64) }, epoch: "b".repeat(64), scope: "session-override" as const };
+  const runtimeState = { role: "dsmm-reviewer" as const, strategy: "startup-lock" as const,
+    rateLimit: { ...settings.runtimePolicy.rateLimit, maxRetries: 1, maxSwitches: 0 },
+    route: { provider: "p", model: "m", reasoningEffort: "high" }, retries: 1, rateLimitFailures: 2, switches: 0, totalDelayMs: 500 };
+  const snapshot = createDsmmStatusSnapshot({ agent: createAgent({ headerPreset: "dsmm-reviewer" }).agent, settings, modeActive: false, admission, roleRuntimeState: runtimeState });
+  assert.equal(snapshot.rolePolicy.strategy, "startup-lock");
+  assert.equal(snapshot.rolePolicy.rateLimit.maxRetries, 1);
+  assert.equal(snapshot.rolePolicy.rateLimit.maxSwitches, 0);
+  assert.deepEqual(snapshot.rolePolicy.fallbackRoutes, []);
+  assert.equal(snapshot.rolePolicy.fallbackSource, "role");
+  assert.deepEqual(snapshot.admission, { profile: admission.profile, epoch: admission.epoch, scope: admission.scope });
+  assert.notEqual(snapshot.admission!.profile, admission.profile);
+  assert.notEqual(snapshot.effectiveSettings.runtimePolicy, settings.runtimePolicy);
+  assert.notEqual(snapshot.effectiveSettings.runtimePolicy.rateLimit, settings.runtimePolicy.rateLimit);
+  assert.notEqual(snapshot.effectiveSettings.roleRouting["dsmm-reviewer"]!.rateLimit, settings.roleRouting["dsmm-reviewer"]!.rateLimit);
+  assert.notEqual(snapshot.rolePolicy.runtimeState, runtimeState);
+  assert.notEqual(snapshot.rolePolicy.runtimeState!.rateLimit, runtimeState.rateLimit);
+  assert.notEqual(snapshot.rolePolicy.runtimeState!.route, runtimeState.route);
+  admission.profile.id = "changed";
+  settings.runtimePolicy.rateLimit.maxRetries = 0;
+  settings.roleRouting["dsmm-reviewer"]!.rateLimit!.maxRetries = 9;
+  runtimeState.rateLimit.maxRetries = 9;
+  runtimeState.route.model = "changed";
+  assert.equal(snapshot.admission!.profile!.id, "focus");
+  assert.equal(snapshot.effectiveSettings.runtimePolicy.rateLimit.maxRetries, 6);
+  assert.equal(snapshot.effectiveSettings.roleRouting["dsmm-reviewer"]!.rateLimit!.maxRetries, 1);
+  assert.equal(snapshot.rolePolicy.runtimeState!.rateLimit.maxRetries, 1);
+  assert.equal(snapshot.rolePolicy.runtimeState!.route!.model, "m");
+  assert.match(formatDsmmStatus(snapshot), /Profile admission: session-override; profile=focus/u);
+  assert.match(formatDsmmStatus(snapshot), /Retry state: retries=1; rate limits=2; switches=0; delay ms=500/u);
 });

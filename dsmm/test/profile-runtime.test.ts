@@ -112,7 +112,7 @@ test("profile admission is immutable for existing and blank roots, and trusted c
     const root = mockAgent("a-root");
     const blank = mockAgent("a-blank");
     agents.push(root, blank);
-    created!({ agent: root }); created!({ agent: blank });
+    await created!({ agent: root }); await created!({ agent: blank });
     const admitted = runtime.getSettings(root);
     assert.equal(Object.isFrozen(admitted), true);
     assert.equal(Object.isFrozen(admitted.guards.toolOutputTruncation), true);
@@ -121,8 +121,8 @@ test("profile admission is immutable for existing and blank roots, and trusted c
     await runtime.select({ id: "b", expectedRevision: b.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
     const child = mockAgent("a-child");
     agents.push(child); owners.set(child.id!, root);
-    created!({ agent: child });
-    const newest = mockAgent("b-root"); agents.push(newest); created!({ agent: newest });
+    await created!({ agent: child });
+    const newest = mockAgent("b-root"); agents.push(newest); await created!({ agent: newest });
     assert.equal(runtime.getSettings(root), admitted);
     assert.equal(runtime.getSettings(blank), admitted, "blank preset selection cannot change admitted runtime settings");
     assert.equal(runtime.getSettings(child), admitted);
@@ -177,7 +177,7 @@ test("native profile installation requires profileContext.dir and never invents 
   await assert.rejects(createProfileRuntime({ get: () => ({ startedBundles: [] }) as never }, resolveConfig()), { code: "activation" });
 });
 
-test("native A-root switching to B retains A child routes, in-flight recovery, guards, blank roots and immutable cold admission", async () => {
+test("native global A-to-B switching retains A child routes, startup-locked failures, guards and immutable cold admission", async () => {
   const profileDir = mkdtempSync(join(tmpdir(), "dsmm-profile-runtime-"));
   let fixture = await nativeRoutingFixture({ roles: { "dsmm-builder": false } }, { headless: true, profileDir });
   try {
@@ -206,7 +206,7 @@ test("native A-root switching to B retains A child routes, in-flight recovery, g
     };
     await runFixtureTurn(parent);
     assert.equal(switched, true);
-    assert.deepEqual(headerRoutes(parent).map((value) => value.model), ["root-a", "backup-a"]);
+    assert.deepEqual(headerRoutes(parent).map((value) => value.model), ["root-a"], "a generic transient failure does not imply fallback under migrated startup-lock defaults");
     assert.equal(runtime.admission(parent as unknown as DshAgent).appliedRevision, a.revision);
     const child = await fixture.subagents.start("dsmm-role-reviewer", {
       parent, prompt: [{ type: "text", text: "Complete local profile inheritance fixture" }],
@@ -230,7 +230,7 @@ test("native A-root switching to B retains A child routes, in-flight recovery, g
     blank.session.append("agent-preset/selected", { agentPreset: "dsmm-orchestrator" });
     fixture.ctx.emit("agent-preset/selected", blank.id, "dsmm-orchestrator");
     await runFixtureTurn(blank);
-    assert.equal(headerRoutes(blank).at(-1)?.model, "backup-a", "an admitted blank root still uses A after selecting a native preset");
+    assert.equal(headerRoutes(blank).at(-1)?.model, "root-a", "an admitted blank root still uses A after selecting a native preset; generic failures remain locked");
     const executeGit = (agent: typeof parent) => agent.ctx.get("tools")!.execute({ callId: ToolCallId(`profile-guard-${agent.id}`), name: "bash", arguments: { command: "git commit -m never-executed-by-fixture" }, agent, signal: new AbortController().signal });
     assert.equal((await executeGit(parent)).isError, true);
     assert.equal((await executeGit(newRoot)).isError, false);

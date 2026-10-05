@@ -294,7 +294,7 @@ test("downstream request-error rejection propagates unchanged without a warning 
   const agent = harness.createAgent([], { config: config() });
   const sentinel = new Error("host failure");
 
-  await assert.rejects(harness.error(errorFrame(agent.agent), async () => {
+  await assert.rejects(harness.error(errorFrame(agent.agent, { failure: { message: "generic", code: "SERVER", status: 503 } }), async () => {
     throw sentinel;
   }), (error) => error === sentinel);
   assert.equal(agent.requestHeaderReads, 0);
@@ -323,113 +323,6 @@ test("disabled, aborted, out-of-scope, nonretryable, missing-header, and provide
     assert.equal(await harness.request(requestFrame(agent.agent), base), base);
     assert.equal(harness.warnings.length, 0);
   }
-});
-
-test("a retryable host-declined failure selects one configured route and never appends a retry event", async () => {
-  const harness = runtimeRecoveryHarness(() => recoverySettings());
-  const agent = harness.createAgent([
-    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-    { type: "step/start", data: { turn: 1, step: 1 } }
-  ], { config: config() });
-
-  assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
-  assert.equal(agent.appended, 0);
-  assert.equal(agent.events.some((event) => event.type === "llm/retry"), false);
-});
-
-test("an exact pending handoff changes only route, drops reasoning effort, preserves nested identity, and consumes once", async () => {
-  const harness = runtimeRecoveryHarness(() => recoverySettings());
-  const agent = harness.createAgent([
-    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-    { type: "step/start", data: { turn: 1, step: 1 } }
-  ], { config: config() });
-  const nested = { keep: true };
-  const messages = [{ role: "user", content: "secret body" }];
-  const base = config({ reasoningEffort: "low", nested, messages });
-
-  assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
-  const result = await harness.request(requestFrame(agent.agent), base);
-  assert.notEqual(result, base);
-  assert.equal(result.provider, "fallback");
-  assert.equal(result.model, "fallback-model");
-  assert.equal(result.reasoningEffort, undefined);
-  assert.equal(result.nested, nested);
-  assert.equal(result.messages, messages);
-  assert.equal(await harness.request(requestFrame(agent.agent), base), base);
-});
-
-test("only the originating agent and exact coordinates consume a pending handoff", async () => {
-  const harness = runtimeRecoveryHarness(() => recoverySettings());
-  const first = harness.createAgent([
-    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-    { type: "step/start", data: { turn: 1, step: 1 } }
-  ], { config: config() });
-  const second = harness.createAgent([], { config: config() });
-  const base = config();
-
-  assert.deepEqual(await harness.error(errorFrame(first.agent)), { kind: "retry" });
-  assert.equal(await harness.request(requestFrame(second.agent), base), base);
-  assert.equal(await harness.request(requestFrame(first.agent, 2, 1), base), base);
-  assert.equal(await harness.request(requestFrame(first.agent, 1, 2), base), base);
-  assert.equal((await harness.request(requestFrame(first.agent), base)).provider, "fallback");
-  assert.equal(await harness.request(requestFrame(first.agent), base), base);
-});
-
-test("duplicate failure evidence reserves one fallback even after its handoff is consumed", async () => {
-  const harness = runtimeRecoveryHarness(() => recoverySettings());
-  const agent = harness.createAgent([
-    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-    { type: "step/start", data: { turn: 1, step: 1 } }
-  ], { config: config() });
-  const frame = errorFrame(agent.agent);
-  assert.deepEqual(await harness.error(frame), { kind: "retry" });
-  assert.equal(await harness.error(frame), undefined);
-  assert.equal((await harness.request(requestFrame(agent.agent), config())).provider, "fallback");
-  assert.equal(await harness.error(frame), undefined);
-});
-
-test("a cancelled or expired step cannot consume or recreate its fallback reservation", async () => {
-  for (const boundary of ["cancel", "step/end", "step/start"] as const) {
-    const harness = runtimeRecoveryHarness(() => recoverySettings());
-    const agent = harness.createAgent([
-      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-      { type: "step/start", data: { turn: 1, step: 1 } }
-    ], { config: config() });
-    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
-    const abort = new AbortController();
-    if (boundary === "cancel") abort.abort();
-    else agent.events.push({ type: boundary, data: { turn: 1, step: boundary === "step/start" ? 2 : 1 } });
-    const base = config();
-    assert.equal(await harness.request({ ...requestFrame(agent.agent), signal: abort.signal }, base), base, boundary);
-    assert.equal(await harness.error(errorFrame(agent.agent, { signal: abort.signal })), undefined, boundary);
-    assert.equal(await harness.request(requestFrame(agent.agent), base), base, boundary);
-  }
-});
-
-test("an exact durable history tail survives cleanup and re-registration while enforcing the fallback cap", async () => {
-  const settings = recoverySettings({
-    fallbackRoutes: [
-      { provider: "fallback", model: "b" },
-      { provider: "fallback", model: "c" }
-    ],
-    maxFallbackAttempts: 2
-  });
-  const harness = runtimeRecoveryHarness(() => settings);
-  const agent = harness.createAgent([
-    { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-    { type: "step/start", data: { turn: 1, step: 1 } },
-    { type: "request/header", data: { reason: "change", header: { config: { provider: "fallback", model: "b" } } } }
-  ], { config: { provider: "fallback", model: "b" } });
-
-  harness.dispose();
-  registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
-  assert.deepEqual(await harness.error(errorFrame(agent.agent, { provider: "fallback" })), { kind: "retry" });
-  const changed = await harness.request(requestFrame(agent.agent), config({ provider: "fallback", model: "b" }));
-  assert.deepEqual({ provider: changed.provider, model: changed.model }, { provider: "fallback", model: "c" });
-
-  agent.events.push({ type: "request/header", data: { reason: "change", header: { config: { provider: "fallback", model: "c" } } } });
-  agent.setHeader({ config: { provider: "fallback", model: "c" } });
-  assert.equal(await harness.error(errorFrame(agent.agent, { provider: "fallback" })), undefined);
 });
 
 test("missing durable evidence for the live fallback route preserves the host decline without consuming a handoff", async () => {
@@ -500,42 +393,6 @@ test("malformed boundaries do not hide the exact live route from durable cap enf
   assert.equal(await harness.error(errorFrame(agent.agent, { provider: "fallback" })), undefined);
   assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream);
   assert.deepEqual(harness.warnings, []);
-});
-
-test("internal evaluation failure gives one sanitized warning while downstream rejection still propagates", async () => {
-  const secret = "credential-and-request-secret";
-  const harness = runtimeRecoveryHarness(() => {
-    throw new Error(secret);
-  });
-  const agent = harness.createAgent([], { config: config() });
-
-  assert.equal(await harness.error(errorFrame(agent.agent)), undefined);
-  assert.deepEqual(harness.warnings, ["dsmm runtime recovery could not evaluate fallback; preserving the host request-error decision"]);
-  assert.equal(harness.warnings[0]?.includes(secret), false);
-
-  const sentinel = new Error("next rejection");
-  await assert.rejects(harness.error(errorFrame(agent.agent), async () => {
-    throw sentinel;
-  }), (error) => error === sentinel);
-  assert.equal(harness.warnings.length, 1);
-});
-
-test("a throwing fallback warning sink preserves the exact host decline without scheduling a handoff", async () => {
-  const secret = "fallback-evaluation-secret";
-  const warningSentinel = new Error("warning sink failed");
-  const harness = runtimeRecoveryHarness(() => {
-    throw new Error(secret);
-  }, () => {
-    throw warningSentinel;
-  });
-  const agent = harness.createAgent([], { config: config() });
-  const hostDecline: DshRequestErrorAction = undefined;
-  const downstream = config();
-
-  assert.equal(await harness.error(errorFrame(agent.agent), async () => hostDecline), hostDecline);
-  assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream);
-  assert.deepEqual(harness.warnings, ["dsmm runtime recovery could not evaluate fallback; preserving the host request-error decision"]);
-  assert.equal(harness.warnings[0]?.includes(secret), false);
 });
 
 test("an active scoped current pending todo queues exactly the configured user continuation message", async () => {
@@ -830,13 +687,14 @@ test("a throwing continuation warning sink does not reject turn stopping", async
   assert.deepEqual(harness.warnings, ["dsmm runtime recovery continuation steering failed for turn 4"]);
 });
 
-test("registration is idempotent, cleanup disposes all three listeners, and replacement resets pending and continuation state", async () => {
+test("registration is idempotent, cleanup disposes all four listeners, and replacement resets pending and continuation state", async () => {
   const harness = runtimeRecoveryHarness(() => recoverySettings());
   const settings = continuationSettings({ maxContinuations: 1 });
   harness.dispose();
   registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
   registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
   assert.deepEqual(harness.registrations.filter((registration) => registration.active).map((registration) => [registration.event, registration.options]), [
+    ["agent/assistant-stream", { prepend: true }],
     ["agent/request", { prepend: true }],
     ["agent/request-error", { prepend: true }],
     ["agent/turn-stopping", undefined]
@@ -847,15 +705,15 @@ test("registration is idempotent, cleanup disposes all three listeners, and repl
     { type: "step/start", data: { turn: 1, step: 1 } },
     goalChange("active")
   ], { config: config() });
-  assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
+  assert.equal(await harness.error(errorFrame(agent.agent)), undefined);
   await harness.turn(turnStoppingFrame(agent.agent));
   assert.equal(agent.steered.length, 1);
 
   harness.dispose();
   assert.equal(harness.registrations.some((registration) => registration.active), false);
-  assert.deepEqual(harness.registrations.map((registration) => registration.disposeCount), [1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(harness.registrations.map((registration) => registration.disposeCount), [1, 1, 1, 1, 1, 1, 1, 1]);
   registerRuntimeRecovery(harness.context, new DeepworkModeController({}), () => settings);
-  assert.equal(harness.registrations.filter((registration) => registration.active).length, 3);
+  assert.equal(harness.registrations.filter((registration) => registration.active).length, 4);
   const base = config();
   assert.equal(await harness.request(requestFrame(agent.agent), base), base);
   await harness.turn(turnStoppingFrame(agent.agent));
@@ -865,7 +723,7 @@ test("registration is idempotent, cleanup disposes all three listeners, and repl
 });
 
 test("every listener and effect registration failure rolls back prior listeners and permits replacement", () => {
-  for (const failureBoundary of ["agent/request", "agent/request-error", "agent/turn-stopping", "effect"] as const) {
+  for (const failureBoundary of ["agent/assistant-stream", "agent/request", "agent/request-error", "agent/turn-stopping", "effect"] as const) {
     const registrations: Registration[] = [];
     const sentinel = new Error(`${failureBoundary} failed`);
     let fail = true;
@@ -890,6 +748,7 @@ test("every listener and effect registration failure rolls back prior listeners 
     fail = false;
     assert.doesNotThrow(() => registerRuntimeRecovery(context, new DeepworkModeController({}), () => continuationSettings()), failureBoundary);
     assert.deepEqual(registrations.filter((registration) => registration.active).map((registration) => [registration.event, registration.options]), [
+      ["agent/assistant-stream", { prepend: true }],
       ["agent/request", { prepend: true }],
       ["agent/request-error", { prepend: true }],
       ["agent/turn-stopping", undefined]
@@ -897,73 +756,26 @@ test("every listener and effect registration failure rolls back prior listeners 
   }
 });
 
-test("role-specific reservations remain per-Agent, exact-effort, duplicate-safe and independent of globals", async () => {
-  const settings = resolveConfig({ defaultActive: true, runtimeRecovery: { enabled: true, fallbackRoutes: [{ provider: "global", model: "wrong" }] }, roleRouting: {
-    "dsmm-reviewer": { fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] },
-    "dsmm-oracle": { fallbackRoutes: [{ provider: "oracle", model: "backup", reasoningEffort: "high" }] }
+
+test("headers alone never prove a no-output attempt, even for explicit rollover and duplicate RATE_LIMIT delivery", async () => {
+  const settings = resolveConfig({ defaultActive: true, roleRouting: {
+    "dsmm-reviewer": { strategy: "rate-limit-fallback", fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }], rateLimit: { switchAfterRateLimits: 1 } },
+    "dsmm-oracle": { strategy: "startup-lock", fallbackRoutes: [{ provider: "oracle", model: "backup" }] }
   } });
   const harness = runtimeRecoveryHarness(() => settings);
-  const make = (preset: string) => {
+  for (const preset of ["dsmm-reviewer", "dsmm-oracle"]) {
     const agent = harness.createAgent([
       { type: "request/header", data: { reason: "initial", header: { config: config() } } },
       { type: "step/start", data: { turn: 1, step: 1 } }
     ], { config: config() });
     agent.setPreset(preset);
-    return agent;
-  };
-  const reviewer = make("dsmm-reviewer");
-  const oracle = make("dsmm-oracle");
-  const results = await Promise.all([harness.error(errorFrame(reviewer.agent)), harness.error(errorFrame(oracle.agent))]);
-  assert.deepEqual(results, [{ kind: "retry" }, { kind: "retry" }]);
-  assert.equal(await harness.error(errorFrame(reviewer.agent)), undefined);
-  assert.equal(await harness.error(errorFrame(oracle.agent)), undefined);
-  assert.deepEqual(await harness.request(requestFrame(oracle.agent), config({ reasoningEffort: "max" })), { provider: "oracle", model: "backup", reasoningEffort: "high" });
-  assert.deepEqual(await harness.request(requestFrame(reviewer.agent), config({ reasoningEffort: "low" })), { provider: "review", model: "backup", reasoningEffort: "max" });
-  assert.equal(await harness.error(errorFrame(reviewer.agent)), undefined);
-  assert.equal(await harness.error(errorFrame(oracle.agent)), undefined);
-});
-
-test("role-specific pending handoffs are fenced by cancellation, stale step, disposal and host durable changes", async () => {
-  for (const boundary of ["cancel", "step/end", "step/start", "dispose", "host-change"] as const) {
-    const settings = resolveConfig({ defaultActive: true, runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] } } });
-    const harness = runtimeRecoveryHarness(() => settings);
-    const agent = harness.createAgent([
-      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-      { type: "step/start", data: { turn: 1, step: 1 } }
-    ], { config: config() });
-    agent.setPreset("dsmm-reviewer");
-    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
-    const abort = new AbortController();
-    let downstream = config();
-    if (boundary === "cancel") abort.abort();
-    else if (boundary === "dispose") harness.dispose();
-    else if (boundary === "host-change") {
-      downstream = config({ provider: "host", model: "durable", reasoningEffort: "high" });
-      agent.events.push({ type: "request/header", data: { reason: "change", header: { config: downstream } } });
-      agent.setHeader({ config: downstream });
-    } else agent.events.push({ type: boundary, data: { turn: 1, step: boundary === "step/start" ? 2 : 1 } });
-    assert.equal(await harness.request({ ...requestFrame(agent.agent), signal: abort.signal }, downstream), downstream, boundary);
-    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, `${boundary}: no stale reactivation`);
-  }
-});
-
-test("edited role policy invalidates an admitted pending fallback even when Agent and coordinates still match", async () => {
-  const original = { runtimeRecovery: { enabled: true }, roleRouting: { "dsmm-reviewer": { primary: { provider: "primary", model: "primary-model", reasoningEffort: "max" }, fallbackRoutes: [{ provider: "review", model: "backup", reasoningEffort: "max" }] } } };
-  for (const edit of ["effort", "chain", "gate"] as const) {
-    let settings = resolveConfig(original);
-    const harness = runtimeRecoveryHarness(() => settings);
-    const agent = harness.createAgent([
-      { type: "request/header", data: { reason: "initial", header: { config: config() } } },
-      { type: "step/start", data: { turn: 1, step: 1 } }
-    ], { config: config() });
-    agent.setPreset("dsmm-reviewer");
-    assert.deepEqual(await harness.error(errorFrame(agent.agent)), { kind: "retry" });
-    settings = resolveConfig({ ...original,
-      ...(edit === "gate" ? { runtimeRecovery: { enabled: false } } : {}),
-      roleRouting: { "dsmm-reviewer": { primary: { ...original.roleRouting["dsmm-reviewer"].primary, ...(edit === "effort" ? { reasoningEffort: "high" } : {}) }, fallbackRoutes: edit === "chain" ? [] : original.roleRouting["dsmm-reviewer"].fallbackRoutes } }
-    });
-    const downstream = config();
-    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, edit);
-    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream, `${edit}: consumed invalid reservation cannot reappear`);
+    let hostCalls = 0;
+    const hostAlways = async () => { hostCalls++; return { kind: "retry" } as const; };
+    assert.equal(await harness.error(errorFrame(agent.agent), hostAlways), undefined);
+    assert.equal(await harness.error(errorFrame(agent.agent), hostAlways), undefined);
+    assert.equal(hostCalls, 0);
+    const downstream = config({ reasoningEffort: "low", nested: { preserved: true } });
+    assert.equal(await harness.request(requestFrame(agent.agent), downstream), downstream);
+    assert.equal(agent.appended, 0);
   }
 });

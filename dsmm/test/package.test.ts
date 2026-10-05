@@ -51,7 +51,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.1.4");
+  assert.equal(pkg.version, "0.1.5");
   assert.equal(Object.hasOwn(pkg, "private"), false);
   assert.equal(pkg.author, "Hugefiver");
   assert.equal(pkg.license, "LicenseRef-AAAPL");
@@ -207,9 +207,10 @@ test("settings-status documentation separates deployment configuration from runt
   }
   assert.match(settingsStatus, /materialization remains off by default/u);
   assert.match(settingsStatus, /Save changes only the draft/u);
-  assert.match(settingsStatus, /new Agents only/u);
-  assert.match(settingsStatus, /including blank Agents.*retain.*snapshots/u);
-  assert.match(settingsStatus, /cold-resumed sessions use the current selection/u);
+  assert.match(settingsStatus, /Global Apply.*new unscoped Agents only/u);
+  assert.match(settingsStatus, /existing even-blank Agents retain their admissions/u);
+  assert.match(settingsStatus, /actual session ID and idle maintenance\/CAS\/epoch fences/u);
+  assert.match(settingsStatus, /Cold resume honors an explicit sidecar.*current global default/u);
   assert.match(settingsStatus, /`roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `lsp`/u);
 });
 
@@ -254,9 +255,11 @@ test("runtime profile documentation distinguishes draft, revision, selection and
   assert.match(profiles, /Saving.*does not activate/iu);
   assert.match(profiles, /Only after the pointer commit succeeds may the current in-memory selection change/u);
   assert.match(profiles, /Every existing live Agent, including a blank one, retains/u);
-  assert.match(profiles, /Native children inherit their parent's snapshot/u);
-  assert.match(profiles, /cold-resumed sessions admit the currently selected immutable revision/u);
-  assert.match(profiles, /no cross-restart historical per-session settings guarantee/u);
+  assert.match(profiles, /Existing children retain their captured old epoch.*later.*children inherit the new one/u);
+  assert.match(profiles, /committed sidecar admits that exact immutable revision or explicit baseline/u);
+  assert.match(profiles, /without a sidecar preserves the historical global-current cold-resume behavior/u);
+  assert.match(profiles, /\.sessions\/<sha256\(native-session-id\)>\.json/u);
+  assert.match(profiles, /expected sidecar revision and admission epoch must still match/u);
   assert.match(profiles, /No operation rewrites `cordis\.patch\.yml`/u);
   assert.match(profiles, /no model-visible profile-management tools.*anonymous endpoints or authentication bypasses/iu);
 });
@@ -271,17 +274,18 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
   assert.match(runtimeRecovery, /maxFallbackAttempts:\s*2/u);
   assert.match(runtimeRecovery, /maxContinuations:\s*3/u);
   assert.match(runtimeRecovery, /Continue the current task from the durable goal or unfinished todo list\. Do not repeat completed work\./u);
-  assert.match(runtimeRecovery, /0\.\.10/u);
-  assert.match(runtimeRecovery, /restart-scoped/i);
-  assert.match(runtimeRecovery, /disabled.*(?:isolated|does not disable).*prompts.*skills.*guards.*LSP.*model routing/is);
-  assert.match(runtimeRecovery, /host.*agent\/request-error.*decision.*wins by identity/is);
-  assert.match(runtimeRecovery, /exact integer status.*lowercased exact code/is);
-  assert.match(runtimeRecovery, /no message parsing/i);
-  assert.match(runtimeRecovery, /failed provider.*latest request header/is);
-  assert.match(runtimeRecovery, /attempted routes.*durable.*headers/is);
+  for (const field of ["maxRetries", "initialDelayMs", "maxDelayMs", "maxTotalDelayMs", "switchAfterRateLimits", "maxSwitches"]) assert.ok(runtimeRecovery.includes(`\`${field}\``), field);
+  assert.match(runtimeRecovery, /`maxRetries`.*3.*0–10/u);
+  assert.match(runtimeRecovery, /`switchAfterRateLimits`.*3.*1–10/u);
+  assert.match(runtimeRecovery, /`startup-lock` \(default\).*`rate-limit-fallback`/u);
+  assert.match(runtimeRecovery, /legacy `runtimeRecovery.enabled` flag is not the strategy selector/u);
+  assert.match(runtimeRecovery, /Every DSMM retry or switch requires positive no-output proof, even when staying on the same model/u);
+  assert.match(runtimeRecovery, /Outside that branch, native host-first behavior and exact downstream result identity remain unchanged/u);
+  assert.match(runtimeRecovery, /Dense live chunks must agree with the validated durable compact stream/u);
+  assert.match(runtimeRecovery, /Refusal is terminal and never falls through to native `mode:always`/u);
+  assert.match(runtimeRecovery, /Exact Agent\/admission epoch\/lock generation, live attempt ID, turn\/step, accepted header/u);
   assert.match(runtimeRecovery, /configured order/i);
-  assert.match(runtimeRecovery, /one-shot.*agent,?\s*turn,?\s*step/is);
-  assert.match(runtimeRecovery, /no timer.*provider call/is);
+  assert.match(runtimeRecovery, /No independent timer-driven request exists/u);
   assert.match(runtimeRecovery, /pending fallback route after native request selection/is);
   assert.match(runtimeRecovery, /named fallback effort.*preserved exactly.*omission clears stale.*reasoningEffort/is);
   assert.match(runtimeRecovery, /final route.*recognizes only exact V4 Pro or native V41 Flash route/is);
@@ -289,13 +293,13 @@ test("runtime-recovery documentation ships the supported recovery contract", () 
   assert.match(runtimeRecovery, /cap.*live agent.*turn/is);
   assert.match(runtimeRecovery, /steering failure.*consumes.*attempt.*sanitized warn.*fail-open/is);
   assert.match(runtimeRecovery, /cold restart/i);
-  assert.match(runtimeRecovery, /no continuation until.*user.*host.*resumes a turn/is);
+  assert.match(runtimeRecovery, /no continuation until.*user.*host.*resumes activity/is);
   assert.match(runtimeRecovery, /continuable.*one-shot/i);
   assert.match(runtimeRecovery, /subagent\/end.*live(?:-| )only/is);
   assert.match(runtimeRecovery, /native durable descriptor and child control\/session surfaces/is);
   assert.match(runtimeRecovery, /Explicitly continue a known continuable child/is);
   assert.match(runtimeRecovery, /no fake.*llm\/retry/i);
-  assert.match(runtimeRecovery, /no timers?/i);
+  assert.match(runtimeRecovery, /only finite abortable delay in the existing native error middleware/i);
   assert.match(runtimeRecovery, /no cross-process automatic retry/i);
   assert.match(runtimeRecovery, /no provider discovery/i);
   assert.match(runtimeRecovery, /no provider-message (?:parsing|classification)/i);

@@ -3,6 +3,8 @@ import { test } from "node:test";
 import type { DshCommandInvocation, DshCommandsRegistry, DshContext } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND, parseDeepworkCommandInput, registerDeepworkCommand, registerDsmmStatusCommand } from "../lib/commands.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
+import type { DsmmSettingsGetter } from "../lib/settings.js";
+import { liveRolePolicyIdentity, pinRoleRoute } from "../lib/role-routing.js";
 import { createDsmmStatusSnapshot, formatDsmmStatus } from "../lib/status.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController } from "../lib/state.js";
 
@@ -174,6 +176,45 @@ test("registered status command rejects invalid input without reading settings o
     } satisfies DshCommandInvocation), { kind: "error", text: "Usage: /dsmm-status [json]" });
   }
   assert.equal(settingsCalls, 0);
+});
+
+test("registered status command reports the exact Agent admission and current epoch retry state", async () => {
+  let command: RegisteredCommand | undefined;
+  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": { strategy: "rate-limit-fallback",
+    primary: { provider: "p", model: "primary" }, fallbackRoutes: [{ provider: "p", model: "fallback", reasoningEffort: "high" }] } } });
+  const agent: DshCommandInvocation["agent"] = { session: { header: { agentPreset: "dsmm-reviewer" }, events: [],
+    append() { throw new Error("status must not write the session"); } } };
+  let epoch = "a".repeat(64);
+  let admissionCalls = 0;
+  const getSettings: DsmmSettingsGetter = (target) => { assert.equal(target, agent); return settings; };
+  getSettings.admission = (target) => {
+    assert.equal(target, agent);
+    admissionCalls += 1;
+    return { settings, profile: { id: "focus", revision: "b".repeat(64) }, epoch, scope: "session-override" };
+  };
+  const identity = liveRolePolicyIdentity(agent, settings, "dsmm-reviewer", epoch);
+  assert.ok(identity);
+  const lock = pinRoleRoute(agent, identity, { provider: "p", model: "fallback", reasoningEffort: "high" }, settings.roleRouting["dsmm-reviewer"]!.fallbackRoutes!);
+  lock.retries = 2;
+  lock.rateLimits = 3;
+  lock.switches = 1;
+  lock.totalDelayMs = 1500;
+  registerDsmmStatusCommand({ commands: { register(value) { command = value; } } }, new DeepworkModeController({}), getSettings);
+  assert.ok(command);
+  const response = await command.handler({ rawInput: "json", agent });
+  const snapshot = JSON.parse(response.text ?? "") as ReturnType<typeof createDsmmStatusSnapshot>;
+  assert.deepEqual(snapshot.admission, { profile: { id: "focus", revision: "b".repeat(64) }, epoch, scope: "session-override" });
+  assert.equal(snapshot.rolePolicy.runtimeState!.retries, 2);
+  assert.equal(snapshot.rolePolicy.runtimeState!.rateLimitFailures, 3);
+  assert.equal(snapshot.rolePolicy.runtimeState!.switches, 1);
+  assert.equal(snapshot.rolePolicy.runtimeState!.totalDelayMs, 1500);
+  assert.deepEqual(snapshot.rolePolicy.runtimeState!.route, { provider: "p", model: "fallback", reasoningEffort: "high" });
+  epoch = "c".repeat(64);
+  const switched = JSON.parse((await command.handler({ rawInput: "json", agent })).text ?? "") as ReturnType<typeof createDsmmStatusSnapshot>;
+  assert.equal(switched.admission!.epoch, epoch);
+  assert.equal(switched.rolePolicy.runtimeState!.retries, 0);
+  assert.equal(switched.rolePolicy.runtimeState!.route, undefined);
+  assert.equal(admissionCalls, 2);
 });
 
 test("registered command name follows settings.modeName", () => {

@@ -2,11 +2,22 @@
 export const PROFILE_STYLES = `
 .dsmm-profiles{width:100%;max-width:760px;min-width:0;display:flex;flex-direction:column;gap:12px;font-family:var(--dsw-font-family);font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
 .dsmm-profiles h2{margin:0;font-size:18px;font-weight:600}
+.dsmm-profiles h3,.dsmm-profiles legend{margin:0;font-size:14px;font-weight:500;line-height:22px}
+.dsmm-profiles :is(label,legend,summary){min-width:0;max-width:100%;overflow-wrap:anywhere}
+.dsmm-profiles :is(.dsmm-structured,.dsmm-session-scope,.dsmm-catalog,.dsmm-policy-fields){min-width:0;display:flex;flex-direction:column;gap:12px}
+.dsmm-profiles fieldset{min-width:0;margin:0;padding:12px;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);display:flex;flex-direction:column;gap:12px}
+.dsmm-profiles .dsmm-route-fields{display:flex;flex-wrap:wrap;gap:12px;min-width:0}
+.dsmm-profiles .dsmm-route-fields>.dsmm-field{flex:1 1 240px;max-width:100%}
+.dsmm-profiles .dsmm-route-fields select{width:100%}
+.dsmm-profiles summary{cursor:pointer;color:var(--dsw-alias-label-primary);min-height:32px;line-height:32px}
+.dsmm-profiles summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.dsmm-profiles .dsmm-advanced[open]>div{margin-top:8px}
+.dsmm-header-profiles{width:auto;max-width:760px}
 .dsmm-profiles p{margin:0;overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-hint{color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles .dsmm-field{min-width:0;display:flex;flex-direction:column;gap:6px}
 .dsmm-profiles .dsmm-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.dsmm-profiles .dsmm-actions>button{max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:36px;height:auto}
+.dsmm-profiles button{max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:36px;height:auto}
 .dsmm-profiles .dsmm-input{width:100%;min-width:0;box-sizing:border-box;border-color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles .dsmm-input input{width:100%;min-width:0;font:inherit;color:inherit}
 .dsmm-profiles select,.dsmm-profiles textarea{box-sizing:border-box;min-width:0;max-width:100%;font:inherit;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-md)}

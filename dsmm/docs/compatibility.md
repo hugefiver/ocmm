@@ -1,8 +1,8 @@
-# Deepwork 0.1.4 Compatibility and Upgrade
+# Deepwork 0.1.5 Compatibility and Upgrade
 
-This document describes the 0.1.4 source contract and required acceptance evidence. It does not claim that the final 0.1.4 artifact has passed Docker, been published, or been activated in Desktop. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
+This document describes the 0.1.5 source contract and required acceptance evidence. It does not claim that the final 0.1.5 artifact has passed Docker, been published, or been activated in Desktop. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft are not substitute evidence for this update; the old 0.1.2 tag/artifact/draft stay untouched and unpublished.
 
-The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts, so it provides no accepted release artifact. The 0.1.4 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
+The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts. 0.1.4's published-origin bytes and failed original verify/404 history are preserved by their separate fixed continuation controls, not rewritten by 0.1.5. The 0.1.5 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
 
 Deepwork is the native plugin title in both exported metadata locales, with localized descriptions. Profiles are displayed as **Deepwork Profiles** / **Deepwork 配置档**, and twelve roles as `DW …`. Package `@dsmm/dsmm`, Loader `dsmm`, role/tool/provider IDs, commands, schemas and persistence vocabulary remain compatible. Native metadata-reader and actual UI evidence must prove the display names; a manifest `displayName` is not a supported substitute.
 
@@ -31,7 +31,7 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 | LSP/MCP | `external ocmm-lsp mcp` | optional |
 | Runtime recovery | `process-local` | optional |
 | Per-role model/effort/fallback policy | native request, subagent and descriptor seams | opt-in; exact configured capability required |
-| Runtime profiles | independent drafts, immutable revisions, minimal pointer | new-Agent application; no historical snapshot guarantee after restart |
+| Runtime profiles | independent drafts, immutable revisions, global pointer and scoped CAS sidecars | global new-Agent defaults; explicit idle session epochs; cold sidecar retention |
 | Durable DSMM metadata | deployment-only `sessionPersistence` on main DSMM entry | explicit startup integration; frozen-artifact/production acceptance pending |
 | DeepSeek V4 Pro calibration | `deepseek-official/deepseek-v4-pro` | optional |
 | DeepSeek V41 Flash calibration | `native DeepSeek providers/deepseek-flash` | optional |
@@ -81,7 +81,9 @@ This prevents future unsafe DSMM writes but does not repair existing unmarked lo
 
 DSMM runtime profiles are independent JSONC drafts beneath the native `profileContext.dir`, not additional DSH deployment profiles. Deployment roles/skills/preset composition/LSP/provider/account/install and `sessionPersistence` settings remain restart-scoped and cannot be changed by a runtime profile. Supported runtime values can be saved into a draft explicitly; save alone never activates it or rewrites deployment configuration. Apply pins immutable bytes and updates only the minimal selection pointer. See [profiles](profiles.md).
 
-Every existing live Agent, **including a blank Agent**, retains its admitted runtime settings when a profile is applied/reset. Children and recovery inherit the parent snapshot. Retention ends with the live Host: after restart, cold-resumed sessions use the current selected revision and native current definition. There is no cross-restart historical profile snapshot guarantee.
+Every existing live Agent, **including a blank Agent**, retains its admitted settings when the global default is applied/reset. Explicit current-session selection is separate: native idle maintenance and CAS/epoch checks commit only that ordinary root's sidecar before publishing its immutable admission. Existing children keep their old epoch; later genuinely owned children inherit the new one. Sidecar cold resume retains the exact pinned revision/baseline even after draft/global changes. Sessions without a sidecar keep the old global-current behavior. Corrupt/unavailable sidecars never silently fall back; native clear/compact does not transfer choices by inferred lineage.
+
+Old profile documents remain loadable, but omitted strategy now means safer `startup-lock`: a legacy generic chain no longer causes later generic automatic hopping. `runtimeRecovery.enabled` remains parse-compatible and controls legacy continuation concerns, not the two role strategies. Explicitly opt in per role to bounded `rate-limit-fallback` where desired. Every DSMM retry, including same-route retry, requires correlated native no-output evidence; partial text, reasoning or tool fragments refuse terminally without invoking a competing always-retry owner. See [runtime recovery](runtime-recovery.md).
 
 Older sessions directly selected into now-auxiliary roles can fail native cold resume because their root preset ID is no longer registered. This is a known native compatibility limitation, not permission to silently replace the persona, reset a session, or erase its history. Disclose it before rollout and preserve historical data; if restoring such sessions is required, stop and obtain direction rather than substituting a root. Package rollback does not authorize history or credential changes.
 
@@ -91,7 +93,7 @@ Global/system Desktop migration is the **third phase**: independent frozen-artif
 
 The Linux packed-lifecycle smoke pins pnpm `12.8.1` and retains DSH's native `nodeLinker: hoisted` profile layout. On Linux Node 22, pnpm `11.9.0` with that layout and DSMM's auto-installed peer graph can print `Done` after removal without exiting; the same failure was reproduced directly without DSH, while `12.8.1` returned normally. A printed `Done` is not uninstall completion. This does not claim the same failure on Windows or modify a user's existing package manager or profile. The smoke enforces a bounded fail-closed timeout and checks actual remove/reinstall exits and profile state.
 
-The matrix separates required 0.1.4 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable.
+The matrix separates required 0.1.5 evidence from historical CLI/configuration, source-contract and credentialed model evidence. A version string or unit test alone establishes neither native preset health nor UI/runtime behavior. Windows, Linux, Web, and macOS evidence are not interchangeable.
 
 The independent Docker gate installs the exact frozen tarball into a fresh pinned native runtime/home and verifies root selection, actual read-only child denials, aliased-parent route preflight, runtime snapshot behavior, and the **same compiled DSMM UI** using native client/slots/RPC and real profile storage. A supported composition-owned in-process operator/Gateway carrier and test-owned browser bridge provide no-credential native component/RPC/storage proof. No user login, copied cookie, launcher token, browser state, Desktop data, account records or authentication bypass is permitted. This proof is not authenticated Desktop/Web-launch proof; actual Desktop mounting and authorized operations remain the later check.
 

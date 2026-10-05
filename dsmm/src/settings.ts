@@ -6,6 +6,11 @@ import { DSMM_ROLE_IDS } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DSMM_SKILL_NAMES } from "./skills.js";
 import type { DsmmSkillName } from "./skills.js";
+import { DEFAULT_DSMM_RUNTIME_POLICY, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
+import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
+
+export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
+export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export type { DsmmSkillName, MvpSkillName } from "./skills.js";
@@ -55,6 +60,8 @@ export interface DsmmRecoveryRoute extends DsmmModelRoute {}
 export interface DsmmRoleRoutingConfig {
   primary?: DsmmModelRoute;
   fallbackRoutes?: DsmmModelRoute[];
+  strategy?: DsmmRoutingStrategy;
+  rateLimit?: Partial<DsmmRateLimitPolicy>;
 }
 
 export type DsmmRoleRouting = Partial<Record<DsmmRoleId, DsmmRoleRoutingConfig>>;
@@ -98,6 +105,7 @@ export interface DsmmPluginConfig {
   skills?: Partial<Record<DsmmSkillName, boolean>>;
   roles?: Partial<Record<DsmmRoleId, boolean>>;
   roleRouting?: DsmmRoleRouting;
+  runtimePolicy?: DsmmRuntimePolicyConfig;
   presets?: Partial<DsmmPresetSettings>;
   workflow?: Partial<DsmmWorkflowSettings>;
   guards?: DsmmGuardConfig;
@@ -118,6 +126,7 @@ export interface DsmmSettings {
   skills: Record<DsmmSkillName, boolean>;
   roles: Record<DsmmRoleId, boolean>;
   roleRouting: DsmmRoleRouting;
+  runtimePolicy: DsmmRuntimePolicySettings;
   presets: DsmmPresetSettings;
   workflow: DsmmWorkflowSettings;
   guards: DsmmGuardSettings;
@@ -125,8 +134,27 @@ export interface DsmmSettings {
   lsp: DsmmLspSettings;
 }
 
+export type DsmmProfileScope = "global-default" | "session-override" | "deployment-baseline";
+
+export interface DsmmProfileAdmission {
+  settings: DsmmSettings;
+  profile: { id: string; revision: string } | null;
+  epoch: string;
+  scope: DsmmProfileScope;
+}
+
 /** Runtime consumers pass their Agent so immutable profile admission is retained. */
-export type DsmmSettingsGetter = (agent?: DshAgent) => DsmmSettings;
+export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
+  admission?: (agent?: DshAgent) => DsmmProfileAdmission;
+};
+
+export interface DsmmResolvedRoleRuntimePolicy {
+  readonly strategy: DsmmRoutingStrategy;
+  readonly rateLimit: Readonly<DsmmRateLimitPolicy>;
+  readonly primary?: Readonly<DsmmModelRoute>;
+  readonly fallbackRoutes: readonly Readonly<DsmmModelRoute>[];
+  readonly fallbackSource: "role" | "global";
+}
 
 export const DSMM_SETTINGS_NAMESPACE = "dsmm";
 export const DSMM_STATUS_COMMAND = "dsmm-status";
@@ -149,6 +177,7 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   skills: createDefaultSkillSettings(),
   roles: createDefaultRoleSettings(),
   roleRouting: {},
+  runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
   presets: {
     materialize: false
   },
@@ -223,7 +252,9 @@ const MODEL_ROUTE_SCHEMA = Schema.object({
 // A dictionary retains unknown keys for fail-closed validation by the resolver.
 const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
   primary: Schema.union([Schema.const(undefined), MODEL_ROUTE_SCHEMA]),
-  fallbackRoutes: Schema.union([Schema.const(undefined), Schema.array(MODEL_ROUTE_SCHEMA)])
+  fallbackRoutes: Schema.union([Schema.const(undefined), Schema.array(MODEL_ROUTE_SCHEMA)]),
+  strategy: Schema.any(),
+  rateLimit: Schema.any()
 }).required()).default({}) as Schema<DsmmRoleRouting>;
 
 // Schemastery treats null like an omitted default. Validate the untouched map
@@ -235,7 +266,9 @@ const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input: un
       if (isRoutingRecord(route)) normalizeRecoveryEffort(route);
     }
   }
-  return { roleRouting: resolveRoleRouting(input.roleRouting as DsmmRoleRouting | undefined) };
+  const roleRouting = resolveRoleRouting(input.roleRouting as DsmmRoleRouting | undefined);
+  const runtimePolicy = normalizeRuntimePolicy(Object.hasOwn(input, "runtimePolicy") ? validatePresentRuntimePolicy(input.runtimePolicy) : undefined);
+  return { roleRouting, runtimePolicy };
 });
 
 const PRESETS_SCHEMA = Schema.object({
@@ -360,6 +393,7 @@ export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHE
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   roleRouting: ROLE_ROUTING_SCHEMA,
+  runtimePolicy: Schema.any(),
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_CONFIG_SCHEMA,
   guards: GUARDS_SCHEMA,
@@ -380,6 +414,7 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA as Schema<Record<DsmmRoleId, boolean>>,
   roleRouting: ROLE_ROUTING_SCHEMA,
+  runtimePolicy: Schema.any(),
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_SCHEMA,
   guards: GUARDS_SCHEMA,
@@ -388,7 +423,7 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
 })]).default({}) as Schema<DsmmSettings>;
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
-  return {
+  const settings: DsmmSettings = {
     modeName: normalizeModeName(config.modeName),
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
@@ -401,12 +436,20 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     roleRouting: resolveRoleRouting(config.roleRouting),
+    runtimePolicy: normalizeRuntimePolicy(Object.hasOwn(config, "runtimePolicy") ? validatePresentRuntimePolicy(config.runtimePolicy) : undefined),
     presets: resolvePresetSettings(config.presets),
     workflow: resolveWorkflowSettings(config.workflow),
     guards: resolveGuardSettings(config.guards),
     runtimeRecovery: resolveRuntimeRecoverySettings(config.runtimeRecovery),
     lsp: resolveLspSettings(config.lsp)
   };
+  for (const role of DSMM_ROLE_IDS) resolveRoleRuntimePolicy(settings, role);
+  return settings;
+}
+
+function validatePresentRuntimePolicy(value: unknown): unknown {
+  if (value === undefined) throw new TypeError("dsmm runtimePolicy must be an object when present");
+  return value;
 }
 
 function resolveMaxReasoningPresets(input: readonly unknown[] | undefined, defaults: readonly DsmmRoleId[]): DsmmRoleId[] {
@@ -420,13 +463,15 @@ export function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRole
   const result: DsmmRoleRouting = {};
   for (const [key, value] of Object.entries(input)) {
     if (!(DSMM_ROLE_IDS as readonly string[]).includes(key)) throw new TypeError("dsmm roleRouting contains an unknown role");
-    if (!isRoutingRecord(value) || Object.keys(value).some((field) => field !== "primary" && field !== "fallbackRoutes")) {
-      throw new TypeError("dsmm roleRouting role policy must contain only primary and fallbackRoutes");
+    if (!isRoutingRecord(value) || Object.keys(value).some((field) => !["primary", "fallbackRoutes", "strategy", "rateLimit"].includes(field))) {
+      throw new TypeError("dsmm roleRouting role policy must contain only primary, fallbackRoutes, strategy and rateLimit");
     }
     const policy: DsmmRoleRoutingConfig = {};
+    if (Object.hasOwn(value, "strategy")) policy.strategy = normalizeRoutingStrategy(value.strategy);
+    if (Object.hasOwn(value, "rateLimit")) policy.rateLimit = normalizeRateLimitOverrides(value.rateLimit);
     if (Object.hasOwn(value, "primary")) policy.primary = normalizeExplicitRoute(value.primary);
     if (Object.hasOwn(value, "fallbackRoutes")) {
-      if (!Array.isArray(value.fallbackRoutes)) throw new TypeError("dsmm roleRouting fallbackRoutes must be an array");
+      if (!Array.isArray(value.fallbackRoutes) || value.fallbackRoutes.length > 32) throw new TypeError("dsmm roleRouting fallbackRoutes must be an array with at most 32 entries");
       policy.fallbackRoutes = [];
       for (const entry of value.fallbackRoutes) {
         const route = normalizeExplicitRoute(entry);

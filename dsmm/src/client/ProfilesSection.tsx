@@ -3,6 +3,9 @@ import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ProfilesActions, ProfilesController, ProfilesIssue, ProfilesViewSnapshot } from "./controller.js";
 import { canReconcileSelection } from "./controller.js";
+import { StructuredEditor } from "./StructuredEditor.js";
+import { SessionScope } from "./SessionProfiles.js";
+import { structuredDocument } from "./structured.js";
 
 export type ProfilesInjected = ProfilesActions & { hooks: { profiles: ProfilesController["store"] } };
 export type ProfilesSectionProps = InjectFace<ProfilesInjected> & PropsLocale<"settings.dsmm-profiles">;
@@ -24,13 +27,14 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const hadConfirmation = useRef(false);
-  const disabled = state.busy !== null || state.pendingEditor !== null;
+  const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy === "apply" || state.sessionBusy === "reset";
   const snapshot = state.snapshot;
   const editor = state.editor;
   const reconcilable = canReconcileSelection(snapshot);
   const selectionConflict = reconcilable && snapshot?.selectionError?.code === "conflict";
   const invalid = state.issue?.kind === "domain" && state.issue.code === "validation";
   const idInvalid = invalid && state.issue?.field === "id";
+  const rawInvalid = editor !== null && structuredDocument(editor.content) === null;
   useEffect(() => {
     if (state.pendingEditor !== null) { cancelRef.current?.focus(); hadConfirmation.current = true; }
     else if (hadConfirmation.current) { selectRef.current?.focus(); hadConfirmation.current = false; }
@@ -49,6 +53,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   return <section className="dsmm-profiles" aria-labelledby={`${prefix}-title`} aria-busy={state.busy !== null}>
     <h2 id={`${prefix}-title`}>{t("title")}</h2>
     <p>{t("description")}</p>
+    <h3 id={`${prefix}-global`}>{t("globalScope")}</h3>
     <p className="dsmm-hint">{t("newSessions")}</p>
     <p data-dsmm-selection>{selection}</p>
     <div className="dsmm-actions">
@@ -68,22 +73,30 @@ export function ProfilesSection(props: ProfilesSectionProps) {
       <p id={`${prefix}-confirm`}>{t("discardPrompt")}</p>
       <div className="dsmm-actions"><Button type="button" variant="outline" onClick={() => { void props.discardAndOpen(); }}>{t("discard")}</Button><Button ref={cancelRef} type="button" variant="primary" onClick={props.cancelDiscard}>{t("cancel")}</Button></div>
     </div>}
+    <SessionScope state={state} actions={props} t={t} />
+    <div className="dsmm-catalog"><h3>{t("catalogTitle")}</h3><p className="dsmm-hint">{t("catalogHint")}</p>
+      {state.catalogUnavailable && <p className="dsmm-hint">{t("catalogUnavailable")}</p>}
+      {state.catalog?.failures.map((failure) => <p className="dsmm-hint" key={failure.id}>{t("catalogFailure", { name: failure.name, id: failure.id })}</p>)}
+      <Button type="button" variant="outline" disabled={state.catalogBusy} onClick={() => { void props.refreshCatalog(); }}>{t(state.catalogBusy ? "catalogRefreshing" : "catalogRefresh")}</Button>
+    </div>
     {editor !== null && <div className="dsmm-editor">
       <div className="dsmm-field">
         <label htmlFor={`${prefix}-id`}>{t("profileId")}</label>
         <Input ref={inputRef} id={`${prefix}-id`} className="dsmm-input" value={editor.id} disabled={disabled || editor.revision !== null} aria-invalid={idInvalid || undefined} aria-describedby={`${prefix}-id-hint${idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editId(event.currentTarget.value)} />
         <p id={`${prefix}-id-hint`} className="dsmm-hint">{t("idHint")}</p>
       </div>
-      <div className="dsmm-field">
+      <StructuredEditor key={state.editorEpoch} state={state} actions={props} disabled={disabled} t={t} />
+      <details className="dsmm-advanced" open><summary>{t("advanced")}</summary><div className="dsmm-field">
         <label htmlFor={`${prefix}-content`}>{t("configuration")}</label>
-        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} disabled={disabled} aria-invalid={(invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
+        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} disabled={disabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
         <p id={`${prefix}-content-hint`} className="dsmm-hint">{t("configurationHint")}</p>
         <p id={`${prefix}-structural-hint`} className="dsmm-hint">{t("structuralHint")}</p>
-      </div>
+      </div></details>
       <p data-dsmm-editor-state>{t(state.dirty ? "dirty" : applied ? "savedApplied" : "savedNotApplied")}</p>
+      <p id={`${prefix}-global-action`} className="dsmm-hint">{t("globalActionHint")}</p>
       <div className="dsmm-actions">
-        <Button type="button" variant="primary" disabled={disabled || !state.dirty || snapshot === null} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
-        <Button type="button" variant="outline" disabled={disabled || state.dirty || editor.revision === null || !reconcilable || (applied && !selectionConflict)} onClick={() => { void props.apply(); }}>{t(state.busy === "apply" ? "applying" : "apply")}</Button>
+        <Button type="button" variant="primary" disabled={disabled || !state.dirty || snapshot === null || state.invalidFields.length > 0} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
+        <Button type="button" variant="outline" aria-describedby={`${prefix}-global-action`} disabled={disabled || state.dirty || editor.revision === null || !reconcilable || (applied && !selectionConflict)} onClick={() => { void props.apply(); }}>{t(state.busy === "apply" ? "applying" : "apply")}</Button>
         {editor.revision !== null && <Button type="button" variant="outline" disabled={disabled} onClick={() => { void props.reload(); }}>{t("reload")}</Button>}
       </div>
     </div>}

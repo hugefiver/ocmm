@@ -1,6 +1,6 @@
-# Deepwork runtime profiles (0.1.4 source contract)
+# Deepwork runtime profiles (0.1.5 source contract)
 
-This guide describes the 0.1.4 source contract. It is not evidence of a published package or completed Docker/Desktop acceptance; see [releasing](releasing.md). Deepwork is the display name; package, storage and configuration IDs retain `dsmm` for compatibility.
+This guide describes the 0.1.5 source contract. It is not evidence of a published package or completed Docker/Desktop acceptance; see [releasing](releasing.md). Deepwork is the display name; package, storage and configuration IDs retain `dsmm` for compatibility. Historical 0.1.4 release identities and continuation evidence stay immutable.
 
 A Deepwork runtime profile is a named file containing runtime policy, not a native deployment profile or an Agent role preset. Native Settings → **Deepwork Profiles** / **Deepwork 配置档** provides create/read/edit/save, explicit apply, and reset to the deployment baseline. The native Agent preset selector remains a separate role selector, displaying `DW …` names under unchanged `dsmm-*` IDs.
 
@@ -13,6 +13,7 @@ The native `profileContext.dir` is the only storage authority. No guessed user-h
 | `<profileContext.dir>/dsmm-profiles/<id>.jsonc` | Editable named draft |
 | `<profileContext.dir>/dsmm-profiles/.revisions/<sha256>.jsonc` | Immutable exact bytes pinned by an explicit apply |
 | `<profileContext.dir>/dsmm-profiles/.selection.json` | Minimal selection pointer: `{version: 1, id, revision}` |
+| `<profileContext.dir>/dsmm-profiles/.sessions/<sha256(native-session-id)>.json` | Explicit session choice: exact session ID, pinned profile/baseline, CAS revision and admission epoch; no history or credentials |
 
 IDs are filename-safe identifiers, not paths; reserved names, case collisions and link traversal are rejected. A document has exactly `version: 1`, `id`, optional `label`, and `settings`. For example, a draft named `careful.jsonc` may contain:
 
@@ -32,7 +33,9 @@ IDs are filename-safe identifiers, not paths; reserved names, case collisions an
           "model": "my-existing-model",
           "reasoningEffort": "high"
         },
-        "fallbackRoutes": []
+        "fallbackRoutes": [],
+        "strategy": "startup-lock",
+        "rateLimit": { "maxRetries": 3, "maxTotalDelayMs": 30000 }
       }
     },
     "runtimeRecovery": { "enabled": false }
@@ -40,7 +43,7 @@ IDs are filename-safe identifiers, not paths; reserved names, case collisions an
 }
 ```
 
-The example provider/model must already exist in the native catalog and advertise the specified effort. It introduces no provider, account or credential. Explicit `fallbackRoutes: []` disables that role's fallback chain; it is not equivalent to omitting the key and inheriting a global chain.
+The example provider/model must be native-resolvable and advertise the specified effort. Catalog listing is advisory: a manually configured route can be resolvable while absent from the list. It introduces no provider, account or credential. Explicit `fallbackRoutes: []` disables that role's fallback chain; it is not equivalent to omitting the key and inheriting a global chain.
 
 ## Supported settings and precedence
 
@@ -48,6 +51,7 @@ The exact top-level `settings` allowlist is:
 
 - `defaultActive`
 - `roleRouting`
+- `runtimePolicy` (optional inherited strategy and finite `rateLimit` defaults)
 - `workflow`
 - `guards`
 - `runtimeRecovery`
@@ -60,9 +64,13 @@ Effective settings resolve in this order: **built-in DSMM defaults → deploymen
 
 ## Save versus apply
 
-Create or open a draft in native Settings, edit its JSONC, and save. Saving validates the draft and preserves the edited raw JSONC/comments, but does not activate it—even if the same ID is currently selected. Unsaved edits must be saved or explicitly discarded before switching away.
+Create or open a draft in native Settings and use the role-specific primary provider/model/exact-effort controls, ordered fallback rows, strategy and bounded retry fields. Each role can choose `startup-lock` or `rate-limit-fallback` independently; blank policy fields inherit, zero is explicit, and an empty fallback chain is not inheritance. Provider/model changes clear stale explicit effort. Catalog refresh preserves configured/manual values and does not select the native/global model default. Advanced JSONC remains available for custom routes and other supported settings.
 
-**Apply** is a separate operation. It checks the expected draft revision, validates runtime fields and native route/effort semantics, pins the draft's exact bytes in `.revisions`, and atomically commits `.selection.json`. Only after the pointer commit succeeds may the current in-memory selection change. The UI distinguishes the editable draft, selected immutable revision for future Agents, and an existing Agent's admitted snapshot. **Reset to baseline** clears the runtime selection for future Agents; it does not delete drafts or mutate an existing Agent.
+Saving validates the draft and preserves edited raw JSONC/comments, but does not activate it—even if the same ID is currently selected. Structured changes edit only their JSONC paths; invalid raw text remains visible and cannot be silently normalized by returning to the form. Unsaved edits must be saved or explicitly discarded before switching away.
+
+**Apply saved profile** is a separate global-default operation. It checks the expected draft revision, validates runtime fields and native route/effort semantics, pins the draft's exact bytes in `.revisions`, and atomically commits `.selection.json`. Only after the pointer commit succeeds may the current in-memory selection change. The UI distinguishes the editable draft, selected immutable revision for future Agents, and an existing Agent's admitted snapshot. **Reset to baseline** clears the global runtime selection for future unscoped Agents; it does not delete drafts or mutate an existing Agent.
+
+**Current-session profile / Apply profile to current session** uses the actual native view's session ID, not the profile being edited or a guessed latest session. It commits only that session's sidecar under a genuine native idle-maintenance reservation. Both the expected sidecar revision and admission epoch must still match. **Pin baseline for current session** writes an explicit baseline choice without changing the global default. Sessionless Settings cannot apply to a session; busy, maintenance-owned, disposed, replaced, child or unauthorized targets refuse visibly. Cold targets are resumed only through native session authority after backend authorization and strict decoding.
 
 Save/apply requests use expected revisions. A concurrent UI save or external file edit produces a conflict instead of overwriting later bytes; reread and reconcile. Validation, missing file, revision conflict, lock/IO, authorization, or activation failures must be visible, not reported as success. Invalid/missing/linked files and digest mismatches never silently select another profile or model. Pointer failure retains the prior disk selection and current settings; an unused immutable revision may remain.
 
@@ -70,9 +78,11 @@ Storage uses bounded validated content, containment/link checks under a cross-pr
 
 ## Agent lifetime and restart
 
-Applying or resetting affects **new Agents only**. Every existing live Agent, including a blank one, retains its admitted immutable runtime snapshot. Native children inherit their parent's snapshot, and in-flight recovery stays within that same policy. Profile selection does not re-register presets, change role enablement, alter tool/skill composition, or update an existing session's persona.
+Global applying or resetting affects **new unscoped Agents only**. Every existing live Agent, including a blank one, retains its admitted immutable runtime snapshot. An explicit current-session apply is different: a truly idle ordinary root receives a new immutable admission epoch after the durable sidecar commit. Even reapplying the same revision creates a new epoch. Existing children retain their captured old epoch; later genuinely owned native children inherit the new one. Other roots, the global default, completed tools and native persona/tool/skill composition remain unchanged.
 
-This retention is **live-Host-only**. After a Host restart, cold-resumed sessions admit the currently selected immutable revision and native current definition, not their old historical profile. A later edit to the draft cannot change the pinned revision used after restart. There is no cross-restart historical per-session settings guarantee.
+Native model selection is separate user intent, not a profile sidecar setting. The exact public native provider/model/effort choice takes priority over the profile's role default, remains on subsequent turns/cold resume, and is not silently cleared by ordinary profile apply. An effort-only or same-value native selection is still fresh intent and fences stale retry work. Parent manual choice does not overwrite a configured child's own role route. Structured profile editing never selects the native/global model default; only the user's native selection endpoint has the host's normal background-default persistence behavior.
+
+After restart, a session with a committed sidecar admits that exact immutable revision or explicit baseline, even if its draft/global default changed. A session without a sidecar preserves the historical global-current cold-resume behavior; it does not infer a previous profile from lineage/history. Corrupt, missing, linked or digest-mismatched sidecars/revisions fail visibly instead of falling back to baseline. Sidecars add no new session event vocabulary, so stock native history readers remain authoritative. Native clear/compact changes the session identity and does not automatically transfer an old choice.
 
 Older sessions whose selected root ID is now auxiliary-only may fail native cold resume with an unknown preset ID. Read [compatibility](compatibility.md) before upgrading; never silently switch their persona or erase history.
 
@@ -80,4 +90,6 @@ Older sessions whose selected root ID is now auxiliary-only may fail native cold
 
 Migration from 0.1.1 is explicit: save supported runtime values as a named draft, preserve deployment roles/skills/provider/account/UI rows, inspect the draft, then apply separately. No operation rewrites `cordis.patch.yml` or migrates credentials. Native RPC authorization applies on the backend as well as the UI. There are no model-visible profile-management tools, child write capabilities, anonymous endpoints or authentication bypasses.
 
-For policy rollback, reset to the deployment baseline or explicitly apply a reviewed prior configuration. Never overwrite an immutable revision or restore draft bytes over a later user edit. Existing live Agents remain unchanged. Package rollback is separate and uses an exact known immutable package through the official carrier; see [releasing](releasing.md).
+For policy rollback, explicitly choose global baseline, session baseline, or a reviewed prior profile in the intended scope using current CAS/epoch values. Never overwrite an immutable revision or restore draft bytes over a later user edit. Global rollback leaves existing live Agents unchanged; scoped rollback changes only the admitted idle root and future children. Package rollback is separate and uses an exact known immutable package through the official carrier; see [releasing](releasing.md).
+
+0.1.4 documents remain loadable without rewriting user files. Omitted strategy now means the safer `startup-lock`; a legacy generic fallback chain no longer silently hops after later generic failures. `runtimeRecovery.enabled` is not the strategy selector. Read [runtime recovery](runtime-recovery.md) before upgrading a configuration that depended on generic automatic fallback.

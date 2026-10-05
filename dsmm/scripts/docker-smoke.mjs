@@ -16,6 +16,7 @@ const DSH_VERSION = "0.2.0-rc.2";
 const ARTIFACT_RECEIPT_PREFIX = "DSMM_FINAL_ARTIFACT_RECEIPT ";
 const STOCK_PERSISTENCE_ID = "session-persistence-jsonl";
 const STOCK_PERSISTENCE_MODULE = "@deepseek-ai/dsh-session-persistence-jsonl";
+export const PROFILE_UI_HARNESS_FILES = Object.freeze(["profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs"]);
 const requiredRolePlugins = [
   "dsh-agent-preset-registry", "dsh-tool-subagent", "dsh-tool-fs", "dsh-tool-fs-search",
   "dsh-tool-bash", "dsh-tool-pwsh", "dsh-tool-jobs", "dsh-skill-filesystem",
@@ -60,6 +61,9 @@ export function parseArtifactOptions(args) {
       throw new Error("hook support must name distinct existing .mjs files without replacing hook.mjs");
     }
     supportNames.add(basename(file));
+  }
+  if (values["require-hook"] && basename(hook ?? "") === "profile-ui-acceptance.mjs" && !PROFILE_UI_HARNESS_FILES.every((file) => supportNames.has(file))) {
+    throw new Error("profile UI acceptance requires every explicit read-only harness support module");
   }
   const evidenceDir = values["evidence-dir"] === undefined ? undefined : resolve(values["evidence-dir"]);
   if (evidenceDir !== undefined && (!statSync(evidenceDir).isDirectory() || readdirSync(evidenceDir).length !== 0)) {
@@ -307,7 +311,9 @@ async function runInnerArtifactSmoke(options) {
     catch (error) { cleanupErrors.push(error); }
     receipt.temporaryHomesRemoved = !existsSync(owned);
     if (cleanupErrors.length) receipt.outcome = "FAILED";
-    console.log(`${ARTIFACT_RECEIPT_PREFIX}${JSON.stringify(receipt)}`);
+    // The successor proof can exceed a pipe buffer. Await its complete drain
+    // before the CLI's terminal error handler exits the process.
+    await new Promise((settle, reject) => process.stdout.write(`${ARTIFACT_RECEIPT_PREFIX}${JSON.stringify(receipt)}\n`, (error) => error ? reject(error) : settle()));
   }
   throwAfterCleanup(primaryError, cleanupErrors, "failed to clean frozen-artifact acceptance homes");
 }

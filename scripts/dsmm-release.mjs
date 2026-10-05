@@ -5,7 +5,8 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { gunzipSync } from "node:zlib";
-import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
+import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
+import { UI_CHECKS_015, requiresSessionProfileProof, validateSessionProfileProof } from "../dsmm/scripts/profile-ui-harness-native.mjs";
 
 export const POLICY = Object.freeze({
   repository: "hugefiver/ocmm", packageName: "@dsmm/dsmm", defaultBranch: "master",
@@ -97,6 +98,9 @@ export const UI_CHECKS = Object.freeze([
   "pointerKeyboardReducedMotionZoomAndResponsive", "realNativeSessionScopeAndControlObserver",
 ]);
 
+export { UI_CHECKS_015, requiresSessionProfileProof };
+export const uiChecksForVersion = (version) => requiresSessionProfileProof(version) ? [...UI_CHECKS, ...UI_CHECKS_015] : [...UI_CHECKS];
+
 export function assertSanitizedReceipt(receipt) {
   const inspect = (value) => {
     if (Array.isArray(value)) { value.forEach(inspect); return; }
@@ -181,8 +185,9 @@ export function validateDockerReceipt(receipt, identity) {
   complete(ui, "UI/profile acceptance"); truth(ui, ["postAppReady"], "UI/profile acceptance");
   equal(ui.kind, "native-client-component-owned-carrier", "UI native carrier");
   equal(ui.artifactSha256, identity.sha256, "UI artifact digest");
-  equal(Object.keys(ui.checks ?? {}).sort(byteOrder), [...UI_CHECKS].sort(byteOrder), "exact UI check set");
-  truth(ui.checks, UI_CHECKS, "UI check");
+  const requiredUiChecks = uiChecksForVersion(identity.version);
+  equal(Object.keys(ui.checks ?? {}).sort(byteOrder), requiredUiChecks.sort(byteOrder), "exact UI check set");
+  truth(ui.checks, requiredUiChecks, "UI check");
   equal(ui.authentication?.realWebOrDesktopLogin, "NOT_EXERCISED", "UI authentication nonclaim");
   for (const key of ["signedIn", "copiedBrowserState", "productionAuthenticationModified"]) equal(ui.authentication?.[key], false, `authentication.${key}`);
   equal(ui.nativeClient?.rewrittenProductionBundles, false, "native bundles unmodified");
@@ -200,6 +205,12 @@ export function validateDockerReceipt(receipt, identity) {
   invariant(Array.isArray(ui.nativeStreams) && ui.nativeStreams.some((stream) => stream.endpoint === "session/control" && stream.strictGateway === true && stream.result === "accepted" && stream.disposed === true && stream.frames > 0), "disposed native session/control stream required");
   truth(ui.cleanup, ["browserContextClosed", "nativeAgentsDisposed", "ownedTemporaryRootRemoved", "nativeHostExited"], "UI cleanup");
   equal(ui.cleanup?.errors, [], "UI cleanup errors");
+  if (requiresSessionProfileProof(identity.version)) {
+    invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "successor scoped native RPC methods required");
+    invariant(ui.nativeCalls.some((call) => call.endpoint === "session/modelCatalog" && call.strictGateway === true && call.result === "accepted"), "actual native parameterless catalog RPC required");
+    invariant(ui.nativeCalls.some((call) => call.endpoint === "session/selectModel" && call.strictGateway === true && call.result === "accepted"), "actual native user model-selection RPC required");
+    validateSessionProfileProof(ui.successorProof, { artifactSha256: identity.sha256, installedRoot: ui.installedRoot });
+  }
   const history = receipt.sessionHistory;
   complete(history, "session history"); equal(history.artifactSha256, identity.sha256, "session-history digest");
   equal(history.packageVersion, identity.version, "session-history version"); equal(history.nativeVersion, POLICY.dshVersion, "session-history native version");
@@ -212,7 +223,7 @@ export function validateDockerReceipt(receipt, identity) {
   invariant(!Object.hasOwn(receipt, "failure") && !Object.hasOwn(receipt, "error") && (!Object.hasOwn(receipt, "cleanupFailures") || isDeepStrictEqual(receipt.cleanupFailures, [])), "Docker failure/cleanup evidence contradicts completion");
   invariant(receipt.runtimeImage?.ownership === "owned" || receipt.runtimeImage?.ownership === "borrowed", "runtime image ownership missing");
   equal(receipt.runtimeImage.cleanup, receipt.runtimeImage.ownership === "owned" ? "COMPLETED" : "NOT_APPLICABLE", "Docker image cleanup");
-  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, uiCheckCount: UI_CHECKS.length,
+  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, uiCheckCount: requiredUiChecks.length,
     sourceUnitTests: "NOT_RUN", realAuthentication: "NOT_EXERCISED" };
 }
 
@@ -292,6 +303,9 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   }
   invariant(terminated, "tar archive has no terminator");
   for (const file of requiredFiles) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
+  if (requiresSessionProfileProof(version)) for (const file of compiledFilesForVersion(version)) {
+    invariant(files.has(file) && files.get(file).length > 0, `missing required successor compiled surface: ${file}`);
+  }
   for (const tree of ["agent-presets", "docs/research", "patches", "prompts", "skills"]) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
   for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
     || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
@@ -631,9 +645,20 @@ export async function registryVersion(version, fetcher = fetch) {
   return JSON.parse((await responseBuffer(response, 2 * 1024 * 1024)).toString("utf8"));
 }
 
-export async function verifyRegistryArtifact(identity, fetcher = fetch) {
+export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
   validateArtifactIdentity(identity);
-  const metadata = await registryVersion(identity.version, fetcher);
+  // This is an after-publication read path only. Absence checks used by the
+  // publisher stay single-shot and can never admit a collision or republish.
+  const poll404 = identity.mode === "future" && requiresSessionProfileProof(identity.version);
+  invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= 300_000, "invalid registry visibility deadline");
+  invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
+  const deadline = now() + visibilityDeadlineMs;
+  let metadata;
+  do {
+    metadata = await registryVersion(identity.version, fetcher);
+    if (metadata !== null || !poll404 || now() >= deadline) break;
+    await wait(Math.min(visibilityPollMs, deadline - now()));
+  } while (now() <= deadline);
   invariant(metadata !== null, "exact registry version is absent"); validateRegistryMetadata(metadata, identity);
   const response = await fetcher(metadata.dist.tarball, { signal: AbortSignal.timeout(60000), redirect: "error" });
   invariant(response.ok, `registry tarball download failed (HTTP ${response.status})`);

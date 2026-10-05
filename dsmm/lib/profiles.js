@@ -1,6 +1,7 @@
 import { getNodeValue, parseTree } from "jsonc-parser";
 import { DSMM_ROLE_IDS } from "./roles.js";
 import { resolveConfig } from "./settings.js";
+import { normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy } from "./routing-policy.js";
 export const MAX_PROFILE_BYTES = 128 * 1024;
 export const MAX_PROFILE_COUNT = 128;
 export const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
@@ -30,7 +31,7 @@ export function validateProfileRevision(revision, field = "expectedRevision") {
     if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision))
         invalid(field, "must be a SHA256 file revision");
 }
-const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "workflow", "guards", "runtimeRecovery", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekV4ProMaxReasoningPresets", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "deepseekFlashMaxReasoningPresets"];
+const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekV4ProMaxReasoningPresets", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "deepseekFlashMaxReasoningPresets"];
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 export function parseProfileDocument(content, expectedId) {
     if (typeof content !== "string")
@@ -65,6 +66,7 @@ export function parseProfileDocument(content, expectedId) {
         optional(overlay, `${prefix}MaxReasoningPresets`, roleList, "settings");
     }
     optional(overlay, "roleRouting", roleRouting, "settings");
+    optional(overlay, "runtimePolicy", runtimePolicy, "settings");
     optional(overlay, "workflow", workflow, "settings");
     optional(overlay, "guards", guards, "settings");
     optional(overlay, "runtimeRecovery", recovery, "settings");
@@ -182,9 +184,39 @@ function roleRouting(value, field) {
     for (const [role, raw] of Object.entries(item)) {
         const path = `${field}.${role}`;
         const policy = record(raw, path);
-        keys(policy, ["primary", "fallbackRoutes"], path);
+        keys(policy, ["primary", "fallbackRoutes", "strategy", "rateLimit"], path);
         optional(policy, "primary", route, path);
         optional(policy, "fallbackRoutes", routeList, path);
+        optional(policy, "strategy", strategy, path);
+        optional(policy, "rateLimit", rateLimit, path);
+    }
+}
+function strategy(value, field) {
+    try {
+        normalizeRoutingStrategy(value);
+    }
+    catch {
+        invalid(field, "must be startup-lock or rate-limit-fallback");
+    }
+}
+function rateLimit(value, field) {
+    try {
+        normalizeRateLimitOverrides(value);
+    }
+    catch {
+        invalid(field, "must contain only bounded integer retry, delay, threshold and switch fields");
+    }
+}
+function runtimePolicy(value, field) {
+    const item = record(value, field);
+    keys(item, ["strategy", "rateLimit"], field);
+    optional(item, "strategy", strategy, field);
+    optional(item, "rateLimit", rateLimit, field);
+    try {
+        normalizeRuntimePolicy(value);
+    }
+    catch {
+        invalid(field, "must contain a valid strategy and bounded rateLimit policy");
     }
 }
 function workflow(value, field) {

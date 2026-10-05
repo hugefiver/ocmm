@@ -501,6 +501,7 @@ function composedRoutingHarness(settings: DsmmSettings): ComposedRoutingHarness 
   const registrations: ComposedRegistration[] = [];
   const context: DshContext = {
     llm: {
+      async resolveCallConfig(config) { return config; },
       async resolveModelInfo(provider, model) {
         resolverCalls.push({ provider, model });
         return { provider, id: model, name: model, reasoning: reasoning(["high"], "high") };
@@ -587,7 +588,7 @@ function composedErrorFrame(agent: DshAgent, provider: string): AgentRequestErro
   };
 }
 
-test("runtime recovery hands off before model routing, so the resolver sees only the final fallback route", async () => {
+test("uncorrelated historical headers cannot admit a fallback before model routing", async () => {
   const settings: DsmmSettings = {
     ...DEFAULT_DSMM_SETTINGS,
     defaultActive: true,
@@ -606,7 +607,7 @@ test("runtime recovery hands off before model routing, so the resolver sees only
   const nested = { unknown: true };
   const downstream = { provider: "primary", model: "primary-model", reasoningEffort: "low", nested };
 
-  assert.deepEqual(await harness.error(composedErrorFrame(agent, "primary")), { kind: "retry" });
+  assert.equal(await harness.error(composedErrorFrame(agent, "primary")), undefined);
   const result = await harness.request({ agent, turn: 1, step: 1, signal: new AbortController().signal }, downstream);
 
   assert.deepEqual(harness.order, [
@@ -616,10 +617,10 @@ test("runtime recovery hands off before model routing, so the resolver sees only
     "recovery:after-next",
     "model-routing:after-next"
   ]);
-  assert.deepEqual(harness.resolverCalls, [{ provider: "deepseek-official", model: "deepseek-v4-pro" }]);
-  assert.equal(result.provider, "deepseek-official");
-  assert.equal(result.model, "deepseek-v4-pro");
-  assert.equal(result.reasoningEffort, "high");
+  assert.deepEqual(harness.resolverCalls, []);
+  assert.equal(result.provider, "primary");
+  assert.equal(result.model, "primary-model");
+  assert.equal(result.reasoningEffort, "low");
   assert.equal(result.nested, nested);
 });
 

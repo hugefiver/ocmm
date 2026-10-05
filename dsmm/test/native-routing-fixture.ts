@@ -22,10 +22,14 @@ import type { DshContext } from "../lib/dsh-types.js";
 export class RoutingFixtureAdapter extends LlmAdapter {
   readonly calls: GenerateOptions[] = [];
   readonly failModels = new Set<string>();
+  readonly rateLimitModels = new Set<string>();
   readonly unsupportedMaxModels = new Set<string>();
+  readonly unavailableModels = new Set<string>();
   beforeStream?: (options: GenerateOptions) => Promise<void>;
+  streamChunks?: (options: GenerateOptions) => AsyncIterable<StreamChunk>;
 
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    if (this.unavailableModels.has(model)) throw new LlmError("deterministic native exact model absence", "UNKNOWN_MODEL");
     const efforts = this.unsupportedMaxModels.has(model) ? ["high"] : ["off", "low", "high", "max"];
     return {
       provider, id: model, name: model,
@@ -38,6 +42,8 @@ export class RoutingFixtureAdapter extends LlmAdapter {
     this.calls.push(options);
     await this.beforeStream?.(options);
     options.signal?.throwIfAborted();
+    if (this.streamChunks !== undefined) { yield* this.streamChunks(options); return; }
+    if (this.rateLimitModels.has(options.model)) throw new LlmError("deterministic local rate limit", "RATE_LIMIT", { status: 429 });
     if (this.failModels.has(options.model)) throw new LlmError("deterministic local transient fixture", "FIXTURE_TRANSIENT", { status: 503 });
     yield { type: "block-start", index: 0, blockType: "text" };
     yield { type: "text-delta", index: 0, text: "fixture complete" };

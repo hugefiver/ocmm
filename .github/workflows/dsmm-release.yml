@@ -118,7 +118,7 @@ jobs:
       - name: Full native and browser Docker gate for future artifact
         if: steps.context.outputs.mode == 'future'
         run: |
-          node control/dsmm/scripts/docker-smoke.mjs --artifact "$DSMM_FROZEN_TARBALL" --expected-sha256 "$DSMM_FROZEN_SHA256" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --require-hook --acceptance-hook control/dsmm/scripts/profile-ui-acceptance.mjs --hook-support control/dsmm/scripts/profile-ui-harness-server.mjs --hook-support control/dsmm/scripts/profile-ui-harness-browser.mjs --evidence-dir "$RUNNER_TEMP/dsmm-ui-evidence"
+          node control/dsmm/scripts/docker-smoke.mjs --artifact "$DSMM_FROZEN_TARBALL" --expected-sha256 "$DSMM_FROZEN_SHA256" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --require-hook --acceptance-hook control/dsmm/scripts/profile-ui-acceptance.mjs --hook-support control/dsmm/scripts/profile-ui-harness-server.mjs --hook-support control/dsmm/scripts/profile-ui-harness-browser.mjs --hook-support control/dsmm/scripts/profile-ui-harness-native.mjs --evidence-dir "$RUNNER_TEMP/dsmm-ui-evidence"
           node control/scripts/dsmm-release.mjs freeze --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --tarball "$DSMM_FROZEN_TARBALL" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --output-dir "$RUNNER_TEMP/dsmm-accepted" --source-checks COMPLETED
       - name: Bind accepted artifacts to this run and attempt
         run: |

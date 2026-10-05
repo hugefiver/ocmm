@@ -18,6 +18,7 @@ export interface DshSessionHeader {
     origin?: string;
 }
 export interface DshSession {
+    readonly id?: string;
     inheritedEventCount?: number;
     events?: readonly DshSessionEvent[];
     snapshotEvents?(): readonly DshSessionEvent[];
@@ -32,6 +33,9 @@ export interface DshAgent {
     id?: string;
     ctx?: DshContext;
     session: DshSession;
+    readonly status?: "idle" | "running";
+    /** Public native reservation: throws synchronously unless truly idle. */
+    runMaintenance?<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;
     options?: {
         provider?: string;
         model?: string;
@@ -39,6 +43,17 @@ export interface DshAgent {
     };
     steer?(message: unknown): unknown | Promise<unknown>;
     inject?(message: unknown): unknown | Promise<unknown>;
+}
+export interface DshAgentsRegistry {
+    get(id: string): DshAgent | undefined;
+    list(): DshAgent[];
+    roots(): DshAgent[];
+    isOwnedBy(id: string, owner: DshAgent): boolean;
+}
+export interface DshAgentCreatedFrame {
+    agent: DshAgent;
+    source: "startup" | "resume" | "clear" | "compact";
+    signal?: AbortSignal;
 }
 export interface DshLlmCallConfig {
     provider: string;
@@ -283,6 +298,7 @@ export interface PreStepDecision {
     [key: string]: unknown;
 }
 export interface DshContext {
+    agents?: DshAgentsRegistry;
     subagents?: import("./role-providers.js").DsmmSubagentRegistry;
     settings?: DshSettingsRegistry;
     systemPrompt?: DshSystemPromptRegistry;

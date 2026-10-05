@@ -73,6 +73,7 @@ const expectedDependencies = {
 const expectedPeers = {
   "@deepseek-ai/cordis": "~4.0.4",
   "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
   "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
   "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
@@ -99,6 +100,9 @@ const expectedDevDependencies = {
   ...expectedPeers,
   "@deepseek-ai/dsh-typert-registry": "0.2.0-rc.2",
   "@deepseek-ai/dsh-api-gateway": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
@@ -281,7 +285,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.1.4",
+    version: "0.1.5",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -380,7 +384,7 @@ function validateNativeClient(packageRoot, paths, errors) {
     if (registrations.length !== 1 || registrations[0]?.id !== "@dsmm/dsmm" || typeof registrations[0]?.factory !== "function") {
       throw new Error("invalid registration");
     }
-    const allowedImports = new Set(["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-primitives", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-typert-protocol"]);
+    const allowedImports = new Set(["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-primitives", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-typert-protocol", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session", "@deepseek-ai/dsh-client-ui-conversation"]);
     sandbox.registration = registrations[0];
     sandbox.require = (id) => { if (!allowedImports.has(id)) throw new Error("unsupported client import"); return {}; };
     runInNewContext("clientExports = registration.factory(require)", sandbox, { timeout: 1000 });
@@ -390,7 +394,7 @@ function validateNativeClient(packageRoot, paths, errors) {
       || typeof client.ProfilesController !== "function" || typeof client.ProfilesSection !== "function"
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
-      || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), ["describe", "read", "save", "select"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`))) {
+      || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), ["describe", "read", "save", "select", "describeSession", "selectSession"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`))) {
       throw new Error("invalid exports");
     }
   } catch {
@@ -429,7 +433,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.1.4") errors.push("npm pack receipt version must equal 0.1.4");
+  if (entry.version !== "0.1.5") errors.push("npm pack receipt version must equal 0.1.5");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);

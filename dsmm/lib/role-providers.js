@@ -1,6 +1,8 @@
 import { parentAgentOptionsForDelegation } from "@deepseek-ai/dsh-subagent";
 import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { DSMM_ROLE_IDS } from "./roles.js";
+import { resolveRoleRuntimePolicy } from "./routing-policy.js";
+import { selectInitialModelRoute } from "./role-routing.js";
 export function roleProviderName(role) {
     return `dsmm-role-${role.slice("dsmm-".length)}`;
 }
@@ -62,13 +64,21 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                         const llm = request.parent.ctx.get("llm");
                         if (llm?.resolveCallConfig === undefined)
                             throw new Error("dsmm role delegation requires the parent Agent native LLM service");
-                        await llm.resolveCallConfig({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }, request.signal);
+                        const explicitRoute = request.agentOptions?.provider !== undefined || request.agentOptions?.model !== undefined;
+                        const candidates = [{ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) },
+                            ...explicitRoute ? [] : resolveRoleRuntimePolicy(parentSettings, role).fallbackRoutes.map((route) => ({ ...route,
+                                ...(request.agentOptions?.reasoningEffort === undefined ? {} : { reasoningEffort: request.agentOptions.reasoningEffort }) }))];
+                        const selected = await selectInitialModelRoute(llm, candidates, request.signal);
                         request.signal.throwIfAborted();
                         if (!active || registry.getProvider("spawn") !== spawn)
                             throw new Error("dsmm role spawn provider changed during route validation; retry delegation");
                         // Preserve the native descriptor, authority filters and lifecycle;
                         // this alias owns only profile-derived route defaults and preflight.
-                        return spawn.start(primary === undefined ? request : { ...request, agentOptions });
+                        const changed = selected.provider !== provider || selected.model !== model;
+                        return spawn.start(primary === undefined && !changed ? request : { ...request, agentOptions: {
+                                ...agentOptions, ...selected,
+                                reasoningEffort: selected.reasoningEffort === undefined ? undefined : ReasoningEffortId(selected.reasoningEffort)
+                            } });
                     }
                 });
                 disposers.push(() => { active = false; dispose(); });

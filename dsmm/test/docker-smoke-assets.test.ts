@@ -115,10 +115,11 @@ test("frozen artifact transport binds exact read-only files without mounting a s
   assert.ok(evidenceArgs.includes("DSMM_UI_EVIDENCE_DIR=/dsmm-acceptance/ui-qa"));
   assert.ok(evidenceArgs.includes("xvfb-run"));
   assert.equal(evidenceArgs.filter((arg: string) => arg === "--init").length, 1);
-  const supportArgs = artifactDockerArguments({ ...options, hookSupport: ["/owned/profile-ui-harness-server.mjs", "/owned/profile-ui-harness-browser.mjs"] }, "owned-native-runtime:fixture");
+  const supportArgs = artifactDockerArguments({ ...options, hookSupport: ["/owned/profile-ui-harness-server.mjs", "/owned/profile-ui-harness-browser.mjs", "/owned/profile-ui-harness-native.mjs"] }, "owned-native-runtime:fixture");
   assert.ok(supportArgs.includes("type=bind,source=/owned/profile-ui-harness-server.mjs,target=/dsmm-acceptance/profile-ui-harness-server.mjs,readonly"));
   assert.ok(supportArgs.includes("type=bind,source=/owned/profile-ui-harness-browser.mjs,target=/dsmm-acceptance/profile-ui-harness-browser.mjs,readonly"));
-  assert.equal(supportArgs.filter((arg: string) => arg === "--hook-support").length, 2);
+  assert.ok(supportArgs.includes("type=bind,source=/owned/profile-ui-harness-native.mjs,target=/dsmm-acceptance/profile-ui-harness-native.mjs,readonly"));
+  assert.equal(supportArgs.filter((arg: string) => arg === "--hook-support").length, 3);
   assert.throws(() => parseArtifactOptions([]), /exact frozen/u);
   assert.throws(() => parseArtifactOptions(["--artifact", join(packageRoot, "package.json")]), /existing \.tgz/u);
   const dockerfile = readFileSync(join(packageRoot, "docker", "Dockerfile.artifact"), "utf8");

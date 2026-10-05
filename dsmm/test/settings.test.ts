@@ -3,16 +3,123 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { spawnSync } from "node:child_process";
 import type { DshContext, DshSettingsRegistry, DshSystemPromptSection } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
 import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DSMM_CONFIG_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, registerSettings } from "../lib/settings.js";
-import type { DsmmPluginConfig } from "../lib/settings.js";
+import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
+import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
+import type { DsmmPluginConfig, DsmmSettings } from "../lib/settings.js";
 
 const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
 const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));
+
+test("roles, profiles and status load in a fresh ESM process regardless of entry order", () => {
+  for (const entries of [["roles", "profiles", "status"], ["status", "roles", "settings"], ["routing-policy", "role-providers", "profiles"]]) {
+    const script = entries.map((entry) => `await import(${JSON.stringify(new URL(`../lib/${entry}.js`, import.meta.url).href)});`).join("\n");
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], { encoding: "utf8", timeout: 10000 });
+    assert.equal(result.status, 0, `${entries.join(",")}: ${result.stderr}`);
+    assert.equal(result.error, undefined);
+  }
+});
+
+test("old routing documents retain their chains but resolve the safer startup lock", () => {
+  for (const enabled of [false, true]) {
+    const settings = resolveConfig({ runtimeRecovery: { enabled, fallbackRoutes: [{ provider: "global", model: "fallback" }] }, roleRouting: {
+      "dsmm-reviewer": { primary: { provider: "p", model: "m" } },
+      "dsmm-planner": { fallbackRoutes: [] }
+    } });
+    const reviewer = resolveRoleRuntimePolicy(settings, "dsmm-reviewer");
+    assert.equal(reviewer.strategy, "startup-lock");
+    assert.deepEqual(reviewer.rateLimit, DEFAULT_DSMM_RUNTIME_POLICY.rateLimit);
+    assert.equal(reviewer.fallbackSource, "global");
+    assert.deepEqual(reviewer.fallbackRoutes, [{ provider: "global", model: "fallback" }]);
+    assert.deepEqual(resolveRoleRuntimePolicy(settings, "dsmm-planner").fallbackRoutes, []);
+    assert.equal(resolveRoleRuntimePolicy(settings, "dsmm-planner").fallbackSource, "role");
+    assert.equal(Object.hasOwn(settings.roleRouting["dsmm-reviewer"]!, "strategy"), false);
+  }
+});
+
+test("each role overrides inherited strategy and retry fields independently", () => {
+  const settings = resolveConfig({
+    runtimePolicy: { strategy: "rate-limit-fallback", rateLimit: { maxRetries: 8, switchAfterRateLimits: 4, maxSwitches: 5 } },
+    roleRouting: {
+      "dsmm-reviewer": { strategy: "startup-lock", rateLimit: { maxRetries: 0 } },
+      "dsmm-planner": { rateLimit: { switchAfterRateLimits: 2 } }
+    }
+  });
+  const reviewer = resolveRoleRuntimePolicy(settings, "dsmm-reviewer");
+  const planner = resolveRoleRuntimePolicy(settings, "dsmm-planner");
+  assert.equal(reviewer.strategy, "startup-lock");
+  assert.equal(reviewer.rateLimit.maxRetries, 0);
+  assert.equal(planner.strategy, "rate-limit-fallback");
+  assert.equal(planner.rateLimit.maxRetries, 8);
+  assert.equal(planner.rateLimit.switchAfterRateLimits, 2);
+  assert.equal(reviewer.rateLimit.switchAfterRateLimits, 4);
+  assert.equal(reviewer.rateLimit.maxSwitches, 5);
+  assert.equal(resolveRoleRuntimePolicy(settings, "dsmm-reviewer"), reviewer, "normalized identity is resolved once");
+  assert.ok(Object.isFrozen(reviewer));
+  assert.ok(Object.isFrozen(reviewer.rateLimit));
+  assert.ok(Object.isFrozen(reviewer.fallbackRoutes));
+});
+
+test("ordered candidates are copied and provider/model deduplicated including primary", () => {
+  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": {
+    primary: { provider: "p", model: "m", reasoningEffort: "low" },
+    fallbackRoutes: [
+      { provider: "p", model: "m", reasoningEffort: "high" },
+      { provider: "q", model: "n", reasoningEffort: "high" },
+      { provider: "q", model: "n", reasoningEffort: "low" },
+      { provider: "r", model: "o" }
+    ]
+  } } });
+  const policy = resolveRoleRuntimePolicy(settings, "dsmm-reviewer");
+  assert.deepEqual(policy.fallbackRoutes, [{ provider: "q", model: "n", reasoningEffort: "high" }, { provider: "r", model: "o" }]);
+  assert.notEqual(policy.primary, settings.roleRouting["dsmm-reviewer"]!.primary);
+  assert.ok(Object.isFrozen(policy.primary));
+  assert.ok(Object.isFrozen(policy.fallbackRoutes[0]));
+});
+
+test("new policies reject malformed presence and unknown fields before schema defaults", () => {
+  const malformed = [
+    { runtimePolicy: null }, { runtimePolicy: undefined }, { runtimePolicy: [] },
+    { runtimePolicy: { strategy: null } }, { runtimePolicy: { strategy: undefined } },
+    { runtimePolicy: { strategy: "automatic" } }, { runtimePolicy: { retries: 2 } },
+    { runtimePolicy: { rateLimit: null } }, { runtimePolicy: { rateLimit: undefined } },
+    { runtimePolicy: { rateLimit: [] } }, { runtimePolicy: { rateLimit: { unknown: 1 } } },
+    { roleRouting: { "dsmm-reviewer": { strategy: null } } },
+    { roleRouting: { "dsmm-reviewer": { rateLimit: undefined } } },
+    { roleRouting: { "dsmm-reviewer": { rateLimit: { secret: 2 } } } }
+  ];
+  for (const input of malformed) {
+    assert.throws(() => resolveConfig(input as unknown as DsmmPluginConfig));
+    assert.throws(() => DSMM_CONFIG_SCHEMA(input as unknown as DsmmPluginConfig));
+    assert.throws(() => DSMM_SETTINGS_SCHEMA(input as unknown as DsmmSettings));
+  }
+});
+
+test("all retry-policy bounds are strict finite integers, not silently repaired", () => {
+  for (const [field, [minimum, maximum]] of Object.entries(DSMM_RATE_LIMIT_BOUNDS)) {
+    for (const value of [minimum - 1, maximum + 1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined]) {
+      for (const input of [
+        { runtimePolicy: { rateLimit: { [field]: value } } },
+        { roleRouting: { "dsmm-reviewer": { rateLimit: { [field]: value } } } }
+      ]) {
+        assert.throws(() => resolveConfig(input as unknown as DsmmPluginConfig), `${field}=${String(value)}`);
+        assert.throws(() => DSMM_CONFIG_SCHEMA(input), `${field}=${String(value)}`);
+      }
+    }
+    for (const value of [minimum, maximum]) {
+      const rateLimit = { initialDelayMs: 0, maxDelayMs: 30000, [field]: value };
+      const settings = resolveConfig({ runtimePolicy: { rateLimit } });
+      assert.equal(settings.runtimePolicy.rateLimit[field as keyof typeof settings.runtimePolicy.rateLimit], value);
+    }
+  }
+  assert.deepEqual(resolveConfig({ runtimePolicy: { rateLimit: { initialDelayMs: 2000, maxDelayMs: 1000 } } }).runtimePolicy.rateLimit,
+    { ...DEFAULT_DSMM_RUNTIME_POLICY.rateLimit, initialDelayMs: 2000, maxDelayMs: 1000 }, "bounded knobs remain independent; the retry owner caps computed delay");
+});
 const DEFAULT_WORKFLOW_SETTINGS = {
   policy: "risk-based",
   strictGates: true,
@@ -63,6 +170,7 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
+    runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
       materialize: false
     },
@@ -111,6 +219,7 @@ test("resolveConfig overlays plugin config on defaults", () => {
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
+    runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
       materialize: false
     },
@@ -381,6 +490,7 @@ test("registerSettings registers direct namespace dsmm with a callable schema an
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
+    runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
       materialize: false
     },
@@ -828,12 +938,14 @@ test("apply registers recovery request hooks before the existing llm model-routi
 
   assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "settings,systemPrompt"), [["settings", "systemPrompt"]]);
   assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "llm"), [["llm"]]);
-  assert.deepEqual(registrations.slice(1, 4), [
+  assert.deepEqual(registrations.slice(1, 5), [
+    { event: "agent/assistant-stream", options: { prepend: true } },
     { event: "agent/request", options: { prepend: true } },
     { event: "agent/request-error", options: { prepend: true } },
     { event: "agent/turn-stopping", options: undefined }
   ]);
   assert.ok(timeline.indexOf("on:agent/request") < timeline.indexOf("inject:llm"));
   assert.ok(timeline.indexOf("on:agent/request-error") < timeline.indexOf("inject:llm"));
+  assert.ok(timeline.indexOf("on:agent/assistant-stream") < timeline.indexOf("inject:llm"));
   assert.ok(timeline.indexOf("on:agent/turn-stopping") < timeline.indexOf("inject:llm"));
 });
