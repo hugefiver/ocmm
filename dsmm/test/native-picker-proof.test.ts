@@ -317,10 +317,21 @@ test("018 requires compact single-model action, admitted read races and native p
   assert.equal(validate017(fixture017()).outcome, "COMPLETED", "historical receipts retain their original grammar");
 });
 
-test("mode proof boundary is reviewed stable 018 only, and never changes older receipts", () => {
+test("mode proof boundary is reviewed stable 018 and exact 019 only, and never changes older receipts", () => {
   for (const version of ["0.1.1", "0.1.5", "0.1.6", "0.1.7"]) assert.equal(requiresSessionModeProof(version), false);
   assert.equal(requiresSessionModeProof("0.1.8"), true);
-  for (const version of ["0.1.9", "0.2.0", "1.0.0", "0.1.08", "0.1.8-beta", "0.1.8\n", "9007199254740992.0.0"]) assert.throws(() => requiresSessionModeProof(version));
+  assert.equal(requiresSessionModeProof("0.1.9"), true);
+  for (const version of ["0.1.10", "0.2.0", "1.0.0", "0.1.08", "0.1.8-beta", "0.1.8\n", "9007199254740992.0.0"]) assert.throws(() => requiresSessionModeProof(version));
+});
+
+test("019 requires the entire unchanged 018 native mode proof and still rejects future and incomplete receipts", () => {
+  const receipt = fixture018();
+  replace(receipt, ["packageVersion"], "0.1.9"); replace(receipt, ["lanes", 0, "installedCandidate", "version"], "0.1.9");
+  const validate019 = () => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.9" });
+  assert.deepEqual(validate019(), validate018(fixture018()), "019 carries the full existing inventory without changing the 018 grammar");
+  assert.throws(() => validateNativePickerProof(fixture018(), { artifactSha256, packageVersion: "0.1.9" }), "018 identity is not a 019 artifact proof");
+  assert.throws(() => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.10" }), "unreviewed 020 fails closed");
+  replace(receipt, ["lanes", 0, "modeSteps"], []); assert.throws(validate019, "019 cannot omit existing mode persistence proof");
 });
 
 test("018 rejects missing mode persistence, implicit mode, model mutation, stale write fences and repeated model lists", () => {

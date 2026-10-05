@@ -21,8 +21,8 @@ const ownedProfileIds = new Set(["picker-b", "picker-no-model"]);
 
 /** Closed reviewed grammars; unreviewed future versions fail closed. */
 export function nativePickerContract(version) {
-  assert.ok(version === "0.1.6" || version === "0.1.7" || version === "0.1.8", "unsupported native picker proof version");
-  if (version === "0.1.8") return "native-menu-mode-018";
+  assert.ok(version === "0.1.6" || version === "0.1.7" || version === "0.1.8" || version === "0.1.9", "unsupported native picker proof version");
+  if (version === "0.1.8" || version === "0.1.9") return "native-menu-mode-018";
   return version === "0.1.7" ? "native-menu-017" : "native-select-016";
 }
 

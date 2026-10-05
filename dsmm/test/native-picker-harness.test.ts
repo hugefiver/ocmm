@@ -140,10 +140,11 @@ test("compact geometry rejects native-seat clipping even when the document and o
   assert.throws(() => validateCompactHeaderGeometry({ ...geometry, elements: [{ ...geometry.elements[0], right: 374 }] }));
 });
 
-test("release identity preserves 016/017 and selects the 018 mode grammar at its stable boundary", () => {
+test("release identity preserves 016/017 and carries the identical reviewed 018 mode grammar into exact 019", () => {
   assert.equal(nativePickerContract("0.1.6"), "native-select-016"); assert.equal(nativePickerContract("0.1.7"), "native-menu-017");
   assert.equal(nativePickerContract("0.1.8"), "native-menu-mode-018");
-  for (const version of ["0.1.5", "0.1.9", "0.2.0", "1.0.0", "0.1.7-beta", "0.1.07", "9007199254740992.0.0", undefined]) assert.throws(() => nativePickerContract(version));
+  assert.equal(nativePickerContract("0.1.9"), "native-menu-mode-018");
+  for (const version of ["0.1.5", "0.1.10", "0.2.0", "1.0.0", "0.1.7-beta", "0.1.07", "9007199254740992.0.0", undefined]) assert.throws(() => nativePickerContract(version));
 });
 test("historical source-after 015 diagnostics remain SELECT-only without admitting 015 or future versions to frozen CI", () => {
   assert.equal(nativePickerDiagnosticContract("0.1.5"), "native-select-016");

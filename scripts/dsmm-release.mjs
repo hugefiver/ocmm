@@ -660,17 +660,18 @@ export function registryVerificationFailure(error) {
   return error instanceof RegistryVerificationError ? { ...error.failure } : null;
 }
 
-export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = ["0.1.7", "0.1.8"].includes(identity?.version) ? 300_000 : 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
+export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibilityDeadlineMs = identity?.mode === "future" && identity.version === "0.1.9" ? 1_200_000 : ["0.1.7", "0.1.8"].includes(identity?.version) ? 300_000 : 120_000, visibilityPollMs = 2_000, now = Date.now, wait = (ms) => new Promise((settle) => setTimeout(settle, ms)) } = {}) {
   validateArtifactIdentity(identity);
   // This is an after-publication read path only. Absence checks used by the
   // publisher stay single-shot and can never admit a collision or republish.
   const poll404 = identity.mode === "future" && requiresSessionProfileProof(identity.version);
-  invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= 300_000, "invalid registry visibility deadline");
+  const visibilityCap = identity.mode === "future" && identity.version === "0.1.9" ? 1_200_000 : 300_000;
+  invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= visibilityCap, "invalid registry visibility deadline");
   invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
   const deadline = now() + visibilityDeadlineMs;
-  const prospective = identity.mode === "future" && identity.version === "0.1.8";
+  const prospective = identity.mode === "future" && ["0.1.8", "0.1.9"].includes(identity.version);
   let stage = "registry-metadata";
-  // The reviewed 0.1.8 contract bounds every public visibility read to one
+  // The reviewed 0.1.8/0.1.9 contracts bound every public visibility read to one
   // deadline. Historical contracts and all publisher absence checks stay intact.
   const readVisible = async (url, options) => {
     for (;;) {

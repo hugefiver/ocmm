@@ -4,13 +4,13 @@
 
 `/deepwork [off|message]` changes the receiving session's mode. `/dsmm-status` reports bounded normalized state; `/dsmm-status json` returns a defensive JSON snapshot with version 1. Other input returns `Usage: /dsmm-status [json]`.
 
-Human-facing status/mode copy uses Deepwork. The technical commands, JSON fields, namespace and configurable `modeName` remain unchanged. The prospective 0.1.8 menu adds a **Deepwork** toggle for other native presets; it defaults off in official minimal conversations unless a saved explicit `deepwork/mode` says otherwise. Even a same-default choice is persisted. This mode intent survives profile changes and reopen. Standing DW presets show a locked enabled label rather than an off action; sessionless, busy and unavailable mutations fail closed. These source requirements do not claim 0.1.8 publication or Desktop acceptance.
+Human-facing status/mode copy uses Deepwork. The technical commands, JSON fields, namespace and configurable `modeName` remain unchanged. The prospective 0.1.9 menu retains a **Deepwork** toggle for other native presets; it defaults off in official minimal conversations unless a saved explicit `deepwork/mode` says otherwise. Even a same-default choice is persisted. This mode intent survives profile changes and reopen. Standing DW presets show a locked enabled label rather than an off action; sessionless, busy and unavailable mutations fail closed. These source requirements do not claim 0.1.9 publication or Desktop acceptance. The 0.1.9 plugin behavior is unchanged from 0.1.8; only release Action verification controls change to an exact shared 20-minute 404 visibility budget and a 45-minute verify job. The 0.1.8 npm publication is genuine but its original terminal receipt failed with GitHub skipped; Desktop remains on 0.1.7 and CLI/TUI on 0.1.6 until a separately completed successor rollout.
 
 Commands belong to the native command adapter. Headless task text is not a slash-command invocation.
 
 ## DSH 0.2 deployment configuration
 
-The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; the prospective 0.1.8 source contract includes runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
+The Loader plugin entry remains the deployment baseline. Structural fields are **restart-scoped**; the prospective 0.1.9 source contract includes runtime-only file overlays for newly admitted Agents. The removed `settings.register()` service and old `$DSH_HOME/settings.yaml` namespace are not used by DSH 0.2. Copy deployment values into the profile's `cordis.patch.yml`, restart, and inspect `--dump-config` and status:
 
 ```yaml
 - id: dsmm
@@ -30,7 +30,7 @@ The Loader plugin entry remains the deployment baseline. Structural fields are *
       enabled: false
 ```
 
-The prospective 0.1.8 source contract includes the additive native Settings **Deepwork Profiles** / **Deepwork 配置档** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
+The prospective 0.1.9 source contract includes the additive native Settings **Deepwork Profiles** / **Deepwork 配置档** section through the native client/authorized RPC surface. It is not a volatile SettingsForms projection and does not turn structural fields into live references. Create/read/edit/save/apply/reset operate on independent files under `<profileContext.dir>/dsmm-profiles/`; neither a Settings schema nor these docs prove completed Desktop activation. See [runtime profiles](profiles.md) for the exact allowlist, file formats and pending acceptance boundary.
 
 Save changes only the draft. Global Apply pins an immutable revision for **new unscoped Agents only**; existing even-blank Agents retain their admissions. The separate current-session selector uses the native view's actual session ID and idle maintenance/CAS/epoch fences. It changes only that ordinary root and future children; old children retain their old epoch. Cold resume honors an explicit sidecar or, when absent, the current global default. Global reset and session baseline pinning are distinct and leave drafts intact.
 
