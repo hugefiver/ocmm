@@ -84,6 +84,20 @@ dsh --profile dsmm-0.1.6-verify --dump-config
 npm view @dsmm/dsmm@0.1.6 dist.integrity --registry "https://registry.npmjs.org/"
 ```
 
+### Published 0.1.6 continuation (separately authorized)
+
+The original `dsmm-scoped-v0.1.6` publication run `37281521750/1` published the immutable npm bytes but failed its verify job; its GitHub Release job was skipped. Preserve that failed history, original source/tag at `d2e499b3a61ef76033d417efbec3402a4739a8fe`, and original npm provenance. Supplemental verification does not rerun that workflow or republish npm.
+
+Only the dedicated no-input `.github/workflows/dsmm-published-continuation-016.yml` may continue this separately authorized identity. Its fixed `--origin-version 0.1.6` policy binds accepted artifact `11332299033`, archive size `359262`, archive digest `sha256:3fedc92c35a88f0a75fdfc6ac8ef9a37ef138d902e5698f90ac969f66f6f4eb9`, and tarball SHA256 `b7b36fc69e892fb22b06a2428d360181d33bd95526ee2bc403c04b6307ed6c35`. The two jobs independently reload original acceptance and verify current registry bytes/provenance plus a fresh isolated Linux/Node 24 native install, then create/finalize only the missing original-byte GitHub Release. Any existing public Release or partial draft stops without adoption, repair, overwrite or deletion. No source pack/build, npm publisher/OIDC, tag mutation, full-workflow rerun or global install belongs to this continuation.
+
+After the dedicated run terminates, use its actual run/attempt/control SHA and a new receipt path:
+
+```powershell
+node scripts/check-dsmm-release-completion.mjs terminal-continuation --origin-version 0.1.6 --run-id <actual-continuation-run> --run-attempt <actual-attempt> --control-sha <trusted-continuation-control-sha> --receipt <new-016-continuation-receipt.json>
+```
+
+Only exit `0` with `COMPLETED` establishes the two-run terminal proof and permits the separately authorized rollout below. A green supplemental run alone is insufficient; `FAILED`/`UNRESOLVED` preserve immutable partial state. The omitted-selector APIs/CLI and old continuation workflow remain fixed to historical 0.1.4; neither that receipt nor its archive/provenance can establish 0.1.6 completion.
+
 ## Phase 3: official installed-carrier Desktop rollout
 
 Only after terminal 0.1.6 completion may authorized global migration begin. First perform the separately bounded isolated real-model/tool check against the exact registry package. Coordinate a fully quit Desktop, recheck concurrent edits, and preserve a recoverable local snapshot of only task-changed package-manager/DSMM-owned files—not the entire credential or session store. Use the exact installed official Desktop carrier to install `@dsmm/dsmm@0.1.6`. It may manage packages while the app is quit; it may **not** boot/dump the reserved Desktop profile. Never substitute standalone npm DSH, a renamed/copied profile, checkout imports, `app.asar` patches, global PATH/pnpm changes, or auth bypasses.

@@ -6,12 +6,13 @@ import { parseArgs } from "node:util";
 import { expectedAssetNames, finalizeRelease, findReleaseByTag, githubRequest, stageDraftTransport } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot } from "./dsmm-registry-install-probe.mjs";
 import {
-  CONTINUATION_WORKFLOW, EvidenceMismatch, PUBLISHED_ORIGIN, github, loadContinuationProof,
+  EvidenceMismatch, github, loadContinuationProof, resolvePublishedOriginPolicy,
   loadContinuationRun, loadPublishedOrigin, validateContinuationContext, validateContinuationVerification,
   verifyPublishedArtifact,
 } from "./check-dsmm-release-completion.mjs";
 
-export function resolveContinuationFromEnvironment(controlRoot, stage, env = process.env) {
+export function resolveContinuationFromEnvironment(controlRoot, stage, env = process.env, originVersion = "0.1.4") {
+  const { workflow } = resolvePublishedOriginPolicy(originVersion);
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_JOB !== (stage === "verify" ? "verify" : "github-release"))
     throw new EvidenceMismatch("continuation must execute in its genuine Actions job");
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
@@ -21,48 +22,49 @@ export function resolveContinuationFromEnvironment(controlRoot, stage, env = pro
   return validateContinuationContext({
     schemaVersion: 1, repository: event.repository?.full_name, defaultBranch: event.repository?.default_branch,
     eventName: env.GITHUB_EVENT_NAME, ref: env.GITHUB_REF, inputs: event.inputs ?? {}, eventSha: env.GITHUB_SHA,
-    controlSha, workflow: { file: CONTINUATION_WORKFLOW, ref: env.GITHUB_WORKFLOW_REF, sha: env.GITHUB_WORKFLOW_SHA },
+    controlSha, workflow: { file: workflow, ref: env.GITHUB_WORKFLOW_REF, sha: env.GITHUB_WORKFLOW_SHA },
     runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
     controlInDefaultHistory: checkGit(["merge-base", "--is-ancestor", controlSha, "refs/remotes/origin/master"]),
-    controlsPresent: [CONTINUATION_WORKFLOW, "scripts/dsmm-release-continuation.mjs", "scripts/check-dsmm-release-completion.mjs",
+    controlsPresent: [workflow, "scripts/dsmm-release-continuation.mjs", "scripts/check-dsmm-release-completion.mjs",
       "scripts/dsmm-release.mjs", "scripts/dsmm-registry-install-probe.mjs"].every(path => checkGit(["cat-file", "-e", `${controlSha}:${path}`])),
     runtime: { platform: process.platform, nodeMajor: Number(process.versions.node.split(".")[0]) },
-  });
+  }, undefined, originVersion);
 }
 
 export async function runPublishedContinuation(stage, context, {
   request = github, downloadArtifact, originLoader = loadPublishedOrigin, publishedCheck = verifyPublishedArtifact,
   stageTransport = stageDraftTransport, finalize = finalizeRelease, findExistingRelease = findReleaseByTag,
-  releaseRequest = githubRequest, proofArtifactId,
+  releaseRequest = githubRequest, proofArtifactId, originVersion = "0.1.4",
 } = {}) {
+  const { origin: fixed } = resolvePublishedOriginPolicy(originVersion);
   if (!["verify", "finalize"].includes(stage)) throw new EvidenceMismatch("unknown continuation stage");
-  validateContinuationContext(context);
-  loadContinuationRun(context, { request, stage });
+  validateContinuationContext(context, context, originVersion);
+  loadContinuationRun(context, { request, stage, originVersion });
   const owner = createOwnedRoot();
   try {
     const acceptedDirectory = join(owner.root, "accepted"); mkdirSync(acceptedDirectory);
-    const origin = await originLoader(acceptedDirectory, { request, downloadArtifact });
+    const origin = await originLoader(acceptedDirectory, { request, downloadArtifact, originVersion });
     if (stage === "verify") {
       const verification = await publishedCheck(origin.identity);
       const envelope = {
         schemaVersion: 2, mode: "published-continuation", outcome: "COMPLETED", continuation: context,
-        originAcceptedArtifact: { id: PUBLISHED_ORIGIN.artifactId, archiveDigest: PUBLISHED_ORIGIN.archiveDigest,
-          runId: PUBLISHED_ORIGIN.runId, runAttempt: PUBLISHED_ORIGIN.runAttempt },
+        originAcceptedArtifact: { id: fixed.artifactId, archiveDigest: fixed.archiveDigest,
+          runId: fixed.runId, runAttempt: fixed.runAttempt },
         verification,
       };
-      validateContinuationVerification(envelope, origin, context);
+      validateContinuationVerification(envelope, origin, context, originVersion);
       return envelope;
     }
     if (!/^[1-9][0-9]*$/u.test(String(proofArtifactId ?? ""))) throw new EvidenceMismatch("exact verify artifact ID is required");
     const proofDirectory = join(owner.root, "verification"); mkdirSync(proofDirectory);
-    const { verification } = await loadContinuationProof(proofDirectory, origin, context, { request, downloadArtifact, artifactId: proofArtifactId });
+    const { verification } = await loadContinuationProof(proofDirectory, origin, context, { request, downloadArtifact, artifactId: proofArtifactId, originVersion });
     const existing = await findExistingRelease(origin.identity.tag);
     if (existing) throw new EvidenceMismatch(`Release already exists; preserved without mutation: ${JSON.stringify({ id: existing.id,
       draft: existing.draft, assets: existing.assets?.map(({ id, name }) => ({ id, name })) })}`);
     // The existing staging API requires complete authenticated draft discovery and absence.
     // It creates the missing Release once; neither this controller nor a retry adopts partial state.
     const staged = await stageTransport(acceptedDirectory, origin.context);
-    const createdPath = `/repos/${PUBLISHED_ORIGIN.repository}/releases/${staged.releaseId}`;
+    const createdPath = `/repos/${fixed.repository}/releases/${staged.releaseId}`;
     const assetMap = (assets) => JSON.stringify(assets?.map(({ id, name }) => ({ id: String(id), name })).sort((left, right) => left.name.localeCompare(right.name)));
     if (!/^[1-9][0-9]*$/u.test(String(staged.releaseId)) || !Array.isArray(staged.assets)
       || JSON.stringify(staged.assets.map(({ name }) => name).sort()) !== JSON.stringify(expectedAssetNames(origin.identity.version))
@@ -74,7 +76,7 @@ export async function runPublishedContinuation(stage, context, {
         throw new EvidenceMismatch("newly created Release/asset identity changed before finalization");
     };
     const boundFinalizerRequest = async (path, options = {}) => {
-      const prefix = `/repos/${PUBLISHED_ORIGIN.repository}/`;
+      const prefix = `/repos/${fixed.repository}/`;
       const method = options.method ?? "GET";
       if (!path.startsWith(prefix) || (method !== "GET" && (method !== "PATCH" || path !== createdPath || options.body?.draft !== false)))
         throw new EvidenceMismatch("finalizer mutation is not the newly created Release public PATCH");
@@ -100,20 +102,21 @@ export async function runPublishedContinuation(stage, context, {
 
 export function parseContinuationArguments(args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    "control-root": { type: "string" }, receipt: { type: "string" }, "proof-artifact-id": { type: "string" },
+    "control-root": { type: "string" }, receipt: { type: "string" }, "proof-artifact-id": { type: "string" }, "origin-version": { type: "string" },
   } });
   if (positionals.length !== 1 || !["verify", "finalize"].includes(positionals[0]) || !values["control-root"])
     throw new EvidenceMismatch("choose verify/finalize and an explicit trusted control checkout");
   if (positionals[0] === "verify" ? !values.receipt || values["proof-artifact-id"] !== undefined
     : values.receipt !== undefined || !/^[1-9][0-9]*$/u.test(values["proof-artifact-id"] ?? ""))
     throw new EvidenceMismatch("invalid continuation stage arguments");
+  resolvePublishedOriginPolicy(values["origin-version"]);
   return { stage: positionals[0], ...values };
 }
 
 export async function main(args = process.argv.slice(2)) {
   const options = parseContinuationArguments(args);
-  const context = resolveContinuationFromEnvironment(resolve(options["control-root"]), options.stage);
-  const result = await runPublishedContinuation(options.stage, context, { proofArtifactId: options["proof-artifact-id"] });
+  const context = resolveContinuationFromEnvironment(resolve(options["control-root"]), options.stage, process.env, options["origin-version"]);
+  const result = await runPublishedContinuation(options.stage, context, { proofArtifactId: options["proof-artifact-id"], originVersion: options["origin-version"] });
   if (options.receipt) writeFileSync(resolve(options.receipt), `${JSON.stringify(result, null, 2)}\n`, { flag: "wx" });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return result;
