@@ -9,6 +9,7 @@ import {
   isCodexModel,
   isDeepSeekModel,
   isGeminiModel,
+  isGpt61OrLaterSolModel,
   isGpt6LunaModel,
   isGpt6SolModel,
   isGptModel,
@@ -88,6 +89,16 @@ test("isGpt6LunaModel matches only Luna names and aliases across known provider 
   }
   for (const modelID of ["gpt-6-lunar", "gpt-6-astra", "gpt-6-astral", "gpt-6-sol", "gpt-6-solar", "prefix-gpt-6-luna", "vendor/custom.gpt-6-luna"]) {
     assert.equal(isGpt6LunaModel(modelID), false, modelID)
+  }
+})
+
+test("Sol 6.1+ capability detection is versioned and rejects adjacent lanes and names", () => {
+  for (const modelID of ["gpt-6.1-sol", "OPENAI/GPT-6.2-SOL-FAST", "amazon-bedrock/us.openai.gpt-6.1-sol.preview", "gpt-6.1.1-sol", "gpt-7-sol"]) {
+    assert.equal(isGpt61OrLaterSolModel(modelID), true, modelID)
+    assert.equal(supportsNativeGptMaxReasoning(modelID), true, modelID)
+  }
+  for (const modelID of ["gpt-5.6-sol", "gpt-6-sol", "gpt-6.0-sol", "gpt-6.1-solar", "gpt-6.1-solstice", "gpt-6.1-astra", "gpt-6.1-luna", "gpt-6.1", "prefix-gpt-6.1-sol", "vendor/custom.gpt-6.1-sol"]) {
+    assert.equal(isGpt61OrLaterSolModel(modelID), false, modelID)
   }
 })
 

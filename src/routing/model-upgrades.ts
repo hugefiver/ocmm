@@ -4,6 +4,7 @@ import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 
 type Version = [number, number, number]
+type GptLane = "sol" | "terra" | "astra" | "luna"
 
 type CatalogCandidate = {
   provider: string
@@ -73,12 +74,12 @@ function parseGptVersion(model: string): Version | null {
   return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)]
 }
 
-function parseGptLane(model: string): { version: Version; lane: "sol" | "terra" } | null {
-  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?-(sol|terra)(?:$|[-_.])/)
+function parseGptLane(model: string): { version: Version; lane: GptLane } | null {
+  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?-(sol|terra|astra|luna)(?:$|[-_.])/)
   if (!match) return null
   return {
     version: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)],
-    lane: match[4] as "sol" | "terra",
+    lane: match[4] as GptLane,
   }
 }
 
@@ -151,9 +152,12 @@ export function selectCatalogModel(
 
   const review = parseReviewAgentName(agentName)
   const isCanonicalOracleFirstSlot = review?.canonicalSlot === "oracle"
-  const lane = gptLaneForAgent(agentName)
   const gptBaseline = compatibleEntry(requirement, undefined, (entry) => parseGptVersion(entry.model) !== null)
-  if (isCanonicalOracleFirstSlot) {
+  const declaredLane = gptBaseline ? parseGptLane(gptBaseline.model) : null
+  // Modern defaults declare their lane in the chain. Legacy chains retain the
+  // canonical Sol/Terra role map and Oracle's exact compatibility preference.
+  const modernLane = declaredLane && declaredLane.version[0] >= 6 ? declaredLane.lane : undefined
+  if (isCanonicalOracleFirstSlot && !modernLane) {
     for (const entry of requirement.fallbackChain) {
       if (parseGptVersion(entry.model) === null) continue
       if (parseGptLane(entry.model) !== null) continue
@@ -161,14 +165,39 @@ export function selectCatalogModel(
       if (exact) return exact
     }
   }
-  if (lane && gptBaseline) {
+  const legacyLane = gptLaneForAgent(agentName)
+  // Newly declared lanes must not invent cross-family promotions. Preserve the
+  // existing role-map contract, and fall through only unavailable non-GPT heads.
+  if (modernLane && !legacyLane) {
+    const head = requirement.fallbackChain[0]!
+    const defaultHead = `${head.providers[0]}/${head.model}`
+    for (const entry of requirement.fallbackChain) {
+      if (entry === gptBaseline) break
+      const available = catalogContainsExactModel(providers, entry)
+      if (available) return available === defaultHead ? undefined : available
+    }
+  }
+  const lanes: GptLane[] = modernLane
+    ? [...new Set(requirement.fallbackChain.flatMap((entry) => {
+      const parsed = parseGptLane(entry.model)
+      return parsed ? [parsed.lane] : []
+    }))]
+    : legacyLane ? [legacyLane] : []
+  for (const lane of lanes) {
+    const baseline = modernLane
+      ? compatibleEntry(requirement, undefined, (entry) => parseGptLane(entry.model)?.lane === lane) ?? gptBaseline
+      : gptBaseline
+    if (!baseline) continue
+    const baselineVersion = parseGptVersion(baseline.model)!
     const candidates: CatalogCandidate[] = []
-    for (const [providerIndex, provider] of gptBaseline.providers.entries()) {
+    for (const [providerIndex, provider] of baseline.providers.entries()) {
       const rawProvider = providers[provider]
       if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
       for (const model of Object.keys(rawProvider.models)) {
         const parsed = parseGptLane(model)
         if (!parsed || parsed.lane !== lane || compareVersion(parsed.version, MIN_GPT_VERSION) < 0) continue
+        if (compareVersion(parsed.version, baselineVersion) < 0) continue
+        if ((lane === "astra" || lane === "luna") && parsed.version[0] < 6) continue
         candidates.push({ provider, model, version: parsed.version, providerIndex })
       }
     }
@@ -177,30 +206,12 @@ export function selectCatalogModel(
     if (best) return `${best.provider}/${best.model}`
   }
 
-  // No lane candidates (or no lane): fall back to the newest no-lane GPT-6+
-  // flagship in the catalog (e.g. gpt-6-astra) before GLM successors. Only
-  // chains that already carry a no-lane GPT-6+ entry opt into this fallback:
-  // those chains upgrade when the catalog moves to the next flagship, while
-  // chains without one keep their own heads (quick stays on its cheap tier;
-  // coding/research keep their higher-priority chain heads).
-  const gpt6Baseline = compatibleEntry(requirement, undefined, (entry) => {
-    const version = parseGptVersion(entry.model)
-    return version !== null && version[0] >= 6 && parseGptLane(entry.model) === null
-  })
-  if (gpt6Baseline) {
-    const candidates: CatalogCandidate[] = []
-    for (const [providerIndex, provider] of gpt6Baseline.providers.entries()) {
-      const rawProvider = providers[provider]
-      if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue
-      for (const model of Object.keys(rawProvider.models)) {
-        const version = parseGptVersion(model)
-        if (!version || version[0] < 6 || parseGptLane(model) !== null) continue
-        candidates.push({ provider, model, version, providerIndex })
-      }
+  if (isCanonicalOracleFirstSlot && modernLane) {
+    for (const entry of requirement.fallbackChain) {
+      if (parseGptVersion(entry.model) === null || parseGptLane(entry.model) !== null) continue
+      const exact = catalogContainsExactModel(providers, entry)
+      if (exact) return exact
     }
-    candidates.sort(compareCatalogCandidates)
-    const best = candidates[0]
-    if (best) return `${best.provider}/${best.model}`
   }
 
   const glmBaseline = compatibleEntry(
@@ -232,36 +243,25 @@ export function matchRequirementSuccessorWithIndex(
 ): RequirementSuccessorMatch | null {
   const gpt = parseGptLane(modelID)
   if (gpt && compareVersion(gpt.version, MIN_GPT_VERSION) >= 0) {
+    if ((gpt.lane === "astra" || gpt.lane === "luna") && gpt.version[0] < 6) return null
     const sameLaneBaseline = compatibleEntryWithIndex(requirement, providerID, (entry) => {
       const parsed = parseGptLane(entry.model)
-      return parsed !== null && parsed.lane === gpt.lane && compareVersion(gpt.version, parsed.version) >= 0
+      return parsed !== null && parsed.lane === gpt.lane
     })
+    if (sameLaneBaseline && compareVersion(gpt.version, parseGptLane(sameLaneBaseline.entry.model)!.version) < 0) return null
+    // Future Astra/Luna upgrades require a declared same-lane baseline. Keep
+    // the already-supported GPT-6 Astra bridge from legacy GPT-5 chains only.
+    if (!sameLaneBaseline && (gpt.lane === "luna" || (gpt.lane === "astra" && compareVersion(gpt.version, [6, 0, 0]) !== 0))) return null
     const baseline = sameLaneBaseline ?? compatibleEntryWithIndex(requirement, providerID, (entry) => {
       const version = parseGptVersion(entry.model)
+      const lane = parseGptLane(entry.model)?.lane
       return version !== null && compareVersion(gpt.version, version) >= 0
+        && (gpt.lane === "astra" ? version[0] < 6 : lane !== "astra" && lane !== "luna")
     })
     if (baseline) {
       return {
         entry: synthesizeSuccessor(baseline.entry, providerID, modelID),
         baselineIndex: baseline.baselineIndex,
-      }
-    }
-  }
-
-  // GPT-6+ flagship (no lane suffix, e.g. gpt-6-astra) upgrades any GPT
-  // baseline at or above the lane floor. Astra-first chains already carry an
-  // exact entry; this branch materializes the successor for lane-first chains
-  // whose catalog has moved to the next flagship.
-  const gptVersion = parseGptVersion(modelID)
-  if (gptVersion && gptVersion[0] >= 6 && parseGptLane(modelID) === null) {
-    const gptBaseline = compatibleEntryWithIndex(requirement, providerID, (entry) => {
-      const version = parseGptVersion(entry.model)
-      return version !== null && compareVersion(gptVersion, version) >= 0
-    })
-    if (gptBaseline) {
-      return {
-        entry: synthesizeSuccessor(gptBaseline.entry, providerID, modelID),
-        baselineIndex: gptBaseline.baselineIndex,
       }
     }
   }

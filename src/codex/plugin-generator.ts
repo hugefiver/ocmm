@@ -14,7 +14,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { type OcmmConfig } from "../config/schema.ts"
 import { loadConfig, type ConfigHost } from "../config/load.ts"
 import { createConfigHandler } from "../hooks/config.ts"
-import { classifyModelFamily, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
+import { classifyModelFamily, isGpt61OrLaterSolModel, isGpt6LunaModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
 import { LOGICAL_TIER_ORDER } from "../logical-tiers/names.ts"
@@ -61,9 +61,10 @@ const CODEX_COMPATIBLE_PROVIDERS = new Set([
  * Default Codex subscription model assignment for generated dw-* profiles.
  *
  * When the effective requirement is not a user-config entry, the generator
- * maps each built-in role to a model from the current Codex subscription
- * catalog (gpt-5.4/5.5/5.6-sol/terra/luna, gpt-6-astra), preferring the
- * 5.6/6 series, with the role's matched reasoning effort. Explicit user
+ * maps each built-in role to a confirmed subscription model (GPT-6.1 Sol,
+ * GPT-6 Luna/Astra) with the role's matched reasoning effort. This offline
+ * table does not observe a live catalog; future defaults require an update
+ * and regeneration, or explicit project configuration. Explicit user
  * configuration (agents/categories entries) always wins and keeps its own
  * chain selection. Roles absent from this table keep their builtin chain
  * heads.
@@ -74,25 +75,25 @@ const CODEX_DEFAULT_MODEL_BY_ROLE = new Map<string, { model: string; variant: Va
   ["planner", { model: "gpt-6-astra", variant: "xhigh" }],
   ["builder", { model: "gpt-6-astra", variant: "xhigh" }],
   ["reviewer", { model: "gpt-6-astra", variant: "xhigh" }],
-  ["clarifier", { model: "gpt-5.6-sol", variant: "xhigh" }],
+  ["clarifier", { model: "gpt-6.1-sol", variant: "xhigh" }],
   ["plan-critic", { model: "gpt-6-astra", variant: "xhigh" }],
-  ["oracle", { model: "gpt-5.6-terra", variant: "xhigh" }],
-  ["oracle-2nd", { model: "gpt-5.6-sol", variant: "xhigh" }],
-  ["doc-search", { model: "gpt-5.6-luna", variant: "high" }],
-  ["explore", { model: "gpt-5.6-luna", variant: "medium" }],
-  ["code-search", { model: "gpt-5.6-luna", variant: "medium" }],
-  ["media-reader", { model: "gpt-5.6-luna", variant: "high" }],
+  ["oracle", { model: "gpt-6.1-sol", variant: "xhigh" }],
+  ["oracle-2nd", { model: "gpt-6.1-sol", variant: "xhigh" }],
+  ["doc-search", { model: "gpt-6-luna", variant: "high" }],
+  ["explore", { model: "gpt-6-luna", variant: "medium" }],
+  ["code-search", { model: "gpt-6-luna", variant: "medium" }],
+  ["media-reader", { model: "gpt-6-luna", variant: "high" }],
   // Categories
   ["hard-reasoning", { model: "gpt-6-astra", variant: "max" }],
   ["deep", { model: "gpt-6-astra", variant: "xhigh" }],
-  ["complex", { model: "gpt-5.6-sol", variant: "xhigh" }],
+  ["complex", { model: "gpt-6.1-sol", variant: "xhigh" }],
   ["creative", { model: "gpt-6-astra", variant: "high" }],
   ["frontend", { model: "gpt-6-astra", variant: "xhigh" }],
-  ["research", { model: "gpt-5.6-terra", variant: "xhigh" }],
-  ["quick", { model: "gpt-5.6-terra", variant: "medium" }],
-  ["coding", { model: "gpt-5.6-terra", variant: "xhigh" }],
-  ["normal-task", { model: "gpt-5.6-terra", variant: "xhigh" }],
-  ["documenting", { model: "gpt-5.6-terra", variant: "high" }],
+  ["research", { model: "gpt-6.1-sol", variant: "xhigh" }],
+  ["quick", { model: "gpt-6.1-sol", variant: "medium" }],
+  ["coding", { model: "gpt-6.1-sol", variant: "xhigh" }],
+  ["normal-task", { model: "gpt-6.1-sol", variant: "xhigh" }],
+  ["documenting", { model: "gpt-6.1-sol", variant: "high" }],
 ])
 const CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"])
 
@@ -228,7 +229,7 @@ export async function buildCodexAgents(args: {
       role: sourceName,
       source: effective?.source,
     })
-    const model = selected.entry?.model ?? args.config.systemDefaultModel ?? "gpt-5.5"
+    const model = selected.entry?.model ?? args.config.systemDefaultModel ?? "gpt-6.1-sol"
     const reasoningEffort = codexReasoningEffort({
       sourceName,
       entry: selected.entry,
@@ -773,8 +774,8 @@ function selectCodexModel(
   opts?: { role?: string; source?: string },
 ): { entry?: FallbackEntry; variant?: Variant } {
   // Codex subscription defaults: built-in roles (agent-default /
-  // category-default sources) map to the subscription catalog, preferring
-  // the 5.6/6 series. Explicit user configuration keeps its own chain.
+  // category-default sources) use the offline 6/6.1 table. Explicit user
+  // configuration keeps its own chain; no migration is applied to it.
   if (opts?.role && opts.source !== "user-config") {
     const subscriptionDefault = CODEX_DEFAULT_MODEL_BY_ROLE.get(opts.role)
     if (subscriptionDefault) {
@@ -815,8 +816,13 @@ function codexReasoningEffort(args: {
   variant?: Variant
 }): string {
   const direct = args.entry?.reasoningEffort
-  const effort = direct ?? (args.variant
-    ? translateVariant("codex", args.variant, { modelID: args.model }).reasoningEffort
+  // New Luna assignments keep the table/config's low/medium rung without
+  // weakening the older GPT floor or the review floors applied below.
+  const effort = direct === "minimal" && isGpt61OrLaterSolModel(args.model) ? "low" : direct ?? (args.variant
+    ? translateVariant("codex", args.variant, {
+      modelID: args.model,
+      respectExplicit: isGpt6LunaModel(args.model) && (args.variant === "low" || args.variant === "medium"),
+    }).reasoningEffort
     : undefined)
   const normalized = effort && CODEX_REASONING_EFFORTS.has(effort)
       ? effort

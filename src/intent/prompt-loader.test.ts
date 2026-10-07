@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -13,11 +13,9 @@ import {
   getShellSafetyPrompt,
   pickDeepworkVariantForAgent,
   pickModelCalibrationVariants,
-  isGpt56Model,
-  isGpt6Model,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"] as const
 
 function makeTempRoot(workflow: "v1" | "codex"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -28,7 +26,7 @@ function makeTempRoot(workflow: "v1" | "codex"): string {
   return root
 }
 
-const GPT56_WORKFLOWS = ["v1", "codex"] as const
+const WORKFLOWS = ["v1", "codex"] as const
 
 test("loadAllPrompts loads files from the workflow subdir", () => {
   const root = makeTempRoot("codex")
@@ -90,14 +88,14 @@ test("loadAllPrompts loads specialized deepwork variants", () => {
   try {
     writeFileSync(join(root, "codex", "deepwork", "glm.md"), "glm-content")
     writeFileSync(join(root, "codex", "deepwork", "codex.md"), "codex-content")
-    writeFileSync(join(root, "codex", "deepwork", "gpt-5.6.md"), "gpt-5.6-content")
+    writeFileSync(join(root, "codex", "deepwork", "gpt.md"), "gpt-content")
     writeFileSync(join(root, "codex", "deepwork", "claude-opus-5.md"), "claude-opus-5-content")
     writeFileSync(join(root, "codex", "deepwork", "kimi-k27.md"), "kimi-k27-content")
     writeFileSync(join(root, "codex", "deepwork", "swe-2.md"), "swe-2-content")
     loadAllPrompts(root, "codex")
     assert.equal(getDeepworkPrompt("glm"), "glm-content")
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
-    assert.equal(getDeepworkPrompt("gpt-5.6"), "gpt-5.6-content")
+    assert.equal(getDeepworkPrompt("gpt"), "gpt-content")
     assert.equal(getDeepworkPrompt("claude-opus-5"), "claude-opus-5-content")
     assert.equal(getDeepworkPrompt("kimi-k27"), "kimi-k27-content")
     assert.equal(getDeepworkPrompt("swe-2"), "swe-2-content")
@@ -124,6 +122,9 @@ test("real workflows load functional agents, deepwork prompts, and categories", 
   const root = join(process.cwd(), "prompts")
   for (const workflow of ["v1", "codex"] as const) {
     loadAllPrompts(root, workflow)
+    for (const obsolete of ["gpt-5.6", "gpt-6-astra", "gpt-6-sol"]) {
+      assert.equal(existsSync(join(root, workflow, "deepwork", `${obsolete}.md`)), false, `${workflow}: no obsolete generation source ${obsolete}`)
+    }
     for (const name of ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]) {
       const source = readFileSync(join(root, workflow, "agents", `${name}.md`), "utf8")
       assert.ok(source.length > 0, `${workflow}/${name} source missing`)
@@ -146,12 +147,13 @@ test("real workflows load functional agents, deepwork prompts, and categories", 
       "complex",
       "deep",
       "documenting",
+      "cross-cutting",
     ]) {
       const source = readFileSync(join(root, workflow, "category", `${category}.md`), "utf8")
       assert.ok(source.length > 0, `${workflow}/${category} source missing`)
       const loaded = getCategoryPrompt(category).trim()
       assert.ok(loaded.length > 0, `${workflow}/${category} category missing`)
-      assert.ok(source.trim().startsWith(loaded), `${workflow}/${category}`)
+      assert.equal(loaded, source.trim(), `${workflow}/${category}: shipped categories have no inline calibration`)
     }
   }
 })
@@ -174,70 +176,33 @@ test("pickDeepworkVariantForAgent picks gpt variant for gpt model", () => {
   )
 })
 
-test("pickDeepworkVariantForAgent isolates GPT-5.6 from other GPT families", () => {
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.6-sol" }),
-    "gpt-5.6",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/openai.gpt-5.6" }),
-    "gpt-5.6",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/us.openai.gpt-5.4" }),
-    "gpt",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-5.7-sol" }),
-    "gpt",
-  )
-  assert.equal(isGpt56Model("vercel/openai/gpt-5.6-terra"), true)
-  assert.equal(isGpt56Model("amazon-bedrock/openai.gpt-5.6"), true)
-  assert.equal(isGpt56Model("gpt-5.7-sol"), false)
-  assert.equal(isGpt56Model("gpt-6-sol"), false)
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "gpt-5.6-terra" }),
-    "gpt-5.6",
-  )
-})
-
-test("pickDeepworkVariantForAgent reuses GPT-5.6 only for exact GPT-6 Sol", () => {
+test("all recognized GPT generations and aliases select the same calibration without changing planner identity", () => {
   for (const modelID of [
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "vercel/openai/gpt-5.6-luna",
+    "amazon-bedrock/openai.gpt-5.6",
+    "amazon-bedrock/us.openai.gpt-5.4",
+    "gpt-5.7-sol",
     "gpt-6-sol",
     "gpt-6-sol-fast",
     "openai/gpt-6-sol",
     "providers/openai/gpt-6-sol-fast",
     "amazon-bedrock/openai.gpt-6-sol",
+    "gpt-6-astra",
+    "openai/gpt-6-astra-fast",
+    "gpt-6-luna",
+    "providers/openai/gpt-6-luna-fast",
+    "gpt-6-preview",
+    "amazon-bedrock/openai.gpt-7-preview",
   ]) {
-    assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: modelID }), "gpt-5.6", modelID)
+    for (const agentName of ["builder", "orchestrator", "reviewer"]) {
+      assert.equal(pickDeepworkVariantForAgent({ agentName, preferenceModel: modelID }), "gpt", `${agentName}/${modelID}`)
+    }
+    assert.equal(pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: modelID }), "planner", modelID)
+    assert.deepEqual(pickModelCalibrationVariants(modelID), ["gpt"], modelID)
   }
-  for (const modelID of ["gpt-6-luna", "gpt-6-solar", "gpt-6-solstice", "prefix-gpt-6-sol"]) {
-    assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: modelID }), "gpt", modelID)
-  }
-  assert.equal(pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-6-astra" }), "gpt-6-astra")
-  assert.equal(pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: "gpt-6-sol" }), "planner")
-  assert.equal(isGpt6Model("gpt-6-sol"), false)
-})
-
-test("pickDeepworkVariantForAgent reserves the Astra variant for GPT-6 Astra", () => {
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "gpt-6-astra" }),
-    "gpt-6-astra",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "openai/gpt-6-astra-fast" }),
-    "gpt-6-astra",
-  )
-  assert.equal(
-    pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "amazon-bedrock/openai.gpt-7-preview" }),
-    "gpt",
-  )
-  assert.equal(isGpt56Model("gpt-6-astra"), false)
-  assert.equal(isGpt6Model("gpt-6-astra"), true)
-  assert.equal(isGpt6Model("openai/gpt-6-astra-fast"), true)
-  assert.equal(isGpt6Model("gpt-6-preview"), false)
-  assert.equal(isGpt6Model("gpt-7-preview"), false)
-  assert.equal(isGpt6Model("gpt-5.6-sol"), false)
 })
 
 test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orchestrator", () => {
@@ -311,6 +276,9 @@ test("pickDeepworkVariantForAgent picks codex variant for Codex models", () => {
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "codex-mini-latest" }),
     "codex",
   )
+  for (const modelID of ["codex-mini-latest", "openai/gpt-5.3-codex", "provider/codex-latest"]) {
+    assert.deepEqual(pickModelCalibrationVariants(modelID), ["gpt"], modelID)
+  }
 })
 
 test("pickDeepworkVariantForAgent defaults for unknown families", () => {
@@ -337,11 +305,14 @@ test("additive model calibration selector distinguishes Kimi Code, SWE-2, and ca
     ["moonshot/kimi-k2.6", []],
     ["moonshot/kimi-k3", []],
     ["unknown/model", []],
+    ["zhipu/glm-5.2", []],
+    ["google/gemini-3.1-pro", []],
+    ["anthropic/claude-opus-5", []],
   ]
   for (const [modelID, expected] of cases) {
     assert.deepEqual(pickModelCalibrationVariants(modelID), expected, modelID)
   }
-  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["kimi-k27", "swe-2"])
+  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["gpt", "kimi-k27", "swe-2"])
 })
 
 test("localized Kimi and SWE-2 calibrations preserve policy without upstream identity or tool protocol", () => {
@@ -364,24 +335,43 @@ test("localized Kimi and SWE-2 calibrations preserve policy without upstream ide
   }
 })
 
-test("category files expose GPT-6 Astra calibrations for only three categories", () => {
+test("shipped categories have no separate generation-specific calibration", () => {
   const root = join(process.cwd(), "prompts")
-  const expected = ["hard-reasoning", "deep", "cross-cutting"]
-  for (const workflow of GPT56_WORKFLOWS) {
+  for (const workflow of WORKFLOWS) {
     loadAllPrompts(root, workflow)
-    for (const name of expected) {
+    for (const name of ["hard-reasoning", "deep", "cross-cutting", "frontend", "creative", "research", "quick", "coding", "normal-task", "complex", "documenting"]) {
       const category = getCategoryPrompt(name)
-      const calibration = getCategoryModelCalibration(name, "gpt-6-astra")
       assert.doesNotMatch(category, /<model-calibration/, `${workflow}/category/${name}.md base leaked marker`)
-      assert.ok(calibration.length > 0, `${workflow}/category/${name}.md Astra calibration missing`)
-      assert.equal(getCategoryModelCalibration(name, "openai/gpt-6-astra-fast"), calibration)
-      assert.equal(getCategoryModelCalibration(name, "gpt-6-preview"), "")
-      assert.equal(getCategoryModelCalibration(name, "gpt-7-preview"), "")
-      assert.equal(getCategoryModelCalibration(name, "gpt-5.6-sol"), "")
-      assert.equal(getCategoryModelCalibration(name, "gpt-5.6-sol", true), calibration)
+      for (const model of ["gpt-5.5", "gpt-5.6-sol", "openai/gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "claude-opus-5"]) {
+        assert.equal(getCategoryModelCalibration(name, model), "", `${workflow}/${name}/${model}`)
+        assert.equal(getCategoryModelCalibration(name, model, true), "", `${workflow}/${name}/${model} carry-ahead`)
+      }
     }
-    for (const name of ["frontend", "creative", "research", "quick", "coding", "normal-task", "complex", "documenting"]) {
-      assert.equal(getCategoryModelCalibration(name, "gpt-6-astra"), "", `${workflow}/category/${name}.md must have no Astra block`)
+  }
+})
+
+test("category extension seam selects generic families, ignores old generation keys, and clears on reload", () => {
+  const root = makeTempRoot("v1")
+  try {
+    writeFileSync(join(root, "v1", "category", "deep.md"), [
+      "category-role",
+      '<model-calibration model="gpt">\ngeneric-gpt-extension\n</model-calibration>',
+      '<model-calibration model="gemini">\ngemini-extension\n</model-calibration>',
+      '<model-calibration model="gpt-6-astra">\nobsolete-generation-layer\n</model-calibration>',
+    ].join("\n"))
+    loadAllPrompts(root, "v1")
+    assert.equal(getCategoryPrompt("deep").trim(), "category-role")
+    for (const model of ["gpt-5.6-sol", "openai/gpt-6-astra-fast", "gpt-6-luna", "codex-mini-latest"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "generic-gpt-extension", model)
     }
+    assert.equal(getCategoryModelCalibration("deep", "google/gemini-3-pro"), "gemini-extension")
+    assert.equal(getCategoryModelCalibration("deep", "anthropic/claude-opus-5"), "")
+    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension")
+    writeFileSync(join(root, "v1", "category", "deep.md"), "replacement-role")
+    loadAllPrompts(root, "v1")
+    assert.equal(getCategoryPrompt("deep"), "replacement-role")
+    assert.equal(getCategoryModelCalibration("deep", "gpt-6-astra", true), "")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

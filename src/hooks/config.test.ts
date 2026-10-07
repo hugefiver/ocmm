@@ -8,7 +8,7 @@ import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { loadAllPrompts } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getDeepworkPrompt, loadAllPrompts } from "../intent/prompt-loader.ts"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "v1")
@@ -67,7 +67,6 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
 const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
 const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
@@ -78,6 +77,12 @@ type ConfigTarget = {
 
 function countText(text: string, needle: string): number {
   return text.split(needle).length - 1
+}
+
+function gptCalibration(): string {
+  const source = getDeepworkPrompt("gpt").trim()
+  assert.ok(source, "loaded GPT calibration must not be empty")
+  return source
 }
 
 function taggedPolicy(agentMap: Record<string, unknown>, name: string, tag: string): string {
@@ -223,7 +228,7 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
   const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
   assert.match(reviewerPrompt, /Agent Role: implementation reviewer/)
   assert.match(reviewerPrompt, /workflow-model-calibration/)
-  assert.match(reviewerPrompt, /DEEPWORK MODE ENABLED/)
+  assert.equal(countText(reviewerPrompt, gptCalibration()), 1)
 
   const clarifierPrompt = String((cfg.agent.clarifier as Record<string, unknown>).prompt)
   assert.match(clarifierPrompt, /Agent Role: clarifier/)
@@ -658,7 +663,7 @@ test("configured planning profiles register canonical prompts, policies, permiss
   }
   const target: ConfigTarget = {
     agent: {},
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } } },
   }
 
   await createConfigHandler({
@@ -682,7 +687,7 @@ test("configured planning profiles register canonical prompts, policies, permiss
   const critic = target.agent["plan-critic-low"] as Record<string, unknown>
   assert.ok(critic)
   assert.equal(critic.mode, "subagent")
-  assert.equal(critic.model, "openai/gpt-5.7-sol")
+  assert.equal(critic.model, "openai/gpt-6.1-astra")
   assert.match(String(critic.prompt), /# Agent Role: plan-critic/)
   assert.doesNotMatch(String(critic.prompt), /# Agent Role: planner/)
   assert.doesNotMatch(String(critic.prompt), /<ocmm-locale-guidance>/)
@@ -703,6 +708,10 @@ test("configured planning profiles register canonical prompts, policies, permiss
     },
     { requirementSource: "user-config", primarySource: "catalog-upgrade" },
   )
+  assert.equal(publishedRoute(routeRegistry, "planner-high").requirement.fallbackChain[0]?.model, "gpt-5.6-sol")
+  const criticPrimary = publishedRoute(routeRegistry, "plan-critic-low").requirement.fallbackChain[0]
+  assert.equal(criticPrimary?.model, "gpt-6.1-astra")
+  assert.deepEqual(criticPrimary?.providers, ["openai"])
   for (const name of ["planner-low", "planner-max", "plan-critic-high", "plan-critic-max"]) {
     assert.equal(target.agent[name], undefined, name)
     assert.equal(routeRegistry.snapshot().routes.has(name), false, `${name} route`)
@@ -809,7 +818,7 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
       "planner-low": { model: "host/existing-planner-low" },
     },
     provider: {
-      openai: { models: { "gpt-5.7-sol": {} } },
+      openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } },
     },
   }
 
@@ -819,8 +828,12 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
     getFastMode: () => false,
   })(target, undefined)
 
-  for (const name of ["planner-high", "plan-critic-high", "reviewer-high"] as const) {
-    assert.equal((target.agent[name] as Record<string, unknown>).model, "openai/gpt-5.7-sol", name)
+  for (const [name, model] of [
+    ["planner-high", "gpt-6.1-astra"],
+    ["plan-critic-high", "gpt-6.1-astra"],
+    ["reviewer-high", "gpt-6.2-sol"],
+  ] as const) {
+    assert.equal((target.agent[name] as Record<string, unknown>).model, `openai/${model}`, name)
     assert.deepEqual(
       {
         requirementSource: publishedRoute(routeRegistry, name).requirementSource,
@@ -829,6 +842,8 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
       { requirementSource: "user-config", primarySource: "catalog-upgrade" },
       name,
     )
+    assert.equal(publishedRoute(routeRegistry, name).requirement.fallbackChain[0]?.model, model, name)
+    assert.deepEqual(publishedRoute(routeRegistry, name).requirement.fallbackChain[0]?.providers, ["openai"], name)
   }
 
   assert.equal((target.agent["planner-max"] as Record<string, unknown>).model, "openai/gpt-5.5")
@@ -1043,7 +1058,9 @@ test("user model override selects specialized deepwork prompt variant", async ()
   await handler(cfg, undefined)
 
   assert.match(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
-  assert.match(String((cfg.agent.builder as Record<string, unknown>).prompt), /Expert coding agent/)
+  const builder = String((cfg.agent.builder as Record<string, unknown>).prompt)
+  assert.ok(builder.includes(getDeepworkPrompt("codex").trim()), "Codex-family adapter base")
+  assert.equal(countText(builder, gptCalibration()), 1, "Codex-family shares GPT calibration")
 })
 
 test("config does not clobber an existing user-set model", async () => {
@@ -1059,33 +1076,43 @@ test("config does not clobber an existing user-set model", async () => {
   assert.equal(entry.description, "user-set")
 })
 
-test("config upgrades only catalog-confirmed GPT Sol and Terra lanes", async () => {
+test("config upgrades only catalog-confirmed declared GPT Sol and Astra lanes", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
     agent: {},
     provider: {
       openai: {
         models: {
+          "gpt-5.4": {},
+          "gpt-5.5": {},
           "gpt-5.6-sol": {},
           "gpt-5.7-sol": {},
           "gpt-5.6-terra": {},
           "gpt-5.7-terra": {},
+          "gpt-6.1-sol": {},
+          "gpt-6.2-sol": {},
+          "gpt-6-astra": {},
+          "gpt-6.1-astra": {},
+          "gpt-6.3-terra": {},
+          "gpt-7": {},
+          "gpt-8-astral": {},
         },
       },
     },
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-5.7-sol")
-  assert.equal((cfg.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.7-sol")
-  assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-5.7-terra")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.7-sol")
-  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.7-terra")
-  assert.equal((cfg.agent["normal-task"] as Record<string, unknown>).model, "openai/gpt-5.7-terra")
-  assert.doesNotMatch(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GPT-5\.6 EXECUTION CALIBRATION/)
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6.1-astra")
+  assert.equal((cfg.agent.planner as Record<string, unknown>).model, "openai/gpt-6.1-astra")
+  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent["normal-task"] as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal(countText(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), gptCalibration()), 1)
 })
 
-test("oracle catalog promotion prefers GPT 5.4 and 5.5 cross-generation entries before Terra", async () => {
+test("oracle catalog promotion retains legacy GPT compatibility when its declared Sol lane is unavailable", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
     agent: {},
@@ -1104,18 +1131,134 @@ test("oracle catalog promotion prefers GPT 5.4 and 5.5 cross-generation entries 
   assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-5.4")
 })
 
-test("config layers the GPT-5.6 specialization only for a GPT-5.6 model", async () => {
-  const c = {
-    ...defaultConfig(),
-    agents: { builder: { model: "openai/gpt-5.6-sol" } },
+test("v1 selected GPT generations and aliases share one calibration after role and planner base", async () => {
+  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  const gpt = gptCalibration()
+  const plannerBase = getDeepworkPrompt("planner").trim()
+  for (const model of [
+    "openai/gpt-5.5", "openai/gpt-5.6-sol", "vercel/openai/gpt-5.6-terra",
+    "openai/gpt-6-sol", "providers/openai/gpt-6-sol-fast", "openai/gpt-6-astra",
+    "amazon-bedrock/openai.gpt-6-astra-fast", "apai/gpt-6-luna", "openai/gpt-7-preview",
+    "openai/codex-mini-latest", "openai/gpt-5.3-codex",
+  ]) {
+    const configured = {
+      ...defaultConfig(),
+      agents: Object.fromEntries(BUILTIN_AGENTS.map(({ name }) => [name, { model }])),
+    }
+    const target: ConfigTarget = { agent: {} }
+    const handler = createConfigHandler({ getConfig: () => configured })
+    await handler(target, undefined)
+    await handler(target, undefined)
+    for (const { name, promptSource } of BUILTIN_AGENTS) {
+      const entry = target.agent[name] as Record<string, unknown>
+      const prompt = String(entry.prompt)
+      assert.equal(entry.model, model, `${model}/${name}: explicit model`)
+      assert.equal(countText(prompt, gpt), 1, `${model}/${name}: one exact source`)
+      assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, `${model}/${name}`)
+      const role = getAgentPrompt(promptSource ?? name).trim()
+      if (role) {
+        assert.ok(prompt.indexOf(role) < prompt.indexOf(gpt), `${model}/${name}: role first`)
+        assert.match(prompt, /role prompt above is authoritative/, `${model}/${name}: subordinate calibration`)
+      }
+      if (name === "planner") {
+        assert.equal(countText(prompt, plannerBase), 1, model)
+        assert.ok(prompt.indexOf(plannerBase) < prompt.indexOf(gpt), `${model}: planner base first`)
+      }
+    }
   }
-  const handler = createConfigHandler({ getConfig: () => c })
-  const cfg: { agent: Record<string, unknown> } = { agent: {} }
-  await handler(cfg, undefined)
+})
 
-  const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
-  assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
-  assert.match(prompt, /Outcome-first/)
+test("v1 non-GPT agents and planners retain their existing layers without GPT calibration", async () => {
+  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  for (const [model, layer] of [
+    ["zhipu/glm-5.2", "glm"], ["google/gemini-3.1-pro", "gemini"],
+    ["anthropic/claude-opus-5", "default"], ["kimi-for-coding/kimi-for-coding", "kimi-k27"],
+    ["devin/swe-2-high", "swe-2"], ["unknown/model", "default"],
+  ] as const) {
+    const configured = {
+      ...defaultConfig(),
+      agents: { reviewer: { model }, planner: { model } },
+    }
+    const target: ConfigTarget = { agent: {} }
+    await createConfigHandler({ getConfig: () => configured })(target, undefined)
+    for (const name of ["reviewer", "planner"]) {
+      const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+      assert.equal(countText(prompt, gptCalibration()), 0, `${model}/${name}`)
+      if (name === "reviewer" || layer === "kimi-k27" || layer === "swe-2") {
+        assert.equal(countText(prompt, getDeepworkPrompt(layer).trim()), 1, `${model}/${name}: existing layer`)
+      }
+    }
+    assert.equal(countText(String((target.agent.planner as Record<string, unknown>).prompt), getDeepworkPrompt("planner").trim()), 1, model)
+  }
+})
+
+test("config never loads obsolete GPT sources and tolerates a missing generic calibration after reload", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-unified-gpt-"))
+  try {
+    for (const workflow of ["v1", "codex"] as const) {
+      for (const area of ["agents", "deepwork", "category"]) {
+        mkdirSync(join(root, workflow, area), { recursive: true })
+      }
+      writeFileSync(join(root, workflow, "agents", "planner.md"), "planner-role-fixture")
+      writeFileSync(join(root, workflow, "deepwork", "planner.md"), "planner-base-fixture")
+      writeFileSync(join(root, workflow, "deepwork", "codex.md"), "adapter-base-fixture")
+      writeFileSync(join(root, workflow, "deepwork", "gpt.md"), "generic-gpt-fixture")
+      writeFileSync(join(root, workflow, "deepwork", "gpt-5.6.md"), "obsolete-gpt56-fixture")
+      writeFileSync(join(root, workflow, "deepwork", "gpt-6-astra.md"), "obsolete-astra-fixture")
+      const configured = {
+        ...defaultConfig(), workflow,
+        agents: { planner: { model: "openai/gpt-6-astra" } },
+      }
+      loadAllPrompts(root, workflow)
+      const first: ConfigTarget = { agent: {} }
+      await createConfigHandler({ getConfig: () => configured })(first, undefined)
+      const prompt = String((first.agent.planner as Record<string, unknown>).prompt)
+      assert.equal(countText(prompt, "generic-gpt-fixture"), 1, workflow)
+      assert.doesNotMatch(prompt, /obsolete-gpt56-fixture|obsolete-astra-fixture/, workflow)
+      rmSync(join(root, workflow, "deepwork", "gpt.md"))
+      loadAllPrompts(root, workflow)
+      const reloaded: ConfigTarget = { agent: {} }
+      await createConfigHandler({ getConfig: () => configured })(reloaded, undefined)
+      const reloadedPrompt = String((reloaded.agent.planner as Record<string, unknown>).prompt)
+      assert.match(reloadedPrompt, /planner-role-fixture/)
+      assert.match(reloadedPrompt, /planner-base-fixture/)
+      assert.doesNotMatch(reloadedPrompt, /generic-gpt-fixture|obsolete-gpt56-fixture|obsolete-astra-fixture/, workflow)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  }
+})
+
+test("explicit host prompts bypass GPT assembly while configured promptAppend stays outside calibration", async () => {
+  const promptsRoot = join(process.cwd(), "prompts")
+  try {
+    for (const workflow of ["v1", "codex"] as const) {
+      loadAllPrompts(promptsRoot, workflow)
+      const configured = {
+        ...defaultConfig(), workflow,
+        agents: { planner: { model: "openai/gpt-6-sol", promptAppend: "Configured planner appendix.", variants: { high: "max" as const } } },
+      }
+      const target: ConfigTarget = {
+        agent: {
+          planner: { model: "openai/gpt-6-luna", prompt: "Explicit host planner prompt." },
+          frontend: { model: "openai/gpt-6-astra", prompt: "Explicit host category prompt." },
+        },
+      }
+      await createConfigHandler({ getConfig: () => configured })(target, undefined)
+      for (const name of ["planner", "frontend"]) {
+        const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+        assert.match(prompt, /Explicit host/)
+        assert.equal(countText(prompt, gptCalibration()), 0, `${workflow}/${name}: host owns prompt`)
+      }
+      assert.equal((target.agent.planner as Record<string, unknown>).model, "openai/gpt-6-luna", workflow)
+      const generated = String((target.agent["planner-high"] as Record<string, unknown>).prompt)
+      assert.equal(countText(generated, gptCalibration()), 1, `${workflow}: tier calibration`)
+      assert.ok(generated.indexOf("</workflow-model-calibration>") < generated.indexOf("Configured planner appendix."), `${workflow}: appendix outside subordinate calibration`)
+    }
+  } finally {
+    loadAllPrompts(promptsRoot, "v1")
+  }
 })
 
 test("config composes Kimi Code calibration after each agent's workflow base", async () => {
@@ -1321,10 +1464,11 @@ test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", a
 
     const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
     assert.match(orchestrator, /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is)
-    assert.equal(countText(orchestrator, GPT_56_MARKER), 1)
+    assert.equal(countText(orchestrator, gptCalibration()), 1)
     for (const name of [...BUILTIN_AGENTS.map(({ name: agentName }) => agentName), "reviewer-high", "planner-high"]) {
       const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
-      assert.equal(countText(prompt, GPT_56_MARKER), 1, `${name}: GPT-5.6 carriage`)
+      assert.equal(countText(prompt, gptCalibration()), 1, `${name}: generic GPT carriage`)
+      assert.ok(prompt.includes(getDeepworkPrompt("codex").trim()), `${name}: unguarded adapter base`)
     }
   } finally {
     loadAllPrompts(promptsRoot, "v1")
@@ -1341,29 +1485,34 @@ test("existing host models drive prompt calibration", async () => {
   await handler(cfg, undefined)
 
   const prompt = String((cfg.agent.builder as Record<string, unknown>).prompt)
-  assert.match(prompt, /GPT-5\.6 EXECUTION CALIBRATION/)
+  assert.equal(countText(prompt, gptCalibration()), 1)
 })
 
-test("v1 GPT-6 Sol selections compose the 5.6 layer after the agent-specific base", async () => {
+test("v1 host-selected models drive unified calibration and configured planning tiers inherit it once", async () => {
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   for (const model of ["openai/gpt-6-sol", "providers/openai/gpt-6-sol-fast"]) {
     const cfg: ConfigTarget = {
       agent: { builder: { model }, planner: { model } },
     }
-    await createConfigHandler({ getConfig: () => defaultConfig() })(cfg, undefined)
+    const configured = {
+      ...defaultConfig(),
+      agents: { planner: { model, variants: { high: "max" as const } } },
+    }
+    await createConfigHandler({ getConfig: () => configured })(cfg, undefined)
 
     const builder = String((cfg.agent.builder as Record<string, unknown>).prompt)
-    assert.match(builder, /### Skill Reference \(load on demand\)/, model)
-    assert.equal(countText(builder, GPT_56_MARKER), 1, model)
-    assert.ok(builder.indexOf("### Skill Reference (load on demand)") < builder.indexOf(GPT_56_MARKER), model)
+    assert.equal(countText(builder, gptCalibration()), 1, model)
     assert.doesNotMatch(builder, /# GPT-6 ASTRA/, model)
 
     const planner = String((cfg.agent.planner as Record<string, unknown>).prompt)
     assert.match(planner, /Agent Role: planner/, model)
     assert.match(planner, /Deepwork Planner Injection/, model)
-    assert.equal(countText(planner, GPT_56_MARKER), 1, model)
-    assert.ok(planner.indexOf("Deepwork Planner Injection") < planner.indexOf(GPT_56_MARKER), model)
+    assert.equal(countText(planner, gptCalibration()), 1, model)
+    assert.ok(planner.indexOf(getDeepworkPrompt("planner").trim()) < planner.indexOf(gptCalibration()), model)
     assert.doesNotMatch(planner, /# GPT-6 ASTRA/, model)
+    const tier = cfg.agent["planner-high"] as Record<string, unknown>
+    assert.equal(tier.model, model)
+    assert.equal(countText(String(tier.prompt), gptCalibration()), 1, `${model}: planner-high`)
   }
 })
 
@@ -1410,7 +1559,7 @@ test("multi-hop aliases preserve the effective model and prompt calibration", as
   for (const name of ["reviewer", "oracle"]) {
     const entry = target.agent[name as keyof typeof target.agent] as Record<string, unknown>
     assert.equal(entry.model, "openai/gpt-5.6-sol")
-    assert.match(String(entry.prompt), /GPT-5\.6 EXECUTION CALIBRATION/)
+    assert.equal(countText(String(entry.prompt), gptCalibration()), 1)
     assert.equal(registeredAgentModels.get(name), "openai/gpt-5.6-sol")
   }
 })
@@ -1441,17 +1590,18 @@ test("registeredAgentModels is rebuilt from final agents and compatibility alias
   assert.equal(registeredAgentModels.size, 0)
 })
 
-test("config keeps existing defaults without a matching GPT-5.6 catalog entry", async () => {
+test("config keeps migrated defaults without an eligible declared GPT lane catalog entry", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
     agent: {},
-    provider: { openai: { models: { "gpt-5.5": {} } } },
+    provider: { openai: { models: { "gpt-5.5": {}, "gpt-5.7-sol": {}, "gpt-5.7-terra": {}, "gpt-7": {} } } },
   }
   await handler(cfg, undefined)
 
   assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
   assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6-astra")
-  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-5.6-terra")
+  assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-6.1-sol")
+  assert.equal((cfg.agent.builder as Record<string, unknown>).model, "openai/gpt-6.1-sol")
 })
 
 test("config upgrades GLM 5.1 fallbacks only from a catalog-confirmed GLM 5.2+ model", async () => {
@@ -1502,14 +1652,14 @@ test("GPT catalog lanes take precedence over a GLM 5.2 catalog upgrade", async (
   const cfg: { agent: Record<string, unknown>; provider: Record<string, unknown> } = {
     agent: {},
     provider: {
-      openai: { models: { "gpt-5.6-sol": {} } },
+      openai: { models: { "gpt-6.2-sol": {}, "gpt-6.1-astra": {} } },
       zhipu: { models: { "glm-5.2": {} } },
     },
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-5.6-sol")
-  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6.1-astra")
 })
 
 test("disabledAgents skips registration", async () => {
@@ -1800,7 +1950,7 @@ test("registry-managed registration publishes orthogonal route provenance for se
       reviewer: { model: "openai/host-reviewer" },
       orchestrator: { model: "openai/host-orchestrator" },
     },
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } } },
   }
 
   await createConfigHandler({
@@ -1860,6 +2010,18 @@ test("registry-managed registration publishes orthogonal route provenance for se
     },
     { requirementSource: "category-default", primarySource: "builtin-requirement" },
   )
+  for (const [name, model] of [
+    ["reviewer", "openai/host-reviewer"],
+    ["builder", "openai/user-builder"],
+    ["orchestrator", "openai/host-orchestrator"],
+    ["planner", "openai/gpt-6.1-astra"],
+    ["hard-reasoning", "openai/gpt-6.1-astra"],
+    ["doc-search", "openai/gpt-6-luna"],
+    ["quick", "openai/gpt-6-luna"],
+  ] as const) {
+    assert.equal(publishedRoute(routeRegistry, name).model, model, name)
+    assert.equal((target.agent[name] as Record<string, unknown>).model, model, name)
+  }
   for (const route of snapshot.routes.values()) {
     assert.notEqual(route.requirementSource, "input-variant")
     assert.notEqual(route.requirementSource, "no-op")
@@ -2016,6 +2178,7 @@ test("registry-managed registration samples fast activation once for each config
 
 test("registry rebuilds atomically, materializes selected primaries, and retains a prior snapshot on failure", async () => {
   const routeRegistry = createEffectiveRouteRegistry()
+  const plannerChain = structuredClone(BUILTIN_AGENTS.find((agent) => agent.name === "planner")!.requirement.fallbackChain)
   let config: ReturnType<typeof defaultConfig> = {
     ...defaultConfig(),
     agents: { "deleted-worker": { model: "openai/deleted-worker" } },
@@ -2027,18 +2190,31 @@ test("registry rebuilds atomically, materializes selected primaries, and retains
   })
   const target: ConfigTarget = {
     agent: { reviewer: { model: "openai/host-reviewer" } },
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } } },
   }
 
   await handler(target, undefined)
   assert.equal(publishedRoute(routeRegistry, "deleted-worker").requirement.fallbackChain[0]?.model, "deleted-worker")
   assert.equal(publishedRoute(routeRegistry, "reviewer").requirement.fallbackChain[0]?.model, "host-reviewer")
-  assert.equal(publishedRoute(routeRegistry, "planner").requirement.fallbackChain[0]?.model, "gpt-5.7-sol")
+  const plannerRoute = publishedRoute(routeRegistry, "planner")
+  assert.equal(plannerRoute.model, "openai/gpt-6.1-astra")
+  assert.equal(plannerRoute.primarySource, "catalog-upgrade")
+  const expectedPlannerChain = [
+    { providers: ["openai"], model: "gpt-6.1-astra", variant: "max" },
+    ...plannerChain.filter((entry) => entry.model !== "gpt-6-astra"),
+  ]
+  assert.deepEqual(plannerRoute.requirement.fallbackChain, expectedPlannerChain)
+  assert.deepEqual(BUILTIN_AGENTS.find((agent) => agent.name === "planner")!.requirement.fallbackChain, plannerChain)
+  const firstSnapshot = routeRegistry.snapshot()
 
   config = defaultConfig()
   await handler(target, undefined)
   const rebuiltSnapshot = routeRegistry.snapshot()
+  assert.notEqual(rebuiltSnapshot, firstSnapshot)
   assert.equal(rebuiltSnapshot.routes.has("deleted-worker"), false)
+  assert.equal(firstSnapshot.routes.has("deleted-worker"), true)
+  assert.equal(publishedRoute(routeRegistry, "planner").model, "openai/gpt-6.1-astra")
+  assert.deepEqual(publishedRoute(routeRegistry, "planner").requirement.fallbackChain, expectedPlannerChain)
 
   const failedHandler = createConfigHandler({
     getConfig: () => {
@@ -2172,12 +2348,16 @@ test("compatibility mode suppresses catalog upgrades for unresolved qualified al
   }
   const target: ConfigTarget = {
     agent: {},
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.2-sol": {} } } },
   }
+
+  const control: ConfigTarget = { agent: {}, provider: structuredClone(target.provider) }
+  await createConfigHandler({ getConfig: defaultConfig })(control, undefined)
+  assert.equal((control.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.2-sol")
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 
-  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-5.6-sol")
+  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.1-sol")
 })
 
 test("compatibility mode suppresses category catalog upgrades for unresolved qualified aliases", async () => {
@@ -2187,8 +2367,12 @@ test("compatibility mode suppresses category catalog upgrades for unresolved qua
   }
   const target: ConfigTarget = {
     agent: {},
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } } },
   }
+
+  const control: ConfigTarget = { agent: {}, provider: structuredClone(target.provider) }
+  await createConfigHandler({ getConfig: defaultConfig })(control, undefined)
+  assert.equal((control.agent["hard-reasoning"] as Record<string, unknown>).model, "openai/gpt-6.1-astra")
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 

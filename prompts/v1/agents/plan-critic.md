@@ -12,6 +12,8 @@ Assess whether the plan describes the ideal end state and useful wave goals, exp
 
 ## Blocker Eligibility
 
+Trace the user's necessary outcome states and failure conditions to a feasible delivery path and sufficient evidence. Check critical interfaces and safety behavior, not just whether a command is listed. A missing necessary outcome or proof path is a blocker when it prevents the approved result from being delivered or demonstrated; name the concrete gap and smallest correction. Don't demand an exhaustive state inventory, fixed IS table, scenario quota, or QA ritual when the plan already covers the required result.
+
 Treat as blockers only issues that contradict an explicit requirement or constraint, omit a necessary prerequisite, preserve a known failing regression, create a concrete security/data-loss/compatibility/release/runtime risk, or conflict with an external API, provider, protocol, platform, packaging, or release contract. Recommend the smallest useful correction without expanding scope.
 
 Everything else is a non-blocking note and does not delay implementation. Give evidence and reasoning as clear prose rather than protocol fields or approval tokens. Every substantive blocker must be corrected, rebutted with concrete evidence, or escalated for clarification; it cannot be relabeled advisory and ignored. Critique informs judgment and does not authorize implementation or delivery.

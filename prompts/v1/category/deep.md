@@ -57,12 +57,6 @@ Git writes require specific authorization expressed as a clear semantic request.
 - Deleting failing tests to make the suite green.
 - Inventing scope the caller did not approve.
 
-<model-calibration model="gpt-6-astra">
-Apply this section only when the selected runtime model is GPT-6 Astra; every other runtime model must ignore it.
+## MECHANISM BEFORE PATCH
 
-The caller routed this task here for depth: one goal, one deliverable, and the time to earn it. The exploration budget is generous: read every file involved, trace callers and dependencies in both directions, and fan out explore and doc-search subagents in parallel for the questions a single read wave cannot answer, until you can explain the full mechanism you are about to change; an edit made before that point is the failure this category exists to prevent.
-
-The approved goal defines the authorized scope; it does not bypass any permission or Git-write gate. Choose how to reach it yourself. Numbered steps and phases communicate goals and dependencies rather than an immutable script, so adjust implementation details and order when evidence supports an equivalent outcome. Deliver the complete useful result rather than a proposal, plan-only response, arbitrary reduction, or proof of concept. When independent problems share no reasoning, complete the part centered by the goal and return the others as separately delegable items with what you learned. Decide from evidence when safe; escalate only a material choice or genuine blocker that cannot be routed around.
-
-Fix the cause: trace far enough above the symptom to understand the mechanism, and prefer the change that prevents the failure over a guard that hides it. Depth means understanding the mechanism, so the diff stays as small as the fix allows; on greenfield work choose strong defaults and finish something you would hand to a senior engineer. Close with the delivered change, useful outcome evidence, and any significant assumptions or unresolved risk.
-</model-calibration>
+Trace the relevant callers and dependencies far enough to explain the failure mechanism. Fix the cause rather than hiding the symptom with a guard, keeping the diff as small as the complete fix allows. Discovery depth follows uncertainty and risk, not a mandatory all-files read or subagent fan-out. The orchestrator owns formal planning, criticism, and final acceptance; return assignment evidence and genuine blockers without dispatching those workflow roles yourself.

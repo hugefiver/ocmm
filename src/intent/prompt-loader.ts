@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,gpt-5.6,gpt-6-astra,claude-opus-5,gemini,glm,codex,planner,kimi-k27,swe-2}.md
+ *     deepwork/{default,gpt,claude-opus-5,gemini,glm,codex,planner,kimi-k27,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGpt6AstraModel, isGpt6SolModel, isKimiK2CodePromptModel, isSwe2Model, parseGptVersion, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isKimiK2CodePromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -26,8 +26,8 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "v1" | "codex"
 
-type DeepworkVariant = "default" | "gpt" | "gpt-5.6" | "gpt-6-astra" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
-export type ModelCalibrationVariant = "kimi-k27" | "swe-2"
+type DeepworkVariant = "default" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
+export type ModelCalibrationVariant = "gpt" | "kimi-k27" | "swe-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -42,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "gpt-5.6", "gpt-6-astra", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -128,8 +128,6 @@ export function pickDeepworkVariantForAgent(opts: {
   if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
     return "claude-opus-5"
   }
-  if (isGpt56Model(opts.preferenceModel) || isGpt6SolModel(opts.preferenceModel)) return "gpt-5.6"
-  if (isGpt6AstraModel(opts.preferenceModel)) return "gpt-6-astra"
   const family = classifyModelFamily({
     providerID: "",
     modelID: opts.preferenceModel,
@@ -141,23 +139,14 @@ export function pickDeepworkVariantForAgent(opts: {
   return "default"
 }
 
-/** GPT-5.6 family, including Sol, Terra, Luna, and provider-versioned aliases. */
-export function isGpt56Model(modelID: string): boolean {
-  const version = parseGptVersion(modelID)
-  return version !== null && version[0] === 5 && version[1] === 6
-}
-
-/** Exact GPT-6 Astra family, including provider-prefixed and suffixed aliases. */
-export function isGpt6Model(modelID: string): boolean {
-  return isGpt6AstraModel(modelID)
-}
-
 /** Additive model calibrations, kept independent from reasoning-family classification. */
 export function pickModelCalibrationVariants(
   modelID: string,
   carryAhead = false,
 ): ModelCalibrationVariant[] {
-  if (carryAhead) return ["kimi-k27", "swe-2"]
+  if (carryAhead) return ["gpt", "kimi-k27", "swe-2"]
+  const family = classifyModelFamily({ modelID })
+  if (family === "gpt" || family === "codex") return ["gpt"]
   if (isKimiK2CodePromptModel(modelID)) return ["kimi-k27"]
   if (isSwe2Model(modelID)) return ["swe-2"]
   return []
@@ -178,8 +167,12 @@ export function getCategoryModelCalibration(
   modelID: string,
   carryAhead = false,
 ): string {
-  const calibration = categoryModelCalibrations.get(name)?.get("gpt-6-astra") ?? ""
-  return carryAhead || isGpt6AstraModel(modelID) ? calibration : ""
+  const calibrations = categoryModelCalibrations.get(name)
+  const family = classifyModelFamily({ modelID })
+  const variants = carryAhead
+    ? pickModelCalibrationVariants(modelID, true)
+    : [family === "codex" ? "gpt" : family]
+  return variants.map((variant) => calibrations?.get(variant) ?? "").filter(Boolean).join("\n\n---\n\n")
 }
 
 export function getShellSafetyPrompt(): string {

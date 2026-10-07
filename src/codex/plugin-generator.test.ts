@@ -457,7 +457,7 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.ok(deep)
   assert.equal(deep.reasoningEffort, "xhigh")
   assert.ok(documenting)
-  assert.equal(documenting.model, "gpt-5.6-terra")
+  assert.equal(documenting.model, "gpt-6.1-sol")
   assert.ok(oracle)
   assert.equal(oracle.sourceName, "oracle")
   assert.equal(oracle.reasoningEffort, "xhigh")
@@ -549,93 +549,88 @@ test("Codex dispatch rules preserve source role delegation permissions", async (
   }
 })
 
-test("Codex agent composition reuses the guarded GPT-5.6 layer for GPT-6 Sol without losing roles or tools", async () => {
+test("Codex agent composition shares one GPT source across generations, planning tiers, and categories", async () => {
   for (const workflow of ["v1", "codex"] as const) {
-    const agents = await buildCodexAgents({
-      config: {
-        ...defaultConfig(),
-        workflow,
-        agents: { orchestrator: { model: "openai/gpt-6-sol" } },
-        categories: { coding: { model: "openai/gpt-6-sol" } },
-      },
-      cwd: process.cwd(),
-      skillsRoot: join(process.cwd(), "skills"),
-    })
-    const orchestrator = agents.find((agent) => agent.sourceName === "orchestrator")
-    const coding = agents.find((agent) => agent.sourceName === "coding")
-    assert.ok(orchestrator, `${workflow} orchestrator`)
-    assert.ok(coding, `${workflow} coding`)
-    assert.equal(orchestrator.model, "gpt-6-sol", `${workflow} orchestrator model`)
-    assert.equal(coding.model, "gpt-6-sol", `${workflow} coding model`)
-    assert.equal(agents.some((agent) => /gpt-6-sol/i.test(agent.name)), false, `${workflow}: no separate Sol profile`)
-    assert.equal(existsSync(join(process.cwd(), "prompts", workflow, "deepwork", "gpt-6-sol.md")), false, `${workflow}: no Sol variant source`)
-
-    const orchestratorPrompt = extractOriginalDeepworkPrompt(orchestrator.developerInstructions)
-    const codingPrompt = extractOriginalDeepworkPrompt(coding.developerInstructions)
-    const orchestratorRole = getAgentPrompt("orchestrator").trim()
-    const codingRole = getCategoryPrompt("coding").trim()
-    const calibrations = [
-      getDeepworkPrompt("default"),
-      getDeepworkPrompt("gpt"),
-      getDeepworkPrompt("gpt-5.6"),
-      getDeepworkPrompt("gpt-6-astra"),
-      getDeepworkPrompt("claude-opus-5"),
-      getDeepworkPrompt("kimi-k27"),
-      getDeepworkPrompt("swe-2"),
-    ].map((prompt) => prompt.trim()).filter(Boolean)
-
-    assert.equal(orchestratorPrompt.includes(orchestratorRole), true, `${workflow} orchestrator role composition`)
-    assert.equal(codingPrompt.includes(codingRole), true, `${workflow} coding role composition`)
-    assert.ok(orchestratorPrompt.indexOf(orchestratorRole) < orchestratorPrompt.indexOf("# GPT-5.6 EXECUTION CALIBRATION"), `${workflow} orchestrator role first`)
-    assert.ok(codingPrompt.indexOf(codingRole) < codingPrompt.indexOf("# GPT-5.6 EXECUTION CALIBRATION"), `${workflow} coding role first`)
-    assert.equal(countOccurrences(orchestratorPrompt, "# GPT-5.6 EXECUTION CALIBRATION"), 1, `${workflow} orchestrator shared layer once`)
-    assert.equal(countOccurrences(codingPrompt, "# GPT-5.6 EXECUTION CALIBRATION"), 1, `${workflow} coding shared layer once`)
-    assert.match(orchestrator.developerInstructions, /Codex tool compatibility:/, `${workflow} orchestrator tool contract`)
-    assert.match(coding.developerInstructions, /Codex tool compatibility:/, `${workflow} coding tool contract`)
-    assert.match(orchestrator.developerInstructions, /## Subagent Dispatch Compatibility/, `${workflow} orchestrator dispatch contract`)
-    assert.match(coding.developerInstructions, /## Subagent Dispatch Compatibility/, `${workflow} coding dispatch contract`)
-    assert.equal(calibrations.some((prompt) => orchestratorPrompt.includes(prompt)), true, `${workflow} orchestrator calibration`)
-    assert.equal(calibrations.some((prompt) => codingPrompt.includes(prompt)), true, `${workflow} coding calibration`)
-
-    const specialization = getDeepworkPrompt("gpt-5.6").trim()
-    assert.ok(orchestratorPrompt.includes(specialization), `${workflow} orchestrator uses existing layer`)
-    assert.ok(codingPrompt.includes(specialization), `${workflow} coding uses existing layer`)
-    assert.match(specialization, /apply only to GPT-5\.6 and GPT-6 Sol/i, `${workflow} dual-model guard in calibration`)
-    assert.match(specialization, /GPT-6 Astra, Luna, and other GPT-6 models ignore (?:it|this layer)/, `${workflow} guard excludes other GPT-6`)
-    assert.match(specialization, /Both support native `max`/, `${workflow} native max`)
-
-    if (workflow === "codex") {
-      for (const calibration of [
-        getDeepworkPrompt("gpt-5.6"),
-        getDeepworkPrompt("gpt-6-astra"),
-        getDeepworkPrompt("kimi-k27"),
-        getDeepworkPrompt("swe-2"),
-      ]) {
-        assert.equal(orchestratorPrompt.includes(calibration.trim()), true, `codex orchestrator carries ${calibration.length}-byte calibration`)
-        assert.equal(codingPrompt.includes(calibration.trim()), true, `codex coding carries ${calibration.length}-byte calibration`)
+    for (const model of [
+      "openai/gpt-5.5", "openai/gpt-5.6-sol", "openai/gpt-6-sol", "apai/gpt-6.1-sol", "openai/gpt-6-astra",
+      "apai/gpt-6-luna", "providers/openai/gpt-6-sol-fast", "amazon-bedrock/openai.gpt-6-astra-fast",
+      "openai/gpt-7-preview", "openai/codex-mini-latest",
+    ]) {
+      const agents = await buildCodexAgents({
+        config: {
+          ...defaultConfig(),
+          workflow,
+          agents: {
+            orchestrator: { model },
+            planner: { model, variants: { high: "high" as const } },
+            "plan-critic": { model, variants: { low: "low" as const } },
+          },
+          categories: { coding: { model }, deep: { model }, "cross-cutting": { model } },
+        },
+        cwd: process.cwd(),
+        skillsRoot: join(process.cwd(), "skills"),
+      })
+      const gpt = getDeepworkPrompt("gpt").trim()
+      const plannerBase = getDeepworkPrompt("planner").trim()
+      const adapter = getDeepworkPrompt("codex").trim()
+      assert.ok(gpt && plannerBase && adapter)
+      assert.equal(agents.some((agent) => /gpt-\d/i.test(agent.name)), false, `${workflow}: no generation-specific profile`)
+      for (const sourceName of ["orchestrator", "planner", "planner-high", "plan-critic", "plan-critic-low", "coding", "deep", "cross-cutting"]) {
+        const agent = agents.find((candidate) => candidate.sourceName === sourceName)
+        assert.ok(agent, `${workflow}/${model}/${sourceName}`)
+        const assembled = extractOriginalDeepworkPrompt(agent.developerInstructions)
+        const roleName = sourceName === "planner-high" ? "planner" : sourceName === "plan-critic-low" ? "plan-critic" : sourceName
+        const role = (getAgentPrompt(roleName) || getCategoryPrompt(roleName)).trim()
+        assert.ok(role)
+        assert.ok(assembled.indexOf(role) < assembled.indexOf(gpt), `${workflow}/${model}/${sourceName}: role first`)
+        assert.equal(countOccurrences(assembled, gpt), 1, `${workflow}/${model}/${sourceName}: exact source once`)
+        assert.doesNotMatch(assembled, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/)
+        assert.match(agent.developerInstructions, /Codex tool compatibility:/)
+        assert.match(agent.developerInstructions, /## Subagent Dispatch Compatibility/)
+        if (sourceName.startsWith("planner")) {
+          assert.equal(countOccurrences(assembled, plannerBase), 1, `${workflow}/${sourceName}: planner base`)
+          assert.ok(assembled.indexOf(plannerBase) < assembled.indexOf(gpt))
+        }
+        if (workflow === "codex") {
+          assert.equal(countOccurrences(assembled, adapter), 1, `${sourceName}: unguarded adapter base`)
+          for (const variant of ["kimi-k27", "swe-2"] as const) {
+            assert.equal(countOccurrences(assembled, getDeepworkPrompt(variant).trim()), 1, `${sourceName}: ${variant} carry-ahead`)
+          }
+        }
       }
     }
   }
 })
 
-test("Codex agent composition continues to select GPT-5.6 Sol without a separate variant", async () => {
-  for (const workflow of ["v1", "codex"] as const) {
+test("Codex non-GPT model selections retain role, planner, adapter, and one runtime-guarded GPT carry-ahead", async () => {
+  for (const model of ["github-copilot/claude-sonnet-4-6", "github-copilot/gemini-3.1-pro", "github-copilot/glm-5.2", "github-copilot/kimi-k2.8", "github-copilot/swe-2-high"]) {
     const agents = await buildCodexAgents({
       config: {
         ...defaultConfig(),
-        workflow,
-        agents: { orchestrator: { model: "openai/gpt-5.6-sol" } },
-        categories: { coding: { model: "openai/gpt-5.6-sol" } },
+        workflow: "codex",
+        agents: { orchestrator: { model }, planner: { model } },
+        categories: { coding: { model }, "cross-cutting": { model } },
       },
       cwd: process.cwd(),
       skillsRoot: join(process.cwd(), "skills"),
     })
-    for (const name of ["orchestrator", "coding"]) {
+    const gpt = getDeepworkPrompt("gpt").trim()
+    const adapter = getDeepworkPrompt("codex").trim()
+    assert.match(gpt, /(?:apply|use)[^\n]*only[^\n]*(?:runtime|selected)[^\n]*(?:GPT|Codex)/i)
+    assert.match(gpt, /(?:non-GPT|every other runtime model)[^\n]*ignore/i)
+    assert.match(gpt, /guard[^\n]*only[^\n]*calibration[^\n]*not[^\n]*role[^\n]*planner[^\n]*adapter/i, "guard cannot disable other policy layers")
+    for (const name of ["orchestrator", "planner", "coding", "cross-cutting"]) {
       const agent = agents.find(({ sourceName }) => sourceName === name)
-      assert.ok(agent, `${workflow}/${name}`)
-      assert.equal(agent.model, "gpt-5.6-sol", `${workflow}/${name}`)
+      assert.ok(agent, `${model}/${name}`)
+      assert.equal(agent.model, model.slice(model.indexOf("/") + 1), `${model}/${name}: explicit non-GPT model`)
       const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
-      assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt-5.6").trim()), 1, `${workflow}/${name}`)
+      assert.equal(countOccurrences(prompt, gpt), 1, `${model}/${name}`)
+      assert.equal(countOccurrences(prompt, adapter), 1, `${model}/${name}: adapter not gated`)
+      assert.ok(prompt.indexOf(adapter) < prompt.indexOf(gpt), `${name}: guard is confined to GPT calibration`)
+      if (name === "planner") {
+        assert.equal(countOccurrences(prompt, getDeepworkPrompt("planner").trim()), 1)
+        assert.match(prompt, /planner never dispatches that review/i)
+      }
     }
   }
 })
@@ -651,6 +646,7 @@ test("Codex agents carry guarded Kimi and SWE-2 calibrations once without replac
 
   for (const agent of agents) {
     const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
+    assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 1, `${agent.sourceName}: generic GPT carry-ahead`)
     assert.equal(countOccurrences(prompt, kimi), 1, `${agent.sourceName}: Kimi calibration`)
     assert.equal(countOccurrences(prompt, swe2), 1, `${agent.sourceName}: SWE-2 calibration`)
     assert.match(kimi, /every other runtime model must ignore it/)
@@ -675,29 +671,79 @@ test("Codex subscription defaults cover every always-on role without activating 
     planner: ["gpt-6-astra", "xhigh"],
     builder: ["gpt-6-astra", "xhigh"],
     reviewer: ["gpt-6-astra", "xhigh"],
-    clarifier: ["gpt-5.6-sol", "xhigh"],
+    clarifier: ["gpt-6.1-sol", "xhigh"],
     "plan-critic": ["gpt-6-astra", "xhigh"],
-    oracle: ["gpt-5.6-terra", "xhigh"],
-    "oracle-2nd": ["gpt-5.6-sol", "xhigh"],
-    "doc-search": ["gpt-5.6-luna", "high"],
-    explore: ["gpt-5.6-luna", "high"],
-    "code-search": ["gpt-5.6-luna", "high"],
-    "media-reader": ["gpt-5.6-luna", "high"],
+    oracle: ["gpt-6.1-sol", "xhigh"],
+    "oracle-2nd": ["gpt-6.1-sol", "xhigh"],
+    "doc-search": ["gpt-6-luna", "high"],
+    explore: ["gpt-6-luna", "medium"],
+    "code-search": ["gpt-6-luna", "medium"],
+    "media-reader": ["gpt-6-luna", "high"],
     "hard-reasoning": ["gpt-6-astra", "max"],
     deep: ["gpt-6-astra", "xhigh"],
-    complex: ["gpt-5.6-sol", "xhigh"],
+    complex: ["gpt-6.1-sol", "xhigh"],
     creative: ["gpt-6-astra", "high"],
     frontend: ["gpt-6-astra", "xhigh"],
-    research: ["gpt-5.6-terra", "xhigh"],
-    quick: ["gpt-5.6-terra", "high"],
-    coding: ["gpt-5.6-terra", "xhigh"],
-    "normal-task": ["gpt-5.6-terra", "xhigh"],
-    documenting: ["gpt-5.6-terra", "high"],
+    research: ["gpt-6.1-sol", "xhigh"],
+    quick: ["gpt-6.1-sol", "medium"],
+    coding: ["gpt-6.1-sol", "xhigh"],
+    "normal-task": ["gpt-6.1-sol", "xhigh"],
+    documenting: ["gpt-6.1-sol", "high"],
   }
   assert.deepEqual(
     Object.fromEntries(agents.map((agent) => [agent.sourceName, [agent.model, agent.reasoningEffort]])),
     expected,
   )
+})
+
+test("Codex migration leaves explicit legacy model chains untouched and preserves new Sol and Luna low effort", async () => {
+  const agents = await buildCodexAgents({
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      agents: {
+        orchestrator: { models: ["openai/gpt-5.4", "openai/gpt-6.1-sol"], variant: "xhigh" },
+        builder: { model: "openai/gpt-5.6-sol", variant: "max" },
+        clarifier: { model: "openai/gpt-5.6-terra", variant: "medium" },
+        "doc-search": { model: "openai/gpt-5.4-mini", variant: "low" },
+        "code-search": { model: "apai/gpt-6-luna", variant: "medium" },
+        planner: { model: "apai/gpt-6.2-astra", variant: "max" },
+        oracle: { model: "apai/gpt-6.1-sol", variants: { low: "low" as const, max: "max" as const } },
+        reviewer: { model: "apai/gpt-6.1-sol", variant: "medium" },
+        "plan-critic": { model: "apai/gpt-6.1-sol", variants: { low: "low" as const } },
+      },
+      categories: {
+        quick: { model: "apai/gpt-6.1-sol", variant: "low" },
+        documenting: { model: "apai/gpt-6.1-sol", variant: "medium" },
+        coding: { model: "openai/gpt-5.5", variant: "xhigh" },
+        "normal-task": { requirement: { fallbackChain: [
+          { providers: ["apai"], model: "gpt-6.1-sol", reasoningEffort: "minimal" },
+        ] } },
+      },
+    },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  const bySource = new Map(agents.map((agent) => [agent.sourceName, agent]))
+  for (const [role, model, effort] of [
+    ["orchestrator", "gpt-5.4", "xhigh"],
+    ["builder", "gpt-5.6-sol", "max"],
+    ["clarifier", "gpt-5.6-terra", "high"],
+    ["doc-search", "gpt-5.4-mini", "low"],
+    ["code-search", "gpt-6-luna", "medium"],
+    ["planner", "gpt-6.2-astra", "max"],
+    ["oracle-low", "gpt-6.1-sol", "xhigh"],
+    ["oracle-max", "gpt-6.1-sol", "max"],
+    ["reviewer", "gpt-6.1-sol", "xhigh"],
+    ["plan-critic-low", "gpt-6.1-sol", "xhigh"],
+    ["quick", "gpt-6.1-sol", "low"],
+    ["documenting", "gpt-6.1-sol", "medium"],
+    ["coding", "gpt-5.5", "xhigh"],
+    ["normal-task", "gpt-6.1-sol", "low"],
+  ]) {
+    assert.deepEqual([bySource.get(role!)?.model, bySource.get(role!)?.reasoningEffort], [model, effort], role)
+  }
+  assert.deepEqual(bySource.get("orchestrator")?.preferredChain, ["openai/gpt-5.4", "openai/gpt-6.1-sol"])
 })
 
 test("Codex project OA snapshot loads without user profiles and produces the exact 22-role matrix", { concurrency: false }, async () => {
@@ -710,13 +756,13 @@ test("Codex project OA snapshot loads without user profiles and produces the exa
   }
   const source = {
     agents: {
-      orchestrator: ["apai/gpt-6-sol", "high"],
+      orchestrator: ["apai/gpt-6.1-sol", "high"],
       planner: ["apai/gpt-6-astra", "high"],
       reviewer: ["apai/gpt-6-astra", "high"],
-      clarifier: ["apai/gpt-6-sol", "high"],
+      clarifier: ["apai/gpt-6.1-sol", "high"],
       "plan-critic": ["apai/gpt-6-astra", "high"],
-      oracle: ["apai/gpt-5.6-terra", "xhigh"],
-      "oracle-2nd": ["apai/gpt-6-sol", "high"],
+      oracle: ["apai/gpt-6.1-sol", "xhigh"],
+      "oracle-2nd": ["apai/gpt-6.1-sol", "high"],
       "doc-search": ["apai/gpt-6-luna", "high"],
       explore: ["apai/gpt-6-luna", "medium"],
       "code-search": ["apai/gpt-6-luna", "medium"],
@@ -725,39 +771,39 @@ test("Codex project OA snapshot loads without user profiles and produces the exa
     categories: {
       "hard-reasoning": ["apai/gpt-6-astra", "max"],
       deep: ["apai/gpt-6-astra", "high"],
-      complex: ["apai/gpt-6-sol", "xhigh"],
+      complex: ["apai/gpt-6.1-sol", "xhigh"],
       creative: ["apai/gpt-6-astra", "high"],
       frontend: ["apai/gpt-6-astra", "xhigh"],
-      research: ["apai/gpt-6-sol", "high"],
+      research: ["apai/gpt-6.1-sol", "high"],
       quick: ["apai/gpt-6-luna", "medium"],
-      coding: ["apai/gpt-6-sol", "xhigh"],
-      "normal-task": ["apai/gpt-6-sol", "high"],
-      documenting: ["apai/gpt-6-sol", "medium"],
+      coding: ["apai/gpt-6.1-sol", "xhigh"],
+      "normal-task": ["apai/gpt-6.1-sol", "high"],
+      documenting: ["apai/gpt-6.1-sol", "medium"],
     },
   } as const
   const expectedGenerated = {
-    orchestrator: ["gpt-6-sol", "high"],
+    orchestrator: ["gpt-6.1-sol", "high"],
     planner: ["gpt-6-astra", "high"],
     builder: ["gpt-6-astra", "xhigh"],
     reviewer: ["gpt-6-astra", "xhigh"],
-    clarifier: ["gpt-6-sol", "high"],
+    clarifier: ["gpt-6.1-sol", "high"],
     "plan-critic": ["gpt-6-astra", "xhigh"],
-    oracle: ["gpt-5.6-terra", "xhigh"],
-    "oracle-2nd": ["gpt-6-sol", "xhigh"],
+    oracle: ["gpt-6.1-sol", "xhigh"],
+    "oracle-2nd": ["gpt-6.1-sol", "xhigh"],
     "doc-search": ["gpt-6-luna", "high"],
-    explore: ["gpt-6-luna", "high"],
-    "code-search": ["gpt-6-luna", "high"],
+    explore: ["gpt-6-luna", "medium"],
+    "code-search": ["gpt-6-luna", "medium"],
     "media-reader": ["gpt-6-luna", "high"],
     "hard-reasoning": ["gpt-6-astra", "max"],
     deep: ["gpt-6-astra", "high"],
-    complex: ["gpt-6-sol", "xhigh"],
+    complex: ["gpt-6.1-sol", "xhigh"],
     creative: ["gpt-6-astra", "high"],
     frontend: ["gpt-6-astra", "xhigh"],
-    research: ["gpt-6-sol", "high"],
-    quick: ["gpt-6-luna", "high"],
-    coding: ["gpt-6-sol", "xhigh"],
-    "normal-task": ["gpt-6-sol", "high"],
-    documenting: ["gpt-6-sol", "high"],
+    research: ["gpt-6.1-sol", "high"],
+    quick: ["gpt-6-luna", "medium"],
+    coding: ["gpt-6.1-sol", "xhigh"],
+    "normal-task": ["gpt-6.1-sol", "high"],
+    documenting: ["gpt-6.1-sol", "medium"],
   }
   try {
     process.env.CODEX_HOME = codexHome
@@ -781,12 +827,12 @@ test("Codex project OA snapshot loads without user profiles and produces the exa
     assert.equal(loaded.activeProfile, undefined)
     assert.deepEqual(Object.keys(loaded.config.agents ?? {}).sort(), Object.keys(source.agents).sort())
     assert.deepEqual(Object.keys(loaded.config.categories ?? {}).sort(), Object.keys(source.categories).sort())
-    assert.deepEqual(loaded.config.agents?.orchestrator, { model: "apai/gpt-6-sol", variant: "high" })
+    assert.deepEqual(loaded.config.agents?.orchestrator, { model: "apai/gpt-6.1-sol", variant: "high" })
 
     writeFileSync(join(codexHome, "ocmm.jsonc"), JSON.stringify({ agents: { orchestrator: { model: "apai/gpt-5.6-luna", variant: "max" } } }))
     const withoutUserBase = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
     assert.deepEqual(withoutUserBase.sources, { project: configPath })
-    assert.equal(withoutUserBase.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+    assert.equal(withoutUserBase.config.agents?.orchestrator?.model, "apai/gpt-6.1-sol")
 
     const profileDir = join(codexHome, "ocmm-profiles")
     mkdirSync(profileDir)
@@ -801,11 +847,11 @@ test("Codex project OA snapshot loads without user profiles and produces the exa
     const isolated = loadConfig({ cwd: projectRoot, host: "codex", includeUser: false })
     assert.deepEqual(isolated.sources, { project: configPath })
     assert.equal(isolated.activeProfile, undefined)
-    assert.equal(isolated.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+    assert.equal(isolated.config.agents?.orchestrator?.model, "apai/gpt-6.1-sol")
     const adapter = loadAdapterConfig(projectRoot)
     assert.equal(adapter.host, "codex")
     assert.equal(adapter.config.workflow, "codex")
-    assert.equal(adapter.config.agents?.orchestrator?.model, "apai/gpt-6-sol")
+    assert.equal(adapter.config.agents?.orchestrator?.model, "apai/gpt-6.1-sol")
     const agents = await buildCodexAgents({ config: adapter.config, cwd: projectRoot, skillsRoot: join(projectRoot, "skills") })
     assert.deepEqual(
       Object.fromEntries(agents.map(({ sourceName, model, reasoningEffort }) => [sourceName, [model, reasoningEffort]])),
@@ -832,7 +878,7 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
   const orchestrator = bySource.get("orchestrator")
   const planner = bySource.get("planner")
   const opusPrompt = normalizeLf(readFileSync(join(process.cwd(), "prompts", "codex", "deepwork", "claude-opus-5.md"), "utf8")).trim()
-  const gpt56Prompt = normalizeLf(readFileSync(join(process.cwd(), "prompts", "codex", "deepwork", "gpt-5.6.md"), "utf8")).trim()
+  const gptPrompt = normalizeLf(readFileSync(join(process.cwd(), "prompts", "codex", "deepwork", "gpt.md"), "utf8")).trim()
 
   assert.ok(orchestrator)
   assert.ok(planner)
@@ -845,7 +891,7 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
     const expectedOpusCount = agent.sourceName === "orchestrator" ? 1 : 0
     const instructions = normalizeLf(agent.developerInstructions)
     assert.equal(countOccurrences(instructions, opusPrompt), expectedOpusCount, agent.sourceName)
-    assert.equal(countOccurrences(instructions, gpt56Prompt), 1, `${agent.sourceName}: GPT-5.6 carriage`)
+    assert.equal(countOccurrences(instructions, gptPrompt), 1, `${agent.sourceName}: generic GPT carriage`)
   }
 
   const explicitlyConfigured = await buildCodexAgents({
@@ -888,7 +934,7 @@ test("Codex generated Opus 5 carriage is orchestrator-only and tracked bundle is
       if (file === "dw-orchestrator.toml") continue
       const instructions = parseGeneratedDeveloperInstructions(readFileSync(join(generatedAgentsRoot, file), "utf8"), file)
       assert.equal(countOccurrences(instructions, opusPrompt), 0, file)
-      assert.equal(countOccurrences(instructions, gpt56Prompt), 1, `${file}: GPT-5.6 carriage`)
+      assert.equal(countOccurrences(instructions, gptPrompt), 1, `${file}: generic GPT carriage`)
     }
 
     const fresh = await generateCodexPlugin({
@@ -1184,6 +1230,11 @@ test("Codex floors non-GPT plan critics without flooring planners", async () => 
     assert.match(criticLow, /^model_reasoning_effort = "xhigh"$/m)
     assert.match(oracleLow, /^model_reasoning_effort = "high"$/m)
     assert.match(reviewerLow, /^model_reasoning_effort = "high"$/m)
+    for (const [name, toml] of [["planner-low", plannerLow], ["plan-critic-low", criticLow], ["oracle-low", oracleLow], ["reviewer-low", reviewerLow]] as const) {
+      const instructions = parseGeneratedDeveloperInstructions(toml, name)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("gpt").trim()), 1, `${name}: guarded GPT source survives TOML rendering`)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("codex").trim()), 1, `${name}: adapter survives non-GPT selection`)
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1221,6 +1272,9 @@ test("temporary Codex generation writes configured planning tiers to plugin and 
       const pluginCopy = readFileSync(join(pluginAgents, filename), "utf8")
       const projectCopy: string = readFileSync(join(projectAgents, filename), "utf8")
       assert.equal(projectCopy, pluginCopy, `${sourceName} project/plugin copies`)
+      const instructions = parseGeneratedDeveloperInstructions(pluginCopy, sourceName)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("gpt").trim()), 1, `${sourceName}: generic GPT source rendered once`)
+      assert.doesNotMatch(instructions, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/)
     }
     for (const sourceName of ["planner-low", "planner-max", "plan-critic-high"] as const) {
       const filename = `${CODEX_AGENT_PREFIX}-${sourceName}.toml`
@@ -1279,6 +1333,8 @@ test("Codex generation resolves arbitrary multi-hop reviewer and oracle-2nd alia
     const agent = agents.find((candidate) => candidate.sourceName === role)
     assert.equal(agent?.model, "gpt-5.6-sol")
     assert.equal(agent?.reasoningEffort, "xhigh")
+    assert.ok(agent)
+    assert.equal(countOccurrences(extractOriginalDeepworkPrompt(agent.developerInstructions), getDeepworkPrompt("gpt").trim()), 1, `${role}: alias calibration`)
   }
 })
 

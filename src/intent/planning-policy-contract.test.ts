@@ -5,7 +5,7 @@ import { test } from "node:test"
 
 import { defaultConfig } from "../config/schema.ts"
 import { createConfigHandler } from "../hooks/config.ts"
-import { loadAllPrompts, type Workflow } from "./prompt-loader.ts"
+import { getDeepworkPrompt, loadAllPrompts, type Workflow } from "./prompt-loader.ts"
 
 const ROOT = process.cwd()
 const PROMPTS_ROOT = join(ROOT, "prompts")
@@ -17,9 +17,9 @@ const DEEPWORK_VARIANTS = [
   "gemini",
   "codex",
   "planner",
-  "gpt-5.6",
-  "gpt-6-astra",
   "claude-opus-5",
+  "kimi-k27",
+  "swe-2",
 ] as const
 
 function prompt(workflow: Workflow, area: "agents" | "deepwork", name: string): string {
@@ -37,7 +37,7 @@ function assertComplexPlanningDefault(text: string, label: string): void {
     /limited[\s\S]{0,100}simple[\s\S]{0,100}low-risk[\s\S]{0,120}(?:clear(?:ly)? bounded|clear boundaries)/i,
     `${label}: the direct path must stay narrowly bounded`,
   )
-  assert.match(text, /(?:explicit(?:ly)? user request|user explicitly requests)/i, `${label}: an explicit user-requested skip must remain available`)
+  assert.match(text, /(?:explicit(?:ly)? user(?: request|[- ]requested skip)|user explicitly requests)/i, `${label}: an explicit user-requested skip must remain available`)
   assert.match(
     text,
     /(?:clear requirements[^.]{0,180}(?:do not|not)[^.]{0,80}(?:exempt|escape|excuse)|even when (?:requirements|discovery)[^.]{0,140}clear)/i,
@@ -109,8 +109,13 @@ test("planning policy stays consistent across role, model, and adapter layers", 
     }
 
     for (const model of [
+      "openai/gpt-5.5",
       "openai/gpt-5.6-sol",
+      "providers/openai/gpt-6-sol-fast",
       "openai/gpt-6-astra",
+      "apai/gpt-6-luna",
+      "amazon-bedrock/openai.gpt-7-preview",
+      "openai/codex-mini-latest",
       "anthropic/claude-opus-5",
       "google/gemini-3-pro",
       "zhipu/glm-5.1",
@@ -124,10 +129,37 @@ test("planning policy stays consistent across role, model, and adapter layers", 
       )
     }
 
-    const assembledPlanner = await assembledPrompt(workflow, "planner", "openai/gpt-5.6-sol")
-    assertComplexPlanningDefault(assembledPlanner, `${workflow} assembled planner`)
-    assert.match(assembledPlanner, /planner never dispatches that review/i)
+    for (const model of ["openai/gpt-5.5", "openai/gpt-5.6-sol", "openai/gpt-6-sol", "openai/gpt-6-astra", "apai/gpt-6-luna"]) {
+      const assembledPlanner = await assembledPrompt(workflow, "planner", model)
+      assertComplexPlanningDefault(assembledPlanner, `${workflow} assembled planner ${model}`)
+      assert.match(assembledPlanner, /planner never dispatches that review/i)
+      const calibration = getDeepworkPrompt("gpt").trim()
+      assert.ok(calibration, `${workflow}: loaded GPT calibration`)
+      assert.equal(assembledPlanner.split(calibration).length - 1, 1, `${workflow}/${model}: planner calibration once`)
+      assert.ok(assembledPlanner.indexOf("Agent Role: planner") < assembledPlanner.indexOf(calibration))
+      assert.match(assembledPlanner, /formal planner dispatch[\s\S]{0,200}orchestrator-owned/i)
+    }
   }
 
   loadAllPrompts(PROMPTS_ROOT, "v1")
+})
+
+test("GPT delivery calibration and critic policy connect outcomes to proportionate reusable evidence", () => {
+  for (const workflow of WORKFLOWS) {
+    const gpt = prompt(workflow, "deepwork", "gpt")
+    const critic = prompt(workflow, "agents", "plan-critic")
+    const glm = prompt(workflow, "deepwork", "glm")
+    assert.match(gpt, /complete[^.\n]{0,140}(?:outcome|result)/i, `${workflow}: full outcome`)
+    assert.match(gpt, /worker[\s\S]{0,450}(?:caller|parent|orchestrator)/i, `${workflow}: worker stop boundary`)
+    assert.match(gpt, /(?:role|permission)[\s\S]{0,250}(?:authoritative|override|boundar|scope)/i, `${workflow}: calibration cannot expand role`)
+    assert.match(critic, /(?:critical|necessary|required|user)[^.\n]{0,180}(?:state|outcome|result)[\s\S]{0,350}evidence/i, `${workflow}: critic checks outcome-to-evidence coverage`)
+    for (const [name, text] of [["gpt", gpt], ["glm", glm]] as const) {
+      assert.match(text, /(?:reuse|re-use)[\s\S]{0,300}evidence/i, `${workflow}/${name}: evidence reuse`)
+      assert.match(text, /(?:files|inputs)[\s\S]{0,180}dependenc[\s\S]{0,180}environment/i, `${workflow}/${name}: validity inputs`)
+      assert.match(text, /(?:phase|stage)[\s\S]{0,350}(?:blocker|blocked)[\s\S]{0,350}(?:plan|change)/i, `${workflow}/${name}: substantive progress communication`)
+      assert.doesNotMatch(text, /run one appropriate final pass|(?:always|mandatory|unconditional)[^\n.]{0,80}final (?:pass|verification)/i, `${workflow}/${name}: no unconditional rerun`)
+    }
+    assert.doesNotMatch(gpt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION|(?:all|every) GPT[^.\n]{0,80}(?:support|native)[^.\n]{0,40}`max`/i)
+    assert.doesNotMatch(critic, /(?:require|mandatory)[^.\n]{0,70}(?:IS table|fixed state table)/i)
+  }
 })

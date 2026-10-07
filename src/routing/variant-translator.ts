@@ -3,7 +3,7 @@
  *
  * Different providers express "reasoning intensity" differently:
  *   - OpenAI / GPT/Codex family : `options.reasoningEffort`; non-mini built-ins are generally at least high,
- *     except exact GPT-6 Sol/Luna off and GPT-family Sol/Luna/Astra minimal
+ *     except Sol 6.1+ low/medium, exact GPT-6 Sol/Luna off, and supported minimal mappings
  *   - Anthropic Claude   : `options.thinking = { type, budgetTokens }`
  *   - Anthropic Opus 4.7+: no thinking override from ocmm
  *   - Google Gemini      : same `reasoningEffort` style; thinking via `options.thinking`
@@ -15,7 +15,7 @@
  * reasoningEffort/thinking fields are handled by the chat.params hook.
  */
 
-import { isGpt6AstraModel, isGpt6LunaModel, isGpt6SolModel, isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
+import { isGpt61OrLaterSolModel, isGpt6AstraModel, isGpt6LunaModel, isGpt6SolModel, isMiniModel, supportsNativeGptMaxReasoning, type ModelFamily } from "../intent/model-family.ts"
 import { reasoningToVariant, variantToReasoningLevel } from "../shared/reasoning.ts"
 import type { Reasoning, ThinkingMode, Variant } from "../shared/types.ts"
 
@@ -206,6 +206,10 @@ export function normalizeVariantForModel(opts: {
 }): Variant {
   const { family, modelID, variant } = opts
   if ((family === "gpt" || family === "codex") && !isMiniModel(modelID)) {
+    if (isGpt61OrLaterSolModel(modelID)) {
+      if (variant === "minimal") return "low"
+      if (variant === "low" || variant === "medium") return variant
+    }
     if (family === "gpt" && variant === "minimal" && (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID) || isGpt6AstraModel(modelID))) {
       return "low"
     }
@@ -229,6 +233,7 @@ export function normalizeReasoningForModel(opts: {
 
   if (reasoning === "off") {
     if (family === "gpt" || family === "codex") {
+      if (isGpt61OrLaterSolModel(modelID)) return "low"
       if (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID)) return "off"
       if (isGpt6AstraModel(modelID)) return "low"
     }
@@ -248,6 +253,9 @@ export function translateReasoning(
   reasoning: Reasoning,
   opts?: { modelID?: string; respectExplicit?: boolean },
 ): VariantEffect {
+  if ((family === "gpt" || family === "codex") && opts?.modelID && isGpt61OrLaterSolModel(opts.modelID) && reasoning === "off") {
+    return { reasoningEffort: "low" }
+  }
   const effectiveReasoning = opts?.modelID && !opts.respectExplicit
     ? normalizeReasoningForModel({ family, modelID: opts.modelID, reasoning })
     : reasoning
@@ -285,6 +293,9 @@ export function translateVariant(
   variant: Variant,
   opts?: { modelID?: string; respectExplicit?: boolean },
 ): VariantEffect {
+  if ((family === "gpt" || family === "codex") && opts?.modelID && isGpt61OrLaterSolModel(opts.modelID) && variant === "minimal") {
+    return { reasoningEffort: "low" }
+  }
   const effectiveVariant = opts?.modelID && !opts.respectExplicit
     ? normalizeVariantForModel({ family, modelID: opts.modelID, variant })
     : variant

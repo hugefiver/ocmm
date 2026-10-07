@@ -3,6 +3,8 @@ import assert from "node:assert/strict"
 
 import { BUILTIN_AGENT_INDEX } from "../data/agents.ts"
 import { resolveEffectiveRequirement, resolveModelRouting } from "./resolver.ts"
+import { materializeSelectedPrimary } from "./effective-route.ts"
+import { matchRequirementSuccessorWithIndex } from "./model-upgrades.ts"
 
 test("opt-in category resolves to null unless explicitly configured", () => {
   // Unconfigured: never resolvable implicitly.
@@ -223,16 +225,23 @@ test("published absence retains a valid request-local input variant", () => {
   assert.equal(r.entry.model, "gpt-5.4-mini")
 })
 
-test("oracle GPT cross-generation entries retain their static Terra adjacency", () => {
+test("oracle's modern Sol entry precedes its retained cross-generation compatibility fallbacks", () => {
   const chain = BUILTIN_AGENT_INDEX.get("oracle")!.requirement.fallbackChain
   const gptEntries = chain.filter((entry) => entry.providers.includes("openai") && entry.model.startsWith("gpt-"))
 
   assert.deepEqual(
     gptEntries.map((entry) => `${entry.model}:${entry.variant}`),
-    ["gpt-5.4:xhigh", "gpt-5.6-terra:xhigh", "gpt-5.5:xhigh"],
+    ["gpt-6.1-sol:xhigh", "gpt-5.4:xhigh", "gpt-5.5:xhigh"],
   )
   assert.equal(chain[0]!.model, "claude-opus-5")
   assert.equal(chain[1]!.model, "claude-opus-4-7")
+  assert.equal(chain[2]!.model, "gemini-3.1-pro")
+  for (const entry of gptEntries) {
+    const result = resolveModelRouting({ agentName: "oracle", providerID: "openai", modelID: entry.model })
+    assert.deepEqual(result?.entry, entry, entry.model)
+    assert.equal(result?.variant, "xhigh", entry.model)
+    assert.equal(result?.source, "agent-default", entry.model)
+  }
 })
 
 test("oracle inherits reviewer model via defaultAlias when user writes oracle entry without model", () => {
@@ -258,7 +267,9 @@ test("falls back to first chain entry when current model isn't in the chain", ()
     providerID: "openai",
   })
   assert.ok(r)
-  assert.equal(r!.entry.model, "gpt-5.6-sol")
+  assert.equal(r!.entry.model, "gpt-6.1-sol")
+  assert.deepEqual(r!.entry, BUILTIN_AGENT_INDEX.get("reviewer")!.requirement.fallbackChain[0])
+  assert.equal(r!.variant, "xhigh")
   assert.equal(r!.source, "agent-default")
 })
 
@@ -488,26 +499,24 @@ test("entryMatches only accepts boundary-delimited version aliases", () => {
 })
 
 test("routes supported GPT and GLM successors through synthesized actual entries", () => {
-  const gpt = resolveModelRouting({
-    agentName: "reviewer",
-    modelID: "gpt-5.7-sol",
-    providerID: "openai",
-  })
+  for (const agentName of ["reviewer", "oracle"]) {
+    const gpt = resolveModelRouting({ agentName, modelID: "gpt-6.2-sol", providerID: "openai" })
+    assert.deepEqual(gpt, {
+      entry: {
+        providers: ["openai"],
+        model: "gpt-6.2-sol",
+        variant: "xhigh",
+      },
+      variant: "xhigh",
+      source: "agent-default",
+    }, agentName)
+  }
   const glm = resolveModelRouting({
     agentName: "reviewer",
     modelID: "glm-5.2",
     providerID: "zhipu",
   })
 
-  assert.deepEqual(gpt, {
-    entry: {
-      providers: ["openai"],
-      model: "gpt-5.7-sol",
-      variant: "xhigh",
-    },
-    variant: "xhigh",
-    source: "agent-default",
-  })
   assert.deepEqual(glm, {
     entry: {
       providers: ["zhipu"],
@@ -519,11 +528,14 @@ test("routes supported GPT and GLM successors through synthesized actual entries
   })
 })
 
-test("oracle routes Terra catalog successors through synthesized actual entries", () => {
+test("an explicit legacy Oracle Terra chain retains its supported catalog successor", () => {
   const result = resolveModelRouting({
     agentName: "oracle",
     modelID: "gpt-5.7-terra",
     providerID: "openai",
+    agentsConfig: {
+      oracle: { model: "openai/gpt-5.6-terra", variant: "xhigh", fallbackModels: ["openai/gpt-5.5"] },
+    },
   })
 
   assert.deepEqual(result, {
@@ -533,8 +545,40 @@ test("oracle routes Terra catalog successors through synthesized actual entries"
       variant: "xhigh",
     },
     variant: "xhigh",
-    source: "agent-default",
+    source: "user-config",
   })
+})
+
+test("future Astra resolution and materialization preserve its own baseline index, tuning, and fallback order", () => {
+  const agentsConfig = {
+    planner: {
+      requirement: {
+        fallbackChain: [
+          { providers: ["openai"], model: "gpt-6.1-sol", variant: "high" as const, temperature: 0.2 },
+          { providers: ["openai"], model: "gpt-6-astra", variant: "max" as const, temperature: 0.1 },
+          { providers: ["openai"], model: "gpt-5.5", variant: "high" as const },
+        ],
+      },
+    },
+  }
+  const requirement = resolveEffectiveRequirement({ agentName: "planner", agentsConfig })!.requirement
+  const originalChain = structuredClone(requirement.fallbackChain)
+  for (const modelID of ["gpt-6.1-astra", "gpt-6.2-astra"]) {
+    const primary = { providers: ["openai"], model: modelID, variant: "max", temperature: 0.1 }
+    assert.deepEqual(matchRequirementSuccessorWithIndex(requirement, "openai", modelID), {
+      baselineIndex: 1,
+      entry: primary,
+    })
+    assert.deepEqual(resolveModelRouting({ agentName: "planner", providerID: "openai", modelID, agentsConfig }), {
+      entry: primary,
+      variant: "max",
+      source: "user-config",
+    })
+    assert.deepEqual(materializeSelectedPrimary(requirement, `openai/${modelID}`).fallbackChain, [
+      primary, originalChain[0], originalChain[2],
+    ])
+  }
+  assert.deepEqual(requirement.fallbackChain, originalChain)
 })
 
 test("multi-hop aliases resolve the same effective requirement as direct config", () => {

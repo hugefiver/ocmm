@@ -32,7 +32,6 @@ const LOCAL_COORDINATOR_TASK_RULES = {
 } as const
 
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const GPT_56_MARKER = "# GPT-5.6 EXECUTION CALIBRATION"
 const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
 const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
@@ -169,11 +168,11 @@ test("user category override changes the model without disabling subagent mode",
   assert.equal(entry.mode, "subagent")
 })
 
-test("GPT-5.6 and GPT-6 Sol category selections append only the additive calibration after the authoritative role", async () => {
+test("selected GPT and Codex-family categories append one generic calibration after the authoritative role", async () => {
   loadAllPrompts(PROMPTS_ROOT, "v1")
   const rolePrompt = getCategoryPrompt("frontend").trim()
-  const specialization = getDeepworkPrompt("gpt-5.6").trim()
   const genericGptPrompt = getDeepworkPrompt("gpt").trim()
+  assert.ok(genericGptPrompt)
   const cases = [
     {
       label: "host-selected model",
@@ -188,6 +187,11 @@ test("GPT-5.6 and GPT-6 Sol category selections append only the additive calibra
       },
       target: { agent: {} } as { agent: Record<string, unknown> },
     },
+    ...["openai/gpt-5.5", "openai/gpt-6-astra", "amazon-bedrock/openai.gpt-6-astra-fast", "apai/gpt-6-luna", "openai/gpt-7-preview", "openai/codex-mini-latest"].map((model) => ({
+      label: model,
+      config: { ...defaultConfig(), categories: { frontend: { model } } },
+      target: { agent: {} } as { agent: Record<string, unknown> },
+    })),
     {
       label: "host-selected GPT-6 Sol-fast",
       config: defaultConfig(),
@@ -211,10 +215,35 @@ test("GPT-5.6 and GPT-6 Sol category selections append only the additive calibra
 
     assert.ok(prompt.startsWith(rolePrompt), `${label}: category role must remain first and authoritative`)
     assert.match(prompt, /<workflow-model-calibration>/, `${label}: missing calibration envelope`)
-    assert.ok(prompt.includes(specialization), `${label}: missing additive GPT-5.6 calibration`)
-    assert.equal(countText(prompt, GPT_56_MARKER), 1, `${label}: additive layer occurs once`)
-    assert.ok(!prompt.includes(genericGptPrompt), `${label}: generic GPT prompt must not be appended`)
-    assert.doesNotMatch(prompt, /# GPT-6 ASTRA EXECUTION CALIBRATION/, `${label}: Astra layer must not be appended`)
+    assert.equal(countText(prompt, genericGptPrompt), 1, `${label}: generic layer occurs once`)
+    assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, `${label}: no generation layer`)
+  }
+})
+
+test("all categories including opted-in cross-cutting use the same GPT layer and exclude it for non-GPT", async () => {
+  loadAllPrompts(PROMPTS_ROOT, "v1")
+  const gpt = getDeepworkPrompt("gpt").trim()
+  assert.ok(gpt)
+  for (const model of [
+    "openai/gpt-5.5", "openai/gpt-5.6-sol", "openai/gpt-6-sol", "openai/gpt-6-astra", "apai/gpt-6-luna",
+    "zhipu/glm-5.2", "google/gemini-3.1-pro", "anthropic/claude-opus-5", "kimi-for-coding/kimi-for-coding", "devin/swe-2-high", "unknown/model",
+  ]) {
+    const configured = {
+      ...defaultConfig(),
+      categories: Object.fromEntries(BUILTIN_CATEGORIES.map(({ name }) => [name, { model }])),
+    }
+    const target: { agent: Record<string, unknown> } = { agent: {} }
+    const handler = createConfigHandler({ getConfig: () => configured })
+    await handler(target, undefined)
+    await handler(target, undefined)
+    for (const { name } of BUILTIN_CATEGORIES) {
+      const entry = target.agent[name] as Record<string, unknown>
+      const prompt = String(entry.prompt)
+      assert.equal(entry.model, model, `${model}/${name}`)
+      assert.ok(prompt.startsWith(getCategoryPrompt(name).trim()), `${model}/${name}: role first`)
+      assert.equal(countText(prompt, gpt), model.includes("gpt-") ? 1 : 0, `${model}/${name}`)
+      assert.doesNotMatch(prompt, /GPT-6 ASTRA EXECUTION CALIBRATION|selected runtime model is GPT-6 Astra/, `${model}/${name}`)
+    }
   }
 })
 
@@ -270,7 +299,7 @@ test("Kimi and SWE category selections preserve the category role and isolate ca
   assert.equal(countText(adjacent, KIMI_K27_MARKER), 0)
 })
 
-test("Codex generation gives every builtin category the guarded GPT-5.6 calibration", async () => {
+test("Codex generation gives every builtin category one guarded generic GPT calibration", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
     const handler = createConfigHandler({
@@ -278,10 +307,10 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
     })
     const cfg: { agent: Record<string, unknown> } = { agent: {} }
     await handler(cfg, undefined)
-    const specialization = getDeepworkPrompt("gpt-5.6").trim()
-    assert.match(specialization, /apply only to GPT-5\.6 and GPT-6 Sol/i, "guard inside 5.6 calibration")
-    assert.match(specialization, /GPT-6 Astra, Luna, and other GPT-6 models ignore it/, "Astra/Luna exclusion inside 5.6 calibration")
-    assert.match(specialization, /Both support native `max`/, "native max guard")
+    const gpt = getDeepworkPrompt("gpt").trim()
+    assert.ok(gpt)
+    assert.match(gpt, /(?:apply|use)[^\n]*only[^\n]*(?:runtime|selected)[^\n]*(?:GPT|Codex)/i, "runtime family guard")
+    assert.match(gpt, /(?:non-GPT|every other runtime model)[^\n]*ignore/i, "non-GPT must ignore calibration")
     const opus5 = getDeepworkPrompt("claude-opus-5").trim()
     const kimi = getDeepworkPrompt("kimi-k27").trim()
     const swe2 = getDeepworkPrompt("swe-2").trim()
@@ -294,8 +323,8 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       const entry = cfg.agent[category.name] as Record<string, unknown>
       const prompt = entry.prompt as string
       assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
-      assert.ok(prompt.includes(specialization), `${category.name}: missing GPT-5.6 calibration`)
-      assert.equal(countText(prompt, GPT_56_MARKER), 1, `${category.name}: GPT-5.6 marker`)
+      assert.equal(countText(prompt, gpt), 1, `${category.name}: one exact generic calibration`)
+      assert.equal(countText(prompt, getDeepworkPrompt("codex").trim()), 1, `${category.name}: adapter base outside GPT guard`)
       assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), `${category.name}: category role remains first`)
       assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
@@ -303,30 +332,38 @@ test("Codex generation gives every builtin category the guarded GPT-5.6 calibrat
       assert.equal(countText(prompt, SWE_2_MARKER), 1, `${category.name}: SWE-2 carry-ahead`)
       assert.ok(prompt.includes(kimi), `${category.name}: exact Kimi calibration`)
       assert.ok(prompt.includes(swe2), `${category.name}: exact SWE-2 calibration`)
-      assert.ok(prompt.includes(specialization), `${category.name}: guarded dual-model calibration`)
+      assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, category.name)
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")
   }
 })
 
-test("Codex carries the exact Astra category calibration behind its own runtime guard", async () => {
+test("Codex category non-GPT selections carry the family guard without guarding role or adapter", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
     const config = {
       ...defaultConfig(),
       workflow: "codex" as const,
-      categories: { deep: { model: "openai/gpt-5.6-sol" } },
+      categories: {
+        deep: { model: "anthropic/claude-sonnet-4-6" },
+        "cross-cutting": { model: "google/gemini-3.1-pro" },
+      },
     }
     const target: { agent: Record<string, unknown> } = { agent: {} }
     await createConfigHandler({ getConfig: () => config })(target, undefined)
-    const deep = target.agent.deep as Record<string, unknown>
-    const prompt = String(deep.prompt)
-
-    assert.equal(deep.model, "openai/gpt-5.6-sol")
-    assert.match(prompt, /Apply this section only when the selected runtime model is GPT-6 Astra/)
-    assert.match(prompt, /every other runtime model must ignore it/)
-    assert.doesNotMatch(getCategoryPrompt("deep"), /model-calibration|Astra/)
+    const gpt = getDeepworkPrompt("gpt").trim()
+    const adapter = getDeepworkPrompt("codex").trim()
+    for (const [name, model] of [["deep", "anthropic/claude-sonnet-4-6"], ["cross-cutting", "google/gemini-3.1-pro"]] as const) {
+      const entry = target.agent[name] as Record<string, unknown>
+      const prompt = String(entry.prompt)
+      assert.equal(entry.model, model)
+      assert.ok(prompt.startsWith(getCategoryPrompt(name).trim()))
+      assert.equal(countText(prompt, gpt), 1, `${name}: guarded generic calibration`)
+      assert.equal(countText(prompt, adapter), 1, `${name}: adapter retained`)
+      assert.ok(prompt.indexOf(adapter) < prompt.indexOf(gpt), `${name}: adapter outside family guard`)
+      assert.doesNotMatch(prompt, /selected runtime model is GPT-6 Astra|GPT-6 ASTRA EXECUTION CALIBRATION/)
+    }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")
   }
@@ -401,7 +438,7 @@ test("registry-managed categories publish category provenance and write final ro
     provider: Record<string, unknown>
   } = {
     agent: {},
-    provider: { openai: { models: { "gpt-5.7-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } } },
   }
 
   await createConfigHandler({
@@ -422,6 +459,11 @@ test("registry-managed categories publish category provenance and write final ro
   )
   assert.equal((target.agent["hard-reasoning"] as Record<string, unknown>).model, catalogRoute.model)
   assert.equal((target.agent.quick as Record<string, unknown>).model, headRoute.model)
+  assert.equal(catalogRoute.model, "openai/gpt-6.1-astra")
+  assert.deepEqual(catalogRoute.requirement.fallbackChain[0], {
+    providers: ["openai"], model: "gpt-6.1-astra", variant: "xhigh",
+  })
+  assert.equal(headRoute.model, "openai/gpt-6-luna")
 })
 
 test("registry-managed configured categories register non-builtins and give same-name agents priority", async () => {
@@ -534,7 +576,7 @@ test("category diagnostics report built-in and custom registrations once per han
   const createTarget = () => ({
     agent: {},
     provider: {
-      openai: { models: { "gpt-5.7-sol": {} } },
+      openai: { models: { "gpt-6.1-astra": {}, "gpt-6.2-sol": {} } },
       qa: { models: { "custom-model": {} } },
     },
   })
@@ -550,8 +592,9 @@ test("category diagnostics report built-in and custom registrations once per han
   assert.equal(builtin[0]?.level, "info")
   assert.equal(custom[0]?.level, "info")
   assert.match(builtin[0]!.message, /status=available .*primarySource=catalog-upgrade .*routePreserved=true/)
+  assert.match(builtin[0]!.message, /selectedModel="openai\/gpt-6\.1-astra"/)
   assert.match(custom[0]!.message, /status=available .*primarySource=user-requirement .*routePreserved=true/)
-  assert.equal(publishedCategoryRoute(routeRegistry, "hard-reasoning").model, "openai/gpt-5.7-sol")
+  assert.equal(publishedCategoryRoute(routeRegistry, "hard-reasoning").model, "openai/gpt-6.1-astra")
   assert.equal(publishedCategoryRoute(routeRegistry, "custom-observed").model, "qa/custom-model")
 })
 

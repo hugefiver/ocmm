@@ -122,7 +122,7 @@ Choose coverage that fits the work and its concrete risks. Exercise the useful p
 
 Use test-first when it materially improves confidence at a real deterministic seam, not as a mandatory RED ritual. When no useful deterministic seam exists, use the strongest real-surface verification available. Characterization tests are appropriate before a refactor only when they protect behavior that could otherwise regress unnoticed.
 
-For code changes, run diagnostics on changed source files, targeted tests, and broader test/build checks when applicable. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
+For code changes, prefer targeted tests and diagnostics on changed source files during development. Reserve full suites for final acceptance when the affected scope, cross-module risk, or repository policy requires them; small changes need only relevant checks unless such requirements apply. Reuse passing evidence when verified files, relevant dependencies, and environment are unchanged and coverage is sufficient; rerun missing or affected checks. This rule never excuses skipping necessary checks or weakening a relevant failure. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
 
 Final answers must name what changed, what was verified, and any remaining risk or skipped check.
 

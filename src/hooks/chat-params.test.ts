@@ -1764,3 +1764,129 @@ test("chat.params ignores an unproven raw model temperature capability field", a
 
   assert.equal(output.temperature, undefined)
 })
+
+for (const reasoningEffort of ["minimal", "none"] as const) {
+  test(`chat.params caps explicit direct ${reasoningEffort} on GPT-6.1+ Sol`, async () => {
+    for (const providerID of ["openai", "openai-codex"]) {
+      for (const modelID of ["gpt-6.1-sol", "openai/gpt-6.2-sol-fast", "gpt-7-sol"]) {
+        const cfg = OcmmConfigSchema.parse({ agents: {
+          builder: { requirement: { fallbackChain: [{ providers: [providerID], model: modelID, reasoningEffort }] } },
+        } })
+        const output = { options: {} as Record<string, unknown> }
+        await createChatParamsHandler({ getConfig: () => cfg })(
+          makeInput({ agentName: "builder", providerID, modelID }), output,
+        )
+        assert.equal(output.options.reasoningEffort, "low", `${providerID}/${modelID}`)
+        assert.equal(recentResolutions().at(-1)!.applied.reasoningEffort, "low")
+      }
+    }
+  })
+}
+
+test("chat.params preserves builtin GPT-6.1+ Sol direct low and medium while capping unsupported levels", async () => {
+  for (const providerID of ["openai", "openai-codex"]) {
+    for (const reasoningEffort of ["low", "medium", "minimal", "none"]) {
+      const registry = createEffectiveRouteRegistry()
+      publishRoutes(registry, new Map([["builder", {
+        model: `${providerID}/gpt-6.1-sol`,
+        requirement: { fallbackChain: [{ providers: [providerID], model: "gpt-6.1-sol", reasoningEffort }] },
+        requirementSource: "agent-default",
+        primarySource: "builtin-requirement",
+        fastPath: { kind: "off" },
+      }]]))
+      const output = { options: {} as Record<string, unknown> }
+      await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+        makeInput({ agentName: "builder", providerID, modelID: "gpt-6.1-sol" }), output,
+      )
+      const expected = reasoningEffort === "medium" ? "medium" : "low"
+      assert.equal(output.options.reasoningEffort, expected, `${providerID} direct ${reasoningEffort}`)
+    }
+  }
+})
+
+test("chat.params caps GPT-6.1+ Sol final fast options with and without a resolved requirement", async () => {
+  for (const providerID of ["openai", "openai-codex"]) {
+    for (const effort of ["minimal", "none"]) {
+      for (const resolved of [true, false]) {
+        const registry = createEffectiveRouteRegistry()
+        publishRoutes(registry, new Map([["builder", {
+          model: `${providerID}/gpt-6.1-sol`,
+          requirement: { fallbackChain: resolved ? [{ providers: [providerID], model: "gpt-6.1-sol", variant: "high" }] : [] },
+          requirementSource: "agent-default",
+          primarySource: "builtin-requirement",
+          fastPath: {
+            kind: "options", defaultRules: false,
+            rules: [{ match: { provider: providerID, model: "gpt-6.1-sol" }, options: { reasoningEffort: effort } }],
+          },
+        }]]))
+        const output = { options: {} as Record<string, unknown> }
+        await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+          makeInput({ agentName: "builder", providerID, modelID: "gpt-6.1-sol" }), output,
+        )
+        assert.equal(output.options.reasoningEffort, "low", `${providerID} ${effort} resolved=${resolved}`)
+      }
+    }
+  }
+})
+
+test("chat.params retains GPT-6.1+ Sol variant and canonical migration semantics", async () => {
+  for (const providerID of ["openai", "openai-codex"]) {
+    for (const source of ["user-config", "agent-default"] as const) {
+      for (const control of ["variant", "reasoning"] as const) {
+        for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) {
+          const registry = createEffectiveRouteRegistry()
+          publishRoutes(registry, new Map([["builder", {
+            model: `${providerID}/gpt-6.1-sol`,
+            requirement: { fallbackChain: [{ providers: [providerID], model: "gpt-6.1-sol" }], [control]: level },
+            requirementSource: source,
+            primarySource: source === "user-config" ? "user-requirement" : "builtin-requirement",
+            fastPath: { kind: "off" },
+          }]]))
+          const output = { options: {} as Record<string, unknown> }
+          await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+            makeInput({ agentName: "builder", providerID, modelID: "gpt-6.1-sol" }), output,
+          )
+          assert.equal(output.options.reasoningEffort, level === "minimal" ? "low" : level, `${providerID} ${source} ${control}=${level}`)
+        }
+      }
+    }
+  }
+})
+
+test("chat.params keeps GPT-6.1+ Sol neutral variant none separate from canonical off", async () => {
+  for (const providerID of ["openai", "openai-codex"]) {
+    for (const control of [{ variant: "none" }, { reasoning: "off" }] as const) {
+      const cfg = OcmmConfigSchema.parse({ agents: { builder: { model: `${providerID}/gpt-6.1-sol`, ...control } } })
+      const handler = createChatParamsHandler({ getConfig: () => cfg })
+      const output = { options: {} as Record<string, unknown> }
+      await handler(makeInput({ agentName: "builder", providerID, modelID: "gpt-6.1-sol" }), output)
+      assert.deepEqual(output.options, "variant" in control ? {} : { reasoningEffort: "low" }, `${providerID} ${JSON.stringify(control)}`)
+      const neutralRequest = { options: {} as Record<string, unknown> }
+      await handler(makeInput({ agentName: "builder", providerID, modelID: "gpt-6.1-sol", variant: "none" }), neutralRequest)
+      assert.deepEqual(neutralRequest.options, {})
+    }
+  }
+})
+
+test("chat.params retains GPT-6.1+ Sol review and critic floors after direct and fast overrides", async () => {
+  for (const agentName of ["reviewer", "plan-critic", "reviewer-low", "plan-critic-low"]) {
+    for (const effort of ["minimal", "none", "low", "medium", "max"]) {
+      const registry = createEffectiveRouteRegistry()
+      publishRoutes(registry, new Map([[agentName, {
+        model: "openai/gpt-6.1-sol",
+        requirement: { fallbackChain: [{ providers: ["openai"], model: "gpt-6.1-sol", reasoningEffort: effort }] },
+        requirementSource: "user-config",
+        primarySource: "user-requirement",
+        fastPath: {
+          kind: "options", defaultRules: false,
+          rules: [{ match: { model: "gpt-6.1-sol" }, options: { reasoningEffort: effort } }],
+        },
+      }]]))
+      const output = { options: {} as Record<string, unknown> }
+      await createChatParamsHandler({ getConfig: defaultConfig, routeRegistry: registry })(
+        makeInput({ agentName, modelID: "gpt-6.1-sol" }), output,
+      )
+      assert.equal(output.options.reasoningEffort, effort === "max" ? "max" : "xhigh", `${agentName} ${effort}`)
+    }
+  }
+})

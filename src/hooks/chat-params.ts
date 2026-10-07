@@ -22,6 +22,7 @@ import {
 } from "../routing/fast-option-rules.ts"
 import {
   classifyModelFamily,
+  isGpt61OrLaterSolModel,
   isGpt6AstraModel,
   isGpt6LunaModel,
   isGpt6SolModel,
@@ -211,8 +212,8 @@ function stripUnsupportedTemperature(capability: ModelTemperatureCapability, out
 
 function capGpt6ReasoningEffort(family: string, modelID: string, effort: string): string {
   if (family !== "gpt" && family !== "codex") return effort
-  if (effort === "none" && isGpt6AstraModel(modelID)) return "low"
-  if (effort === "minimal" && (isGpt6SolModel(modelID) || isGpt6LunaModel(modelID) || isGpt6AstraModel(modelID))) {
+  if (effort === "none" && (isGpt61OrLaterSolModel(modelID) || isGpt6AstraModel(modelID))) return "low"
+  if (effort === "minimal" && (isGpt61OrLaterSolModel(modelID) || isGpt6SolModel(modelID) || isGpt6LunaModel(modelID) || isGpt6AstraModel(modelID))) {
     return "low"
   }
   return effort
@@ -233,6 +234,10 @@ function normalizeReasoningEffortForModel(args: {
   const effort = args.reasoningEffort.toLowerCase()
   if ((args.family === "gpt" || args.family === "codex") && effort === "max" && !supportsNativeGptMaxReasoning(args.modelID)) {
     return "xhigh"
+  }
+  if ((args.family === "gpt" || args.family === "codex") && isGpt61OrLaterSolModel(args.modelID)
+    && (effort === "none" || effort === "minimal" || effort === "low" || effort === "medium")) {
+    return capGpt6ReasoningEffort(args.family, args.modelID, effort)
   }
   if ((args.family === "gpt" || args.family === "codex")
     && (effort === "none" || effort === "minimal")

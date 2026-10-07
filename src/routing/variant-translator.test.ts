@@ -155,6 +155,30 @@ test("canonical reasoning respects explicit user values while retaining GPT max 
   }), { reasoningEffort: "max" })
 })
 
+test("GPT-6.1 and later Sol preserve supported low-through-max effort without changing neutral none", () => {
+  for (const family of ["gpt", "codex"] as const) {
+    for (const modelID of ["gpt-6.1-sol", "apai/gpt-6.2-sol-fast", "gpt-7-sol"]) {
+      for (const variant of ["low", "medium", "high", "xhigh", "max"] as const) {
+        assert.equal(normalizeVariantForModel({ family, modelID, variant }), variant, modelID)
+        assert.deepEqual(translateVariant(family, variant, { modelID }), { reasoningEffort: variant }, modelID)
+        assert.deepEqual(translateReasoning(family, variant, { modelID }), { reasoningEffort: variant }, modelID)
+      }
+      for (const respectExplicit of [false, true]) {
+        assert.deepEqual(translateVariant(family, "minimal", { modelID, respectExplicit }), { reasoningEffort: "low" }, modelID)
+        assert.deepEqual(translateReasoning(family, "minimal", { modelID, respectExplicit }), { reasoningEffort: "low" }, modelID)
+        assert.deepEqual(translateReasoning(family, "off", { modelID, respectExplicit }), { reasoningEffort: "low" }, modelID)
+        assert.deepEqual(translateReasoning(family, "auto", { modelID, respectExplicit }), {}, modelID)
+      }
+      assert.equal(normalizeVariantForModel({ family, modelID, variant: "minimal" }), "low", modelID)
+      assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "off" }), "low", modelID)
+      assert.deepEqual(translateVariant(family, "none", { modelID, respectExplicit: true }), {}, modelID)
+    }
+    for (const modelID of ["gpt-5.6-sol", "gpt-6-sol", "gpt-6.1-solar", "gpt-6.1-astra", "gpt-6.1-luna"]) {
+      assert.deepEqual(translateVariant(family, "medium", { modelID }), { reasoningEffort: "high" }, modelID)
+    }
+  }
+})
+
 test("exact GPT-6 models retain canonical off while Codex static minimal keeps its high contract", () => {
   for (const family of ["gpt", "codex"] as const) {
     for (const [modelID, off] of [

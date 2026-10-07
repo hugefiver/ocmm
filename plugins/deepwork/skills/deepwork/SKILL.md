@@ -76,14 +76,14 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 |---|---|---|
 | dw-builder | xhigh | builder |
 | dw-clarifier | high | clarifier |
-| dw-code-search | high | code-search |
+| dw-code-search | medium | code-search |
 | dw-coding | xhigh | coding |
 | dw-complex | xhigh | complex |
 | dw-creative | high | creative |
 | dw-deep | high | deep |
 | dw-doc-search | high | doc-search |
-| dw-documenting | high | documenting |
-| dw-explore | high | explore |
+| dw-documenting | medium | documenting |
+| dw-explore | medium | explore |
 | dw-frontend | xhigh | frontend |
 | dw-hard-reasoning | max | hard-reasoning |
 | dw-media-reader | high | media-reader |
@@ -93,7 +93,7 @@ Only when the callable schema exposes `fork_turns` may the agent use `fork_turns
 | dw-orchestrator | high | orchestrator |
 | dw-plan-critic | xhigh | plan-critic |
 | dw-planner | high | planner |
-| dw-quick | high | quick |
+| dw-quick | medium | quick |
 | dw-research | high | research |
 | dw-reviewer | xhigh | reviewer |
 

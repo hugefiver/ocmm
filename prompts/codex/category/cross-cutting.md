@@ -49,10 +49,4 @@ Then execute. If a major decision arises mid-execution, surface it; do not silen
 - Surveying only the files the prompt names.
 - Asking a clarifying question when the context already decides it; record the assumption and finish.
 
-<model-calibration model="gpt-6-astra">
-Apply this section only when the selected runtime model is GPT-6 Astra; every other runtime model must ignore it.
-
-The caller routed this task here because the change spans systems or modules and its defining risk is surface consistency, so breadth of consideration is what this category buys. Before committing to an approach, survey the whole surface the change touches: every caller and consumer of what you will modify, sibling modules that implement the same pattern, the tests, docs, schemas, config, scripts, and CI that encode the current behavior, and the history of the area (git log and blame) for the reasons it is shaped this way. Fan out explore and doc-search subagents in parallel when that surface is wider than one read wave covers.
-
-Weigh at least two ways to do it against what you found, choose one, and say in the final message why it won. Then deliver it across every surface you identified, so behavior stays consistent everywhere the change is observable and no caller, test, doc, schema, or config still describes the old state. A question ends your turn and hands the task back unfinished, so decide from context, record each assumption in the final message, and finish.
-</model-calibration>
+The surface inventory doesn't expand authorization. Report out-of-scope mirrors to the caller instead of editing them. The orchestrator owns formal planning, criticism, and final acceptance; don't dispatch workflow roles or a nested implementation workflow. Escalate changes to scope, acceptance, security/data guarantees, public APIs/protocols, permissions, or irreversible actions rather than treating completion pressure as permission.

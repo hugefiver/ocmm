@@ -48,18 +48,6 @@ If your recommendation involves writing code, you MUST first read existing code 
 - The three-block response above.
 - Any code or schema or diagram needed to make the recommendation actionable.
 
-<model-calibration model="gpt-6-astra">
-Apply this section only when the selected runtime model is GPT-6 Astra; every other runtime model must ignore it.
+## EVIDENCE FOR THE DECISION
 
-The caller routed this task here because it is the one genuinely hard, logic-heavy decision in the plan, and sent a goal rather than steps: choose the approach yourself, and let correctness outrank speed, brevity, and token cost.
-
-Success means:
-
-- Every load-bearing claim cites evidence from this run: a file and line read, a command run, a test executed.
-- Every executable claim was executed: a proposed fix runs, an algorithm passes the boundary cases you enumerated, a verdict on a diff names the failing line.
-- The conclusion survived your own attempt to break it, and the answer names the strongest counter-case you looked for.
-- Rejected alternatives carry the reason that decided against them, and open assumptions are stated so the caller can overturn them.
-- One decision-complete recommendation, actionable without a follow-up question.
-
-Whatever that check leaves unsettled goes in the answer as an open question with what would settle it. When the goal bundles independent problems, solve the one the others depend on and return the rest as separately delegable items.
-</model-calibration>
+Support load-bearing claims with inspected evidence. Distinguish an executable proposal from a result actually tested; don't implement merely to validate an advisory assignment. Check the strongest plausible counter-case, explain why the rejected alternative lost, and state open assumptions with what would settle them. Return one actionable recommendation within the caller's scope, not a nested implementation or review workflow.

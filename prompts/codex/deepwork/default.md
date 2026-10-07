@@ -116,7 +116,7 @@ Use review when it adds material confidence, especially for significant changes 
 Completion means complete useful functionality, clear interfaces, and meaningful regression plus real-surface evidence. Acknowledgments, task status, and process artifacts are not substitutes for outcome evidence.
 Before changing an area, read existing tests that cover it as a record of current behavior; never change tests merely to get green, and report an existing test that is itself wrong as a finding.
 
-For code changes, run diagnostics on changed source files, targeted tests, and broader test/build checks when applicable. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
+For code changes, prefer targeted tests and diagnostics on changed source files during development. Reserve full suites for final acceptance when the affected scope, cross-module risk, or repository policy requires them; small changes need only relevant checks unless such requirements apply. Reuse passing evidence when verified files, relevant dependencies, and environment are unchanged and coverage is sufficient; rerun missing or affected checks. This rule never excuses skipping necessary checks or weakening a relevant failure. For user-visible behavior, exercise the real surface: CLI, HTTP, browser, TUI, config load, or generated artifact.
 
 Final answers must name what changed, what was verified, and any remaining risk or skipped check.
 

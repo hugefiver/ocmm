@@ -4,7 +4,34 @@ This document is the single source of truth for v1 skill and prompt provenance, 
 
 Naming note: `v1` remains the configuration value and on-disk version label. Prompt text shown to models calls this the `deepwork` workflow to describe the behavior rather than the version tag.
 
-## Current Operating Contract (2026-09-19)
+## Current GPT Composition and Selective Sync (2026-10-07)
+
+Each adapter has nine deepwork sources: `default`, `gpt`, `claude-opus-5`, `gemini`, `glm`, `codex`, `planner`, `kimi-k27`, and `swe-2`. There are five functional-role sources and eleven category sources, including opt-in `cross-cutting` (ten categories by default). The four v1/Codex `gpt-5.6.md` and `gpt-6-astra.md` sources are deleted. Their descriptions below are historical provenance, not current loading instructions.
+
+`deepwork/gpt.md` is the only GPT behavioral calibration per adapter, titled `# GPT EXECUTION CALIBRATION`. Composition is role-first, with subordinate calibration inside the composer-owned `<workflow-model-calibration>` envelope. OpenCode adds the shared layer once for the final detected GPT/Codex-family model, including planners and categories. Planner retains `deepwork/planner.md` as planning doctrine, not a GPT generation. `deepwork/codex.md` contains only host tool compatibility. Category sources have no Astra inline markers or model-only addenda; useful decision-evidence and cause-oriented investigation principles live in generic role text without mandatory broad exploration.
+
+Codex carries one shared GPT layer ahead of runtime selection. Non-GPT models ignore GPT behavior, but role, planner, embedded-skill, and adapter tool instructions still apply. Opus remains orchestrator-only; Kimi/SWE additive guards, other non-GPT layers, explicit prompt overrides, planning tiers, and opt-in category behavior retain their boundaries. Runtime family/generation detection, native `max` support, effort translation, explicit configuration priority, and critic/review floors aren't changed by prompt unification.
+
+| Current source, both adapters | Maintained purpose |
+| --- | --- |
+| `deepwork/gpt.md` | Complete authorized outcome; complex-work planner/critic default and recorded narrow skips; orchestrator ownership and worker stopping; proportional regression and real-surface evidence; anti-slop; evidence reuse; substantive communication |
+| `deepwork/codex.md` | Host-specific tools and continuation compatibility only |
+| `deepwork/planner.md` | Existing plan-only doctrine and authoritative writing-plans reference, unchanged |
+| `deepwork/glm.md` | Existing GLM policy with communication and evidence-reuse updates only |
+| `agents/plan-critic.md` | Necessary user outcome states and failure conditions have feasible delivery and sufficient evidence; only necessary omissions block, no fixed IS table or QA ritual |
+| `category/{hard-reasoning,deep,cross-cutting}.md` | Generic role bases without Astra markers or copied GPT calibration |
+
+Passing evidence is reusable only when verified files, relevant dependencies, and environment are unchanged and coverage is sufficient. Changes invalidate only affected evidence; failed, stale, or irrelevant results aren't passes. No automatic final rerun or reduction of necessary verification is allowed. GPT/GLM communication reports known results, current work, and next steps at substantive phase transitions, blockers, major plan changes, or after long work segments, not every tool/todo or private deliberation.
+
+Both adapters' `deepwork/{default,gpt}.md` prefer targeted tests and diagnostics during development, reserving full suites for final acceptance when affected scope, cross-module risk, or repository policy requires them. Small changes need only relevant checks unless those requirements apply, including repository-required pre-commit typecheck, test, and build. Valid passing evidence remains reusable; this rule doesn't waive necessary checks or weaken relevant failures.
+
+Sources adopted selectively from parent-reviewed OMO candidates: `1abe7d383` for outcome-state plan criticism, `8edb5eb79` for phase handoffs, `7d293bf23` for evidence reuse, and `d06f90178` for shorter outcome/risk-oriented calibration. Parent review of HEAD `087766909` found no additional required import; this text partition doesn't claim an independent full diff/history review. Rejected: runtime ledger/DAG, fixed reviewer gates, IS tables, new hooks, model-chain upgrades, mandatory fan-out, and unconditional final validation. `writing-plans` already supplies outcome/wave evidence and self-review, so no skill edit is needed.
+
+The GPT bases shrink from 216 to 43 lines (v1) and 224 to 47 (Codex). Each also replaces two deleted 40-line generation layers, reducing the full former GPT source set from 296 to 43 and 304 to 47 lines. Both 193-line `codex.md` sources become 9-line tool-compatibility notes. Counts describe the edit, not acceptance thresholds. Key rules remain in calibration and authoritative role/skill references. Generated Codex profiles are parent-owned generator output; source editing alone doesn't prove assembled prompts or generated freshness.
+
+Author's note: This record is for prompt/runtime maintainers; verify role-first, single-layer composition through the actual loader and generator.
+
+## Continuing Operating Contract (2026-09-19)
 
 - OpenCode has one maintained workflow: `v1` (the default). `prompts/codex/**` and the generated Codex bundle are an independent adapter surface; the generator owns generated output. CodeGraph is removed and is not a discovery prerequisite or runtime dependency.
 - OpenCode background work is conditional on the active callable Task schema. Keep dependencies foreground, rely on host completion/error notification rather than polling, and preserve returned `task_id` semantics. Codex has no equivalent background-session contract.
@@ -61,6 +88,8 @@ Historical-policy note (2026-09-19): dated receipt, hash, mandatory-round, fixed
 
 ## Codex Plugin Prompts (`prompts/codex/`)
 
+Historical GPT composition note: the dated GPT-5.6/Sol/Astra and Codex-policy entries in this section describe earlier states. The 2026-10-07 shared GPT composition above replaces them, including the former category carry-ahead layers.
+
 The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory alongside `prompts/v1/`. These are v1-derived prompts adapted for the Codex environment:
 
 - **Tool substitutions**: `task()` → `multi_agent_v1.spawn_agent`, TodoWrite → `update_plan`, Edit/Write → `apply_patch`, `lsp_diagnostics` → LSP via lsp MCP.
@@ -88,9 +117,9 @@ The Deepwork Codex plugin uses a dedicated `prompts/codex/` directory alongside 
 | requesting-code-review/code-reviewer.md | superpowers/requesting-code-review/code-reviewer.md | local flat-workflow review input: accepts committed ranges or working-tree/staged diffs and must ask the orchestrator for missing diff evidence instead of asking implementation subagents to commit. **2026-07-29 review-artifact identity adaptation:** identity echo and verification; `[evidence]` mismatch or drift is a blocker; evaluate stamped evidence with no test rerun; assessment is `Yes`/`No` and the receipt verdict is binary `approved`/`rejected`. |
 | writing-plans/plan-document-reviewer-prompt.md | superpowers/writing-plans/plan-document-reviewer-prompt.md | extended: added Cross-Task Consistency, Global Constraints, and Plan vs Review Rubric check categories (absorbs upstream Pre-Flight plan review into plan-critic) |
 
-## Prompt Source Mapping
+## Historical Prompt Source Mapping (through 2026-09-23)
 
-The deepwork source inventory contains nine variants: `default`, `gpt`, `gpt-5.6`, `gpt-6-astra`, `claude-opus-5`, `gemini`, `glm`, `codex`, and `planner`.
+This table records prior adaptations, not current inventory or composition. Current inventory and replacement mapping are in the 2026-10-07 section. Generation-specific GPT sources, Astra category blocks, and their loading descriptions are superseded; runtime effort exceptions remain separate capability policy.
 
 **2026-08-28 proportional default verification:** `prompts/v1/deepwork/default.md` now asks for one or two targeted scenarios for a small single-surface change and at least three for multi-surface or security/runtime-safety/data-loss/migration/release/high-risk work. It always includes a happy path and adds edge or adjacent coverage only when risk exists. Test-first requires a real deterministic test seam; otherwise use the strongest real-surface verification, with no synthetic boundary or prose pin. Characterization tests are limited to refactors where a behavior regression could otherwise be hidden.
 
@@ -160,9 +189,9 @@ created for the current task.
 - `deep` and `complex` may additionally call only `coding`, `frontend`, `hard-reasoning`, `creative`, and `documenting` for materially useful bounded deliverables. **2026-09-07:** the opt-in `cross-cutting` category, when activated by explicit user config, gains the same local-coordinator rights (utility leaves plus those specialist execution agents); `deep.md` prompts now carry a concise `## DELEGATION` routing section stating both lists and the never-call set.
 - Planner and review roles return plans/findings to their caller. Reviewer/Oracle profiles are implementation-acceptance/code-quality-only; formal planner dispatch, difficult-decision routing, the plan-critic loop, and final acceptance review remain orchestrator-owned.
 - Final review accepts either an orchestrator-owned committed range or an uncommitted working-tree/staged diff; implementation subagents do not create commits merely to make review possible.
-- `prompts/v1/agents/planner.md`, effective terminal delegation contracts, `skills/v1/subagent-driven-development/SKILL.md`, `skills/v1/subagent-driven-development/implementer-prompt.md`, and `skills/v1/requesting-code-review/SKILL.md` carry exact role permissions and ownership. `prompts/v1/deepwork/gpt-5.6.md` carries only the conservative model-level threshold; `prompts/v1/deepwork/claude-opus-5.md` carries only the orchestrator-only additive calibration. Codex generated profiles and copied skills are refreshed from those sources.
+- `prompts/v1/agents/planner.md`, effective terminal delegation contracts, `skills/v1/subagent-driven-development/SKILL.md`, `skills/v1/subagent-driven-development/implementer-prompt.md`, and `skills/v1/requesting-code-review/SKILL.md` carry exact role permissions and ownership. The shared `prompts/v1/deepwork/gpt.md` supplies subordinate GPT calibration; `prompts/v1/deepwork/claude-opus-5.md` remains orchestrator-only. Codex generated profiles and copied skills are refreshed from those sources.
 
-## GPT-5.6 Prompt Simplification (2026-07-19)
+## Historical GPT-5.6 Prompt Simplification (2026-07-19, superseded 2026-10-07)
 
 - Authority: `code-yeongyu/oh-my-openagent` `dev@e8d842a38a7e0ed3edd5fc74f88247f8b63075ad`; reviewed Hephaestus OpenCode/Codex sources and the GPT-5.6 Momus source.
 - Evidence: PR #6012 and #6010 favor shorter role-preserving prompts; PR #6100 requires observable `GOAL` / `STOP WHEN` / `EVIDENCE`; PR #6151 avoids empty polling and unchanged-input revalidation.
@@ -174,7 +203,7 @@ created for the current task.
 - 2026-08-19 cache-aware retrieval: GPT-5.6 calibration now avoids unnecessary large tool-output replay by preferring targeted lookup, bounded reads, small stable outputs, closed-batch summaries, and focused re-lookups when exact old output is needed. Then-maintained v1/omo sources included OpenCode-specific native `tool_output` and compression/history rewrite restraint; Codex kept the neutral subset only.
 - 2026-08-24 measured cache restraint: Then-maintained v1/omo sources preferred tool results below 16,000 characters and per-turn new output below 32,000 characters, rejected phase-end `compress`, kept summaries in the current response, preserved model/session continuity after unavoidable compression, and reused one subagent `task_id` within the same role/stage. Codex carried equivalent environment-neutral output, context-reduction, and continuation guidance.
 
-## GPT-6 Astra Sync (2026-09-07)
+## Historical GPT-6 Astra Sync (2026-09-07, prompt composition superseded 2026-10-07)
 
 - Upstream authority: `code-yeongyu/oh-my-openagent` `dev@767069606bcd36a2eb311f6a9ac14ab17b1f41b6`, GPT-6 Astra changeset (PRs #7789–#7801, ~36 commits, 2026-09-05): category prompt appends in `packages/senpi-task/src/category/openai-categories.ts` (mirrored in `packages/omo-opencode/src/tools/delegate-task/openai-categories.ts`), `gpt-prompt-identity.ts`, category-model routing, and the either-flagship gate. `packages/prompts-core/prompts/ultrawork/gpt.md` has no Astra content, so the ocmm `deepwork/gpt.md` sync source is unchanged.
 - Routing sync: `hard-reasoning` and `deep` chains lead with `gpt-6-astra` (max/xhigh before `gpt-5.6-sol`); `plan-critic`, `frontend`, and `creative` gpt entries prepend `gpt-6-astra` at matched tuning; `matchRequirementSuccessor` materializes any GPT-6+ no-lane flagship over a GPT baseline; `selectCatalogModel` falls back to the newest no-lane GPT-6 flagship when no lane candidates exist, and only for chains that already carry a no-lane GPT-6+ entry — chains without one (`quick`, `coding`, `research`) keep their own heads, and lane models (`gpt-5.6-sol`/`-terra`) still take precedence over the astra head when both are in the catalog; `supportsNativeGptMaxReasoning` extends native `max` to GPT-5.6-and-later. `gpt-6-astra-fast` promotion rides the existing fast-option rules unchanged.

@@ -69,6 +69,14 @@ export function isGpt6SolModel(modelID: string): boolean {
   return /^gpt-6-sol(?:$|[-_.])/.test(extractModelName(modelID).toLowerCase())
 }
 
+/** Sol 6.1+ exposes low through max, but not none/minimal reasoning effort. */
+export function isGpt61OrLaterSolModel(modelID: string): boolean {
+  const name = extractModelName(modelID).toLowerCase()
+  if (!/^gpt-\d+(?:\.\d+){0,2}-sol(?:$|[-_.])/.test(name)) return false
+  const version = parseGptVersion(name)
+  return version !== null && (version[0] > 6 || (version[0] === 6 && version[1] >= 1))
+}
+
 export function isCodexModel(modelID: string, providerID?: string): boolean {
   const lc = modelID.toLowerCase()
   const provider = providerID?.toLowerCase() ?? ""
