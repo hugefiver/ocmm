@@ -339,11 +339,12 @@ test("source entry exports a dsh plugin function and config schema", async () =>
   assert.equal(existsSync(join(packageRoot, "lib", "status.d.ts")), true);
 });
 
-test("preset-scoped skill plugin source entry exposes its Cordis contract", async () => {
+test("legacy preset skill entry retains a no-op Cordis contract; runtime mounts are Agent-scoped", async () => {
   const mod = await import("../lib/preset-skills.js");
 
   assert.equal(mod.name, "dsmm/preset-skills");
-  assert.deepEqual(mod.inject, ["skills"]);
+  assert.deepEqual(mod.inject, []);
+  assert.equal(typeof mod.registerAgentSkills, "function");
   assert.equal(typeof mod.Config, "function");
   assert.equal(typeof mod.apply, "function");
   assert.equal(mod.default, mod.apply);

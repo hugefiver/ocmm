@@ -1,6 +1,10 @@
 # dsmm Skill Sync Policy
 
-dsmm skill text is sourced from current ocmm `skills/v1` behavior, then adapted to DSH-native Agent Skills. Seven core skills remain prompt-injected while deepwork is active. The separate `debugging` skill and its DAP client are bundled for on-demand role-preset use and are never added to every turn's core prompt.
+dsmm skill text is sourced from current ocmm `skills/v1` behavior, then adapted to DSH-native Agent Skills. Stage A (2026-10-07) exposes the existing seven core skills plus debugging only through a native Agent-scoped metadata provider. No skill body is injected into system prompts; both ordinary active presets and DW default-on presets load bodies only on native skill invocation. Explicit off withdraws the DSMM provider without removing project skills or role permissions.
+
+Metadata in `src/skills.ts` must match packaged frontmatter (tested) and must never read `SKILL.md` during discovery. `resourceBase` resolves the package's complete existing skill directory; body reads are cancellable and fenced by the registration signal, per-lookup generation and current parent scope. Parent/global snapshots preserve all non-DSMM winning names and invocation restrictions. Incomplete/error observations do not imply absence. Native registry invalidation clears that registry's catalog cache; no DSMM ancestor/body cache or skills/change notification loop is added. The old preset compatibility entry registers nothing. B owns full source/library expansion, deterministic synchronization and generated preset refresh.
+
+rc.2 broadcasts `skills/change` across the Cordis runtime, but revision/cache ownership remains per registry. DSMM therefore uses its broadcast generation only to fence each in-flight list/get, never as a permanent version in cached candidate locators. Each get rechecks the current ancestor snapshot before reading a body; unrelated registry changes cannot leave a complete cached catalog permanently unloadable or require a manual local invalidate. The listener does not reflect broadcasts into `control.invalidate()`.
 
 ## Source mapping
 
@@ -15,6 +19,6 @@ dsmm skill text is sourced from current ocmm `skills/v1` behavior, then adapted 
 
 ## Synchronization rules
 
-When ocmm workflow skills change, review the matching dsmm skill for behavior drift. Port durable intent, safety and acceptance; do not port OpenCode/Codex tool names, hook mechanics or imagined DSH events. Keep the seven auto-injected bodies compact, retain debugging as a separate registered skill, and update tests/docs when core inventory or setting names change.
+When ocmm workflow skills change, review the matching dsmm skill for behavior drift. Port durable intent, safety and acceptance; do not port OpenCode/Codex tool names, hook mechanics or imagined DSH events. Keep discovery metadata separate from all eight lazy bodies/resources, and update tests/docs when inventory or setting names change. Do not reinstate a prompt-body fallback.
 
 Future sync work should record the source ocmm skill version or date in the related implementation plan or changelog entry, then run the dsmm verification path before publishing the package.

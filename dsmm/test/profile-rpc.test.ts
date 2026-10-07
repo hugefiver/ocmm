@@ -239,6 +239,7 @@ async function replayUnawaitedStorageIndex(): Promise<typeof dsmmPlugin> {
   const awaited = "return fiber.await().then(() => applyRuntime(ctx, config));";
   assert.ok(compiled.includes(awaited), "replay must alter the production storage-ready barrier only");
   const old = compiled.replace(awaited, "return applyRuntime(ctx, config);")
+    .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   const replay = await import(`data:text/javascript;base64,${Buffer.from(old).toString("base64")}`) as { default: typeof dsmmPlugin };
   return replay.default;
@@ -250,6 +251,7 @@ async function replayReturnedServiceIndex(): Promise<typeof dsmmPlugin> {
   const fixed = /profileCtx\.inject\?\.\(\["typert"\], \(rpcCtx\) => \{\s*registerProfilesRpc\(rpcCtx, manager\);\s*\}\);/u;
   assert.ok(fixed.test(compiled), "replay must replace exactly the production Typert callback, not a fixture");
   const old = compiled.replace(fixed, 'profileCtx.inject?.(["typert"], (rpcCtx) => registerProfilesRpc(rpcCtx, manager));')
+    .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   // Read-only in-memory replay preserves every other production module and
   // callback. No generated file, checkout edit, or global runtime is changed.
@@ -320,7 +322,7 @@ test("production startup refuses a preexisting incompatible native JSONL backend
     assert.equal([...ctx.registry.values()].some((runtime) => runtime.callback === DsmmSessionPersistence), false);
     const session = Session.create(SessionId("production-incompatible-storage"));
     const controller = new DeepworkModeController(ctx as unknown as DshContext);
-    await assert.rejects(controller.select({ session } as unknown as DshAgent, true), /no unsafe event was appended/u);
+    await assert.rejects(controller.selectIdle({ session } as unknown as DshAgent, true, false), /no unsafe event was appended/u);
     assert.equal(session.snapshotEvents().length, 0);
     assert.deepEqual(await before.list(), []);
     await assert.rejects(access(join(root, "requested-dsmm-logs")), { code: "ENOENT" });

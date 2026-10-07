@@ -1,13 +1,4 @@
-export interface SettingsScope<T> {
-    get(): T;
-    watch?(callback: (next: T, prev: T) => void | Promise<void>): () => void;
-}
-export interface DshSettingsRegistry {
-    register<T>(namespace: string, schema: unknown, options: {
-        base: Partial<T>;
-        applies?: "live" | "restart";
-    }): SettingsScope<T>;
-}
+import type { Context } from "@deepseek-ai/cordis";
 export interface DshSessionEvent {
     type: string;
     data?: unknown;
@@ -62,7 +53,6 @@ export interface DshLlmCallConfig {
     temperature?: number;
     maxTokens?: number;
     stop?: unknown;
-    [key: string]: unknown;
 }
 export interface DshLlmFailure {
     readonly message: string;
@@ -73,24 +63,20 @@ export interface DshLlmFailure {
 }
 export interface DshEpochHeader {
     config: DshLlmCallConfig;
-    [key: string]: unknown;
 }
 export interface DshReasoningEffortInfo {
     id: string;
     name: string;
-    [key: string]: unknown;
 }
 export interface DshModelReasoningInfo {
     efforts: readonly DshReasoningEffortInfo[];
     defaultEffort?: string;
-    [key: string]: unknown;
 }
 export interface DshResolvedModelInfo {
     provider: string;
     id: string;
     name: string;
     reasoning?: DshModelReasoningInfo;
-    [key: string]: unknown;
 }
 export interface DshLlmRuntime {
     resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<DshResolvedModelInfo>;
@@ -163,28 +149,13 @@ export type DshGoalChangeEventData = {
     };
     clearedAt: number;
 };
-export interface DshSystemPromptContext {
-    agent?: DshAgent;
-    [key: string]: unknown;
-}
-export interface DshSystemPromptSection {
-    name: string;
-    order: number;
-    interpolate?: boolean;
+type NativePromptRegistry = Context["systemPrompt"];
+export type DshSystemPromptContext = Pick<NonNullable<Parameters<NativePromptRegistry["assemble"]>[0]>, "scope" | "signal">;
+export type DshSystemPromptSection = Omit<Parameters<NativePromptRegistry["section"]>[0], "text"> & {
     text(context: DshSystemPromptContext): string;
-}
+};
 export interface DshSystemPromptRegistry {
-    section(section: DshSystemPromptSection): unknown;
-}
-export interface DshPromptAssembly {
-    sections: Array<{
-        name: string;
-        text: string;
-        interpolate?: boolean;
-    }>;
-    contexts: unknown[];
-    tools: unknown[];
-    variables: Record<string, string | undefined>;
+    section(section: DshSystemPromptSection): ReturnType<NativePromptRegistry["section"]>;
 }
 export interface DshCommandInvocation {
     agent: DshAgent;
@@ -207,27 +178,11 @@ export interface DshCommandsRegistry {
         handler(invocation: DshCommandInvocation): DshCommandResult | Promise<DshCommandResult>;
     }): unknown;
 }
-export interface DshSkillRegistration {
-    name: string;
-    description: string;
-    content: string;
-    source?: "bundled" | "runtime" | string;
-    provider?: string;
-    resourceBase?: {
-        kind: "directory";
-        path: string;
-    } | {
-        kind: "opaque";
-        description: string;
-    };
-    invocation?: {
-        modelInvocable: boolean;
-        userInvocable: boolean;
-    };
-}
-export interface DshSkillRegistry {
-    register(skill: DshSkillRegistration): unknown;
-}
+export type DshSkillRegistry = Pick<Context["skills"], "registerProvider" | "snapshot" | "list" | "get">;
+export type DshSkillRegistration = NonNullable<Awaited<ReturnType<DshSkillRegistry["get"]>>>;
+export type DshSkillProvider = ReturnType<Parameters<DshSkillRegistry["registerProvider"]>[0]>;
+export type DshSkillCandidate = Parameters<DshSkillProvider["get"]>[0];
+export type DshSkillLookupOptions = Parameters<DshSkillProvider["list"]>[0];
 export interface DshContentBlock {
     type: string;
     text?: string;
@@ -280,14 +235,6 @@ export interface DshToolRuntime {
     get?(name: string): unknown;
 }
 export type DshEventListener = (...args: any[]) => any;
-export interface DshInjectedServices {
-    settings?: DshSettingsRegistry;
-    skills?: DshSkillRegistry;
-    commands?: DshCommandsRegistry;
-    tools?: DshToolRuntime;
-    llm?: DshLlmRuntime;
-    [key: string]: unknown;
-}
 export interface PreStepFrame {
     agent: DshAgent;
     signal: AbortSignal;
@@ -300,7 +247,6 @@ export interface PreStepDecision {
 export interface DshContext {
     agents?: DshAgentsRegistry;
     subagents?: import("./role-providers.js").DsmmSubagentRegistry;
-    settings?: DshSettingsRegistry;
     systemPrompt?: DshSystemPromptRegistry;
     skills?: DshSkillRegistry;
     commands?: DshCommandsRegistry;
@@ -329,4 +275,5 @@ export interface DshContext {
         warn(message: string, ...args: unknown[]): void;
     };
 }
+export {};
 //# sourceMappingURL=dsh-types.d.ts.map

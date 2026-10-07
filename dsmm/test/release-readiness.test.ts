@@ -570,7 +570,13 @@ test("0.1.9 documentation requires explicit durable mode and a single admitted-p
     assert.match(document, /saved explicit `deepwork\/mode`/u, path);
     assert.match(document, /same-default.*(?:persist|intent)/iu, path);
     assert.match(document, /profile changes and reopen|profile changes and fresh-process reopen/iu, path);
-    assert.match(document, /standing DW presets.*locked enabled/iu, path);
+    if (path === compatibilityPath || path === join(packageRoot, "docs", "settings-status.md")) {
+      assert.match(document, /DW (?:presets|roles).*not locked|DW roles are no longer locked/iu, path);
+      assert.match(document, /explicit off.*(?:retains|does not remove)/iu, path);
+    } else {
+      // Other historical release/UI documents are outside stage A ownership.
+      assert.match(document, /standing DW presets.*locked enabled/iu, path);
+    }
     assert.match(document, /one profile list/iu, path);
     assert.match(document, /`@use-model`/u, path);
     assert.match(document, /Use profile model/u, path);

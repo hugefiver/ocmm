@@ -222,7 +222,7 @@ export function persistedRoleRoute(frame: Pick<AgentRequestFrame, "agent">, prim
       || !["initial", "resume", "change", "series"].includes(String(event.data.reason)) || !("header" in event.data)) continue;
     const header = event.data.header;
     if (!isRecord(header) || !isRecord(header.config)) continue;
-    const config = header.config as DshLlmCallConfig;
+    const config = header.config;
     if (typeof config?.provider !== "string" || config.provider.trim() === ""
       || typeof config.model !== "string" || config.model.trim() === "") continue;
     selected = {

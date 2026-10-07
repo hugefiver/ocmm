@@ -67,8 +67,11 @@ test("minimal default and native idle mode writes survive profile changes/reopen
     assert.equal(minimal.session.snapshotEvents().filter((event) => event.type === "model/selection").length, 0);
     const dw = await f.create({ agentPreset: "dsmm-orchestrator" });
     const managed = await runtime.getSession(structural(dw));
-    assert.equal(managed.deepwork!.active, true); assert.equal(managed.deepwork!.locked, true);
-    await assert.rejects(runtime.selectMode(toggle(managed, false), structural(dw)), { code: "validation" });
+    assert.equal(managed.deepwork!.active, true); assert.equal(managed.deepwork!.locked, false);
+    const dwOff = await runtime.selectMode(toggle(managed, false), structural(dw));
+    assert.equal(dwOff.deepwork!.active, false); assert.equal(dwOff.deepwork!.explicit, true);
+    await runFixtureTurn(dw);
+    assert.doesNotMatch(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
   } finally { await f.dispose(); }
 });
 
@@ -391,19 +394,25 @@ test("an exact native entered Agent cannot bypass its sidecar through a synchron
   const f = await nativeRoutingFixture();
   try {
     const runtime = runtimeOf(f);
-    const id = SessionId("dsmm-entered-before-created");
-    const session = f.ctx.get("sessions")!.prepare(id);
-    const detachSession = f.ctx.get("sessions")!.enter(session);
-    f.ctx.get("sessions")!.announce(session);
-    const early = { id, session, ctx: f.ctx } as unknown as Agent;
-    assert.throws(() => runtime.getSettings(structural(early)), { code: "activation" }, "unpublished native setup cannot establish a default binding either");
-    const detach = f.agents.enter(early, undefined);
-    try {
-      assert.throws(() => runtime.getSettings(structural(early)), { code: "activation" });
-      await assert.rejects(runtime.getSession(structural(early)), { code: "activation" });
-      await f.agents.announce(early, "startup");
-      assert.equal(runtime.admission(structural(early)).scope, "global-default");
-    } finally { detach(); detachSession(); }
+    let setupObserved = false, enteredObserved = false;
+    f.ctx.on("agent/created", async ({ agent }) => {
+      if (agent.id !== "dsmm-entered-before-created") return;
+      enteredObserved = true;
+      assert.throws(() => runtime.getSettings(structural(agent)), { code: "activation" });
+      await assert.rejects(runtime.getSession(structural(agent)), { code: "activation" });
+    }, { prepend: true, global: true });
+    const early = await f.create({}, undefined, {
+      sessionId: SessionId("dsmm-entered-before-created"),
+      async setup(_agentCtx, agent) {
+        setupObserved = true;
+        assert.throws(() => runtime.getSettings(structural(agent)), { code: "activation" }, "unpublished native setup cannot establish a default binding either");
+        await assert.rejects(runtime.getSession(structural(agent)), { code: "not-owned" }, "setup has not published an owned Agent yet");
+        return { commit() { assert.throws(() => runtime.getSettings(structural(agent)), { code: "activation" }); } };
+      }
+    });
+    assert.equal(setupObserved, true);
+    assert.equal(enteredObserved, true);
+    assert.equal(runtime.admission(structural(early)).scope, "global-default");
   } finally { await f.dispose(); }
 });
 

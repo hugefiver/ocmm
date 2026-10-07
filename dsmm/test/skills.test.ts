@@ -1,92 +1,44 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { DshSkillRegistration } from "../lib/dsh-types.js";
-import { DSMM_SKILL_NAMES as SETTINGS_SKILL_NAMES } from "../lib/settings.js";
-import {
-  DSMM_SKILL_NAMES,
-  DSMM_ON_DEMAND_SKILL_NAMES,
-  MVP_SKILL_NAMES,
-  enabledSkillNames,
-  loadBundledSkill,
-  parseSkillMarkdown,
-  registerBundledSkills,
-  renderBundledSkillPrompt
-} from "../lib/skills.js";
-import { resolveConfig } from "../lib/settings.js";
+import { DSMM_SKILL_NAMES as SETTINGS_SKILL_NAMES, resolveConfig } from "../lib/settings.js";
+import { DSMM_SKILL_NAMES, DSMM_ON_DEMAND_SKILL_NAMES, MVP_SKILL_NAMES, enabledSkillNames,
+  bundledSkillMetadata, parseSkillMarkdown, readBundledSkill } from "../lib/skills.js";
 
-test("DSMM skill names are stable and kebab-case", () => {
-  assert.deepEqual(DSMM_SKILL_NAMES, [
-    "brainstorming",
-    "writing-plans",
-    "requesting-code-review",
-    "receiving-code-review",
-    "subagent-driven-development",
-    "dispatching-parallel-agents",
-    "remove-ai-slops"
-  ]);
-});
-
-test("MVP skill names remain as a compatibility alias", () => {
-  assert.equal(MVP_SKILL_NAMES, DSMM_SKILL_NAMES);
-  assert.equal(SETTINGS_SKILL_NAMES, DSMM_SKILL_NAMES);
-});
-
-test("debugging is available on demand, without joining the seven injected core skills", () => {
+test("canonical seven-core inventory and legacy alias remain stable; debugging is lazy too", () => {
+  assert.deepEqual(DSMM_SKILL_NAMES, ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops"]);
+  assert.equal(MVP_SKILL_NAMES, DSMM_SKILL_NAMES); assert.equal(SETTINGS_SKILL_NAMES, DSMM_SKILL_NAMES);
   assert.deepEqual(DSMM_ON_DEMAND_SKILL_NAMES, ["debugging"]);
-  const loaded = loadBundledSkill("debugging");
-  assert.match(loaded.content, /references\/scripts\/dap\.mjs/u);
-  assert.equal(renderBundledSkillPrompt(DSMM_SKILL_NAMES).includes('<dsmm-skill name="debugging">'), false);
 });
 
-test("parseSkillMarkdown extracts frontmatter and body", () => {
-  assert.deepEqual(parseSkillMarkdown("---\nname: sample\ndescription: Sample skill\n---\n\n# Body\n"), {
-    name: "sample",
-    description: "Sample skill",
-    content: "# Body\n"
-  });
+test("parseSkillMarkdown extracts frontmatter and body and rejects invalid entries", () => {
+  assert.deepEqual(parseSkillMarkdown("---\nname: sample\ndescription: Sample skill\n---\n\n# Body\n"), { name: "sample", description: "Sample skill", content: "# Body\n" });
+  assert.throws(() => parseSkillMarkdown("# No frontmatter"));
+  assert.throws(() => parseSkillMarkdown("---\nname: sample\n---\nbody"));
 });
 
-test("enabledSkillNames keeps canonical order and respects configured disablement", () => {
-  const settings = resolveConfig({ skills: { "writing-plans": false, "remove-ai-slops": false } });
-
-  assert.deepEqual(enabledSkillNames(settings), [
-    "brainstorming",
-    "requesting-code-review",
-    "receiving-code-review",
-    "subagent-driven-development",
-    "dispatching-parallel-agents"
-  ]);
+test("enabledSkillNames preserves canonical order and deployment disablement", () => {
+  assert.deepEqual(enabledSkillNames(resolveConfig({ skills: { "writing-plans": false, "remove-ai-slops": false } })), ["brainstorming", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents"]);
 });
 
-test("loadBundledSkill preserves bundled registration metadata", () => {
-  const loaded = loadBundledSkill("brainstorming");
-
-  assert.equal(loaded.name, "brainstorming");
-  assert.equal(loaded.source, "bundled");
-  assert.equal(loaded.provider, "dsmm");
-  assert.equal(loaded.resourceBase?.kind, "directory");
-  assert.deepEqual(loaded.invocation, { modelInvocable: true, userInvocable: true });
-  assert.match(loaded.content, /^# Brainstorming/mu);
-  assert.doesNotMatch(loaded.content, /^---$/mu);
-});
-
-test("registerBundledSkills registers only the requested names in canonical order", () => {
-  const registered: DshSkillRegistration[] = [];
-  registerBundledSkills({ register(skill) { registered.push(skill); } }, ["remove-ai-slops", "brainstorming"]);
-
-  assert.deepEqual(registered.map((skill) => skill.name), ["brainstorming", "remove-ai-slops"]);
-  assert.ok(registered.every((skill) => skill.source === "bundled"));
-  assert.ok(registered.every((skill) => skill.provider === "dsmm"));
-  assert.ok(registered.every((skill) => skill.resourceBase?.kind === "directory"));
-  assert.ok(registered.every((skill) => skill.invocation?.modelInvocable === true && skill.invocation.userInvocable === true));
-});
-
-test("renderBundledSkillPrompt emits requested skill bodies once without frontmatter", () => {
-  const prompt = renderBundledSkillPrompt(["remove-ai-slops", "brainstorming", "brainstorming"]);
-
-  assert.equal((prompt.match(/<dsmm-skill name="brainstorming">/gu) ?? []).length, 1);
-  assert.equal((prompt.match(/<dsmm-skill name="remove-ai-slops">/gu) ?? []).length, 1);
-  assert.match(prompt, /^<dsmm-skill name="brainstorming">\n# Brainstorming/mu);
-  assert.match(prompt, /<dsmm-skill name="remove-ai-slops">\n# Remove AI Slops/mu);
-  assert.doesNotMatch(prompt, /^---$/mu);
+test("metadata inventory agrees with packaged frontmatter without carrying bodies", async () => {
+  for (const name of [...DSMM_SKILL_NAMES, ...DSMM_ON_DEMAND_SKILL_NAMES]) {
+    const meta = bundledSkillMetadata(name);
+    assert.equal(meta.resourceBase?.kind, "directory");
+    if (meta.resourceBase?.kind !== "directory") throw new Error("bundled skill needs a directory base");
+    const parsed = parseSkillMarkdown(readFileSync(join(meta.resourceBase.path, "SKILL.md"), "utf8"));
+    const loaded = await readBundledSkill(name, new AbortController().signal);
+    assert.equal("content" in meta, false); assert.equal(meta.provider, "dsmm"); assert.equal(meta.source, "bundled");
+    assert.deepEqual(meta.invocation, { modelInvocable: true, userInvocable: true });
+    assert.equal(meta.name, parsed.name); assert.equal(meta.description, parsed.description);
+    assert.deepEqual(loaded, { ...meta, content: parsed.content });
+    assert.doesNotMatch(loaded.content, /^---$/mu);
+  }
+  const debugging = await readBundledSkill("debugging", new AbortController().signal);
+  assert.match(debugging.content, /references\/scripts\/dap\.mjs/);
+  assert.equal(debugging.resourceBase?.kind, "directory");
+  if (debugging.resourceBase?.kind === "directory") assert.match(readFileSync(join(debugging.resourceBase.path, "references/scripts/dap.mjs"), "utf8"), /node/);
+  const aborted = AbortSignal.abort();
+  await assert.rejects(readBundledSkill("brainstorming", aborted));
 });

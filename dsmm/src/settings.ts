@@ -1,5 +1,5 @@
 import Schema from "@deepseek-ai/schemastery";
-import type { DshAgent, DshContext, DshSettingsRegistry } from "./dsh-types.js";
+import type { DshAgent, DshContext } from "./dsh-types.js";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import type { DsmmLspSettings } from "./lsp.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
@@ -156,7 +156,6 @@ export interface DsmmResolvedRoleRuntimePolicy {
   readonly fallbackSource: "role" | "global";
 }
 
-export const DSMM_SETTINGS_NAMESPACE = "dsmm";
 export const DSMM_STATUS_COMMAND = "dsmm-status";
 
 export interface RegisterSettingsOptions {
@@ -618,53 +617,12 @@ function normalizePositiveInteger(value: number | undefined, defaultValue: numbe
 }
 
 export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {}, options: RegisterSettingsOptions = {}): () => DsmmSettings {
-  const base = resolveConfig(config);
-  // Current Cordis loads restart-scoped Config itself; SettingsForms has no register().
-  if (ctx.get !== undefined) {
-    const getSettings = (): DsmmSettings => base;
-    options.onChange?.(base);
-    options.install?.(ctx, getSettings);
-    return getSettings;
-  }
-  let getSettings = (): DsmmSettings => base;
-  let attached = false;
-  const installedSettingsByReadyContext = new WeakMap<DshContext, DshSettingsRegistry>();
-
-  const ready = (readyCtx: DshContext, settings: DshSettingsRegistry | undefined): void => {
-    if (settings === undefined || installedSettingsByReadyContext.get(readyCtx) === settings) return;
-    const scope = settings.register<DsmmSettings>(DSMM_SETTINGS_NAMESPACE, DSMM_SETTINGS_SCHEMA, { base, applies: "restart" });
-    const previousGetSettings = getSettings;
-    const previousAttached = attached;
-    getSettings = () => resolveConfig(scope.get() as DsmmPluginConfig);
-    try {
-      options.onChange?.(getSettings());
-      options.install?.(readyCtx, () => getSettings());
-      installedSettingsByReadyContext.set(readyCtx, settings);
-      readyCtx.effect?.(() => () => {
-        if (installedSettingsByReadyContext.get(readyCtx) === settings) installedSettingsByReadyContext.delete(readyCtx);
-      });
-      attached = true;
-    } catch (error) {
-      if (installedSettingsByReadyContext.get(readyCtx) === settings) installedSettingsByReadyContext.delete(readyCtx);
-      getSettings = previousGetSettings;
-      attached = previousAttached;
-      throw error;
-    }
-  };
-
-  if (ctx.inject !== undefined) {
-    ctx.inject(["settings", "systemPrompt"], (readyCtx) => ready(readyCtx, readyCtx.settings));
-    return () => getSettings();
-  }
-
-  if (Object.prototype.hasOwnProperty.call(ctx, "settings")) {
-    ready(ctx, Object.getOwnPropertyDescriptor(ctx, "settings")?.value as DshSettingsRegistry | undefined);
-  }
-
-  if (!attached) {
-    options.onChange?.(getSettings());
-    options.install?.(ctx, () => getSettings());
-  }
-
-  return () => getSettings();
+  // Loader owns entry identity, Config validation, revision and persistent patch.
+  // Each non-volatile reload receives a new deployment baseline. Profiles stay
+  // on the existing immutable admission path, never a parallel settings store.
+  const base = resolveConfig(DSMM_CONFIG_SCHEMA(config));
+  const getSettings = (): DsmmSettings => base;
+  options.onChange?.(base);
+  options.install?.(ctx, getSettings);
+  return getSettings;
 }

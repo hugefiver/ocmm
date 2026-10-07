@@ -91,8 +91,6 @@ export class DsmmProfileRuntime {
             if (this.bind(agent) !== admitted || admitted.epoch !== request.expectedAdmissionEpoch || mode.revision !== request.expectedModeRevision) {
                 throw new DsmmProfileError("conflict", "The session profile, preset or mode changed. Refresh before retrying.");
             }
-            if (mode.locked)
-                throw new DsmmProfileError("validation", "A DW preset owns its Deepwork composition.");
             assertAuthority?.();
         };
         assertCurrent();
@@ -170,6 +168,7 @@ export class DsmmProfileRuntime {
                         assertCurrent: () => assertCurrent(maintenanceSignal),
                         committed: (selection, settings) => {
                             this.bound.set(agent, this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override"));
+                            this.mode.changed(agent);
                         }
                     });
                     // A committed selection remains a successful transaction even if a

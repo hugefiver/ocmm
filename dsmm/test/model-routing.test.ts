@@ -6,7 +6,7 @@ import type {
   DshAgent,
   DshContext,
   DshEpochHeader,
-  DshLlmCallConfig,
+  DshLlmCallConfig as NativeCallConfig,
   DshLlmRuntime,
   DshModelReasoningInfo,
   DshRequestErrorAction,
@@ -22,6 +22,9 @@ import { registerRuntimeRecovery } from "../lib/runtime-recovery.js";
 import { DEFAULT_DSMM_SETTINGS } from "../lib/settings.js";
 import type { DsmmSettings } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
+
+// Extra fields exercise transparent adapter forwarding, not the SDK contract.
+type DshLlmCallConfig = NativeCallConfig & Record<string, unknown>;
 
 function reasoning(ids: readonly string[], defaultEffort?: string): DshModelReasoningInfo {
   return {

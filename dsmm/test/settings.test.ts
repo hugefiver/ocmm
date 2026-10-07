@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
-import type { DshContext, DshSettingsRegistry, DshSystemPromptSection } from "../lib/dsh-types.js";
+import type { DshContext } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
 import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, DSMM_SETTINGS_NAMESPACE, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
+import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
 import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
 import type { DsmmPluginConfig, DsmmSettings } from "../lib/settings.js";
 
@@ -153,8 +150,6 @@ const DEFAULT_RUNTIME_RECOVERY_SETTINGS = {
     prompt: "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work."
   }
 };
-
-type DshEffectCallback = Parameters<NonNullable<DshContext["effect"]>>[0];
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
@@ -461,462 +456,39 @@ test("resolveConfig supports preset materialization settings", () => {
   assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true });
 });
 
-test("registerSettings registers direct namespace dsmm with a callable schema and base settings", () => {
-  const calls: Array<{ namespace: string; schema: unknown; options: unknown }> = [];
-  const ctx: DshContext = {
-    settings: {
-      register<T>(namespace: string, schema: unknown, options: { base: Partial<T>; applies?: "live" | "restart" }) {
-        calls.push({ namespace, schema, options });
-        return { get: () => options.base as T };
-      }
-    }
-  };
-
-  const getSettings = registerSettings(ctx, { defaultActive: true });
-
-  assert.equal(calls[0]?.namespace, DSMM_SETTINGS_NAMESPACE);
-  assert.equal(typeof calls[0]?.schema, "function");
-  assert.equal(typeof (calls[0]?.schema as { toJSON?: unknown }).toJSON, "function");
-  assert.deepEqual(getSettings(), {
-    modeName: "deepwork",
-    defaultActive: true,
-    promptOrder: 50,
-    deepseekV4ProCalibration: "auto",
-    deepseekV4ProDefaultReasoningEffort: "high",
-    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
-    deepseekFlashCalibration: "auto",
-    deepseekFlashDefaultReasoningEffort: "high",
-    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
-    skills: DEFAULT_SKILL_SETTINGS,
-    roles: DEFAULT_ROLE_SETTINGS,
-    roleRouting: {},
-    runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
-    presets: {
-      materialize: false
-    },
-    workflow: DEFAULT_WORKFLOW_SETTINGS,
-    guards: DEFAULT_GUARD_SETTINGS,
-    runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
-    lsp: DEFAULT_DSMM_LSP_SETTINGS
-  });
-});
-
-test("registerSettings notifies only attached effective restart-scoped settings when service exists", () => {
+test("restart-scoped Config is the only deployment input, even on a legacy-shaped host", () => {
   const observed: string[] = [];
-  const attached = { ...DEFAULT_DSMM_SETTINGS, modeName: "attached" };
-  let registrationOptions: unknown;
-
-  const getSettings = registerSettings({
-    settings: {
-      register<T>(_namespace: string, _schema: unknown, options: unknown) {
-        registrationOptions = options;
-        return {
-          get: () => attached as T
-        };
-      }
-    }
-  }, { modeName: "base" }, {
-    onChange(settings) {
-      observed.push(settings.modeName);
-    },
-    install(_readyCtx, getReadySettings) {
-      observed.push(`install:${getReadySettings().modeName}`);
-    }
+  const ctx = new Proxy({} as DshContext, { get(_target, property) {
+    if (property === "settings") throw new Error("removed settings API was read");
+    return undefined;
+  } });
+  const getSettings = registerSettings(ctx, { modeName: "base", defaultActive: true }, {
+    onChange(settings) { observed.push(settings.modeName); },
+    install(ready, settings) { assert.equal(ready, ctx); observed.push(`install:${settings().modeName}`); }
   });
-
-  assert.deepEqual(registrationOptions, { base: { ...DEFAULT_DSMM_SETTINGS, modeName: "base" }, applies: "restart" });
-  assert.equal(getSettings().modeName, "attached");
-  assert.deepEqual(observed, ["attached", "install:attached"]);
+  assert.deepEqual(getSettings(), resolveConfig({ modeName: "base", defaultActive: true }));
+  assert.deepEqual(observed, ["base", "install:base"]);
 });
 
-test("registerSettings reserves attached dsmm-status mode names for getters and installs", () => {
-  const installed: string[] = [];
-  const getSettings = registerSettings({
-    settings: {
-      register<T>() {
-        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: DSMM_STATUS_COMMAND }) as T };
-      }
-    }
-  }, {}, {
-    install(_readyCtx, getReadySettings) {
-      installed.push(getReadySettings().modeName);
-    }
-  });
+test("Config reinstallation makes a separate baseline and cannot replace an old getter", () => {
+  const a = registerSettings({}, { defaultActive: true });
+  const b = registerSettings({}, { defaultActive: false });
+  assert.equal(a().defaultActive, true); assert.equal(b().defaultActive, false);
+  assert.notEqual(a(), b());
+  const invalid = { runtimePolicy: { strategy: "unknown" } } as unknown as DsmmPluginConfig;
+  assert.throws(() => registerSettings({}, invalid));
+});
 
+test("Config normalizes reserved command names for getters, installation and command registration", () => {
+  const installed: string[] = [];
+  const getSettings = registerSettings({}, { modeName: DSMM_STATUS_COMMAND }, {
+    install(_ctx, settings) { installed.push(settings().modeName); }
+  });
   assert.equal(getSettings().modeName, DEFAULT_DSMM_SETTINGS.modeName);
   assert.deepEqual(installed, [DEFAULT_DSMM_SETTINGS.modeName]);
-});
-
-test("registerSettings normalizes attached DeepSeek V4 Pro max reasoning presets for getters and installs", () => {
-  const installedPresets: string[][] = [];
-  const attached = {
-    ...DEFAULT_DSMM_SETTINGS,
-    deepseekV4ProMaxReasoningPresets: ["dsmm-reviewer", "invalid-role", "dsmm-plan-critic", "dsmm-reviewer"]
-  };
-
-  const getSettings = registerSettings({
-    settings: {
-      register<T>() {
-        return { get: () => attached as T };
-      }
-    }
-  }, {}, {
-    install(_readyCtx, getReadySettings) {
-      installedPresets.push(getReadySettings().deepseekV4ProMaxReasoningPresets);
-    }
-  });
-
-  assert.deepEqual(getSettings().deepseekV4ProMaxReasoningPresets, ["dsmm-plan-critic", "dsmm-reviewer"]);
-  assert.deepEqual(installedPresets, [["dsmm-plan-critic", "dsmm-reviewer"]]);
-});
-
-test("registerSettings normalizes attached runtime recovery settings for getters and installs", () => {
-  const installed: Array<ReturnType<typeof resolveConfig>["runtimeRecovery"]> = [];
-  const attached = {
-    ...DEFAULT_DSMM_SETTINGS,
-    runtimeRecovery: {
-      ...DEFAULT_DSMM_SETTINGS.runtimeRecovery,
-      retryOnStatusCodes: [429, 429, 99, 503],
-      retryOnCodes: [" RATE_LIMIT ", "rate_limit", ""],
-      fallbackRoutes: [
-        { provider: " fallback ", model: " model " },
-        { provider: "fallback", model: "model" },
-        { provider: "", model: "discard" }
-      ],
-      maxFallbackAttempts: 99,
-      idleContinuation: {
-        ...DEFAULT_DSMM_SETTINGS.runtimeRecovery.idleContinuation,
-        maxContinuations: -4
-      }
-    }
-  };
-
-  const getSettings = registerSettings({
-    settings: {
-      register<T>() {
-        return { get: () => attached as T };
-      }
-    }
-  }, {}, {
-    install(_readyCtx, getReadySettings) {
-      installed.push(getReadySettings().runtimeRecovery);
-    }
-  });
-
-  const expected = {
-    ...DEFAULT_RUNTIME_RECOVERY_SETTINGS,
-    retryOnStatusCodes: [429, 503],
-    retryOnCodes: ["rate_limit"],
-    fallbackRoutes: [{ provider: "fallback", model: "model" }],
-    maxFallbackAttempts: 10,
-    idleContinuation: {
-      ...DEFAULT_RUNTIME_RECOVERY_SETTINGS.idleContinuation,
-      maxContinuations: 0
-    }
-  };
-  assert.deepEqual(getSettings().runtimeRecovery, expected);
-  assert.deepEqual(installed, [expected]);
-});
-
-test("registerSettings notifies base settings only when no settings service attaches", () => {
-  const observed: string[] = [];
-
-  const getSettings = registerSettings({}, { modeName: "base-only" }, {
-    onChange(settings) {
-      observed.push(settings.modeName);
-    }
-  });
-
-  assert.equal(getSettings().modeName, "base-only");
-  assert.deepEqual(observed, ["base-only"]);
-});
-
-test("registerSettings does not notify a base root before an injected settings root attaches", () => {
-  const observedRoots: Array<string | undefined> = [];
-  let deferredInstaller: ((readyCtx: DshContext) => unknown) | undefined;
-
-  registerSettings({
-    inject(dependencies, installer) {
-      if (dependencies[0] !== "settings") return;
-      deferredInstaller = installer;
-    }
-  }, { presets: { materialize: true, root: "base-root" } }, {
-    onChange(settings) {
-      observedRoots.push(settings.presets.root);
-    }
-  });
-
-  assert.deepEqual(observedRoots, []);
-  deferredInstaller?.({
-    settings: {
-      register<T>() {
-        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, presets: { materialize: true, root: "attached-root" } }) as T };
-      }
-    }
-  });
-
-  assert.deepEqual(observedRoots, ["attached-root"]);
-});
-
-test("registerSettings can wait for an injected settings service", () => {
-  const calls: string[] = [];
-  const getSettings = registerSettings({
-    inject(dependencies, installer) {
-      assert.deepEqual(dependencies, ["settings", "systemPrompt"]);
-      installer({
-        settings: {
-          register<T>(namespace: string) {
-            calls.push(namespace);
-            return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: "injected" }) as T };
-          }
-        }
-      });
-    },
-    systemPrompt: { section() {} }
-  });
-
-  assert.deepEqual(calls, ["dsmm"]);
-  assert.equal(getSettings().modeName, "injected");
-});
-
-test("registerSettings installs once per settings registry on the same injected child and replaces the live getter", () => {
-  let installer: ((readyCtx: DshContext) => unknown) | undefined;
-  const changes: string[] = [];
-  const installs: string[] = [];
-  const effectCallbacks: DshEffectCallback[] = [];
-  const settingsA: DshSettingsRegistry = {
-    register<T>() {
-      return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: "attached-a" }) as T };
-    }
-  };
-  const settingsB: DshSettingsRegistry = {
-    register<T>() {
-      return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: "attached-b" }) as T };
-    }
-  };
-  const child: DshContext = {
-    settings: settingsA,
-    effect(callback) {
-      effectCallbacks.push(callback);
-    }
-  };
-
-  const getSettings = registerSettings({
-    inject(dependencies, candidate) {
-      if (dependencies[0] === "settings") installer = candidate;
-    }
-  }, {}, {
-    onChange(settings) {
-      changes.push(settings.modeName);
-    },
-    install(_readyCtx, getReadySettings) {
-      installs.push(getReadySettings().modeName);
-    }
-  });
-
-  const ready = installer;
-  assert.ok(ready);
-  ready(child);
-  ready(child);
-  child.settings = settingsB;
-  ready(child);
-  const firstEffect = effectCallbacks[0];
-  assert.ok(firstEffect);
-  const firstCleanup = firstEffect();
-  if (typeof firstCleanup === "function") firstCleanup();
-  ready(child);
-
-  assert.deepEqual(changes, ["attached-a", "attached-b"]);
-  assert.deepEqual(installs, ["attached-a", "attached-b"]);
-  assert.equal(getSettings().modeName, "attached-b");
-});
-
-test("registerSettings reinstalls a same-registry child after its effect cleanup", () => {
-  let installer: ((readyCtx: DshContext) => unknown) | undefined;
-  const installs: string[] = [];
-  const effectCallbacks: DshEffectCallback[] = [];
-  const settings: DshSettingsRegistry = {
-    register<T>() {
-      return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: "attached-a" }) as T };
-    }
-  };
-  const child: DshContext = {
-    settings,
-    effect(callback) {
-      effectCallbacks.push(callback);
-    }
-  };
-
-  const getSettings = registerSettings({
-    inject(dependencies, candidate) {
-      if (dependencies[0] === "settings") installer = candidate;
-    }
-  }, {}, {
-    install(_readyCtx, getReadySettings) {
-      installs.push(getReadySettings().modeName);
-    }
-  });
-
-  const ready = installer;
-  assert.ok(ready);
-  ready(child);
-  ready(child);
-  const effect = effectCallbacks[0];
-  assert.ok(effect);
-  const cleanup = effect();
-  assert.equal(typeof cleanup, "function");
-  if (typeof cleanup === "function") cleanup();
-  ready(child);
-
-  assert.deepEqual(installs, ["attached-a", "attached-a"]);
-  assert.equal(getSettings().modeName, "attached-a");
-});
-
-test("registerSettings returns base fallback when the settings service is absent", () => {
-  const getSettings = registerSettings({ systemPrompt: { section() {} } }, { modeName: "fallback" });
-
-  assert.equal(getSettings().modeName, "fallback");
-});
-
-test("registerSettings does not read missing Cordis services directly", () => {
-  const ctx = new Proxy({} as DshContext, {
-    get(_target, property) {
-      if (property === "settings") throw new Error("settings was read directly");
-      return undefined;
-    },
-    has() {
-      return false;
-    }
-  });
-
-  assert.doesNotThrow(() => registerSettings(ctx, { modeName: "proxy-safe" }));
-});
-
-test("registerSettings installs once on the root with base settings when the settings service is absent", () => {
-  const ctx: DshContext = {};
-  const installs: Array<{ context: DshContext; modeName: string }> = [];
-  const getSettings = registerSettings(ctx, { modeName: "base-fallback" }, {
-    install(readyCtx, getReadySettings) {
-      installs.push({ context: readyCtx, modeName: getReadySettings().modeName });
-    }
-  });
-
-  assert.equal(getSettings().modeName, "base-fallback");
-  assert.deepEqual(installs, [{ context: ctx, modeName: "base-fallback" }]);
-});
-
-test("apply defers prompt, command, and preset materialization until the settings-ready child", () => {
-  const baseRoot = mkdtempSync(join(tmpdir(), "dsmm-base-presets-"));
-  const attachedRoot = mkdtempSync(join(tmpdir(), "dsmm-attached-presets-"));
-  const rootSections: DshSystemPromptSection[] = [];
-  const childSections: DshSystemPromptSection[] = [];
-  const rootCommandNames: string[] = [];
-  const childCommandNames: string[] = [];
-  const attachedSettings = {
-    ...DEFAULT_DSMM_SETTINGS,
-    modeName: "attached-deepwork",
-    promptOrder: 77,
-    presets: { materialize: true, root: attachedRoot }
-  };
-  let settingsInstaller: ((readyCtx: DshContext) => unknown) | undefined;
-  const child: DshContext = {
-    settings: {
-      register<T>() {
-        return { get: () => attachedSettings as T };
-      }
-    },
-    systemPrompt: { section(section) { childSections.push(section); } },
-    commands: { register(command) { childCommandNames.push(command.name); } }
-  };
-
-  try {
-    apply({
-      systemPrompt: { section(section) { rootSections.push(section); } },
-      commands: { register(command) { rootCommandNames.push(command.name); } },
-      inject(dependencies, installer) {
-        if (dependencies[0] === "settings") settingsInstaller = installer;
-      }
-    }, {
-      modeName: "base-deepwork",
-      promptOrder: 50,
-      presets: { materialize: true, root: baseRoot }
-    });
-
-    assert.deepEqual(rootSections.map((section) => section.order), [], "no root prompt registration before settings attachment; current order must not leak as 50");
-    assert.deepEqual(rootCommandNames, []);
-    assert.equal(childSections.length, 0);
-    assert.equal(childCommandNames.length, 0);
-    assert.equal(existsSync(join(baseRoot, "dsmm-orchestrator")), false);
-
-    const installer = settingsInstaller;
-    assert.ok(installer);
-    installer(child);
-    installer(child);
-
-    assert.deepEqual(rootSections, []);
-    assert.deepEqual(rootCommandNames, []);
-    assert.deepEqual(childSections.map((section) => ({ name: section.name, order: section.order })), [{ name: "dsmm:deepwork", order: 77 }]);
-    assert.deepEqual(childCommandNames, ["attached-deepwork", "dsmm-status"]);
-    assert.equal(existsSync(join(baseRoot, "dsmm-orchestrator")), false);
-    assert.equal(existsSync(join(attachedRoot, "dsmm-orchestrator")), true);
-  } finally {
-    rmSync(baseRoot, { recursive: true, force: true });
-    rmSync(attachedRoot, { recursive: true, force: true });
-  }
-});
-
-test("apply reserves dsmm-status for base and attached command registrations", () => {
-  const baseCommandNames: string[] = [];
-  apply({
-    systemPrompt: { section() {} },
-    commands: { register(command) { baseCommandNames.push(command.name); } }
-  }, { modeName: DSMM_STATUS_COMMAND });
-  assert.deepEqual(baseCommandNames, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
-
-  const rootCommandNames: string[] = [];
-  const childCommandNames: string[] = [];
-  let settingsInstaller: ((readyCtx: DshContext) => unknown) | undefined;
-  const child: DshContext = {
-    settings: {
-      register<T>() {
-        return { get: () => ({ ...DEFAULT_DSMM_SETTINGS, modeName: DSMM_STATUS_COMMAND }) as T };
-      }
-    },
-    systemPrompt: { section() {} },
-    commands: { register(command) { childCommandNames.push(command.name); } }
-  };
-
-  apply({
-    systemPrompt: { section() {} },
-    commands: { register(command) { rootCommandNames.push(command.name); } },
-    inject(dependencies, installer) {
-      if (dependencies[0] === "settings") settingsInstaller = installer;
-    }
-  }, { modeName: DSMM_STATUS_COMMAND });
-
-  assert.deepEqual(rootCommandNames, []);
-  const installer = settingsInstaller;
-  assert.ok(installer);
-  installer(child);
-  installer(child);
-  assert.deepEqual(childCommandNames, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
-});
-
-test("apply registers settings through host context", () => {
-  const namespaces: string[] = [];
-  const settings: DshSettingsRegistry = {
-    register<T>(namespace: string) {
-      namespaces.push(namespace);
-      return { get: () => DEFAULT_DSMM_SETTINGS as T };
-    }
-  };
-
-  apply({
-    settings,
-    systemPrompt: { section() {} }
-  });
-
-  assert.deepEqual(namespaces, ["dsmm"]);
+  const commands: string[] = [];
+  apply({ systemPrompt: { section() { return () => {}; } }, commands: { register(command) { commands.push(command.name); } } }, { modeName: DSMM_STATUS_COMMAND });
+  assert.deepEqual(commands, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
 });
 
 test("apply registers recovery request hooks before the existing llm model-routing injection", () => {
@@ -936,9 +508,9 @@ test("apply registers recovery request hooks before the existing llm model-routi
     }
   });
 
-  assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "settings,systemPrompt"), [["settings", "systemPrompt"]]);
+  assert.deepEqual(injections.filter((dependencies) => dependencies.includes("settings")), []);
   assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "llm"), [["llm"]]);
-  assert.deepEqual(registrations.slice(1, 5), [
+  assert.deepEqual(registrations.filter(({ event }) => ["agent/assistant-stream", "agent/request", "agent/request-error", "agent/turn-stopping"].includes(event)).slice(0, 4), [
     { event: "agent/assistant-stream", options: { prepend: true } },
     { event: "agent/request", options: { prepend: true } },
     { event: "agent/request-error", options: { prepend: true } },

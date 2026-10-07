@@ -101,13 +101,10 @@ test("buildDeepworkPrompt renders effective workflow policy values", () => {
   assert.match(prompt, /finalReviewPolicy: reviewer-only/);
 });
 
-test("buildDeepworkPrompt appends a nonempty skill prompt after workflow policy", () => {
-  const skillPrompt = "<dsmm-skill name=\"brainstorming\">\n# Brainstorming\n</dsmm-skill>";
-  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { skillPrompt });
-
-  assert.equal(prompt.endsWith(skillPrompt), true);
-  assert.match(prompt, /<\/dsmm-workflow-policy>\n\n<dsmm-skill/u);
-  assert.equal(buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { skillPrompt: "" }), buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS));
+test("buildDeepworkPrompt has no skill-body injection seam", () => {
+  const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS);
+  assert.match(prompt, /<\/dsmm-workflow-policy>$/u);
+  assert.doesNotMatch(prompt, /<dsmm-skill|# Brainstorming/u);
 });
 
 test("exported prompt constants match asset intent", () => {

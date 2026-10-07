@@ -139,7 +139,6 @@ export interface DsmmResolvedRoleRuntimePolicy {
     readonly fallbackRoutes: readonly Readonly<DsmmModelRoute>[];
     readonly fallbackSource: "role" | "global";
 }
-export declare const DSMM_SETTINGS_NAMESPACE = "dsmm";
 export declare const DSMM_STATUS_COMMAND = "dsmm-status";
 export interface RegisterSettingsOptions {
     onChange?: (settings: DsmmSettings) => void;

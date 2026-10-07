@@ -8,7 +8,7 @@ import type {
   DshAgent,
   DshContext,
   DshEpochHeader,
-  DshLlmCallConfig,
+  DshLlmCallConfig as NativeCallConfig,
   DshLlmFailure,
   DshRequestErrorAction,
   DshSessionEvent
@@ -18,6 +18,8 @@ import { registerRuntimeRecovery } from "../lib/runtime-recovery.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DsmmSettings } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
+
+type DshLlmCallConfig = NativeCallConfig & Record<string, unknown>;
 
 type RequestListener = (frame: AgentRequestFrame, next: () => Promise<DshLlmCallConfig>) => Promise<DshLlmCallConfig>;
 type RequestErrorListener = (frame: AgentRequestErrorFrame, next: () => Promise<DshRequestErrorAction>) => Promise<DshRequestErrorAction>;

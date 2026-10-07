@@ -1,6 +1,8 @@
+import { Context } from "@deepseek-ai/cordis";
 import { registerDeepworkCommand, registerDsmmStatusCommand } from "./commands.js";
 import { registerSafetyGuards } from "./guards.js";
 import { registerDeepworkPrompt } from "./mode.js";
+import { registerAgentSkills } from "./preset-skills.js";
 import { registerModelRouting } from "./model-routing.js";
 import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
@@ -35,6 +37,18 @@ export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled
 export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export function apply(ctx, config = {}) {
+    // Deployment Config is non-volatile. A Loader remount must not replace
+    // already-admitted Agent policy/skill realms, including busy Agents.
+    if (ctx instanceof Context && ctx.fiber.entry !== undefined) {
+        const native = ctx;
+        const owner = ctx.fiber.entry;
+        native.on("loader/patch-context", (entry, next) => {
+            if (entry === owner && (native.get("agents")?.list().length ?? 0) > 0) {
+                throw new Error("dsmm deployment Config requires restart while Agents are admitted; runtime mode/profile changes use idle maintenance instead");
+            }
+            next();
+        }, { global: true });
+    }
     const storage = config.sessionPersistence;
     if (storage !== undefined) {
         if (storage === null || typeof storage !== "object" || typeof storage.root !== "string" || !isAbsolute(storage.root)
@@ -42,13 +56,12 @@ export function apply(ctx, config = {}) {
             || storage.compression !== undefined && !["zstd", "none"].includes(storage.compression)) {
             throw new Error("Deepwork sessionPersistence must preserve an explicit absolute native root and compression");
         }
-        if (ctx.get === undefined || ctx.plugin === undefined)
-            throw new Error("Deepwork sessionPersistence requires native startup composition");
-        if (ctx.get("sessionPersistence") !== undefined)
+        if (!(ctx instanceof Context))
+            throw new Error("Deepwork sessionPersistence requires a native Cordis Context");
+        const native = ctx;
+        if (native.get("sessionPersistence") !== undefined)
             throw new Error("Disable the exact existing JSONL entry at startup before enabling Deepwork sessionPersistence; live replacement is refused");
-        const fiber = ctx.plugin(DsmmSessionPersistence, storage);
-        if (fiber === undefined)
-            throw new Error("Deepwork sessionPersistence startup registration failed");
+        const fiber = native.plugin(DsmmSessionPersistence, storage);
         return fiber.await().then(() => applyRuntime(ctx, config));
     }
     return applyRuntime(ctx, config);
@@ -85,6 +98,7 @@ function applyRuntime(ctx, config) {
         install(readyCtx, getReadySettings) {
             const install = (installCtx, settingsGetter) => {
                 registerDeepworkPrompt(installCtx, controller, settingsGetter, config);
+                registerAgentSkills(installCtx, controller, settingsGetter);
                 const installCommands = (commandCtx) => {
                     registerDeepworkCommand(commandCtx, controller, settingsGetter);
                     registerDsmmStatusCommand(commandCtx, controller, settingsGetter);

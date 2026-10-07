@@ -1,6 +1,6 @@
-// Optional dsh host type augmentation. Keep this module emitted so consumers
-// that import dsmm also receive the session-event key when dsh types are present.
+// Native rc.2 session-event augmentation; keep the emitted module for consumers.
 import type { DsmmRoleId } from "./roles.js";
+import type {} from "@deepseek-ai/dsh-session/types";
 
 export interface DsmmRolePolicyEventData {
   version: 1;
@@ -8,7 +8,6 @@ export interface DsmmRolePolicyEventData {
   policy: string | null;
 }
 
-// @ts-ignore Optional peer types may be absent when developing dsmm standalone.
 declare module "@deepseek-ai/dsh-session/types" {
   interface SessionEventMap {
     "deepwork/mode": { active: boolean };

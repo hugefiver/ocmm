@@ -84,6 +84,7 @@ async function replayUnguardedStartup(): Promise<typeof dsmmPlugin> {
   const compiled = await readFile(index, "utf8");
   assert.equal(compiled.split("requireProfileAdmission();").length - 1, 2, "replay changes only both production admission getter guards");
   const old = compiled.replaceAll("requireProfileAdmission();", "")
+    .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   return (await import(`data:text/javascript;base64,${Buffer.from(old).toString("base64")}`) as { default: typeof dsmmPlugin }).default;
 }

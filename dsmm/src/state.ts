@@ -1,4 +1,4 @@
-import type { DshAgent, DshContext, DshSession, DshSessionEvent, PreStepDecision, PreStepFrame } from "./dsh-types.js";
+import type { DshAgent, DshContext, DshSessionEvent } from "./dsh-types.js";
 import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
 import { assertDsmmMetadataPersistence } from "./session-metadata.js";
 import { createHash } from "node:crypto";
@@ -6,22 +6,15 @@ import { isDsmmRoleId } from "./roles.js";
 import type { SessionDeepworkState } from "./profile-types.js";
 
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
-
-type PendingIntent = { active: boolean };
-
-export type DeepworkSelectionOutcome = "committed" | "pending" | "unchanged";
+export type DeepworkSelectionOutcome = "committed" | "unchanged";
 
 function activeFromEvent(event: DshSessionEvent): boolean | undefined {
-  if (event.type !== DEEPWORK_MODE_EVENT) return undefined;
-
   const data = event.data;
-  return typeof data === "object" && data !== null && "active" in data && typeof data.active === "boolean"
-    ? data.active
-    : undefined;
+  return event.type === DEEPWORK_MODE_EVENT && typeof data === "object" && data !== null && "active" in data && typeof data.active === "boolean" ? data.active : undefined;
 }
 
 export function isDeepworkActive(events: readonly DshSessionEvent[] = [], defaultActive = false, selectedPreset?: string): boolean {
-  let active = selectedPreset === "minimal" ? false : defaultActive;
+  let active = isDsmmRoleId(selectedPreset) || (selectedPreset !== "minimal" && defaultActive);
   for (const event of events) active = activeFromEvent(event) ?? active;
   return active;
 }
@@ -36,64 +29,50 @@ export function hasOpenTurn(events: readonly DshSessionEvent[] = []): boolean {
 }
 
 export class DeepworkModeController {
-  private readonly pending = new WeakMap<DshSession, PendingIntent>();
+  private readonly listeners = new Set<(agent: DshAgent) => void>();
+  constructor(private readonly ctx: DshContext) {}
 
-  constructor(private readonly ctx: DshContext) {
-    ctx.on?.("agent/pre-step", async (frame: PreStepFrame, next: () => Promise<PreStepDecision>) => {
-      const decision = await next();
-      const intent = this.pending.get(frame.agent.session);
-      if (decision.kind === "reject" || frame.signal.aborted || intent === undefined) return decision;
-
-      try {
-        await this.commit(frame.agent.session, intent.active);
-      } catch (cause) {
-        ctx.logger?.warn("dsmm failed to append deepwork mode event; pending intent will retry", cause);
-      }
-      return decision;
-    });
+  watch(listener: (agent: DshAgent) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
+  /** Profile commits have no native session event; notify their Agent mount. */
+  changed(agent: DshAgent): void { for (const listener of this.listeners) listener(agent); }
+
   active(agent: DshAgent | undefined, defaultActive: boolean): boolean {
-    if (agent === undefined) return false;
-    return this.pending.get(agent.session)?.active ?? isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
+    return agent !== undefined && isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
   }
 
   describe(agent: DshAgent, defaultActive: boolean): SessionDeepworkState {
-    const events = sessionEvents(agent.session);
-    const preset = resolveSelectedAgentPreset(agent.session);
+    const events = sessionEvents(agent.session), preset = resolveSelectedAgentPreset(agent.session);
     const intents = events.map(activeFromEvent).filter((value) => value !== undefined);
-    const pending = this.pending.get(agent.session);
-    const locked = isDsmmRoleId(preset);
-    return { active: locked || this.active(agent, defaultActive), explicit: intents.length > 0 || pending !== undefined, locked,
+    return { active: this.active(agent, defaultActive), explicit: intents.length > 0, locked: false,
       revision: createHash("sha256").update(JSON.stringify({ preset, defaultActive, intents,
-        presetChanges: events.filter((event) => event.type === "agent-preset/selected").length, pending: pending?.active })).digest("hex") };
+        presetChanges: events.filter((event) => event.type === "agent-preset/selected").length })).digest("hex") };
   }
 
   async select(agent: DshAgent, active: boolean, defaultActive = false): Promise<DeepworkSelectionOutcome> {
-    const current = this.active(agent, defaultActive);
-    const explicit = sessionEvents(agent.session).some((event) => activeFromEvent(event) !== undefined);
-    if (current === active && explicit && !this.pending.has(agent.session)) return "unchanged";
-
-    if (hasOpenTurn(sessionEvents(agent.session))) {
-      this.pending.set(agent.session, { active });
-      return "pending";
-    }
-    await this.commit(agent.session, active);
+    if (agent.status === "running" || hasOpenTurn(sessionEvents(agent.session))) throw new Error("Deepwork mode requires an idle session; no change was queued");
+    const before = this.describe(agent, defaultActive);
+    if (before.explicit && before.active === active) return "unchanged";
+    const write = async (signal?: AbortSignal): Promise<void> => {
+      signal?.throwIfAborted();
+      if (this.describe(agent, defaultActive).revision !== before.revision) throw new Error("Deepwork mode changed; refresh before retrying");
+      await this.selectIdle(agent, active, defaultActive);
+    };
+    if (agent.runMaintenance === undefined) throw new Error("Deepwork mode requires native idle maintenance");
+    await agent.runMaintenance(write);
     return "committed";
   }
 
-  /** Native idle maintenance owns this write; never stage an uncommitted UI intent. */
+  /** Called inside the existing native maintenance / admission CAS boundary. */
   async selectIdle(agent: DshAgent, active: boolean, defaultActive: boolean): Promise<void> {
     if (hasOpenTurn(sessionEvents(agent.session))) throw new Error("Deepwork mode requires an idle session");
     const mode = this.describe(agent, defaultActive);
-    if (mode.explicit && mode.active === active && !this.pending.has(agent.session)) return;
-    await this.commit(agent.session, active);
-  }
-
-  private async commit(session: DshSession, active: boolean): Promise<void> {
-    const pending = this.pending.get(session);
+    if (mode.explicit && mode.active === active) return;
     assertDsmmMetadataPersistence(this.ctx);
-    await session.append(DEEPWORK_MODE_EVENT, { active });
-    if (this.pending.get(session) === pending) this.pending.delete(session);
+    await agent.session.append(DEEPWORK_MODE_EVENT, { active });
+    // Native session/event owns mode invalidation, including external appends.
   }
 }

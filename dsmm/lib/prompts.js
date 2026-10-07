@@ -76,7 +76,6 @@ effectiveDesiredReasoningEffort: ${desiredDeepseekEffort(settings, options.selec
 </dsmm-deepseek-${model}-policy>`;
     const calibrated = model !== undefined && calibration !== "off"
         ? `${base}\n\n${model === "flash" ? DEEPSEEK_FLASH_OVERLAY : DEEPSEEK_V4_PRO_OVERLAY}\n\n${calibrationPolicy}` : base;
-    const prompt = `${calibrated}\n\n${workflowPolicy}`;
-    return options.skillPrompt === undefined || options.skillPrompt === "" ? prompt : `${prompt}\n\n${options.skillPrompt}`;
+    return `${calibrated}\n\n${workflowPolicy}`;
 }
 //# sourceMappingURL=prompts.js.map

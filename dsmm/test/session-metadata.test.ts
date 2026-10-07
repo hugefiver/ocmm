@@ -28,7 +28,7 @@ test("durable DSMM mode and policy refuse an incompatible persistence path befor
   const agent = { session: { events: [{ type: "turn/start", data: { turn: 1 } }, { type: "step/start", data: { turn: 1, step: 1 } }], append() { appended += 1; } } };
   const mode = new DeepworkModeController(ctx);
   const blank = { ...agent, session: { ...agent.session, events: [] } };
-  await assert.rejects(mode.select(blank, true), /no unsafe event was appended/u);
+  await assert.rejects(mode.selectIdle(blank, true, false), /no unsafe event was appended/u);
   await assert.rejects(establishRolePolicy({ agent, turn: 1, step: 1, signal: new AbortController().signal } as AgentRequestFrame,
     resolveConfig({ roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "test" } } } }), "dsmm-reviewer", ctx), /no unsafe event was appended/u);
   assert.equal(appended, 0);

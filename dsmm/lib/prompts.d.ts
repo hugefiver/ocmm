@@ -7,7 +7,6 @@ export interface DeepworkPromptOptions {
     route?: Pick<DshLlmCallConfig, "provider" | "model">;
     selectedPreset?: string;
     overrideSection?: string;
-    skillPrompt?: string;
 }
 export declare function buildDeepworkPrompt(settings: DsmmSettings, options?: DeepworkPromptOptions): string;
 //# sourceMappingURL=prompts.d.ts.map

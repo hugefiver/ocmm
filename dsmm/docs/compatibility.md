@@ -12,6 +12,16 @@ Deepwork is the native plugin title in both exported metadata locales, with loca
 
 ## Compatibility authority
 
+### Stage A source contract (2026-10-07; not a publication/host-install claim)
+
+The working source now uses rc.2 `SystemPrompt.AssembleContext.scope/signal` and validates exact live Agent identity; the optional dsh-agent assembly augmentation is not required. Common prompt text never contains bundled skill bodies. Ordinary presets are off unless an effective default or explicit intent enables them; DW role presets default on, but a durable explicit off always wins. Persona, read-only and Git/host permission boundaries remain independent.
+
+The native skill provider is Agent-scoped, disposable and lazy for seven core skills plus debugging. It queries only the parent/global metadata snapshot, yields to every non-DSMM ancestor winner regardless of rank/source, and publishes nothing on incomplete observations. Native revision invalidation, cancellation and generation/parent fencing prevent stale body delivery. No standing preset/global private-mode provider or prompt-body fallback is retained. Missing native registry capability is a diagnostic/refusal, not fictitious availability.
+
+Scope APIs are resolved through the existing declared `dsh-agent-preset-registry` peer graph; skill types come through the declared `dsh-skill-filesystem` contract. No global SDK path or new dependency is embedded. The legacy `preset-skills` export remains a no-op compatibility entry until generated assets are refreshed in B.
+
+Deployment configuration is the main plugin's native Loader Config/entry, not `settings.register`. Runtime profiles retain immutable admissions and idle/CAS persistence. Keyless contract tests use real Cordis Loader, native preset/AgentLoop/skill/tool services and a local LLM adapter; they do not prove plugin Config UI, authenticated Desktop, full B/C/D parity or publication.
+
 The current migration targets `@deepseek-ai/dsh@0.2.0-rc.2`, the official npm latest/next version resolved on 2026-10-03. `0.2.1-alpha.1` is an alpha channel, not the selected compatibility authority. The CLI's actual version and installed package identity must both match the pinned target.
 
 DSH 0.1.1-rc.2 was the historical baseline; it is not the authority for this updated working tree. Installation ranges are not proof of compatibility with future releases.
@@ -46,7 +56,7 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 
 The 0.1.9 Web/Desktop header contributes one icon-only native profile menu in sessionless, blank and active views, yielding to native navigation ownership. One profile list handles normal profile switching that keeps the current model and invokes no native model selection. One `@use-model` **Use profile model** action reads the current admitted immutable profile model without reapplying a later saved revision; successful profile CAS remains authoritative for profile changes, not a prerequisite repeated by this independent model action. It retains native-default persistence like the Models tab and existing manual-model-intent race fencing. Disabled mutations leave the menu inspectable and refreshable. Successes are accessible live announcements only, not visible success prose; short sanitized refusal details use allowlisted codes/fields and refresh/retry guidance, never raw messages or paths. No verbose normal-menu descriptions or duplicate profile-model list remains. These are required new-menu contracts, not a claim of authenticated Desktop acceptance; the historical 0.1.6 SELECT and 0.1.7 menu proof contracts remain unchanged.
 
-The menu's **Deepwork** toggle applies to other native presets. Official minimal mode defaults off unless saved explicit `deepwork/mode` intent exists; a same-default choice still persists that intent, which survives profile changes and reopen. Standing DW presets show a locked enabled label, not an off action. Sessionless/busy/unavailable mutations fail closed; mode never creates a session or changes native preset, model or global runtime default.
+The menu's **Deepwork** toggle controls common workflow/skill visibility for ordinary and DW presets. Official minimal mode defaults off unless saved explicit `deepwork/mode` intent exists; a same-default choice still persists that intent, which survives profile changes and reopen. DW presets default on but are not locked; explicit off retains their persona/permissions. Sessionless/busy/unavailable mutations fail closed; mode never creates a session or changes native preset, model or global runtime default.
 
 Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`. Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file.
 

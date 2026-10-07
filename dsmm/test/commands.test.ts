@@ -92,6 +92,7 @@ test("registered status command reads live settings and has no status-only sessi
   });
   const controller = new DeepworkModeController({});
   const agent: DshCommandInvocation["agent"] = {
+    async runMaintenance(task) { return task(new AbortController().signal); },
     session: {
       events,
       append(type, data) {
@@ -233,6 +234,7 @@ test("registered command turns mode on and steers non-empty input", async () => 
   const result = await command.handler({
     rawInput: " inspect repo",
     agent: {
+      async runMaintenance(task) { return task(new AbortController().signal); },
       session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
       steer: (message) => steered.push(message)
     }
@@ -256,6 +258,7 @@ test("registered command turns mode off without steering", async () => {
   const result = await command.handler({
     rawInput: " off",
     agent: {
+      async runMaintenance(task) { return task(new AbortController().signal); },
       session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
       steer: (message) => steered.push(message)
     }
@@ -271,7 +274,8 @@ test("registered command can turn off a default-active mode", async () => {
   const appended: unknown[] = [];
   const result = await command.handler({
     rawInput: " off",
-    agent: { session: { events: [], append: (type, payload) => appended.push({ type, payload }) } }
+    agent: { session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
+      async runMaintenance(task) { return task(new AbortController().signal); } }
   } satisfies DshCommandInvocation);
 
   assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: false } }]);

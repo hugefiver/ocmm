@@ -1,11 +1,6 @@
-export interface SettingsScope<T> {
-  get(): T;
-  watch?(callback: (next: T, prev: T) => void | Promise<void>): () => void;
-}
-
-export interface DshSettingsRegistry {
-  register<T>(namespace: string, schema: unknown, options: { base: Partial<T>; applies?: "live" | "restart" }): SettingsScope<T>;
-}
+import type { Context } from "@deepseek-ai/cordis";
+import type {} from "@deepseek-ai/dsh-agent-preset-registry";
+import type {} from "@deepseek-ai/dsh-skill-filesystem";
 
 export interface DshSessionEvent {
   type: string;
@@ -61,7 +56,6 @@ export interface DshLlmCallConfig {
   temperature?: number;
   maxTokens?: number;
   stop?: unknown;
-  [key: string]: unknown;
 }
 
 export interface DshLlmFailure {
@@ -74,19 +68,16 @@ export interface DshLlmFailure {
 
 export interface DshEpochHeader {
   config: DshLlmCallConfig;
-  [key: string]: unknown;
 }
 
 export interface DshReasoningEffortInfo {
   id: string;
   name: string;
-  [key: string]: unknown;
 }
 
 export interface DshModelReasoningInfo {
   efforts: readonly DshReasoningEffortInfo[];
   defaultEffort?: string;
-  [key: string]: unknown;
 }
 
 export interface DshResolvedModelInfo {
@@ -94,7 +85,6 @@ export interface DshResolvedModelInfo {
   id: string;
   name: string;
   reasoning?: DshModelReasoningInfo;
-  [key: string]: unknown;
 }
 
 export interface DshLlmRuntime {
@@ -173,27 +163,15 @@ export type DshGoalChangeEventData =
       clearedAt: number;
     };
 
-export interface DshSystemPromptContext {
-  agent?: DshAgent;
-  [key: string]: unknown;
-}
+type NativePromptRegistry = Context["systemPrompt"];
+export type DshSystemPromptContext = Pick<NonNullable<Parameters<NativePromptRegistry["assemble"]>[0]>, "scope" | "signal">;
 
-export interface DshSystemPromptSection {
-  name: string;
-  order: number;
-  interpolate?: boolean;
+export type DshSystemPromptSection = Omit<Parameters<NativePromptRegistry["section"]>[0], "text"> & {
   text(context: DshSystemPromptContext): string;
-}
+};
 
 export interface DshSystemPromptRegistry {
-  section(section: DshSystemPromptSection): unknown;
-}
-
-export interface DshPromptAssembly {
-  sections: Array<{ name: string; text: string; interpolate?: boolean }>;
-  contexts: unknown[];
-  tools: unknown[];
-  variables: Record<string, string | undefined>;
+  section(section: DshSystemPromptSection): ReturnType<NativePromptRegistry["section"]>;
 }
 
 export interface DshCommandInvocation {
@@ -217,19 +195,11 @@ export interface DshCommandsRegistry {
   }): unknown;
 }
 
-export interface DshSkillRegistration {
-  name: string;
-  description: string;
-  content: string;
-  source?: "bundled" | "runtime" | string;
-  provider?: string;
-  resourceBase?: { kind: "directory"; path: string } | { kind: "opaque"; description: string };
-  invocation?: { modelInvocable: boolean; userInvocable: boolean };
-}
-
-export interface DshSkillRegistry {
-  register(skill: DshSkillRegistration): unknown;
-}
+export type DshSkillRegistry = Pick<Context["skills"], "registerProvider" | "snapshot" | "list" | "get">;
+export type DshSkillRegistration = NonNullable<Awaited<ReturnType<DshSkillRegistry["get"]>>>;
+export type DshSkillProvider = ReturnType<Parameters<DshSkillRegistry["registerProvider"]>[0]>;
+export type DshSkillCandidate = Parameters<DshSkillProvider["get"]>[0];
+export type DshSkillLookupOptions = Parameters<DshSkillProvider["list"]>[0];
 
 export interface DshContentBlock {
   type: string;
@@ -273,15 +243,6 @@ export interface DshToolRuntime {
 
 export type DshEventListener = (...args: any[]) => any;
 
-export interface DshInjectedServices {
-  settings?: DshSettingsRegistry;
-  skills?: DshSkillRegistry;
-  commands?: DshCommandsRegistry;
-  tools?: DshToolRuntime;
-  llm?: DshLlmRuntime;
-  [key: string]: unknown;
-}
-
 export interface PreStepFrame {
   agent: DshAgent;
   signal: AbortSignal;
@@ -296,7 +257,6 @@ export interface PreStepDecision {
 export interface DshContext {
   agents?: DshAgentsRegistry;
   subagents?: import("./role-providers.js").DsmmSubagentRegistry;
-  settings?: DshSettingsRegistry;
   systemPrompt?: DshSystemPromptRegistry;
   skills?: DshSkillRegistry;
   commands?: DshCommandsRegistry;
