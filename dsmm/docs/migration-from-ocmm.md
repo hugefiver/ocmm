@@ -1,5 +1,13 @@
 # Migrating from ocmm to DSMM 0.1.1
 
+## Current source-content checkpoint (2026-10-07)
+
+The historical 0.1.1 mapping below is preserved, not current full-parity evidence. Working Stage B content now has the complete 11 base roles + 11 categories (22 canonical IDs) and fourteen configurable lazy skills. Cross-cutting is opt-in/default false, creative retains its existing identity, and root eligibility remains Orchestrator/Builder/Planner only. No source OCMM provider preferences, .opencode config, credentials or private profiles are copied. The native model picker and actual catalog remain authoritative.
+
+Use [role catalog](agent-presets.md) and [deterministic source sync](skill-sync.md) for current content and source → artifact → consumer mapping. Full default workflow, all nine source model/compatibility variants, source category calibrations, actual TS catalog responsibilities and terminal delegation policy are preserved with DSH-specific tools/authority. Source-generated files do not prove callable native roles, plan-only writes, continuation, background or execution guards. C/D own those remaining runtime/settings mechanisms.
+
+All fourteen skills load through native metadata/get/resourceBase, not seven-core fulltext injection plus an unconfigurable debugging exception. Explicit off preserves persona/access but withdraws common and DSMM skills. The full frontend taste/brand/ui-ux-db library uses an explicit, fixed-pin materialization recipe; package/runtime checks refuse missing or changed resources offline. A new source checkout must follow the documented explicit sync step, while a complete distributed package includes the full ignored library and real license notices. This is source/resource parity, not completed C/D runtime or publication/host-install proof. Installation/login/Git/destructive migration operations below require separate exact authorization; they are guidance, not automatic actions.
+
 DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH. This guide describes the 0.1.1 routing surface targeting DSH 0.2.0-rc.2, not a full host-feature parity claim.
 
 ## Hard boundary

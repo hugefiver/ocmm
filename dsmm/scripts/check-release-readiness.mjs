@@ -4,6 +4,7 @@ import { dirname, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
+import { checkFrontendAssets } from "./materialize-frontend.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
@@ -130,9 +131,13 @@ const expectedDevDependencies = {
 };
 
 const expectedScripts = {
-  "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+  "build": "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs",
   "build:client": "node scripts/build-client.mjs",
   "check:release": "node scripts/check-release-readiness.mjs",
+  "sync:source": "node --experimental-strip-types scripts/sync-source-assets.mjs",
+  "generate:roles": "node scripts/generate-role-assets.mjs",
+  "check:source": "node --experimental-strip-types scripts/check-source-assets.mjs",
+  "sync:frontend": "node scripts/materialize-frontend.mjs --sync",
   "typecheck": "tsc -p tsconfig.json --noEmit",
   "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
   "test": "pnpm run build && node --test --experimental-strip-types test/*.test.ts",
@@ -270,6 +275,7 @@ function requiredTreeFiles(packageRoot, tree, current = resolve(packageRoot, tre
   const paths = [];
   const entries = readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
   for (const entry of entries) {
+    if ([".gitignore", ".npmignore"].includes(entry.name)) continue;
     if (entry.isSymbolicLink()) continue;
     const entryPath = resolve(current, entry.name);
     if (entry.isFile()) {
@@ -346,13 +352,16 @@ function validateRequiredSurface(paths, requiredPaths, errors) {
   }
 }
 
-function isForbiddenPath(path) {
+function isForbiddenPath(path, sourceResources) {
   const basename = path.slice(path.lastIndexOf("/") + 1);
   const segments = path.split("/");
+  const skillResource = sourceResources.has(path);
   const forbiddenScript = segments.some((segment) => segment.toLowerCase() === "scripts")
-    && !operatorScripts.includes(path) && path !== "skills/debugging/references/scripts/dap.mjs";
+    && !operatorScripts.includes(path) && !skillResource;
   const forbiddenMetadataResource = /^locale\//iu.test(path) && !metadataResources.includes(path);
-  return segments.some((segment) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules"].includes(segment.toLowerCase())) || forbiddenScript || forbiddenMetadataResource || /\.(?:test|spec)\.[^/]+$/u.test(path) || path.endsWith(".map") || path.endsWith(".tgz") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
+  return segments.some((segment) => ["src", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", "__pycache__"].includes(segment.toLowerCase()))
+    || (!skillResource && (segments.some((segment) => ["test", "tests"].includes(segment.toLowerCase())) || /\.(?:test|spec)\.[^/]+$/u.test(path)))
+    || forbiddenScript || forbiddenMetadataResource || path.endsWith(".map") || path.endsWith(".tgz") || path.endsWith(".pyc") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
 }
 
 function validatePluginMetadata(packageRoot, paths, errors) {
@@ -429,6 +438,8 @@ function validateLicense(packageRoot, paths, errors) {
 function check(packageRoot) {
   const { errors: manifestErrors } = preflightManifest(packageRoot);
   if (manifestErrors.length > 0) return createReceipt({ errors: manifestErrors });
+  const frontend = checkFrontendAssets(packageRoot);
+  if (frontend.outcome !== "ready") return createReceipt({ errors: frontend.errors });
 
   const entry = runPack(packageRoot);
   const errors = [];
@@ -443,7 +454,10 @@ function check(packageRoot) {
   validateNativeClient(packageRoot, paths, errors);
   validateProfileDeploymentBoundary(packageRoot, errors);
 
-  const forbiddenPaths = [...paths].filter(isForbiddenPath).sort(compareBytewise);
+  const sourceManifestPath = resolve(packageRoot, "prompts/source/manifest.json");
+  const sourceResources = new Set(JSON.parse(readFileSync(sourceManifestPath, "utf8")).files
+    .map((row) => row.artifact).filter((path) => /^skills\/[a-z0-9-]+\//u.test(path)));
+  const forbiddenPaths = [...paths].filter((path) => isForbiddenPath(path, sourceResources)).sort(compareBytewise);
   for (const path of forbiddenPaths) errors.push(`forbidden package surface: ${path}`);
 
   const sorted = sortedErrors(errors);

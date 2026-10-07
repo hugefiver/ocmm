@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Phase 4 — Hard-Reasoning Escalation
 
 At 2 consecutive failed hypothesis rounds, stop investigating and reframe. Two evidence-backed failures establish that this is a genuinely difficult debugging problem; only at this threshold may `hard-reasoning` be used. Ordinary and first-attempt debugging must stay with direct runtime investigation, `code-search`, or `research`.
@@ -33,7 +35,7 @@ Do not fan out multiple decision agents. Add `code-search` or `research` only wh
 ## Prompt
 
 ```
-task(description="Reframe root-cause investigation", subagent_type="hard-reasoning",
+Native assignment content for a permitted callable hard-reasoning role (otherwise return to stage owner):
      prompt="""
      GOAL: Reframe this genuinely difficult root-cause investigation after two failed evidence rounds.
      STOP WHEN: You provide one ranked next hypothesis set and decisive runtime queries; do not propose a fix without confirming evidence.
@@ -45,7 +47,7 @@ task(description="Reframe root-cause investigation", subagent_type="hard-reasoni
      C. INVARIANT-VIOLATION — load-bearing assumptions that may be false.
 
      Return: three ranked candidate causes, the frame supporting each, and the smallest runtime query that confirms or refutes each. This is decision support only; do not edit files or dispatch other agents.
-     """)
+     """
 ```
 
 ---

@@ -159,7 +159,8 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     assert.deepEqual({ profiles: described.profiles, selectedId: described.selectedId, appliedRevision: described.appliedRevision, selectionRevision: described.selectionRevision }, {
       profiles: [], selectedId: null, appliedRevision: null, selectionRevision: "absent",
     });
-    assert.equal(described.roles?.length, 12);
+    assert.equal(described.roles?.length, 22);
+    assert.equal(described.roles?.find((role) => role.id === "dsmm-cross-cutting")?.enabled, false);
     assert.equal(described.editorDefaults?.strategy, "startup-lock");
     let persistedSession: Session | undefined;
     const storageFibers = [...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers])

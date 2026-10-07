@@ -1,0 +1,3118 @@
+{
+  "sourceBaseline": "89ca14b",
+  "host": "DSH 0.2.0-rc.2",
+  "license": "LicenseRef-AAAPL; full package LICENSE applies to OCMM-derived modifications; original third-party notices retained per skill",
+  "attribution": "OCMM Hugefiver; v1 workflow forks retain obra/superpowers lineage; standalone notices/licenses copied recursively",
+  "rules": {
+    "native-skill-load": "Replace automatic/fulltext/slash-command skill assumptions with triggered native lazy skill loading.",
+    "native-dispatch": "Adapt concrete OpenCode Task/team schemas to assignment text and actually exposed role-specific DSH tools; retain useful investigative responsibilities.",
+    "source-role-authority": "Preserve full role/category content and source terminal policies, with DSH capability conditions; no provider/model defaults copied.",
+    "dsh-common-scope": "Keep complete default common workflow inside effective mode; planner/family layers are additive and subordinate to persistent persona/terminal policy, explicit off withdraws common/skills only.",
+    "bounded-cleanup": "Retain all source cleanup categories and green behavior lock; remove mechanical fan-out, LOC-driven refactoring, redundant test quotas and unauthorized Git restore.",
+    "authorization": "Resource commands never authorize installation, login, Git writes, private state access or destructive operations.",
+    "frontend-capabilities": "Authored React/Open Design routing inspects actual existing capabilities first; installation requires separate authorization and unverified surfaces are reported, not silently passed.",
+    "frontend-cli-context": "Verbatim UI/UX upstream commands are superseded by authored absolute resourceBase script paths, target-project cwd and explicit authorized output-dir; no ruleset-cwd persistence or assumed tool cwd API.",
+    "resource-base": "Recursive resources ship at native skill resourceBase; source examples are shell-translated and permission-conditioned, not automatic execution."
+  },
+  "anchors": [
+    {
+      "source": "src/hooks/config.ts",
+      "anchor": "const LOCAL_COORDINATORS = [\"deep\", \"complex\", \"cross-cutting\"] as const"
+    },
+    {
+      "source": "src/hooks/config.ts",
+      "anchor": "The role prompt above is authoritative for this agent's scope, permissions, and output contract."
+    },
+    {
+      "source": "src/hooks/config.ts",
+      "anchor": "The category role prompt above is authoritative for this agent's scope, permissions, and output contract."
+    },
+    {
+      "source": "src/intent/prompt-loader.ts",
+      "anchor": "if (isPlannerAgent(opts.agentName)) return \"planner\""
+    },
+    {
+      "source": "src/intent/prompt-loader.ts",
+      "anchor": "if (family === \"gpt\" || family === \"codex\") return [\"gpt\"]"
+    },
+    {
+      "source": "src/intent/model-family.ts",
+      "anchor": "name === \"kimi-for-coding-highspeed\""
+    }
+  ],
+  "roles": [
+    {
+      "id": "dsmm-orchestrator",
+      "sourceId": "orchestrator",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/orchestrator.md",
+      "promptArtifact": "prompts/source/agents/orchestrator.md",
+      "terminalArtifact": "prompts/source/terminal/orchestrator.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-planner",
+      "sourceId": "planner",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/planner.md",
+      "promptArtifact": "prompts/source/agents/planner.md",
+      "terminalArtifact": "prompts/source/terminal/planner.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-plan-critic",
+      "sourceId": "plan-critic",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/plan-critic.md",
+      "promptArtifact": "prompts/source/agents/plan-critic.md",
+      "terminalArtifact": "prompts/source/terminal/plan-critic.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-builder",
+      "sourceId": "builder",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": null,
+      "promptArtifact": null,
+      "terminalArtifact": "prompts/source/terminal/builder.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-reviewer",
+      "sourceId": "reviewer",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/reviewer.md",
+      "promptArtifact": "prompts/source/agents/reviewer.md",
+      "terminalArtifact": "prompts/source/terminal/reviewer.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-oracle",
+      "sourceId": "oracle",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/reviewer.md",
+      "promptArtifact": "prompts/source/agents/reviewer.md",
+      "terminalArtifact": "prompts/source/terminal/oracle.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-oracle-2nd",
+      "sourceId": "oracle-2nd",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/reviewer.md",
+      "promptArtifact": "prompts/source/agents/reviewer.md",
+      "terminalArtifact": "prompts/source/terminal/oracle-2nd.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-creative",
+      "sourceId": "creative",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/creative.md",
+      "promptArtifact": "prompts/source/category/creative.md",
+      "terminalArtifact": "prompts/source/terminal/creative.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-code-search",
+      "sourceId": "code-search",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": null,
+      "promptArtifact": null,
+      "terminalArtifact": "prompts/source/terminal/code-search.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-doc-search",
+      "sourceId": "doc-search",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": null,
+      "promptArtifact": null,
+      "terminalArtifact": "prompts/source/terminal/doc-search.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-clarifier",
+      "sourceId": "clarifier",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": "prompts/v1/agents/clarifier.md",
+      "promptArtifact": "prompts/source/agents/clarifier.md",
+      "terminalArtifact": "prompts/source/terminal/clarifier.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-media-reader",
+      "sourceId": "media-reader",
+      "catalogSource": "src/data/agents.ts",
+      "promptSource": null,
+      "promptArtifact": null,
+      "terminalArtifact": "prompts/source/terminal/media-reader.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-frontend",
+      "sourceId": "frontend",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/frontend.md",
+      "promptArtifact": "prompts/source/category/frontend.md",
+      "terminalArtifact": "prompts/source/terminal/frontend.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-hard-reasoning",
+      "sourceId": "hard-reasoning",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/hard-reasoning.md",
+      "promptArtifact": "prompts/source/category/hard-reasoning.md",
+      "terminalArtifact": "prompts/source/terminal/hard-reasoning.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-research",
+      "sourceId": "research",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/research.md",
+      "promptArtifact": "prompts/source/category/research.md",
+      "terminalArtifact": "prompts/source/terminal/research.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-quick",
+      "sourceId": "quick",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/quick.md",
+      "promptArtifact": "prompts/source/category/quick.md",
+      "terminalArtifact": "prompts/source/terminal/quick.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-coding",
+      "sourceId": "coding",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/coding.md",
+      "promptArtifact": "prompts/source/category/coding.md",
+      "terminalArtifact": "prompts/source/terminal/coding.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-normal-task",
+      "sourceId": "normal-task",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/normal-task.md",
+      "promptArtifact": "prompts/source/category/normal-task.md",
+      "terminalArtifact": "prompts/source/terminal/normal-task.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-complex",
+      "sourceId": "complex",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/complex.md",
+      "promptArtifact": "prompts/source/category/complex.md",
+      "terminalArtifact": "prompts/source/terminal/complex.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-deep",
+      "sourceId": "deep",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/deep.md",
+      "promptArtifact": "prompts/source/category/deep.md",
+      "terminalArtifact": "prompts/source/terminal/deep.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-documenting",
+      "sourceId": "documenting",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/documenting.md",
+      "promptArtifact": "prompts/source/category/documenting.md",
+      "terminalArtifact": "prompts/source/terminal/documenting.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    },
+    {
+      "id": "dsmm-cross-cutting",
+      "sourceId": "cross-cutting",
+      "catalogSource": "src/data/categories.ts",
+      "promptSource": "prompts/v1/category/cross-cutting.md",
+      "promptArtifact": "prompts/source/category/cross-cutting.md",
+      "terminalArtifact": "prompts/source/terminal/cross-cutting.md",
+      "consumer": "src/roles.ts persona + active src/prompts.ts calibration",
+      "test": "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts"
+    }
+  ],
+  "skills": {
+    "brainstorming": "skills/v1/brainstorming",
+    "writing-plans": "skills/v1/writing-plans",
+    "requesting-code-review": "skills/v1/requesting-code-review",
+    "receiving-code-review": "skills/v1/receiving-code-review",
+    "subagent-driven-development": "skills/v1/subagent-driven-development",
+    "dispatching-parallel-agents": "skills/v1/dispatching-parallel-agents",
+    "remove-ai-slops": "skills/remove-ai-slops",
+    "debugging": "skills/debugging",
+    "frontend": "skills/frontend",
+    "git-master": "skills/git-master",
+    "ast-grep": "skills/ast-grep",
+    "coding-agent-sessions": "skills/coding-agent-sessions",
+    "init-deep": "skills/init-deep",
+    "using-git-worktrees": "skills/using-git-worktrees"
+  },
+  "exclusions": [
+    {
+      "source": "skills/publish",
+      "reason": "OCMM release authority and package/tag protocol; DSMM does not inherit release authorization."
+    },
+    {
+      "source": "skills/customize-opencode",
+      "reason": "Configures the OpenCode host, not DSH; no equivalent DSH configuration is fabricated."
+    },
+    {
+      "source": "prompts/codex/**",
+      "reason": "Separate Codex adapter; DSH adapts the v1 Codex-model compatibility variant without installing another host behavior layer."
+    },
+    {
+      "source": "**/{__pycache__,node_modules,.git}/** and **/*.pyc",
+      "reason": "Interpreter caches, dependencies and VCS state are not skill resources."
+    },
+    {
+      "source": "**/{.gitignore,.npmignore}",
+      "reason": "Source repository/package ignore rules are not runtime resources and would hide meaningful fixtures or materialized distribution resources in the DSH bundle."
+    },
+    {
+      "source": "skills/frontend/scripts/perfection/lighthouse-audit.py (execution only)",
+      "reason": "Retained in the resource tree, not executable browser QA: canonical source entry itself prohibits this legacy helper's implicit installation/endpoint behavior."
+    }
+  ],
+  "files": [
+    {
+      "source": "prompts/v1/deepwork/default.md",
+      "artifact": "prompts/source/deepwork/default.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/gpt.md",
+      "artifact": "prompts/source/deepwork/gpt.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/claude-opus-5.md",
+      "artifact": "prompts/source/deepwork/claude-opus-5.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/gemini.md",
+      "artifact": "prompts/source/deepwork/gemini.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/glm.md",
+      "artifact": "prompts/source/deepwork/glm.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/codex.md",
+      "artifact": "prompts/source/deepwork/codex.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/planner.md",
+      "artifact": "prompts/source/deepwork/planner.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/kimi-k27.md",
+      "artifact": "prompts/source/deepwork/kimi-k27.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/deepwork/swe-2.md",
+      "artifact": "prompts/source/deepwork/swe-2.md",
+      "consumer": "src/prompts.ts: buildDeepworkPrompt",
+      "rules": [
+        "native-skill-load",
+        "native-dispatch",
+        "source-role-authority",
+        "dsh-common-scope"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/agents/orchestrator.md",
+      "artifact": "prompts/source/agents/orchestrator.md",
+      "consumer": "src/roles.ts: DSMM_ROLES.persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/agents/reviewer.md",
+      "artifact": "prompts/source/agents/reviewer.md",
+      "consumer": "src/roles.ts: DSMM_ROLES.persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/agents/planner.md",
+      "artifact": "prompts/source/agents/planner.md",
+      "consumer": "src/roles.ts: DSMM_ROLES.persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/agents/clarifier.md",
+      "artifact": "prompts/source/agents/clarifier.md",
+      "consumer": "src/roles.ts: DSMM_ROLES.persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/agents/plan-critic.md",
+      "artifact": "prompts/source/agents/plan-critic.md",
+      "consumer": "src/roles.ts: DSMM_ROLES.persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/frontend.md",
+      "artifact": "prompts/source/category/frontend.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/creative.md",
+      "artifact": "prompts/source/category/creative.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/hard-reasoning.md",
+      "artifact": "prompts/source/category/hard-reasoning.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/research.md",
+      "artifact": "prompts/source/category/research.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/quick.md",
+      "artifact": "prompts/source/category/quick.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/coding.md",
+      "artifact": "prompts/source/category/coding.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/normal-task.md",
+      "artifact": "prompts/source/category/normal-task.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/complex.md",
+      "artifact": "prompts/source/category/complex.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/deep.md",
+      "artifact": "prompts/source/category/deep.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/documenting.md",
+      "artifact": "prompts/source/category/documenting.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/v1/category/cross-cutting.md",
+      "artifact": "prompts/source/category/cross-cutting.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: category calibration",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "prompts/shared/shell-safety.md",
+      "artifact": "prompts/source/shared/shell-safety.md",
+      "consumer": "src/prompts.ts: common; source terminal role policies",
+      "rules": [],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "scripts/source-inventory.mjs: DSH_TOOL_CONTRACT",
+      "artifact": "prompts/source/shared/dsh-host-contract.md",
+      "consumer": "src/roles.ts: persona; src/prompts.ts: common",
+      "rules": [
+        "native-dispatch",
+        "authorization",
+        "resource-base"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: buildLocaleGuidance(default)",
+      "artifact": "prompts/source/shared/locale.md",
+      "consumer": "src/prompt-content.ts: primary/all persona prefix",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/orchestrator.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/planner.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/plan-critic.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/builder.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/reviewer.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/oracle.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/oracle-2nd.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/creative.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/code-search.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/doc-search.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/clarifier.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/media-reader.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/frontend.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/hard-reasoning.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/research.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/quick.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/coding.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/normal-task.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/complex.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/deep.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/documenting.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation",
+      "artifact": "prompts/source/terminal/cross-cutting.md",
+      "consumer": "src/roles.ts: persona",
+      "rules": [
+        "source-role-authority",
+        "native-dispatch"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "src/data/{agents,categories}.ts; src/hooks/config.ts assembly",
+      "artifact": "prompts/source/catalog.json",
+      "consumer": "src/roles.ts: canonical metadata, persona, settings/profile role keys",
+      "rules": [
+        "source-role-authority"
+      ],
+      "test": "test/prompts.test.ts; test/roles.test.ts; test/source-sync.test.ts"
+    },
+    {
+      "source": "skills/v1/brainstorming/SKILL.md",
+      "artifact": "skills/brainstorming/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/writing-plans/SKILL.md",
+      "artifact": "skills/writing-plans/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/writing-plans/plan-document-reviewer-prompt.md",
+      "artifact": "skills/writing-plans/plan-document-reviewer-prompt.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/requesting-code-review/SKILL.md",
+      "artifact": "skills/requesting-code-review/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/requesting-code-review/code-reviewer.md",
+      "artifact": "skills/requesting-code-review/code-reviewer.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/receiving-code-review/SKILL.md",
+      "artifact": "skills/receiving-code-review/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/subagent-driven-development/SKILL.md",
+      "artifact": "skills/subagent-driven-development/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/subagent-driven-development/code-quality-reviewer-prompt.md",
+      "artifact": "skills/subagent-driven-development/code-quality-reviewer-prompt.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/subagent-driven-development/implementer-prompt.md",
+      "artifact": "skills/subagent-driven-development/implementer-prompt.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/subagent-driven-development/spec-reviewer-prompt.md",
+      "artifact": "skills/subagent-driven-development/spec-reviewer-prompt.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/v1/dispatching-parallel-agents/SKILL.md",
+      "artifact": "skills/dispatching-parallel-agents/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/remove-ai-slops/SKILL.md",
+      "artifact": "skills/remove-ai-slops/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/SKILL.md",
+      "artifact": "skills/debugging/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/logging.md",
+      "artifact": "skills/debugging/references/logging.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/00-setup.md",
+      "artifact": "skills/debugging/references/methodology/00-setup.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/02-investigate.md",
+      "artifact": "skills/debugging/references/methodology/02-investigate.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/03-flaky-triage.md",
+      "artifact": "skills/debugging/references/methodology/03-flaky-triage.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/04-hard-reasoning-escalation.md",
+      "artifact": "skills/debugging/references/methodology/04-hard-reasoning-escalation.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/05-escalate.md",
+      "artifact": "skills/debugging/references/methodology/05-escalate.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/06-fix.md",
+      "artifact": "skills/debugging/references/methodology/06-fix.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/08-qa.md",
+      "artifact": "skills/debugging/references/methodology/08-qa.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/09-cleanup.md",
+      "artifact": "skills/debugging/references/methodology/09-cleanup.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/methodology/partial-runtime-evidence.md",
+      "artifact": "skills/debugging/references/methodology/partial-runtime-evidence.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/bundled-js-binary.md",
+      "artifact": "skills/debugging/references/runtimes/bundled-js-binary.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/go.md",
+      "artifact": "skills/debugging/references/runtimes/go.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/native-binary.md",
+      "artifact": "skills/debugging/references/runtimes/native-binary.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/node.md",
+      "artifact": "skills/debugging/references/runtimes/node.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/python.md",
+      "artifact": "skills/debugging/references/runtimes/python.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/runtimes/rust.md",
+      "artifact": "skills/debugging/references/runtimes/rust.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/scripts/dap.mjs",
+      "artifact": "skills/debugging/references/scripts/dap.mjs",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/scripts/dap.test.mjs",
+      "artifact": "skills/debugging/references/scripts/dap.test.mjs",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/scripts/fixture-adapter.mjs",
+      "artifact": "skills/debugging/references/scripts/fixture-adapter.mjs",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/tools/dap.md",
+      "artifact": "skills/debugging/references/tools/dap.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/tools/ghidra.md",
+      "artifact": "skills/debugging/references/tools/ghidra.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/tools/playwright-cli.md",
+      "artifact": "skills/debugging/references/tools/playwright-cli.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/tools/pwndbg.md",
+      "artifact": "skills/debugging/references/tools/pwndbg.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/debugging/references/tools/pwntools.md",
+      "artifact": "skills/debugging/references/tools/pwntools.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/SKILL.md",
+      "artifact": "skills/frontend/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/README.md",
+      "artifact": "skills/frontend/references/design/README.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/_INDEX.md",
+      "artifact": "skills/frontend/references/design/_INDEX.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/aside.md",
+      "artifact": "skills/frontend/references/design/aside.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/clone-from-url.md",
+      "artifact": "skills/frontend/references/design/clone-from-url.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/design-system-architecture.md",
+      "artifact": "skills/frontend/references/design/design-system-architecture.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/interaction-skill.md",
+      "artifact": "skills/frontend/references/design/interaction-skill.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/design/react-dev-tooling-skill.md",
+      "artifact": "skills/frontend/references/design/react-dev-tooling-skill.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/perfection/README.md",
+      "artifact": "skills/frontend/references/perfection/README.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/references/perfection/react-perf-tooling.md",
+      "artifact": "skills/frontend/references/perfection/react-perf-tooling.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/scripts/perfection/lighthouse-audit.py",
+      "artifact": "skills/frontend/scripts/perfection/lighthouse-audit.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/git-master/SKILL.md",
+      "artifact": "skills/git-master/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/git-master/agents/openai.yaml",
+      "artifact": "skills/git-master/agents/openai.yaml",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/LICENSE",
+      "artifact": "skills/ast-grep/LICENSE",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/README.md",
+      "artifact": "skills/ast-grep/README.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/SKILL.md",
+      "artifact": "skills/ast-grep/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/SOURCE",
+      "artifact": "skills/ast-grep/SOURCE",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/install.ps1",
+      "artifact": "skills/ast-grep/install.ps1",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/install.sh",
+      "artifact": "skills/ast-grep/install.sh",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/cli.md",
+      "artifact": "skills/ast-grep/references/cli.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/install.md",
+      "artifact": "skills/ast-grep/references/install.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/patterns.md",
+      "artifact": "skills/ast-grep/references/patterns.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/pitfalls.md",
+      "artifact": "skills/ast-grep/references/pitfalls.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/recipes.md",
+      "artifact": "skills/ast-grep/references/recipes.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/sgconfig.md",
+      "artifact": "skills/ast-grep/references/sgconfig.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/references/yaml-rules.md",
+      "artifact": "skills/ast-grep/references/yaml-rules.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/scripts/ast_grep_helper.py",
+      "artifact": "skills/ast-grep/scripts/ast_grep_helper.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/tests/smoke.ps1",
+      "artifact": "skills/ast-grep/tests/smoke.ps1",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/tests/smoke.sh",
+      "artifact": "skills/ast-grep/tests/smoke.sh",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/ast-grep/tests/test_resolver.py",
+      "artifact": "skills/ast-grep/tests/test_resolver.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/LICENSE-UPSTREAM.md",
+      "artifact": "skills/coding-agent-sessions/LICENSE-UPSTREAM.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/NOTICE.md",
+      "artifact": "skills/coding-agent-sessions/NOTICE.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/SKILL.md",
+      "artifact": "skills/coding-agent-sessions/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/agents/openai.yaml",
+      "artifact": "skills/coding-agent-sessions/agents/openai.yaml",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/pyrightconfig.json",
+      "artifact": "skills/coding-agent-sessions/pyrightconfig.json",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/references/all-platforms.md",
+      "artifact": "skills/coding-agent-sessions/references/all-platforms.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/references/claude.md",
+      "artifact": "skills/coding-agent-sessions/references/claude.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/references/codex.md",
+      "artifact": "skills/coding-agent-sessions/references/codex.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/references/opencode.md",
+      "artifact": "skills/coding-agent-sessions/references/opencode.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/references/senpi.md",
+      "artifact": "skills/coding-agent-sessions/references/senpi.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/__init__.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/__init__.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/aside_scanner.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/aside_scanner.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/claude.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/claude.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/cli.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/cli.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/codex.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/codex.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/file_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/file_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/jsonio.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/jsonio.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/kiro_scanner.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/kiro_scanner.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/opencode.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/opencode.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/pi_family.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/pi_family.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/sqlite_optional_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/sqlite_optional_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/sqlite_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/sqlite_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/timeparse.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/timeparse.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/transcript.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/transcript.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/agent_sessions/types.py",
+      "artifact": "skills/coding-agent-sessions/scripts/agent_sessions/types.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/find-agent-sessions.py",
+      "artifact": "skills/coding-agent-sessions/scripts/find-agent-sessions.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_agent_sessions.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_agent_sessions.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_aside_scanner.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_aside_scanner.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_cli_contract.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_cli_contract.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_extended_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_extended_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_optional_sqlite_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_optional_sqlite_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/coding-agent-sessions/scripts/tests/test_pi_family_scanners.py",
+      "artifact": "skills/coding-agent-sessions/scripts/tests/test_pi_family_scanners.py",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/init-deep/SKILL.md",
+      "artifact": "skills/init-deep/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/using-git-worktrees/SKILL.md",
+      "artifact": "skills/using-git-worktrees/SKILL.md",
+      "consumer": "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources",
+      "rules": [
+        "resource-base",
+        "authorization",
+        "native-dispatch"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "skills/frontend/ATTRIBUTION.md + scripts/frontend-recipe.mjs fixed-pin adaptation",
+      "artifact": "skills/frontend/ATTRIBUTION.md",
+      "consumer": "frontend distribution notices; test/source-sync.test.ts",
+      "rules": [
+        "authorization",
+        "resource-base"
+      ],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "scripts/frontend-recipe.mjs: third-party body distribution policy",
+      "artifact": "skills/frontend/.gitignore",
+      "consumer": "Git source hygiene; materialized bodies are never committed",
+      "rules": [],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "scripts/frontend-recipe.mjs: full resource distribution policy",
+      "artifact": "skills/frontend/.npmignore",
+      "consumer": "npm package files; no missing materialized references allowed",
+      "rules": [],
+      "test": "test/skills.test.ts; test/source-sync.test.ts; test/native-runtime-contract.test.ts"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/claude/DESIGN.md",
+      "artifact": "skills/frontend/references/design/claude.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "795605ed1f181b3c9ff77c35430321851fd50619",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/cohere/DESIGN.md",
+      "artifact": "skills/frontend/references/design/cohere.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "3463593bcf40f40afb6704d355840ad84e28c367",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/elevenlabs/DESIGN.md",
+      "artifact": "skills/frontend/references/design/elevenlabs.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "45841f4e245337eb31e963c1da8736677e53d436",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/minimax/DESIGN.md",
+      "artifact": "skills/frontend/references/design/minimax.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f775524bd573c25470da0b43737e8f9461f2d8d0",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/mistral-ai/DESIGN.md",
+      "artifact": "skills/frontend/references/design/mistral.ai.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f68dc970dc8ce50ff18856ca36406222279b6db7",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/ollama/DESIGN.md",
+      "artifact": "skills/frontend/references/design/ollama.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "2adcf2acf9ed4abf2e07c148c9b7bafe7d4278cf",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/opencode-ai/DESIGN.md",
+      "artifact": "skills/frontend/references/design/opencode.ai.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f69563985580133b0f46af859615c487fbe330ba",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/replicate/DESIGN.md",
+      "artifact": "skills/frontend/references/design/replicate.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "7d4ef2df3c31d8c3eeccc0e41658be216925b3c5",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/runwayml/DESIGN.md",
+      "artifact": "skills/frontend/references/design/runwayml.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c78d9c2d644c19d278928cfb465f26986ec3f01d",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/together-ai/DESIGN.md",
+      "artifact": "skills/frontend/references/design/together.ai.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "927bd76a8e61bc713c2d4e6693572705275ecb22",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/voltagent/DESIGN.md",
+      "artifact": "skills/frontend/references/design/voltagent.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "0dec46b30eb10cd27ee521a49aaa1f8b42453456",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/x-ai/DESIGN.md",
+      "artifact": "skills/frontend/references/design/x.ai.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "cbdf4819330e51357e3cfdb7b7e1cabd9b93717e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/cursor/DESIGN.md",
+      "artifact": "skills/frontend/references/design/cursor.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c9ea295d07bbd4da4f00d36652ffe16bbe7ddfe1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/expo/DESIGN.md",
+      "artifact": "skills/frontend/references/design/expo.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "a625cd9e6ec6e0ff37bb7269a5137e2a97e56e38",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/lovable/DESIGN.md",
+      "artifact": "skills/frontend/references/design/lovable.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9a6648dcf8caaa67a9afbe288a6b094eb78387ad",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/raycast/DESIGN.md",
+      "artifact": "skills/frontend/references/design/raycast.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "88e665905c215694fe99126767e6ce63be865de1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/superhuman/DESIGN.md",
+      "artifact": "skills/frontend/references/design/superhuman.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "5d6516500eaa834450e6f039f29c5351533cd806",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/vercel/DESIGN.md",
+      "artifact": "skills/frontend/references/design/vercel.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "156d11cd61c623de14119d1bf70b3989a9e219d2",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/warp/DESIGN.md",
+      "artifact": "skills/frontend/references/design/warp.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9f4f95e4aef4d176e2120acd1d9557c0c372052e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/clickhouse/DESIGN.md",
+      "artifact": "skills/frontend/references/design/clickhouse.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "ccf1713ce44325b3b7873f1c9d6df0d22d2a997e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/composio/DESIGN.md",
+      "artifact": "skills/frontend/references/design/composio.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c5cf5d76a7638b68d91c3d178d9441546c07a74e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/hashicorp/DESIGN.md",
+      "artifact": "skills/frontend/references/design/hashicorp.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "2cda74521624d40553b7a65f88be740eee7334e0",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/mongodb/DESIGN.md",
+      "artifact": "skills/frontend/references/design/mongodb.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "91841e008e451ae7054fe9a0c13fc3d78c2b844b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/posthog/DESIGN.md",
+      "artifact": "skills/frontend/references/design/posthog.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f10edede26e64d08090f72eae04a0a628621ace6",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/sanity/DESIGN.md",
+      "artifact": "skills/frontend/references/design/sanity.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "3f4d60b08061882b82b1429e37c74cde23fcbf17",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/sentry/DESIGN.md",
+      "artifact": "skills/frontend/references/design/sentry.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "5e862058b268cb7e536047079227d94fe00fb462",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/supabase/DESIGN.md",
+      "artifact": "skills/frontend/references/design/supabase.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "21c80f2515da76f5a815199ee303d0c324320c82",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/cal/DESIGN.md",
+      "artifact": "skills/frontend/references/design/cal.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "41c0d7490c707cb95d2a3defc641b9c48c9af7bd",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/intercom/DESIGN.md",
+      "artifact": "skills/frontend/references/design/intercom.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "ea2901a1dd9cb5a0e689ee234d315a0bb709934f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/linear-app/DESIGN.md",
+      "artifact": "skills/frontend/references/design/linear.app.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f2f13150569761a93e1da955659c8c266d62de23",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/mintlify/DESIGN.md",
+      "artifact": "skills/frontend/references/design/mintlify.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "bd01a2390788c0d7ef2aa431812ca0291a139eff",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/notion/DESIGN.md",
+      "artifact": "skills/frontend/references/design/notion.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "df843d3f5afcf0bda8b7def103bfaa4a1e1c03db",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/resend/DESIGN.md",
+      "artifact": "skills/frontend/references/design/resend.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "516d5b60123d4e3bd3e473b071e531ba2d9a35db",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/zapier/DESIGN.md",
+      "artifact": "skills/frontend/references/design/zapier.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "b265af4eba9aaf7147de0be2d018d254ce060087",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/airtable/DESIGN.md",
+      "artifact": "skills/frontend/references/design/airtable.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "18a9c2aeb607e5df30dd9dc85b1a5236af765b1b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/clay/DESIGN.md",
+      "artifact": "skills/frontend/references/design/clay.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d553ce9f397fc584a40909fe3ab5eef4d1371aea",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/figma/DESIGN.md",
+      "artifact": "skills/frontend/references/design/figma.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "481681cf30679fd20dad131458bdf19779e543f0",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/framer/DESIGN.md",
+      "artifact": "skills/frontend/references/design/framer.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "44ae213e0082273733a904e27c328ae15102b79a",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/miro/DESIGN.md",
+      "artifact": "skills/frontend/references/design/miro.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "3512480e20667000c2a4ebb842ad0a5217a936d8",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/webflow/DESIGN.md",
+      "artifact": "skills/frontend/references/design/webflow.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "ac5d94ac5c148590ecfc800364cc1918b5eae7c3",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/binance/DESIGN.md",
+      "artifact": "skills/frontend/references/design/binance.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "80ba5d1bdc6cb630b976356a1de52b93ec784ea3",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/coinbase/DESIGN.md",
+      "artifact": "skills/frontend/references/design/coinbase.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "5a459fbd15f07e7cd88533e26089e908d2874de3",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/kraken/DESIGN.md",
+      "artifact": "skills/frontend/references/design/kraken.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "422d26c9d1264c068f73d58fbf17307f4dee8ab9",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/mastercard/DESIGN.md",
+      "artifact": "skills/frontend/references/design/mastercard.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "a6c80588b7732d0996ef46c6a8db5d8cc7eeff8e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/revolut/DESIGN.md",
+      "artifact": "skills/frontend/references/design/revolut.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8500e3befd1d659b514bdbddde10fb98c3c41232",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/stripe/DESIGN.md",
+      "artifact": "skills/frontend/references/design/stripe.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8ab94dc6a93367833283bb9c7c930c6bacd6b70d",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/wise/DESIGN.md",
+      "artifact": "skills/frontend/references/design/wise.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "57476c89c4e20995188fe3d439557e2c4d493644",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/airbnb/DESIGN.md",
+      "artifact": "skills/frontend/references/design/airbnb.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f4310620dc4e14aaa363543a1ce0bc2088c59323",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/meta/DESIGN.md",
+      "artifact": "skills/frontend/references/design/meta.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "56c888178c241272bde43c15913af5f26caa6066",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/nike/DESIGN.md",
+      "artifact": "skills/frontend/references/design/nike.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "ec2ce7e2a590f758e0c23e5f5d70bf2c439b1664",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/shopify/DESIGN.md",
+      "artifact": "skills/frontend/references/design/shopify.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "023511c728f6b1ae20518ecf39f183e3790138b8",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/starbucks/DESIGN.md",
+      "artifact": "skills/frontend/references/design/starbucks.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "6fe30874c8ba78f638610f7d2a162561a8e5ec95",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/apple/DESIGN.md",
+      "artifact": "skills/frontend/references/design/apple.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9976e12b42d3c396c96c063b61bedb4dac83c10e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/ibm/DESIGN.md",
+      "artifact": "skills/frontend/references/design/ibm.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9799fbb81a5fdf329c230412c1480c2b2679214d",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/nvidia/DESIGN.md",
+      "artifact": "skills/frontend/references/design/nvidia.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "15f828986ed25701b93971539cc6d66b58ae509f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/pinterest/DESIGN.md",
+      "artifact": "skills/frontend/references/design/pinterest.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "3c3fae8bd73a4c93edfd9636a466a7365614801b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/playstation/DESIGN.md",
+      "artifact": "skills/frontend/references/design/playstation.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d0baed048500c359bbc7d4eba761a790ae388cb9",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/spacex/DESIGN.md",
+      "artifact": "skills/frontend/references/design/spacex.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "53babd727268f66c5166165b8081b6a01fbfbf6a",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/spotify/DESIGN.md",
+      "artifact": "skills/frontend/references/design/spotify.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "50fb2396b806b6ef79295aa89e7ae57dbe8d3883",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/theverge/DESIGN.md",
+      "artifact": "skills/frontend/references/design/theverge.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "caea31e6b71f8488ee374327905b4d0c2c4d0265",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/uber/DESIGN.md",
+      "artifact": "skills/frontend/references/design/uber.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "49cc7258874b9a3369f51683ba70793c4b02b02c",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/vodafone/DESIGN.md",
+      "artifact": "skills/frontend/references/design/vodafone.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "2266e0d0d7b36df903245b1da965e340d44d85ef",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/wired/DESIGN.md",
+      "artifact": "skills/frontend/references/design/wired.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "282ee46cc8244dc44512db1981350911907c1e3f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/bmw/DESIGN.md",
+      "artifact": "skills/frontend/references/design/bmw.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "3254627a5f1327201bc1a05c5ffa8cf4aac4a7fa",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/bugatti/DESIGN.md",
+      "artifact": "skills/frontend/references/design/bugatti.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "98b5e86652da09a2e5f4abe2f54de6cda529f628",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/ferrari/DESIGN.md",
+      "artifact": "skills/frontend/references/design/ferrari.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "cb3349513b04e9a352e7bca4498cb96e54f6e523",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/lamborghini/DESIGN.md",
+      "artifact": "skills/frontend/references/design/lamborghini.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "54ca59f88b1155521811b85f41aa5a33ba97d716",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/renault/DESIGN.md",
+      "artifact": "skills/frontend/references/design/renault.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "5ccfd75833ddd388540bd78aa8c77434257c26d7",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/design-systems/tesla/DESIGN.md",
+      "artifact": "skills/frontend/references/design/tesla.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "7f32287cb9229b4bf5b29cec1c428dc5ff83317f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/taste-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/taste-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "b72132fcd466da605623ffe96e370b3991fc5285",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/gpt-tasteskill/SKILL.md",
+      "artifact": "skills/frontend/references/design/gpt-tasteskill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "03ed209b8fdc0a3cd6bccf8a5b3bfffe56aa4558",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/minimalist-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/minimalist-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "44ead27ef04ffe79ade0c6df7fd696dbcf7b246b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/brutalist-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/brutalist-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f5375b908340e1376ed391232a31c5d82d5babfb",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/soft-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/soft-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "4038f41ec0137ec92e98ed0151fe3b7038b9329e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/redesign-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/redesign-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c8304f0c9301385e3641b052d6b25b8af11cb6c1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/image-to-code-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/image-to-code-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d19f8de112252ea88724c540647cad85b7653d46",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/output-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/output-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d983bbcf040b6f433c624ce2212a2c044ad2da3c",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/stitch-skill/SKILL.md",
+      "artifact": "skills/frontend/references/design/stitch-skill.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "19d958cdb5f83d14e4021fac942c1bcf8395c042",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/imagegen-frontend-web/SKILL.md",
+      "artifact": "skills/frontend/references/design/imagegen-frontend-web.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "26b293b8d0088631c41ebefde4a650768d01cf22",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/imagegen-frontend-mobile/SKILL.md",
+      "artifact": "skills/frontend/references/design/imagegen-frontend-mobile.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9d8d55f3ca7a77e18329922ea8a67694dee52ebb",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/brandkit/SKILL.md",
+      "artifact": "skills/frontend/references/design/imagegen-brandkit.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d76399f666af97ac8c142928e02602d9732e78aa",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/skills/stitch-skill/DESIGN.md",
+      "artifact": "skills/frontend/references/design/stitch-design-example.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "ef78a972599e7b1791580a5bcd6cf0242abac65b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/.claude/skills/ui-ux-pro-max/SKILL.md",
+      "artifact": "skills/frontend/references/ui-ux-db/README.md",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "a64d6c233a6293c05ab70f67156cc7e30284232a",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/scripts/core.py",
+      "artifact": "skills/frontend/references/ui-ux-db/scripts/core.py",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8d02065480ecab6978935133371658789782e093",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/scripts/design_system.py",
+      "artifact": "skills/frontend/references/ui-ux-db/scripts/design_system.py",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d3152e5fb6cd284d03f4169ce63b91f3df40b32d",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/scripts/search.py",
+      "artifact": "skills/frontend/references/ui-ux-db/scripts/search.py",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "d782d315f5cf3bb9dc9cbd16d43186e7c6adaf43",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/charts.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/charts.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c27b726c1162aa79d93f46ef039523666be44187",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/colors.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/colors.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "7b2b0672037001ef08f1686f3d1f1c87e14a71c1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/icons.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/icons.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "210a8d0863177abe5e559750d076a27216c87e49",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/landing.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/landing.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f64101ec49882e68b0555da56e328187fd2f9a8c",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/products.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/products.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "0bb9fcb3e03d7f70ca3e53a79de9bea49e585ef0",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/react-performance.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/react-performance.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "671465f29ce8d1b12e1576ab81c7b610161f2f6d",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/styles.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/styles.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8bacc703fadb0165b0a2b746ca78c80513e0d5b0",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/typography.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/typography.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "51a63f01ac248e51240652131bb342b6606b6856",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/ui-reasoning.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/ui-reasoning.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8b6ca2fb256e13ff2a0a9dd150f34e1bc2ec8e25",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/ux-guidelines.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/ux-guidelines.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "e347aeda7401aac08879a7b11c3907782c7bcadb",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/app-interface.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/web-interface.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f34c3cd0de0eee83553b996756e1b999749d56a1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/google-fonts.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/google-fonts.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "45ece9ea26e9df5405b987270067cb88dab79f67",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/app-interface.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/app-interface.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "f34c3cd0de0eee83553b996756e1b999749d56a1",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/astro.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/astro.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "cacba81c96005b527b55bdb56e37d69bd616ca54",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/flutter.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/flutter.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "b8dfd0d696bdb885184c271feb0d8722f7d7c655",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/html-tailwind.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/html-tailwind.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "51ff57a6808b199e664eda22fbd7736d827d9a9a",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/jetpack-compose.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/jetpack-compose.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "971ff9e3074c9a1a414b1a7e69745f286291d3f6",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/nextjs.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/nextjs.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "8762161a982279b2bdaad86860d10f0afbfeb13f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/nuxt-ui.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/nuxt-ui.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "7146e84836c504d4374a9b1cace3262b771a2956",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/nuxtjs.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/nuxtjs.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c275d0de8c6a06a06f8439be017af660fefe91bb",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/react-native.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/react-native.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "209e893c3b2441813add061270009d9b6fe3e512",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/react.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/react.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "9f891f4ab9cc8362b22f919f1dcae5b9853fc9bf",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/shadcn.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/shadcn.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "fb86e8d1c135aa384df284f216c3db9c5187ae57",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/svelte.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/svelte.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "39b6d2e4404cca19d2afe86529597638e6752d2e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/swiftui.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/swiftui.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "1009d75ccdac6eb667ee141285908a249e82fb50",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/vue.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/vue.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "86b05cffdcd30abedf357e21ddf0fe51baed541f",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/threejs.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/threejs.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "7035a99742baa094c42e551c03048c02715164a3",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/angular.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/angular.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "75cb670f247923ba78946501c004e36dd37d3407",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/src/ui-ux-pro-max/data/stacks/laravel.csv",
+      "artifact": "skills/frontend/references/ui-ux-db/data/stacks/laravel.csv",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "c32f2084373cc2f917c414949bb8e691825a529e",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nexu-io/open-design@6afe7eae156bfa29251a51fd0636649c257f7444/LICENSE",
+      "artifact": "skills/frontend/LICENSE-Apache-2.0.txt",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "eb79c35bd865477e525b18e56f35d56fbe0f7110",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "Leonxlnx/taste-skill@06d6028b5c623016c59ce8536f578e5a1127b499/LICENSE",
+      "artifact": "skills/frontend/LICENSE-taste-skill.txt",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "48a2f6640b81ff8eca9ce7f6a96337692713ef5b",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill@f32d6a61cdf0bfd57404c45854583fd19ff95088/LICENSE",
+      "artifact": "skills/frontend/LICENSE-ui-ux-pro-max.txt",
+      "consumer": "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)",
+      "rules": [
+        "verbatim fixed-pin bytes; path mapping only"
+      ],
+      "blob": "1e71cbf26660f31903807d099fe902c098fc7e4c",
+      "test": "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate"
+    },
+    {
+      "source": "scripts/frontend-recipe.mjs immutable path/blob provenance",
+      "artifact": "skills/frontend/.frontend-materialized.json",
+      "consumer": "offline completeness/integrity and package gate",
+      "rules": [
+        "explicit-only network synchronization"
+      ]
+    }
+  ]
+}

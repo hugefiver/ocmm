@@ -2,11 +2,10 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { DshAgent, DshSkillRegistration, DshSkillRegistry } from "./dsh-types.js";
 import type { DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
-export declare const DSMM_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops"];
-export declare const MVP_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops"];
+export declare const DSMM_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops", "debugging", "frontend", "git-master", "ast-grep", "coding-agent-sessions", "init-deep", "using-git-worktrees"];
+export declare const MVP_SKILL_NAMES: readonly ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops", "debugging", "frontend", "git-master", "ast-grep", "coding-agent-sessions", "init-deep", "using-git-worktrees"];
 export type DsmmSkillName = (typeof DSMM_SKILL_NAMES)[number];
-export declare const DSMM_ON_DEMAND_SKILL_NAMES: readonly ["debugging"];
-export type DsmmAvailableSkillName = DsmmSkillName | (typeof DSMM_ON_DEMAND_SKILL_NAMES)[number];
+export type DsmmAvailableSkillName = DsmmSkillName;
 export type MvpSkillName = DsmmSkillName;
 /** Packaged metadata only; discovery never reads SKILL.md. */
 export declare const DSMM_SKILL_DESCRIPTIONS: Record<DsmmAvailableSkillName, string>;

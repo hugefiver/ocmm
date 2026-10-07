@@ -1,39 +1,53 @@
 import type { DshLlmCallConfig } from "./dsh-types.js";
 import { desiredDeepseekEffort, isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
+import { readPromptAsset as asset, SOURCE_ROLE_CATALOG, splitCategory } from "./prompt-content.js";
+import type { SourceRoleContent } from "./prompt-content.js";
 import type { DsmmSettings } from "./settings.js";
+export { SOURCE_ROLE_CATALOG, buildRolePersona } from "./prompt-content.js";
+export type { SourceRoleContent } from "./prompt-content.js";
 
-export const BASE_DEEPWORK_PROMPT = `<dsmm-deepwork-mode>
-
-DEEPWORK MODE ENABLED!
-
-Use this workflow only while the \`{{modeName}}\` mode is active OR a DW-managed preset is selected. This is an opt-in boundary: outside both conditions, do not apply Deepwork-specific gates, intent routing, or tool-discipline requirements. The default mode name is \`deepwork\` unless configured.
-
-## Intent routing
-
-Determine whether the user requests an explanation, diagnosis, implementation, or open-ended design. State the outcome and evidence in the user's language; classify aloud only when it helps the user.
-
-## Workflow gates
-
-- A clear implementation request authorizes its stated scope. Do not require design reapproval or a separate approval loop for equivalent implementation decisions.
-- For complex business or behavior implementation, default to planner → plan-critic → implementation. Skip this sequence only for a bounded, simple, low-risk change or an explicit permitted user request. A task having multiple steps alone is not the criterion.
-- Escalate choices that change scope or acceptance, weaken safety/data guarantees, change a public API/protocol or permissions, or cause an irreversible effect. Preserve explicit user configuration.
-- Request implementation review when risk, uncertainty, or user requirements warrant it; reviewer is primary-lane self-review, while an Oracle is an externally configured cross-check. Do not run fixed review loops or manufacture an Oracle model.
-- For completed implementation, gather evidence from tests, diagnostics, and real surfaces before declaring done.
-- Keep scope exact. Do not add unrelated refactors, speculative abstractions, or surprise features.
-- The bundled workflow skill set is available in this mode: \`brainstorming\`, \`writing-plans\`, \`subagent-driven-development\`, \`dispatching-parallel-agents\`, \`requesting-code-review\`, \`receiving-code-review\`, and \`remove-ai-slops\`.
-- \`workflow.policy=risk-based\` uses the rules above. Explicit \`workflow.policy=legacy\` retains the configured \`strictGates\`, \`reviewCap\`, and \`finalReviewPolicy\` gates. Do not apply any Deepwork policy outside active \`{{modeName}}\` mode or DW-managed preset scope.
-
-## Tool discipline
-
-Use repository tools for repository-specific claims. Prefer narrow reads and searches before broad exploration. Use external documentation for library, API, CLI, or cloud-service details.
-
-- Use the shell dialect available in the current DSH runtime. Keep commands short and inspectable; resolve exact paths before destructive actions and do not string-build cross-shell deletes.
-- No autonomous Git writes: implementing or fixing does not authorize a commit, and a commit does not authorize pushing, tagging, rebasing, or releasing.
-- Child tasks inherit the host's authority and depth limits. Delegate only through actually available DSH tools; preset files alone do not prove that a role is callable.
-
-- Deepwork safety guards may enforce shell dialect, git-write approval, output-size, plan-format, question-label, and todo-discipline policy inside this mode; treat \`[dsmm safety]\` messages as binding policy feedback.
-
+const activation = `<dsmm-deepwork-mode>
+Use this workflow only while the \`{{modeName}}\` mode is effectively active. This is an opt-in boundary: ordinary presets default off; DW roles default on, but explicit off wins and retains only persona/access. Never force common workflow or skills on merely from a role name.
+\`workflow.policy=risk-based\` follows the source workflow below. Explicit \`workflow.policy=legacy\` retains the configured \`strictGates\`, \`reviewCap\` and \`finalReviewPolicy\` gates; it is compatibility policy, not extra authorization. Role scope, output and terminal delegation policy are authoritative over all workflow/model guidance.
+Skills are native metadata and lazy bodies, never automatically injected. Load matching skills only through the actual native skill catalog. Treat \`[dsmm safety]\` messages as binding feedback. Implementing does not authorize a commit; a commit does not authorize push/tag/rebase/release.
 </dsmm-deepwork-mode>`;
+
+export const BASE_DEEPWORK_PROMPT = [activation, asset("deepwork/default.md"), asset("shared/shell-safety.md"), asset("shared/dsh-host-contract.md")].join("\n\n---\n\n");
+
+// Prompt-only matching follows src/intent/model-family.ts, not model routing.
+function modelName(fullId: string): string {
+  const name = fullId.slice(fullId.lastIndexOf("/") + 1).toLowerCase();
+  const vendors: Record<string, RegExp> = { openai: /^(?:gpt-|o\d|chatgpt-|codex-)/u, anthropic: /^claude-/u, google: /^gemini-/u, zhipu: /^glm-/u, deepseek: /^deepseek-/u };
+  const parts = name.split("."), direct = parts.slice(1).join("."), regional = parts.slice(2).join(".");
+  if (vendors[parts[0]]?.test(direct)) return direct;
+  if (/^(?:[a-z]{2}|[a-z]{2}-[a-z]+-\d+)$/u.test(parts[0]) && vendors[parts[1]]?.test(regional)) return regional;
+  return name;
+}
+
+export function promptModelVariants(role: string | undefined, model: string): string[] {
+  const name = modelName(model);
+  const gpt = name.includes("gpt") || model.toLowerCase().includes("codex");
+  const opus = /^claude-opus-5(?:[-.]5)?(?:$|[-.](?:20\d{6}(?:[-.][a-z0-9]+)*|[a-z][a-z0-9-]*))$/iu.test(name.replace(/^global\.anthropic\./iu, "").replace(/@default$/iu, ""));
+  const kimi = ["kimi-for-coding", "kimi-for-coding-highspeed"].includes(name) || /^(?:kimi-k2[.-]?[78]|k2[-.]?p[78])(?:$|[-_.])/u.test(name);
+  const additive = gpt ? ["gpt"] : kimi ? ["kimi-k27"] : /^swe-2(?:[-.]|$)/u.test(name) ? ["swe-2"] : [];
+  const base = role === "planner" ? "planner" : role === "orchestrator" && opus ? "claude-opus-5"
+    : model.toLowerCase().includes("codex") ? "codex" : gpt ? "gpt" : name.startsWith("gemini-") ? "gemini" : name.includes("glm") ? "glm" : "default";
+  return [...new Set([base, ...additive])].filter((variant) => variant !== "default");
+}
+
+export function roleModelCalibration(role: SourceRoleContent | undefined, model: string): string {
+  const variants = promptModelVariants(role?.sourceId, model);
+  const layers = variants.map((variant) => asset(`deepwork/${variant}.md`));
+  if (role?.kind === "category" && role.promptArtifact !== null) {
+    const category = splitCategory(asset(role.promptArtifact.replace("prompts/source/", "")));
+    const name = modelName(model);
+    const family = model.toLowerCase().includes("codex") || name.includes("gpt") ? "gpt" : name.startsWith("gemini-") ? "gemini" : name.includes("glm") ? "glm" : name.includes("claude") ? "claude" : "unknown";
+    // Categories carry only their own family layer + additive model calibration,
+    // not the base-agent Gemini/GLM/planner workflow variants.
+    return [category.calibrations.get(family), ...layers.filter((_layer, index) => ["gpt", "kimi-k27", "swe-2"].includes(variants[index]))].filter(Boolean).join("\n\n---\n\n");
+  }
+  return layers.join("\n\n---\n\n");
+}
 
 export const DEEPSEEK_V4_PRO_OVERLAY = `<dsmm-deepseek-v4-pro-calibration>
 
@@ -65,6 +79,8 @@ DeepSeek-V41-Flash applies only to the verified deepseek-official/deepseek-flash
 export interface DeepworkPromptOptions {
   route?: Pick<DshLlmCallConfig, "provider" | "model">;
   selectedPreset?: string;
+  /** Existing effective-role resolver supplies content identity, not route authority. */
+  roleId?: string | null;
   overrideSection?: string;
 }
 
@@ -72,7 +88,10 @@ export function buildDeepworkPrompt(
   settings: DsmmSettings,
   options: DeepworkPromptOptions = {}
 ): string {
-  const base = (options.overrideSection?.trim() || BASE_DEEPWORK_PROMPT).replaceAll("{{modeName}}", settings.modeName);
+  const role = SOURCE_ROLE_CATALOG.find((role) => role.id === (options.roleId === undefined ? options.selectedPreset : options.roleId));
+  const common = role === undefined ? BASE_DEEPWORK_PROMPT : [activation, asset("deepwork/default.md")].join("\n\n---\n\n");
+  const family = roleModelCalibration(role, options.route?.model ?? "");
+  const base = [options.overrideSection?.trim() || common, family === "" ? "" : `<workflow-model-calibration>\nThe role prompt is authoritative for scope, permissions and output. Model calibration never grants tools or changes the native route.\n\n${family}\n</workflow-model-calibration>`].filter(Boolean).join("\n\n---\n\n").replaceAll("{{modeName}}", settings.modeName);
   const workflowPolicy = settings.workflow.policy === "legacy" ? `<dsmm-workflow-policy>
 policy: legacy
 strictGates: ${String(settings.workflow.strictGates)}

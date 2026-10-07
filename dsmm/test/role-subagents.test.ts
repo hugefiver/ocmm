@@ -36,7 +36,8 @@ test("custom headless profile installs role tools in Agent scope before assembly
   };
   await created({ agent: { ctx: agentCtx, session: { header: { origin: "headless" }, events: [], append() {} } } });
 
-  assert.equal(registrations.length, DSMM_ROLE_IDS.length - 1);
+  assert.equal(registrations.length, DSMM_ROLE_IDS.filter((id) => id !== "dsmm-orchestrator" && DEFAULT_DSMM_SETTINGS.roles[id]).length);
+  assert.equal(registrations.some(({ config }) => config.toolName === "dsmm_cross_cutting"), false);
   const reviewer = registrations.find(({ config }) => config.toolName === "dsmm_reviewer");
   assert.deepEqual(reviewer?.config.toolFilter, { allow: ["read", "glob", "grep"] });
   assert.equal(reviewer?.config.modelSelectionSettings, false);

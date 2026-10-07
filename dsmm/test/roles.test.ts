@@ -16,7 +16,10 @@ const EXPECTED_ROLE_IDS = [
   "dsmm-code-search",
   "dsmm-doc-search",
   "dsmm-clarifier",
-  "dsmm-media-reader"
+  "dsmm-media-reader",
+  "dsmm-frontend", "dsmm-hard-reasoning", "dsmm-research", "dsmm-quick",
+  "dsmm-coding", "dsmm-normal-task", "dsmm-complex", "dsmm-deep",
+  "dsmm-documenting", "dsmm-cross-cutting"
 ] as const;
 
 test("role ids are stable and exported from the package entrypoint", () => {
@@ -49,19 +52,25 @@ test("root eligibility follows explicit role mode without hiding enabled auxilia
     ["dsmm-code-search", "subagent"],
     ["dsmm-doc-search", "subagent"],
     ["dsmm-clarifier", "subagent"],
-    ["dsmm-media-reader", "subagent"]
+    ["dsmm-media-reader", "subagent"],
+    ...EXPECTED_ROLE_IDS.slice(12).map((id) => [id, "subagent"])
   ]);
   assert.deepEqual(DSMM_ROLES.filter(isRootRole).map((role) => role.id), ["dsmm-orchestrator", "dsmm-planner", "dsmm-builder"]);
-  assert.equal(DSMM_ROLES.filter((role) => !isRootRole(role)).length, 9);
+  assert.equal(DSMM_ROLES.filter((role) => !isRootRole(role)).length, 19);
   assert.equal(DSMM_ROLES.find((role) => role.id === "dsmm-planner")?.access, "read-only");
-  assert.equal(DSMM_ROLES.every((role) => role.enabledByDefault), true);
+  assert.deepEqual(DSMM_ROLES.filter((role) => !role.enabledByDefault).map((role) => role.id), ["dsmm-cross-cutting"]);
+  assert.equal(DSMM_ROLES.filter((role) => role.kind === "role").length, 11);
+  assert.equal(DSMM_ROLES.filter((role) => role.kind === "category").length, 11);
 });
 
 test("Deepwork uses DW display names and personas without changing compatible role identities", () => {
   assert.deepEqual(DSMM_ROLES.map((role) => role.name), [
     "DW Orchestrator", "DW Planner", "DW Plan Critic", "DW Builder",
     "DW Reviewer", "DW Oracle", "DW Oracle 2nd", "DW Creative",
-    "DW Code Search", "DW Doc Search", "DW Clarifier", "DW Media Reader"
+    "DW Code Search", "DW Doc Search", "DW Clarifier", "DW Media Reader",
+    "DW Frontend", "DW Hard Reasoning", "DW Research", "DW Quick",
+    "DW Coding", "DW Normal Task", "DW Complex", "DW Deep",
+    "DW Documenting", "DW Cross Cutting"
   ]);
   assert.deepEqual(DSMM_ROLES.map((role) => role.id), EXPECTED_ROLE_IDS);
   for (const role of DSMM_ROLES) {
@@ -80,41 +89,40 @@ test("preset metadata renders id, name, and description", () => {
   }
 });
 
-test("agent cordis renders one persona, actual capability rows, and bundled skills", () => {
-  const expectedSkills = DSMM_SKILL_NAMES.map((skill) => `      - '${skill}'`).join("\n");
-
+test("agent cordis renders one full persona and native skill tools without a standing private skill provider", () => {
   for (const role of DSMM_ROLES) {
     const cordis = renderAgentCordis(role);
     const personaMarkers = cordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? [];
-    const presetSkillMarkers = cordis.match(/name: '@dsmm\/dsmm\/preset-skills'/gu) ?? [];
 
     assert.equal(personaMarkers.length, 1);
-    assert.equal(presetSkillMarkers.length, 1);
+    assert.doesNotMatch(cordis, /@dsmm\/dsmm\/preset-skills/u);
     assert.match(cordis, /^- id: persona\n  name: '@deepseek-ai\/dsh-persona'\n  config:\n    prefix: /mu);
     assert.match(cordis, /- id: agent-instructions\n  name: '@deepseek-ai\/dsh-agent-instructions'\n  config:\n    maxBytes: 65536\n/u);
     assert.ok(cordis.includes(role.id));
-    assert.ok(cordis.includes(`- id: dsmm-preset-skills\n  name: '@dsmm/dsmm/preset-skills'\n  config:\n    skills:\n${expectedSkills}\n`));
+    assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-skill'/u);
+    assert.match(cordis, /name: '@deepseek-ai\/dsh-skill-filesystem'/u);
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs-search'/u);
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs'/u);
     assert.equal(cordis.includes("name: '@deepseek-ai/dsh-tool-pwsh'"), role.access !== "read-only");
     assert.equal(cordis.endsWith("\n"), true);
+    assert.doesNotMatch(cordis, /^[\t ]+$/mu, "blank scalar lines must not acquire indentation-only whitespace");
   }
 });
 
-test("agent cordis renders an explicit empty core skill list", () => {
+test("standing composition never serializes a session-private skill enable list", () => {
   const role = DSMM_ROLES[0];
   assert.ok(role);
   const cordis = renderAgentCordis(role, []);
 
-  assert.match(cordis, /- id: dsmm-preset-skills\n  name: '@dsmm\/dsmm\/preset-skills'\n  config:\n    skills: \[\]\n/u);
-  assert.doesNotMatch(cordis, /    skills:\n\n$/u);
+  assert.equal(cordis, renderAgentCordis(role));
+  assert.doesNotMatch(cordis, /dsmm-preset-skills|    skills:/u);
   assert.ok(cordis.includes(role.id));
 });
 
 test("personas are role-scoped and avoid host-specific tool names", () => {
   for (const role of DSMM_ROLES) {
     assert.ok(role.persona.includes(role.id));
-    assert.doesNotMatch(role.persona, /opencode|task tool/iu);
+    assert.doesNotMatch(role.persona, /Native OpenCode Background|Task tool \(general-purpose\)|task\(description/u);
   }
 });
 
@@ -122,9 +130,8 @@ test("orchestrator names DSH role tools and does not claim model heterogeneity b
   const orchestrator = DSMM_ROLES.find((role) => role.id === "dsmm-orchestrator");
   assert.ok(orchestrator);
 
-  for (const target of EXPECTED_ROLE_IDS.filter((id) => id !== "dsmm-orchestrator")) {
-    assert.ok(orchestrator.persona.includes(target), `${target} missing from orchestrator persona`);
-  }
+  assert.match(orchestrator.persona, /Logical source role names map to dsmm-<name>/u);
+  assert.match(orchestrator.persona, /Smallest-fit routing/u);
   assert.match(orchestrator.persona, /different model was explicitly selected/u);
 });
 

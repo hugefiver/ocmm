@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Partial Runtime Evidence — When You Cannot Execute the Real Operation
 
 Read this when **runtime truth beats code reading** is in conflict with **you cannot run the actual operation**.
@@ -156,7 +158,7 @@ Reviewer and Oracle profiles are reserved for software implementation acceptance
 ### Pattern
 
 ```
-task(description="Verify non-debug artifact claims", subagent_type="research",
+Native assignment content for a permitted callable research role (otherwise verify directly):
      prompt="""
 SKEPTICAL FINAL VERIFICATION — be critical, look for reasons the task is incomplete or wrong.
 
@@ -178,7 +180,7 @@ SKEPTICAL FINAL VERIFICATION — be critical, look for reasons the task is incom
 3. Identify any unsubstantiated claims, missing pieces, or factual errors.
 4. End with PASS / FAIL / PARTIAL with specific gaps.
 Be skeptical. Don't rubber-stamp.
-""")
+"""
 ```
 
 ### Keep the roles distinct

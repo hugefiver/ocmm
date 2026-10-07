@@ -30,8 +30,9 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
   assert.equal(definitions.some((item) => DSMM_ROLES.some((role) => role.id === item.id && !isRootRole(role))), false);
   const orchestrator = definitions[0];
   assert.ok(orchestrator);
-  assert.equal(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").length, DSMM_ROLE_IDS.length - 1);
-  assert.deepEqual(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").map((item) => item.config?.toolName), DSMM_ROLE_IDS.filter((id) => id !== "dsmm-orchestrator").map((id) => id.replace(/-/gu, "_")));
+  const enabledChildren = DSMM_ROLE_IDS.filter((id) => id !== "dsmm-orchestrator" && DEFAULT_DSMM_SETTINGS.roles[id]);
+  assert.equal(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").length, enabledChildren.length);
+  assert.deepEqual(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").map((item) => item.config?.toolName), enabledChildren.map((id) => id.replace(/-/gu, "_")));
   const planTool = orchestrator.plugins.find((item) => item.config?.toolName === "dsmm_plan_critic");
   assert.deepEqual(planTool?.config?.toolFilter, { allow: ["read", "glob", "grep"] });
   assert.equal(orchestrator.plugins.some((item) => item.name === "@deepseek-ai/dsh-tool-fs"), true);

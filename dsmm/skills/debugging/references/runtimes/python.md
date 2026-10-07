@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Python Debugging
 
 Covers CPython 3.9+, pytest, asyncio, Django, FastAPI. Setup commands, attach mechanisms, state-query patterns, gotchas, silent-failure signatures.

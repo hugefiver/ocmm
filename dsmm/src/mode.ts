@@ -3,7 +3,7 @@ import type { DshAgent, DshContext, DshLlmCallConfig, DshSystemPromptRegistry, D
 import type { Config } from "./index.js";
 import { agentForScope, nativeAgentContext } from "./native-scope.js";
 import { buildDeepworkPrompt } from "./prompts.js";
-import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 import type { DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
@@ -25,7 +25,7 @@ export function registerDeepworkPrompt(readyCtx: DshContext, controller: Deepwor
         if (subject === undefined) return "";
         const settings = getSettings(subject);
         if (!controller.active(subject, settings.defaultActive)) return "";
-        return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), overrideSection: config.section });
+        return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), roleId: resolveEffectiveDsmmRole(subject, settings, true) ?? null, overrideSection: config.section });
       }
     };
     // Keep the caller's registration scope even when a primitive service is supplied.

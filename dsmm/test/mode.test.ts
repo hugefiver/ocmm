@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import type { DshAgent, DshContext, DshSystemPromptSection } from "../lib/dsh-types.js";
 import { apply } from "../lib/index.js";
 import { registerDeepworkPrompt } from "../lib/mode.js";
@@ -61,6 +62,19 @@ test("newest valid selection is authoritative without changing explicit intent",
   assert.match(f.render(agent), /DEEPWORK MODE ENABLED!/);
   agent.session.events = [...agent.session.events!, { type: "deepwork/mode", data: { active: false } }];
   assert.equal(f.render(agent), "");
+});
+
+test("content calibration uses existing effective child identity, never its inherited root preset", () => {
+  const f = fixture();
+  const options = { provider: "fixture", model: "claude-opus-5" };
+  assert.match(f.render({ session: session(undefined, "dsmm-orchestrator"), options }), /# CLAUDE OPUS 5 EXECUTION CALIBRATION/u);
+  for (const role of [undefined, "reviewer", "planner"]) {
+    const child: DshAgent = { options, session: { ...session(true, "dsmm-orchestrator"), header: { origin: "subagent", agentPreset: "dsmm-orchestrator" },
+      events: [...session(true).events!, ...(role === undefined ? [] : [{ type: "subagent/descriptor", data: snapshotSubagentDescriptor({ mode: "one-shot", provider: `dsmm-role-${role}` }) }])] } };
+    const prompt = f.render(child);
+    assert.doesNotMatch(prompt, /# CLAUDE OPUS 5 EXECUTION CALIBRATION/u);
+    assert.equal(prompt.includes("# Deepwork Planner Injection"), role === "planner");
+  }
 });
 
 test("apply consumes Loader Config immediately, never a fake settings.register service", () => {

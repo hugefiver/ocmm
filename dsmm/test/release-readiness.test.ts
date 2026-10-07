@@ -70,6 +70,7 @@ function requiredTreeFiles(root: string, tree: string, current = join(root, tree
   const paths: string[] = [];
   const entries = readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
   for (const entry of entries) {
+    if ([".gitignore", ".npmignore"].includes(entry.name)) continue;
     if (entry.isSymbolicLink()) continue;
     const entryPath = join(current, entry.name);
     if (entry.isFile()) {
@@ -318,11 +319,18 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
   const migration = readFileSync(migrationPath, "utf8");
   const opening = "DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH.";
 
-  assert.ok(migration.startsWith(`# Migrating from ocmm to DSMM 0.1.1\n\n${opening}`));
+  assert.ok(migration.startsWith("# Migrating from ocmm to DSMM 0.1.1\n\n## Current source-content checkpoint (2026-10-07)\n"));
+  assert.ok(migration.includes(`${opening} This guide describes the 0.1.1 routing surface targeting DSH 0.2.0-rc.2, not a full host-feature parity claim.`));
+  const checkpoint = migration.slice(migration.indexOf("## Current source-content checkpoint"), migration.indexOf(opening));
+  assert.match(checkpoint, /historical 0\.1\.1 mapping below is preserved, not current full-parity evidence/u);
+  assert.match(checkpoint, /22 canonical IDs.*fourteen configurable lazy skills/u);
+  assert.match(checkpoint, /C\/D own those remaining runtime\/settings mechanisms/u);
+  assert.match(checkpoint, /not completed C\/D runtime or publication\/host-install proof/u);
   assert.deepEqual(
     [...migration.matchAll(/^(?:#|##) .+$/gmu)].map((match) => match[0]),
     [
       "# Migrating from ocmm to DSMM 0.1.1",
+      "## Current source-content checkpoint (2026-10-07)",
       "## Hard boundary",
       "## Feature mapping",
       "## Migration sequence",
@@ -827,7 +835,9 @@ test("release readiness checker rejects nested script, build, test, temporary an
     "patches/build/leak.js",
     "patches/test/operator.mjs",
     "patches/temp/operator.mjs",
-    "patches/secrets.json"
+    "patches/secrets.json",
+    "skills/debugging/references/scripts/not-source.mjs",
+    "skills/debugging/references/scripts/secrets.json"
   ];
   const fixtureRoot = createReleaseFixture();
   try {

@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Flaky-test triage
 
 Use this reference when a test is intermittent, passes in isolation, changes its failing neighbor, depends on execution order, or fails only in CI. Treat the symptom as shared-state evidence until a controlled experiment proves otherwise.
@@ -47,7 +49,7 @@ fi
 **PowerShell — unique run root and optional listener inspection**
 
 ```powershell
-$runRoot = Join-Path "$env:LOCALAPPDATA\Temp\dsmm-debug" "flaky-$([guid]::NewGuid().ToString('N'))"
+$runRoot = Join-Path "$env:LOCALAPPDATA\Temp\opencode" "flaky-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $runRoot | Out-Null
 $env:TEST_TMPDIR = $runRoot
 pnpm test -- --test-name-pattern "affected test"

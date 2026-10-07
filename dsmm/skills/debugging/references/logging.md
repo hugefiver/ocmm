@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Logging — Cross-Language Methodology
 
 Every log line has exactly two legitimate readers: the operator reconstructing an incident and the developer reproducing a bug. A line that serves neither is cost — storage, noise, and attention stolen from the lines that matter. Everything below derives from that.

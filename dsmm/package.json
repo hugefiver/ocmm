@@ -72,9 +72,13 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "build": "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs",
     "build:client": "node scripts/build-client.mjs",
     "check:release": "node scripts/check-release-readiness.mjs",
+    "sync:source": "node --experimental-strip-types scripts/sync-source-assets.mjs",
+    "generate:roles": "node scripts/generate-role-assets.mjs",
+    "check:source": "node --experimental-strip-types scripts/check-source-assets.mjs",
+    "sync:frontend": "node scripts/materialize-frontend.mjs --sync",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
     "test": "pnpm run build && node --test --experimental-strip-types test/*.test.ts",

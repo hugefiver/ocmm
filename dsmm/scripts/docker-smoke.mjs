@@ -487,7 +487,7 @@ async function assertPackedExports(profilePackage, home) {
   for (const name of requiredRolePlugins) profileRequire.resolve(`@deepseek-ai/${name}`);
   const dsmm = await import(pathToFileURL(entry).href);
   const presetSkills = await import(pathToFileURL(skillsEntry).href);
-  if (typeof dsmm.default !== "function" || typeof presetSkills.default !== "function" || dsmm.DSMM_SKILL_NAMES?.length !== 7 || dsmm.DSMM_ROLE_IDS?.length !== 12 || dsmm.DSMM_LSP_TOOL_NAMES?.length !== 9) {
+  if (typeof dsmm.default !== "function" || typeof presetSkills.default !== "function" || dsmm.DSMM_SKILL_NAMES?.length !== 14 || dsmm.DSMM_ROLE_IDS?.length !== 22 || dsmm.DSMM_LSP_TOOL_NAMES?.length !== 9) {
     throw new Error("packed dsmm exports missed canonical skills, roles, or LSP tools");
   }
   console.log("PACKAGED_DSMM_RESOLVED");

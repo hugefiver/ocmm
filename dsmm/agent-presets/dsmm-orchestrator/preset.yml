@@ -1,3 +1,3 @@
 id: dsmm-orchestrator
 name: 'DW Orchestrator'
-description: 'Coordinates Deepwork sessions and routes work to focused DW roles.'
+description: 'Main coordinator. Decomposes work, delegates to specialists, verifies results, and uses a model configured for broad coordination.'

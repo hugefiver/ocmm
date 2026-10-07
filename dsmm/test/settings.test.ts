@@ -5,16 +5,16 @@ import type { DshContext } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
 import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
-import { DSMM_ROLE_IDS } from "../lib/roles.js";
+import { DSMM_ROLES } from "../lib/roles.js";
 import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
 import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
 import type { DsmmPluginConfig, DsmmSettings } from "../lib/settings.js";
 
-const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true]));
+const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLES.map((role) => [role.id, role.enabledByDefault]));
 const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));
 
 test("roles, profiles and status load in a fresh ESM process regardless of entry order", () => {
-  for (const entries of [["roles", "profiles", "status"], ["status", "roles", "settings"], ["routing-policy", "role-providers", "profiles"]]) {
+  for (const entries of [["prompts", "roles", "profiles", "status"], ["roles", "prompts", "settings"], ["status", "roles", "settings"], ["routing-policy", "role-providers", "profiles"]]) {
     const script = entries.map((entry) => `await import(${JSON.stringify(new URL(`../lib/${entry}.js`, import.meta.url).href)});`).join("\n");
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], { encoding: "utf8", timeout: 10000 });
     assert.equal(result.status, 0, `${entries.join(",")}: ${result.stderr}`);

@@ -21,8 +21,9 @@ export const Config: Schema<PresetSkillsConfig> = Schema.object({
 });
 
 export function apply(ctx: DshContext, config: PresetSkillsConfig = {}): void {
-  // Compatibility entry for generated presets: never publish session-private
-  // skills from a standing composition. The root plugin owns Agent mounts.
+  // Retain the published 0.1.9 Cordis entry shape for older callers. Current
+  // generated presets do not consume it; this hook registers no skills.
+  // The main entry calls registerAgentSkills below for real Agent mounts.
 }
 
 export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {

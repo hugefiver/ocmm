@@ -1,7 +1,7 @@
 import { Context, getTraceable } from "@deepseek-ai/cordis";
 import { agentForScope, nativeAgentContext } from "./native-scope.js";
 import { buildDeepworkPrompt } from "./prompts.js";
-import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 function routeFromAgent(agent) {
     const header = agent.session.requestHeader?.();
     const { provider, model } = (header === undefined ? agent.options : header.config) ?? {};
@@ -23,7 +23,7 @@ export function registerDeepworkPrompt(readyCtx, controller, getSettings, config
                 const settings = getSettings(subject);
                 if (!controller.active(subject, settings.defaultActive))
                     return "";
-                return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), overrideSection: config.section });
+                return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), roleId: resolveEffectiveDsmmRole(subject, settings, true) ?? null, overrideSection: config.section });
             }
         };
         // Keep the caller's registration scope even when a primitive service is supplied.

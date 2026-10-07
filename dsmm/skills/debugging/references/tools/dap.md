@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # DAP Client (`dap.mjs`) — Drive the Debugger's Protocol, Not Its Text
 
 **Design modeled on the `debug` tool of oh-my-pi (https://github.com/can1357/oh-my-pi, branch omp2).** Their harness proved the useful shape: one structured debug surface with bounded output, stop snapshots, and classified errors. This script brings the same discipline to any shell without registering a tool or adding a dependency.
@@ -26,7 +28,7 @@ The script is at `references/scripts/dap.mjs`. It is zero dependency and runs wi
 PowerShell / Node:
 
 ```powershell
-$dapScript = Join-Path $PWD "skills\debugging\references\scripts\dap.mjs"
+$dapScript = Join-Path $skillResourceBase "references\scripts\dap.mjs" # resourceBase from native skill load
 node $dapScript
 ```
 

@@ -9,8 +9,9 @@ export const Config = Schema.object({
     skills: Schema.array(SKILL_NAME_SCHEMA).default([...DSMM_SKILL_NAMES])
 });
 export function apply(ctx, config = {}) {
-    // Compatibility entry for generated presets: never publish session-private
-    // skills from a standing composition. The root plugin owns Agent mounts.
+    // Retain the published 0.1.9 Cordis entry shape for older callers. Current
+    // generated presets do not consume it; this hook registers no skills.
+    // The main entry calls registerAgentSkills below for real Agent mounts.
 }
 export function registerAgentSkills(ctx, controller, getSettings) {
     const mounted = new Map();

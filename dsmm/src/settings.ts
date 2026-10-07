@@ -2,7 +2,7 @@ import Schema from "@deepseek-ai/schemastery";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import type { DsmmLspSettings } from "./lsp.js";
-import { DSMM_ROLE_IDS } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DSMM_SKILL_NAMES } from "./skills.js";
 import type { DsmmSkillName } from "./skills.js";
@@ -225,18 +225,12 @@ function createDefaultSkillSettings(): Record<DsmmSkillName, boolean> {
 }
 
 function createDefaultRoleSettings(): Record<DsmmRoleId, boolean> {
-  return Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, true])) as Record<DsmmRoleId, boolean>;
+  return Object.fromEntries(DSMM_ROLES.map((role) => [role.id, role.enabledByDefault])) as Record<DsmmRoleId, boolean>;
 }
 
-const SKILLS_SCHEMA = Schema.object({
-  brainstorming: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills.brainstorming),
-  "writing-plans": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["writing-plans"]),
-  "requesting-code-review": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["requesting-code-review"]),
-  "receiving-code-review": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["receiving-code-review"]),
-  "subagent-driven-development": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["subagent-driven-development"]),
-  "dispatching-parallel-agents": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["dispatching-parallel-agents"]),
-  "remove-ai-slops": Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills["remove-ai-slops"])
-});
+const SKILLS_SCHEMA = Schema.object(Object.fromEntries(
+  DSMM_SKILL_NAMES.map((name) => [name, Schema.boolean().default(DEFAULT_DSMM_SETTINGS.skills[name])])
+)) as Schema<Partial<Record<DsmmSkillName, boolean>>>;
 
 const ROLES_SCHEMA = Schema.object(Object.fromEntries(
   DSMM_ROLE_IDS.map((id) => [id, Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles[id])])

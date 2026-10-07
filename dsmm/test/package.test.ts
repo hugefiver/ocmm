@@ -108,7 +108,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.equal(pkg.scripts["check:release"], "node scripts/check-release-readiness.mjs");
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
-  assert.equal(pkg.scripts.build, "tsc -p tsconfig.json && node scripts/build-client.mjs");
+  assert.equal(pkg.scripts.build, "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs");
   assert.equal(pkg.scripts["build:client"], "node scripts/build-client.mjs");
   assert.equal(pkg.devDependencies.react, "^18.3.1");
   assert.equal(pkg.devDependencies["@types/react"], "^18.3.27");

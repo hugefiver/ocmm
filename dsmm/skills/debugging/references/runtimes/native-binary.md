@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Native Binary Debugging (No Source / Reverse Engineering)
 
 For binaries where you don't have trustworthy source: stripped production builds, third-party closed libs, malware, CTF challenges, firmware, vendored libs whose docs lie. The workflow is specific; doing it out of order wastes days.

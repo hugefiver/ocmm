@@ -15,7 +15,7 @@ import { registerSafetyGuards } from "../lib/guards.js";
 import { resolveManagedPresetRoot } from "../lib/preset-materializer.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { resolveConfig } from "../lib/settings.js";
-import { bundledSkillMetadata, readBundledSkill, registerBundledSkills } from "../lib/skills.js";
+import { DSMM_SKILL_NAMES, bundledSkillMetadata, readBundledSkill, registerBundledSkills } from "../lib/skills.js";
 import { DeepworkModeController } from "../lib/state.js";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
@@ -101,7 +101,7 @@ test("A regression: role persona survives but durable explicit off wins over rol
     const render = () => f.ctx.systemPrompt.assemble({ scope: agent }).then(renderPrompt);
     assert.match(await render(), /ROLE_PERSONA_SENTINEL/); assert.match(await render(), /DEEPWORK MODE ENABLED!/);
     assert.doesNotMatch(await render(), /# Brainstorming|# Writing Plans|<dsmm-skill/);
-    assert.equal((await f.ctx.skills.list({ scope: agent })).length, 8);
+    assert.deepEqual((await f.ctx.skills.list({ scope: agent })).map((skill) => skill.name).sort(), [...DSMM_SKILL_NAMES].sort());
     assert.match((await f.ctx.skills.get("writing-plans", { scope: agent }))?.content ?? "", /# Writing Plans/);
     const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
     const before = await runtime.getSession(adapterAgent(agent));
@@ -122,7 +122,7 @@ test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; b
     const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
     const before = await runtime.getSession(adapterAgent(a));
     await runtime.selectMode({ sessionId: a.id, active: true, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch }, adapterAgent(a));
-    assert.equal((await f.ctx.skills.list({ scope: a, cwd: a.session.header.cwd })).length, 8);
+    assert.equal((await f.ctx.skills.list({ scope: a, cwd: a.session.header.cwd })).length, DSMM_SKILL_NAMES.length);
     assert.deepEqual(await f.ctx.skills.list({ scope: b, cwd: b.session.header.cwd }), []);
     assert.deepEqual(await f.ctx.skills.list(), []);
     assert.deepEqual(await f.ctx.skills.list({ scope: scopeParentOf(a) }), []);
@@ -133,7 +133,7 @@ test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; b
     for (const preset of ["dsmm-planner", "standard", "dsmm-planner", "standard"]) {
       await f.ctx.agentPresets.select(b, preset);
       const catalog = await f.ctx.skills.list({ scope: b, cwd: b.session.header.cwd });
-      assert.equal(catalog.length, preset === "standard" ? 0 : 8);
+      assert.equal(catalog.length, preset === "standard" ? 0 : DSMM_SKILL_NAMES.length);
     }
     const quiet = changes; await f.ctx.skills.list({ scope: a }); await f.ctx.skills.list({ scope: b });
     assert.equal(changes, quiet, "metadata queries never reflect skills/change into invalidate loops");
@@ -153,6 +153,16 @@ test("native skill tool consumes metadata catalog and loads a body only at invoc
     assert.doesNotMatch(prompt, /# Brainstorming|<dsmm-skill/);
     const result = await f.tools.execute({ callId: ToolCallId("native-skill-load"), name: "skill", arguments: { name: "brainstorming" }, agent, signal: new AbortController().signal });
     assert.equal(result.isError, false); assert.match(JSON.stringify(result.content), /# Brainstorming/);
+    for (const name of ["debugging", "ast-grep", "coding-agent-sessions"] as const) {
+      const loaded = await f.tools.execute({ callId: ToolCallId(`native-skill-load-${name}`), name: "skill", arguments: { name }, agent, signal: new AbortController().signal });
+      assert.equal(loaded.isError, false, name);
+      const registration = await f.ctx.skills.get(name, { scope: agent });
+      assert.equal(registration?.resourceBase?.kind, "directory");
+      if (registration?.resourceBase?.kind === "directory") {
+        const resource = name === "debugging" ? "references/scripts/dap.mjs" : name === "ast-grep" ? "scripts/ast_grep_helper.py" : "scripts/agent_sessions/cli.py";
+        assert.ok((await readFile(join(registration.resourceBase.path, resource), "utf8")).length > 0);
+      }
+    }
   } finally { await f.dispose(); }
 });
 
@@ -180,7 +190,7 @@ test("another isolated native registry cannot permanently poison cached bundled 
     const other = otherCtx.get("skills")!;
     assert.notEqual(other, f.ctx.skills);
     const catalog = await f.ctx.skills.snapshot(f.view);
-    assert.equal(catalog.complete, true); assert.equal(catalog.skills.length, 8); assert.equal(f.reads(), 0);
+    assert.equal(catalog.complete, true); assert.equal(catalog.skills.length, DSMM_SKILL_NAMES.length); assert.equal(f.reads(), 0);
     assert.match((await f.ctx.skills.get("brainstorming", f.view))?.content ?? "", /# Brainstorming/);
     let changes = 0;
     f.ctx.on("skills/change", () => { changes++; });
@@ -254,7 +264,7 @@ test("preset-layer cwd-specific winner affects only its session; invocation-disa
     assert.equal(denied.isError, true); assert.doesNotMatch(JSON.stringify(denied.content), /# Brainstorming|FORBIDDEN_PROJECT_BODY/);
     a.session.append("deepwork/mode", { active: false });
     assert.equal((await f.ctx.skills.list(view(a))).length, 1, "off withdraws DSMM only, not ancestor project");
-    assert.equal((await f.ctx.skills.list(view(b))).length, 8);
+    assert.equal((await f.ctx.skills.list(view(b))).length, DSMM_SKILL_NAMES.length);
     await ancestorScope.dispose();
   } finally { await f.dispose(); }
 });
@@ -273,7 +283,7 @@ test("native Loader owns Config identity/reload and refuses to replace an admitt
       await assert.rejects(f.reloadDeployment({ roles: noRoles, defaultActive: false }), /requires restart/);
       assert.equal(runtime.getSettings(adapterAgent(a)).defaultActive, true);
       assert.equal((await runtime.getSession(adapterAgent(a))).admissionEpoch, before.admissionEpoch);
-      assert.equal((await f.ctx.skills.list({ scope: a })).length, 8);
+      assert.equal((await f.ctx.skills.list({ scope: a })).length, DSMM_SKILL_NAMES.length);
     } finally { barrier.release(); await busy; }
   } finally { await f.dispose(); }
 });
@@ -290,7 +300,7 @@ test("ancestor incomplete/error/abort never means missing; later native lookup r
       assert.equal(await f.ctx.skills.get("brainstorming", f.view), undefined);
     }
     await assert.rejects(f.ctx.skills.snapshot({ ...f.view, signal: AbortSignal.abort() }));
-    state = "complete"; invalidate(); assert.equal((await f.ctx.skills.snapshot(f.view)).skills.length, 8); assert.equal(f.reads(), 0);
+    state = "complete"; invalidate(); assert.equal((await f.ctx.skills.snapshot(f.view)).skills.length, DSMM_SKILL_NAMES.length); assert.equal(f.reads(), 0);
   } finally { await f.dispose(); }
 });
 
@@ -370,7 +380,7 @@ test("registration abort cancels ancestor discovery; repeated same-scope mounts 
     assert.deepEqual(await f.ctx.skills.list({ scope: agent }), []);
     for (let i = 0; i < 4; i++) {
       const current = registerBundledSkills(agent.ctx, bridge, options);
-      assert.equal((await f.ctx.skills.list({ scope: agent })).length, 8);
+      assert.equal((await f.ctx.skills.list({ scope: agent })).length, DSMM_SKILL_NAMES.length);
       current.dispose(); current.dispose(); assert.deepEqual(await f.ctx.skills.list({ scope: agent }), []);
     }
     undo(); assert.deepEqual(await f.ctx.skills.list(), []);

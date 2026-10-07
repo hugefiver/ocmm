@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Node.js / tsx / ts-node / Bun / Deno Debugging
 
 Covers Node 18+, tsx, ts-node, Bun, Deno. Launch recipes, inspector protocol usage, the `node inspect` CLI, and the **tsx source-map silent-failure** that costs people days.

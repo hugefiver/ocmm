@@ -1,3 +1,5 @@
+> DSH adapter boundary: resolve this resource from the loaded skill's directory resourceBase. Examples are not authority: installation/download/login, private state, Git writes and destructive operations need exact explicit authorization. Use only tools and native roles actually exposed in the current catalog and allowed by the caller; otherwise use a real direct fallback or report the limitation. Translate shell examples to the active runtime.
+
 # Phase 2 + 3 — Hypothesis Formation & Parallel Investigation
 
 One hypothesis is a hunch. Three hypotheses is a decision. Investigation is how you turn the decision into runtime evidence.
@@ -37,9 +39,13 @@ If two hypotheses have identical distinguishing evidence, they aren't actually d
 
 ---
 
-## Phase 3 — Investigate Distinct Evidence
+## Phase 3 — Independent Evidence Investigation
 
-Use available DSH role-specific tools only when parallel evidence collection is genuinely independent and within current permission and depth limits. Otherwise investigate sequentially. Assign one hypothesis and its falsifying observation per investigation. Never assume OpenCode team APIs or an automatically writable agent.
+Use independent direct probes first. If the current role policy and actual DSH catalog permit delegation, assign distinct bounded evidence to available roles; otherwise investigate sequentially. DSH does not provide the OpenCode team registry or debug-squad configuration. Do not write host-private team configuration or invent task calls.
+
+Retain the source responsibilities: inspect observed runtime state; correlate logs/timing; minimize a reproducible input; cross-link observations into a causal chain and identify the next falsifying query. Read-only lookup roles may inspect evidence but cannot create instrumentation/reproduction files by proxy. The lead journals artifacts before creation, approves authorized edits, integrates evidence, and owns cancellation/cleanup via actual host controls. Reviewer/Oracle remain implementation-acceptance roles, not debugging consultants. After two failed evidence rounds, return a genuinely difficult decision to the stage owner for optional hard-reasoning, subject to the caller's permitted targets.
+
+---
 
 ## Evidence capture discipline (both paths)
 
