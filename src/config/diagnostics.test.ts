@@ -365,3 +365,57 @@ test("OpenCode loading deduplicates base, inline-descriptor, and selected-profil
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+for (const load of [loadConfig, loadOpenCodePluginConfig]) {
+  for (const entry of ["root", "inline", "directory"] as const) {
+    test(`${load.name}: project ${entry} allowlist filtering preserves sibling diagnostics and tolerant recovery`, () => {
+      const root = mkdtempSync(join(tmpdir(), "ocmm-allowlist-diagnostics-"))
+      const userDir = join(root, "user", "opencode")
+      const cwd = join(root, "project")
+      const projectDir = join(cwd, ".opencode")
+      const projectPath = join(projectDir, "ocmm.jsonc")
+      const profilePath = join(projectDir, "ocmm-profiles", "selected.jsonc")
+      const saved = new Map<string, string | undefined>()
+      for (const key of ["XDG_CONFIG_HOME", "OCMM_PROFILE", "OCMM_NO_PROFILE"]) saved.set(key, process.env[key])
+      try {
+        process.env.XDG_CONFIG_HOME = join(root, "user")
+        delete process.env.OCMM_PROFILE
+        delete process.env.OCMM_NO_PROFILE
+        mkdirSync(userDir, { recursive: true })
+        mkdirSync(join(projectDir, "ocmm-profiles"), { recursive: true })
+        writeFileSync(join(userDir, "ocmm.jsonc"), JSON.stringify({
+          mcp: { envAllowlist: ["USER_KEY"], websearch: { provider: "tavily" } },
+        }))
+        const value = {
+          debug: true,
+          mcp: { envAllowlist: ["PROJECT_KEY"], enabled: false, envAllowlst: "hidden-value", websearch: { provider: "invalid" } },
+        }
+        writeFileSync(projectPath, JSON.stringify(entry === "root"
+          ? value
+          : { activeProfile: "selected", ...(entry === "inline" ? { profiles: { selected: value } } : {}) }))
+        if (entry === "directory") writeFileSync(profilePath, JSON.stringify(value))
+        const warnings = captureConfigWarnings(() => {
+          const config = load({ cwd }).config
+          assert.deepEqual(config.mcp.envAllowlist, ["USER_KEY"])
+          assert.equal(config.mcp.enabled, false)
+          assert.equal(config.mcp.websearch.provider, "tavily")
+          assert.equal(config.debug, true)
+        })
+        const payloads = unknownKeyPayloads(warnings)
+        assert.equal(payloads.length, 1)
+        assert.equal(payloads[0]!.total, 1)
+        assert.deepEqual(payloads[0]!.entries, [{
+          source: entry === "directory" ? profilePath : projectPath,
+          path: [...(entry === "inline" ? ["profiles", "selected"] : []), "mcp", "envAllowlst"],
+        }])
+        assert.equal(JSON.stringify(warnings).includes("hidden-value"), false)
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  }
+}

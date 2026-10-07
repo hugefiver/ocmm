@@ -242,6 +242,8 @@ function loadProfileDescriptorsFromDirWithDiagnostics(
     let parsed: unknown
     try {
       parsed = JSON.parse(stripJsoncCommentsAndTrailingCommas(readFileSync(path, "utf8")))
+      // Preparation and the pre-migration activation cache must share the same trusted contribution.
+      if (source === "project-directory") parsed = stripProjectMcpEnvAllowlist(parsed)
       descriptor.value = parsed
     } catch (err) {
       descriptor.error = { kind: "parse", message: (err as Error).message }
@@ -414,7 +416,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): LoadedConfig {
           selectedContributions = [prepareReviewProfile({
             name: activeProfile,
             source: projectDirWinner.source,
-            value: projectDirWinner.value,
+            value: stripProjectMcpEnvAllowlist(projectDirWinner.value),
           }, warnReviewOnce)]
       } else {
         const userDirWinner = userDirEntries[activeProfile]
@@ -679,6 +681,19 @@ function formatZodIssues(issues: readonly { path: readonly PropertyKey[]; messag
 }
 
 function stripProjectOnlyFields(value: unknown): unknown {
+  const cleaned = stripProjectMcpEnvAllowlist(value)
+  if (!isPlainObject(cleaned) || !isPlainObject(cleaned.profiles)) return cleaned
+  let profiles: Record<string, unknown> | undefined
+  for (const [name, profile] of Object.entries(cleaned.profiles)) {
+    const filtered = stripProjectMcpEnvAllowlist(profile)
+    if (filtered === profile) continue
+    profiles ??= { ...cleaned.profiles }
+    profiles[name] = filtered
+  }
+  return profiles ? { ...cleaned, profiles } : cleaned
+}
+
+function stripProjectMcpEnvAllowlist(value: unknown): unknown {
   if (!isPlainObject(value)) return value
   if (!isPlainObject(value.mcp) || !("envAllowlist" in value.mcp)) return value
   const mcp = { ...value.mcp }
