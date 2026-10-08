@@ -2,7 +2,8 @@ import { createUserMessage, expandAssistantStream } from "@deepseek-ai/dsh-llm";
 import { foldDurableRecoveryWork, isCurrentRecoveryStep } from "./recovery-policy.js";
 import { isDsmmRoleId } from "./roles.js";
 import { applyModelRoute, isUnavailableRouteFailure, latestNativeModelSelection, liveRolePolicyIdentity, recordAdmittedRecoveryRoute, roleRouteLock, sameModelRoute, selectInitialModelRoute } from "./role-routing.js";
-import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
+import { childOwnedSessionEvents, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
+import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
 const installedContexts = new WeakSet();
 const RECOVERY_WARNING = "dsmm runtime recovery refused an unproven or exhausted retry";
@@ -70,6 +71,10 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
     let disposeRequestError;
     let disposeTurnStopping;
     let disposeAssistantStream;
+    const live = (agent) => {
+        const agents = ctx.get?.("agents");
+        return agents === undefined || agent.id !== undefined && agents.get(agent.id) === agent;
+    };
     const reset = () => {
         const request = disposeRequest;
         const requestError = disposeRequestError;
@@ -96,7 +101,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
     };
     try {
         disposeAssistantStream = ctx.on("agent/assistant-stream", ({ agent, frame }) => {
-            if (!active)
+            if (!active || !live(agent))
                 return;
             if (frame.type === "start") {
                 const settings = getSettings(agent);
@@ -149,6 +154,8 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
         }, { prepend: true });
         disposeRequest = ctx.on("agent/request", async (frame, next) => {
             const downstream = await next();
+            if (!active || !live(frame.agent))
+                return downstream;
             const pending = pendingByAgent.get(frame.agent);
             if (pending === undefined)
                 return downstream;
@@ -185,6 +192,8 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             return applyModelRoute(downstream, pending.route);
         }, { prepend: true });
         disposeRequestError = ctx.on("agent/request-error", async (frame, next) => {
+            if (!active || !live(frame.agent) || frame.signal.aborted)
+                return undefined;
             let settings;
             let role;
             try {
@@ -264,7 +273,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 }
                 const currentSettings = getSettings(frame.agent);
                 const currentRole = resolveEffectiveDsmmRole(frame.agent, currentSettings, controller.active(frame.agent, currentSettings.defaultActive));
-                if (!active || frame.signal.aborted || currentRole !== role
+                if (!active || !live(frame.agent) || frame.signal.aborted || currentRole !== role
                     || liveRolePolicyIdentity(frame.agent, currentSettings, currentRole, getSettings.admission?.(frame.agent).epoch) !== policy
                     || roleRouteLock(frame.agent, policy) !== lock || lock.generation !== expectedGeneration
                     || attemptsByAgent.get(frame.agent) !== attempt || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step)
@@ -294,7 +303,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             try {
                 const settings = getSettings(frame.agent);
                 const continuation = settings.runtimeRecovery.idleContinuation;
-                if (!settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted)
+                if (!active || !live(frame.agent) || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted)
                     return;
                 const preset = resolveSelectedAgentPreset(frame.agent.session);
                 const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);

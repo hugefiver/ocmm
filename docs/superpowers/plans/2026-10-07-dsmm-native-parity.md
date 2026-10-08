@@ -1,6 +1,6 @@
 # DSMM：DSH 0.2.0-rc.2 原生 API 与完整 OCMM 行为 parity 实施计划
 
-日期：2026-10-07。状态：计划及设置生命周期修订已通过 blocker-focused 审查；阶段 A 最终验收通过，随本阶段实现提交。B–E 尚未完成。
+日期：2026-10-07；D 增量修订：2026-10-08。状态：A `d8fbae7`、B `9a6768c`、C0 `9a87f07` 已提交；C 实现及分组回归已收尾，待随实现提交。权限 filter 修正的 139 项回归已由同一 reviewer 闭合；Windows 广泛组原 685 项中的两项旧 fixture 前提已由原文件 17/17 和相关 native 57/57 关闭，其余未受影响的通过证据复用，不称单次 685 全绿。未修改的冷 LSP gate 在同字节、合法 owned 临时 executable fixture 上取得 2/2 正向证据，默认原入口的环境限制未修复。D0/D/E 尚未开始。本次 Desktop / Deepwork 模块增量已由新 plan-critic stage 复核，无新增 blocker；C 提交前置不省略。
 
 ## 1. 已授权结果与边界
 
@@ -12,6 +12,8 @@
 - 补齐 native subagent 实际启动、路由、续接、后台、取消、权限、深度、清理和 profile admission 行为；延续已有 runtime，不另建 scheduler/retry 状态机。
 - 在宿主插件管理中选中 DSMM 后的原生 **Config 设置入口** 提供真实 feature controls；保存、effective state、scope、restart/idle/live 生命周期一致。保留现有 Profiles/header selector，不用它们冒充插件页。
 - 用户m0488/m0490追加：主配置集中到官方home resolver锚定的DSMM自有 `<DSH_HOME>/plugins/dsmm/config.json`，DSH profile只存显式覆盖并优先于global；named runtime profiles新默认也集中，legacy只读兼容，不实际迁移私人文件。`plugins/dsmm`是本插件约定，不能宣传为DSH官方规定目录。具体层级/安全合同见§3.3，C0是D前置。
+- 用户 m0660 新增及随后官方证据澄清：**主目标是官方 DSH Desktop 与 Web 共享的原生 Plugins 页面**，其中 DSMM 页面可配置全局设置、启用/停用子插件；社区 Desktop 的 `settings.plugins.tab` 只是兼容参考，不能替代官方入口。Deepwork 是有独立身份、配置和真实 consumer gate 的模块，允许安装并加载 DSMM 核心而不启用 DW。未来子插件沿相同静态模块机制扩展，不要求现在实现未知模块。宿主管理 DSMM 整包的 installed/enabled/loaded 与 DSMM 内 Deepwork 开关是不同层，不能相互冒充。当前 rc.2 Web 原生 Config ledger 验收保留；官方最新 Desktop 源码兼容与实际 Desktop 运行证据分开记录，必要 UI 实现不因缺 Desktop binary 降为可选。
+- role/category 更原生委派的研究结论按用户 fallback 执行：rc.2 现有公共工具配置不提供 role/category 参数；本次保留已接线的 per-role tools、native providers、continuable/policy/output 契约，不将自造聚合 dispatch、公开 tool ABI 重构或 worker bus 拉入 D。
 - 对照 OCMM 的 routing/recovery/guards/LSP/profile 行为补齐 DSH 适用缺口；可记录原生等价或有证据的不适用项，不能用空开关、仅 prompt 声明或虚构 host 能力代替实现。
 - 按用户追加要求清理 DSMM 项目代码，避免过度设计和无意义的冗余测试。清理随各阶段 ownership 合入，最终检查遗漏；不另造清理框架，不按行数机械拆模块，不为满足数量配额添加 helper、接口、测试或审查轮次。已证明的原生能力替代失效兼容层，行为保留的清理由现有通过的相关检查保护。
 - 用户要求每个完成阶段 commit。**仅父执行流程负责 Git 写操作**；本 plan 随第一实现 commit，不能先提交纯 spec。未授权 push/tag/release、全局或私人插件安装、软件/依赖安装、真实用户 profile/auth 迁移。
@@ -82,7 +84,7 @@ Native subagent `StartRequest` 支持 prompt/parent/signal，以及 capability �
 
 ### 3.2 Deepwork activation / skill visibility
 
-区分 **role persona/固有权限**、**Deepwork common workflow**、**DSMM bundled skill visibility**：
+区分 **DSMM 核心 / Deepwork 模块可用上限**、**role persona/固有权限**、**Deepwork common workflow**、**DSMM bundled skill visibility**。以下既有 A 场景表适用于 Deepwork 模块在本 Agent admission 中有效可用；m0660 新增模块上限见表后合同，不改判 A 的历史验收。
 
 | 场景 | Persona | Common workflow / DSMM registry |
 | --- | --- | --- |
@@ -92,6 +94,16 @@ Native subagent `StartRequest` 支持 prompt/parent/signal，以及 capability �
 | 任意 preset，显式 off | role persona 若存在仍保留 | explicit off 优先，不再以 `isDsmmRoleId` 强制 common workflow/skills |
 
 这把当前 role 的“锁定 enabled”UI 改为可表达显式关闭 common 的状态，不把关闭解释为卸掉 read-only/Git/host approval 边界。已有 `deepwork/mode` intent 持久化、跨 profile/reopen 优先级继续保留。mode/profile 改变只在现有 idle/CAS 边界接受；busy 时拒绝或清楚显示待应用，不能改写正在执行的 prompt/tool realm。
+
+#### D0 新增：Deepwork 真模块与 global-only 上限
+
+- **最小形态**：在现有 `applyRuntime` 中明确拆开 core 安装与静态 `deepwork` 模块安装分支；使用小型已知 module descriptor（稳定 ID、label、配置字段、安装/状态边界）即可，不要求新 Cordis row、动态 registry、worker bus、第三方安装/脚本接口。当前只有 `deepwork`；unknown module ID/字段拒绝而非执行或默默启用。安装包中的源码/资源仍可存在，off 不删除 preset 文件、session 数据或用户配置。
+- **持久配置**：新增 `modules.deepwork.enabled`，只允许写 §3.3 的唯一 global `config.json`；缺省为 `true`，unset 恢复该默认，ordinary `defaultActive:false` 不变。这是兼容现有显式 DW preset 使用意图的 availability 默认，不是默认开启 ordinary session。全新 install-only fixture 显式配置 `false`，证明 DSMM core 仍可加载和设置。不能只改 `defaultActive`、label 或隐藏菜单来实现模块关闭。
+- **层边界**：这个新增模块字段是 global-only 上限，不是把所有旧 global 业务字段改为不可覆盖 pin。native profile transport、旧 flat profile Config 和 named/session overlay 不得写此字段，精确拒绝其显式输入；旧字段仍按原 global → explicit profile → allowed immutable overlay 规则合并。global/raw transport/resolved settings 验证应区分输入层，不能让内部 captured 模块值反向变成可写 profile 字段。globalOn 内既有 role/skill、profile、mode、权限策略继续收窄；任一 profile override、session on、standing role preset 或 alias direct call 都不能提升 admitted moduleOff。
+- **core 留存**：配置 read/save/status、C0 storage/capture/CAS、必要 native admission 与权限保护不依赖 DW 安装。`dsmmConfig` 服务当前随 `registerProfilesRpc` 接在 profile runtime 后，D0 必须使 DW-off/core-loaded 冷启动下仍能经原 authority 访问它，不复制第二后端；Profiles 资源管理与真实 module activation 分开，管理配置不偷偷启动 DW。既有显式 host sessionPersistence 绑定不是 DW 开关的新配置范围。
+- **冷启动 off**：不注册 DSMM 的 DW persona/common/workflow skill provider、role providers/tools、standing presets/materialization，以及仅为 DW 安装的 routing/recovery/LSP 或 subagent control 活动；宿主自身的 skills/tools/LSP/subagent 服务不撤下。必要只读/Git/host 安全拒绝留在 core 或独立保护接点，不能通过 off 卸掉保护，也不把所有普通 host 行为新升级为 DW。只读 role identity/继承 filter 一旦已捕获仍不可丢弃，不能先清 role 再失去其限制。
+- **捕获而非热卸载**：startup 捕获是否挂载 DW；新 ordinary root 捕获最新合法 global module desired，并与 startup 实际模块 substrate 取交集。startupOn 后保存 off：旧 root 及其未来 child 保持原 admission/mode/epoch，新的 off admission 不得执行 DW。standing picker 可保留 startup inventory，但 off-admitted root 选择旧 DW preset/alias 必须在有用模型/工具执行前明确拒绝，不得悄悄注入 persona/workflow 后假报关闭；不要求动态撤销全局 preset。startupOff 后保存 on：只保存 desired，缺 substrate 的新 root 仍 off 且显示 restart-required；用户独立显式 restart 后才能接纳。旧 root 的 mode/profile CAS 不吸收新的 module desired；恢复 on 也不自动重绑旧 root。
+- **可观察状态**：分别投影 master desired（global/default 来源）、startup mounted、目标 root admitted、模块阻断原因和 pending。session 的 on intent 不等于 module effective，off admission 中的 on 请求明确拒绝/解释而非回报 active；已有 on-intent 数据不删除。保存不 cancel、reload、partial-dispose、启动进程或新增 queue；用户独立 host restart 的会话取消语义照实说明。DSMM 整包被 host disabled 时自身 UI/backend 可以消失，不承诺由已卸载插件自行保存或重新启用自己。
 
 DSMM provider 注册在每个 **Agent 的 scoped layer**，不能把 session 私有 enable/mode 放进共享 preset/global provider。rc.2 的 precedence 是 **layer-before-rank**：最近 scope 的同名 candidate 直接覆盖祖先；`BUNDLED_SKILL_RANK = 600` 只参与同层排序，不能保证 ancestor preset/global 的 project skill 胜过 Agent 层 DSMM。保留项目覆盖必须显式避让，不能仅配置 rank。
 
@@ -143,6 +155,17 @@ Global save不触碰任何DSH profile patch，不调用nativeLoader reload/apply
 
 Global写入口使用已有authenticated/authorized native client/backend通道和与设置相同的trusted-host权限约束，不暴露为model tool、skill调用或任意文件编辑RPC；客户端不能提交root、目标路径、entry他人身份或store选择。固定字段grammar/schema与服务端权限检查是硬边界，不靠UI隐藏；只有nativeFS工具已有policy能允许的文件访问仍由host判断，本功能不为模型授予global配置目录的read/write豁免。globalConfig不储存凭据，状态/错误脱敏；非可信remote/无写权限会话不因能读UI就能写global。
 
+#### D 新增：官方 Desktop / Web 共享 Plugins 主目标与 authority
+
+- **三类证据分层**：父的官方 doc-search 已完成，确认 `deepseek-ai/deepseek-harness` 的 `dsh-v0.2.1-alpha.1` / SHA `5badb15009ae1756c3afe0ae0cef1faafc290ccc`（2026-10-03）包含官方 `apps/desktop`，其 package 与 root 版本相同；对应 release 无 assets，故这里只证明官方 latest Desktop **源码身份/版本**，不宣称存在该版本安装包或本机已安装。用户已选的当前 npm latest CLI/SDK 基线仍是 rc.2 / `639ed015397290b3745d163aafe02ffee4aa3f84`，不得为 Desktop 静默升 SDK/peer 或安装。验收分别标记 official-latest-Desktop source compatibility、current-rc.2 public UI actual-native、community Desktop v0.11.0 reference；源码兼容不能冒充任一未运行的载体。
+- **官方 sharedWebHost 与 client**：固定 SHA 的 [host-process.ts](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/apps/desktop/src/host-process.ts) 与 [web-document.ts](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/apps/desktop/src/web-document.ts) 证明官方 Desktop owns `sharedWebHost`，使用 Host 303/auth-cookie 流程，仅为 `dsh-app://app` Origin 代转请求，核心插件页复用 Web。未发现独立 desktop client platform；沿实际 manifest/client discovery 核验既有 `dsh.client.platform: web` / `exports['./client']`，不臆造 `desktop` enum、不改 Electron shell。官方 `@deepseek-ai/dsh-sdk-client@0.2.1-alpha.1` 源码是启动 `dsh --profile sdk` 子进程的 stdio turn SDK，**不是 Desktop UI API**；本功能不依赖它，缺这个包不能推断 Desktop 没有 UI 扩展能力。
+- **新增页面的主契约**：固定 SHA 的 [slot-contract.ts](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/packages/client/ui-plugin-manager/src/client/slot-contract.ts) 与 [index.ts](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/packages/client/ui-plugin-manager/src/client/index.ts) 公开 `plugins.item`（原生卡片、独立page、summary/page/order）、`plugins.bundle.config`、`plugins.row.config`（`package#rowId`）。`PluginConfigViewProps` 的 view/form 可选，`ConfigPageForm` 提供 Host snapshot + mutate；不能假设所有 bundle 页自动带 form。D 在这些官方 shared Plugins contracts 内提供 DSMM global/module controls 页面，复用当前 rc.2 已证 ledger/actual entry 映射，并精确比对新增源码契约与 rc.2 可用接口。不存在独立 Deepwork-toggle slot；子模块开关是 DSMM 页自己的 domain control，绝不凭空新增宿主槽或拿 community tab 代替。
+- **宿主整包控制不是 module master**：官方 bundle/row 的整体开关由宿主写 `dsh.profile.bundles` 或 `cordis.patch.disabled`，非 HMR、待显式 restart；不镜像到 DSMM global、不由保存 DSMM 设置代写/自动重启。install 不等于 loaded，源码 package 存在也不是当前加载证据。Deepwork 子模块只写既定 DSMM global 字段，继续按 D0 startup/admission 边界消费，不能把 host bundle pending 与模块 pending 混同。
+- **同一写 authority**：沿用 C0 `profile-rpc.ts:assertLocalSettingsOperator` 的 actual `invocation.peer === connection.operator`、`webServer.host === '127.0.0.1'`、`settings.writable === true`，并在 save 的 signal/lifetime、同 connection owner 和最终写边界复验。官方 Desktop local carrier、auth cookie、Origin 代转、Electron IPC sender 或窗口由本机启动都不是此 actual operator 的等价证据；必须沿真实连接验证，不用新 IPC/HTTP 代理绕过拒绝。profile form 的 `remote.settings` / native field source、actual entry/revision CAS 与 C0 global exact-save 是两个后端，不跨用 revision 或入口。只读/authority 未证时 UI 说明不可写及准确原因，只显示现有权限允许读取的状态；当前 global describe 也受 operator 检查，不另开未授权配置读取面或伪造有效状态。
+- **复用而非第二实现**：官方 Desktop 与 Web 复用 shared Plugins contribution、D0/C0 config controller、组件、global CAS 和 native profile forms；分别验证实际 carrier/client发现与 host 身份。页面均有 global/profile/source/effective 区域与已知子模块开关；缺 form/actual entry 时该区标明 unavailable，不借 Profiles CRUD 或另一入口代写。无第二 global 文件、镜像 store、保存/重启 queue 或新 Electron patch。
+- **社区仅兼容支线/reference**：独立 `dataelement/dsh-desktop@v0.11.0`（2026-10-03）README 固定 rc.2，证据为 [README](https://github.com/dataelement/dsh-desktop/blob/v0.11.0/README.md)、[architecture](https://github.com/dataelement/dsh-desktop/blob/v0.11.0/docs/architecture.md)、[patch-plugin-contract](https://github.com/dataelement/dsh-desktop/blob/v0.11.0/docs/patch-plugin-contract.md)。其随机 loopback webview、`packages/dsh-desktop-market-installer/client.js` 的 `settings.plugins.tab` / `desktop-host-plugins`、market 条件下 `desktop-market-management` 与对应测试不是官方 Plugins 契约；其 `profiles/web/.dsh-market/state.json#disabled` / `profileBundlePackageBackend` switched/removed 也不是官方整包存储格式。可以在已证兼容面复用同一组件 embedding，不为支线新建框架/后端，不写其 state/改宿主，也不以支线完成代替官方主目标。
+- **验收条件**：当前精确 `Get-Command dsh-desktop` 未找到，本机尚无 installed Desktop 运行证据；它也不能据此证明官方 Desktop 没有其它 executable 名称。current rc.2 Web screenshot 不算 official Desktop 通过，alpha 源码对照不算 alpha runtime 通过。必需 shared Plugins 页面/module controls、打包与可执行现有测试仍属 D/E 交付，不能因缺 binary 变成可选。官方 Desktop 加载、入口导航及 operator 保存若不能用已存在且隔离的运行环境验证，就列具体未验证面；不自动下载/安装，不把源码/组件测试称为 Desktop 验收完成。后续确需软件授权由父另行处理，本次不询问或申请安装。
+
 #### Named profiles集中默认与旧库兼容（无自动迁移）
 
 - 复用现有ProfileStore的JSONC、immutable revisions、selection/session CAS及安全校验，不建另一profile DB。`profile-runtime.createProfileRuntime`目前硬编码`profile.dir/dsmm-profiles`；`ProfileStore` constructor仅接受basename `dsmm-profiles`，read/describe/load也走会创建锁的`locked`路径。C0必须显式改成可信factory选定的documents root与state root，适配中央`profiles`布局；不能仅把basename guard放宽为任何绝对目录。旧public构造调用/明确传入的旧合法root仍保持其原安全语义，不添加model/wire任意root参数。
@@ -172,6 +195,7 @@ Global写入口使用已有authenticated/authorized native client/backend通道�
 ### 3.4 Subagent / delegation
 
 - 沿用 native subagent service + spawn-in-process + tool 的一套生命周期，role provider 只做身份、能力、route/admission 适配。
+- m0660 的更 native role/category 委派调查已得到有界结论：rc.2 公共 role-subagent tool 配置 types `index.d.ts:17–73` 的 `provider` 是每实例固定 string，`toolName` 每实例必须 unique，无 role/category 参数。generic 聚合 dispatcher 需要自造公开 tool schema/ABI，不是现成 native 能力。因此 D0/D 仅为现有 per-role tool/provider 加模块 gate，保留 native continuation、typed/useful outputs、capability 和 §3.4 policy；不重开旧 ABI、planner Markdown handoff 或另造 worker bus。
 - delegation 按 **source 角色分组 + root/stage-owner 或 bounded child 身份** 精确映射，不以“所有 worker 只能 leaf”抹平差别。依据 `src/hooks/config.ts:44-79` 的分组、`:331-377` 的 `delegationContractFor` 与 `:1063-1108` 的实际权限，使用下表作为 prompt、catalog、native/headless 执行共享策略：
 
   | source 分组/身份 | 允许的子任务目标 | 必须拒绝的目标/约束 |
@@ -236,7 +260,7 @@ Global写入口使用已有authenticated/authorized native client/backend通道�
 
 ### 阶段 C — 完整 role/subagent 与已有行为的 native parity
 
-**依赖与新增commit边界**：A已提交、B的canonical inventory/完整source验收完成后，按 **C0集中存储/合并 → C剩余native消费/委派 → D双层设置页 → E集成** 顺序实施。§3.3中央存储与显式overlay是D前置，不放E或发布后补。C0与C各是有运行结果的meaningful阶段，各自通过适用提交门槛后由父commit；不另spec commit、不回派A/B修范围。
+**依赖与新增commit边界**：A已提交、B的canonical inventory/完整source验收完成后，按 **C0集中存储/合并 → C剩余native消费/委派 → D0模块gate/core解耦 → D官方共享Plugins设置页 → E集成** 顺序实施。§3.3中央存储与显式overlay是D前置，不放E或发布后补。C0、C、D0各是有运行结果的meaningful阶段，各自通过适用提交门槛后由父commit；不另spec commit、不回派A/B修范围。C 当前冷 LSP gate 不因新增 D0 改 criterion/归因，也不因 UI 工作转为可选；C 未通过前 D0/D 不覆盖其 pending diff，Root/OMO/native SDK 保持只读。
 
 #### C0 — 中央部署base、稀疏profile继承与named-store集中默认
 
@@ -258,7 +282,7 @@ Global写入口使用已有authenticated/authorized native client/backend通道�
 
 #### C剩余 — 按集中配置合同完成native消费与delegation
 
-**依赖**：C0验证的global/profile读取、可信身份、store origin与capture接口，B的canonical权限语义；D随后只做页面接线和必要consumer投影完善，不重造数据层。
+**依赖**：C0验证的global/profile读取、可信身份、store origin与capture接口，B的canonical权限语义；C 完成后 D0 增加 m0660 模块门控，D 再做页面接线和必要投影，不重造数据层、不倒灌改变 C 验收。
 
 **结果**：所有启用 roles/categories 在各自允许入口可用，native dispatch/continuation/取消/限制真实生效，已有 routing/recovery/guards/LSP/profile 缺口有对应实现或原生等价证据。
 
@@ -280,39 +304,59 @@ Global写入口使用已有authenticated/authorized native client/backend通道�
 
 **commit**：`feat(dsmm): complete native role delegation and runtime parity`。
 
-### 阶段 D — 原生插件 Config 页、真实 feature controls 与安全状态展示
+### 阶段 D0 — DSMM core 独立加载与 Deepwork 模块可用上限
 
-**依赖**：A真实settings metadata、B inventory、C0中央global/稀疏nativeprofile transport与C的capture/effective接口完成；可提前只读确认UIentry，不同时更改共享schema。D沿用两条已实现的可信后端入口，不能仅做单层表单后把global继承留给E。
+**依赖/结果**：仅在 C 验收通过并由父提交后开始。复用 C0/C 的唯一存储、startup/admission capture 和权限政策，使 DSMM loaded + Deepwork cold-off 是真实可运行组合，core 设置仍可用；此结果可独立验收/提交，故不把后端权限改变混在 UI stage 中。
 
-**结果**：宿主Plugins选择DSMM的Config页提供清晰区分的 **Global defaults editor** 与 **当前DSH profile overrides**，并呈现逐层来源、merged desired、startup/new-root/current-session effective。global编辑实际写中央config.json，profile覆盖实际写对应nativeentry；成功只承诺所选层已保存，不称已应用或host已排重启。named Profiles为独立资源编辑器，非DSH profile层，也不冒充globalConfig。
+**ownership**：`dsmm/src/{settings,deployment-config,index,profile-runtime,profile-rpc,profile-remote,profile-types,status,state,mode,commands,preset-skills,skills,preset-registry,role-policy,role-providers,role-subagents,guards,model-routing,runtime-recovery,lsp}.ts` 仅涉及模块输入/安装/消费/投影的必要部分；可新增一个小型 static module descriptor 文件。相应既有 settings/native/profile/security 测试与 `dsmm/docs/{settings-status,compatibility,agent-presets,profiles}.md`。沿用而非改造 B 生成协议/资源；与 D 串行交接共享 schema/RPC。清单是影响面，不要求每文件都改。
 
-**ownership**：`dsmm/src/client/**` 的双层Config contribution/controller/component与必要style；C0固定global服务的client契约及`src/{settings,status,index,profile-runtime,profile-rpc,profile-types,profile-remote}.ts`必要状态投影（不得另存配置）；`locale/{en,zh}.json`与clientlocales；已有 `dsmm/DESIGN.md`、`docs/{design,settings-status,profiles,compatibility}.md`；相关client/native/browser测试。
+工作与验收：
+
+1. 在 global 输入校验/受控 path grammar 增加 §3.2 的已知 `modules.deepwork.enabled`；native sparse transport 与 named overlay 不接受该 global-only 字段，内部 resolved/captured 设置保留其来源。不复制 global store、不把旧业务字段强制 pin、不把 global merged snapshot 保存回 profile。复用 C0 CAS/拒绝非法输入测试 seam，证明 global false 无法被 profile 或 named/session 输入覆盖，unknown module 不落盘。
+2. 拆分 `index.ts:applyRuntime` 的 core 和 DW 安装 ownership：当前 `registerDeepworkPrompt`、`registerAgentSkills`、providers/presets、materialization、headless controls 与 profile 初始化交织，config RPC 又随 profile runtime 挂载。按 startup module snapshot 跳过 DW 活动，但保证配置服务/必要 admission/安全 fence 仍 ready；profile runtime 的 standing-role readiness 校验须按**真实有效模块集合**处理，不能 blanket skip C 的 route/immutable/CAS/native 权限校验。late inject 仍读取同一 startup snapshot。默认 on 路径保持旧注册/行为。
+3. 用同一 admitted 上限约束 prompt/skill、mode select、role policy、provider alias/continuable preflight 与 standing-preset root 使用；保留已捕获 read-only/filter 身份的更强拒绝。off 新 root 即使可见 startup standing preset 也不能在模型/工具执行前绕过 gate；真实 native 入口应证明零 DW 有用执行/注入，不能只断言菜单隐藏。若公开 lifecycle seam 不能安全拦住该使用，报告具体 blocker，不修改 SDK/静默放宽为仅 session off。旧 root/future child、idle mode/profile CAS 和 cold-resume 继续遵守 C0 捕获边界；既有 immutable 引用缺失仍拒绝。
+4. 暴露 D 可共享的 module desired/startup/admitted/source/reason/pending，只是现有 snapshot 的投影，无新状态机。用现有 native Loader/mock LLM 稳定 fixture 证明：缺字段默认兼容；fresh explicit-off 时无 DW 活注册/进程但 core 配置可读写；startupOn 保存 off 后旧 parent/future child 不变而新 root off；profile/session on、standing preset 和 direct alias 不能绕过；startupOff 保存 on 不热挂，独立显式重启才可用。安全 sentinel、只读、原生 approval、filter 单调继承与输出/continuation 合同不退化。复用现有相关回归，只补能检测模块新风险的断言，不按场景配额增文件或重复跑全量。
+
+**commit**：通过本阶段适用门槛后由父 `feat(dsmm): separate deepwork module activation from core settings`；不提升版本、不单独提交 plan。本阶段不声称 Desktop 实际运行已通过。
+
+### 阶段 D — 官方 Desktop / Web 共享 Plugins 设置页、模块 controls 与安全状态展示
+
+**依赖**：A真实settings metadata、B inventory、C0中央global/稀疏nativeprofile transport、C的capture/effective接口和D0模块gate完成；可提前只读确认UIentry，不同时更改共享schema。D沿用两条已实现的可信后端入口，不能仅做单层表单后把global继承或官方Desktop共享Plugins实现留为可选。§3.3新增官方alpha源码只界定兼容目标，当前实现/实测SDK仍固定rc.2；不能为源版本差异自动升级peer/install。
+
+**结果**：在官方 Desktop / Web 共用的 native Plugins 中提供 DSMM 卡片/页面及正确 bundle/row Config 接点，页面包含 **DSMM Global config / 子模块开关** 与 **当前DSH profile overrides**，并呈现逐层来源、merged desired、startup/new-root/current-session effective。global编辑实际写中央config.json，profile覆盖实际写对应nativeentry；Deepwork master 是 DSMM 自有 domain control，只在global层编辑，profile区说明继承的模块上限而不出现可绕过的开关。成功只承诺所选层已保存，不称已应用或host已排重启。named Profiles为独立资源编辑器，非DSH profile层，也不冒充globalConfig；host整包安装/开关保留宿主管理。社区settings tab embedding仅可复用兼容，不能作为主结果。
+
+**ownership**：`dsmm/src/client/**` 的官方 shared Plugins item/page、bundle/row ledger contribution、共享controller/component与必要style；C0/D0固定global服务和module状态的client契约及`src/{settings,status,index,profile-runtime,profile-rpc,profile-types,profile-remote}.ts`必要投影（不得另存配置/扩大authority）；仅在实际client发现契约要求时改 `dsmm/package.json` 的客户端声明；`locale/{en,zh}.json`与clientlocales；已有 `dsmm/DESIGN.md`、`docs/{design,settings-status,profiles,compatibility}.md`；相关client/native/browser测试。不改 Root、官方/社区 Desktop/Electron 源码或 SDK，不添加依赖或依赖 stdio `dsh-sdk-client` 作为UI桥。
 
 工作：
 
-1. 沿rc.2 `PluginManagerPage` 的真实身份路径接入：entry页通过 `plugins.item.id` 与settings namespace匹配、传form `state/mutate`；bundle用 `plugins.bundle.config`（key=package），row用 `plugins.row.config`（key=`package#row`），bundle不会自动有entryform。贡献页面内globalEditor绑定C0可信固定globalbase服务，profileOverrides绑定所选actualrow entry的 `configForms.get(entryId)`；packagekey只选择UI，不是namespace或任意backend路径。多实例不能误写其它entry，global影响同home多个profiles须清楚标明。复用 `whileServed`/服务disposal，不靠autoGenerate或Builtin plugins tab。Settings Profiles单独显示central/legacy store origin与写入能力，不提供假迁移成功。
-2. 复用已有 `dsmm/DESIGN.md` 的nativeDSH tokens/primitives、布局/a11y/反馈，不另建品牌/入口/框架。只补Global与DSH profile覆盖的作用范围、逐层来源、named-store origin/legacy只读及desired/effective/capture-boundary，无queue重启说明；旧standing DW locked-enabled描述如仍存在按A已定语义更新，不重开该政策。Profiles不用nativeconfigForms持久模型的区别保持；部署profile层使用nativeconfigForms，globalEditor使用C0固定文件服务，不能把两者文案都称“Host settings”。不安装React额外工具。
+1. 沿rc.2 `PluginManagerPage` 真实身份路径和 §3.3 官方公开 shared Plugins contracts 接入：`plugins.item` 提供 DSMM 卡片/summary/page/order，entry身份与settings namespace真实匹配；bundle用 `plugins.bundle.config`（key=package），row用 `plugins.row.config`（key=`package#rowId`）。`PluginConfigViewProps` 的 view/form 可选；存在 `ConfigPageForm` 时消费 Host snapshot/mutate，不假设 bundle 自动有entryform。globalEditor绑定C0固定globalbase服务，profileOverrides消费所选actualrow entry的 `configForms.get(entryId)` / `remote.settings` native field source与revision CAS；packagekey只选择UI，不是namespace或任意backend路径。独立page缺form时不伪造profile编辑权限；使用公开可证的entry关联，无法关联则明确该区不可用。官方Desktop复用这套contribution而不是另造settings tab；社区embedding若适配只复用组件、不替代主入口验收。多实例不能误写其它entry，global影响同home多个profiles须清楚标明。复用 `whileServed`/服务disposal，不靠autoGenerate。DW-off/core-loaded 的sessionless状态下页面仍可发现，不依赖DW provider/Conversation；Settings Profiles单独显示central/legacy store origin与写入能力，不提供假迁移成功。
+2. 复用已有 `dsmm/DESIGN.md` 的nativeDSH tokens/primitives、现有React库、布局/a11y/反馈，只接上述原生入口，不另建品牌/独立SPA/框架。补充Global与DSH profile覆盖及子模块的作用范围、逐层来源、named-store origin/legacy只读及desired/effective/capture-boundary，无queue重启说明；旧standing DW locked-enabled描述如仍存在按A已定语义与D0模块上限更新，不重开历史政策。Profiles不用nativeconfigForms持久模型的区别保持；部署profile层使用nativeconfigForms，globalEditor使用C0固定文件服务，不能把两者文案都称“Host settings”。不安装React额外工具。
 3. 对照C0 sparse transport/merge schema与inventory，global层可设值/恢复defaults，profile层可显式override或unset继承global，界面不能用native填充defaults的`value`冒充global-aware结果。覆盖完整feature字段范围及capture boundary；profile只将必要受控字段volatile，globalbackend使用相同业务字段校验而非Volatile。schema/source提示区分native更高层pin，不能承诺unset清除宿主上层强制值。legacyflat显式值保留可见、同default值仍是覆盖；无授权不批量清理。sessionPersistence/账户/hostpolicy等非editable项只读说明，不变更其存储。named profileJSONC仍只含runtime allowlist，不纳入roles/skills或rawrefs。
 4. 以 §3.3 的DSMM状态投影展示desired、startup actual、next-new-root适用值/限制，以及明确session的admitted值；role/skill默认新root捕获，旧parent的future child仍继承旧parent，依赖未挂载或静态rootpreset变化则显示等待用户显式重启。LSP/materialization不承诺保存时启停；没有SDK `requiresRestart/queuedIdle` 字段，也不自行维护queue。只有证实的consumer支持原位live才显示立即生效。对保护相关控制说明desired off不等于当前session已解除保护，host授权始终必需。
 5. **分开保存**：globalEditor走C0固定文件exact set/unset+expected global revision，保留未触碰字段、任何profile patch都不改；profileOverrides走native form `mutate`/actualentry revision，unset恢复下层而非保存全量合并值。二者各自完整验证、权限与stale/conflict/非法值/断连处理，不能构造同一按钮跨层事务或用ProfilesCRUD代写。globalsave不触发Loader，profile只volatile更新；均须证明无partial-dispose/reapply/reconcile/LSP重建/busyAgent取消。native只读/nonloopback不可写或globalbackend无trustedauthority时分别显示不可写，不借另一个入口绕过拒绝。
 6. 成功精确说明“Global base已保存”或“本DSH profile覆盖已保存”；native `applies:'live'`不证明globalstore存在或consumer生效。逐字段展示global/profile/named-session来源与startup/admission差异，revision组合未对齐则提示待刷新。legacy库为只读兼容、未自动迁移；对中央同名draft/冲突只说明，不擅自copy/覆盖。pending只是内存比较，无任务/重启queue。EN/ZH和sanitized错误完整，换entry/断连/dispose无旧身份写回，不暴露路径/secrets。
 7. 同步session menu的explicit-off/persona/common区分、sessionless/busy状态；普通主模型仍仅原生picker/明确Use profile model action控制。对确需重启的设置提供清晰用户操作说明；**不将hostrestart连接到save、mount effect或后台监听**。若提供现有原生restart入口，必须标示其取消session的host语义、由用户独立明确操作，不能声称busy安全或queued restart；本任务无需新增restart按钮，说明原生操作即可。
+8. 在上述共享页面以静态 descriptor 展示已知子插件 `deepwork` 的 master switch 与模块内设置；global-off 时仍能查看/编辑允许保存的 desired 配置，但准确标明当前不可运行/待 restart，不伪造 live 开关。未来已知子插件可新增 descriptor/显式安装分支和自己的字段；本次不预建未知模块、插件市场、权限自授或任意 provider/script 入口。复用现有 React/native DSH tokens 和库，不加新品牌/依赖。安装 DSMM、host 包 enabled/loaded、Deepwork desired/有效值必须分开标示，无法观测的 host 状态写 unknown 而非由包存在推测。
 
 **证据**：真实浏览器通过DSMM bundle/row Config入口操作正确entry，编辑→nativevolatile settings写入→active profile patch与descriptor revision→同fiber refs原位变化→DSMM desired/effective投影；不能只挂一个表单跳过PluginManagerPage身份路径。busy root持续运行时保存role/skill/recovery desired，无DSMM/依赖partial-dispose、sessioncancel、自动restart或scope重构；旧root及新生child保持旧epoch，新ordinary root采用新有效策略并通过off/on catalog/dispatch回归。LSP/materialization保持startup actual并显示显式restart-required，随后在run-owned fixture中独立、显式重启host，验证新startup接纳desired并正确清理旧资源（不把host取消session说成DSMM安全排队）。stale save/非法值/断连/只读namespace失败不篡改配置；desired回退使差异消失，无隐藏queue；profile apply不吸收新的deployment结构、native模型不变。键盘焦点、读屏名称/live announcement、窄窗/深浅主题/长中英文文本、desired保存与effective未知/待新root/待显式重启可区分；运行中允许安全desired保存不等于允许对当前sessionapply。
 
 **集中配置browser补充**：用同home两个隔离host profiles，经真实Config页保存global而不改任一profilepatch；profileA写一个显式override后global变更只改变A未覆盖字段与B继承值，A清除override恢复global，UI来源与新root实际行为一致。另一编辑器/外部fixture更改global触发CAS拒绝而非丢未编辑字段；entry切换不把global保存变成profile保存。现有oldparent/futurechild和profile CAS不吸收新global；startup能力缺失明示restart。legacy named库显示只读与原pin/coldresume，不出现迁移成功或后台写入；无modeltool/任意路径调用可访问global写RPC。所有fixtures来自run-owned路径，不访问私人profile做演示。
 
+**Desktop / 模块补充证据**：共享组件和官方 Plugins contribution 接线测试证明 DW-off/core-loaded 页面可见、global master 保存仍走C0 CAS，profile/unknown-module/跨入口尝试不能绕authority；on/off、来源、desired/startup/admitted和旧root提示真实。分开记录：①当前rc.2实际原生Plugins卡片/页面/bundle/row ledger及保存；②官方latest Desktop固定SHA的sharedWebHost/client discovery/public slots源码兼容；③实际官方Desktop运行条件具备时的目标版本、原生Plugins导航、DSMM loaded/entry、真实carrier operator/writable保存/拒绝及清理。无③就列未验证，①②或community tab测试均不能替代。官方host整体开关写自身bundles/disabled并待restart，DSMM不镜像或模拟；独立host操作与模块save的取消/卸载/pending语义分别报告。当前缺Desktop运行条件时仍完成必需shared page/module代码、契约/组件与Web实面检查，不标双平台完整通过、不静默删Desktop验收，也不自动安装以求绿。
+
 **commit**：`feat(dsmm): add native plugin feature settings`。
 
 ### 阶段 E — 集成闭环、分发完整性与最终可用证据
 
-**依赖**：A/B、C0中央存储、Cnative消费、D双层Config页全部完成。若只剩验收且没有文件变更，不创建empty commit；集成tests/harness/docs收尾构成本阶段正常commit。集中配置与profile继承不可拖到E才首次实现，也不能省略B的跨host证据限制。
+**依赖**：A/B、C0中央存储、Cnative消费、D0真实模块gate、D官方Desktop/Web共享Plugins必要代码完成。若官方Desktop actual-surface尚无运行条件，E负责列明并补足可执行证据，而非默认已通过；无法补足时保留未验证结论。若只剩验收且没有文件变更，不创建empty commit；集成tests/harness/docs收尾构成本阶段正常commit。集中配置、模块gate与shared Plugins contribution不可拖到E才首次实现，也不能省略B的跨host证据限制。
 
-**ownership**：`dsmm/test/**` 必要集成测试、`dsmm/scripts/**` 的 keyless acceptance/sync checks、`dsmm/package.json` 的测试/资源清单（不 bump/publish）、`README.md` 与 dsmm相关维护/兼容文档；不改 release workflow 作为本任务捷径。
+**ownership**：`dsmm/test/**` 必要集成测试、`dsmm/scripts/**` 的 keyless acceptance/sync checks 和已有条件下的 Desktop 隔离验收接线、`dsmm/package.json` 的测试/资源清单（不 bump/publish）、`dsmm/README.md` 与 DSMM 相关维护/兼容文档；不改 Root README、release workflow、Desktop 宿主或 SDK 作为本任务捷径。
 
 工作与证据：
 
 - 用一套 run-owned empty profile 完成“普通 preset off → on → metadata → load skill/reference → dispatch permitted role → native child continuation/result → Config保存desired → 旧parent/新child保持原admission、新ordinary root采用新effective → 必要时用户独立显式restart后startup生效 → dispose”用户路径；另一并行session保持其scope/admission。已有mode/profile idle CAS另行回归，不能把它当deployment保存后的自动queue。再走显式role preset与explicit-off的反向路径。
+- 复用 D0/D fixture 增加真实 install-only 状态：全新隔离 home 中 DSMM core loaded、global Deepwork master 明确 off，设置可访问而 DW persona/skills/roles/providers 不活跃；从原生设置页保存 on 仅产生 desired/pending，独立显式 restart 后首次新 root 才能使用，再保存 off 证明旧 parent/future child 留存与新 root 上限。保留默认 on compatibility 路径及原 session explicit-off 的 persona/权限语义，不能将两个 off 混写。
+- 官方共享Plugins按证据层分别列结果：current rc.2 public UI actual-native、official latest Desktop source compatibility，以及有运行条件才可验证的installed official Desktop actual-surface；包括身份/版本、client graph metadata、原生入口/entry/服务authority、保存层及运行状态。不为同一backend复制整套测试，不把Web通过推定为Desktop/operator通过。community v0.11.0仅独立reference/兼容结果，不能替代官方page。所有shared Plugins代码、模块门控及打包仍是必需交付，缺binary不降为建议项；alpha源码核对不改变rc.2 SDK/peer pin。
 - 复用C0/D证据补足双DSH profile的global→explicit override→immutable named/session overlay真实链路，集中named文档但隔离selection/session state；从全新临时home证明不再每profile新建主配置/named仓。只用fixture演示legacy只读/显式非破坏import边界，不自动实际迁移；package/runtime能从声明peer解析公开home路径SDK，不能依赖本机全局路径。
 - 真实 Loader + native service + keyless mock LLM，不以 fake ctx 注册和固定成功日志替代；记录实际 assembled prompt/registry结果/工具执行与拒绝/settings持久化/epoch，在敏感信息不存在的 fixture上保留必要截图/状态。
 - 同步 checker/资源完整性/生成 role assets/check:release（先确认它只读、不发布不安装）验证包结构。检查 npm `files` 与 client bundle 包含完整资源，不引用 source checkout、全局 host 或私人绝对路径；本地 pack 如需仅写 run-owned temp，不做插件安装。
@@ -366,6 +410,7 @@ pnpm run build
 - 复用 `profile-ui-acceptance.mjs` 的 native storage根校验、owner marker、child进程退出与token脱敏，但不要求原有 frozen release artifact/hash/严格 receipt格式，也不导入其 install/auth/固定场景数逻辑。已有 browser carrier 只有 Profiles section，不算 Config 页入口；需挂真实 plugin manager原生组件/导航并使用真实 settings/Loader后端。
 - Playwright只用已存在 Chromium/executable；不 `playwright install`。fresh browser无 storageState 导入，不登录、不复制 cookies/localStorage/user data。开发 harness 需要 runtime自带临时连接token时只用于该run，内存处理、不写报告。
 - frontend工作先读取适用 design/perfection参考，执行真实浏览器 interaction/layout/a11y 与适用性能审计；不能以 standalone app 的 Lighthouse/SEO仪式替代插件功能，不能为刷分改变宿主安全/UX。记录宿主不可控项和软件缺失项，不安装新 QA工具。
+- Desktop 如已有可运行 executable，只从 run-owned profile/home/user-data 与本次受控加载入口启动；验证实际 webview target/client metadata、host/operator 归属，不连接私人 Electron 窗口或读取市场配置。无此条件不下载、安装或重写 Electron 宿主；保留 Desktop 验证缺口，不拿现有 Edge/Web harness 冒充。整包开关测试是独立明确 host 操作，不绑定 DSMM 保存 effect。
 - 验收结束关闭本次启动的browser/context/server/host/children，取消pending requests，释放 fibers/providers/subscriptions/timers。递归删除仅本次 owner marker验证过的精确目录，失败时不能扫 temp 根或用户 home。
 
 ### 5.3 必须覆盖的反例
@@ -385,6 +430,9 @@ pnpm run build
 | global写丢数据/影响其它profile | 两host共享唯一config.json、exact edits/CAS拒绝stale，未编辑字段和全部profilepatch不变；外部invalid/unknownkeys不被空配置覆盖；global save不调用Loader，source/revision不一致不伪报effective |
 | 集中named仓导致跨scope状态串用或破坏旧库 | central文档共享、selection/session按hostprofile+entry隔离；legacy读无锁/目录写入，冷恢复pin完整且中央同名不替代；fixture显式import原bytes保留/冲突拒绝，不扫描或迁移私人profiles |
 | plugin私有文件接口变成模型越权通道 | authenticated/trustedbackend授权、固定root与字段grammar；伪entry/任意path/modeltool调用拒绝，no-follow与rootidentity拒绝替换；不改变nativeFS sandbox/approval |
+| Deepwork master 只是标签/defaultActive，或关闭顺带解除保护 | fresh masterOff 无 DW 活动而 core config 可用；默认字段缺省兼容；profile/session/standing-preset/direct-alias 绕过拒绝，未知 module 拒绝；既有只读/filter/Git/native权限与数据保持，关模块不清权限身份 |
+| module desired 被冒充当前全局停用/启动 | startupOn→off 保留 oldroot/futurechild，新root采用off；startupOff→on 无模块热挂、显示restart-required，独立显式restart才接纳；idle profile/mode CAS不吸收新module desired，无自动cancel/reload/queue |
+| Desktop local carrier/cookie/Origin代转被当作operator，或Web截图冒认Desktop | 精确actual peer/operator、writable、loopback及owner/signal复验；另一入口不绕deny，权限不允许的describe不补开读取面；区分rc.2 UI实测、官方alpha源码兼容与实际官方Desktop导航/loaded/entry/save；缺binary列未验证，community tab不能替代官方Plugins |
 | 资源只在repo可用 | 从临时分发树resolve全references/scripts/assets，无越界私人路径，无漏包 |
 | 注入内容诱导越权 | 项目skill/文档/tool输出中的“忽略权限/派peer/做Git写”不能改变dispatch/approval/path guards；项目skill优先不等于权限提升 |
 
@@ -399,14 +447,18 @@ pnpm run build
 7. **同步维护会暴露源策略冲突。** 按用户已批准的DSH工具/安全语义改写OpenCode专用细节；如果两源对权限或公共行为冲突且证据不能裁定，升级给orchestrator，不随意挑更宽松文本。
 8. **安全回退**只关闭/撤销本次feature scope并保持宿主原有普通preset、permissions和数据；不自动卸载用户插件、重写用户profile或用破坏性Git回滚。实现后的revert等Git动作需另有具体授权。
 9. **集中不等于自动迁移/跨profile共享状态。** 新默认主配置和named文档集中；当前旧库存在则read-only origin pin保护immutable引用与coldresume，相关写功能明确受限直至另有精确非破坏导入授权。保留旧explicit根、格式、元数据和权限，禁止自动搬/删/初始化；这一兼容限制必须交付报告，不称已迁移。stage验收用fixtures证明新默认和legacy读安全，不能为了全量绿访问用户实际文件。globalCAS只承诺合作写者锁+外部变更检测，不虚构文件系统跨编辑器事务；如布局/provenance无法验证，则拒绝该操作并报告具体边界，不猜路径或defaults。
+10. **静态模块、global-only master、兼容默认。** 现 `settings.ts` 只有 `defaultActive:false` 和逐role/skill字段，`state.ts` 仍把 DW preset 视为默认 active，`index.ts:applyRuntime` 无 master 安装分支；故不能把旧模式开关改名交付。新增 `modules.deepwork.enabled` 默认 true 的依据是现有可用性与用户未要求 default-off；显式 false 满足 install-only。core + 静态安装分支是最小可执行解，不要求物理多 row。代价：需调整 schema层别、startup/admission与各consumer；若未来要求任意外部模块，须另授权设计，不提前建框架。本上限只影响新module字段，不重新解释既有global优先级。
+11. **D0 独立于 C 与 UI。** core RPC 当前与 profile/DW 初始化耦合，standing presets 带静态 persona，role-policy 已承担只读与filter；D0须在实际使用前门控而保留身份保护，不能大范围条件return。独立阶段能先证明 cold-off、保存能力与无权限回退再接UI。代价是多一个用户要求的 meaningful stage commit，由父执行；C 的冷 MCP 查询、只读 Root 诊断及既有失败/归因原样保留，不趁机修 Root 或改验收。
+12. **官方 Desktop 主目标已定，源码不等于运行。** 官方alpha固定SHA已证明 `apps/desktop` / sharedWebHost与公开Plugins契约，主目标由shared Plugins item/page及bundle/row Config完成；community v0.11.0 tab降为兼容reference，不再承担官方验收。保持当前rc.2 SDK/peer pin、复用web client/backend是最小方案；代价是必须精确核对跨源码版本契约，若有真实不兼容则报告窄缺口，不暗升SDK或新建Electron桥。release无assets不能推出安装包可用，实际Desktopbinary/operator仍未验证；local cookie/Origin代转不替代authority。缺运行条件只限制验收声明、不免除必需实现，不为验证自动安装，也不把stdio `dsh-sdk-client` 当UI依赖。
+13. **更 native 委派采用用户允许的保留方案。** rc.2 固定provider/toolName契约无role/category参数，当前per-role代码已有native生命周期、continuable与权限证据；新增聚合tool会引入公开ABI变化而非现成native适配。本增量不做该重构，代价是暂保多role工具；将来SDK提供合适公开能力时另立范围，不删除现有有用输出/结构化结果或权限检查。
 
-目前**没有需要用户重复选择的设计blocker**：目录采用父的DSMM约定、合并使用公开SDK路径与本地数据规则、旧库按保守只读兼容；不存在官方globalSettings或queuedrestart的假设。C0须实测sparse native defaults/provenance、peer发行态解析、central/legacystore与CAS；C/D继续验证capture/Loader保活与双层PluginManagerPage真实入口。尚未实测不等于通过，必要项不安全则具体报告，不静默缩范围/猜权限。父可按已有授权自行裁定普通实现细节；不安装、不实际迁移私人文件、不RootOCMM写，不扩大Git操作。此次只交同critic有限复核新增central/overlay及依赖，不重开A/B/delegation。
+本增量**没有需要用户重复选择的普通设计问题**：静态模块/global-only上限/兼容默认不变，官方补证只在本轮plan内纠正D的shared Plugins主目标与证据来源，不新增stage或重开框架；C0已验收存储合同不重开，C尚未通过。仍需证据而非猜测的是rc.2实际UI与官方alpha源码兼容、实际Desktop client发现/operator及运行条件，以及D0在standing-preset实际使用前的gate与core脱耦结果；官方源码identity已明确，不再列为待查。父可裁定等价小实现；若必须扩大authority、改公开tool ABI/SDK或安装，返回具体缺口，不静默绕过。原journal与六份旧plans保护不变。此次只改本plan，不派workflow、不产品实现、不Git写；父随后派critic复核新增D0/D/E及受影响接口，不重审已闭合A/B/C0或planner Markdown政策。
 
 ## 7. Handoff 与完成定义
 
 由 orchestrator 将本 plan 与既有 internal/external/clarifier evidence 交 `plan-critic-high`；planner不dispatch。material blocker需要修正、证据反驳或升级，non-blocking建议不阻实施；只在实质输入变化后复查相关部分，不设固定收据/hash/无限审查循环。
 
-完成必须同时满足：rc.2真实API与scoped lazy registry可用；完整11+11及适用prompt/skill资源可追溯且能运行；subagent与已有runtime边界真实生效；主配置集中globalbase、DSHprofile显式覆盖与named/sessionoverlay正确继承，namedstore新默认集中且legacy保护无自动迁移；原生插件Config页两种保存及source/effective/pending真实；包括C0在内的必要阶段验收/commit完成；用户资产未改、无安装/私人profile/auth访问、无RootOCMM写、无push/release。最终报告列commit IDs、实际测试/界面证据、native等价/N/A、legacy只读限制与未验证项，不能声称已迁移私人文件或已发布。只完成plan、文本同步、注册日志或某次CI绿色都不等于产品parity完成。
+完成必须同时满足：rc.2真实API与scoped lazy registry可用；完整11+11及适用prompt/skill资源可追溯且能运行；subagent与已有runtime边界真实生效；主配置集中globalbase、DSHprofile显式覆盖与named/sessionoverlay正确继承，namedstore新默认集中且legacy保护无自动迁移；DSMM core在Deepwork冷off时独立可用，global-only模块上限在真实consumer执行而非改label，默认兼容且不放宽保护；官方Desktop/Web共享Plugins中的DSMM页面、bundle/row Config ledger及global/profile两种保存和source/effective/pending真实；包括C0、C、D0/D/E在内的必要阶段验收/commit由父完成；用户资产未改、无安装/私人profile/auth访问、无RootOCMM/OMO/nativeSDK写、无push/release。必需shared UI代码完成但缺官方Desktop executable/authority实证时可交付精确受限结果，必须将Desktop实际surface列为未验证，不能称双载体全验收或把必需实现列optional；明确分别报告当前rc.2 public UI实测、固定SHA官方latest Desktop源码兼容、未证安装包/实际运行，以及community v0.11仅reference/兼容的地位，不静默升SDK。最终报告列commit IDs、实际测试/界面证据、native等价/N/A、旧root保留/显式restart语义、legacy只读限制与未验证项，不能声称已迁移私人文件或已发布。C冷LSP尚失败时仍不能称整体parity完成；只完成plan、文本同步、注册日志或某次CI绿色都不等于产品parity完成。
 
 ## 8. 阶段验收记录
 
@@ -450,3 +502,25 @@ pnpm run build
 - 已核对 rc.2 `initializeProfileFromDefault` / `runProfile` 不自动安装或下载；SDK 可用公开 `createLaunchEnvironmentSnapshot([{ source: 'process', values: isolatedProcessEnv }])` 避免读取私人 `.env`。boot 后 `ctx.profileContext.home` 是可信的已解析 home，可交公开 home resolver，不由 profile dir 推导。新 profile 仍会写自己的 include root，因此只允许 run-owned 路径。这些是源码接点证据，不是实际 Host 启动通过。
 - 本地 ESM row 的浏览器资产有真实发现路径：client-modules 从 Loader 解析的模块 URL 找最近 package manifest，验证 `dsh.client.platform: web` 与 `exports['./client']`，再把实际 bundle 纳入 client graph/asset route；B manifest 与构建 `lib/client.js` 满足相应声明条件。未证明 standalone row 自动成为 Plugin Manager 可导航的安装 bundle；D 必须在原生页面核实真实 inventory、entry ID 与 Config ledger，不能把 server import 或独立表单当作该结果。
 - 浏览器连接预检已取得实际成功：Playwright 1.59 + 自建 fresh Edge 随机 loopback TCP-CDP，核验 marker、launcher/直接 child、进程时间和 listener 归属后建立新 context，读取 `about:blank` 并取得 1280×800 截图。连接/context/browser 均正常关闭，owned PID、listener 和 profile 均已清除；未登录或连接用户浏览器。原 CLI pipe 故障未宣称修复，修订 cold-start 路径未另行重跑；这只证明可用连接方式，不是 DSMM Config/UI 验收。
+- 原生页面入口已另行实际验证：从已安装 rc.2 的默认 web 初始化独立 profile，仅启动官方 base/web bundles，未导入并行修改中的 DSMM。正常点击预览说明“继续”，再通过“全局面板 → 插件”进入真实页面，截图与 DOM 显示“插件”一级标题及 8 个官方插件。公开本地 operator handshake 保留 native authentication；没有账户登录、模型 stream 或观测到的外部请求。默认工作区集成探测在 QA 中拒绝，未执行工作区/job/FS 操作，因此这不是这些宿主能力的验收。
+- 随后出现 API Key 引导，本次没有填写或继续进入详情/Config。父核验截图可见宿主原生“稍后配置”按钮：后续 D 可验证该正常延期配置流程，不把它当作账户登录绕过，也不通过改 DOM、关闭认证、假密钥或修改权限消除引导。若后续路径真正要求凭据或账户登录，仍停在该边界并报告限制。目前尚未证明延期后 Config 可操作、DSMM inventory/ledger 存在或保存成功。
+- 前置任务两次 Host 均正常 shutdown，fresh Edge 正常关闭；父核验清理 JSON 中已记录主/子 PID 不存在、4 个 owned Host/CDP 端口无 listener、browser profile 已删除。脚本、独立 homes/profile 与证据仅保留在 run-owned `d-native-entry-preflight-20261008` 子目录，最后随本轮精确清理。原生 Config 的 bundle/row ledger 与 actual entry/form namespace 契约仍由 D 实际接线，不由页面入口或 metadata 推定完成。
+
+### C：原生执行机制与分组回归收尾，待随实现提交
+
+- 首批真实 mock LLM 已执行 root → deep → coding → read 并返回有用结果；当前身份、委派策略、实际 spawn capabilities 和 Agent-owned drain 接线仍在补齐，不能将该正例或构建/发行 dry-run 当作整个 C 完成。
+- 新负例证实旧 `plan-validation.ts` 在宿主拒绝 read/edit 时仍通过 Node `readFileSync` 读取目标，并可能在格式错误回包中泄露未获准正文。该负例保持 RED，C 不提交；不得删除或降低检查、提前读取来刷新 native observation/CAS，或用截断行视图假装完整文档。
+- 父裁定最小 fail-closed 适配：启用 plan-validation 时，rc.2 尚无已授权完整提交前 preview 的受保护 plan edit 明确拒绝并说明能力限制；校验 caller 提供的完整 write 文档仍可用，但不授予或绕过 native write/read/approval/CAS。非计划 edit 保留宿主原行为，关闭格式子功能不影响必须执行的只读与宿主权限。移除危险直接读文件和失效重建分支，原生匹配与 CAS 仍由宿主处理，不虚构已完成全文 edit 校验。
+- rc.2 `restrict` 不过滤同层自身注册，当前重注册禁止目标/变更工具的执行拒绝已有证据；catalog 隐藏不能据此宣称成立。优先公开同层过滤接点，无安全路径则准确记录可见但执行必拒的限制，不修改私有 SDK 或复制调度器。完整 background/continuation/capacity/depth/error/abort、preset rebind、捕获边界和 LSP 进程回环仍待当前阶段实现验收。
+- 后续实施已移除计划编辑的 Node 读取与重建分支；原泄露负例现为零目标读取、零 body dispatch、回包无 sentinel、文件不变，普通 native edit 匹配/CAS 和完整 write 的更强宿主拒绝仍有实际证明。身份/realm、formal readonly planner handoff、原生委派/continuation/background、取消/drain 和 capture 组已取得定向证据，但不据此提前宣告整个 C 完成。
+- 当前真实 LSP `find_symbol_related` 正向仍失败：Windows 路径转换为 `file:////%3F/C:/...` 后 gopls 无 package metadata。实际 MCP status、工具注册与进程退出不代替这条有用查询；同一实施任务按受控普通路径/extended 路径对照定位 DSMM→MCP 边界，Root Rust 与 opaque identity 不改，保留原 RED 和 owned cleanup 证据。
+- 稳定核心独立审查新增已验证 Important：root 以 `toolFilter:{deny:["write"]}` 派出 bounded Builder 时，Builder 自身拒绝 write，但其下一层合法 quick alias 未继承父 filter，write sentinel body 实际执行。共享准入必须继承父已生效限制、下一层只能继续收窄，涵盖角色工具、直接 alias 和 continuation/cold-resume；同时保留 native unknown-filter 拒绝、合法 utility 结果与 structured-output 语义。此缺陷及 LSP 正向查询均为 C 提交阻塞，修正后只重验受影响边界，不删除失败断言求绿。
+- 按用户要求停止旧实施任务后由全新任务接替；旧任务确认无未完成操作或所属进程，保留 working diff，不回滚。新任务在共享 child admission 处采用 allow 交集、deny 并集，并复制冻结限制，原 native caller filter 保持。原 Builder → quick 场景由实际 write body 1 变为 0，sentinel 不变且合法 read/result 仍通过；直接 alias、第二消息及同 durable ID cold resume 保持限制。当前相关 139 项全部通过，同一核心审查会话已核验并关闭该权限缺陷；这不代表整个 C 已通过。
+- 冷 LSP 正向 gate 已恢复为独立空缓存的一次真实请求，未靠 CLI 预热或重复查询过关，仍失败。绕过 DSMM/DSH 直接调用同一 MCP 的冷对照也失败，而六个独立 direct gopls 协议对照（含两种 URI、configuration 回复及 extended cwd）均得到 definition 1、references 2。最终 MCP `filePath` 逐字保留公开路径，opaque identity 仅比较相等；尚不能把 `%3F` URI 单独认定根因，也未证明 DSMM 路径 corruption。C 仍未提交，继续以只读 Root 启动/协议差异诊断缩小原因，不修改 Root/SDK、不将 status、构建或 447 项 artifact readiness 替代冷查询验收。
+- 只读 Root 诊断进一步收敛到 executable 启动入口关联的环境限制：原 workspace 入口下的 managed child 能读取 owned marker，但创建 owned 公共日志明确返回 `EPERM`；同一 fixture 上的逐字节临时副本可执行公共写入和实际冷查询。原与副本 SHA-256 均为 `3942e35fa7960d26ff81fd8ab8e7cbcb59ec204f1e8761c68fa4c79c1502a45b`，没有重编译或改 Root/SDK/产品路径。
+- 父接受上述合法临时 executable 作为隔离 QA fixture：实际运行未修改的 `test/native-lsp.test.ts`，首次独立空缓存取得 definition 1、references 2，2 pass、0 fail/skip/cancel；测试文件前后 hash 不变、公开 `filePath` 原样、opaque target 未解析，未预热、sleep、重试或改期待。observer 仅观察原样 spawn/exit，所属进程与 fixture 均已清理。该证明关闭 C 适配功能的冷正向证据缺口，不证明默认原 `dist/bin` 入口已修复，也不授权生产 relocation、持久复制、防护/权限例外；Defender/WDAC/ACL/Job 具体根因及 gopls 缓存写入失败仍未确认。默认入口 RED 与诊断记录保留，C 还须完成分组广泛回归后才能提交。
+- 首次广泛 C 分组冻结 65 个测试文件，预先将 repair 与 native LSP 分出，Windows 其余 63 文件单次默认并发运行。观察到 `native-route-strategies` 一项、`package` 一项和 `preset-materializer` 三项失败；240000 ms 工具上限中断，Node 最终 exit/signal/count 未知，472 条部分 reporter 勾号不是通过总数。不得将这些文件移出范围或把旧定向结果当成广泛通过；接替实施任务先取得原 case 完整失败断言，保留 fallback/readonly authority、preset ownership/legacy/原子发布与清理合同后最小修正。
+- repair 闭包由 13 增至 14 modules，旧 Linux 证据已失效并实际重跑：原修复工具测试在既有 immutable image、无网络、空 homes、只读 mount/cap-drop 下取得 7 pass、0 fail、3 原有 Windows-only skip，Node/Docker 均 exit 0。skips 不当通过；旧 foreign-carrier 拒绝与 15 秒 lease 问题不称修复。广泛 Windows 中断的所属可观察进程已无存活，残留 marked fixture/cache 仅保留在 run-owned 子目录，最终统一精确清理。
+- 五项失败定向重放取得完整 65 tests、60 pass/5 fail、Node exit 1；三处原测试前提修正后同组 65/65、相关 native delegation/role routing/root authority 56/56 通过，Node 均 exit 0。父逐行核对：alias fallback fixture 明确 `defaultActive:true`，不再由未准入普通 root 测试合法委派；materializer 字节期望使用实际单-role enabled inventory，不要求未启用 utility rows；文档字段列表加入已存在 `subagents`。所有原 fallback/header/ownership、write 拒绝、精确文件字节、foreign/unsafe legacy、原子发布及注入失败清理断言保留；无产品、权限、catalog 或 build 输入变更。再次广泛组仍保留原 63 文件和默认并发，使用 600000 ms 工具上限及即时完整 TAP，不据上述局部正向批准整个 C。
+- 完整广泛 Windows 组最终 685 tests、683 pass/2 fail、0 skip/cancel，Node exit 1、signal null；测试期间 inputs 无变化。两项失败均为旧 profile fixture 直接创建 generic subagent，被实际 role policy 正确拒绝。原文件取得 17 tests、15 pass/2 fail、exit 1 后，仅三处 setup 改为 exact-parent 的真实 `dsmm-role-reviewer` provider，并等待 completed、finally 释放 native handles；所有旧/新 child admission、epoch、profile switch、model/effort picker、metadata、锁/CAS/ownership、resume 断言保持。当前原文件 17/17 与相关 native 四文件 57/57、测试类型检查均 exit 0；generic spawn negative、deny-write body 0/sentinel unchanged 和合法 read/result 仍通过。
+- 父核验该 fixture-only diff 与原始日志，按相关输入不变复用广泛组其余通过结果、当前 build/source/generated/frontend 与 repair/cold LSP 分组证据；不将历史 Node exit 1 改判，不重复无受影响理由的整套测试。这里是覆盖全部适用 case 的组合验收，不是单环境或单次 monolithic green。repair 的 3 个既有 Windows-only skip 与原 LSP 入口环境限制继续披露；artifact readiness 仍只证明分发契约，不是发布或功能通过。

@@ -10,7 +10,8 @@ import { DSMM_ROLES, isRootRole } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute, DsmmPluginConfig, DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { roleRouteRuntimeState, selectInitialModelRoute } from "./role-routing.js";
-import { resolveEffectiveDsmmRole, sessionEvents } from "./session-scope.js";
+import { sessionEvents } from "./session-scope.js";
+import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { DeepworkModeController, hasOpenTurn } from "./state.js";
 import { resolveRoleRuntimePolicy } from "./settings.js";
 import { freezeSettings } from "./settings.js";
@@ -49,6 +50,8 @@ export interface DsmmProfileRuntimeOptions {
   /** Awaited once per new ordinary root; never used by children or idle switches. */
   readDesired?: () => Promise<DsmmDeploymentSnapshot>;
   startup?: DsmmDeploymentSnapshot;
+  /** Frozen actual native startup substrate; omission is the trusted legacy seam. */
+  subagentCapabilities?: { backgroundJobs: boolean; continuable: boolean };
 }
 
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission { baseline: DsmmSettings }
@@ -254,15 +257,16 @@ export class DsmmProfileRuntime {
   select(request: ProfileSelectRequest): Promise<ProfileSnapshot> {
     const operation = this.selectionQueue.then(async () => {
       let selectedDocument: DsmmProfileDocument | null = null;
+      const baseline = this.current.baseline;
       const result = await this.store.select(request, async (document) => {
         selectedDocument = document === null ? null : freezeSettings(document);
-        const prepared = immutableSettings(resolveProfileSettings(this.baseline as DsmmPluginConfig, document?.settings ?? {}));
+        const prepared = immutableSettings(resolveProfileSettings(baseline as DsmmPluginConfig, document?.settings ?? {}));
         await this.validate(prepared);
         return prepared;
       });
       // There is no await between successful durable commit and publication of
       // the complete settings value. Draft saves never reach this assignment.
-      this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default", this.baseline, this.options.startup, [], selectedDocument);
+      this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default", baseline, this.options.startup, this.current.restartRequired, selectedDocument);
       this.currentDocument = selectedDocument;
       return this.describe();
     });
@@ -277,6 +281,11 @@ export class DsmmProfileRuntime {
     for (const role of DSMM_ROLES) {
       if (desired.roles[role.id] && !this.baseline.roles[role.id]) restartRequired.push(`roles.${role.id}`);
       effective.roles[role.id] = desired.roles[role.id] && this.baseline.roles[role.id];
+    }
+    const capability = desired.subagents.backgroundMode === "continuable" ? this.options.subagentCapabilities?.continuable : this.options.subagentCapabilities?.backgroundJobs;
+    if (desired.subagents.enableRunInBackground && capability === false) {
+      effective.subagents.enableRunInBackground = false;
+      restartRequired.push("subagents");
     }
     for (const key of ["modeName", "promptOrder", "presets", "lsp"] as const) {
       if (JSON.stringify(desired[key]) !== JSON.stringify(this.baseline[key])) restartRequired.push(key);

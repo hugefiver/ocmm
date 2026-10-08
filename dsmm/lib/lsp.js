@@ -10,6 +10,55 @@ export const DSMM_LSP_TOOL_NAMES = [
     "rename",
     "format"
 ];
+/** Optional native package resolution is anchored by the trusted host, not home guesses or CLI paths. */
+export async function registerLspRuntime(ctx, settings) {
+    let state = { state: "disabled", tools: [] };
+    ctx.provide("dsmmLspState", () => state);
+    if (!settings.enabled)
+        return;
+    const anchor = ctx.get("profileContext")?.installAnchor;
+    const unavailable = (diagnostic) => {
+        state = { state: "unavailable", tools: [], diagnostic };
+        if (settings.failOnStartupError)
+            throw new Error(`DSMM LSP startup unavailable: ${diagnostic}`);
+    };
+    if (anchor === undefined) {
+        unavailable("host-anchor-unavailable");
+        return;
+    }
+    let plugin;
+    try {
+        const modulePath = createRequire(anchor).resolve("@deepseek-ai/dsh-mcp-client");
+        plugin = await import(pathToFileURL(modulePath).href);
+    }
+    catch {
+        unavailable("native-package-unavailable");
+        return;
+    }
+    if (typeof plugin.apply !== "function") {
+        unavailable("native-package-unavailable");
+        return;
+    }
+    try {
+        await ctx.plugin(plugin, toDshMcpClientConfig(settings)).await();
+    }
+    catch {
+        unavailable("native-tools-unavailable");
+        return;
+    }
+    const tools = ctx.get("tools");
+    const names = tools?.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`)) ?? [];
+    if (names.length === 0) {
+        unavailable("native-tools-unavailable");
+        return;
+    }
+    state = { state: "ready", tools: names };
+    ctx.on("tools/change", () => {
+        const names = tools.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`));
+        state = names.length === 0 ? { state: "unavailable", diagnostic: "native-tools-unavailable", tools: [] } : { state: "ready", tools: names };
+    });
+    ctx.effect(() => () => { state = { state: "unavailable", diagnostic: "native-tools-unavailable", tools: [] }; });
+}
 export const DEFAULT_DSMM_LSP_SETTINGS = {
     enabled: false,
     serverName: "dsmm_lsp",
@@ -151,4 +200,6 @@ function isPlainYamlScalar(value) {
         return false;
     return !value.startsWith("---") && !value.startsWith("...");
 }
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 //# sourceMappingURL=lsp.js.map

@@ -234,8 +234,18 @@ export function decidePostToolExecution(exec, result, decision, settings, contro
         content: [{ type: "text", text: truncateTextMiddle(text, truncation.maxInlineBytes, exec.name) }]
     };
 }
-export function registerSafetyGuards(ctx, controller, getSettings) {
+export function registerSafetyGuards(ctx, controller, getSettings, rolePolicy) {
+    const tools = ctx.get?.("tools");
+    if (rolePolicy !== undefined && tools !== undefined) {
+        const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent, execution.name, tools));
+        ctx.effect?.(() => guard);
+    }
     ctx.on?.("tools/pre-execute", async (exec, next) => {
+        // Role authority precedes optional workflow helpers in every tool realm;
+        // turning common/guards off cannot grant a read-only role a mutation.
+        const denied = exec.agent === undefined ? undefined : rolePolicy?.toolDenial(exec.agent, exec.name);
+        if (denied !== undefined)
+            return { kind: "deny", reason: denied };
         const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
         if (decision === undefined)
             return next();

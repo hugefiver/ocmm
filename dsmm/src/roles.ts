@@ -3,6 +3,7 @@ import type { DsmmSkillName } from "./skills.js";
 import { buildRolePersona, SOURCE_ROLE_CATALOG } from "./prompt-content.js";
 import { roleProviderName } from "./role-providers.js";
 import type { DsmmModelRoute, DsmmRoleRouting } from "./settings.js";
+import { allowedRoleChildren } from "./role-policy.js";
 
 export const DSMM_ROLE_IDS = [
   "dsmm-orchestrator", "dsmm-planner", "dsmm-plan-critic", "dsmm-builder",
@@ -84,7 +85,7 @@ export function rolePluginRows(role: DsmmRoleDefinition, skills: readonly DsmmSk
     rows.push({ id: "tool-pwsh", name: "@deepseek-ai/dsh-tool-pwsh", disabled: process.platform !== "win32" });
     rows.push({ id: "tool-jobs", name: "@deepseek-ai/dsh-tool-jobs" });
   }
-  if (role.id === "dsmm-orchestrator" || role.id === "dsmm-builder") rows.push(...roleSubagentPluginRows(enabledRoles, roleRouting));
+  rows.push(...roleSubagentPluginRows(enabledRoles.filter((id) => allowedRoleChildren(role.id).includes(id)), roleRouting));
   return rows;
 }
 
@@ -93,7 +94,7 @@ export function roleSubagentPluginRows(enabledRoles: readonly DsmmRoleId[] = def
   return DSMM_ROLES.filter((role) => role.id !== "dsmm-orchestrator" && enabledRoles.includes(role.id)).map((role) => ({
     id: `subagent-${role.id}`,
     name: "@deepseek-ai/dsh-tool-subagent",
-    config: roleSubagentConfig(role, [], roleRouting[role.id]?.primary)
+    config: roleSubagentConfig(role, enabledRoles.map((id) => id.replace(/-/gu, "_")), roleRouting[role.id]?.primary)
   }));
 }
 
@@ -105,11 +106,13 @@ export function roleSubagentConfig(role: DsmmRoleDefinition, availableTools: rea
   // read_image is conditional on the DSH attachment store; an unknown name
   // would make DSH's native toolFilter reject the child at startup.
   if (role.id === "dsmm-media-reader" && availableTools.includes("read_image")) readOnlyTools.push("read_image");
+  readOnlyTools.push(...allowedRoleChildren(role.id).map((id) => id.replace(/-/gu, "_")).filter((name) => availableTools.includes(name)));
   return {
     provider: roleProviderName(role.id),
     ...(primary === undefined ? {} : { agentOptions: { ...primary } }),
     toolName: role.id.replace(/-/gu, "_"),
-    // Same-scope native re-registration can bypass inherited tool restrictions.
+    // Selection remains host-owned; identity and monotonic execution fences are
+    // admitted separately from this standing composition.
     modelSelectionSettings: false,
     backgroundMode: "one-shot",
     enableRunInBackground: false,

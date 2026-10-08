@@ -98,6 +98,7 @@ test("native maintenance race and mode persistence refusal leave accepted mode a
 
 test("native idle switches isolate two roots and global default; old/new children keep their exact admission snapshots", async () => {
   const f = await nativeRoutingFixture({}, { headless: true });
+  const children: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
   try {
     const runtime = runtimeOf(f);
     const a = await runtime.save({ id: "a", content: profile("a", "session-a"), expectedRevision: null });
@@ -107,7 +108,10 @@ test("native idle switches isolate two roots and global default; old/new childre
     const beforeGlobal = await runtime.describe();
     const switchedA = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     const oldAdmission = runtime.admission(structural(first));
-    const oldChild = await f.create({ origin: "subagent" }, undefined, { parentAgent: first });
+    const oldChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the old admission" }], signal: new AbortController().signal });
+    children.push(oldChildRun);
+    assert.equal((await oldChildRun.result).stopReason, "completed");
+    const oldChild = oldChildRun.localAgent!;
     assert.equal(runtime.admission(structural(oldChild)), oldAdmission);
     const switchedB = await runtime.selectSession(await request(runtime, second, "b", b.revision), structural(second));
     await runFixtureTurn(first); await runFixtureTurn(second);
@@ -121,7 +125,10 @@ test("native idle switches isolate two roots and global default; old/new childre
     const reapplied = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     assert.notEqual(reapplied.admissionEpoch, switchedA.admissionEpoch, "same revision explicitly reapplied starts a fenced epoch");
     assert.equal(runtime.admission(structural(oldChild)), oldAdmission, "already-created child is never recursively rebound");
-    const newChild = await f.create({ origin: "subagent" }, undefined, { parentAgent: first });
+    const newChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the reapplied admission" }], signal: new AbortController().signal });
+    children.push(newChildRun);
+    assert.equal((await newChildRun.result).stopReason, "completed");
+    const newChild = newChildRun.localAgent!;
     assert.equal(runtime.admission(structural(newChild)), runtime.admission(structural(first)));
     assert.notEqual(runtime.admission(structural(newChild)).epoch, runtime.admission(structural(oldChild)).epoch);
     await assert.rejects(async () => runtime.selectSession({ ...(await request(runtime, first, "b", b.revision)), expectedAdmissionEpoch: switchedA.admissionEpoch }, structural(first)), { code: "conflict" });
@@ -145,7 +152,7 @@ test("native idle switches isolate two roots and global default; old/new childre
         assert.equal(runtime.admission(structural(newRoleChild.localAgent!)).appliedRevision, b.revision);
       } finally { await newRoleChild.dispose(); }
     } finally { await oldRoleChild.dispose(); }
-  } finally { await f.dispose(); }
+  } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
 });
 
 test("an unscoped root displays its exact captured global profile after the future-root default changes", async () => {
@@ -174,6 +181,7 @@ test("an unscoped root displays its exact captured global profile after the futu
 
 test("profile model metadata follows the admitted ordinary root role without changing native selection or locks", async () => {
   const f = await nativeRoutingFixture();
+  const children: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
   try {
     const runtime = runtimeOf(f);
     const nativeSelection: ModelSelectionRef = { current: { provider: "fixture", model: "native-tab", reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
@@ -210,13 +218,16 @@ test("profile model metadata follows the admitted ordinary root role without cha
     assert.equal((await runtime.getSession(structural(root))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
     root.session.append("deepwork/mode", { active: true });
     assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
-    const child = await f.create({ origin: "subagent" }, undefined, { parentAgent: root });
+    const childRun = await f.subagents.start("dsmm-role-reviewer", { parent: root, prompt: [{ type: "text", text: "complete the admitted child" }], signal: new AbortController().signal });
+    children.push(childRun);
+    assert.equal((await childRun.result).stopReason, "completed");
+    const child = childRun.localAgent!;
     await assert.rejects(runtime.getSession(structural(child)), { code: "not-owned" });
     const noPrimary = await runtime.save({ id: "no-primary", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-primary", settings: { roleRouting: { "dsmm-orchestrator": { fallbackRoutes: [route("fallback-only")] } } } }) });
     const applied = await runtime.selectSession(await request(runtime, root, noPrimary.id, noPrimary.revision), structural(root));
     assert.equal(applied.profileModel, undefined, "fallbacks and actual native route never become a declared profile primary");
     assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
-  } finally { await f.dispose(); }
+  } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
 });
 
 test("native running and foreign maintenance activities refuse immediately; a queued wake uses the committed new epoch", async () => {

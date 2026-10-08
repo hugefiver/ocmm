@@ -23,6 +23,12 @@ export interface DsmmPresetSettings {
     materialize: boolean;
     root?: string;
 }
+export interface DsmmSubagentSettings {
+    enableRunInBackground: boolean;
+    backgroundMode: "one-shot" | "continuable";
+    /** Omitted delegates to the native host limit (rc.2 default 1). */
+    maxDepth?: number;
+}
 export interface DsmmGuardSettings {
     scope: DsmmGuardScope;
     shellCommandSafety: boolean;
@@ -93,6 +99,7 @@ export interface DsmmPluginConfig {
     roleRouting?: DsmmRoleRouting;
     runtimePolicy?: DsmmRuntimePolicyConfig;
     presets?: Partial<DsmmPresetSettings>;
+    subagents?: Partial<DsmmSubagentSettings>;
     workflow?: Partial<DsmmWorkflowSettings>;
     guards?: DsmmGuardConfig;
     runtimeRecovery?: DsmmRuntimeRecoveryConfig;
@@ -113,6 +120,7 @@ export interface DsmmSettings {
     roleRouting: DsmmRoleRouting;
     runtimePolicy: DsmmRuntimePolicySettings;
     presets: DsmmPresetSettings;
+    subagents: DsmmSubagentSettings;
     workflow: DsmmWorkflowSettings;
     guards: DsmmGuardSettings;
     runtimeRecovery: DsmmRuntimeRecoverySettings;

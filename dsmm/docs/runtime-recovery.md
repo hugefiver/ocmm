@@ -100,3 +100,15 @@ To investigate an interrupted child, use the native durable descriptor and child
 - No automatic child followup. No automatic parent followup.
 
 Warnings are fixed and sanitized; they omit request bodies, provider error bodies, credentials, todo text, goal text, and arbitrary exception details.
+
+## Native C consumption
+
+Consumers use `getSettings(agent)`/admission epoch, not desired disk values. Saving
+desired recovery off does not cancel an old admitted parent or its future children;
+new ordinary roots capture the new policy. Exact live registry membership rejects
+late disposed assistant/error/turn-stopping evidence before it can reserve retry
+or steer. Native generation/turn/step/no-output ownership and finite budgets remain
+the same controller; no parallel scheduler, queue, retry prompt or OCMM event-name
+translation is added. Generic native retry ownership is unchanged. Continuable
+message/interrupt/cold resume and native jobs cancellation are public native control
+paths, not runtime-recovery retries or a fake one-shot task-id continuation.

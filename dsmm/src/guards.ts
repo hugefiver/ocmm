@@ -6,6 +6,9 @@ import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
 import type { ShellDialect, ShellDialectViolation } from "./shell-command.js";
 import type { DeepworkModeController } from "./state.js";
+import type { DsmmRolePolicy } from "./role-policy.js";
+import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
+import type { DshAgent } from "./dsh-types.js";
 
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 
@@ -257,8 +260,17 @@ export function decidePostToolExecution(
   };
 }
 
-export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {
+export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, rolePolicy?: DsmmRolePolicy): void {
+  const tools = ctx.get?.<ToolRuntime>("tools");
+  if (rolePolicy !== undefined && tools !== undefined) {
+    const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent as unknown as DshAgent, execution.name, tools));
+    ctx.effect?.(() => guard);
+  }
   ctx.on?.("tools/pre-execute", async (exec: DshToolExecution, next: () => Promise<DshPreToolDecision>) => {
+    // Role authority precedes optional workflow helpers in every tool realm;
+    // turning common/guards off cannot grant a read-only role a mutation.
+    const denied = exec.agent === undefined ? undefined : rolePolicy?.toolDenial(exec.agent, exec.name);
+    if (denied !== undefined) return { kind: "deny", reason: denied };
     const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
     if (decision === undefined) return next();
     if (decision.kind === "deny") return decision;

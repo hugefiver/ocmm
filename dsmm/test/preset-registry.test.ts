@@ -34,7 +34,7 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
   assert.equal(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").length, enabledChildren.length);
   assert.deepEqual(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").map((item) => item.config?.toolName), enabledChildren.map((id) => id.replace(/-/gu, "_")));
   const planTool = orchestrator.plugins.find((item) => item.config?.toolName === "dsmm_plan_critic");
-  assert.deepEqual(planTool?.config?.toolFilter, { allow: ["read", "glob", "grep"] });
+  assert.deepEqual(planTool?.config?.toolFilter, { allow: ["read", "glob", "grep", "dsmm_code_search", "dsmm_doc_search", "dsmm_research", "dsmm_media_reader"] });
   assert.equal(orchestrator.plugins.some((item) => item.name === "@deepseek-ai/dsh-tool-fs"), true);
   assert.equal("roots" in orchestrator, false);
 });
@@ -145,7 +145,7 @@ test("native preset child inventory is profile-invariant and retains deployment 
   assert.equal(Object.hasOwn(tool, "agentOptions"), false, "the provider admits the bound parent profile route before spawn");
   assert.equal(tool.provider, "dsmm-role-reviewer");
   assert.equal(tool.modelSelectionSettings, false);
-  assert.deepEqual(tool.toolFilter, { allow: ["read", "glob", "grep"] });
+  assert.deepEqual(tool.toolFilter, { allow: ["read", "glob", "grep", "dsmm_code_search", "dsmm_doc_search", "dsmm_research", "dsmm_media_reader"] });
   assert.equal(orchestrator.plugins.some((row) => row.config?.toolName === "dsmm_builder"), false);
   assert.equal(Object.hasOwn(orchestrator.plugins.find((row) => row.config?.toolName === "dsmm_oracle")!.config!, "agentOptions"), false);
 });

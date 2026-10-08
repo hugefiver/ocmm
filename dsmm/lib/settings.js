@@ -23,6 +23,7 @@ export const DEFAULT_DSMM_SETTINGS = {
     presets: {
         materialize: false
     },
+    subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
     workflow: {
         policy: "risk-based",
         strictGates: true,
@@ -102,6 +103,11 @@ const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input) =>
 const PRESETS_SCHEMA = Schema.object({
     materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
     root: Schema.string()
+});
+const SUBAGENTS_SCHEMA = Schema.object({
+    enableRunInBackground: Schema.boolean().default(false),
+    backgroundMode: Schema.union([Schema.const("one-shot"), Schema.const("continuable")]).default("one-shot"),
+    maxDepth: Schema.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER)
 });
 const FINAL_REVIEW_POLICY_SCHEMA = Schema.union([
     Schema.const("simple-oracle-complex-reviewer"),
@@ -208,6 +214,7 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
     roleRouting: ROLE_ROUTING_SCHEMA,
     runtimePolicy: RUNTIME_POLICY_CONFIG_SCHEMA,
     presets: PRESETS_SCHEMA,
+    subagents: SUBAGENTS_SCHEMA,
     workflow: WORKFLOW_CONFIG_SCHEMA,
     guards: GUARDS_SCHEMA,
     runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
@@ -261,6 +268,7 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
         roleRouting: ROLE_ROUTING_SCHEMA,
         runtimePolicy: Schema.any(),
         presets: PRESETS_SCHEMA,
+        subagents: SUBAGENTS_SCHEMA,
         workflow: WORKFLOW_SCHEMA,
         guards: GUARDS_SCHEMA,
         runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
@@ -282,6 +290,7 @@ export function resolveConfig(config = {}) {
         roleRouting: resolveRoleRouting(config.roleRouting),
         runtimePolicy: normalizeRuntimePolicy(Object.hasOwn(config, "runtimePolicy") ? validatePresentRuntimePolicy(config.runtimePolicy) : undefined),
         presets: resolvePresetSettings(config.presets),
+        subagents: SUBAGENTS_SCHEMA(config.subagents ?? {}),
         workflow: resolveWorkflowSettings(config.workflow),
         guards: resolveGuardSettings(config.guards),
         runtimeRecovery: resolveRuntimeRecoverySettings(config.runtimeRecovery),

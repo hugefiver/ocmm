@@ -12,6 +12,43 @@ export const DSMM_LSP_TOOL_NAMES = [
 ] as const;
 export type DsmmLspToolName = (typeof DSMM_LSP_TOOL_NAMES)[number];
 
+export interface DsmmLspRuntimeState {
+  state: "disabled" | "ready" | "unavailable";
+  diagnostic?: "host-anchor-unavailable" | "native-package-unavailable" | "native-tools-unavailable";
+  tools: readonly string[];
+}
+declare module "@deepseek-ai/cordis" { interface Context { dsmmLspState: () => DsmmLspRuntimeState } }
+
+/** Optional native package resolution is anchored by the trusted host, not home guesses or CLI paths. */
+export async function registerLspRuntime(ctx: Context, settings: DsmmLspSettings): Promise<void> {
+  let state: DsmmLspRuntimeState = { state: "disabled", tools: [] };
+  ctx.provide("dsmmLspState", () => state);
+  if (!settings.enabled) return;
+  const anchor = (ctx.get("profileContext") as { installAnchor?: string } | undefined)?.installAnchor;
+  const unavailable = (diagnostic: DsmmLspRuntimeState["diagnostic"]): void => {
+    state = { state: "unavailable", tools: [], diagnostic };
+    if (settings.failOnStartupError) throw new Error(`DSMM LSP startup unavailable: ${diagnostic}`);
+  };
+  if (anchor === undefined) { unavailable("host-anchor-unavailable"); return; }
+  let plugin;
+  try {
+    const modulePath = createRequire(anchor).resolve("@deepseek-ai/dsh-mcp-client");
+    plugin = await import(pathToFileURL(modulePath).href);
+  } catch { unavailable("native-package-unavailable"); return; }
+  if (typeof plugin.apply !== "function") { unavailable("native-package-unavailable"); return; }
+  try { await ctx.plugin(plugin, toDshMcpClientConfig(settings)).await(); }
+  catch { unavailable("native-tools-unavailable"); return; }
+  const tools = ctx.get("tools");
+  const names = tools?.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`)) ?? [];
+  if (names.length === 0) { unavailable("native-tools-unavailable"); return; }
+  state = { state: "ready", tools: names };
+  ctx.on("tools/change", () => {
+    const names = tools!.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`));
+    state = names.length === 0 ? { state: "unavailable", diagnostic: "native-tools-unavailable", tools: [] } : { state: "ready", tools: names };
+  });
+  ctx.effect(() => () => { state = { state: "unavailable", diagnostic: "native-tools-unavailable", tools: [] }; });
+}
+
 export interface DsmmLspSettings {
   enabled: boolean;
   serverName: string;
@@ -182,3 +219,6 @@ function isPlainYamlScalar(value: string): boolean {
   if (/^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/iu.test(value)) return false;
   return !value.startsWith("---") && !value.startsWith("...");
 }
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import type { Context } from "@deepseek-ai/cordis";

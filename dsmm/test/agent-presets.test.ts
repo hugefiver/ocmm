@@ -29,6 +29,7 @@ test("static agent preset files exactly match role render helpers", () => {
 });
 
 test("static agent cordis files mirror native preset plugin inventory", () => {
+  const leaves = new Set(["dsmm-quick", "dsmm-research", "dsmm-code-search", "dsmm-doc-search", "dsmm-media-reader"]);
   for (const role of DSMM_ROLES) {
     const agentCordis = readFileSync(join(packageRoot, "agent-presets", role.id, "agent.cordis.yml"), "utf8");
 
@@ -37,7 +38,7 @@ test("static agent cordis files mirror native preset plugin inventory", () => {
     assert.equal((agentCordis.match(/name: '@deepseek-ai\/dsh-persona'/gu) ?? []).length, 1, `${role.id} has one persona row`);
     assert.doesNotMatch(agentCordis, /@dsmm\/dsmm\/preset-skills/u);
     assert.equal((agentCordis.match(/name: '@deepseek-ai\/dsh-tool-skill'/gu) ?? []).length, 1);
-    assert.equal(agentCordis.includes("name: '@deepseek-ai/dsh-tool-subagent'"), role.id === "dsmm-orchestrator" || role.id === "dsmm-builder");
+    assert.equal(agentCordis.includes("name: '@deepseek-ai/dsh-tool-subagent'"), !leaves.has(role.id), `${role.id} retains its exact source delegation group`);
   }
 });
 

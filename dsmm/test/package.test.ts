@@ -214,7 +214,7 @@ test("settings-status documentation separates deployment configuration from runt
   assert.match(settingsStatus, /existing even-blank Agents retain their admissions/u);
   assert.match(settingsStatus, /actual session ID and idle maintenance\/CAS\/epoch fences/u);
   assert.match(settingsStatus, /Cold resume honors an explicit sidecar.*current global default/u);
-  assert.match(settingsStatus, /`roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `lsp`/u);
+  assert.match(settingsStatus, /`roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `subagents`, `lsp`/u);
 });
 
 test("model-routing documentation ships the exact calibration contract", () => {

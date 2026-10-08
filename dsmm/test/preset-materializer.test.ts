@@ -62,7 +62,7 @@ function writeManagedRole(root: string, roleId: string, marker: string, agent = 
 function assertExactManagedRole(directory: string, roleId: string): void {
   const role = roleDefinition(roleId);
   assert.deepEqual(readdirSync(directory).sort(), [DSMM_MANAGED_PRESET_MARKER, "agent.cordis.yml", "preset.yml"].sort());
-  assert.equal(readFileSync(join(directory, "agent.cordis.yml"), "utf8"), renderAgentCordis(role));
+  assert.equal(readFileSync(join(directory, "agent.cordis.yml"), "utf8"), renderAgentCordis(role, undefined, [role.id]));
   assert.equal(readFileSync(join(directory, "preset.yml"), "utf8"), renderPresetMetadata(role));
   assert.equal(readFileSync(join(directory, DSMM_MANAGED_PRESET_MARKER), "utf8"), currentMarker(roleId));
 }

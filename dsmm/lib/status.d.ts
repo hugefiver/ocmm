@@ -4,6 +4,7 @@ import type { DsmmRoleId } from "./roles.js";
 import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleRuntimeState } from "./profile-types.js";
+import type { DsmmLspRuntimeState } from "./lsp.js";
 export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
     version: typeof DSMM_STATUS_VERSION;
@@ -61,6 +62,7 @@ export interface DsmmStatusSnapshot {
         };
     };
     effectiveSettings: DsmmSettings;
+    lspRuntime?: DsmmLspRuntimeState;
 }
 export declare function createDsmmStatusSnapshot(input: {
     agent: DshAgent;

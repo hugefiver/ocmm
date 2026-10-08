@@ -3,7 +3,9 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
+import { createRequire, registerHooks } from "node:module";
+import { after } from "node:test";
+import { pathToFileURL } from "node:url";
 import { Context } from "@deepseek-ai/cordis";
 import { AgentRegistry, installModelSelection } from "@deepseek-ai/dsh-agent";
 import type { Agent, AgentHandle, CreateAgentOptions, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
@@ -25,6 +27,17 @@ import type { DsmmRoleId } from "../lib/roles.js";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 
 useIsolatedDshEnvironment();
+
+// Only the fixture's missing public web-tool package uses the explicitly supplied
+// full CLI resolver. No private Loader slot or production import is overridden.
+if (process.env.DSMM_TEST_DSH_ENTRY !== undefined) {
+  const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY);
+  const webUrl = pathToFileURL(sdk.resolve("@deepseek-ai/dsh-tool-web")).href;
+  const hook = registerHooks({ resolve(specifier, context, next) {
+    return specifier === "@deepseek-ai/dsh-tool-web" ? { url: webUrl, shortCircuit: true } : next(specifier, context);
+  } });
+  after(() => hook.deregister());
+}
 
 /** All requests terminate inside this adapter; no credentials, network or shell. */
 export class RoutingFixtureAdapter extends LlmAdapter {
@@ -67,7 +80,17 @@ const { SkillRegistry } = skillSdk("@deepseek-ai/dsh-skill");
 const presetSdk = createRequire(require.resolve("@deepseek-ai/dsh-agent-preset-registry"));
 const { Loader }: { Loader: new (ctx: Context, config?: { baseUrl?: string }) => Context["loader"] } = presetSdk("@deepseek-ai/cordis-plugin-loader");
 
-export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string; home?: string; nativePresets?: boolean; isolatedPrompt?: boolean;
+/** Explicit full CLI resolution is test-only; no production absolute SDK path. */
+export async function nativeFixturePlugin(name: string, peer?: string) {
+  const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
+  const resolver = peer === undefined ? sdk : createRequire(sdk.resolve(peer));
+  return import(pathToFileURL(resolver.resolve(name)).href);
+}
+
+export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string; home?: string; nativePresets?: boolean; isolatedPrompt?: boolean; persistence?: boolean;
+  nativeFs?: boolean;
+  nativeJobs?: boolean;
+  nativeSubagents?: { maxDepth?: number; maxActiveSubagents?: number };
   beforeDsmm?: (ctx: Context, create: (meta?: CreateAgentOptions["meta"], selection?: ModelSelectionRef, extra?: Partial<CreateAgentOptions>) => Promise<Agent>) => Promise<void>;
 } = {}) {
   const host = new Context();
@@ -83,6 +106,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     presets: { ...input.presets, root: input.presets?.root ?? join(fixtureDir, "agent-presets") }
   });
   config = withPresetRoot(config);
+  if (options.persistence) config = { ...config, sessionPersistence: { root: join(fixtureDir, "sessions"), compression: "none" } };
   const removeOwnedFixture = (): void => {
     if (!existsSync(fixtureDir)) return;
     assert.equal(lstatSync(fixtureDir).isSymbolicLink(), false, "fixture root must not be linked");
@@ -94,21 +118,40 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     const fibers = [
       ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
       ctx.plugin(LlmRuntime), ctx.plugin(SystemPrompt, {}), ctx.plugin(ToolRuntime, { mode: "native" }),
-      ctx.plugin(SubagentRuntime, {}), ctx.plugin(SkillRegistry, {})
+      ctx.plugin(SubagentRuntime, options.nativeSubagents ?? {}), ctx.plugin(SkillRegistry, {})
     ];
     await Promise.all(fibers.map((fiber) => fiber.await()));
+    if (options.persistence) {
+      const query = await nativeFixturePlugin("@deepseek-ai/dsh-session-query-sqlite", "@deepseek-ai/dsh-base");
+      await ctx.plugin(query.default, { path: join(fixtureDir, "derived-query.sqlite"), openAt: "never" }).await();
+    }
+    if (options.nativeJobs) {
+      const jobs = await nativeFixturePlugin("@deepseek-ai/dsh-jobs-local");
+      const jobTools = await nativeFixturePlugin("@deepseek-ai/dsh-tool-jobs");
+      await ctx.plugin(jobs.default, {}).await();
+      await ctx.plugin(jobTools, {}).await();
+    }
     const llm = ctx.get("llm");
     const tools = ctx.get("tools");
     assert.ok(llm && tools);
     llm.registerAdapter(["fixture", "deepseek-official"], adapter);
-    for (const name of ["read", "glob", "grep", "write", "edit", "bash", "pwsh", "shell"]) {
+    if (options.nativeFs) {
+      const fsLocal = await nativeFixturePlugin("@deepseek-ai/dsh-fs-local");
+      const observed = await nativeFixturePlugin("@deepseek-ai/dsh-fs-observation-policy");
+      const fsTools = await nativeFixturePlugin("@deepseek-ai/dsh-tool-fs");
+      await ctx.plugin(fsLocal.default, { cwd: fixtureDir }).await();
+      await ctx.plugin(observed).await();
+      await ctx.plugin(fsTools, {}).await();
+    }
+    for (const name of ["read", "glob", "grep", "write", "edit", "bash", "pwsh", "shell"].filter((name) => !options.nativeFs || !["read", "write", "edit"].includes(name))) {
       tools.register({
         name, description: `Local native routing fixture ${name}; never touches disk`, parameters: {},
         output: { schema: { type: "string" }, render: () => [{ type: "text", text: name }] },
         async execute() { return name; }
       });
     }
-    ctx.provide("profileContext", { home, dir: profileDir, baseUrl: new URL("../", import.meta.url).href, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
+    ctx.provide("profileContext", { home, dir: profileDir, installAnchor: process.env.DSMM_TEST_DSH_ENTRY,
+      baseUrl: new URL("../", import.meta.url).href, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
     let loader: Context["loader"] | undefined;
     if (options.nativePresets) {
       const loaderFiber = ctx.plugin(Loader, { baseUrl: new URL("../", import.meta.url).href });
@@ -175,6 +218,11 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       },
       deploymentConfig(): unknown { return loader?.resolve(dsmmEntryId!).fiber?.config; },
       create,
+      async disposeAgent(agent: Agent): Promise<void> {
+        const handle = handles.find((candidate) => candidate.agent === agent);
+        assert.ok(handle, "only the exact fixture-owned Agent may be disposed");
+        await handle.dispose();
+      },
       /** Genuine unowned auxiliary Sessions; this grants no live-parent ownership. */
       async createAuxiliary(role: DsmmRoleId = "dsmm-reviewer", selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> {
         const agent = await this.create({ origin: "subagent", agentPreset: role }, selection, extra);

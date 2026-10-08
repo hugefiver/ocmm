@@ -6,9 +6,11 @@ import { registerAgentSkills } from "./preset-skills.js";
 import { registerModelRouting } from "./model-routing.js";
 import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
-import { registerHeadlessRoleTools } from "./role-subagents.js";
+import { registerHeadlessRoleTools, registerNativeSubagentControls } from "./role-subagents.js";
 import { registerRolePresets } from "./preset-registry.js";
 import { registerRoleProviders } from "./role-providers.js";
+import { DsmmRolePolicy } from "./role-policy.js";
+import { registerLspRuntime } from "./lsp.js";
 import { createProfileRuntime } from "./profile-runtime.js";
 import { registerProfilesRpc } from "./profile-rpc.js";
 import { DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, registerSettings } from "./settings.js";
@@ -107,6 +109,7 @@ function applyRuntime(ctx, config, deployment, startup) {
         }
         return admission;
     };
+    const rolePolicy = new DsmmRolePolicy(ctx, getBoundSettings, controller);
     const getSettings = registerSettings(ctx, startup?.settings ?? config, {
         install(readyCtx, getReadySettings) {
             const install = (installCtx, settingsGetter) => {
@@ -120,7 +123,7 @@ function applyRuntime(ctx, config, deployment, startup) {
                     installCtx.inject(["commands"], installCommands);
                 else
                     installCommands(installCtx);
-                registerRoleProviders(installCtx, settingsGetter, getReadySettings);
+                registerRoleProviders(installCtx, settingsGetter, getReadySettings, rolePolicy);
                 // Standing compositions are deployment-only and never replaced on a
                 // runtime profile selection. All routes are read from Agent bindings.
                 const settings = getReadySettings();
@@ -135,6 +138,8 @@ function applyRuntime(ctx, config, deployment, startup) {
             }
             requiresNativeProfiles = true;
             const installProfiles = async (profileCtx) => {
+                await registerLspRuntime(profileCtx, getReadySettings().lsp);
+                await registerNativeSubagentControls(profileCtx);
                 // Standing definitions must exist before initialize audits retained
                 // Agents. A missing optional registry still installs later from this
                 // same frozen startup getter, without blocking unrelated Hosts.
@@ -142,7 +147,13 @@ function applyRuntime(ctx, config, deployment, startup) {
                 if (profileCtx.get?.("agentPresets") !== undefined)
                     await presets;
                 runtime = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller,
-                    ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }) });
+                    ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }),
+                    subagentCapabilities: {
+                        backgroundJobs: profileCtx.get?.("jobs") !== undefined && profileCtx.get?.("tools")?.get("job_output") !== undefined,
+                        continuable: profileCtx.get?.("sessionPersistence") !== undefined && profileCtx.get?.("sessionQuery") !== undefined
+                            && profileCtx.get?.("subagents")?.getProvider("spawn")?.prepareContinuable !== undefined
+                            && profileCtx.get?.("tools")?.get("send_message") !== undefined
+                    } });
                 profileCtx.provide?.("dsmmProfileRuntime", runtime);
                 if (deployment !== undefined)
                     profileCtx.provide?.("dsmmDeploymentConfig", deployment);
@@ -151,6 +162,7 @@ function applyRuntime(ctx, config, deployment, startup) {
                     registerProfilesRpc(rpcCtx, manager, deployment);
                 });
                 install(profileCtx, runtime.getSettings);
+                await registerHeadlessRoleTools(profileCtx, controller, runtime.getSettings, rolePolicy);
             };
             if (readyCtx.inject !== undefined) {
                 const initialization = readyCtx.inject(["profileContext"], installProfiles);
@@ -162,8 +174,7 @@ function applyRuntime(ctx, config, deployment, startup) {
     });
     registerRuntimeRecovery(ctx, controller, getBoundSettings);
     registerModelRouting(ctx, controller, getBoundSettings);
-    registerHeadlessRoleTools(ctx, controller, getBoundSettings);
-    registerSafetyGuards(ctx, controller, getBoundSettings);
+    registerSafetyGuards(ctx, controller, getBoundSettings, ctx.get === undefined ? undefined : rolePolicy);
     return profileInitialization;
 }
 // Cordis Loader introspects this object's Config/inject; a bare function loses

@@ -5,6 +5,7 @@ import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole, rolePluginRows } from "./roles.j
 import type { DsmmRoleId } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
 import type { DsmmSettings } from "./settings.js";
+import { allowedRoleChildren, readonlyRoleTool, roleFromToolName } from "./role-policy.js";
 
 interface NativePresetRegistry {
   register(definition: {
@@ -83,8 +84,10 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
           if (tools?.restrict === undefined || tools.guard === undefined) throw new Error(`dsmm read-only role requires DSH tools guard/restrict: ${selected}`);
           const disposeGuard = tools.guard((execution) => {
             if (execution.agent !== agent || !isReadonlyRole(registry.composedPreset(agent.ctx))) return undefined;
-            return ["write", "edit", "bash", "pwsh"].includes(execution.name) || execution.name.startsWith("dsmm_")
-              ? "dsmm read-only role does not permit mutation or delegation" : undefined;
+            const role = registry.composedPreset(agent.ctx) as DsmmRoleId;
+            const target = roleFromToolName(execution.name);
+            return target === undefined ? readonlyRoleTool(execution.name, settings) ? undefined : "dsmm read-only role does not permit this tool"
+              : allowedRoleChildren(role).includes(target) && settings.roles[target] ? undefined : "dsmm read-only role does not permit this delegation";
           });
           states.set(agent, { role: selected, disposeGuard, pending: true });
           restrictedAgents.add(agent);

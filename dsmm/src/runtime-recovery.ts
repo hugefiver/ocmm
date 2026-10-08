@@ -1,12 +1,13 @@
 import { createUserMessage, expandAssistantStream } from "@deepseek-ai/dsh-llm";
 import type { AssistantStreamRecord } from "@deepseek-ai/dsh-llm";
 import type { AssistantStreamFrame } from "@deepseek-ai/dsh-agent";
-import type { AgentRequestErrorFrame, DshAgent, DshContext, DshEpochHeader, DshLlmFailure, DshLlmRuntime } from "./dsh-types.js";
+import type { AgentRequestErrorFrame, DshAgent, DshAgentsRegistry, DshContext, DshEpochHeader, DshLlmFailure, DshLlmRuntime } from "./dsh-types.js";
 import { foldDurableRecoveryWork, isCurrentRecoveryStep } from "./recovery-policy.js";
 import { isDsmmRoleId } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { applyModelRoute, isUnavailableRouteFailure, latestNativeModelSelection, liveRolePolicyIdentity, recordAdmittedRecoveryRoute, roleRouteLock, sameModelRoute, selectInitialModelRoute } from "./role-routing.js";
-import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
+import { childOwnedSessionEvents, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
+import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
 import type { DsmmRecoveryRoute, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
@@ -110,6 +111,10 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
   let disposeRequestError: unknown;
   let disposeTurnStopping: unknown;
   let disposeAssistantStream: unknown;
+  const live = (agent: DshAgent): boolean => {
+    const agents = ctx.get?.<DshAgentsRegistry>("agents");
+    return agents === undefined || agent.id !== undefined && agents.get(agent.id) === agent;
+  };
 
   const reset = (): void => {
     const request = disposeRequest;
@@ -133,7 +138,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
 
   try {
     disposeAssistantStream = ctx.on("agent/assistant-stream", ({ agent, frame }: { agent: DshAgent; frame: AssistantStreamFrame }) => {
-      if (!active) return;
+      if (!active || !live(agent)) return;
       if (frame.type === "start") {
         const settings = getSettings(agent);
         const role = resolveEffectiveDsmmRole(agent, settings, controller.active(agent, settings.defaultActive));
@@ -173,6 +178,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
     }, { prepend: true });
     disposeRequest = ctx.on("agent/request", async (frame, next) => {
       const downstream = await next();
+      if (!active || !live(frame.agent)) return downstream;
       const pending = pendingByAgent.get(frame.agent);
       if (pending === undefined) return downstream;
       if (latestNativeModelSelection(frame.agent)?.seq !== pending.manualSelectionSeq) {
@@ -209,6 +215,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       return applyModelRoute(downstream, pending.route);
     }, { prepend: true });
     disposeRequestError = ctx.on("agent/request-error", async (frame, next) => {
+      if (!active || !live(frame.agent) || frame.signal.aborted) return undefined;
       let settings;
       let role;
       try {
@@ -274,7 +281,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
         }
         const currentSettings = getSettings(frame.agent);
         const currentRole = resolveEffectiveDsmmRole(frame.agent, currentSettings, controller.active(frame.agent, currentSettings.defaultActive));
-        if (!active || frame.signal.aborted || currentRole !== role
+        if (!active || !live(frame.agent) || frame.signal.aborted || currentRole !== role
           || liveRolePolicyIdentity(frame.agent, currentSettings, currentRole, getSettings.admission?.(frame.agent).epoch) !== policy
           || roleRouteLock(frame.agent, policy!) !== lock || lock.generation !== expectedGeneration
           || attemptsByAgent.get(frame.agent) !== attempt || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step)
@@ -299,7 +306,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       try {
         const settings = getSettings(frame.agent);
         const continuation = settings.runtimeRecovery.idleContinuation;
-        if (!settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted) return;
+        if (!active || !live(frame.agent) || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted) return;
 
         const preset = resolveSelectedAgentPreset(frame.agent.session);
         const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);

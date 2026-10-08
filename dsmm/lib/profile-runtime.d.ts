@@ -30,6 +30,11 @@ export interface DsmmProfileRuntimeOptions {
     /** Awaited once per new ordinary root; never used by children or idle switches. */
     readDesired?: () => Promise<DsmmDeploymentSnapshot>;
     startup?: DsmmDeploymentSnapshot;
+    /** Frozen actual native startup substrate; omission is the trusted legacy seam. */
+    subagentCapabilities?: {
+        backgroundJobs: boolean;
+        continuable: boolean;
+    };
 }
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission {
     baseline: DsmmSettings;

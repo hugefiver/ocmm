@@ -31,7 +31,7 @@ test("native preflight chooses first native-resolvable candidate without a prima
 });
 
 test("native alias preflight selects initial fallback while preserving native read-only spawn authority", async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": {
+  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-reviewer": {
     primary: { provider: "missing-native-adapter", model: "unavailable" }, fallbackRoutes: [backup]
   } } });
   try {

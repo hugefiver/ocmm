@@ -172,6 +172,7 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     presets: {
       materialize: false
     },
+    subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
     runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
@@ -221,6 +222,7 @@ test("resolveConfig overlays plugin config on defaults", () => {
     presets: {
       materialize: false
     },
+    subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
     runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,

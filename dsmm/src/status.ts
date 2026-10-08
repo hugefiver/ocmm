@@ -5,11 +5,13 @@ import { isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
 import { DSMM_ROLES, isDsmmRoleId } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { persistedRoleRoute, liveRolePolicyIdentity, roleRouteRuntimeState } from "./role-routing.js";
-import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
 import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleRuntimeState } from "./profile-types.js";
+import type { DsmmLspRuntimeState } from "./lsp.js";
 
 export const DSMM_STATUS_VERSION = 1 as const;
 
@@ -69,6 +71,7 @@ export interface DsmmStatusSnapshot {
     };
   };
   effectiveSettings: DsmmSettings;
+  lspRuntime?: DsmmLspRuntimeState;
 }
 
 interface DsmmStatusRouteInput {
@@ -186,7 +189,8 @@ export function createDsmmStatusSnapshot(input: {
         maxContinuations: settings.runtimeRecovery.idleContinuation.maxContinuations
       }
     },
-    effectiveSettings: copySettings(settings)
+    effectiveSettings: copySettings(settings),
+    ...(agent.ctx?.get?.<() => DsmmLspRuntimeState>("dsmmLspState") === undefined ? {} : { lspRuntime: agent.ctx.get!<() => DsmmLspRuntimeState>("dsmmLspState")!() })
   };
 }
 
@@ -299,6 +303,7 @@ function copySettings(settings: DsmmSettings): DsmmSettings {
     }])),
     runtimePolicy: { strategy: settings.runtimePolicy.strategy, rateLimit: { ...settings.runtimePolicy.rateLimit } },
     presets: { ...settings.presets, ...(settings.presets.root === undefined ? {} : { root: "<configured>" }) },
+    subagents: { ...settings.subagents },
     workflow: { ...settings.workflow },
     guards: {
       ...settings.guards,

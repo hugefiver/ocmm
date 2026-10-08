@@ -1,6 +1,7 @@
 import { getTraceable } from "@deepseek-ai/cordis";
 import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole, rolePluginRows } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
+import { allowedRoleChildren, readonlyRoleTool, roleFromToolName } from "./role-policy.js";
 /** Declare roles to DSH 0.2's native registry; directories are not discovery inputs. */
 export function registerRolePresets(ctx, getSettings) {
     const install = async (readyCtx) => {
@@ -55,8 +56,10 @@ export function registerRolePresets(ctx, getSettings) {
                     const disposeGuard = tools.guard((execution) => {
                         if (execution.agent !== agent || !isReadonlyRole(registry.composedPreset(agent.ctx)))
                             return undefined;
-                        return ["write", "edit", "bash", "pwsh"].includes(execution.name) || execution.name.startsWith("dsmm_")
-                            ? "dsmm read-only role does not permit mutation or delegation" : undefined;
+                        const role = registry.composedPreset(agent.ctx);
+                        const target = roleFromToolName(execution.name);
+                        return target === undefined ? readonlyRoleTool(execution.name, settings) ? undefined : "dsmm read-only role does not permit this tool"
+                            : allowedRoleChildren(role).includes(target) && settings.roles[target] ? undefined : "dsmm read-only role does not permit this delegation";
                     });
                     states.set(agent, { role: selected, disposeGuard, pending: true });
                     restrictedAgents.add(agent);

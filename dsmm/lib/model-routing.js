@@ -1,6 +1,7 @@
 import { isDsmmRoleId } from "./roles.js";
 import { applyModelRoute, clearRoleRouteLock, effectiveRoleFallbackRoutes, establishRolePolicy, latestNativeModelSelection, nativeModelSelectionWasAccepted, orderedModelRoutes, persistedRoleRoute, pinRoleRoute, roleRouteLock, selectInitialModelRoute, sameExactModelRoute, sameModelRoute, takeAdmittedRecoveryRoute } from "./role-routing.js";
-import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { childOwnedSessionEvents, sessionEvents } from "./session-scope.js";
 import { isCurrentRecoveryStep } from "./recovery-policy.js";
 export function isDeepseekV4ProRoute(config) {
@@ -150,7 +151,7 @@ export function registerModelRouting(ctx, controller, getSettings) {
                 const calibration = route === "flash" ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration;
                 if (calibration === "off")
                     return downstream;
-                const preset = resolveSelectedAgentPreset(frame.agent?.session);
+                const preset = role ?? resolveSelectedAgentPreset(frame.agent?.session);
                 const inScope = active || isDsmmRoleId(preset);
                 if (!inScope)
                     return downstream;

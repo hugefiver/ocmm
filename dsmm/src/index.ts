@@ -8,9 +8,11 @@ import { registerAgentSkills } from "./preset-skills.js";
 import { registerModelRouting } from "./model-routing.js";
 import { registerRuntimeRecovery } from "./runtime-recovery.js";
 import { reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
-import { registerHeadlessRoleTools } from "./role-subagents.js";
+import { registerHeadlessRoleTools, registerNativeSubagentControls } from "./role-subagents.js";
 import { registerRolePresets } from "./preset-registry.js";
 import { registerRoleProviders } from "./role-providers.js";
+import { DsmmRolePolicy } from "./role-policy.js";
+import { registerLspRuntime } from "./lsp.js";
 import { createProfileRuntime } from "./profile-runtime.js";
 import type { DsmmProfileRuntime } from "./profile-runtime.js";
 import { registerProfilesRpc } from "./profile-rpc.js";
@@ -42,7 +44,7 @@ export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPrese
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
 export { DSMM_GUARD_PREFIX, decidePostToolExecution, decidePreToolExecution, isSafetyScopeActive, registerSafetyGuards, truncateTextMiddle } from "./guards.js";
 export { DEFAULT_DSMM_LSP_SETTINGS, DSMM_LSP_SERVER_NAME, DSMM_LSP_TOOL_NAMES, parseLspSmokeCommand, publicLspToolName, renderLspMcpPatch, resolveLspSettings, toDshMcpClientConfig } from "./lsp.js";
-export type { DshMcpStdioConfig, DsmmLspSettings, DsmmLspToolName } from "./lsp.js";
+export type { DshMcpStdioConfig, DsmmLspSettings, DsmmLspToolName, DsmmLspRuntimeState } from "./lsp.js";
 export { classifyModelFamily } from "./model-family.js";
 export type { DsmmModelFamily } from "./model-family.js";
 export { desiredDeepseekEffort, isDeepseekV4ProRoute, registerModelRouting, selectAdvertisedEffort } from "./model-routing.js";
@@ -59,6 +61,7 @@ export type { DsmmStatusSnapshot } from "./status.js";
 export type { AgentRequestErrorFrame, AgentRequestFrame, AgentTurnStoppingFrame, DshEpochHeader, DshGoalChangeEventData, DshGoalSnapshot, DshLlmCallConfig, DshLlmFailure, DshModelReasoningInfo, DshReasoningEffortInfo, DshRequestErrorAction, DshRequestHeaderEventData, DshResolvedModelInfo, DshStepBoundaryEventData, DshTodoItem, DshTodoWriteEventData } from "./dsh-types.js";
 export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
 export type { DeepseekCalibration, DeepseekDefaultReasoningEffort, DsmmFinalReviewPolicy, DsmmGitWritePolicy, DsmmGuardScope, DsmmGuardSettings, DsmmPluginConfig, DsmmModelRoute, DsmmRoleRoutingConfig, DsmmRoleRouting, DsmmRecoveryRoute, DsmmRuntimeRecoverySettings, DsmmSettings, DsmmSettingsGetter, DsmmSkillName, DsmmWorkflowSettings, MvpSkillName } from "./settings.js";
+export type { DsmmSubagentSettings } from "./settings.js";
 export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
 export { resolveDshHome } from "./dsh-home.js";
 export { DsmmDeploymentConfig, parseGlobalConfig, editGlobalConfig } from "./deployment-config.js";
@@ -129,6 +132,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
     }
     return admission;
   };
+  const rolePolicy = new DsmmRolePolicy(ctx, getBoundSettings, controller);
   const getSettings = registerSettings(ctx, startup?.settings ?? config, {
     install(readyCtx, getReadySettings) {
       const install = (installCtx: DshContext, settingsGetter: DsmmSettingsGetter): void => {
@@ -140,7 +144,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
         };
         if (installCtx.get !== undefined && installCtx.inject !== undefined) installCtx.inject(["commands"], installCommands);
         else installCommands(installCtx);
-        registerRoleProviders(installCtx, settingsGetter, getReadySettings);
+        registerRoleProviders(installCtx, settingsGetter, getReadySettings, rolePolicy);
         // Standing compositions are deployment-only and never replaced on a
         // runtime profile selection. All routes are read from Agent bindings.
         const settings = getReadySettings();
@@ -154,13 +158,21 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
       }
       requiresNativeProfiles = true;
       const installProfiles = async (profileCtx: DshContext): Promise<void> => {
+        await registerLspRuntime(profileCtx as Context, getReadySettings().lsp);
+        await registerNativeSubagentControls(profileCtx as Context);
         // Standing definitions must exist before initialize audits retained
         // Agents. A missing optional registry still installs later from this
         // same frozen startup getter, without blocking unrelated Hosts.
         const presets = registerRolePresets(profileCtx, getReadySettings);
         if (profileCtx.get?.("agentPresets") !== undefined) await presets;
         runtime = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller,
-          ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }) });
+          ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }),
+          subagentCapabilities: {
+            backgroundJobs: profileCtx.get?.("jobs") !== undefined && (profileCtx.get?.("tools") as Context["tools"] | undefined)?.get("job_output") !== undefined,
+            continuable: profileCtx.get?.("sessionPersistence") !== undefined && profileCtx.get?.("sessionQuery") !== undefined
+              && (profileCtx.get?.("subagents") as Context["subagents"] | undefined)?.getProvider("spawn")?.prepareContinuable !== undefined
+              && (profileCtx.get?.("tools") as Context["tools"] | undefined)?.get("send_message") !== undefined
+          } });
         profileCtx.provide?.("dsmmProfileRuntime", runtime);
         if (deployment !== undefined) profileCtx.provide?.("dsmmDeploymentConfig", deployment);
         const manager = runtime;
@@ -168,6 +180,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
           registerProfilesRpc(rpcCtx as unknown as Context, manager, deployment);
         });
         install(profileCtx, runtime.getSettings);
+        await registerHeadlessRoleTools(profileCtx, controller, runtime.getSettings, rolePolicy);
       };
       if (readyCtx.inject !== undefined) {
         const initialization = readyCtx.inject(["profileContext"], installProfiles);
@@ -178,8 +191,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
   });
   registerRuntimeRecovery(ctx, controller, getBoundSettings);
   registerModelRouting(ctx, controller, getBoundSettings);
-  registerHeadlessRoleTools(ctx, controller, getBoundSettings);
-  registerSafetyGuards(ctx, controller, getBoundSettings);
+  registerSafetyGuards(ctx, controller, getBoundSettings, ctx.get === undefined ? undefined : rolePolicy);
   return profileInitialization;
 }
 

@@ -171,6 +171,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-plan-critic
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -267,6 +271,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-builder
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -417,6 +425,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-oracle
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -517,6 +529,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-oracle-2nd
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -617,6 +633,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-creative
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -979,6 +999,10 @@
         - 'read'
         - 'glob'
         - 'grep'
+        - 'dsmm_code_search'
+        - 'dsmm_doc_search'
+        - 'dsmm_research'
+        - 'dsmm_media_reader'
 - id: subagent-dsmm-media-reader
   name: '@deepseek-ai/dsh-tool-subagent'
   config:

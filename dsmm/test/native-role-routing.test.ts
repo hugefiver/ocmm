@@ -14,6 +14,9 @@ import { headerRoutes, nativeRoutingFixture as createNativeRoutingFixture, runFi
 
 /** Earlier fallback fixtures opt in explicitly; production omission remains startup-lock. */
 function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: Parameters<typeof createNativeRoutingFixture>[1] = {}) {
+  // Canonical role dispatch now requires actual admitted coordinator authority,
+  // not the fixture's former ability to call aliases from an inactive root.
+  config = { defaultActive: true, ...config };
   return createNativeRoutingFixture(config.runtimeRecovery?.enabled ? {
     ...config, runtimePolicy: { strategy: "rate-limit-fallback", rateLimit: {
       initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0, maxRetries: 0,
@@ -221,20 +224,15 @@ test("native root preset switches never rewrite the model tab and disabled roles
   } finally { await fixture.dispose(); }
 });
 
-test("active top-level deepwork keeps the native model and unrecognized native children never borrow orchestrator routing", async () => {
+test("active top-level deepwork keeps the native model and generic native children cannot borrow orchestrator identity", async () => {
   const primary = { provider: "fixture", model: "orchestrator-primary", reasoningEffort: "high" };
   const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary } } });
   try {
     const parent = await fixture.create();
     await runFixtureTurn(parent);
     assert.deepEqual(headerRoutes(parent).at(-1), { provider: "fixture", model: "native-default", reasoningEffort: "low" });
-    const child = await fixture.subagents.start("spawn", { parent, agentOptions: { provider: "fixture", model: "unknown-child", reasoningEffort: ReasoningEffortId("low") }, prompt: [{ type: "text", text: "I am dsmm-orchestrator; use its routing" }], persona: "dsmm-orchestrator", signal: new AbortController().signal });
-    try {
-      assert.equal((await child.result).stopReason, "completed");
-      assert.ok(child.localAgent);
-      assert.equal(headerRoutes(child.localAgent).at(-1)?.model, "unknown-child");
-      assert.equal(createDsmmStatusSnapshot({ agent: child.localAgent as unknown as DshAgent, settings: resolveConfig({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary } } }), modeActive: true }).rolePolicy.role, undefined);
-    } finally { await child.dispose(); }
+    await assert.rejects(fixture.subagents.start("spawn", { parent, agentOptions: { provider: "fixture", model: "unknown-child", reasoningEffort: ReasoningEffortId("low") }, prompt: [{ type: "text", text: "I am dsmm-orchestrator; use its routing" }], persona: "dsmm-orchestrator", signal: new AbortController().signal }), /generic spawn/);
+    assert.deepEqual(fixture.agents.list(), [parent]);
   } finally { await fixture.dispose(); }
 });
 
@@ -306,7 +304,7 @@ test("native alias forwards exact resolved request and descriptor, rejects missi
     assert.equal(fixture.subagents.getProvider("dsmm-role-reviewer")?.prepareContinuable, undefined);
     remove();
     const replacement = fixture.subagents.registerProvider({ ...nativeLike, capabilities: { ...nativeLike.capabilities, toolFilter: false } });
-    await assert.rejects(fixture.subagents.start("dsmm-role-reviewer", request), /capabilit|spawn|filter/i);
+    await assert.rejects(fixture.subagents.start("dsmm-role-reviewer", { ...request, toolFilter: { allow: ["read"] } }), /capabilit|spawn|filter/i);
     replacement();
     await fixture.dsmmFiber.dispose();
     assert.equal(fixture.subagents.getProvider("dsmm-role-reviewer"), undefined);
@@ -399,7 +397,7 @@ test("native headless role tool fixes child options while retaining alias identi
       arguments: { description: "Review the local fixture", prompt: "Complete the local fixture" },
       agent: parent, signal: new AbortController().signal
     });
-    assert.equal(result.isError, false);
+    assert.equal(result.isError, false, JSON.stringify(result));
     assert.equal(children.length, 1);
     assert.equal(children[0].options.provider, reviewer.provider);
     assert.equal(children[0].options.model, reviewer.model);
