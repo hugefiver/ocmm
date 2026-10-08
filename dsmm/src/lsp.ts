@@ -20,7 +20,7 @@ export interface DsmmLspRuntimeState {
 declare module "@deepseek-ai/cordis" { interface Context { dsmmLspState: () => DsmmLspRuntimeState } }
 
 /** Optional native package resolution is anchored by the trusted host, not home guesses or CLI paths. */
-export async function registerLspRuntime(ctx: Context, settings: DsmmLspSettings): Promise<void> {
+export async function registerLspRuntime(ctx: Context, settings: DsmmLspSettings, getSettings?: import("./settings.js").DsmmSettingsGetter): Promise<void> {
   let state: DsmmLspRuntimeState = { state: "disabled", tools: [] };
   ctx.provide("dsmmLspState", () => state);
   if (!settings.enabled) return;
@@ -36,11 +36,20 @@ export async function registerLspRuntime(ctx: Context, settings: DsmmLspSettings
     plugin = await import(pathToFileURL(modulePath).href);
   } catch { unavailable("native-package-unavailable"); return; }
   if (typeof plugin.apply !== "function") { unavailable("native-package-unavailable"); return; }
+  const before = new Map(ctx.get("tools")?.schemas().map((row) => [row.name, ctx.get("tools")!.get(row.name)]) ?? []);
   try { await ctx.plugin(plugin, toDshMcpClientConfig(settings)).await(); }
   catch { unavailable("native-tools-unavailable"); return; }
   const tools = ctx.get("tools");
   const names = tools?.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`)) ?? [];
   if (names.length === 0) { unavailable("native-tools-unavailable"); return; }
+  if (getSettings !== undefined) {
+    const owned = new Map(names.filter((name) => tools!.get(name) !== before.get(name)).map((name) => [name, tools!.get(name)]));
+    const dispose = tools!.guard((execution) => execution.agent !== undefined
+      && owned.has(execution.name) && owned.get(execution.name) === tools!.get(execution.name, execution.agent)
+      && !getSettings(execution.agent as unknown as import("./dsh-types.js").DshAgent).modules.deepwork.enabled
+      ? "Deepwork LSP is not admitted in this Agent" : undefined);
+    ctx.effect(() => dispose);
+  }
   state = { state: "ready", tools: names };
   ctx.on("tools/change", () => {
     const names = tools!.schemas().map((tool) => tool.name).filter((name) => name.startsWith(`mcp__${settings.serverName}__`));

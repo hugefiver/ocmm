@@ -225,7 +225,7 @@ function selectionState(value) {
   return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value) {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork"]);
+  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
   return {
     sessionId: sessionId(item.sessionId),
@@ -241,6 +241,7 @@ function sessionSnapshot(value) {
     }),
     ...optional(item, "rolePolicy", rolePolicy),
     ...optional(item, "profileModel", modelRoute),
+    ...optional(item, "modules", moduleStates),
     ...optional(item, "deepwork", (input) => {
       const mode = object(input, ["active", "explicit", "locked", "revision"]);
       return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
@@ -319,11 +320,32 @@ function configDescriptor(method, parameter) {
     result: codec("GlobalConfigSnapshot", globalSnapshot)
   };
 }
+function moduleStates(value) {
+  if (!Array.isArray(value) || value.length !== 1) fail("modules");
+  return value.map((value2) => {
+    const row = object(value2, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
+    const descriptor2 = object(row.descriptor, ["id", "label", "key"]);
+    if (descriptor2.id !== "deepwork" || descriptor2.label !== "Deepwork" || descriptor2.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown") fail("module descriptor");
+    const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
+    if (!["defaults", "global"].includes(String(desired.source)) || !["current-global", "admission", "startup"].includes(String(desired.capture)) || ![null, "global-disabled", "restart-required"].includes(next.reason) || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason)) fail("module state");
+    return {
+      descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" },
+      hostBundleEnabled: "unknown",
+      desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source, capture: desired.capture },
+      startupMounted: boolean(row.startupMounted, "startupMounted"),
+      admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
+      nextRoot: { admitted: boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
+      reason: row.reason,
+      pending: boolean(row.pending, "pending")
+    };
+  });
+}
 var TYPERT_REMOTE = {
   package: "@dsmm/dsmm",
   descriptors: [
     configDescriptor("describe"),
     configDescriptor("save", codec("GlobalConfigSaveRequest", globalSaveRequest)),
+    { ...configDescriptor("describeModules"), result: codec("DsmmModuleStateArray", moduleStates) },
     {
       ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
       parameters: [

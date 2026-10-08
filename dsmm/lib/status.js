@@ -7,7 +7,8 @@ import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-poli
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export const DSMM_STATUS_VERSION = 1;
 export function createDsmmStatusSnapshot(input) {
-    const { agent, settings, modeActive } = input;
+    const { agent, settings } = input;
+    const modeActive = settings.modules.deepwork.enabled && input.modeActive;
     const ordinaryRoot = agent.session.header?.origin !== "subagent";
     const selectedPreset = resolveSelectedAgentPreset(agent.session);
     const dsmmPreset = isDsmmRoleId(selectedPreset);
@@ -44,6 +45,7 @@ export function createDsmmStatusSnapshot(input) {
             && route.model === selectedRoute.model && route.reasoningEffort === selectedRoute.reasoningEffort);
     return {
         version: DSMM_STATUS_VERSION,
+        ...(input.modules === undefined ? {} : { modules: structuredClone(input.modules) }),
         ...(input.admission?.store === undefined ? {} : { profileStore: { ...input.admission.store } }),
         ...(input.admission?.deployment === undefined ? {} : { deployment: {
                 globalRevision: input.admission.deployment.globalRevision, nativeRevision: input.admission.deployment.nativeRevision,
@@ -133,6 +135,7 @@ export function formatDsmmStatus(snapshot) {
     return [
         "Deepwork status",
         `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
+        ...snapshot.modules?.map((module) => `Module ${module.descriptor.id}: desired=${module.desired.enabled} (${module.desired.source}, ${module.desired.capture}); startup-mounted=${module.startupMounted}; admitted=${module.admitted}; next-root=${module.nextRoot.admitted}; pending=${module.pending}; reason=${module.reason ?? "none"}; host-bundle-enabled=${module.hostBundleEnabled}`) ?? [],
         `Scope: ${scope}`,
         ...(snapshot.admission === undefined ? [] : [`Profile admission: ${snapshot.admission.scope}; profile=${snapshot.admission.profile?.id ?? "deployment baseline"}; epoch=${snapshot.admission.epoch}`]),
         ...(snapshot.deployment === undefined ? [] : [`Deployment capture: global=${snapshot.deployment.globalRevision}; native=${snapshot.deployment.nativeRevision}; restart-required=${snapshot.deployment.restartRequired.join(",") || "none"}`]),
@@ -192,6 +195,7 @@ function resolveCalibration(input) {
 }
 function copySettings(settings) {
     return {
+        modules: { deepwork: { enabled: settings.modules.deepwork.enabled } },
         modeName: settings.modeName,
         defaultActive: settings.defaultActive,
         promptOrder: settings.promptOrder,

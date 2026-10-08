@@ -79,6 +79,12 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
     idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 export interface DsmmPluginConfig {
+    /** Only global deployment input; native/legacy profile transport rejects it. */
+    modules?: {
+        deepwork?: {
+            enabled?: boolean;
+        };
+    };
     /** Startup-only native storage binding; never a runtime-profile field. */
     sessionPersistence?: {
         root: string;
@@ -106,6 +112,11 @@ export interface DsmmPluginConfig {
     lsp?: Partial<DsmmLspSettings>;
 }
 export interface DsmmSettings {
+    modules: {
+        deepwork: {
+            enabled: boolean;
+        };
+    };
     modeName: string;
     defaultActive: boolean;
     promptOrder: number;
@@ -173,6 +184,7 @@ export interface DsmmDeploymentSnapshot {
 /** Runtime consumers pass their Agent so immutable profile admission is retained. */
 export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
     admission?: (agent?: DshAgent) => DsmmProfileAdmission;
+    moduleStates?: (agent?: DshAgent) => import("./modules.js").DsmmModuleState[];
 };
 export interface DsmmResolvedRoleRuntimePolicy {
     readonly strategy: DsmmRoutingStrategy;
@@ -183,6 +195,8 @@ export interface DsmmResolvedRoleRuntimePolicy {
 }
 export declare const DSMM_STATUS_COMMAND = "dsmm-status";
 export interface RegisterSettingsOptions {
+    /** Already resolved/captured internal settings, never external profile input. */
+    resolved?: DsmmSettings;
     onChange?: (settings: DsmmSettings) => void;
     install?: (readyCtx: DshContext, getSettings: () => DsmmSettings) => void;
 }
@@ -199,6 +213,7 @@ export declare function validateSparseConfig(input: unknown, global?: boolean): 
 export declare function validateDeploymentPath(path: readonly string[]): void;
 export declare function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConfig;
 export declare function resolveDeployment(global: DsmmPluginConfig, profile: DsmmPluginConfig): DsmmSettings;
+export declare function validateResolvedSettings(settings: DsmmSettings): DsmmSettings;
 export declare function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting;
 export declare function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean;
 export declare function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings;

@@ -12,11 +12,13 @@ import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSet
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleRuntimeState } from "./profile-types.js";
 import type { DsmmLspRuntimeState } from "./lsp.js";
+import type { DsmmModuleState } from "./modules.js";
 
 export const DSMM_STATUS_VERSION = 1 as const;
 
 export interface DsmmStatusSnapshot {
   version: typeof DSMM_STATUS_VERSION;
+  modules?: DsmmModuleState[];
   admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
   profileStore?: DsmmProfileAdmission["store"];
   deployment?: { globalRevision: string; nativeRevision: string; entryId: string; hostProfileKey: string; restartRequired: readonly string[]; sources: NonNullable<DsmmProfileAdmission["sources"]>; sourceCaptures?: DsmmProfileAdmission["sourceCaptures"] };
@@ -86,8 +88,10 @@ export function createDsmmStatusSnapshot(input: {
   modeActive: boolean;
   admission?: DsmmProfileAdmission;
   roleRuntimeState?: DsmmRoleRuntimeState;
+  modules?: DsmmModuleState[];
 }): DsmmStatusSnapshot {
-  const { agent, settings, modeActive } = input;
+  const { agent, settings } = input;
+  const modeActive = settings.modules.deepwork.enabled && input.modeActive;
   const ordinaryRoot = agent.session.header?.origin !== "subagent";
   const selectedPreset = resolveSelectedAgentPreset(agent.session);
   const dsmmPreset = isDsmmRoleId(selectedPreset);
@@ -121,6 +125,7 @@ export function createDsmmStatusSnapshot(input: {
 
   return {
     version: DSMM_STATUS_VERSION,
+    ...(input.modules === undefined ? {} : { modules: structuredClone(input.modules) }),
     ...(input.admission?.store === undefined ? {} : { profileStore: { ...input.admission.store } }),
     ...(input.admission?.deployment === undefined ? {} : { deployment: {
       globalRevision: input.admission.deployment.globalRevision, nativeRevision: input.admission.deployment.nativeRevision,
@@ -212,6 +217,7 @@ export function formatDsmmStatus(snapshot: DsmmStatusSnapshot): string {
   return [
     "Deepwork status",
     `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
+    ...snapshot.modules?.map((module) => `Module ${module.descriptor.id}: desired=${module.desired.enabled} (${module.desired.source}, ${module.desired.capture}); startup-mounted=${module.startupMounted}; admitted=${module.admitted}; next-root=${module.nextRoot.admitted}; pending=${module.pending}; reason=${module.reason ?? "none"}; host-bundle-enabled=${module.hostBundleEnabled}`) ?? [],
     `Scope: ${scope}`,
     ...(snapshot.admission === undefined ? [] : [`Profile admission: ${snapshot.admission.scope}; profile=${snapshot.admission.profile?.id ?? "deployment baseline"}; epoch=${snapshot.admission.epoch}`]),
     ...(snapshot.deployment === undefined ? [] : [`Deployment capture: global=${snapshot.deployment.globalRevision}; native=${snapshot.deployment.nativeRevision}; restart-required=${snapshot.deployment.restartRequired.join(",") || "none"}`]),
@@ -284,6 +290,7 @@ function resolveCalibration(input: {
 
 function copySettings(settings: DsmmSettings): DsmmSettings {
   return {
+    modules: { deepwork: { enabled: settings.modules.deepwork.enabled } },
     modeName: settings.modeName,
     defaultActive: settings.defaultActive,
     promptOrder: settings.promptOrder,

@@ -59,6 +59,8 @@ export function registerModelRouting(ctx, controller, getSettings) {
                 if (frame.signal.aborted)
                     return downstream;
                 const settings = getSettings(frame.agent);
+                if (!settings.modules.deepwork.enabled)
+                    return downstream;
                 const ordinaryRoot = frame.agent.session.header?.origin !== "subagent";
                 const admitted = takeAdmittedRecoveryRoute(frame);
                 const active = controller.active(frame.agent, settings.defaultActive);

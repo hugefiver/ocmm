@@ -118,6 +118,13 @@ test("reconcileRolePresets materializes enabled roles and skips disabled roles",
       assert.equal(readFileSync(join(presetDirectory, "preset.yml"), "utf8"), renderPresetMetadata(role));
       assert.equal(readFileSync(join(presetDirectory, DSMM_MANAGED_PRESET_MARKER), "utf8"), currentMarker(role.id));
     }
+    const planner = join(root, "dsmm-planner"), original = snapshotDirectory(planner);
+    const off = resolveConfig({ modules: { deepwork: { enabled: false } }, presets: { materialize: false } });
+    reconcileRolePresets({ root, settings: off });
+    assert.deepEqual(snapshotDirectory(planner), original, "module off reconciliation preserves the existing export");
+    materializeRolePresets({ root, settings: off });
+    assert.deepEqual(snapshotDirectory(planner), original, "module off must not delete or rewrite previously materialized assets");
+    assert.equal(existsSync(join(root, "dsmm-reviewer")), false, "module off must not export a newly enabled role");
   });
 });
 

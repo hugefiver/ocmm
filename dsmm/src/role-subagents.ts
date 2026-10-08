@@ -148,6 +148,7 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
   };
   const onCreated = async ({ agent }: { agent: DshAgent }): Promise<void> => {
     if (states.has(agent) || admittedRealms.has(agent)) return;
+    if (!getSettings(agent).modules.deepwork.enabled) return;
     const agentCtx = nativeAgentContext(agent);
     policy.admit(agent);
     states.set(agent, { owned: [], hostDefinitions: [] });

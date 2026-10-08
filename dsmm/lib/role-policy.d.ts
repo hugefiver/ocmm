@@ -28,9 +28,13 @@ export declare class DsmmRolePolicy {
     private readonly getSettings;
     private readonly mode;
     private readonly calls;
+    private readonly providers;
     constructor(ctx: DshContext, getSettings: DsmmSettingsGetter, mode: DeepworkModeController);
+    captureProvider(provider: object): void;
     private agents;
     assertLive(agent: DshAgent): void;
+    /** Core fence runs before native prompt/body assembly or provider execution. */
+    assertModuleAdmission(agent: DshAgent): void;
     identity(agent: DshAgent): DsmmRoleIdentity;
     targets(agent: DshAgent): readonly DsmmRoleId[];
     assertDelegation(parent: DshAgent, role: DsmmRoleId): DelegationIdentity;
@@ -38,6 +42,7 @@ export declare class DsmmRolePolicy {
     prepareContinuable(parent: DshAgent, role: DsmmRoleId, signal: AbortSignal): void;
     admit(agent: DshAgent): DsmmRoleIdentity;
     private bindChild;
+    private captureIdentity;
     captureTools(agent: DshAgent, tools: ToolRuntime, controlledNames?: readonly string[], reset?: boolean): void;
     toolDenial(agent: DshAgent, name: string, tools?: ToolRuntime): string | undefined;
     installDrain(agent: DshAgent): void;

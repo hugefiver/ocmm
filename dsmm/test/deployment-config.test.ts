@@ -15,6 +15,7 @@ import type { DshAgent } from "../lib/dsh-types.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { createDsmmStatusSnapshot } from "../lib/status.js";
+import { parseProfileDocument } from "../lib/profiles.js";
 
 test("public home peer resolves from the declared filesystem anchor and honors host > env > default", () => {
   const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-skill-filesystem"));
@@ -48,6 +49,23 @@ test("sparse transport, full merge, arrays and exact unset preserve layer semant
   assert.throws(() => copyJson(accessor), /unsafe property/);
   assert.throws(() => editGlobalConfig({}, [{ op: "unset", path: ["unknown"] }]));
   assert.throws(() => parseGlobalConfig('{"defaultActive":true,"defaultActive":false}'));
+});
+
+test("Deepwork module is a strict global-only ceiling; absence/unset defaults on without pinning other defaults", () => {
+  const off = { modules: { deepwork: { enabled: false } } };
+  for (const global of [{}, { modules: {} }, { modules: { deepwork: {} } }, { modules: { deepwork: { enabled: true } } }]) {
+    assert.equal(resolveDeployment(global, {}).modules.deepwork.enabled, true);
+    assert.equal(resolveDeployment(global, {}).defaultActive, false);
+  }
+  assert.equal(resolveDeployment(off, { defaultActive: true }).modules.deepwork.enabled, false);
+  assert.equal(resolveDeployment(off, { defaultActive: true }).defaultActive, true);
+  const unset = editGlobalConfig(off, [{ op: "unset", path: ["modules", "deepwork", "enabled"] }]);
+  assert.equal(resolveDeployment(unset, {}).modules.deepwork.enabled, true);
+  assert.throws(() => DSMM_CONFIG_SCHEMA(off));
+  assert.throws(() => DSMM_NATIVE_CONFIG_SCHEMA(off));
+  assert.throws(() => resolveDeployment({}, off));
+  assert.throws(() => parseProfileDocument(JSON.stringify({ version: 1, id: "module-override", settings: off }), "module-override"));
+  for (const invalid of [{ modules: { unknown: { enabled: false } } }, { modules: { deepwork: { unknown: false } } }, { modules: { deepwork: { enabled: "false" } } }, { modules: null }]) assert.throws(() => resolveDeployment(invalid as never, {}));
 });
 
 test("two actual Loader entries inherit one global base; volatile pins/unset preserve fibers and old admissions", async () => {

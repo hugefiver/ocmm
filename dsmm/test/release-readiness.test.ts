@@ -926,13 +926,18 @@ test("release readiness checker rejects invalid, eager and Host-leaking client b
   }
 });
 
-test("release readiness checker rejects an absent or foreign selectMode remote descriptor", () => {
+test("release readiness checker rejects absent or foreign mode and module remote descriptors", () => {
   const installed = readFileSync(join(packageRoot, "lib", "client.js"), "utf8");
-  assert.ok(installed.includes('descriptor("selectMode",'), "compiled mode descriptor exists");
-  for (const replacement of ['descriptor("describeSession",', 'descriptor("foreignMode",']) {
+  for (const [marker, replacement] of [
+    ['descriptor("selectMode",', 'descriptor("describeSession",'],
+    ['descriptor("selectMode",', 'descriptor("foreignMode",'],
+    ['configDescriptor("describeModules")', 'configDescriptor("describe")'],
+    ['configDescriptor("describeModules")', 'configDescriptor("foreignModules")']
+  ]) {
+    assert.ok(installed.includes(marker), "compiled descriptor exists");
     const fixtureRoot = createReleaseFixture();
     try {
-      writeFixtureFile(fixtureRoot, "lib/client.js", installed.replace('descriptor("selectMode",', replacement));
+      writeFixtureFile(fixtureRoot, "lib/client.js", installed.replace(marker, replacement));
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1);
       assert.ok(receipt.errors.includes("native client bundle must lazily register @dsmm/dsmm with apply and inject exports"));

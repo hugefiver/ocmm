@@ -12,7 +12,7 @@ declare module "@deepseek-ai/cordis" {
     }
 }
 /** Optional native package resolution is anchored by the trusted host, not home guesses or CLI paths. */
-export declare function registerLspRuntime(ctx: Context, settings: DsmmLspSettings): Promise<void>;
+export declare function registerLspRuntime(ctx: Context, settings: DsmmLspSettings, getSettings?: import("./settings.js").DsmmSettingsGetter): Promise<void>;
 export interface DsmmLspSettings {
     enabled: boolean;
     serverName: string;

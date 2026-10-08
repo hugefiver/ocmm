@@ -37,6 +37,7 @@ import { Remote, RemoteError, TypertRemoteService, remoteErrorOf } from "@deepse
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { TYPERT_HOST } from "./profile-remote.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
+import { projectDeepworkModule } from "./modules.js";
 /** Business service addressed only by native Typert Gateway invocations. */
 let DsmmProfilesHost = (() => {
     let _classSuper = TypertRemoteService;
@@ -207,27 +208,45 @@ let DsmmConfigHost = (() => {
     let _classSuper = TypertRemoteService;
     let _instanceExtraInitializers = [];
     let _describe_decorators;
+    let _describeModules_decorators;
     let _save_decorators;
     return class DsmmConfigHost extends _classSuper {
         static {
             const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
             _describe_decorators = [Remote];
+            _describeModules_decorators = [Remote];
             _save_decorators = [Remote];
             __esDecorate(this, null, _describe_decorators, { kind: "method", name: "describe", static: false, private: false, access: { has: obj => "describe" in obj, get: obj => obj.describe }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _describeModules_decorators, { kind: "method", name: "describeModules", static: false, private: false, access: { has: obj => "describeModules" in obj, get: obj => obj.describeModules }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _save_decorators, { kind: "method", name: "save", static: false, private: false, access: { has: obj => "save" in obj, get: obj => obj.save }, metadata: _metadata }, null, _instanceExtraInitializers);
             if (_metadata) Object.defineProperty(this, Symbol.metadata, { enumerable: true, configurable: true, writable: true, value: _metadata });
         }
         backend = __runInitializers(this, _instanceExtraInitializers);
+        startup;
         lifetime = new AbortController();
-        constructor(ctx, backend) {
+        constructor(ctx, backend, startup) {
             super(ctx, "dsmmConfig");
             this.backend = backend;
+            this.startup = startup;
             ctx.effect(() => () => this.lifetime.abort());
         }
         async describe() {
             try {
                 assertLocalSettingsOperator(this.ctx);
                 return await this.backend.readGlobal();
+            }
+            catch (error) {
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+            }
+        }
+        async describeModules() {
+            try {
+                assertLocalSettingsOperator(this.ctx);
+                if (this.startup === undefined)
+                    throw new DsmmProfileError("unavailable", "The startup module capture is unavailable.");
+                const desired = await this.backend.readDesired();
+                assertLocalSettingsOperator(this.ctx);
+                return [projectDeepworkModule(this.startup, desired, undefined, true)];
             }
             catch (error) {
                 throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
@@ -261,6 +280,12 @@ export function registerProfilesRpc(ctx, backend, deployment) {
     ctx.typert.register(TYPERT_HOST);
     if (deployment !== undefined)
         new DsmmConfigHost(ctx, deployment);
+    return service;
+}
+/** Core-owned injection; works without any DW or profile business service. */
+export function registerConfigRpc(ctx, deployment, startup) {
+    const service = new DsmmConfigHost(ctx, deployment, startup);
+    ctx.typert.register(TYPERT_HOST);
     return service;
 }
 //# sourceMappingURL=profile-rpc.js.map

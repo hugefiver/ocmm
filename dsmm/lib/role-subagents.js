@@ -160,6 +160,8 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
     const onCreated = async ({ agent }) => {
         if (states.has(agent) || admittedRealms.has(agent))
             return;
+        if (!getSettings(agent).modules.deepwork.enabled)
+            return;
         const agentCtx = nativeAgentContext(agent);
         policy.admit(agent);
         states.set(agent, { owned: [], hostDefinitions: [] });

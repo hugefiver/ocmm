@@ -1,5 +1,6 @@
 /** Wire-only profile data: safe to import from the native browser client. */
 import type { DsmmRoleId } from "./roles.js";
+import type { DsmmModuleState } from "./modules.js";
 import type { DsmmModelRoute, DsmmProfileScope } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 export type ProfileErrorCode = "validation" | "conflict" | "not-found" | "lock-timeout" | "unsafe-path" | "io" | "activation" | "corrupt-selection" | "limit" | "busy" | "maintenance" | "disposed" | "not-owned" | "unavailable" | "cancelled";
@@ -78,6 +79,8 @@ export interface SessionProfileSnapshot {
     profileModel?: DsmmModelRoute;
     /** Optional for older Hosts; explicit session intent always beats defaults. */
     deepwork?: SessionDeepworkState;
+    /** Safe captured module admission; not a read of the current global editor. */
+    modules?: DsmmModuleState[];
 }
 export interface SessionDeepworkState {
     active: boolean;

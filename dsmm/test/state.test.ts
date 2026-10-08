@@ -30,6 +30,14 @@ test("same-default explicit choices persist across preset/profile changes and re
   events.push({ type: "agent-preset/selected", data: { agentPreset: "minimal" } });
   assert.equal(new DeepworkModeController({}).active(agent, false), true);
   assert.equal(await controller.select(agent, true), "unchanged");
+  const disabled = new DeepworkModeController({}, () => false);
+  const beforeOff = disabled.describe(agent, false);
+  assert.equal(beforeOff.active, false);
+  await assert.rejects(disabled.select(agent, true), /not admitted/u);
+  assert.equal(await disabled.select(agent, false), "committed", "off must replace persisted on intent even when effective activity is already off");
+  assert.notEqual(disabled.describe(agent, false).revision, beforeOff.revision);
+  assert.equal(new DeepworkModeController({}).active(agent, true), false, "independent available controller observes saved off intent");
+  assert.equal(await disabled.select(agent, false), "unchanged");
 });
 
 test("busy mode requests are rejected, not staged into current prompt or future pre-step", async () => {

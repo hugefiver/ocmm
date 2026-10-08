@@ -5,9 +5,11 @@ import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSet
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleRuntimeState } from "./profile-types.js";
 import type { DsmmLspRuntimeState } from "./lsp.js";
+import type { DsmmModuleState } from "./modules.js";
 export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
     version: typeof DSMM_STATUS_VERSION;
+    modules?: DsmmModuleState[];
     admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
     profileStore?: DsmmProfileAdmission["store"];
     deployment?: {
@@ -70,6 +72,7 @@ export declare function createDsmmStatusSnapshot(input: {
     modeActive: boolean;
     admission?: DsmmProfileAdmission;
     roleRuntimeState?: DsmmRoleRuntimeState;
+    modules?: DsmmModuleState[];
 }): DsmmStatusSnapshot;
 export declare function formatDsmmStatus(snapshot: DsmmStatusSnapshot): string;
 //# sourceMappingURL=status.d.ts.map

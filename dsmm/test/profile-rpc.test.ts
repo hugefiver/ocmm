@@ -150,11 +150,13 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     };
     const rpcFibers = [...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers])
       .filter((fiber) => ownedByEntry(fiber) && Object.hasOwn(fiber.inject, "typert"));
-    assert.equal(rpcFibers.length, 1, "the production profile owner must create one native Typert injection");
+    assert.equal(rpcFibers.length, 2, "core config and profile RPC own independent native Typert injections");
     // Parent startup alone can pass while a nested injection has failed. Await
     // the actual RPC child so an accidentally returned Service is observable.
-    await rpcFibers[0].await();
-    assert.equal(rpcFibers[0].state, 2, "the native RPC injection must remain ACTIVE");
+    for (const fiber of rpcFibers) {
+      await fiber.await();
+      assert.equal(fiber.state, 2, "each native RPC injection must remain ACTIVE");
+    }
     assert.ok(ctx.get("dsmmProfileRuntime"));
     assert.ok(ctx.get("dsmmProfiles"));
     assert.deepEqual(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").map((descriptor) => descriptor.method), ["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"]);
@@ -252,9 +254,9 @@ async function replayUnawaitedStorageIndex(): Promise<typeof dsmmPlugin> {
 async function replayReturnedServiceIndex(): Promise<typeof dsmmPlugin> {
   const index = new URL("../lib/index.js", import.meta.url);
   const compiled = await readFile(index, "utf8");
-  const fixed = /profileCtx\.inject\?\.\(\["typert"\], \(rpcCtx\) => \{\s*registerProfilesRpc\(rpcCtx, manager, deployment\);\s*\}\);/u;
+  const fixed = /profileCtx\.inject\?\.\(\["typert"\], \(rpcCtx\) => \{\s*new DsmmProfilesHost\(rpcCtx, manager\);\s*\}\);/u;
   assert.ok(fixed.test(compiled), "replay must replace exactly the production Typert callback, not a fixture");
-  const old = compiled.replace(fixed, 'profileCtx.inject?.(["typert"], (rpcCtx) => registerProfilesRpc(rpcCtx, manager, deployment));')
+  const old = compiled.replace(fixed, 'profileCtx.inject?.(["typert"], (rpcCtx) => new DsmmProfilesHost(rpcCtx, manager));')
     .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   // Read-only in-memory replay preserves every other production module and

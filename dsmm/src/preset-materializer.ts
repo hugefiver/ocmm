@@ -93,6 +93,7 @@ export function materializeRolePresets(options: RolePresetMaterializerOptions): 
 }
 
 export function reconcileRolePresets({ root, settings, filesystem: filesystemOverride }: RolePresetMaterializerOptions): void {
+  if (!settings.modules.deepwork.enabled) return;
   if (root.length === 0) {
     throw new Error("dsmm preset materialization root must not be empty");
   }

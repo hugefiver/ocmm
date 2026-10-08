@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,10 +96,12 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
   const host = new Context();
   const ctx = (options.isolatedPrompt ? host.isolate("systemPrompt") : host).extend({ baseUrl: new URL("../", import.meta.url).href });
   // Filesystem ownership is per Host even when a test deliberately shares profiles.
+  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "native-routing-fixture", prefix: "dsmm-native-routing-", time: Date.now() })}\n`);
   const fixtureDir = mkdtempSync(join(tmpdir(), "dsmm-native-routing-"));
   const owner = `native-routing-fixture:${randomUUID()}`;
   const marker = join(fixtureDir, ".run-owner");
   writeFileSync(marker, owner, { flag: "wx" });
+  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "native-routing-fixture-owned", owner, root: fixtureDir })}\n`);
   const profileDir = options.profileDir ?? fixtureDir;
   const home = options.home ?? join(profileDir, "dsh-home");
   const withPresetRoot = (input: DsmmPluginConfig): DsmmPluginConfig => ({ ...input,

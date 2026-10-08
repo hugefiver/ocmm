@@ -11,7 +11,7 @@ export const DSMM_LSP_TOOL_NAMES = [
     "format"
 ];
 /** Optional native package resolution is anchored by the trusted host, not home guesses or CLI paths. */
-export async function registerLspRuntime(ctx, settings) {
+export async function registerLspRuntime(ctx, settings, getSettings) {
     let state = { state: "disabled", tools: [] };
     ctx.provide("dsmmLspState", () => state);
     if (!settings.enabled)
@@ -39,6 +39,7 @@ export async function registerLspRuntime(ctx, settings) {
         unavailable("native-package-unavailable");
         return;
     }
+    const before = new Map(ctx.get("tools")?.schemas().map((row) => [row.name, ctx.get("tools").get(row.name)]) ?? []);
     try {
         await ctx.plugin(plugin, toDshMcpClientConfig(settings)).await();
     }
@@ -51,6 +52,14 @@ export async function registerLspRuntime(ctx, settings) {
     if (names.length === 0) {
         unavailable("native-tools-unavailable");
         return;
+    }
+    if (getSettings !== undefined) {
+        const owned = new Map(names.filter((name) => tools.get(name) !== before.get(name)).map((name) => [name, tools.get(name)]));
+        const dispose = tools.guard((execution) => execution.agent !== undefined
+            && owned.has(execution.name) && owned.get(execution.name) === tools.get(execution.name, execution.agent)
+            && !getSettings(execution.agent).modules.deepwork.enabled
+            ? "Deepwork LSP is not admitted in this Agent" : undefined);
+        ctx.effect(() => dispose);
     }
     state = { state: "ready", tools: names };
     ctx.on("tools/change", () => {

@@ -9,7 +9,7 @@ import { DSMM_ROLES, isDsmmRoleId } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
-import { resolveEffectiveDsmmRole } from "./session-scope.js";
+import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 
 export interface DsmmRoleIdentity {
   readonly role?: DsmmRoleId;
@@ -20,7 +20,7 @@ export interface DsmmRoleIdentity {
   readonly toolFilter?: ToolRestriction;
 }
 
-const liveIdentities = new WeakMap<DshAgent, DsmmRoleIdentity>();
+const liveIdentities = new WeakMap<DshAgent, { identity: DsmmRoleIdentity; readEpoch(): string }>();
 const toolIdentities = new WeakMap<DshAgent, { realm: object; definitions: Map<string, ToolDefinition> }>();
 
 function inheritToolFilter(parent?: ToolRestriction, requested?: ToolRestriction): ToolRestriction | undefined {
@@ -33,7 +33,8 @@ function inheritToolFilter(parent?: ToolRestriction, requested?: ToolRestriction
 }
 
 export function resolveAdmittedDsmmRole(agent: DshAgent, settings: DsmmSettings, active: boolean): DsmmRoleId | undefined {
-  const identity = liveIdentities.get(agent);
+  if (!settings.modules.deepwork.enabled) return undefined;
+  const identity = liveIdentities.get(agent)?.identity;
   return identity?.role === undefined ? resolveEffectiveDsmmRole(agent, settings, active)
     : identity.role !== undefined && settings.roles[identity.role] ? identity.role : undefined;
 }
@@ -62,8 +63,11 @@ interface DelegationIdentity { parent: DshAgent; role: DsmmRoleId; epoch: string
 /** Identity admission only: native services retain every run, inbox and retry lifecycle. */
 export class DsmmRolePolicy {
   private readonly calls = new AsyncLocalStorage<DelegationIdentity>();
+  private readonly providers = new WeakSet<object>();
 
   constructor(private readonly ctx: DshContext, private readonly getSettings: DsmmSettingsGetter, private readonly mode: DeepworkModeController) {}
+
+  captureProvider(provider: object): void { this.providers.add(provider); }
 
   private agents(): DshAgentsRegistry {
     const registry = this.ctx.get?.<DshAgentsRegistry>("agents");
@@ -75,9 +79,27 @@ export class DsmmRolePolicy {
     if (agent.id === undefined || this.agents().get(agent.id) !== agent) throw new SubagentError("DSMM delegation requires the exact live Agent", "UNAUTHORIZED");
   }
 
+  /** Core fence runs before native prompt/body assembly or provider execution. */
+  assertModuleAdmission(agent: DshAgent): void {
+    this.assertLive(agent);
+    const settings = this.getSettings(agent);
+    const selected = agent.ctx?.get?.<{ composedPreset(ctx: unknown): string | undefined }>("agentPresets")?.composedPreset(agent.ctx)
+      ?? resolveSelectedAgentPreset(agent.session);
+    const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session) as Parameters<typeof foldSubagentDescriptor>[0]);
+    const provider = descriptor === undefined ? undefined : this.ctx.get?.<{ getProvider(name: string): object | undefined }>("subagents")?.getProvider(descriptor.provider);
+    const providerRole = descriptor?.provider.startsWith("dsmm-role-") && (provider === undefined || this.providers.has(provider))
+      ? `dsmm-${descriptor.provider.slice("dsmm-role-".length)}` : undefined;
+    if (agent.session.header?.origin !== "subagent" && selected?.startsWith("dsmm-")
+      && !isDsmmRoleId(selected)) throw new SubagentError("DSMM unknown standing root is not admitted", "UNAUTHORIZED");
+    const role = providerRole ?? (isDsmmRoleId(selected) ? selected : undefined);
+    if (role !== undefined && (!settings.modules.deepwork.enabled || !isDsmmRoleId(role))) {
+      throw new SubagentError("Deepwork module or role is not admitted in this Agent; standing presets and child resume cannot enable it", "UNAUTHORIZED");
+    }
+  }
+
   identity(agent: DshAgent): DsmmRoleIdentity {
     this.assertLive(agent);
-    const existing = liveIdentities.get(agent);
+    const existing = liveIdentities.get(agent)?.identity;
     if (existing?.child) return existing;
     const parent = this.agents().list().find((row) => row !== agent && this.agents().isOwnedBy(agent.id!, row));
     if (parent !== undefined) {
@@ -86,14 +108,14 @@ export class DsmmRolePolicy {
     }
     const settings = this.getSettings(agent);
     const selected = agent.ctx?.get?.<{ composedPreset(ctx: unknown): string | undefined }>("agentPresets")?.composedPreset(agent.ctx);
-    const role = isDsmmRoleId(selected) ? selected : agent.session.header?.origin !== "subagent" && settings.roles["dsmm-orchestrator"] && this.mode.active(agent, settings.defaultActive) ? "dsmm-orchestrator" : undefined;
+    const role = isDsmmRoleId(selected) ? selected : settings.modules.deepwork.enabled && agent.session.header?.origin !== "subagent" && settings.roles["dsmm-orchestrator"] && this.mode.active(agent, settings.defaultActive) ? "dsmm-orchestrator" : undefined;
     return Object.freeze({ role, child: agent.session.header?.origin === "subagent", epoch: this.getSettings.admission?.(agent).epoch ?? "trusted-direct" });
   }
 
   targets(agent: DshAgent): readonly DsmmRoleId[] {
     const identity = this.identity(agent);
     const settings = this.getSettings(agent);
-    if (identity.role === undefined || !settings.roles[identity.role]) return [];
+    if (!settings.modules.deepwork.enabled || identity.role === undefined || !settings.roles[identity.role]) return [];
     return allowedRoleChildren(identity.role, identity.child).filter((role) => settings.roles[role]
       && (identity.toolFilter?.allow === undefined || identity.toolFilter.allow.includes(roleToolName(role)))
       && !identity.toolFilter?.deny?.includes(roleToolName(role)));
@@ -118,12 +140,24 @@ export class DsmmRolePolicy {
     this.assertLive(agent);
     const agents = this.agents();
     const parent = agents.list().find((row) => row !== agent && agents.isOwnedBy(agent.id!, row));
+    const existing = liveIdentities.get(agent);
+    if (existing !== undefined) {
+      // A retained child owns its original capture, not its parent's newer
+      // mode/profile or a reinstall's replacement settings getter.
+      if (parent === undefined || existing.identity.parent !== parent || existing.readEpoch() !== existing.identity.epoch) {
+        throw new SubagentError("DSMM retained child admission no longer matches its exact owner or captured epoch", "UNAUTHORIZED");
+      }
+      this.assertLive(parent);
+      return existing.identity;
+    }
     if (parent === undefined) return this.identity(agent);
     const parentIdentity = this.identity(parent);
     if (parentIdentity.role === undefined) {
-      const identity = Object.freeze({ child: true, parent, epoch: parentIdentity.epoch });
-      liveIdentities.set(agent, identity);
-      return identity;
+      if (this.getSettings.admission?.(agent).epoch !== this.getSettings.admission?.(parent).epoch) throw new SubagentError("DSMM child must inherit its exact parent's admission", "UNAUTHORIZED");
+      const identity = Object.freeze({ child: true, parent, epoch: parentIdentity.epoch,
+        ...(parentIdentity.readOnly === undefined ? {} : { readOnly: parentIdentity.readOnly }),
+        ...(parentIdentity.toolFilter === undefined ? {} : { toolFilter: parentIdentity.toolFilter }) });
+      return this.captureIdentity(agent, identity);
     }
     const invocation = this.calls.getStore();
     if (invocation === undefined || invocation.parent !== parent) {
@@ -148,7 +182,11 @@ export class DsmmRolePolicy {
       readOnly: parentIdentity.readOnly === true || DSMM_ROLES.find((row) => row.id === parentIdentity.role)?.access === "read-only"
         || DSMM_ROLES.find((row) => row.id === role)?.access === "read-only",
       ...(inheritedFilter === undefined ? {} : { toolFilter: inheritedFilter }) });
-    liveIdentities.set(agent, identity);
+    return this.captureIdentity(agent, identity);
+  }
+
+  private captureIdentity(agent: DshAgent, identity: DsmmRoleIdentity): DsmmRoleIdentity {
+    liveIdentities.set(agent, { identity, readEpoch: () => this.getSettings.admission?.(agent).epoch ?? "trusted-direct" });
     return identity;
   }
 
@@ -165,7 +203,8 @@ export class DsmmRolePolicy {
   toolDenial(agent: DshAgent, name: string, tools?: ToolRuntime): string | undefined {
     const identity = this.identity(agent);
     const settings = this.getSettings(agent);
-    const target = roleFromToolName(name);
+    // With no DW role/module in this admission, same-named host tools are host-owned.
+    const target = !settings.modules.deepwork.enabled && identity.role === undefined ? undefined : roleFromToolName(name);
     const readonly = identity.readOnly || DSMM_ROLES.find((row) => row.id === identity.role)?.access === "read-only";
     if (tools !== undefined && (readonly || target !== undefined)) {
       const admitted = toolIdentities.get(agent);
@@ -173,12 +212,12 @@ export class DsmmRolePolicy {
         || admitted.definitions.get(name) !== tools.get(name, agent as Agent)) return "DSMM tool definition was not admitted in this exact Agent realm";
     }
     if (target !== undefined) return this.targets(agent).includes(target) ? undefined : `DSMM delegation to ${target} is not permitted`;
-    if (identity.role === undefined) return identity.child && ["subagent", "spawn", "fork"].includes(name) ? "DSMM unadmitted children cannot delegate" : undefined;
-    if (!settings.roles[identity.role]) return "DSMM role is disabled in this Agent admission";
     if (identity.toolFilter?.allow !== undefined && !identity.toolFilter.allow.includes(name) && name !== "structured_output"
       || identity.toolFilter?.deny?.includes(name)) return "DSMM child native toolFilter does not permit this tool";
-    if (["subagent", "spawn", "fork"].includes(name)) return "Use the admitted DSMM role tools; generic delegation is not a role-policy bypass";
     if (readonly && !readonlyRoleTool(name, settings)) return "DSMM read-only role does not permit this tool";
+    if (identity.role === undefined) return identity.child && settings.modules.deepwork.enabled && ["subagent", "spawn", "fork"].includes(name) ? "DSMM unadmitted children cannot delegate" : undefined;
+    if (!settings.modules.deepwork.enabled || !settings.roles[identity.role]) return "DSMM role is disabled in this Agent admission";
+    if (["subagent", "spawn", "fork"].includes(name)) return "Use the admitted DSMM role tools; generic delegation is not a role-policy bypass";
     return undefined;
   }
 

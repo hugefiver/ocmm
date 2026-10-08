@@ -31,6 +31,7 @@ export function childOwnedSessionEvents(session: DshSession): readonly DshSessio
 
 /** Parent preset/persona inheritance is deliberately not delegated role authority. */
 export function resolveEffectiveDsmmRole(agent: DshAgent, settings: DsmmSettings, modeActive: boolean): DsmmRoleId | undefined {
+  if (!settings.modules.deepwork.enabled) return undefined;
   let role: DsmmRoleId | undefined;
   if (agent.session.header?.origin === "subagent") {
     const own = childOwnedSessionEvents(agent.session);

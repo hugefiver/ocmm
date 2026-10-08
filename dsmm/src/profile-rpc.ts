@@ -10,6 +10,9 @@ import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, Profi
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import type { DshAgent, DshAgentsRegistry } from "./dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
+import { projectDeepworkModule } from "./modules.js";
+import type { DsmmModuleState } from "./modules.js";
+import type { DsmmSettings } from "./settings.js";
 
 /** The public SessionController capability, without importing its client graph. */
 type NativeSessionAuthority = Pick<SessionController, "resolveAgent">;
@@ -164,7 +167,7 @@ export function assertLocalSettingsOperator(ctx: Context): void {
 
 export class DsmmConfigHost extends TypertRemoteService {
   private readonly lifetime = new AbortController();
-  constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig) {
+  constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig, private readonly startup?: DsmmSettings) {
     super(ctx, "dsmmConfig");
     ctx.effect(() => () => this.lifetime.abort());
   }
@@ -172,6 +175,16 @@ export class DsmmConfigHost extends TypertRemoteService {
   async describe(): Promise<GlobalConfigSnapshot> {
     try { assertLocalSettingsOperator(this.ctx); return await this.backend.readGlobal(); }
     catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+  }
+  @Remote
+  async describeModules(): Promise<DsmmModuleState[]> {
+    try {
+      assertLocalSettingsOperator(this.ctx);
+      if (this.startup === undefined) throw new DsmmProfileError("unavailable", "The startup module capture is unavailable.");
+      const desired = await this.backend.readDesired();
+      assertLocalSettingsOperator(this.ctx);
+      return [projectDeepworkModule(this.startup, desired, undefined, true)];
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
   }
   @Remote
   async save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot> {
@@ -197,5 +210,12 @@ export function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, depl
   const service = new DsmmProfilesHost(ctx, backend);
   ctx.typert.register(TYPERT_HOST);
   if (deployment !== undefined) new DsmmConfigHost(ctx, deployment);
+  return service;
+}
+
+/** Core-owned injection; works without any DW or profile business service. */
+export function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings): DsmmConfigHost {
+  const service = new DsmmConfigHost(ctx, deployment, startup);
+  ctx.typert.register(TYPERT_HOST);
   return service;
 }

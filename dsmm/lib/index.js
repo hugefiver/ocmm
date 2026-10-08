@@ -12,7 +12,7 @@ import { registerRoleProviders } from "./role-providers.js";
 import { DsmmRolePolicy } from "./role-policy.js";
 import { registerLspRuntime } from "./lsp.js";
 import { createProfileRuntime } from "./profile-runtime.js";
-import { registerProfilesRpc } from "./profile-rpc.js";
+import { DsmmProfilesHost, registerConfigRpc } from "./profile-rpc.js";
 import { DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 import DsmmSessionPersistence from "./session-persistence.js";
@@ -20,6 +20,8 @@ import { isAbsolute } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DsmmProfileError } from "./profiles.js";
 import { DsmmDeploymentConfig } from "./deployment-config.js";
+import { agentForScope } from "./native-scope.js";
+import { projectDeepworkModule } from "./modules.js";
 export const name = "dsmm";
 export const inject = ["profileContext"];
 // Direct public Config calls keep the complete plain flat ABI. Native Cordis
@@ -44,6 +46,7 @@ export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled
 export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
 export { resolveDshHome } from "./dsh-home.js";
 export { DsmmDeploymentConfig, parseGlobalConfig, editGlobalConfig } from "./deployment-config.js";
+export { DSMM_MODULE_DESCRIPTORS, deepworkEnabled, projectDeepworkModule } from "./modules.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export function apply(ctx, config = {}) {
     if (!(ctx instanceof Context))
@@ -82,7 +85,7 @@ function applyConfigured(ctx, config, deployment, startup) {
     return applyRuntime(ctx, config, deployment, startup);
 }
 function applyRuntime(ctx, config, deployment, startup) {
-    const controller = new DeepworkModeController(ctx);
+    const controller = new DeepworkModeController(ctx, (agent) => getBoundSettings(agent).modules.deepwork.enabled);
     let runtime;
     let profileInitialization;
     let requiresNativeProfiles = ctx.get !== undefined;
@@ -109,20 +112,38 @@ function applyRuntime(ctx, config, deployment, startup) {
         }
         return admission;
     };
+    getBoundSettings.moduleStates = (agent) => {
+        requireProfileAdmission();
+        return runtime?.getSettings.moduleStates?.(agent) ?? [projectDeepworkModule(getSettings(), startup, getBoundSettings.admission(agent))];
+    };
     const rolePolicy = new DsmmRolePolicy(ctx, getBoundSettings, controller);
-    const getSettings = registerSettings(ctx, startup?.settings ?? config, {
+    const getSettings = registerSettings(ctx, config, {
+        ...(startup === undefined ? {} : { resolved: startup.settings }),
         install(readyCtx, getReadySettings) {
+            const startupMounted = getReadySettings().modules.deepwork.enabled;
+            // The global editor belongs to core, not profile/DW installation success.
+            if (deployment !== undefined) {
+                readyCtx.provide?.("dsmmDeploymentConfig", deployment);
+                readyCtx.inject?.(["typert"], (rpcCtx) => {
+                    registerConfigRpc(rpcCtx, deployment, getReadySettings());
+                });
+            }
             const install = (installCtx, settingsGetter) => {
-                registerDeepworkPrompt(installCtx, controller, settingsGetter, { section: startup === undefined ? config.section : startup.profile.section ?? startup.global.section });
-                registerAgentSkills(installCtx, controller, settingsGetter);
+                if (startupMounted) {
+                    registerDeepworkPrompt(installCtx, controller, settingsGetter, { section: startup === undefined ? config.section : startup.profile.section ?? startup.global.section });
+                    registerAgentSkills(installCtx, controller, settingsGetter);
+                }
                 const installCommands = (commandCtx) => {
-                    registerDeepworkCommand(commandCtx, controller, settingsGetter);
+                    if (startupMounted)
+                        registerDeepworkCommand(commandCtx, controller, settingsGetter);
                     registerDsmmStatusCommand(commandCtx, controller, settingsGetter);
                 };
                 if (installCtx.get !== undefined && installCtx.inject !== undefined)
                     installCtx.inject(["commands"], installCommands);
                 else
                     installCommands(installCtx);
+                if (!startupMounted)
+                    return;
                 registerRoleProviders(installCtx, settingsGetter, getReadySettings, rolePolicy);
                 // Standing compositions are deployment-only and never replaced on a
                 // runtime profile selection. All routes are read from Agent bindings.
@@ -138,8 +159,10 @@ function applyRuntime(ctx, config, deployment, startup) {
             }
             requiresNativeProfiles = true;
             const installProfiles = async (profileCtx) => {
-                await registerLspRuntime(profileCtx, getReadySettings().lsp);
-                await registerNativeSubagentControls(profileCtx);
+                if (startupMounted) {
+                    await registerLspRuntime(profileCtx, getReadySettings().lsp, getBoundSettings);
+                    await registerNativeSubagentControls(profileCtx);
+                }
                 // Standing definitions must exist before initialize audits retained
                 // Agents. A missing optional registry still installs later from this
                 // same frozen startup getter, without blocking unrelated Hosts.
@@ -155,14 +178,20 @@ function applyRuntime(ctx, config, deployment, startup) {
                             && profileCtx.get?.("tools")?.get("send_message") !== undefined
                     } });
                 profileCtx.provide?.("dsmmProfileRuntime", runtime);
-                if (deployment !== undefined)
-                    profileCtx.provide?.("dsmmDeploymentConfig", deployment);
                 const manager = runtime;
                 profileCtx.inject?.(["typert"], (rpcCtx) => {
-                    registerProfilesRpc(rpcCtx, manager, deployment);
+                    new DsmmProfilesHost(rpcCtx, manager);
                 });
                 install(profileCtx, runtime.getSettings);
-                await registerHeadlessRoleTools(profileCtx, controller, runtime.getSettings, rolePolicy);
+                const admitIdentity = (agent) => {
+                    rolePolicy.assertModuleAdmission(agent);
+                    rolePolicy.admit(agent);
+                };
+                profileCtx.on?.("agent/created", ({ agent }) => { admitIdentity(agent); }, { global: true });
+                for (const agent of profileCtx.get?.("agents")?.list() ?? [])
+                    admitIdentity(agent);
+                if (startupMounted)
+                    await registerHeadlessRoleTools(profileCtx, controller, runtime.getSettings, rolePolicy);
             };
             if (readyCtx.inject !== undefined) {
                 const initialization = readyCtx.inject(["profileContext"], installProfiles);
@@ -172,8 +201,22 @@ function applyRuntime(ctx, config, deployment, startup) {
                 throw new Error("dsmm native profiles require asynchronous profileContext injection");
         }
     });
-    registerRuntimeRecovery(ctx, controller, getBoundSettings);
-    registerModelRouting(ctx, controller, getBoundSettings);
+    if (getSettings().modules.deepwork.enabled) {
+        registerRuntimeRecovery(ctx, controller, getBoundSettings);
+        registerModelRouting(ctx, controller, getBoundSettings);
+    }
+    if (ctx.get !== undefined) {
+        ctx.on?.("system-prompt/assemble", async (_assembly, options, next) => {
+            const agent = agentForScope(ctx, options.scope);
+            if (agent !== undefined)
+                rolePolicy.assertModuleAdmission(agent);
+            return next();
+        }, { prepend: true, global: true });
+        ctx.on?.("agent/request", async (frame, next) => {
+            rolePolicy.assertModuleAdmission(frame.agent);
+            return next();
+        }, { prepend: true, global: true });
+    }
     registerSafetyGuards(ctx, controller, getBoundSettings, ctx.get === undefined ? undefined : rolePolicy);
     return profileInitialization;
 }

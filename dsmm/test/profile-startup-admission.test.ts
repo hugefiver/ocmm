@@ -99,7 +99,7 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
 async function replayUnguardedStartup(): Promise<typeof dsmmPlugin> {
   const index = new URL("../lib/index.js", import.meta.url);
   const compiled = await readFile(index, "utf8");
-  assert.equal(compiled.split("requireProfileAdmission();").length - 1, 2, "replay changes only both production admission getter guards");
+  assert.equal(compiled.split("requireProfileAdmission();").length - 1, 3, "replay changes only production settings, admission and module-projection getter guards");
   const old = compiled.replaceAll("requireProfileAdmission();", "")
     .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);

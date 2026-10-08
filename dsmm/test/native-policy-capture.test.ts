@@ -6,6 +6,9 @@ import type { DsmmDeploymentConfig } from "../lib/deployment-config.js";
 import { DsmmDeploymentConfig as DeploymentConfig } from "../lib/deployment-config.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
+import dsmmPlugin from "../lib/index.js";
+import { DsmmRolePolicy } from "../lib/role-policy.js";
+import { DeepworkModeController } from "../lib/state.js";
 import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 
 test("old busy parent and future native children retain effective epoch while new roots capture off/on and missing startup substrate requires restart", async () => {
@@ -69,4 +72,60 @@ test("old busy parent and future native children retain effective epoch while ne
     assert.equal(f.subagents.getProvider("dsmm-role-cross-cutting"), undefined);
     assert.equal(runtime.admission(off as unknown as DshAgent), offAdmission);
   } finally { release?.(); await f.dispose(); }
+});
+
+test("retained native reviewer keeps its own immutable admission after parent mode/profile changes and DSMM reinstall", async (t) => {
+  const config = { defaultActive: true };
+  const f = await nativeRoutingFixture(config, { headless: true });
+  let reinstall: ReturnType<typeof f.ctx.plugin> | undefined;
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const parent = await f.create();
+    const run = await f.subagents.start("dsmm-role-reviewer", { parent, prompt: [], signal: new AbortController().signal, toolFilter: { deny: ["write"] } });
+    try {
+      await run.result;
+      const child = run.localAgent!;
+      const captured = runtime.admission(child as DshAgent);
+      const policy = new DsmmRolePolicy(f.ctx as unknown as DshContext, runtime.getSettings, new DeepworkModeController(f.ctx as unknown as DshContext));
+      const identity = policy.identity(child as DshAgent);
+      assert.equal(identity.role, "dsmm-reviewer");
+      assert.equal(identity.readOnly, true);
+      assert.deepEqual(identity.toolFilter, { deny: ["write"] });
+      assert.ok(Object.isFrozen(identity.toolFilter!.deny));
+      const mode = await runtime.getSession(parent as DshAgent);
+      await runtime.selectMode({ sessionId: parent.id, active: false, expectedModeRevision: mode.deepwork!.revision, expectedAdmissionEpoch: mode.admissionEpoch }, parent as DshAgent);
+      let writes = 0;
+      let sentinel = "UNCHANGED";
+      const remove = child.ctx.tools.register({ name: "write", description: "Counter-only retained permission sentinel; never writes files", parameters: {},
+        output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: String(value) }] },
+        async execute() { writes++; sentinel = "CHANGED"; return sentinel; } });
+      const execute = (name: string, id: string) => child.ctx.tools.execute({ agent: child, name, arguments: {}, callId: ToolCallId(id), signal: new AbortController().signal });
+      try {
+        const before = await execute("write", "retained-write-before");
+        assert.equal(before.isError, true);
+        assert.equal(writes, 0);
+        const overlay = await runtime.save({ id: "retained-parent-overlay", expectedRevision: null, content: '{"version":1,"id":"retained-parent-overlay","settings":{"workflow":{"reviewCap":2}}}' });
+        const session = await runtime.getSession(parent as DshAgent);
+        await runtime.selectSession({ sessionId: parent.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch }, parent as DshAgent);
+        assert.notEqual(runtime.admission(parent as DshAgent).epoch, captured.epoch);
+        assert.equal(runtime.admission(child as DshAgent), captured, "old live child keeps its own capture after the parent's legal idle overlay");
+        await f.dsmmFiber.dispose();
+        reinstall = f.ctx.plugin({ name: "dsmm-retained-child-reinstall", inject: ["profileContext"], apply(ctx) { return dsmmPlugin.apply(ctx as unknown as DshContext, config); } });
+        await reinstall.await();
+        assert.equal(f.agents.get(child.id), child);
+        assert.equal(f.agents.isOwnedBy(child.id, parent), true);
+        const after = await execute("write", "retained-write-after");
+        const read = await execute("read", "retained-read-after");
+        t.diagnostic(`actual native reinstall: before write error=${before.isError}, after=${after.isError}, write bodies=${writes}, sentinel=${sentinel}; read error=${read.isError}, value=${JSON.stringify(read.value)}; old child epoch preserved while parent changed`);
+        assert.equal(after.isError, true);
+        assert.equal(writes, 0);
+        assert.equal(sentinel, "UNCHANGED");
+        assert.equal(read.isError, false);
+        assert.equal(read.value, "read", "captured native read definition still returns a useful result");
+        assert.equal(policy.admit(child as DshAgent), identity, "shared admission is idempotent without following today's parent mode or epoch");
+        assert.equal(identity.epoch, captured.epoch);
+        assert.throws(() => policy.admit({ ...child, id: child.id } as DshAgent), (error: unknown) => error instanceof Error && "code" in error && error.code === "UNAUTHORIZED");
+      } finally { remove(); }
+    } finally { await run.dispose(); }
+  } finally { await reinstall?.dispose(); await f.dispose(); }
 });

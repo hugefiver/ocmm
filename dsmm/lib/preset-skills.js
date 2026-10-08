@@ -22,7 +22,7 @@ export function registerAgentSkills(ctx, controller, getSettings) {
         const raw = presets?.serviceFor(agent, "skills") ?? agentCtx.get("skills");
         const previous = mounted.get(agent), parent = scopeParentOf(agent);
         const settings = getSettings(agent);
-        if (!controller.active(agent, settings.defaultActive)) {
+        if (!settings.modules.deepwork.enabled || !controller.active(agent, settings.defaultActive)) {
             remove(agent);
             return;
         }

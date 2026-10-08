@@ -6,15 +6,17 @@ export declare function isDeepworkActive(events?: readonly DshSessionEvent[], de
 export declare function hasOpenTurn(events?: readonly DshSessionEvent[]): boolean;
 export declare class DeepworkModeController {
     private readonly ctx;
+    private readonly moduleEnabled;
     private readonly listeners;
-    constructor(ctx: DshContext);
+    constructor(ctx: DshContext, moduleEnabled?: (agent: DshAgent) => boolean);
     watch(listener: (agent: DshAgent) => void): () => void;
     /** Profile commits have no native session event; notify their Agent mount. */
     changed(agent: DshAgent): void;
     active(agent: DshAgent | undefined, defaultActive: boolean): boolean;
     describe(agent: DshAgent, defaultActive: boolean): SessionDeepworkState;
+    private intent;
     select(agent: DshAgent, active: boolean, defaultActive?: boolean): Promise<DeepworkSelectionOutcome>;
     /** Called inside the existing native maintenance / admission CAS boundary. */
-    selectIdle(agent: DshAgent, active: boolean, defaultActive: boolean): Promise<void>;
+    selectIdle(agent: DshAgent, active: boolean, _defaultActive: boolean): Promise<void>;
 }
 //# sourceMappingURL=state.d.ts.map

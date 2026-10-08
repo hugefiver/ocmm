@@ -101,7 +101,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
     };
     try {
         disposeAssistantStream = ctx.on("agent/assistant-stream", ({ agent, frame }) => {
-            if (!active || !live(agent))
+            if (!active || !live(agent) || !getSettings(agent).modules.deepwork.enabled)
                 return;
             if (frame.type === "start") {
                 const settings = getSettings(agent);
@@ -157,7 +157,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             if (!active || !live(frame.agent))
                 return downstream;
             const pending = pendingByAgent.get(frame.agent);
-            if (pending === undefined)
+            if (pending === undefined || !getSettings(frame.agent).modules.deepwork.enabled)
                 return downstream;
             if (latestNativeModelSelection(frame.agent)?.seq !== pending.manualSelectionSeq) {
                 pendingByAgent.delete(frame.agent);
@@ -198,6 +198,8 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             let role;
             try {
                 settings = getSettings(frame.agent);
+                if (!settings.modules.deepwork.enabled)
+                    return await next();
                 role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
             }
             catch {
@@ -303,7 +305,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
             try {
                 const settings = getSettings(frame.agent);
                 const continuation = settings.runtimeRecovery.idleContinuation;
-                if (!active || !live(frame.agent) || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted)
+                if (!active || !live(frame.agent) || !settings.modules.deepwork.enabled || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted)
                     return;
                 const preset = resolveSelectedAgentPreset(frame.agent.session);
                 const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);

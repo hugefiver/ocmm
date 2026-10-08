@@ -25,9 +25,11 @@ export function hasOpenTurn(events = []) {
 }
 export class DeepworkModeController {
     ctx;
+    moduleEnabled;
     listeners = new Set();
-    constructor(ctx) {
+    constructor(ctx, moduleEnabled = () => true) {
         this.ctx = ctx;
+        this.moduleEnabled = moduleEnabled;
     }
     watch(listener) {
         this.listeners.add(listener);
@@ -37,7 +39,7 @@ export class DeepworkModeController {
     changed(agent) { for (const listener of this.listeners)
         listener(agent); }
     active(agent, defaultActive) {
-        return agent !== undefined && isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
+        return agent !== undefined && this.moduleEnabled(agent) && isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
     }
     describe(agent, defaultActive) {
         const events = sessionEvents(agent.session), preset = resolveSelectedAgentPreset(agent.session);
@@ -46,11 +48,22 @@ export class DeepworkModeController {
             revision: createHash("sha256").update(JSON.stringify({ preset, defaultActive, intents,
                 presetChanges: events.filter((event) => event.type === "agent-preset/selected").length })).digest("hex") };
     }
+    intent(agent) {
+        const events = sessionEvents(agent.session);
+        for (let index = events.length - 1; index >= 0; index--) {
+            const value = activeFromEvent(events[index]);
+            if (value !== undefined)
+                return value;
+        }
+        return undefined;
+    }
     async select(agent, active, defaultActive = false) {
+        if (active && !this.moduleEnabled(agent))
+            throw new Error("Deepwork module is not admitted in this session; a mode intent cannot enable it");
         if (agent.status === "running" || hasOpenTurn(sessionEvents(agent.session)))
             throw new Error("Deepwork mode requires an idle session; no change was queued");
         const before = this.describe(agent, defaultActive);
-        if (before.explicit && before.active === active)
+        if (this.intent(agent) === active)
             return "unchanged";
         const write = async (signal) => {
             signal?.throwIfAborted();
@@ -64,11 +77,12 @@ export class DeepworkModeController {
         return "committed";
     }
     /** Called inside the existing native maintenance / admission CAS boundary. */
-    async selectIdle(agent, active, defaultActive) {
+    async selectIdle(agent, active, _defaultActive) {
+        if (active && !this.moduleEnabled(agent))
+            throw new Error("Deepwork module is not admitted in this session; a mode intent cannot enable it");
         if (hasOpenTurn(sessionEvents(agent.session)))
             throw new Error("Deepwork mode requires an idle session");
-        const mode = this.describe(agent, defaultActive);
-        if (mode.explicit && mode.active === active)
+        if (this.intent(agent) === active)
             return;
         assertDsmmMetadataPersistence(this.ctx);
         await agent.session.append(DEEPWORK_MODE_EVENT, { active });

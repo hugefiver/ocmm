@@ -156,6 +156,7 @@ const DEFAULT_RUNTIME_RECOVERY_SETTINGS = {
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
+    modules: { deepwork: { enabled: true } },
     modeName: "deepwork",
     defaultActive: false,
     promptOrder: 50,
@@ -206,6 +207,7 @@ test("current Loader config installs without legacy settings registration or sys
 
 test("resolveConfig overlays plugin config on defaults", () => {
   assert.deepEqual(resolveConfig({ modeName: "dw", promptOrder: 60, deepseekV4ProCalibration: "off" }), {
+    modules: { deepwork: { enabled: true } },
     modeName: "dw",
     defaultActive: false,
     promptOrder: 60,

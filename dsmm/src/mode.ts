@@ -24,7 +24,7 @@ export function registerDeepworkPrompt(readyCtx: DshContext, controller: Deepwor
         const subject = agent !== undefined && context.scope === agent ? agent : agentForScope(readyCtx, context.scope);
         if (subject === undefined) return "";
         const settings = getSettings(subject);
-        if (!controller.active(subject, settings.defaultActive)) return "";
+        if (!settings.modules.deepwork.enabled || !controller.active(subject, settings.defaultActive)) return "";
         return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), roleId: resolveEffectiveDsmmRole(subject, settings, true) ?? null, overrideSection: config.section });
       }
     };

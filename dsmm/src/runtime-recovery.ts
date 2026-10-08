@@ -138,7 +138,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
 
   try {
     disposeAssistantStream = ctx.on("agent/assistant-stream", ({ agent, frame }: { agent: DshAgent; frame: AssistantStreamFrame }) => {
-      if (!active || !live(agent)) return;
+      if (!active || !live(agent) || !getSettings(agent).modules.deepwork.enabled) return;
       if (frame.type === "start") {
         const settings = getSettings(agent);
         const role = resolveEffectiveDsmmRole(agent, settings, controller.active(agent, settings.defaultActive));
@@ -180,7 +180,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       const downstream = await next();
       if (!active || !live(frame.agent)) return downstream;
       const pending = pendingByAgent.get(frame.agent);
-      if (pending === undefined) return downstream;
+      if (pending === undefined || !getSettings(frame.agent).modules.deepwork.enabled) return downstream;
       if (latestNativeModelSelection(frame.agent)?.seq !== pending.manualSelectionSeq) {
         pendingByAgent.delete(frame.agent);
         throw new Error("dsmm retry was superseded by an explicit native model selection");
@@ -220,6 +220,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       let role;
       try {
         settings = getSettings(frame.agent);
+        if (!settings.modules.deepwork.enabled) return await next();
         role = resolveEffectiveDsmmRole(frame.agent, settings, controller.active(frame.agent, settings.defaultActive));
       } catch {
         const prior = attemptsByAgent.get(frame.agent);
@@ -306,7 +307,7 @@ export function registerRuntimeRecovery(ctx: DshContext, controller: DeepworkMod
       try {
         const settings = getSettings(frame.agent);
         const continuation = settings.runtimeRecovery.idleContinuation;
-        if (!active || !live(frame.agent) || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted) return;
+        if (!active || !live(frame.agent) || !settings.modules.deepwork.enabled || !settings.runtimeRecovery.enabled || !continuation.enabled || frame.signal.aborted) return;
 
         const preset = resolveSelectedAgentPreset(frame.agent.session);
         const inScope = controller.active(frame.agent, settings.defaultActive) || isDsmmRoleId(preset);

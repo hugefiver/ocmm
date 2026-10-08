@@ -33,6 +33,8 @@ export { resolveDshHome } from "./dsh-home.js";
 export { DsmmDeploymentConfig, parseGlobalConfig, editGlobalConfig } from "./deployment-config.js";
 export type { GlobalConfigSnapshot, GlobalConfigSaveRequest, DeploymentPathEdit } from "./deployment-config.js";
 export type { DsmmDeploymentSnapshot } from "./settings.js";
+export { DSMM_MODULE_DESCRIPTORS, deepworkEnabled, projectDeepworkModule } from "./modules.js";
+export type { DsmmModuleState } from "./modules.js";
 export type { DsmmProfileRuntimeStore, DsmmProfileRuntimeOptions } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export declare function apply(ctx: DshContext, config?: Config): void | Promise<void>;

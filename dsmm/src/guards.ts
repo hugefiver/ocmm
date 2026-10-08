@@ -92,6 +92,7 @@ export function truncateTextMiddle(text: string, maxBytes: number, toolName: str
 export function isSafetyScopeActive(exec: DshToolExecution, settings: DsmmSettings, controller: DeepworkModeController): boolean {
   if (settings.guards.scope === "off") return false;
   if (settings.guards.scope === "always") return true;
+  if (!settings.modules.deepwork.enabled) return false;
   if (controller.active(exec.agent, settings.defaultActive)) return true;
   return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));
 }
@@ -222,6 +223,7 @@ export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSet
 
   const git = gitWriteDecision(exec, settings);
   if (git !== undefined) return git;
+  if (!settings.modules.deepwork.enabled) return undefined;
 
   if (settings.guards.planFormatValidation) {
     const plan = validatePlanMutation(exec);
@@ -247,7 +249,7 @@ export function decidePostToolExecution(
   controller: DeepworkModeController
 ): DshPostToolDecision {
   const truncation = settings.guards.toolOutputTruncation;
-  if (!truncation.enabled || !isSafetyScopeActive(exec, settings, controller)) return decision;
+  if (!settings.modules.deepwork.enabled || !truncation.enabled || !isSafetyScopeActive(exec, settings, controller)) return decision;
   if (result.isError || decision.kind !== "accept" || "value" in decision) return decision;
 
   const content = decision.content ?? result.content;

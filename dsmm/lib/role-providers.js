@@ -50,6 +50,8 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
         installed.add(registry);
         try {
             const settings = getDeploymentSettings();
+            if (!settings.modules.deepwork.enabled)
+                return;
             for (const role of DSMM_ROLE_IDS) {
                 if (role === "dsmm-orchestrator" || !settings.roles[role])
                     continue;
@@ -66,8 +68,8 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                             if (!active || registry.getProvider("spawn") !== spawn)
                                 throw new SubagentError("DSMM native continuable provider changed", "NO_PROVIDER");
                             const admitted = getSettings(request.parent);
-                            if (!admitted.roles[role])
-                                throw new SubagentError("DSMM role is disabled", "UNAUTHORIZED");
+                            if (!admitted.modules.deepwork.enabled || !admitted.roles[role])
+                                throw new SubagentError("DSMM module or role is disabled", "UNAUTHORIZED");
                             if (!admitted.subagents.enableRunInBackground || admitted.subagents.backgroundMode !== "continuable")
                                 throw new SubagentError("DSMM continuable delegation requires explicit admitted opt-in", "UNAUTHORIZED");
                             policy?.prepareContinuable(request.parent, role, request.signal);
@@ -88,7 +90,7 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                                 throw new SubagentError(`DSMM spawn does not support ${key}`, "UNSUPPORTED_CAPABILITY");
                         }
                         const parentSettings = getSettings(request.parent);
-                        if (!parentSettings.roles[role])
+                        if (!parentSettings.modules.deepwork.enabled || !parentSettings.roles[role])
                             throw new Error("dsmm role provider is disabled by deployment configuration");
                         const agentOptions = await roleAgentOptions(request.parent, role, parentSettings, request.signal, request.agentOptions);
                         request.signal.throwIfAborted();
@@ -109,6 +111,9 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                             : policy.duringDelegation(request.parent, role, () => spawn.start(resolved), request.toolFilter);
                     }
                 });
+                const provider = registry.getProvider(roleProviderName(role));
+                if (provider !== undefined)
+                    policy?.captureProvider(provider);
                 disposers.push(() => { active = false; dispose(); });
             }
             readyCtx.effect?.(() => () => {

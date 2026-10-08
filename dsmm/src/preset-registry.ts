@@ -40,7 +40,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
       ?? (readyCtx as DshContext & { agentPresets?: NativePresetRegistry }).agentPresets;
     if (registry === undefined) throw new Error("dsmm requires the native DSH agentPresets registry");
     const settings = getSettings();
-    const enabled = DSMM_ROLE_IDS.filter((id) => settings.roles[id]);
+    const enabled = DSMM_ROLE_IDS.filter((id) => settings.modules.deepwork.enabled && settings.roles[id]);
     const active = DSMM_ROLES.filter((role) => isRootRole(role) && enabled.includes(role.id));
     const disposers: Array<() => Promise<void>> = [];
     try {

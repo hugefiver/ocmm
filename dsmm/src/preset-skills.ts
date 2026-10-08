@@ -35,7 +35,7 @@ export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeCon
     const raw = presets?.serviceFor(agent, "skills") ?? agentCtx.get("skills");
     const previous = mounted.get(agent), parent = scopeParentOf(agent);
     const settings = getSettings(agent);
-    if (!controller.active(agent, settings.defaultActive)) { remove(agent); return; }
+    if (!settings.modules.deepwork.enabled || !controller.active(agent, settings.defaultActive)) { remove(agent); return; }
     if (raw === undefined) throw new Error("dsmm active skills require the native skill registry; no prompt-body fallback is available");
     if (previous?.parent === parent && previous?.registry === raw) { previous.provider.invalidate(); return; }
     remove(agent);

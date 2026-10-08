@@ -99,7 +99,7 @@ export function registerBundledSkills(ctx: Context, skills: DshSkillRegistry, op
   const stopChange = ctx.on("skills/change", () => { generation += 1; }, { global: true });
   const names = (): readonly DsmmAvailableSkillName[] => {
     const settings = options.getSettings(options.agent);
-    return options.controller.active(options.agent, settings.defaultActive) ? enabledSkillNames(settings) : [];
+    return settings.modules.deepwork.enabled && options.controller.active(options.agent, settings.defaultActive) ? enabledSkillNames(settings) : [];
   };
   let disposeProvider: () => void;
   try {

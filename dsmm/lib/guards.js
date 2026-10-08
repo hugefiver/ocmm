@@ -78,6 +78,8 @@ export function isSafetyScopeActive(exec, settings, controller) {
         return false;
     if (settings.guards.scope === "always")
         return true;
+    if (!settings.modules.deepwork.enabled)
+        return false;
     if (controller.active(exec.agent, settings.defaultActive))
         return true;
     return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));
@@ -204,6 +206,8 @@ export function decidePreToolExecution(exec, settings, controller) {
     const git = gitWriteDecision(exec, settings);
     if (git !== undefined)
         return git;
+    if (!settings.modules.deepwork.enabled)
+        return undefined;
     if (settings.guards.planFormatValidation) {
         const plan = validatePlanMutation(exec);
         if (plan !== undefined)
@@ -221,7 +225,7 @@ export function decidePreToolExecution(exec, settings, controller) {
 }
 export function decidePostToolExecution(exec, result, decision, settings, controller) {
     const truncation = settings.guards.toolOutputTruncation;
-    if (!truncation.enabled || !isSafetyScopeActive(exec, settings, controller))
+    if (!settings.modules.deepwork.enabled || !truncation.enabled || !isSafetyScopeActive(exec, settings, controller))
         return decision;
     if (result.isError || decision.kind !== "accept" || "value" in decision)
         return decision;

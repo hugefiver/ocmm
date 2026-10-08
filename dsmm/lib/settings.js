@@ -7,6 +7,7 @@ export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export const DSMM_STATUS_COMMAND = "dsmm-status";
 export const DEFAULT_DSMM_SETTINGS = {
+    modules: { deepwork: { enabled: true } },
     modeName: "deepwork",
     defaultActive: false,
     promptOrder: 50,
@@ -220,6 +221,8 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
     runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
     lsp: LSP_SCHEMA
 });
+const MODULES_SCHEMA = Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean() }) });
+const GLOBAL_FIELDS_SCHEMA = Schema.object({ ...CONFIG_FIELDS_SCHEMA.dict, modules: MODULES_SCHEMA });
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
 function sparseSchema(schema) {
     const { default: _default, required: _required, ...meta } = schema.meta;
@@ -254,6 +257,7 @@ export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.defau
     }
 });
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+        modules: Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean().default(true) }) }),
         modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
         defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
         promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
@@ -276,6 +280,7 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
     })]).default({});
 export function resolveConfig(config = {}) {
     const settings = {
+        modules: { deepwork: { enabled: config.modules?.deepwork?.enabled ?? DEFAULT_DSMM_SETTINGS.modules.deepwork.enabled } },
         modeName: normalizeModeName(config.modeName),
         defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
         promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
@@ -389,7 +394,7 @@ function validateShape(value, schema) {
 /** Sparse grammar and full semantic validation are separate from native refs. */
 export function validateSparseConfig(input, global = false) {
     const config = copyJson(input);
-    validateShape(config, CONFIG_FIELDS_SCHEMA);
+    validateShape(config, global ? GLOBAL_FIELDS_SCHEMA : CONFIG_FIELDS_SCHEMA);
     if (global && Object.hasOwn(config, "sessionPersistence"))
         throw new TypeError("Native session storage is not a global deployment field");
     // A deployment layer may override one primary-route member and inherit the
@@ -405,7 +410,7 @@ export function validateSparseConfig(input, global = false) {
     return config;
 }
 export function validateDeploymentPath(path) {
-    let schema = CONFIG_FIELDS_SCHEMA;
+    let schema = GLOBAL_FIELDS_SCHEMA;
     if (path.length === 0 || path[0] === "sessionPersistence")
         throw new TypeError("Not an editable deployment field");
     for (const key of path) {
@@ -428,13 +433,19 @@ export function mergeConfigLayers(...layers) {
         }
         return result;
     };
-    return layers.reduce((base, layer) => merge(base, validateSparseConfig(layer)), {});
+    return layers.reduce((base, layer) => merge(base, copyJson(layer)), {});
 }
 export function resolveDeployment(global, profile) {
-    const merged = mergeConfigLayers(validateSparseConfig(global, true), profile);
+    const merged = mergeConfigLayers(validateSparseConfig(global, true), validateSparseConfig(profile));
     const settings = resolveConfig(merged);
-    validateSparseConfig(settings);
+    validateResolvedSettings(settings);
     return freezeSettings(settings);
+}
+export function validateResolvedSettings(settings) {
+    const plain = copyJson(settings);
+    validateShape(plain, GLOBAL_FIELDS_SCHEMA);
+    DSMM_SETTINGS_SCHEMA(plain);
+    return plain;
 }
 function validatePresentRuntimePolicy(value) {
     if (value === undefined)
@@ -596,7 +607,7 @@ export function registerSettings(ctx, config = {}, options = {}) {
     // Loader owns entry identity, Config validation, revision and persistent patch.
     // Each non-volatile reload receives a new deployment baseline. Profiles stay
     // on the existing immutable admission path, never a parallel settings store.
-    const base = freezeSettings(resolveConfig(validateSparseConfig(config)));
+    const base = freezeSettings(options.resolved === undefined ? resolveConfig(validateSparseConfig(config)) : validateResolvedSettings(options.resolved));
     const getSettings = () => base;
     options.onChange?.(base);
     options.install?.(ctx, getSettings);

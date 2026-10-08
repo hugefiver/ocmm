@@ -5,6 +5,7 @@ import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimit
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute } from "./settings.js";
 import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
+import type { DsmmModuleState } from "./modules.js";
 
 export interface DsmmProfilesRemote {
   describe(): Promise<RemoteResult<ProfileSnapshot>>;
@@ -20,6 +21,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
   interface TypertRemoteMap {
     "dsmmConfig/describe": () => Promise<RemoteResult<GlobalConfigSnapshot>>;
     "dsmmConfig/save": (request: GlobalConfigSaveRequest) => Promise<RemoteResult<GlobalConfigSnapshot>>;
+    "dsmmConfig/describeModules": () => Promise<RemoteResult<DsmmModuleState[]>>;
     "dsmmProfiles/describe": DsmmProfilesRemote["describe"];
     "dsmmProfiles/read": DsmmProfilesRemote["read"];
     "dsmmProfiles/save": DsmmProfilesRemote["save"];
@@ -30,7 +32,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
   }
   interface TypertRemoteNamespaceMap {
     dsmmProfiles: DsmmProfilesRemote;
-    dsmmConfig: { describe(): Promise<RemoteResult<GlobalConfigSnapshot>>; save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>> };
+    dsmmConfig: { describe(): Promise<RemoteResult<GlobalConfigSnapshot>>; save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>>; describeModules(): Promise<RemoteResult<DsmmModuleState[]>> };
   }
   interface RemoteErrorDetailsMap {
     "dsmm-profiles/refused": ProfileErrorInfo;
@@ -180,7 +182,7 @@ function selectionState(value: unknown): ProfileSelectionState {
   return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value: unknown): SessionProfileSnapshot {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork"]);
+  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
   return {
     sessionId: sessionId(item.sessionId), globalDefault: selectionState(item.globalDefault), selection: selectionState(item.selection),
@@ -192,6 +194,7 @@ function sessionSnapshot(value: unknown): SessionProfileSnapshot {
     }),
     ...optional(item, "rolePolicy", rolePolicy),
     ...optional(item, "profileModel", modelRoute),
+    ...optional(item, "modules", moduleStates),
     ...optional(item, "deepwork", (input) => {
       const mode = object(input, ["active", "explicit", "locked", "revision"]);
       return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
@@ -261,12 +264,31 @@ function configDescriptor(method: string, parameter?: TypertCodec): InvocationDe
     parameters: parameter === undefined ? [] : [{ name: "request", wire: "request", source: "json", codec: parameter }], result: codec("GlobalConfigSnapshot", globalSnapshot) };
 }
 
+function moduleStates(value: unknown): DsmmModuleState[] {
+  if (!Array.isArray(value) || value.length !== 1) fail("modules");
+  return value.map((value) => {
+    const row = object(value, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
+    const descriptor = object(row.descriptor, ["id", "label", "key"]);
+    if (descriptor.id !== "deepwork" || descriptor.label !== "Deepwork" || descriptor.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown") fail("module descriptor");
+    const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
+    if (!["defaults", "global"].includes(String(desired.source)) || !["current-global", "admission", "startup"].includes(String(desired.capture))
+      || ![null, "global-disabled", "restart-required"].includes(next.reason as string | null)
+      || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason as string | null)) fail("module state");
+    return { descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }, hostBundleEnabled: "unknown",
+      desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source as "defaults" | "global", capture: desired.capture as DsmmModuleState["desired"]["capture"] },
+      startupMounted: boolean(row.startupMounted, "startupMounted"), admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
+      nextRoot: { admitted: boolean(next.admitted, "nextRoot.admitted"), reason: next.reason as DsmmModuleState["nextRoot"]["reason"] },
+      reason: row.reason as DsmmModuleState["reason"], pending: boolean(row.pending, "pending") };
+  });
+}
+
 /** Explicit strict Host contract; no SRC fallback or browser-supplied authority. */
 export const TYPERT_REMOTE: TypertRemoteContribution = {
   package: "@dsmm/dsmm",
   descriptors: [
     configDescriptor("describe"),
     configDescriptor("save", codec("GlobalConfigSaveRequest", globalSaveRequest)),
+    { ...configDescriptor("describeModules"), result: codec("DsmmModuleStateArray", moduleStates) },
     {
       ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
       parameters: [

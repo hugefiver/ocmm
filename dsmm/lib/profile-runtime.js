@@ -11,6 +11,7 @@ import { resolveRoleRuntimePolicy } from "./settings.js";
 import { freezeSettings } from "./settings.js";
 import { resolveDshHome } from "./dsh-home.js";
 import { lstatSync } from "node:fs";
+import { projectDeepworkModule } from "./modules.js";
 import { Context } from "@deepseek-ai/cordis";
 function immutableSettings(settings) {
     return freezeSettings(settings);
@@ -36,9 +37,10 @@ export class DsmmProfileRuntime {
         this.store = store;
         this.options = options;
         this.baseline = immutableSettings(baseline);
-        this.mode = options.modeController ?? new DeepworkModeController({ get: (name) => ctx.get?.(name) });
+        this.mode = options.modeController ?? new DeepworkModeController({ get: (name) => ctx.get?.(name) }, (agent) => this.getSettings(agent).modules.deepwork.enabled);
         this.current = this.prepare(null, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
         this.getSettings.admission = (agent) => this.admission(agent);
+        this.getSettings.moduleStates = (agent) => { const admission = this.admission(agent); return [projectDeepworkModule(this.baseline, admission.deployment, admission)]; };
     }
     async initialize() {
         const selection = await this.store.loadSelection();
@@ -72,6 +74,7 @@ export class DsmmProfileRuntime {
         const profileModel = this.declaredProfileModel(admitted.settings, role);
         return { sessionId: agent.id, globalDefault: selectionState(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
             rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch), deepwork: this.mode.describe(agent, admitted.settings.defaultActive),
+            modules: [projectDeepworkModule(this.baseline, admitted.deployment, admitted)],
             ...(profileModel === undefined ? {} : { profileModel }),
             admissionEpoch: admitted.epoch, switchAllowed: reason === undefined, ...(reason === undefined ? {} : { switchUnavailableReason: reason }) };
     }
@@ -92,6 +95,8 @@ export class DsmmProfileRuntime {
             assertAuthority?.();
         };
         assertCurrent();
+        if (request.active && !admitted.settings.modules.deepwork.enabled)
+            throw new DsmmProfileError("unavailable", "Deepwork module is not admitted in this session; changing mode cannot enable it.", "modules.deepwork.enabled");
         if (agent.status === "running")
             throw new DsmmProfileError("busy", "Wait for the session to become idle.");
         if (agent.runMaintenance === undefined)
@@ -173,6 +178,7 @@ export class DsmmProfileRuntime {
                     // queued wake or disposal wins immediately when maintenance releases.
                     return { sessionId: request.sessionId, globalDefault: selectionState(this.current), selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
                         deepwork: this.mode.describe(agent, result.prepared.defaultActive),
+                        modules: [projectDeepworkModule(this.baseline, admitted.deployment, this.admission(agent))],
                         ...(profileModel === undefined ? {} : { profileModel }),
                         scope: request.id === null ? "deployment-baseline" : "session-override", admissionEpoch: epoch, switchAllowed: true };
                 }
@@ -246,6 +252,9 @@ export class DsmmProfileRuntime {
         const desired = deployment?.settings ?? this.baseline;
         const effective = structuredClone(desired);
         const restartRequired = [];
+        effective.modules.deepwork.enabled = desired.modules.deepwork.enabled && this.baseline.modules.deepwork.enabled;
+        if (desired.modules.deepwork.enabled && !this.baseline.modules.deepwork.enabled)
+            restartRequired.push("modules.deepwork.enabled");
         for (const role of DSMM_ROLES) {
             if (desired.roles[role.id] && !this.baseline.roles[role.id])
                 restartRequired.push(`roles.${role.id}`);
@@ -283,6 +292,8 @@ export class DsmmProfileRuntime {
         };
         for (const key of ["modeName", "promptOrder", "presets", "lsp"])
             pinStartup(key);
+        if (deployment?.settings.modules.deepwork.enabled && !baseline.modules.deepwork.enabled)
+            pinStartup("modules.deepwork.enabled");
         for (const role of DSMM_ROLES) {
             if (deployment?.settings.roles[role.id] && !baseline.roles[role.id])
                 pinStartup(`roles.${role.id}`);
@@ -395,6 +406,8 @@ export class DsmmProfileRuntime {
         }
     }
     async validate(settings, agent, signal, auditCatalog = true) {
+        if (!settings.modules.deepwork.enabled)
+            return;
         if (this.options.validateCandidate !== undefined) {
             await this.options.validateCandidate(settings);
             return;

@@ -102,6 +102,10 @@ test("git write guard can be configured to deny", () => {
 
   assert.equal(decision?.kind, "deny");
   assert.match(decision?.reason ?? "", /git write command is disabled/);
+  const off = { ...settings, modules: { deepwork: { enabled: false } }, guards: { ...settings.guards, scope: "always" as const } };
+  assert.equal(decidePreToolExecution(exec("pwsh", { command: "git push origin master" }, false), off, controller())?.kind, "deny");
+  assert.equal(decidePreToolExecution(exec("pwsh", { command: "git push origin master" }, false), { ...off, guards: { ...off.guards, scope: "off" } }, controller()), undefined);
+  assert.equal(decidePreToolExecution(exec("todo_write", { todos: [{ status: "pending" }] }, false), off, controller()), undefined, "off module does not add DW workflow discipline to ordinary tools");
 });
 
 test("git write guard detects destructive operation forms and honors off policy", () => {
@@ -358,6 +362,12 @@ test("registerSafetyGuards composes pre-execute decisions monotonically", async 
     assert.deepEqual(result, expected, name);
     assert.equal(nextCalls === 1, callsNext, name);
   }
+  const off = { ...askSettings, modules: { deepwork: { enabled: false } }, guards: { ...askSettings.guards, scope: "always" as const } };
+  registerSafetyGuards({ on(event, listener) { listeners[event] = listener; } }, controller(), () => off);
+  const execution = exec("pwsh", { command: "git push" }, false);
+  assert.equal((await (listeners["tools/pre-execute"] as typeof preExecute)(execution, async () => ({ kind: "allow" }))).kind, "ask");
+  const nativeDenial: DshPreToolDecision = { kind: "deny", reason: "native host refusal" };
+  assert.equal(await (listeners["tools/pre-execute"] as typeof preExecute)(execution, async () => nativeDenial), nativeDenial);
 });
 
 test("truncateTextMiddle keeps head and tail with dsmm notice", () => {

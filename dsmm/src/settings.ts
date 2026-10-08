@@ -97,6 +97,8 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
 };
 
 export interface DsmmPluginConfig {
+  /** Only global deployment input; native/legacy profile transport rejects it. */
+  modules?: { deepwork?: { enabled?: boolean } };
   /** Startup-only native storage binding; never a runtime-profile field. */
   sessionPersistence?: { root: string; compression?: "zstd" | "none" };
   modeName?: string;
@@ -122,6 +124,7 @@ export interface DsmmPluginConfig {
 }
 
 export interface DsmmSettings {
+  modules: { deepwork: { enabled: boolean } };
   modeName: string;
   defaultActive: boolean;
   promptOrder: number;
@@ -180,6 +183,7 @@ export interface DsmmDeploymentSnapshot {
 /** Runtime consumers pass their Agent so immutable profile admission is retained. */
 export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
   admission?: (agent?: DshAgent) => DsmmProfileAdmission;
+  moduleStates?: (agent?: DshAgent) => import("./modules.js").DsmmModuleState[];
 };
 
 export interface DsmmResolvedRoleRuntimePolicy {
@@ -193,11 +197,14 @@ export interface DsmmResolvedRoleRuntimePolicy {
 export const DSMM_STATUS_COMMAND = "dsmm-status";
 
 export interface RegisterSettingsOptions {
+  /** Already resolved/captured internal settings, never external profile input. */
+  resolved?: DsmmSettings;
   onChange?: (settings: DsmmSettings) => void;
   install?: (readyCtx: DshContext, getSettings: () => DsmmSettings) => void;
 }
 
 export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
+  modules: { deepwork: { enabled: true } },
   modeName: "deepwork",
   defaultActive: false,
   promptOrder: 50,
@@ -438,6 +445,9 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
   lsp: LSP_SCHEMA
 });
 
+const MODULES_SCHEMA = Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean() }) });
+const GLOBAL_FIELDS_SCHEMA = Schema.object({ ...CONFIG_FIELDS_SCHEMA.dict, modules: MODULES_SCHEMA });
+
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
 function sparseSchema(schema: Schema): Schema {
   const { default: _default, required: _required, ...meta } = schema.meta;
@@ -471,6 +481,7 @@ export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.defau
 }) as unknown as Schema<DsmmPluginConfig>;
 
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+  modules: Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean().default(true) }) }),
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
@@ -494,6 +505,7 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
   const settings: DsmmSettings = {
+    modules: { deepwork: { enabled: config.modules?.deepwork?.enabled ?? DEFAULT_DSMM_SETTINGS.modules.deepwork.enabled } },
     modeName: normalizeModeName(config.modeName),
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
@@ -583,7 +595,7 @@ function validateShape(value: unknown, schema: Schema): void {
 /** Sparse grammar and full semantic validation are separate from native refs. */
 export function validateSparseConfig(input: unknown, global = false): DsmmPluginConfig {
   const config = copyJson(input) as DsmmPluginConfig;
-  validateShape(config, CONFIG_FIELDS_SCHEMA);
+  validateShape(config, global ? GLOBAL_FIELDS_SCHEMA : CONFIG_FIELDS_SCHEMA);
   if (global && Object.hasOwn(config, "sessionPersistence")) throw new TypeError("Native session storage is not a global deployment field");
   // A deployment layer may override one primary-route member and inherit the
   // others. Validate its present members here; resolveDeployment validates the
@@ -598,7 +610,7 @@ export function validateSparseConfig(input: unknown, global = false): DsmmPlugin
 }
 
 export function validateDeploymentPath(path: readonly string[]): void {
-  let schema: Schema = CONFIG_FIELDS_SCHEMA;
+  let schema: Schema = GLOBAL_FIELDS_SCHEMA;
   if (path.length === 0 || path[0] === "sessionPersistence") throw new TypeError("Not an editable deployment field");
   for (const key of path) {
     if (schema.type === "union") schema = schema.list?.find((node) => node.type === "object") ?? schema;
@@ -619,14 +631,21 @@ export function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConf
     }
     return result;
   };
-  return layers.reduce((base, layer) => merge(base as Record<string, unknown>, validateSparseConfig(layer) as Record<string, unknown>), {});
+  return layers.reduce((base, layer) => merge(base as Record<string, unknown>, copyJson(layer) as Record<string, unknown>), {});
 }
 
 export function resolveDeployment(global: DsmmPluginConfig, profile: DsmmPluginConfig): DsmmSettings {
-  const merged = mergeConfigLayers(validateSparseConfig(global, true), profile);
+  const merged = mergeConfigLayers(validateSparseConfig(global, true), validateSparseConfig(profile));
   const settings = resolveConfig(merged);
-  validateSparseConfig(settings);
+  validateResolvedSettings(settings);
   return freezeSettings(settings);
+}
+
+export function validateResolvedSettings(settings: DsmmSettings): DsmmSettings {
+  const plain = copyJson(settings);
+  validateShape(plain, GLOBAL_FIELDS_SCHEMA);
+  DSMM_SETTINGS_SCHEMA(plain);
+  return plain;
 }
 
 function validatePresentRuntimePolicy(value: unknown): unknown {
@@ -803,7 +822,7 @@ export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {},
   // Loader owns entry identity, Config validation, revision and persistent patch.
   // Each non-volatile reload receives a new deployment baseline. Profiles stay
   // on the existing immutable admission path, never a parallel settings store.
-  const base = freezeSettings(resolveConfig(validateSparseConfig(config)));
+  const base = freezeSettings(options.resolved === undefined ? resolveConfig(validateSparseConfig(config)) : validateResolvedSettings(options.resolved));
   const getSettings = (): DsmmSettings => base;
   options.onChange?.(base);
   options.install?.(ctx, getSettings);

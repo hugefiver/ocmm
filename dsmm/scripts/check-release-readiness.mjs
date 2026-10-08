@@ -407,7 +407,7 @@ function validateNativeClient(packageRoot, paths, errors) {
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
       || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), [
-        "@dsmm/dsmm#dsmmConfig/describe", "@dsmm/dsmm#dsmmConfig/save",
+        "@dsmm/dsmm#dsmmConfig/describe", "@dsmm/dsmm#dsmmConfig/save", "@dsmm/dsmm#dsmmConfig/describeModules",
         ...["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`)
       ])) {
       throw new Error("invalid exports");

@@ -3,6 +3,8 @@ import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { DshAgent } from "./dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
+import type { DsmmModuleState } from "./modules.js";
+import type { DsmmSettings } from "./settings.js";
 export interface ProfilesBackend {
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
@@ -32,9 +34,11 @@ export declare class DsmmProfilesHost extends TypertRemoteService {
 export declare function assertLocalSettingsOperator(ctx: Context): void;
 export declare class DsmmConfigHost extends TypertRemoteService {
     private readonly backend;
+    private readonly startup?;
     private readonly lifetime;
-    constructor(ctx: Context, backend: DsmmDeploymentConfig);
+    constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined);
     describe(): Promise<GlobalConfigSnapshot>;
+    describeModules(): Promise<DsmmModuleState[]>;
     save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot>;
 }
 declare module "@deepseek-ai/cordis" {
@@ -45,4 +49,6 @@ declare module "@deepseek-ai/cordis" {
 }
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
 export declare function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, deployment?: DsmmDeploymentConfig): DsmmProfilesHost;
+/** Core-owned injection; works without any DW or profile business service. */
+export declare function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings): DsmmConfigHost;
 //# sourceMappingURL=profile-rpc.d.ts.map

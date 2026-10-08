@@ -154,6 +154,8 @@ test("rc.2 native settings refuses unknown, ordinary and raw-reference edits wit
     assert.equal(typeof rawRef.get, "function", "use the real Cordis volatile reference, not a fake raw value");
     for (const [path, value, error] of [
       [["unknown"], true, /not volatile/],
+      [["modules", "deepwork", "enabled"], false, /not volatile/],
+      [["modules"], { deepwork: { enabled: false } }, /not volatile/],
       [["sessionPersistence"], { root: join(f.dir, "must-not-be-mounted") }, /not volatile/],
       [["defaultActive"], rawRef, /Config .*contains/]
     ] as const) {

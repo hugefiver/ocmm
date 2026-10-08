@@ -78,7 +78,7 @@ export function registerBundledSkills(ctx, skills, options) {
     const stopChange = ctx.on("skills/change", () => { generation += 1; }, { global: true });
     const names = () => {
         const settings = options.getSettings(options.agent);
-        return options.controller.active(options.agent, settings.defaultActive) ? enabledSkillNames(settings) : [];
+        return settings.modules.deepwork.enabled && options.controller.active(options.agent, settings.defaultActive) ? enabledSkillNames(settings) : [];
     };
     let disposeProvider;
     try {
