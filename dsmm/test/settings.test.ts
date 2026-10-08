@@ -9,6 +9,9 @@ import { DSMM_ROLES } from "../lib/roles.js";
 import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
 import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
 import type { DsmmPluginConfig, DsmmSettings } from "../lib/settings.js";
+import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
+
+useIsolatedDshEnvironment();
 
 const DEFAULT_ROLE_SETTINGS = Object.fromEntries(DSMM_ROLES.map((role) => [role.id, role.enabledByDefault]));
 const DEFAULT_SKILL_SETTINGS = Object.fromEntries(DSMM_SKILL_NAMES.map((id) => [id, true]));

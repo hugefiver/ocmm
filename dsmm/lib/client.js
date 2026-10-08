@@ -88,7 +88,7 @@ function isRecord(value) {
 var errorCodes = /* @__PURE__ */ new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled"]);
 var idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 var revisionPattern = /^[a-f0-9]{64}$/u;
-var rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)$/u;
+var rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader|frontend|hard-reasoning|research|quick|coding|normal-task|complex|deep|documenting|cross-cutting)$/u;
 function isProfileId(value) {
   return typeof value === "string" && idPattern.test(value) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value);
 }
@@ -161,7 +161,7 @@ function content(value) {
   return result;
 }
 function snapshot(value) {
-  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults"]);
+  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction"]);
   if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail("profiles");
   return {
     profiles: item.profiles.map((input) => {
@@ -173,7 +173,7 @@ function snapshot(value) {
     selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
     ...optional(item, "selectionError", errorInfo),
     ...optional(item, "roles", (input) => {
-      if (!Array.isArray(input) || input.length > 12) fail("roles");
+      if (!Array.isArray(input) || input.length > 22) fail("roles");
       const result = input.map((value2) => {
         const row = object(value2, ["id", "label", "enabled"], ["runtimePolicy"]);
         return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "runtimePolicy", (input2) => {
@@ -184,7 +184,13 @@ function snapshot(value) {
       if (new Set(result.map((row) => row.id)).size !== result.length) fail("roles");
       return result;
     }),
-    ...optional(item, "editorDefaults", runtimePolicy)
+    ...optional(item, "editorDefaults", runtimePolicy),
+    ...optional(item, "origin", (input) => {
+      if (!["central", "legacy", "explicit"].includes(String(input))) fail("origin");
+      return input;
+    }),
+    ...optional(item, "readOnly", (input) => boolean(input, "readOnly")),
+    ...optional(item, "writeRestriction", (input) => text(input, "writeRestriction", 1024))
   };
 }
 function rateLimit(value) {
@@ -267,9 +273,57 @@ function codec(symbol, parse3) {
 function descriptor(method, result, parameter) {
   return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === void 0 ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
 }
+function jsonData(value, depth = 0, active = /* @__PURE__ */ new Set()) {
+  if (depth > 32) fail("JSON depth");
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "object" || value === null || active.has(value)) fail("JSON value");
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail("JSON object");
+  active.add(value);
+  const result = Array.isArray(value) ? value.map((child) => jsonData(child, depth + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    if (["__proto__", "prototype", "constructor"].includes(key)) fail("JSON key");
+    return [key, jsonData(child, depth + 1, active)];
+  }));
+  active.delete(value);
+  return result;
+}
+function globalSnapshot(value) {
+  const row = object(value, ["config", "revision"]);
+  object(row.config, [], Object.keys(row.config));
+  return { config: jsonData(row.config), revision: selectionRevision(row.revision) };
+}
+function globalSaveRequest(value) {
+  const row = object(value, ["expectedRevision", "edits"]);
+  if (!Array.isArray(row.edits) || row.edits.length > 128) fail("edits");
+  return { expectedRevision: selectionRevision(row.expectedRevision), edits: row.edits.map((value2) => {
+    const edit = object(value2, ["op", "path"], ["value"]);
+    if (!Array.isArray(edit.path) || edit.path.length < 1 || edit.path.length > 8) fail("field path");
+    const path = edit.path.map((part) => {
+      const key = text(part, "field", 128);
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key)) fail("field");
+      return key;
+    });
+    if (edit.op === "unset" && !Object.hasOwn(edit, "value")) return { op: "unset", path };
+    if (edit.op !== "set" || !Object.hasOwn(edit, "value")) fail("edit");
+    return { op: "set", path, value: jsonData(edit.value) };
+  }) };
+}
+function configDescriptor(method, parameter) {
+  return {
+    id: `@dsmm/dsmm#dsmmConfig/${method}`,
+    service: "dsmmConfig",
+    namespace: "dsmmConfig",
+    method,
+    invocation: { kind: "direct" },
+    parameters: parameter === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: parameter }],
+    result: codec("GlobalConfigSnapshot", globalSnapshot)
+  };
+}
 var TYPERT_REMOTE = {
   package: "@dsmm/dsmm",
   descriptors: [
+    configDescriptor("describe"),
+    configDescriptor("save", codec("GlobalConfigSaveRequest", globalSaveRequest)),
     {
       ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
       parameters: [

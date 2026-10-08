@@ -127,6 +127,40 @@ export interface DsmmProfileAdmission {
     } | null;
     epoch: string;
     scope: DsmmProfileScope;
+    deployment?: DsmmDeploymentSnapshot;
+    restartRequired?: readonly string[];
+    sources?: Record<string, "defaults" | "global" | "profile" | "named-session">;
+    sourceCaptures?: {
+        startup?: {
+            globalRevision: string;
+            nativeRevision: string;
+        };
+        /** Deployment refers to this admission's captured desired snapshot, never latest disk. */
+        fields: Record<string, "startup" | "deployment" | "named-session">;
+    };
+    store?: {
+        origin: "central" | "legacy" | "explicit";
+        readOnly: boolean;
+        writeRestriction?: string;
+    };
+}
+export interface DsmmDeploymentSnapshot {
+    settings: DsmmSettings;
+    global: DsmmPluginConfig;
+    profile: DsmmPluginConfig;
+    globalRevision: string;
+    nativeRevision: string;
+    /** Native configForms CAS when its public descriptor is available; raw hash is not that CAS. */
+    nativeFormRevision?: number;
+    nativeNamespace?: string;
+    /** Public native base/user provenance; profile above is the assembled explicit entry layer. */
+    nativeForm?: {
+        base?: unknown;
+        user?: unknown;
+    };
+    entryId: string;
+    hostProfileKey: string;
+    sources: Record<string, "defaults" | "global" | "profile">;
 }
 /** Runtime consumers pass their Agent so immutable profile admission is retained. */
 export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
@@ -146,8 +180,17 @@ export interface RegisterSettingsOptions {
 }
 export declare const DEFAULT_DSMM_SETTINGS: DsmmSettings;
 export declare const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
+export declare const DSMM_NATIVE_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
 export declare const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings>;
 export declare function resolveConfig(config?: DsmmPluginConfig): DsmmSettings;
+/** Reject references, accessors, prototypes and non-JSON data before any merge. */
+export declare function copyJson<T>(input: T): T;
+export declare function freezeSettings<T>(input: T): T;
+/** Sparse grammar and full semantic validation are separate from native refs. */
+export declare function validateSparseConfig(input: unknown, global?: boolean): DsmmPluginConfig;
+export declare function validateDeploymentPath(path: readonly string[]): void;
+export declare function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConfig;
+export declare function resolveDeployment(global: DsmmPluginConfig, profile: DsmmPluginConfig): DsmmSettings;
 export declare function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting;
 export declare function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean;
 export declare function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings;

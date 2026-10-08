@@ -33,7 +33,7 @@ interface NativeAgentRegistry {
 }
 
 /** Declare roles to DSH 0.2's native registry; directories are not discovery inputs. */
-export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSettings): void {
+export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSettings): void | Promise<void> {
   const install = async (readyCtx: DshContext): Promise<void> => {
     const registry = readyCtx.get?.<NativePresetRegistry>("agentPresets")
       ?? (readyCtx as DshContext & { agentPresets?: NativePresetRegistry }).agentPresets;
@@ -133,7 +133,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
   };
 
   if (ctx.inject !== undefined) {
-    ctx.inject(["agentPresets"], install);
+    return Promise.resolve(ctx.inject(["agentPresets"], install)).then(() => undefined);
   } else if (ctx.get?.("agentPresets") !== undefined || (ctx as DshContext & { agentPresets?: NativePresetRegistry }).agentPresets !== undefined) {
     void install(ctx).catch((error: unknown) => ctx.logger?.warn(`dsmm native preset registration failed: ${String(error)}`));
   }

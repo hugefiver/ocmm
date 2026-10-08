@@ -3,6 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
+
+useIsolatedDshEnvironment();
 import type {
   AgentRequestErrorFrame,
   AgentTurnStoppingFrame,
@@ -162,10 +165,10 @@ test("README local documentation links are shipped by the package", () => {
     assert.ok(localDocs.includes(required), `${required} is linked from README`);
   }
   assert.match(readme, /@deepseek-ai\/dsh@0\.2\.0-rc\.2/u);
-  assert.match(readme, /seven scoped core workflow skills/iu);
-  assert.match(readme, /twelve native roles/iu);
+  assert.match(readme, /Fourteen configurable Agent-scoped skills/iu);
+  assert.match(readme, /11 base roles and 11 categories/iu);
   assert.match(readme, /nine tools including atomic `format`/iu);
-  assert.match(readme, /Headless task text is not a slash-command adapter/u);
+  assert.match(readme, /Headless task text (?:is not|isn't) a slash-command adapter/iu);
   for (const path of localDocs) {
     assert.ok(pkg.files.includes(path), `${path} is included in package files`);
     assert.equal(existsSync(join(packageRoot, path)), true, `${path} exists`);
@@ -183,13 +186,13 @@ test("settings-status documentation separates deployment configuration from runt
   assert.match(settingsStatus, /Usage: \/dsmm-status \[json\]/u);
   assert.match(settingsStatus, /defensive JSON snapshot with version 1/u);
   assert.match(settingsStatus, /Commands belong to the native command adapter/u);
-  assert.match(settingsStatus, /restart-scoped/u);
-  assert.match(settingsStatus, /Loader plugin entry.*deployment baseline/u);
-  assert.match(settingsStatus, /removed `settings\.register\(\)` service/u);
+  assert.match(settingsStatus, /LSP retain startup settings/u);
+  assert.match(settingsStatus, /flat optional volatile transport fields/u);
+  assert.match(settingsStatus, /removed `settings\.register\(\)` namespace/u);
   assert.match(settingsStatus, /\$DSH_HOME\/settings\.yaml/u);
-  assert.match(settingsStatus, /runtime-only file overlays for newly admitted Agents/u);
+  assert.match(settingsStatus, /new ordinary root awaits the latest valid global\/profile desired deployment.*applied immutable named overlay/iu);
   assert.match(settingsStatus, /Schema parsing preserves this distinction/u);
-  assert.match(settingsStatus, /twelve role toggles default on/u);
+  assert.match(settingsStatus, /22 roles\/categories and 14 configurable skills, with cross-cutting opt-in\/default false/u);
   assert.match(settingsStatus, /does not perform capability\/network queries/u);
 
   for (const line of [
@@ -241,8 +244,9 @@ test("model-routing documentation ships the exact calibration contract", () => {
 test("runtime profile documentation distinguishes draft, revision, selection and live Agent authority", () => {
   const profiles = readFileSync(join(packageRoot, "docs", "profiles.md"), "utf8");
   assert.match(profiles, /^# Deepwork runtime profiles \(0\.1\.9 source contract\)/u);
-  assert.match(profiles, /native `profileContext\.dir` is the only storage authority/u);
-  assert.match(profiles, /dsmm-profiles\/<id>\.jsonc/u);
+  assert.match(profiles, /ProfileStore\.fromCentral\(home, profiledir, entryId\)/u);
+  assert.match(profiles, /<root>\/profiles\/<id>\.jsonc/u);
+  assert.match(profiles, /strict read-only legacy compatibility/u);
   assert.match(profiles, /\.revisions\/<sha256>\.jsonc/u);
   assert.match(profiles, /\.selection\.json.*\{version: 1, id, revision\}/u);
   for (const field of ["defaultActive", "roleRouting", "workflow", "guards", "runtimeRecovery", "deepseekV4ProCalibration", "deepseekFlashCalibration"]) {
@@ -252,16 +256,16 @@ test("runtime profile documentation distinguishes draft, revision, selection and
   for (const field of ["roles", "skills", "modeName", "promptOrder", "section", "presets", "lsp", "sessionPersistence"]) {
     assert.ok(rejectedFields.includes(`\`${field}\``), `${field} remains deployment-only`);
   }
-  assert.match(profiles, /built-in DSMM defaults → deployment DSMM configuration → selected immutable runtime revision/u);
-  assert.match(profiles, /Saving.*does not activate/iu);
+  assert.match(profiles, /built-in defaults → sparse global `config\.json` → explicit native entry\/profile override → selected immutable runtime revision/u);
+  assert.match(profiles, /Saving.*doesn't activate/iu);
   assert.match(profiles, /Only after the pointer commit succeeds may the current in-memory selection change/u);
   assert.match(profiles, /Every existing live Agent, including a blank one, retains/u);
   assert.match(profiles, /Existing children retain their captured old epoch.*later.*children inherit the new one/u);
-  assert.match(profiles, /committed sidecar admits that exact immutable revision or explicit baseline/u);
-  assert.match(profiles, /without a sidecar preserves the historical global-current cold-resume behavior/u);
+  assert.match(profiles, /committed sidecar uses that origin's exact immutable revision or explicit baseline/u);
+  assert.match(profiles, /without a sidecar preserves the historical scoped-global-current behavior/u);
   assert.match(profiles, /\.sessions\/<sha256\(native-session-id\)>\.json/u);
   assert.match(profiles, /expected sidecar revision and admission epoch must still match/u);
-  assert.match(profiles, /No operation rewrites `cordis\.patch\.yml`/u);
+  assert.match(profiles, /Named-profile operations don't rewrite `cordis\.patch\.yml`/u);
   assert.match(profiles, /no model-visible profile-management tools.*anonymous endpoints or authentication bypasses/iu);
 });
 

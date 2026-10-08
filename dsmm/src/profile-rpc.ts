@@ -9,6 +9,7 @@ import { TYPERT_HOST } from "./profile-remote.js";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import type { DshAgent, DshAgentsRegistry } from "./dsh-types.js";
+import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 
 /** The public SessionController capability, without importing its client graph. */
 type NativeSessionAuthority = Pick<SessionController, "resolveAgent">;
@@ -148,11 +149,53 @@ export class DsmmProfilesHost extends TypertRemoteService {
   }
 }
 
-declare module "@deepseek-ai/cordis" { interface Context { dsmmProfiles: DsmmProfilesHost } }
+/** A peer is not write authority. Require the public local, writable Host carrier. */
+export function assertLocalSettingsOperator(ctx: Context): void {
+  const invocation = ctx.invocation;
+  const connection = ctx.get("connection") as HostConnectionHandle | undefined;
+  const webServer = ctx.get("webServer") as { host?: string } | undefined;
+  const settings = ctx.get("settings") as { writable?: boolean } | undefined;
+  if (invocation?.peer === undefined || connection?.operator !== invocation.peer
+    || webServer?.host !== "127.0.0.1" || settings?.writable !== true) {
+    throw new DsmmProfileError("not-owned", "Global deployment edits require the authenticated operator of a local writable native Host.");
+  }
+  invocation.signal.throwIfAborted();
+}
+
+export class DsmmConfigHost extends TypertRemoteService {
+  private readonly lifetime = new AbortController();
+  constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig) {
+    super(ctx, "dsmmConfig");
+    ctx.effect(() => () => this.lifetime.abort());
+  }
+  @Remote
+  async describe(): Promise<GlobalConfigSnapshot> {
+    try { assertLocalSettingsOperator(this.ctx); return await this.backend.readGlobal(); }
+    catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+  }
+  @Remote
+  async save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot> {
+    try {
+      assertLocalSettingsOperator(this.ctx);
+      const connection = this.ctx.get("connection")!;
+      const owner: unknown = Reflect.get(connection, symbols.original) ?? connection;
+      const assertAuthority = (): void => {
+        if (this.lifetime.signal.aborted) throw new DsmmProfileError("disposed", "The deployment editor was disposed; no late write is allowed.");
+        assertLocalSettingsOperator(this.ctx);
+        const current = this.ctx.get("connection")!;
+        if ((Reflect.get(current, symbols.original) ?? current) !== owner) throw new DsmmProfileError("not-owned", "The operator connection changed; refresh before saving.");
+      };
+      return await this.backend.saveGlobal(request, assertAuthority);
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+  }
+}
+
+declare module "@deepseek-ai/cordis" { interface Context { dsmmProfiles: DsmmProfilesHost; dsmmConfig: DsmmConfigHost } }
 
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
-export function registerProfilesRpc(ctx: Context, backend: ProfilesBackend): DsmmProfilesHost {
+export function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, deployment?: DsmmDeploymentConfig): DsmmProfilesHost {
   const service = new DsmmProfilesHost(ctx, backend);
   ctx.typert.register(TYPERT_HOST);
+  if (deployment !== undefined) new DsmmConfigHost(ctx, deployment);
   return service;
 }

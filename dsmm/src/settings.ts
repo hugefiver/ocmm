@@ -141,6 +141,31 @@ export interface DsmmProfileAdmission {
   profile: { id: string; revision: string } | null;
   epoch: string;
   scope: DsmmProfileScope;
+  deployment?: DsmmDeploymentSnapshot;
+  restartRequired?: readonly string[];
+  sources?: Record<string, "defaults" | "global" | "profile" | "named-session">;
+  sourceCaptures?: {
+    startup?: { globalRevision: string; nativeRevision: string };
+    /** Deployment refers to this admission's captured desired snapshot, never latest disk. */
+    fields: Record<string, "startup" | "deployment" | "named-session">;
+  };
+  store?: { origin: "central" | "legacy" | "explicit"; readOnly: boolean; writeRestriction?: string };
+}
+
+export interface DsmmDeploymentSnapshot {
+  settings: DsmmSettings;
+  global: DsmmPluginConfig;
+  profile: DsmmPluginConfig;
+  globalRevision: string;
+  nativeRevision: string;
+  /** Native configForms CAS when its public descriptor is available; raw hash is not that CAS. */
+  nativeFormRevision?: number;
+  nativeNamespace?: string;
+  /** Public native base/user provenance; profile above is the assembled explicit entry layer. */
+  nativeForm?: { base?: unknown; user?: unknown };
+  entryId: string;
+  hostProfileKey: string;
+  sources: Record<string, "defaults" | "global" | "profile">;
 }
 
 /** Runtime consumers pass their Agent so immutable profile admission is retained. */
@@ -241,13 +266,16 @@ const MODEL_ROUTE_SCHEMA = Schema.object({
   model: Schema.string().required(),
   reasoningEffort: Schema.string()
 });
+const RATE_LIMIT_CONFIG_SCHEMA = Schema.object(Object.fromEntries(Object.keys(DEFAULT_DSMM_RUNTIME_POLICY.rateLimit).map((key) => [key, Schema.number()])));
+const ROUTING_STRATEGY_CONFIG_SCHEMA = Schema.union([Schema.const("startup-lock"), Schema.const("rate-limit-fallback")]);
+const RUNTIME_POLICY_CONFIG_SCHEMA = Schema.object({ strategy: ROUTING_STRATEGY_CONFIG_SCHEMA, rateLimit: RATE_LIMIT_CONFIG_SCHEMA });
 
 // A dictionary retains unknown keys for fail-closed validation by the resolver.
 const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
   primary: Schema.union([Schema.const(undefined), MODEL_ROUTE_SCHEMA]),
   fallbackRoutes: Schema.union([Schema.const(undefined), Schema.array(MODEL_ROUTE_SCHEMA)]),
-  strategy: Schema.any(),
-  rateLimit: Schema.any()
+  strategy: ROUTING_STRATEGY_CONFIG_SCHEMA,
+  rateLimit: RATE_LIMIT_CONFIG_SCHEMA
 }).required()).default({}) as Schema<DsmmRoleRouting>;
 
 // Schemastery treats null like an omitted default. Validate the untouched map
@@ -368,7 +396,7 @@ const LSP_SCHEMA = Schema.object({
   failOnStartupError: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.failOnStartupError)
 });
 
-export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+const CONFIG_FIELDS_SCHEMA = Schema.object({
   sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
     root: Schema.string().required(),
     compression: Schema.union([Schema.const("zstd"), Schema.const("none")])
@@ -386,13 +414,45 @@ export const DSMM_CONFIG_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHE
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   roleRouting: ROLE_ROUTING_SCHEMA,
-  runtimePolicy: Schema.any(),
+  runtimePolicy: RUNTIME_POLICY_CONFIG_SCHEMA,
   presets: PRESETS_SCHEMA,
   workflow: WORKFLOW_CONFIG_SCHEMA,
   guards: GUARDS_SCHEMA,
   runtimeRecovery: RUNTIME_RECOVERY_SCHEMA,
   lsp: LSP_SCHEMA
-})]).default({}) as Schema<DsmmPluginConfig>;
+});
+
+/** Transport nodes carry no business defaults. Only deployment input is volatile. */
+function sparseSchema(schema: Schema): Schema {
+  const { default: _default, required: _required, ...meta } = schema.meta;
+  return new Schema({ ...schema, meta,
+    ...(schema.dict === undefined ? {} : { dict: Object.fromEntries(Object.entries(schema.dict).map(([key, child]) => [key, sparseSchema(child)])) }),
+    ...(schema.inner === undefined ? {} : { inner: sparseSchema(schema.inner) }),
+    ...(schema.list === undefined ? {} : { list: schema.list.map(sparseSchema) }) });
+}
+const TRANSPORT_FIELDS_SCHEMA = sparseSchema(CONFIG_FIELDS_SCHEMA);
+export const DSMM_CONFIG_SCHEMA = Schema.intersect([
+  Schema.transform(Schema.any(), (input: unknown) => { resolveConfig(validateSparseConfig(input ?? {})); return {}; }),
+  sparseSchema(CONFIG_FIELDS_SCHEMA)
+]).default({}) as Schema<DsmmPluginConfig>;
+for (const [key, schema] of Object.entries(TRANSPORT_FIELDS_SCHEMA.dict!)) {
+  if (key !== "sessionPersistence") TRANSPORT_FIELDS_SCHEMA.set(key, schema.volatile());
+}
+// Native forms require a fixed object root: volatile nodes cannot sit under an
+// intersection. Keep that schema intact and validate through the public protocol.
+export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.default({}), {
+  apply(target, receiver, args) {
+    validateSparseConfig(args[0] ?? {});
+    return Reflect.apply(target, receiver, args);
+  },
+  get(target, key, receiver) {
+    if (key !== "~standard") return Reflect.get(target, key, receiver);
+    return { version: 1, vendor: "schemastery", validate(input: unknown) {
+      validateSparseConfig(input ?? {});
+      return target["~standard"].validate(input);
+    } };
+  }
+}) as unknown as Schema<DsmmPluginConfig>;
 
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
@@ -438,6 +498,117 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
   };
   for (const role of DSMM_ROLE_IDS) resolveRoleRuntimePolicy(settings, role);
   return settings;
+}
+
+/** Reject references, accessors, prototypes and non-JSON data before any merge. */
+export function copyJson<T>(input: T): T {
+  const active = new Set<object>();
+  const copy = (value: unknown, depth: number): unknown => {
+    if (depth > 32) throw new TypeError("Deepwork configuration nesting is too deep");
+    if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value !== "object" || value === null || active.has(value)) throw new TypeError("Deepwork configuration must be plain JSON data");
+    const prototype = Object.getPrototypeOf(value);
+    if (Array.isArray(value) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) throw new TypeError("Deepwork configuration must use plain objects");
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new TypeError("Deepwork configuration must not contain symbols");
+    active.add(value);
+    const result: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (["__proto__", "prototype", "constructor"].includes(key) || !Object.hasOwn(descriptor, "value") || !descriptor.enumerable) throw new TypeError("Deepwork configuration contains an unsafe property");
+      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) throw new TypeError("Deepwork configuration arrays must contain only elements");
+      Reflect.set(result, key, copy(descriptor.value, depth + 1));
+    }
+    if (Array.isArray(value) && Object.keys(result).length !== value.length) throw new TypeError("Deepwork configuration arrays must not have holes");
+    active.delete(value);
+    return result;
+  };
+  return copy(input, 0) as T;
+}
+
+export function freezeSettings<T>(input: T): T {
+  const result = copyJson(input);
+  const freeze = (value: unknown): void => {
+    if (value === null || typeof value !== "object") return;
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+  freeze(result);
+  return result;
+}
+
+function validateShape(value: unknown, schema: Schema): void {
+  if (value === null || value === undefined) throw new TypeError("Deepwork explicit configuration must not be null or undefined");
+  if (schema.type === "object") {
+    if (typeof value !== "object" || Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an object");
+    for (const [key, child] of Object.entries(value)) {
+      const field = schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined;
+      if (field === undefined) throw new TypeError("Deepwork configuration contains an unknown field");
+      validateShape(child, field);
+    }
+  } else if (schema.type === "dict") {
+    if (typeof value !== "object" || Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an object");
+    for (const child of Object.values(value)) validateShape(child, schema.inner!);
+  } else if (schema.type === "array") {
+    if (!Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an array");
+    for (const child of value) validateShape(child, schema.inner!);
+  } else if (schema.type === "union") {
+    for (const child of schema.list ?? []) {
+      try { validateShape(value, child); return; } catch { /* Try the other declared alternatives. */ }
+    }
+    throw new TypeError("Deepwork configuration field does not match its declared type");
+  } else {
+    schema(value);
+  }
+}
+
+/** Sparse grammar and full semantic validation are separate from native refs. */
+export function validateSparseConfig(input: unknown, global = false): DsmmPluginConfig {
+  const config = copyJson(input) as DsmmPluginConfig;
+  validateShape(config, CONFIG_FIELDS_SCHEMA);
+  if (global && Object.hasOwn(config, "sessionPersistence")) throw new TypeError("Native session storage is not a global deployment field");
+  // A deployment layer may override one primary-route member and inherit the
+  // others. Validate its present members here; resolveDeployment validates the
+  // complete route only after both sparse layers have merged.
+  const routing = config.roleRouting === undefined ? undefined : copyJson(config.roleRouting);
+  for (const policy of Object.values(routing ?? {})) {
+    if (policy?.primary !== undefined && (!Object.hasOwn(policy.primary, "provider") || !Object.hasOwn(policy.primary, "model"))) delete policy.primary;
+  }
+  const settings = resolveConfig({ ...config, ...(routing === undefined ? {} : { roleRouting: routing }) });
+  DSMM_SETTINGS_SCHEMA(settings);
+  return config;
+}
+
+export function validateDeploymentPath(path: readonly string[]): void {
+  let schema: Schema = CONFIG_FIELDS_SCHEMA;
+  if (path.length === 0 || path[0] === "sessionPersistence") throw new TypeError("Not an editable deployment field");
+  for (const key of path) {
+    if (schema.type === "union") schema = schema.list?.find((node) => node.type === "object") ?? schema;
+    const child = schema.type === "object" ? schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined : schema.type === "dict" ? schema.inner : undefined;
+    if (child === undefined) throw new TypeError("Unknown deployment field path");
+    schema = child;
+  }
+}
+
+export function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConfig {
+  const merge = (base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> => {
+    const result = copyJson(base);
+    for (const [key, value] of Object.entries(overlay)) {
+      const previous = result[key];
+      result[key] = value !== null && typeof value === "object" && !Array.isArray(value)
+        && previous !== null && typeof previous === "object" && !Array.isArray(previous)
+        ? merge(previous as Record<string, unknown>, value as Record<string, unknown>) : copyJson(value);
+    }
+    return result;
+  };
+  return layers.reduce((base, layer) => merge(base as Record<string, unknown>, validateSparseConfig(layer) as Record<string, unknown>), {});
+}
+
+export function resolveDeployment(global: DsmmPluginConfig, profile: DsmmPluginConfig): DsmmSettings {
+  const merged = mergeConfigLayers(validateSparseConfig(global, true), profile);
+  const settings = resolveConfig(merged);
+  validateSparseConfig(settings);
+  return freezeSettings(settings);
 }
 
 function validatePresentRuntimePolicy(value: unknown): unknown {
@@ -614,7 +785,7 @@ export function registerSettings(ctx: DshContext, config: DsmmPluginConfig = {},
   // Loader owns entry identity, Config validation, revision and persistent patch.
   // Each non-volatile reload receives a new deployment baseline. Profiles stay
   // on the existing immutable admission path, never a parallel settings store.
-  const base = resolveConfig(DSMM_CONFIG_SCHEMA(config));
+  const base = freezeSettings(resolveConfig(validateSparseConfig(config)));
   const getSettings = (): DsmmSettings => base;
   options.onChange?.(base);
   options.install?.(ctx, getSettings);

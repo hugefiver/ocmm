@@ -136,7 +136,7 @@ test("ordinary-root status reports native-owned model selection instead of dorma
   assert.deepEqual(snapshot.rolePolicy.fallbackRoutes, []); assert.equal(snapshot.rolePolicy.fallbackSource, "disabled");
   assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
   assert.equal(snapshot.route.currentReasoningEffort, "low");
-  assert.deepEqual(snapshot.effectiveSettings, settings, "declared profile configuration remains available to the explicit profile editor");
+  assert.deepEqual(snapshot.effectiveSettings, { ...settings, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }, "routing policy remains inspectable while arbitrary LSP command contents remain private");
   assert.equal(appended(), 0);
 });
 
@@ -298,7 +298,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
         maxContinuations: 2
       }
     },
-    effectiveSettings: settings
+    effectiveSettings: { ...settings, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }
   });
   assert.equal(appended(), 0);
 });
@@ -526,7 +526,7 @@ test("runtime recovery summary reports configuration separately from applicabili
   assert.equal(auxiliary.runtimeRecovery.fallbackRouteCount, 2, "auxiliary global fallback reporting is unchanged");
 });
 
-test("effective settings are an exhaustive defensive copy", () => {
+test("effective settings are an exhaustive defensive copy with private paths and environment values redacted", () => {
   const settings = resolveConfig({
     modeName: "focused-work",
     defaultActive: true,
@@ -557,8 +557,8 @@ test("effective settings are an exhaustive defensive copy", () => {
     lsp: {
       enabled: true,
       serverName: "custom_lsp",
-      command: "custom-lsp",
-      args: ["serve", "--debug"],
+      command: "C:/PRIVATE_LSP_SENTINEL/private-server.exe",
+      args: ["--config=C:/PRIVATE_LSP_SENTINEL/config.json", "PRIVATE_PARAMETER_SENTINEL"],
       cwd: "C:/workspace",
       env: { CUSTOM_LSP: "1" },
       toolCallTimeoutMs: 4500,
@@ -572,7 +572,13 @@ test("effective settings are an exhaustive defensive copy", () => {
   });
   const copy = snapshot.effectiveSettings;
 
-  assert.deepEqual(copy, settings);
+  assert.deepEqual(copy, { ...settings, presets: { ...settings.presets, root: "<configured>" },
+    lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>", "<configured>"], cwd: "<configured>", env: { CUSTOM_LSP: "<redacted>" } } });
+  for (const output of [JSON.stringify(snapshot), formatDsmmStatus(snapshot)]) {
+    assert.doesNotMatch(output, /PRIVATE_LSP_SENTINEL|PRIVATE_PARAMETER_SENTINEL/u);
+  }
+  assert.equal(settings.lsp.command, "C:/PRIVATE_LSP_SENTINEL/private-server.exe", "runtime settings are not redacted in place");
+  assert.deepEqual(settings.lsp.args, ["--config=C:/PRIVATE_LSP_SENTINEL/config.json", "PRIVATE_PARAMETER_SENTINEL"]);
   assert.notEqual(copy, settings);
   assert.notEqual(copy.deepseekV4ProMaxReasoningPresets, settings.deepseekV4ProMaxReasoningPresets);
   assert.notEqual(copy.skills, settings.skills);
@@ -609,7 +615,7 @@ test("effective settings are an exhaustive defensive copy", () => {
   assert.deepEqual(copy.deepseekV4ProMaxReasoningPresets, ["dsmm-reviewer"]);
   assert.equal(copy.skills.brainstorming, false);
   assert.equal(copy.roles["dsmm-reviewer"], false);
-  assert.equal(copy.presets.root, "C:/presets");
+  assert.equal(copy.presets.root, "<configured>");
   assert.equal(copy.workflow.reviewCap, 3);
   assert.equal(copy.guards.toolOutputTruncation.maxInlineBytes, 400);
   assert.equal(copy.guards.questionLabelHelper.maxLabelChars, 11);
@@ -617,8 +623,8 @@ test("effective settings are an exhaustive defensive copy", () => {
   assert.deepEqual(copy.runtimeRecovery.retryOnCodes, ["eagain"]);
   assert.equal(copy.runtimeRecovery.fallbackRoutes[0].provider, "backup");
   assert.equal(copy.runtimeRecovery.idleContinuation.prompt, "Continue safely.");
-  assert.deepEqual(copy.lsp.args, ["serve", "--debug"]);
-  assert.deepEqual(copy.lsp.env, { CUSTOM_LSP: "1" });
+  assert.deepEqual(copy.lsp.args, ["<configured>", "<configured>"]);
+  assert.deepEqual(copy.lsp.env, { CUSTOM_LSP: "<redacted>" });
 
   copy.runtimeRecovery.fallbackRoutes[0].model = "snapshot-model";
   Object.assign(copy.lsp.env, { SNAPSHOT_ONLY: "yes" });

@@ -2,6 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { DshAgent } from "./dsh-types.js";
+import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 export interface ProfilesBackend {
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
@@ -27,11 +28,21 @@ export declare class DsmmProfilesHost extends TypertRemoteService {
     selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<SessionProfileSnapshot>;
     selectMode(sessionId: string, request: SessionModeSelectRequest): Promise<SessionProfileSnapshot>;
 }
+/** A peer is not write authority. Require the public local, writable Host carrier. */
+export declare function assertLocalSettingsOperator(ctx: Context): void;
+export declare class DsmmConfigHost extends TypertRemoteService {
+    private readonly backend;
+    private readonly lifetime;
+    constructor(ctx: Context, backend: DsmmDeploymentConfig);
+    describe(): Promise<GlobalConfigSnapshot>;
+    save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot>;
+}
 declare module "@deepseek-ai/cordis" {
     interface Context {
         dsmmProfiles: DsmmProfilesHost;
+        dsmmConfig: DsmmConfigHost;
     }
 }
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
-export declare function registerProfilesRpc(ctx: Context, backend: ProfilesBackend): DsmmProfilesHost;
+export declare function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, deployment?: DsmmDeploymentConfig): DsmmProfilesHost;
 //# sourceMappingURL=profile-rpc.d.ts.map

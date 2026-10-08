@@ -15,6 +15,9 @@ import {
   renderManagedPresetMarker,
   resolveManagedPresetRoot
 } from "../lib/preset-materializer.js";
+import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
+
+useIsolatedDshEnvironment();
 
 const LEGACY_MARKER = "managed by dsmm\n";
 
@@ -459,7 +462,8 @@ test("apply uses DSH_HOME fallback root when preset root is absent", () => {
       assert.equal(existsSync(join(home, ".agent-presets", "dsmm-orchestrator", DSMM_MANAGED_PRESET_MARKER)), true);
       assert.equal(existsSync(join(home, ".agent-presets", "dsmm-reviewer")), false);
     } finally {
-      process.env.DSH_HOME = previous;
+      if (previous === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = previous;
     }
   });
 });

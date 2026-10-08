@@ -4,7 +4,11 @@ import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, Profi
 import type { DsmmProfileDocument } from "./profiles.js";
 import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
+import type { DsmmDeploymentSnapshot } from "./settings.js";
 export interface DsmmProfileRuntimeStore {
+    readonly readOnly?: boolean;
+    readonly origin?: "central" | "legacy" | "explicit";
+    readonly writeRestriction?: string;
     loadSelection(): Promise<LoadedProfileSelection>;
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
@@ -23,8 +27,12 @@ export interface DsmmProfileRuntimeOptions {
     /** Trusted test/integration seam, never a wire-supplied path or callback. */
     validateCandidate?: (settings: DsmmSettings) => void | Promise<void>;
     modeController?: DeepworkModeController;
+    /** Awaited once per new ordinary root; never used by children or idle switches. */
+    readDesired?: () => Promise<DsmmDeploymentSnapshot>;
+    startup?: DsmmDeploymentSnapshot;
 }
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission {
+    baseline: DsmmSettings;
 }
 /** Global defaults admit new roots; scoped idle switches replace one root's epoch. */
 export declare class DsmmProfileRuntime {
@@ -33,6 +41,7 @@ export declare class DsmmProfileRuntime {
     private readonly options;
     readonly getSettings: DsmmSettingsGetter;
     private current;
+    private currentDocument;
     private readonly baseline;
     private readonly bound;
     private readonly admitting;
@@ -51,6 +60,12 @@ export declare class DsmmProfileRuntime {
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
     save(request: ProfileSaveRequest): Promise<ProfileReadResult>;
+    getStartupSettings(): DsmmSettings;
+    describeDeployment(agent?: DshAgent): Promise<{
+        startup: DsmmDeploymentSnapshot | null;
+        desired: DsmmDeploymentSnapshot | null;
+        admission: DsmmProfileAdmission;
+    }>;
     select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
     private prepare;
     private profileAdmission;

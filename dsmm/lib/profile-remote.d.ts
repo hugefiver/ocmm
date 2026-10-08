@@ -1,6 +1,7 @@
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry";
 import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
+import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 export interface DsmmProfilesRemote {
     describe(): Promise<RemoteResult<ProfileSnapshot>>;
     read(id: string): Promise<RemoteResult<ProfileReadResult>>;
@@ -12,6 +13,8 @@ export interface DsmmProfilesRemote {
 }
 declare module "@deepseek-ai/dsh-typert-protocol/types" {
     interface TypertRemoteMap {
+        "dsmmConfig/describe": () => Promise<RemoteResult<GlobalConfigSnapshot>>;
+        "dsmmConfig/save": (request: GlobalConfigSaveRequest) => Promise<RemoteResult<GlobalConfigSnapshot>>;
         "dsmmProfiles/describe": DsmmProfilesRemote["describe"];
         "dsmmProfiles/read": DsmmProfilesRemote["read"];
         "dsmmProfiles/save": DsmmProfilesRemote["save"];
@@ -22,6 +25,10 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     }
     interface TypertRemoteNamespaceMap {
         dsmmProfiles: DsmmProfilesRemote;
+        dsmmConfig: {
+            describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
+            save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>>;
+        };
     }
     interface RemoteErrorDetailsMap {
         "dsmm-profiles/refused": ProfileErrorInfo;

@@ -22,6 +22,9 @@ import { apply } from "../lib/index.js";
 import type { DsmmPluginConfig } from "../lib/index.js";
 import type { DshContext } from "../lib/dsh-types.js";
 import type { DsmmRoleId } from "../lib/roles.js";
+import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
+
+useIsolatedDshEnvironment();
 
 /** All requests terminate inside this adapter; no credentials, network or shell. */
 export class RoutingFixtureAdapter extends LlmAdapter {
@@ -64,7 +67,9 @@ const { SkillRegistry } = skillSdk("@deepseek-ai/dsh-skill");
 const presetSdk = createRequire(require.resolve("@deepseek-ai/dsh-agent-preset-registry"));
 const { Loader }: { Loader: new (ctx: Context, config?: { baseUrl?: string }) => Context["loader"] } = presetSdk("@deepseek-ai/cordis-plugin-loader");
 
-export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string; nativePresets?: boolean; isolatedPrompt?: boolean } = {}) {
+export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string; home?: string; nativePresets?: boolean; isolatedPrompt?: boolean;
+  beforeDsmm?: (ctx: Context, create: (meta?: CreateAgentOptions["meta"], selection?: ModelSelectionRef, extra?: Partial<CreateAgentOptions>) => Promise<Agent>) => Promise<void>;
+} = {}) {
   const host = new Context();
   const ctx = (options.isolatedPrompt ? host.isolate("systemPrompt") : host).extend({ baseUrl: new URL("../", import.meta.url).href });
   // Filesystem ownership is per Host even when a test deliberately shares profiles.
@@ -73,6 +78,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
   const marker = join(fixtureDir, ".run-owner");
   writeFileSync(marker, owner, { flag: "wx" });
   const profileDir = options.profileDir ?? fixtureDir;
+  const home = options.home ?? join(profileDir, "dsh-home");
   const withPresetRoot = (input: DsmmPluginConfig): DsmmPluginConfig => ({ ...input,
     presets: { ...input.presets, root: input.presets?.root ?? join(fixtureDir, "agent-presets") }
   });
@@ -102,7 +108,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
         async execute() { return name; }
       });
     }
-    ctx.provide("profileContext", { dir: profileDir, baseUrl: new URL("../", import.meta.url).href, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
+    ctx.provide("profileContext", { home, dir: profileDir, baseUrl: new URL("../", import.meta.url).href, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
     let loader: Context["loader"] | undefined;
     if (options.nativePresets) {
       const loaderFiber = ctx.plugin(Loader, { baseUrl: new URL("../", import.meta.url).href });
@@ -115,12 +121,33 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       await loader.await();
       const presets = ctx.get("agentPresets")!;
       await presets.register({ id: "standard", name: "Ordinary", description: "Native parity fixture", plugins: [] });
-      await presets.register({ id: "dsmm-planner", name: "DW Planner", description: "Native persona/restriction fixture", plugins: [{ name: "cordis:parity-persona", config: { prefix: "ROLE_PERSONA_SENTINEL" } }] });
+      if (config.roles?.["dsmm-planner"] === false) {
+        await presets.register({ id: "dsmm-planner", name: "DW Planner", description: "Native persona/restriction fixture", plugins: [{ name: "cordis:parity-persona", config: { prefix: "ROLE_PERSONA_SENTINEL" } }] });
+      }
     }
     const loopFiber = ctx.plugin(AgentLoop, {});
     await loopFiber.await();
     const spawnFiber = options.spawn === false ? undefined : ctx.plugin(nativeSpawn, { providerName: "spawn" });
     await spawnFiber?.await();
+    const agents = ctx.get("agents");
+    const subagents = ctx.get("subagents");
+    assert.ok(agents && subagents);
+    const handles: AgentHandle[] = [];
+    const create = async (meta: CreateAgentOptions["meta"] = {}, selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> => {
+      const handle = await agents.create({
+        sessionId: SessionId(`dsmm-routing-fixture-${++fixtureSequence}`),
+        meta, agentOptions: { provider: "fixture", model: "native-default", reasoningEffort: ReasoningEffortId("low") },
+        ...extra,
+        ...(options.nativePresets || selection ? { async setup(agentCtx: Context, agent: Agent) {
+          if (options.nativePresets) await ctx.get("agentPresets")!.mount(agentCtx, meta?.agentPreset);
+          if (selection) installModelSelection(agentCtx, selection);
+          return extra.setup?.(agentCtx, agent);
+        } } : {})
+      });
+      handles.push(handle);
+      return handle.agent;
+    };
+    await options.beforeDsmm?.(ctx, create);
     const dsmmEntryId = loader === undefined ? undefined : await loader.create({ name: "cordis:parity-dsmm", config });
     await loader?.await();
     const dsmmFiber = dsmmEntryId === undefined ? ctx.plugin({
@@ -128,31 +155,26 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       apply(ready: Context) { return apply(ready as unknown as DshContext, config); }
     }) : loader!.resolve(dsmmEntryId).fiber!;
     await dsmmFiber.await();
-    const agents = ctx.get("agents");
-    const subagents = ctx.get("subagents");
-    assert.ok(agents && subagents);
-    const handles: AgentHandle[] = [];
+    for (const runtime of ctx.registry.values()) {
+      if (runtime.callback.name !== "installProfiles") continue;
+      for (const fiber of runtime.fibers) {
+        let parent = fiber.parent.fiber;
+        while (parent.uid !== 0 && parent.uid !== dsmmFiber.uid) parent = parent.parent.fiber;
+        if (parent.uid === dsmmFiber.uid) await fiber.await();
+      }
+    }
     return {
-      ctx, host, adapter, agents, subagents, dsmmFiber, spawnFiber, tools, profileDir, dsmmEntryId,
+      ctx, host, adapter, agents, subagents, dsmmFiber, spawnFiber, tools, profileDir, home, dsmmEntryId,
       async reloadDeployment(next: DsmmPluginConfig): Promise<void> {
         assert.ok(loader && dsmmEntryId);
         await loader.update(dsmmEntryId, { config: withPresetRoot(next) }); await loader.await();
       },
-      deploymentConfig(): unknown { return loader?.resolve(dsmmEntryId!).fiber?.config; },
-      async create(meta: CreateAgentOptions["meta"] = {}, selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> {
-        const handle = await agents.create({
-          sessionId: SessionId(`dsmm-routing-fixture-${++fixtureSequence}`),
-          meta, agentOptions: { provider: "fixture", model: "native-default", reasoningEffort: ReasoningEffortId("low") },
-          ...extra,
-          ...(options.nativePresets || selection ? { async setup(agentCtx: Context, agent: Agent) {
-            if (options.nativePresets) await ctx.get("agentPresets")!.mount(agentCtx, meta?.agentPreset);
-            if (selection) installModelSelection(agentCtx, selection);
-            return extra.setup?.(agentCtx, agent);
-          } } : {})
-        });
-        handles.push(handle);
-        return handle.agent;
+      async saveDeployment(next: DsmmPluginConfig): Promise<void> {
+        assert.ok(loader && dsmmEntryId);
+        await loader.resolve(dsmmEntryId).update({ config: withPresetRoot(next) }); await loader.await();
       },
+      deploymentConfig(): unknown { return loader?.resolve(dsmmEntryId!).fiber?.config; },
+      create,
       /** Genuine unowned auxiliary Sessions; this grants no live-parent ownership. */
       async createAuxiliary(role: DsmmRoleId = "dsmm-reviewer", selection?: ModelSelectionRef, extra: Partial<CreateAgentOptions> = {}): Promise<Agent> {
         const agent = await this.create({ origin: "subagent", agentPreset: role }, selection, extra);

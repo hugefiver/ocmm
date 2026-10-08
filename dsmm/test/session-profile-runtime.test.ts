@@ -26,6 +26,9 @@ const profile = (id: string, model: string) => JSON.stringify({ version: 1, id, 
   roleRouting: { "dsmm-orchestrator": { primary: route(model) }, "dsmm-reviewer": { primary: route(`${model}-review`) } } } });
 const structural = (agent: Agent) => agent as unknown as DshAgent;
 function runtimeOf(f: Awaited<ReturnType<typeof nativeRoutingFixture>>) { return f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime; }
+function centralStore(f: Awaited<ReturnType<typeof nativeRoutingFixture>>) {
+  return ProfileStore.fromCentral(f.home, f.profileDir, runtimeOf(f).admission().deployment!.entryId);
+}
 async function request(runtime: DsmmProfileRuntime, agent: Agent, id: string | null, revision?: string): Promise<SessionProfileSelectRequest> {
   const state = await runtime.getSession(structural(agent));
   return { sessionId: agent.id, id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: state.selection.selectionRevision, expectedAdmissionEpoch: state.admissionEpoch };
@@ -33,7 +36,7 @@ async function request(runtime: DsmmProfileRuntime, agent: Agent, id: string | n
 function gate() { let release!: () => void; const promise = new Promise<void>((done) => { release = done; }); return { promise, release }; }
 async function localRuntime(f: Awaited<ReturnType<typeof nativeRoutingFixture>>, validateCandidate: () => Promise<void>, lookup?: Map<string, DshAgent>) {
   const ctx: DshContext = { get(name) { return (name === "agents" ? { list: () => lookup === undefined ? f.agents.list() as unknown as DshAgent[] : [...lookup.values()], get: (id: string) => lookup === undefined ? structural(f.agents.get(SessionId(id))!) : lookup.get(id), isOwnedBy: (id: string, owner: DshAgent) => f.agents.isOwnedBy(SessionId(id), owner as unknown as Agent) } : f.ctx.get(name)) as never; } };
-  const runtime = new DsmmProfileRuntime(ctx, resolveConfig(), new ProfileStore(join(f.profileDir, "dsmm-profiles")), { validateCandidate });
+  const runtime = new DsmmProfileRuntime(ctx, resolveConfig(), centralStore(f), { validateCandidate });
   await runtime.initialize();
   return runtime;
 }
@@ -373,7 +376,7 @@ test("native candidate admission accepts ordered resolvable chains and inherited
   } finally { await f.dispose(); }
 });
 
-test("startup profile lock contention visibly refuses initialization without registering admission listeners or admitting baseline", async () => {
+test("explicit store startup lock contention still refuses, while strict legacy startup reads never contend or write locks", async () => {
   const root = mkdtempSync(join(tmpdir(), "dsmm-startup-lock-"));
   try {
     const storeDir = join(root, "dsmm-profiles");
@@ -383,8 +386,12 @@ test("startup profile lock contention visibly refuses initialization without reg
     const pointer = readFileSync(join(storeDir, ".selection.json"));
     writeFileSync(join(storeDir, ".lock"), "preexisting-init-owner");
     let listeners = 0;
-    await assert.rejects(createProfileRuntime({ get: (name) => (name === "profileContext" ? { dir: root } : undefined) as never, on() { listeners++; } }, resolveConfig()), { code: "lock-timeout" });
+    const explicit = new DsmmProfileRuntime({ on() { listeners++; } }, resolveConfig(), store);
+    await assert.rejects(explicit.initialize(), { code: "lock-timeout" });
     assert.equal(listeners, 0);
+    const legacy = await createProfileRuntime({ get: (name) => (name === "profileContext" ? { dir: root } : undefined) as never }, resolveConfig());
+    assert.equal(legacy.admission().appliedRevision, saved.revision);
+    assert.equal((await legacy.describe()).readOnly, true);
     assert.equal(readFileSync(join(storeDir, ".selection.json")).equals(pointer), true);
     assert.equal(readFileSync(join(storeDir, ".lock"), "utf8"), "preexisting-init-owner");
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -455,9 +462,10 @@ test("native persisted resume honors explicit immutable session pins and baselin
         assert.deepEqual((await runtimeOf(f).getSession(structural(handle.agent))).profileModel, index === 0 ? route("pinned-a") : index === 1 ? undefined : route("global-b"));
       } finally { await handle.dispose(); }
     }
-    const sidecar = join(profileDir, "dsmm-profiles", ".sessions", `${createHash("sha256").update(ids[0]!).digest("hex")}.json`);
+    const store = centralStore(f);
+    const sidecar = join(store.stateDir, ".sessions", `${createHash("sha256").update(ids[0]!).digest("hex")}.json`);
     const before = readFileSync(sidecar);
-    unlinkSync(join(profileDir, "dsmm-profiles", ".revisions", `${saved.revision}.jsonc`));
+    unlinkSync(join(store.profileDir, ".revisions", `${saved.revision}.jsonc`));
     await assert.rejects(f.agents.resume({ resumeSessionId: ids[0]! }), { code: "corrupt-selection" });
     assert.equal(f.agents.get(ids[0]!), undefined, "failed created admission is rolled back by native factory before any wake");
     assert.equal(readFileSync(sidecar).equals(before), true);

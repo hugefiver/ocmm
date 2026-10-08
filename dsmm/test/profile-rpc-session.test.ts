@@ -21,6 +21,8 @@ import type { DsmmProfileRuntimeOptions } from "../lib/profile-runtime.js";
 import { resolveConfig } from "../lib/settings.js";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
 import type { SessionProfileSelectRequest, SessionProfileSnapshot } from "../lib/profile-types.js";
+import { DsmmDeploymentConfig } from "../lib/deployment-config.js";
+import type { GlobalConfigSnapshot } from "../lib/deployment-config.js";
 
 const require = createRequire(import.meta.url);
 const nativeRequire = createRequire(require.resolve("@deepseek-ai/dsh-client-connection/package.json"));
@@ -36,7 +38,7 @@ class MemoryCredentials extends CredentialProvider {
   }
 }
 
-async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOptions) {
+async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOptions, globalConfig = false) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-scoped-rpc-"));
   const ctx = new Context();
   try {
@@ -49,7 +51,14 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
     const store = new ProfileStore(join(root, "dsmm-profiles"));
     const runtime = new DsmmProfileRuntime(ctx as unknown as DshContext, resolveConfig(), store, options);
     await runtime.initialize();
-    const rpc = ctx.plugin({ name: "session-profile-rpc", inject: ["typert"], apply(ready: Context) { registerProfilesRpc(ready, runtime); } });
+    const carrier = { host: "127.0.0.1" }, settingsAuthority = { writable: true };
+    let deployment: DsmmDeploymentConfig | undefined;
+    if (globalConfig) {
+      ctx.provide("profileContext", { home: root, dir: root });
+      ctx.provide("webServer", carrier); ctx.provide("settings", settingsAuthority);
+      deployment = new DsmmDeploymentConfig(ctx as unknown as DshContext, {});
+    }
+    const rpc = ctx.plugin({ name: "session-profile-rpc", inject: ["typert"], apply(ready: Context) { registerProfilesRpc(ready, runtime, deployment); } });
     await rpc.await();
     const gateway = ctx.typertGateway;
     const invoke = <T>(method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> => gateway.invoke({ namespace: "dsmmProfiles", method, args, ...(signal === undefined ? {} : { signal }) }) as Promise<T>;
@@ -67,7 +76,7 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
       await ctx.agents.register(agent as unknown as Agent);
       return agent;
     };
-    return { root, ctx, gateway, runtime, store, rpc, connectionFiber, invoke, createRoot, async dispose() { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); } };
+    return { root, ctx, gateway, runtime, store, rpc, connectionFiber, invoke, createRoot, deployment, carrier, settingsAuthority, async dispose() { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); } };
   } catch (error) { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); throw error; }
 }
 
@@ -85,6 +94,31 @@ function selectRequest(snapshot: SessionProfileSnapshot, id: string | null, revi
 function modeRequest(snapshot: SessionProfileSnapshot, active: boolean) {
   return { sessionId: snapshot.sessionId, active, expectedModeRevision: snapshot.deepwork!.revision, expectedAdmissionEpoch: snapshot.admissionEpoch };
 }
+
+test("fixed global backend through native Gateway requires operator plus trusted local/writable carrier and rejects arbitrary roots", async () => {
+  const f = await fixture(true, undefined, true);
+  try {
+    // Carrier bind/writability are a public authority seam; the operator, Gateway,
+    // strict codec and backend are real native services, not a fake invocation.
+    const invoke = (request: unknown, peer?: Parameters<typeof f.gateway.invoke>[0]["peer"]) => f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request }, ...(peer === undefined ? {} : { peer }) }) as Promise<GlobalConfigSnapshot>;
+    const request = { expectedRevision: "absent", edits: [{ op: "set", path: ["defaultActive"], value: true }] };
+    const peer = f.ctx.connection.operator;
+    const impostor = { id: peer.id, ctx: new Context(), async dispose() {} };
+    await assert.rejects(invoke(request, impostor), refused("not-owned"));
+    f.carrier.host = "0.0.0.0"; await assert.rejects(invoke(request), refused("not-owned"));
+    f.carrier.host = "127.0.0.1"; f.settingsAuthority.writable = false;
+    await assert.rejects(invoke(request), refused("not-owned")); f.settingsAuthority.writable = true;
+    await assert.rejects(invoke({ ...request, root: f.root }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/input-invalid");
+    const pointer = await readFile(join(f.store.stateDir, ".selection.json")).catch(() => null);
+    const saved = await invoke(request);
+    assert.equal(saved.config.defaultActive, true);
+    assert.deepEqual(await readFile(join(f.store.stateDir, ".selection.json")).catch(() => null), pointer);
+    await assert.rejects(invoke(request), refused("conflict"));
+    const exact = await invoke({ expectedRevision: saved.revision, edits: [{ op: "set", path: ["workflow", "reviewCap"], value: 0 }] });
+    assert.equal(exact.config.defaultActive, true); assert.equal(exact.config.workflow?.reviewCap, 0);
+    await assert.rejects(invoke({ expectedRevision: exact.revision, edits: [{ op: "unset", path: ["arbitraryPath"] }] }), refused("validation"));
+  } finally { await f.dispose(); }
+});
 
 test("strict additive mode codecs reject unknown fields and retain old optional snapshot compatibility", () => {
   const descriptor = TYPERT_REMOTE.descriptors.find((row) => row.method === "selectMode")!;

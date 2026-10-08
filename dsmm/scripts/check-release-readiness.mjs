@@ -406,7 +406,10 @@ function validateNativeClient(packageRoot, paths, errors) {
       || typeof client.ProfilesController !== "function" || typeof client.ProfilesSection !== "function"
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
-      || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), ["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`))) {
+      || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), [
+        "@dsmm/dsmm#dsmmConfig/describe", "@dsmm/dsmm#dsmmConfig/save",
+        ...["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`)
+      ])) {
       throw new Error("invalid exports");
     }
   } catch {

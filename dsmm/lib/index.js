@@ -11,15 +11,20 @@ import { registerRolePresets } from "./preset-registry.js";
 import { registerRoleProviders } from "./role-providers.js";
 import { createProfileRuntime } from "./profile-runtime.js";
 import { registerProfilesRpc } from "./profile-rpc.js";
-import { DSMM_CONFIG_SCHEMA, registerSettings } from "./settings.js";
+import { DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, registerSettings } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 import DsmmSessionPersistence from "./session-persistence.js";
 import { isAbsolute } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DsmmProfileError } from "./profiles.js";
+import { DsmmDeploymentConfig } from "./deployment-config.js";
 export const name = "dsmm";
 export const inject = ["profileContext"];
-export const Config = DSMM_CONFIG_SCHEMA;
+// Direct public Config calls keep the complete plain flat ABI. Native Cordis
+// consumes the same object's Standard Schema protocol for sparse volatile refs.
+export const Config = new Proxy(DSMM_NATIVE_CONFIG_SCHEMA, {
+    apply(_target, _receiver, args) { return DSMM_CONFIG_SCHEMA(args[0] ?? {}); }
+});
 export { DSMM_ROLE_IDS, DSMM_ROLES, isDsmmRoleId, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 export { DSMM_MANAGED_PRESET_MARKER, materializeRolePresets, reconcileRolePresets, resolveManagedPresetRoot } from "./preset-materializer.js";
 export { DSMM_GUARD_PREFIX, decidePostToolExecution, decidePreToolExecution, isSafetyScopeActive, registerSafetyGuards, truncateTextMiddle } from "./guards.js";
@@ -35,10 +40,18 @@ export { DSMM_STATUS_COMMAND, registerDsmmStatusCommand } from "./commands.js";
 export { DSMM_STATUS_VERSION, createDsmmStatusSnapshot, formatDsmmStatus } from "./status.js";
 export { DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, MVP_SKILL_NAMES, isRoleEnabled, resolveConfig, resolveRoleRouting, registerSettings } from "./settings.js";
 export { createProfileRuntime, DsmmProfileRuntime } from "./profile-runtime.js";
+export { resolveDshHome } from "./dsh-home.js";
+export { DsmmDeploymentConfig, parseGlobalConfig, editGlobalConfig } from "./deployment-config.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export function apply(ctx, config = {}) {
-    // Deployment Config is non-volatile. A Loader remount must not replace
-    // already-admitted Agent policy/skill realms, including busy Agents.
+    if (!(ctx instanceof Context))
+        return applyConfigured(ctx, config);
+    const deployment = new DsmmDeploymentConfig(ctx, config);
+    return deployment.readDesired().then((startup) => applyConfigured(ctx, config, deployment, startup));
+}
+function applyConfigured(ctx, config, deployment, startup) {
+    // Volatile desired saves retain live realms. An ordinary Loader remount must
+    // not replace already-admitted Agent policy/skill realms, including busy Agents.
     if (ctx instanceof Context && ctx.fiber.entry !== undefined) {
         const native = ctx;
         const owner = ctx.fiber.entry;
@@ -62,11 +75,11 @@ export function apply(ctx, config = {}) {
         if (native.get("sessionPersistence") !== undefined)
             throw new Error("Disable the exact existing JSONL entry at startup before enabling Deepwork sessionPersistence; live replacement is refused");
         const fiber = native.plugin(DsmmSessionPersistence, storage);
-        return fiber.await().then(() => applyRuntime(ctx, config));
+        return fiber.await().then(() => applyRuntime(ctx, config, deployment, startup));
     }
-    return applyRuntime(ctx, config);
+    return applyRuntime(ctx, config, deployment, startup);
 }
-function applyRuntime(ctx, config) {
+function applyRuntime(ctx, config, deployment, startup) {
     const controller = new DeepworkModeController(ctx);
     let runtime;
     let profileInitialization;
@@ -94,10 +107,10 @@ function applyRuntime(ctx, config) {
         }
         return admission;
     };
-    const getSettings = registerSettings(ctx, config, {
+    const getSettings = registerSettings(ctx, startup?.settings ?? config, {
         install(readyCtx, getReadySettings) {
             const install = (installCtx, settingsGetter) => {
-                registerDeepworkPrompt(installCtx, controller, settingsGetter, config);
+                registerDeepworkPrompt(installCtx, controller, settingsGetter, { section: startup === undefined ? config.section : startup.profile.section ?? startup.global.section });
                 registerAgentSkills(installCtx, controller, settingsGetter);
                 const installCommands = (commandCtx) => {
                     registerDeepworkCommand(commandCtx, controller, settingsGetter);
@@ -110,23 +123,32 @@ function applyRuntime(ctx, config) {
                 registerRoleProviders(installCtx, settingsGetter, getReadySettings);
                 // Standing compositions are deployment-only and never replaced on a
                 // runtime profile selection. All routes are read from Agent bindings.
-                registerRolePresets(installCtx, getReadySettings);
                 const settings = getReadySettings();
-                const root = resolveManagedPresetRoot(settings);
+                const root = resolveManagedPresetRoot(settings, deployment === undefined ? process.env : { ...process.env, DSH_HOME: deployment.home });
                 if (root !== undefined)
                     reconcileRolePresets({ root, settings });
             };
             if (readyCtx.get === undefined) {
+                registerRolePresets(readyCtx, getReadySettings);
                 install(readyCtx, getReadySettings);
                 return;
             }
             requiresNativeProfiles = true;
             const installProfiles = async (profileCtx) => {
-                runtime = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller });
+                // Standing definitions must exist before initialize audits retained
+                // Agents. A missing optional registry still installs later from this
+                // same frozen startup getter, without blocking unrelated Hosts.
+                const presets = registerRolePresets(profileCtx, getReadySettings);
+                if (profileCtx.get?.("agentPresets") !== undefined)
+                    await presets;
+                runtime = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller,
+                    ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }) });
                 profileCtx.provide?.("dsmmProfileRuntime", runtime);
+                if (deployment !== undefined)
+                    profileCtx.provide?.("dsmmDeploymentConfig", deployment);
                 const manager = runtime;
                 profileCtx.inject?.(["typert"], (rpcCtx) => {
-                    registerProfilesRpc(rpcCtx, manager);
+                    registerProfilesRpc(rpcCtx, manager, deployment);
                 });
                 install(profileCtx, runtime.getSettings);
             };

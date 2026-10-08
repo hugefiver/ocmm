@@ -31,6 +31,9 @@ export interface ProfileSnapshot extends ProfileSelectionState {
   /** Native deployment role inventory; excludes provider accounts and auth data. */
   roles?: ProfileRoleMetadata[];
   editorDefaults?: DsmmRuntimePolicySettings;
+  origin?: "central" | "legacy" | "explicit";
+  readOnly?: boolean;
+  writeRestriction?: string;
 }
 
 export interface ProfileReadResult {

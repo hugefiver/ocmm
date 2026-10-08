@@ -4,6 +4,7 @@ import type { DsmmRoleRuntimeState, ProfileErrorInfo, ProfileReadResult, Profile
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimitPolicy, normalizeRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute } from "./settings.js";
+import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 
 export interface DsmmProfilesRemote {
   describe(): Promise<RemoteResult<ProfileSnapshot>>;
@@ -17,6 +18,8 @@ export interface DsmmProfilesRemote {
 
 declare module "@deepseek-ai/dsh-typert-protocol/types" {
   interface TypertRemoteMap {
+    "dsmmConfig/describe": () => Promise<RemoteResult<GlobalConfigSnapshot>>;
+    "dsmmConfig/save": (request: GlobalConfigSaveRequest) => Promise<RemoteResult<GlobalConfigSnapshot>>;
     "dsmmProfiles/describe": DsmmProfilesRemote["describe"];
     "dsmmProfiles/read": DsmmProfilesRemote["read"];
     "dsmmProfiles/save": DsmmProfilesRemote["save"];
@@ -25,7 +28,10 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     "dsmmProfiles/selectSession": DsmmProfilesRemote["selectSession"];
     "dsmmProfiles/selectMode": NonNullable<DsmmProfilesRemote["selectMode"]>;
   }
-  interface TypertRemoteNamespaceMap { dsmmProfiles: DsmmProfilesRemote }
+  interface TypertRemoteNamespaceMap {
+    dsmmProfiles: DsmmProfilesRemote;
+    dsmmConfig: { describe(): Promise<RemoteResult<GlobalConfigSnapshot>>; save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>> };
+  }
   interface RemoteErrorDetailsMap {
     "dsmm-profiles/refused": ProfileErrorInfo;
     "dsmm-profiles/peer-required": {};
@@ -35,7 +41,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
 const errorCodes = new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled"]);
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
-const rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader)$/u;
+const rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader|frontend|hard-reasoning|research|quick|coding|normal-task|complex|deep|documenting|cross-cutting)$/u;
 
 /** Shared wire grammar for native codec validation and local form feedback. */
 export function isProfileId(value: unknown): value is string {
@@ -113,7 +119,7 @@ function content(value: unknown): string {
   return result;
 }
 function snapshot(value: unknown): ProfileSnapshot {
-  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults"]);
+  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction"]);
   if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail("profiles");
   return {
     profiles: item.profiles.map((input) => {
@@ -125,7 +131,7 @@ function snapshot(value: unknown): ProfileSnapshot {
     selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
     ...optional(item, "selectionError", errorInfo),
     ...optional(item, "roles", (input) => {
-      if (!Array.isArray(input) || input.length > 12) fail("roles");
+      if (!Array.isArray(input) || input.length > 22) fail("roles");
       const result = input.map((value) => {
         const row = object(value, ["id", "label", "enabled"], ["runtimePolicy"]);
         return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "runtimePolicy", (input) => {
@@ -137,6 +143,9 @@ function snapshot(value: unknown): ProfileSnapshot {
       return result;
     }),
     ...optional(item, "editorDefaults", runtimePolicy),
+    ...optional(item, "origin", (input) => { if (!["central", "legacy", "explicit"].includes(String(input))) fail("origin"); return input as "central" | "legacy" | "explicit"; }),
+    ...optional(item, "readOnly", (input) => boolean(input, "readOnly")),
+    ...optional(item, "writeRestriction", (input) => text(input, "writeRestriction", 1024)),
   };
 }
 function rateLimit(value: unknown): DsmmRoleRuntimeState["rateLimit"] {
@@ -216,10 +225,48 @@ function descriptor(method: string, result: TypertCodec, parameter?: { name: str
   return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === undefined ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
 }
 
+function jsonData(value: unknown, depth = 0, active = new Set<object>()): unknown {
+  if (depth > 32) fail("JSON depth");
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "object" || value === null || active.has(value)) fail("JSON value");
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail("JSON object");
+  active.add(value);
+  const result = Array.isArray(value) ? value.map((child) => jsonData(child, depth + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    if (["__proto__", "prototype", "constructor"].includes(key)) fail("JSON key");
+    return [key, jsonData(child, depth + 1, active)];
+  }));
+  active.delete(value);
+  return result;
+}
+function globalSnapshot(value: unknown): GlobalConfigSnapshot {
+  const row = object(value, ["config", "revision"]);
+  object(row.config, [], Object.keys(row.config as object));
+  return { config: jsonData(row.config) as GlobalConfigSnapshot["config"], revision: selectionRevision(row.revision) };
+}
+function globalSaveRequest(value: unknown): GlobalConfigSaveRequest {
+  const row = object(value, ["expectedRevision", "edits"]);
+  if (!Array.isArray(row.edits) || row.edits.length > 128) fail("edits");
+  return { expectedRevision: selectionRevision(row.expectedRevision), edits: row.edits.map((value) => {
+    const edit = object(value, ["op", "path"], ["value"]);
+    if (!Array.isArray(edit.path) || edit.path.length < 1 || edit.path.length > 8) fail("field path");
+    const path = edit.path.map((part) => { const key = text(part, "field", 128); if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key)) fail("field"); return key; });
+    if (edit.op === "unset" && !Object.hasOwn(edit, "value")) return { op: "unset" as const, path };
+    if (edit.op !== "set" || !Object.hasOwn(edit, "value")) fail("edit");
+    return { op: "set" as const, path, value: jsonData(edit.value) };
+  }) };
+}
+function configDescriptor(method: string, parameter?: TypertCodec): InvocationDescriptor {
+  return { id: `@dsmm/dsmm#dsmmConfig/${method}`, service: "dsmmConfig", namespace: "dsmmConfig", method, invocation: { kind: "direct" },
+    parameters: parameter === undefined ? [] : [{ name: "request", wire: "request", source: "json", codec: parameter }], result: codec("GlobalConfigSnapshot", globalSnapshot) };
+}
+
 /** Explicit strict Host contract; no SRC fallback or browser-supplied authority. */
 export const TYPERT_REMOTE: TypertRemoteContribution = {
   package: "@dsmm/dsmm",
   descriptors: [
+    configDescriptor("describe"),
+    configDescriptor("save", codec("GlobalConfigSaveRequest", globalSaveRequest)),
     {
       ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
       parameters: [

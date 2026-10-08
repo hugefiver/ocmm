@@ -191,10 +191,76 @@ let DsmmProfilesHost = (() => {
     };
 })();
 export { DsmmProfilesHost };
+/** A peer is not write authority. Require the public local, writable Host carrier. */
+export function assertLocalSettingsOperator(ctx) {
+    const invocation = ctx.invocation;
+    const connection = ctx.get("connection");
+    const webServer = ctx.get("webServer");
+    const settings = ctx.get("settings");
+    if (invocation?.peer === undefined || connection?.operator !== invocation.peer
+        || webServer?.host !== "127.0.0.1" || settings?.writable !== true) {
+        throw new DsmmProfileError("not-owned", "Global deployment edits require the authenticated operator of a local writable native Host.");
+    }
+    invocation.signal.throwIfAborted();
+}
+let DsmmConfigHost = (() => {
+    let _classSuper = TypertRemoteService;
+    let _instanceExtraInitializers = [];
+    let _describe_decorators;
+    let _save_decorators;
+    return class DsmmConfigHost extends _classSuper {
+        static {
+            const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
+            _describe_decorators = [Remote];
+            _save_decorators = [Remote];
+            __esDecorate(this, null, _describe_decorators, { kind: "method", name: "describe", static: false, private: false, access: { has: obj => "describe" in obj, get: obj => obj.describe }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _save_decorators, { kind: "method", name: "save", static: false, private: false, access: { has: obj => "save" in obj, get: obj => obj.save }, metadata: _metadata }, null, _instanceExtraInitializers);
+            if (_metadata) Object.defineProperty(this, Symbol.metadata, { enumerable: true, configurable: true, writable: true, value: _metadata });
+        }
+        backend = __runInitializers(this, _instanceExtraInitializers);
+        lifetime = new AbortController();
+        constructor(ctx, backend) {
+            super(ctx, "dsmmConfig");
+            this.backend = backend;
+            ctx.effect(() => () => this.lifetime.abort());
+        }
+        async describe() {
+            try {
+                assertLocalSettingsOperator(this.ctx);
+                return await this.backend.readGlobal();
+            }
+            catch (error) {
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+            }
+        }
+        async save(request) {
+            try {
+                assertLocalSettingsOperator(this.ctx);
+                const connection = this.ctx.get("connection");
+                const owner = Reflect.get(connection, symbols.original) ?? connection;
+                const assertAuthority = () => {
+                    if (this.lifetime.signal.aborted)
+                        throw new DsmmProfileError("disposed", "The deployment editor was disposed; no late write is allowed.");
+                    assertLocalSettingsOperator(this.ctx);
+                    const current = this.ctx.get("connection");
+                    if ((Reflect.get(current, symbols.original) ?? current) !== owner)
+                        throw new DsmmProfileError("not-owned", "The operator connection changed; refresh before saving.");
+                };
+                return await this.backend.saveGlobal(request, assertAuthority);
+            }
+            catch (error) {
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+            }
+        }
+    };
+})();
+export { DsmmConfigHost };
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
-export function registerProfilesRpc(ctx, backend) {
+export function registerProfilesRpc(ctx, backend, deployment) {
     const service = new DsmmProfilesHost(ctx, backend);
     ctx.typert.register(TYPERT_HOST);
+    if (deployment !== undefined)
+        new DsmmConfigHost(ctx, deployment);
     return service;
 }
 //# sourceMappingURL=profile-rpc.js.map

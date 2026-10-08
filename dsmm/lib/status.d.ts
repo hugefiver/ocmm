@@ -8,6 +8,16 @@ export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
     version: typeof DSMM_STATUS_VERSION;
     admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
+    profileStore?: DsmmProfileAdmission["store"];
+    deployment?: {
+        globalRevision: string;
+        nativeRevision: string;
+        entryId: string;
+        hostProfileKey: string;
+        restartRequired: readonly string[];
+        sources: NonNullable<DsmmProfileAdmission["sources"]>;
+        sourceCaptures?: DsmmProfileAdmission["sourceCaptures"];
+    };
     mode: {
         name: string;
         active: boolean;

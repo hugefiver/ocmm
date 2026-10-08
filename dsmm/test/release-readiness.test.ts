@@ -171,7 +171,8 @@ const expectedCompatibility = [
   ["LSP/MCP", "external ocmm-lsp mcp"],
   ["Runtime recovery", "process-local"],
   ["Per-role model/effort/fallback policy", "native request, subagent and descriptor seams"],
-  ["Runtime profiles", "independent drafts, immutable revisions, global pointer and scoped CAS sidecars"],
+  ["C0 deployment layers", "sparse central global base and explicit native entry/profile transport"],
+  ["Runtime profiles", "central shared drafts/revisions, scoped default/sidecars; strict read-only legacy origin"],
   ["Durable DSMM metadata", "deployment-only `sessionPersistence` on main DSMM entry"],
   ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
   ["DeepSeek V41 Flash calibration", "native DeepSeek providers/deepseek-flash"]
@@ -268,13 +269,14 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   const rows = parseMarkdownTable(compatibility, "## Compatibility matrix", "compatibility matrix");
 
   assert.deepEqual(rows.map(([surface, boundary]) => [surface, boundary]), expectedCompatibility);
-  assert.equal(rows.length, 17);
+  assert.equal(rows.length, expectedCompatibility.length);
   assert.ok(rows.every((row) => row.length === 3 && row[2] !== ""), "each surface states an evidence level");
   assert.match(rows.find(([surface]) => surface === "DSH")?.[2] ?? "", /pinned authority.*acceptance required/u);
   assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "existing official 0.1.6 CLI/TUI installation verified; new 0.1.9 menu proof is Web/Desktop only");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.match(rows.find(([surface]) => surface === "Native Settings")?.[2] ?? "", /actual Desktop.*separate proofs/u);
-  assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /global new-Agent.*idle session epochs.*cold sidecar retention/u);
+  assert.match(rows.find(([surface]) => surface === "C0 deployment layers")?.[2] ?? "", /backend storage\/capture contract; D Config browser proof pending/u);
+  assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /new-root defaults.*idle overlay epochs.*origin-pinned cold resume/u);
   assert.match(rows.find(([surface]) => surface === "Durable DSMM metadata")?.[2] ?? "", /explicit startup integration.*acceptance pending/u);
 });
 
@@ -302,15 +304,17 @@ test("compatibility document fixes command, headless, platform, and provider bou
   assert.ok(compatibility.includes("`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands."));
   assert.match(compatibility, /native client provides Settings → Deepwork Profiles/u);
   assert.match(compatibility, /no model-visible profile-management tools or anonymous file endpoints/u);
-  assert.ok(compatibility.includes("Headless uses profile `cordis.patch.yml` plus `--dump-config`; real task execution requires a separately configured provider and uses `dsmm.defaultActive: true`."));
-  assert.ok(compatibility.includes("Old `$DSH_HOME/settings.yaml` namespaces must be migrated explicitly; DSMM does not mutate that file."));
+  assert.match(compatibility, /Headless uses native profile configuration plus DSMM's sparse global base/u);
+  assert.match(compatibility, /`--dump-config` shows native Loader composition, not the complete global-aware DSMM effective snapshot/u);
+  assert.match(compatibility, /Real task execution requires a separately configured provider and effective `defaultActive: true`/u);
+  assert.match(compatibility, /Old `\$DSH_HOME\/settings\.yaml` namespaces require explicit handling; DSMM doesn't mutate that file/u);
   assert.ok(compatibility.includes("Windows, Linux, Web, and macOS evidence are not interchangeable."));
   assert.ok(compatibility.includes("LSP/MCP and runtime recovery are disabled by default."));
   assert.ok(compatibility.includes("V4 Pro calibration remains limited to the exact `deepseek-official/deepseek-v4-pro` route."));
   assert.ok(compatibility.includes("`deepseek-official/deepseek-flash` and `deepseek-account/deepseek-flash`"));
-  assert.match(compatibility, /including a blank Agent.*retains.*admitted settings.*global default/u);
-  assert.match(compatibility, /Sidecar cold resume retains the exact pinned revision\/baseline/u);
-  assert.match(compatibility, /Sessions without a sidecar keep the old global-current behavior/u);
+  assert.match(compatibility, /including a blank Agent.*retains.*admitted settings.*scoped named default/u);
+  assert.match(compatibility, /Cold resume uses the origin-pinned revision\/baseline with current valid desired deployment in a new admission/u);
+  assert.match(compatibility, /Sessions without a sidecar keep scoped-global-current behavior/u);
   assert.match(compatibility, /auxiliary roles can fail native cold resume/u);
   assert.match(compatibility, /third phase/u);
 });
@@ -499,13 +503,13 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
     "0.1.9 publication and Desktop acceptance remain pending",
     "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.9.tgz>",
     "dsh --profile <profile> --dump-config",
-    "Headless task text is not a slash-command adapter",
     "pnpm --dir dsmm smoke:docker",
     "real read/write/model round-trip",
     "publishes through OIDC with genuine provenance"
   ]) {
     assert.ok(readme.includes(phrase), `README includes ${phrase}`);
   }
+  assert.match(readme, /Headless task text (?:is not|isn't) a slash-command adapter/iu);
   assert.ok(readme.includes("(docs/compatibility.md)"));
   assert.ok(readme.includes("(docs/migration-from-ocmm.md)"));
   assert.ok(readme.includes("(docs/releasing.md)"));
@@ -578,9 +582,9 @@ test("0.1.9 documentation requires explicit durable mode and a single admitted-p
     assert.match(document, /saved explicit `deepwork\/mode`/u, path);
     assert.match(document, /same-default.*(?:persist|intent)/iu, path);
     assert.match(document, /profile changes and reopen|profile changes and fresh-process reopen/iu, path);
-    if (path === compatibilityPath || path === join(packageRoot, "docs", "settings-status.md")) {
-      assert.match(document, /DW (?:presets|roles).*not locked|DW roles are no longer locked/iu, path);
-      assert.match(document, /explicit off.*(?:retains|does not remove)/iu, path);
+    if (path === compatibilityPath || path === readmePath || path === join(packageRoot, "docs", "profiles.md") || path === join(packageRoot, "docs", "settings-status.md")) {
+      assert.match(document, /DW (?:presets|roles).*(?:not locked|aren't locked)|DW roles are no longer locked/iu, path);
+      assert.match(document, /explicit off.*(?:retain(?:s|ing)?|does not remove)/iu, path);
     } else {
       // Other historical release/UI documents are outside stage A ownership.
       assert.match(document, /standing DW presets.*locked enabled/iu, path);
@@ -623,7 +627,11 @@ test("0.1.8 genuine publication preserves failed terminal history and does not b
     assert.match(document, /old shared 300-second visibility budget expired/u, path);
     assert.match(document, /no old-tag mutation, republishing, rerun, receipt adoption or in-place repair is authorized/u, path);
     assert.match(document, /Desktop remains on 0\.1\.7 and CLI\/TUI on 0\.1\.6, unchanged/u, path);
-    assert.match(document, /same plugin behavior as 0\.1\.8/u, path);
+    if (path === releasePath) assert.match(document, /same plugin behavior as 0\.1\.8/u, path);
+    else {
+      assert.match(document, /original release-only 0\.1\.9 proposal kept 0\.1\.8 behavior/u, path);
+      assert.match(document, /(?:Current working source|Current source) includes A\/B\/C0 changes without a version bump/u, path);
+    }
     assert.match(document, /rollout still waits for its own terminal `COMPLETED`/u, path);
   }
 });

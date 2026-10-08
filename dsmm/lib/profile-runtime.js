@@ -7,17 +7,12 @@ import { roleRouteRuntimeState, selectInitialModelRoute } from "./role-routing.j
 import { resolveEffectiveDsmmRole, sessionEvents } from "./session-scope.js";
 import { DeepworkModeController, hasOpenTurn } from "./state.js";
 import { resolveRoleRuntimePolicy } from "./settings.js";
+import { freezeSettings } from "./settings.js";
+import { resolveDshHome } from "./dsh-home.js";
+import { lstatSync } from "node:fs";
+import { Context } from "@deepseek-ai/cordis";
 function immutableSettings(settings) {
-    const copy = structuredClone(settings);
-    const freeze = (value) => {
-        if (typeof value !== "object" || value === null || Object.isFrozen(value))
-            return;
-        for (const entry of Object.values(value))
-            freeze(entry);
-        Object.freeze(value);
-    };
-    freeze(copy);
-    return copy;
+    return freezeSettings(settings);
 }
 /** Global defaults admit new roots; scoped idle switches replace one root's epoch. */
 export class DsmmProfileRuntime {
@@ -26,6 +21,7 @@ export class DsmmProfileRuntime {
     options;
     getSettings = (agent) => agent === undefined ? this.current.settings : this.bind(agent).settings;
     current;
+    currentDocument = null;
     baseline;
     bound = new WeakMap();
     admitting = new WeakSet();
@@ -45,6 +41,7 @@ export class DsmmProfileRuntime {
     }
     async initialize() {
         const selection = await this.store.loadSelection();
+        this.currentDocument = selection.document === null ? null : freezeSettings(selection.document);
         this.current = this.prepare(selection.document, selection);
         this.ctx.on?.("agent/created", async ({ agent, signal }) => {
             // Factory initialization already owns native maintenance: never whenIdle
@@ -56,7 +53,7 @@ export class DsmmProfileRuntime {
         // Installation into an already-running host treats those Agents as admitted
         // now, while all later profile switches continue to preserve their snapshot.
         for (const agent of this.agents()?.list() ?? [])
-            await this.admit(agent);
+            await this.admit(agent, undefined, this.options.startup);
     }
     admission(agent) { return agent === undefined ? this.current : this.bind(agent); }
     async getSession(agent) {
@@ -69,7 +66,7 @@ export class DsmmProfileRuntime {
         if ((disk.admissionEpoch === null && admitted.scope !== "global-default") || (disk.admissionEpoch !== null && (disk.admissionEpoch !== admitted.epoch || disk.selectedId !== admitted.selectedId || disk.appliedRevision !== admitted.appliedRevision))) {
             throw new DsmmProfileError("conflict", "The session choice changed outside this Host. Its admitted policy was retained; refresh or resume explicitly.");
         }
-        const reason = this.switching.has(agent) ? "maintenance" : agent.status === "running" ? "busy" : agent.runMaintenance === undefined ? "unavailable" : undefined;
+        const reason = this.store.readOnly ? "unavailable" : this.switching.has(agent) ? "maintenance" : agent.status === "running" ? "busy" : agent.runMaintenance === undefined ? "unavailable" : undefined;
         const role = resolveEffectiveDsmmRole(agent, admitted.settings, this.mode.active(agent, admitted.settings.defaultActive));
         const profileModel = this.declaredProfileModel(admitted.settings, role);
         return { sessionId: agent.id, globalDefault: selectionState(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
@@ -158,7 +155,7 @@ export class DsmmProfileRuntime {
                     const epoch = newEpoch();
                     let profileModel;
                     const result = await this.store.selectSession(request, epoch, async (document) => {
-                        const prepared = immutableSettings(resolveProfileSettings(this.baseline, document?.settings ?? {}));
+                        const prepared = immutableSettings(resolveProfileSettings(admitted.baseline, document?.settings ?? {}));
                         await this.validate(prepared, agent, maintenanceSignal);
                         const role = resolveEffectiveDsmmRole(agent, prepared, this.mode.active(agent, prepared.defaultActive));
                         profileModel = this.declaredProfileModel(prepared, role);
@@ -167,7 +164,7 @@ export class DsmmProfileRuntime {
                     }, {
                         assertCurrent: () => assertCurrent(maintenanceSignal),
                         committed: (selection, settings) => {
-                            this.bound.set(agent, this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override"));
+                            this.bound.set(agent, this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override", admitted.baseline, admitted.deployment, admitted.restartRequired, selection.document));
                             this.mode.changed(agent);
                         }
                     });
@@ -220,26 +217,95 @@ export class DsmmProfileRuntime {
     }
     read(id) { return this.store.read(id); }
     save(request) { return this.store.save(request); }
+    getStartupSettings() { return this.baseline; }
+    async describeDeployment(agent) {
+        const desired = await this.options.readDesired?.();
+        return { startup: this.options.startup ?? null, desired: desired ?? null, admission: this.admission(agent) };
+    }
     select(request) {
         const operation = this.selectionQueue.then(async () => {
+            let selectedDocument = null;
             const result = await this.store.select(request, async (document) => {
+                selectedDocument = document === null ? null : freezeSettings(document);
                 const prepared = immutableSettings(resolveProfileSettings(this.baseline, document?.settings ?? {}));
                 await this.validate(prepared);
                 return prepared;
             });
             // There is no await between successful durable commit and publication of
             // the complete settings value. Draft saves never reach this assignment.
-            this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default");
+            this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default", this.baseline, this.options.startup, [], selectedDocument);
+            this.currentDocument = selectedDocument;
             return this.describe();
         });
         this.selectionQueue = operation.catch(() => undefined);
         return operation;
     }
-    prepare(document, selection, epoch = newEpoch(), scope = "global-default") {
-        return this.profileAdmission(selection, immutableSettings(resolveProfileSettings(this.baseline, document?.settings ?? {})), epoch, scope);
+    prepare(document, selection, epoch = newEpoch(), scope = "global-default", deployment = this.options.startup) {
+        const desired = deployment?.settings ?? this.baseline;
+        const effective = structuredClone(desired);
+        const restartRequired = [];
+        for (const role of DSMM_ROLES) {
+            if (desired.roles[role.id] && !this.baseline.roles[role.id])
+                restartRequired.push(`roles.${role.id}`);
+            effective.roles[role.id] = desired.roles[role.id] && this.baseline.roles[role.id];
+        }
+        for (const key of ["modeName", "promptOrder", "presets", "lsp"]) {
+            if (JSON.stringify(desired[key]) !== JSON.stringify(this.baseline[key]))
+                restartRequired.push(key);
+            Object.assign(effective, { [key]: this.baseline[key] });
+        }
+        if (deployment !== undefined && this.options.startup !== undefined
+            && (deployment.profile.section ?? deployment.global.section) !== (this.options.startup.profile.section ?? this.options.startup.global.section))
+            restartRequired.push("section");
+        const baseline = immutableSettings(effective);
+        return this.profileAdmission(selection, immutableSettings(resolveProfileSettings(baseline, document?.settings ?? {})), epoch, scope, baseline, deployment, restartRequired, document);
     }
-    profileAdmission(selection, settings, epoch, scope) {
-        return Object.freeze({ ...selectionState(selection), settings, epoch, scope, profile: selection.selectedId === null || selection.appliedRevision === null ? null : Object.freeze({ id: selection.selectedId, revision: selection.appliedRevision }) });
+    profileAdmission(selection, settings, epoch, scope, baseline = this.baseline, deployment = this.options.startup, restartRequired = [], document = null) {
+        const sources = { ...deployment?.sources };
+        const fields = Object.fromEntries(Object.keys(sources).map((path) => [path, "deployment"]));
+        const pinStartup = (prefix) => {
+            const matches = (path) => path === prefix || path.startsWith(`${prefix}.`);
+            for (const path of Object.keys(sources).filter(matches)) {
+                delete sources[path];
+                delete fields[path];
+            }
+            for (const [path, source] of Object.entries(this.options.startup?.sources ?? {}).filter(([path]) => matches(path))) {
+                sources[path] = source;
+                fields[path] = "startup";
+            }
+        };
+        for (const key of ["modeName", "promptOrder", "presets", "lsp"])
+            pinStartup(key);
+        for (const role of DSMM_ROLES) {
+            if (deployment?.settings.roles[role.id] && !baseline.roles[role.id])
+                pinStartup(`roles.${role.id}`);
+        }
+        const mark = (value, path) => {
+            if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+                for (const [key, child] of Object.entries(value))
+                    mark(child, [...path, key]);
+            }
+            else {
+                sources[path.join(".")] = "named-session";
+                fields[path.join(".")] = "named-session";
+            }
+        };
+        for (const [role, policy] of Object.entries(document?.settings.roleRouting ?? {})) {
+            if (policy?.primary === undefined)
+                continue;
+            const prefix = `roleRouting.${role}.primary.`;
+            for (const path of Object.keys(sources).filter((path) => path.startsWith(prefix))) {
+                delete sources[path];
+                delete fields[path];
+            }
+        }
+        mark(document?.settings ?? {}, []);
+        return Object.freeze({ ...selectionState(selection), settings, baseline, epoch, scope, ...(deployment === undefined ? {} : { deployment }),
+            ...(this.store.origin === undefined ? {} : { store: Object.freeze({ origin: this.store.origin, readOnly: this.store.readOnly === true,
+                    ...(this.store.writeRestriction === undefined ? {} : { writeRestriction: this.store.writeRestriction }) }) }),
+            sources: Object.freeze(sources), sourceCaptures: Object.freeze({ fields: Object.freeze(fields), ...(this.options.startup === undefined ? {} : { startup: Object.freeze({
+                        globalRevision: this.options.startup.globalRevision, nativeRevision: this.options.startup.nativeRevision
+                    }) }) }), restartRequired: Object.freeze([...restartRequired]), profile: selection.selectedId === null || selection.appliedRevision === null ? null : Object.freeze({ id: selection.selectedId, revision: selection.appliedRevision }) });
     }
     declaredProfileModel(settings, role) {
         const primary = role === undefined ? undefined : settings.roleRouting[role]?.primary;
@@ -281,7 +347,7 @@ export class DsmmProfileRuntime {
             throw new DsmmProfileError("not-owned", "Session profile selection requires the exact live ordinary root Agent.");
         }
     }
-    async admit(agent, signal) {
+    async admit(agent, signal, startup) {
         if (this.bound.has(agent))
             return;
         const parent = this.owner(agent);
@@ -296,6 +362,8 @@ export class DsmmProfileRuntime {
         this.admitting.add(agent);
         try {
             signal?.throwIfAborted();
+            const deployment = startup ?? await this.options.readDesired?.();
+            signal?.throwIfAborted();
             const selection = await this.store.loadSessionSelection(agent.id);
             signal?.throwIfAborted();
             if (this.disposed || this.disposedAgents.has(agent))
@@ -303,13 +371,23 @@ export class DsmmProfileRuntime {
             const registry = this.agents();
             if (registry?.get !== undefined && registry.get(agent.id) !== agent)
                 throw new DsmmProfileError("not-owned", "The live session changed during profile admission.");
-            this.bound.set(agent, selection.admissionEpoch === null ? this.current : this.prepare(selection.document, selection, selection.admissionEpoch, selection.selectedId === null ? "deployment-baseline" : "session-override"));
+            const candidate = selection.admissionEpoch === null
+                ? this.options.readDesired === undefined ? this.current : this.prepare(this.currentDocument, this.current, newEpoch(), "global-default", deployment)
+                : this.prepare(selection.document, selection, selection.admissionEpoch, selection.selectedId === null ? "deployment-baseline" : "session-override", deployment);
+            if (this.options.readDesired !== undefined)
+                await this.validate(candidate.settings, agent, signal, startup !== undefined);
+            signal?.throwIfAborted();
+            if (this.disposed || this.disposedAgents.has(agent))
+                throw new DsmmProfileError("disposed", "The session was disposed during deployment admission.");
+            if (registry?.get !== undefined && registry.get(agent.id) !== agent)
+                throw new DsmmProfileError("not-owned", "The live session changed during deployment admission.");
+            this.bound.set(agent, candidate);
         }
         finally {
             this.admitting.delete(agent);
         }
     }
-    async validate(settings, agent, signal) {
+    async validate(settings, agent, signal, auditCatalog = true) {
         if (this.options.validateCandidate !== undefined) {
             await this.options.validateCandidate(settings);
             return;
@@ -327,6 +405,11 @@ export class DsmmProfileRuntime {
                 }
             }
         }
+        // New-root capture validates deployment/schema and standing capability, not
+        // dormant role routes. Actual root requests and role/alias preflight own
+        // model selection. Named Apply and retained-root startup keep full audits.
+        if (!auditCatalog)
+            return;
         const nativeAgent = agent ?? (this.agents()?.list() ?? []).find((candidate) => candidate.ctx?.get?.("llm")?.resolveCallConfig !== undefined);
         const inherited = nativeAgent?.options;
         const inheritedRoute = inherited?.provider === undefined || inherited.model === undefined ? undefined
@@ -371,7 +454,21 @@ export async function createProfileRuntime(ctx, baseline, options = {}) {
     const profile = ctx.get?.("profileContext");
     if (typeof profile?.dir !== "string" || profile.dir.trim() === "")
         throw new DsmmProfileError("activation", "Deepwork profiles require the native deployment profile directory.");
-    const runtime = new DsmmProfileRuntime(ctx, baseline, new ProfileStore(join(profile.dir, "dsmm-profiles")), options);
+    const legacy = join(profile.dir, "dsmm-profiles");
+    let exists = false;
+    try {
+        lstatSync(legacy);
+        exists = true;
+    }
+    catch (error) {
+        if (!(error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT"))
+            throw new DsmmProfileError("unsafe-path", "The current profile's legacy store could not be safely checked.");
+    }
+    // Loader callers use its actual public entry key. The old trusted non-Loader
+    // constructor path has one compatibility namespace, not a guessed entry.
+    const entry = options.startup?.entryId ?? (ctx instanceof Context ? ctx.fiber.entry?.id : undefined) ?? "trusted-direct";
+    const store = exists ? ProfileStore.fromLegacy(legacy) : ProfileStore.fromCentral(resolveDshHome(profile.home), profile.dir, entry);
+    const runtime = new DsmmProfileRuntime(ctx, baseline, store, options);
     await runtime.initialize();
     return runtime;
 }

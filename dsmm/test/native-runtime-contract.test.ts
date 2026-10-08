@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Context, getTraceable } from "@deepseek-ai/cordis";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { createScope, scopeOf, scopeParentOf } from "@deepseek-ai/dsh-scope";
@@ -22,6 +23,45 @@ import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.t
 const noRoles = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, false]));
 const native = () => nativeRoutingFixture({ roles: noRoles }, { nativePresets: true, spawn: false });
 const adapterAgent = (agent: import("@deepseek-ai/dsh-agent").Agent) => agent as DshAgent;
+
+test("mounting DSMM after an ordinary root registers enabled startup presets before auditing and binding it", async () => {
+  let retained: import("@deepseek-ai/dsh-agent").Agent | undefined;
+  const f = await nativeRoutingFixture({}, { nativePresets: true, spawn: false, async beforeDsmm(ctx, create) {
+    assert.equal((await ctx.agentPresets.list()).some((preset) => preset.id === "dsmm-orchestrator"), false);
+    // The real web-tool module requires the public Host web seam. No network
+    // operation is permitted by this local bootstrap fixture.
+    ctx.provide("web", { async search() { throw new Error("fixture forbids web requests"); }, async fetch() { throw new Error("fixture forbids web requests"); } });
+    const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
+    const webModule = pathToFileURL(sdk.resolve("@deepseek-ai/dsh-tool-web")).href;
+    // This fixture exercises imports, not HMR/module-cache APIs. Supply only
+    // the Loader's import slot, resolving the one absent package from the
+    // explicitly supplied installed SDK; every other row uses normal import.
+    const imports: Pick<NonNullable<Context["loader"]["internal"]>, "import"> = {
+      import: async (name: string) => name === "@deepseek-ai/dsh-tool-web" ? import(webModule) : import(name)
+    };
+    Object.assign(ctx.loader, { internal: imports });
+    const denied = async (): Promise<never> => { throw new Error("fixture forbids filesystem/process operations"); };
+    ctx.provide("fs", { readFile: denied, writeFile: denied, edit: denied, stat: denied });
+    ctx.provide("subprocess", { spawn: denied });
+    ctx.provide("shell", { execute: denied });
+    ctx.provide("shellEnv", { resolve: denied });
+    ctx.provide("jobs", { start: denied, list: () => [], attachController: () => () => {}, events: { subscribe: () => () => {} } });
+    retained = await create({ agentPreset: "standard" });
+  } });
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
+    assert.ok(retained); assert.equal(f.agents.get(retained.id), retained);
+    assert.equal(runtime.getSettings(adapterAgent(retained)).roles["dsmm-orchestrator"], true);
+    assert.equal(runtime.admission(adapterAgent(retained)).deployment, runtime.admission().deployment, "retained roots share the validated frozen startup snapshot");
+    for (const id of ["dsmm-orchestrator", "dsmm-planner", "dsmm-builder"]) {
+      assert.equal((await f.ctx.agentPresets.resolve(id)).broken, undefined);
+    }
+    await runFixtureTurn(retained);
+    assert.equal(f.adapter.calls.length, 1);
+    await f.dsmmFiber.dispose();
+    assert.equal((await f.ctx.agentPresets.list()).some((preset) => preset.id === "dsmm-orchestrator"), false);
+  } finally { await f.dispose(); }
+});
 
 test("fixture Hosts isolate default preset roots without relocating shared profiles or explicit caller roots", async () => {
   const profileDir = mkdtempSync(join(tmpdir(), "dsmm-fixture-root-contract-"));
@@ -269,12 +309,12 @@ test("preset-layer cwd-specific winner affects only its session; invocation-disa
   } finally { await f.dispose(); }
 });
 
-test("native Loader owns Config identity/reload and refuses to replace an admitted Agent realm", async () => {
+test("native Loader owns sparse volatile desired; admitted realms survive saves and ordinary remounts remain refused", async () => {
   const f = await native();
   try {
-    assert.ok(f.dsmmEntryId); assert.equal((f.deploymentConfig() as { defaultActive: boolean }).defaultActive, false);
+    assert.ok(f.dsmmEntryId); assert.equal((f.deploymentConfig() as { defaultActive: { get(): unknown } }).defaultActive.get(), undefined);
     await f.reloadDeployment({ roles: noRoles, defaultActive: true, promptOrder: 73 });
-    assert.equal((f.deploymentConfig() as { promptOrder: number }).promptOrder, 73);
+    assert.equal((f.deploymentConfig() as { promptOrder: { get(): unknown } }).promptOrder.get(), 73);
     const a = await f.create({ agentPreset: "standard" });
     const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
     const before = await runtime.getSession(adapterAgent(a));

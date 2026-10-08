@@ -5,24 +5,63 @@ import { parseTree } from "jsonc-parser";
 import { ABSENT_PROFILE_SELECTION_REVISION } from "./profile-types.js";
 import { DsmmProfileError, MAX_PROFILE_BYTES, MAX_PROFILE_COUNT, MAX_PROFILE_DIRECTORY_ENTRIES, MAX_PROFILE_REVISIONS, parseProfileDocument, profileErrorInfo, validateProfileId, validateProfileRevision } from "./profiles.js";
 export const MAX_SESSION_PROFILE_CHOICES = 1024;
+const trustedLayout = Symbol("trusted profile storage layout");
+const LEGACY_WRITE_RESTRICTION = "Legacy profiles are read-only. Explicitly import them before saving or changing selections.";
 /** This directory is supplied by the Host, never by a remote method parameter. */
 export class ProfileStore {
     profileDir;
+    stateDir;
     timeoutMs;
     pollMs;
     rename;
     rootIdentity;
+    origin;
+    hostProfile;
+    identities = new Map();
     constructor(profileDir, options = {}) {
-        if (!isAbsolute(profileDir) || dirname(resolve(profileDir)) === resolve(profileDir) || basename(resolve(profileDir)) !== "dsmm-profiles") {
+        const layout = options[trustedLayout];
+        if (!isAbsolute(profileDir) || dirname(resolve(profileDir)) === resolve(profileDir) || (layout === undefined && basename(resolve(profileDir)) !== "dsmm-profiles")) {
             throw new DsmmProfileError("unsafe-path", "The Host must supply its native profile's dsmm-profiles directory.");
         }
         this.profileDir = resolve(profileDir);
+        this.stateDir = layout?.stateDir ?? this.profileDir;
+        this.origin = layout?.origin ?? "explicit";
+        this.hostProfile = layout?.hostProfile;
         this.timeoutMs = boundedOption(options.lockTimeoutMs, 2000, 0, 30000);
         this.pollMs = boundedOption(options.lockPollMs, 25, 1, 1000);
         this.rename = options.rename ?? renameSync;
     }
+    static fromCentral(home, canonicalHostProfile, actualEntryId, options = {}) {
+        const root = trustedHome(home);
+        validateTrustedDirectoryPath(canonicalHostProfile);
+        if (resolve(canonicalHostProfile) !== canonicalHostProfile)
+            throw new DsmmProfileError("unsafe-path", "A canonical Host profile identity is required.");
+        validateDirectories(canonicalHostProfile, false);
+        if (typeof actualEntryId !== "string" || actualEntryId.length < 1 || actualEntryId.length > 256 || actualEntryId.trim().length === 0
+            || /[\u0000-\u001f\u007f]/u.test(actualEntryId) || Buffer.from(actualEntryId, "utf8").toString("utf8") !== actualEntryId) {
+            throw new DsmmProfileError("validation", "A bounded native entry identity is required.", "actualEntryId");
+        }
+        const identity = process.platform === "win32" ? canonicalHostProfile.toLowerCase() : canonicalHostProfile;
+        const profileDir = join(root, "plugins", "dsmm", "profiles");
+        const stateDir = join(profileDir, ".state", digest(Buffer.from(JSON.stringify([identity, actualEntryId]), "utf8")));
+        const trusted = { ...options, [trustedLayout]: { origin: "central", stateDir, hostProfile: canonicalHostProfile } };
+        const store = new ProfileStore(profileDir, trusted);
+        store.validateRoot(false);
+        store.validateState(false);
+        return store;
+    }
+    static fromLegacy(legacyDir, options = {}) {
+        validateTrustedDirectoryPath(legacyDir);
+        if (basename(resolve(legacyDir)) !== "dsmm-profiles")
+            throw new DsmmProfileError("unsafe-path", "The legacy store must be the Host's exact dsmm-profiles directory.");
+        const root = resolve(legacyDir);
+        const trusted = { ...options, [trustedLayout]: { origin: "legacy", stateDir: root } };
+        const store = new ProfileStore(root, trusted);
+        store.validateRoot(false);
+        return store;
+    }
     async describe() {
-        return this.locked(() => {
+        return this.readOperation(() => {
             const entries = this.inventory();
             const profiles = entries.map((name) => {
                 const id = name.slice(0, -6);
@@ -39,19 +78,20 @@ export class ProfileStore {
             });
             try {
                 const selected = this.selection();
-                return { profiles, selectedId: selected.selectedId, appliedRevision: selected.appliedRevision, selectionRevision: selected.selectionRevision };
+                return { ...this.metadata(), profiles, selectedId: selected.selectedId, appliedRevision: selected.appliedRevision, selectionRevision: selected.selectionRevision };
             }
             catch (error) {
                 // An error is not a successful fallback to the baseline.
-                return { profiles, selectedId: null, appliedRevision: null, selectionRevision: "unavailable", selectionError: profileErrorInfo(error, "corrupt-selection") };
+                return { ...this.metadata(), profiles, selectedId: null, appliedRevision: null, selectionRevision: "unavailable", selectionError: profileErrorInfo(error, "corrupt-selection") };
             }
         });
     }
     async read(id) {
         validateProfileId(id);
-        return this.locked(() => this.readResult(this.draft(id, this.inventory())));
+        return this.readOperation(() => this.readResult(this.draft(id, this.inventory())));
     }
     async save(request) {
+        this.assertWritable();
         validateProfileId(request.id);
         const document = parseProfileDocument(request.content, request.id);
         if (request.expectedRevision !== null)
@@ -76,13 +116,14 @@ export class ProfileStore {
         });
     }
     async loadSelection() {
-        return this.locked(() => this.selection());
+        return this.readOperation(() => this.selection());
     }
     async loadSessionSelection(sessionId) {
         validateSessionProfileId(sessionId);
-        return this.locked(() => this.sessionSelection(sessionId));
+        return this.readOperation(() => this.sessionSelection(sessionId));
     }
     async selectSession(request, epoch, validateCandidate, commit) {
+        this.assertWritable();
         validateSessionProfileId(request.sessionId);
         validateSelectionRequest(request);
         validateProfileRevision(epoch, "admissionEpoch");
@@ -102,7 +143,7 @@ export class ProfileStore {
                     throw error;
                 throw new DsmmProfileError("activation", "The candidate profile could not be activated; the previous session selection was retained.");
             }
-            const directory = join(this.profileDir, ".sessions");
+            const directory = join(this.stateDir, ".sessions");
             const target = join(directory, `${sessionChoiceKey(request.sessionId)}.json`);
             const fence = (temporary) => {
                 commit.assertCurrent();
@@ -110,7 +151,7 @@ export class ProfileStore {
                     conflict("The session selection was edited externally. Refresh before selecting again.");
                 if (draft !== undefined && this.draft(request.id, this.inventory()).revision !== draft.revision)
                     conflict("The draft changed during activation. Reload and select again.");
-                validateDirectories(directory, false);
+                validateDirectories(directory, false, false, this.identities);
                 // The one exclusive atomic staging file is not a session choice.
                 const entries = boundedEntries(directory, MAX_SESSION_PROFILE_CHOICES + (temporary === undefined ? 0 : 1))
                     .filter((name) => temporary === undefined || name !== basename(temporary));
@@ -119,7 +160,7 @@ export class ProfileStore {
             };
             assertLock();
             commit.assertCurrent();
-            validateDirectories(directory, true);
+            validateDirectories(directory, true, false, this.identities);
             fence();
             if (draft !== undefined)
                 this.publishRevision(draft, assertLock);
@@ -133,6 +174,7 @@ export class ProfileStore {
         });
     }
     async select(request, validateCandidate) {
+        this.assertWritable();
         validateSelectionRequest(request);
         return this.locked(async (assertLock) => {
             const current = this.selection();
@@ -159,7 +201,8 @@ export class ProfileStore {
                 this.publishRevision(draft, assertLock);
             const pointer = { version: 1, id: request.id, revision: draft?.revision ?? null };
             const bytes = Buffer.from(`${JSON.stringify(pointer)}\n`, "utf8");
-            this.atomicReplace(join(this.profileDir, ".selection.json"), bytes, () => {
+            this.validateState(true);
+            this.atomicReplace(join(this.stateDir, ".selection.json"), bytes, () => {
                 this.assertSelectionRevision(request.expectedSelectionRevision);
                 if (draft !== undefined && this.draft(request.id, this.inventory()).revision !== draft.revision)
                     conflict("The draft changed during selection. Reload and select again.");
@@ -174,7 +217,8 @@ export class ProfileStore {
         return { id: draft.document.id, ...(draft.document.label === undefined ? {} : { label: draft.document.label }), revision: draft.revision, content: draft.content };
     }
     inventory() {
-        this.validateRoot(false);
+        if (!this.validateRoot(false))
+            return [];
         const names = boundedEntries(this.profileDir, MAX_PROFILE_DIRECTORY_ENTRIES).filter((name) => !name.startsWith(".") && /\.jsonc$/iu.test(name)).sort();
         if (names.length > MAX_PROFILE_COUNT)
             throw new DsmmProfileError("limit", "Profile inventory exceeds the 128-profile limit.");
@@ -204,9 +248,13 @@ export class ProfileStore {
     }
     selection() {
         this.validateRoot(false);
-        const path = join(this.profileDir, ".selection.json");
-        if (status(path) === undefined)
+        this.validateState(false);
+        const path = join(this.stateDir, ".selection.json");
+        if (status(path) === undefined) {
+            if (this.origin === "legacy")
+                throw new DsmmProfileError("corrupt-selection", "The legacy selection is missing. Restore its original pointer and immutable revision explicitly.");
             return { selectedId: null, appliedRevision: null, selectionRevision: ABSENT_PROFILE_SELECTION_REVISION, document: null, content: null };
+        }
         try {
             const file = regularFile(path, 1024);
             const pointer = parseSelectionPointer(file.content);
@@ -227,9 +275,10 @@ export class ProfileStore {
     }
     sessionSelection(sessionId, temporary) {
         this.validateRoot(false);
+        this.validateState(false);
         const absent = { sessionId, admissionEpoch: null, selectedId: null, appliedRevision: null,
             selectionRevision: ABSENT_PROFILE_SELECTION_REVISION, document: null, content: null };
-        const directory = join(this.profileDir, ".sessions");
+        const directory = join(this.stateDir, ".sessions");
         if (status(directory) === undefined)
             return absent;
         validateDirectories(directory, false);
@@ -295,112 +344,181 @@ export class ProfileStore {
         }
     }
     atomicReplace(target, bytes, beforeRename, assertLock) {
-        assertLock();
-        if (status(target) !== undefined)
-            assertRegular(status(target));
-        const temporary = join(dirname(target), `.dsmm-tmp-${randomUUID()}`);
-        let fd;
-        let created = false;
-        try {
-            fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
-            created = true;
-            writeAll(fd, bytes);
-            fsyncSync(fd);
-            closeSync(fd);
-            fd = undefined;
-            this.validateRoot(false);
-            if (status(target) !== undefined)
-                assertRegular(status(target));
-            beforeRename(temporary);
+        atomicReplace(target, bytes, beforeRename, () => {
             assertLock();
-            this.rename(temporary, target);
-            created = false;
-            // rename is the transaction commit. No fallible work follows it.
-        }
-        finally {
-            if (fd !== undefined)
-                closeSync(fd);
-            if (created) {
-                try {
-                    unlinkSync(temporary);
-                }
-                catch { /* Never remove another or previous file to recover a failed commit. */ }
-            }
-        }
+            validateDirectories(dirname(target), false, false, this.identities);
+        }, this.rename);
     }
     validateRoot(create) {
-        validateDirectories(this.profileDir, create);
+        if (this.hostProfile !== undefined)
+            validateDirectories(this.hostProfile, false, false, this.identities);
+        if (!validateDirectories(this.profileDir, create, this.origin === "central", this.identities))
+            return false;
         const current = lstatSync(this.profileDir);
         if (this.rootIdentity !== undefined && !sameFile(this.rootIdentity, current)) {
             throw new DsmmProfileError("unsafe-path", "The profile storage directory was replaced during this Host's lifetime; no operation was committed.");
         }
         this.rootIdentity ??= current;
+        return true;
     }
-    async locked(operation) {
-        let fd;
-        let ownedStatus;
-        let ownedBytes;
-        const lockPath = join(this.profileDir, ".lock");
-        const assertLock = () => {
-            this.validateRoot(false);
-            const current = status(lockPath);
-            if (fd === undefined || ownedStatus === undefined || ownedBytes === undefined || current === undefined || !sameFile(ownedStatus, current) || !sameFile(ownedStatus, fstatSync(fd))) {
-                conflict("Profile lock ownership changed during this operation. No selection was committed; retry after the current owner finishes.");
-            }
-            assertRegular(current);
-            assertRegular(fstatSync(fd));
-            if (!regularFile(lockPath, 256).bytes.equals(ownedBytes))
-                conflict("The profile lock was altered during this operation. No selection was committed; retry after the current owner finishes.");
-        };
+    validateState(create) {
+        return validateDirectories(this.stateDir, create, this.origin === "central", this.identities);
+    }
+    metadata() {
+        return { origin: this.origin, readOnly: this.origin === "legacy", ...(this.origin === "legacy" ? { writeRestriction: LEGACY_WRITE_RESTRICTION } : {}) };
+    }
+    get readOnly() { return this.origin === "legacy"; }
+    get writeRestriction() { return this.readOnly ? LEGACY_WRITE_RESTRICTION : undefined; }
+    assertWritable() {
+        if (this.origin === "legacy")
+            throw new DsmmProfileError("unavailable", LEGACY_WRITE_RESTRICTION);
+    }
+    async readOperation(operation) {
+        if (this.origin === "explicit")
+            return this.locked(operation);
         try {
-            this.validateRoot(true);
-            const deadline = performance.now() + this.timeoutMs;
-            for (;;) {
-                this.validateRoot(false);
-                try {
-                    fd = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
-                    ownedStatus = fstatSync(fd);
-                    ownedBytes = Buffer.from(`${process.pid} ${randomUUID()}\n`, "utf8");
-                    writeAll(fd, ownedBytes);
-                    fsyncSync(fd);
-                    break;
-                }
-                catch (error) {
-                    if (fd !== undefined || errorCode(error) !== "EEXIST")
-                        throw error;
-                    const existing = status(lockPath);
-                    if (existing !== undefined)
-                        assertRegular(existing);
-                    if (performance.now() >= deadline)
-                        throw new DsmmProfileError("lock-timeout", "Another process owns the profile lock. Retry after it finishes; locks are never stolen.");
-                    await new Promise((done) => setTimeout(done, Math.min(this.pollMs, Math.max(1, deadline - performance.now()))));
-                }
+            const first = operation();
+            const second = operation();
+            this.validateRoot(false);
+            this.validateState(false);
+            if (JSON.stringify(first) !== JSON.stringify(second)) {
+                throw new DsmmProfileError(this.origin === "legacy" ? "corrupt-selection" : "conflict", "Profile storage changed during the read. No selection was admitted; retry after it is stable.");
             }
-            assertLock();
-            return await operation(assertLock);
+            return second;
         }
         catch (error) {
             if (error instanceof DsmmProfileError)
                 throw error;
-            throw new DsmmProfileError("io", "Deepwork profile storage failed. Existing files and the previous selection were retained.");
+            throw new DsmmProfileError("io", "Deepwork profile storage could not be read safely.");
         }
-        finally {
-            if (fd !== undefined) {
-                try {
-                    closeSync(fd);
-                }
-                catch { /* A committed pointer must remain a successful transaction. */ }
-                try {
-                    this.validateRoot(false);
-                    const current = status(lockPath);
-                    if (ownedStatus !== undefined && ownedBytes !== undefined && current !== undefined && sameFile(ownedStatus, current) && current.isFile() && !current.isSymbolicLink() && regularFile(lockPath, 256).bytes.equals(ownedBytes))
-                        unlinkSync(lockPath);
-                }
-                catch { /* Do not delete a replacement lock or traverse an altered root. */ }
+    }
+    async locked(operation) {
+        this.assertWritable();
+        return locked(this.profileDir, ".lock", (create) => { this.validateRoot(create); }, this.timeoutMs, this.pollMs, operation);
+    }
+}
+async function locked(directory, lockName, validateRoot, timeoutMs, pollMs, operation) {
+    let fd;
+    let ownedStatus;
+    let ownedBytes;
+    const lockPath = join(directory, lockName);
+    const assertLock = () => {
+        validateRoot(false);
+        const current = status(lockPath);
+        if (fd === undefined || ownedStatus === undefined || ownedBytes === undefined || current === undefined || !sameFile(ownedStatus, current) || !sameFile(ownedStatus, fstatSync(fd))) {
+            conflict("Profile lock ownership changed during this operation. No selection was committed; retry after the current owner finishes.");
+        }
+        assertRegular(current);
+        assertRegular(fstatSync(fd));
+        if (!regularFile(lockPath, 256).bytes.equals(ownedBytes))
+            conflict("The profile lock was altered during this operation. No selection was committed; retry after the current owner finishes.");
+    };
+    try {
+        validateRoot(true);
+        const deadline = performance.now() + timeoutMs;
+        for (;;) {
+            validateRoot(false);
+            try {
+                fd = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+                ownedStatus = fstatSync(fd);
+                ownedBytes = Buffer.from(`${process.pid} ${randomUUID()}\n`, "utf8");
+                writeAll(fd, ownedBytes);
+                fsyncSync(fd);
+                break;
             }
+            catch (error) {
+                if (fd !== undefined || errorCode(error) !== "EEXIST")
+                    throw error;
+                const existing = status(lockPath);
+                if (existing !== undefined)
+                    assertRegular(existing);
+                if (performance.now() >= deadline)
+                    throw new DsmmProfileError("lock-timeout", "Another process owns the profile lock. Retry after it finishes; locks are never stolen.");
+                await new Promise((done) => setTimeout(done, Math.min(pollMs, Math.max(1, deadline - performance.now()))));
+            }
+        }
+        assertLock();
+        return await operation(assertLock);
+    }
+    catch (error) {
+        if (error instanceof DsmmProfileError)
+            throw error;
+        throw new DsmmProfileError("io", "Deepwork profile storage failed. Existing files and the previous selection were retained.");
+    }
+    finally {
+        if (fd !== undefined) {
+            try {
+                closeSync(fd);
+            }
+            catch { /* A committed pointer must remain a successful transaction. */ }
+            try {
+                validateRoot(false);
+                const current = status(lockPath);
+                if (ownedStatus !== undefined && ownedBytes !== undefined && current !== undefined && sameFile(ownedStatus, current) && current.isFile() && !current.isSymbolicLink() && regularFile(lockPath, 256).bytes.equals(ownedBytes))
+                    unlinkSync(lockPath);
+            }
+            catch { /* Do not delete a replacement lock or traverse an altered root. */ }
         }
     }
 }
+function atomicReplace(target, bytes, beforeRename, assertAuthority, rename, assertCurrent) {
+    assertAuthority();
+    if (status(target) !== undefined)
+        assertRegular(status(target));
+    const temporary = join(dirname(target), `.dsmm-tmp-${randomUUID()}`);
+    let fd;
+    let created = false;
+    let owned;
+    try {
+        fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+        created = true;
+        owned = fstatSync(fd);
+        assertRegular(owned);
+        writeAll(fd, bytes);
+        fsyncSync(fd);
+        closeSync(fd);
+        fd = undefined;
+        assertAuthority();
+        if (status(target) !== undefined)
+            assertRegular(status(target));
+        beforeRename(temporary);
+        assertAuthority();
+        const staged = regularFile(temporary, bytes.length);
+        if (!sameFile(owned, lstatSync(temporary)) || !staged.bytes.equals(bytes))
+            conflict("The staged file changed before commit. No file was replaced.");
+        assertCurrent?.();
+        rename(temporary, target);
+        created = false;
+        // rename is the transaction commit. No fallible work follows it.
+    }
+    finally {
+        if (fd !== undefined)
+            closeSync(fd);
+        if (created) {
+            try {
+                assertAuthority();
+                const current = status(temporary);
+                if (owned !== undefined && current !== undefined && sameFile(owned, current))
+                    unlinkSync(temporary);
+            }
+            catch { /* Never traverse an altered root or remove another owner's staging file. */ }
+        }
+    }
+}
+function validateTrustedDirectoryPath(path) {
+    if (typeof path !== "string" || path.length > 4096 || !isAbsolute(path) || /[\u0000-\u001f\u007f]/u.test(path)
+        || Buffer.from(path, "utf8").toString("utf8") !== path || dirname(resolve(path)) === resolve(path)) {
+        throw new DsmmProfileError("unsafe-path", "A bounded absolute trusted Host directory is required.");
+    }
+}
+function trustedHome(home) {
+    validateTrustedDirectoryPath(home);
+    const root = resolve(home);
+    validateDirectories(root, false, true);
+    return root;
+}
+/** @internal Shared only by the fixed config file adapter; not a wire-path storage API. */
+export const profileStoreFilePrimitives = { trustedHome, validateDirectories, status, regularFile, digest, boundedOption, locked, atomicReplace };
 function boundedOption(value, fallback, minimum, maximum) {
     if (value === undefined)
         return fallback;
@@ -424,7 +542,7 @@ function status(path) {
         throw error;
     }
 }
-function validateDirectories(directory, create) {
+function validateDirectories(directory, create, allowMissing = false, identities) {
     const absolute = resolve(directory);
     const root = parse(absolute).root;
     const parts = [];
@@ -433,6 +551,8 @@ function validateDirectories(directory, create) {
     parts.unshift(root);
     for (const path of parts) {
         let found = status(path);
+        if (found === undefined && identities?.has(path))
+            throw new DsmmProfileError("unsafe-path", "A pinned storage directory disappeared; storage authority was invalidated.");
         if (found === undefined && create) {
             try {
                 mkdirSync(path, { mode: 0o700 });
@@ -443,13 +563,21 @@ function validateDirectories(directory, create) {
             }
             found = status(path);
         }
+        if (found === undefined && allowMissing) {
+            return false;
+        }
         if (found === undefined || found.isSymbolicLink() || !found.isDirectory())
             throw new DsmmProfileError("unsafe-path", "Profile directories and every ancestor must be real directories, not links or junctions.");
         const canonical = resolve(realpathSync(path));
         if ((process.platform === "win32" ? canonical.toLowerCase() : canonical) !== (process.platform === "win32" ? path.toLowerCase() : path)) {
             throw new DsmmProfileError("unsafe-path", "Profile storage must not traverse redirected directories or reparse points.");
         }
+        const pinned = identities?.get(path);
+        if (pinned !== undefined && !sameFile(pinned, found))
+            throw new DsmmProfileError("unsafe-path", "A storage directory was replaced; storage authority was invalidated.");
+        identities?.set(path, found);
     }
+    return true;
 }
 function assertRegular(found) {
     if (found.isSymbolicLink() || !found.isFile() || found.nlink !== 1)
@@ -459,6 +587,7 @@ function sameFile(first, second) {
     return first.dev === second.dev && first.ino === second.ino;
 }
 function regularFile(path, maximum) {
+    validateDirectories(dirname(path), false);
     const before = status(path);
     if (before === undefined)
         throw new DsmmProfileError("not-found", "The required profile file does not exist.");
@@ -467,6 +596,7 @@ function regularFile(path, maximum) {
         throw new DsmmProfileError("limit", "Profile storage contains an oversized file.");
     const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
+        validateDirectories(dirname(path), false);
         const opened = fstatSync(fd);
         assertRegular(opened);
         if (!sameFile(before, opened))
@@ -483,6 +613,10 @@ function regularFile(path, maximum) {
             throw new DsmmProfileError("limit", "Profile storage contains an oversized file.");
         const after = fstatSync(fd);
         const named = status(path);
+        validateDirectories(dirname(path), false);
+        assertRegular(after);
+        if (named !== undefined)
+            assertRegular(named);
         if (named === undefined || !sameFile(opened, named) || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs)
             conflict("The profile file was edited while being read. Retry the operation.");
         const bytes = buffer.subarray(0, size);

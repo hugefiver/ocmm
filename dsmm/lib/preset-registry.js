@@ -116,7 +116,7 @@ export function registerRolePresets(ctx, getSettings) {
         }
     };
     if (ctx.inject !== undefined) {
-        ctx.inject(["agentPresets"], install);
+        return Promise.resolve(ctx.inject(["agentPresets"], install)).then(() => undefined);
     }
     else if (ctx.get?.("agentPresets") !== undefined || ctx.agentPresets !== undefined) {
         void install(ctx).catch((error) => ctx.logger?.warn(`dsmm native preset registration failed: ${String(error)}`));

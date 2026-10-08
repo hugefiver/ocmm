@@ -43,6 +43,15 @@ export function createDsmmStatusSnapshot(input) {
             && route.model === selectedRoute.model && route.reasoningEffort === selectedRoute.reasoningEffort);
     return {
         version: DSMM_STATUS_VERSION,
+        ...(input.admission?.store === undefined ? {} : { profileStore: { ...input.admission.store } }),
+        ...(input.admission?.deployment === undefined ? {} : { deployment: {
+                globalRevision: input.admission.deployment.globalRevision, nativeRevision: input.admission.deployment.nativeRevision,
+                entryId: input.admission.deployment.entryId, hostProfileKey: input.admission.deployment.hostProfileKey,
+                restartRequired: [...input.admission.restartRequired ?? []], sources: { ...input.admission.sources },
+                ...(input.admission.sourceCaptures === undefined ? {} : { sourceCaptures: {
+                        fields: { ...input.admission.sourceCaptures.fields }, ...(input.admission.sourceCaptures.startup === undefined ? {} : { startup: { ...input.admission.sourceCaptures.startup } })
+                    } })
+            } }),
         ...(input.admission === undefined ? {} : { admission: {
                 profile: input.admission.profile === null ? null : { ...input.admission.profile },
                 epoch: input.admission.epoch,
@@ -124,6 +133,9 @@ export function formatDsmmStatus(snapshot) {
         `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
         `Scope: ${scope}`,
         ...(snapshot.admission === undefined ? [] : [`Profile admission: ${snapshot.admission.scope}; profile=${snapshot.admission.profile?.id ?? "deployment baseline"}; epoch=${snapshot.admission.epoch}`]),
+        ...(snapshot.deployment === undefined ? [] : [`Deployment capture: global=${snapshot.deployment.globalRevision}; native=${snapshot.deployment.nativeRevision}; restart-required=${snapshot.deployment.restartRequired.join(",") || "none"}`]),
+        ...(snapshot.deployment?.sourceCaptures?.startup === undefined ? [] : [`Startup-pinned sources: global=${snapshot.deployment.sourceCaptures.startup.globalRevision}; native=${snapshot.deployment.sourceCaptures.startup.nativeRevision}`]),
+        ...(snapshot.profileStore === undefined ? [] : [`Named store: ${snapshot.profileStore.origin}; ${snapshot.profileStore.readOnly ? "read-only" : "writable"}${snapshot.profileStore.writeRestriction === undefined ? "" : `; ${snapshot.profileStore.writeRestriction}`}`]),
         `Workflow policy: ${snapshot.effectiveSettings.workflow.policy}`,
         `Route: ${provider}/${model} [${snapshot.route.family}]`,
         `Role policy: ${displayRole(snapshot.rolePolicy.role)}; strategy=${snapshot.rolePolicy.strategy}; primary=${snapshot.rolePolicy.primary === undefined ? "inherit" : `${snapshot.rolePolicy.primary.provider}/${snapshot.rolePolicy.primary.model}`}; fallbacks=${snapshot.rolePolicy.fallbackSource}; retries=${snapshot.rolePolicy.rateLimit.maxRetries}; threshold=${snapshot.rolePolicy.rateLimit.switchAfterRateLimits}; switches=${snapshot.rolePolicy.rateLimit.maxSwitches}`,
@@ -196,7 +208,7 @@ function copySettings(settings) {
                 ...(policy.rateLimit === undefined ? {} : { rateLimit: { ...policy.rateLimit } })
             }])),
         runtimePolicy: { strategy: settings.runtimePolicy.strategy, rateLimit: { ...settings.runtimePolicy.rateLimit } },
-        presets: { ...settings.presets },
+        presets: { ...settings.presets, ...(settings.presets.root === undefined ? {} : { root: "<configured>" }) },
         workflow: { ...settings.workflow },
         guards: {
             ...settings.guards,
@@ -211,9 +223,14 @@ function copySettings(settings) {
             idleContinuation: { ...settings.runtimeRecovery.idleContinuation }
         },
         lsp: {
-            ...settings.lsp,
-            args: [...settings.lsp.args],
-            env: { ...settings.lsp.env }
+            enabled: settings.lsp.enabled,
+            serverName: settings.lsp.serverName,
+            command: settings.lsp.command === "" ? "" : "<configured>",
+            args: settings.lsp.args.map(() => "<configured>"),
+            cwd: settings.lsp.cwd === "" ? "" : "<configured>",
+            env: Object.fromEntries(Object.keys(settings.lsp.env).map((key) => [key, "<redacted>"])),
+            toolCallTimeoutMs: settings.lsp.toolCallTimeoutMs,
+            failOnStartupError: settings.lsp.failOnStartupError
         }
     };
 }
