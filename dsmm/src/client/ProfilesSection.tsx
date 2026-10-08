@@ -30,6 +30,8 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy === "apply" || state.sessionBusy === "reset";
   const snapshot = state.snapshot;
   const editor = state.editor;
+  const readOnly = snapshot?.readOnly === true;
+  const editorDisabled = disabled || readOnly;
   const reconcilable = canReconcileSelection(snapshot);
   const selectionConflict = reconcilable && snapshot?.selectionError?.code === "conflict";
   const invalid = state.issue?.kind === "domain" && state.issue.code === "validation";
@@ -53,13 +55,15 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   return <section className="dsmm-profiles" aria-labelledby={`${prefix}-title`} aria-busy={state.busy !== null}>
     <h2 id={`${prefix}-title`}>{t("title")}</h2>
     <p>{t("description")}</p>
+    {snapshot?.origin !== undefined && <p className="dsmm-hint">{t(snapshot.origin === "legacy" ? "legacyOrigin" : snapshot.origin === "central" ? "centralOrigin" : "explicitOrigin")}</p>}
+    {readOnly && <p role="status" className="dsmm-hint">{t("readOnlyOrigin")}</p>}
     <h3 id={`${prefix}-global`}>{t("globalScope")}</h3>
     <p className="dsmm-hint">{t("newSessions")}</p>
     <p data-dsmm-selection>{selection}</p>
     <div className="dsmm-actions">
-      <Button type="button" variant="outline" disabled={disabled || snapshot === null} onClick={() => { void props.create(); }}>{t("new")}</Button>
+      <Button type="button" variant="outline" disabled={editorDisabled || snapshot === null} onClick={() => { void props.create(); }}>{t("new")}</Button>
       <Button type="button" variant="outline" disabled={disabled} onClick={() => { void props.refresh(); }}>{t(state.busy === "refresh" ? "refreshing" : "refresh")}</Button>
-      <Button type="button" variant="outline" disabled={disabled || !reconcilable || (snapshot?.selectedId === null && !selectionConflict)} onClick={() => { void props.reset(); }}>{t(state.busy === "reset" ? "resetting" : "reset")}</Button>
+      <Button type="button" variant="outline" disabled={editorDisabled || !reconcilable || (snapshot?.selectedId === null && !selectionConflict)} onClick={() => { void props.reset(); }}>{t(state.busy === "reset" ? "resetting" : "reset")}</Button>
     </div>
     {snapshot !== null && <div className="dsmm-field">
       <label htmlFor={`${prefix}-select`}>{t("editorSelect")}</label>
@@ -85,23 +89,23 @@ export function ProfilesSection(props: ProfilesSectionProps) {
         <Input ref={inputRef} id={`${prefix}-id`} className="dsmm-input" value={editor.id} disabled={disabled || editor.revision !== null} aria-invalid={idInvalid || undefined} aria-describedby={`${prefix}-id-hint${idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editId(event.currentTarget.value)} />
         <p id={`${prefix}-id-hint`} className="dsmm-hint">{t("idHint")}</p>
       </div>
-      <StructuredEditor key={state.editorEpoch} state={state} actions={props} disabled={disabled} t={t} />
+      <StructuredEditor key={state.editorEpoch} state={state} actions={props} disabled={editorDisabled} t={t} />
       <details className="dsmm-advanced" open><summary>{t("advanced")}</summary><div className="dsmm-field">
         <label htmlFor={`${prefix}-content`}>{t("configuration")}</label>
-        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} disabled={disabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
+        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} readOnly={readOnly} disabled={disabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
         <p id={`${prefix}-content-hint`} className="dsmm-hint">{t("configurationHint")}</p>
         <p id={`${prefix}-structural-hint`} className="dsmm-hint">{t("structuralHint")}</p>
       </div></details>
       <p data-dsmm-editor-state>{t(state.dirty ? "dirty" : applied ? "savedApplied" : "savedNotApplied")}</p>
       <p id={`${prefix}-global-action`} className="dsmm-hint">{t("globalActionHint")}</p>
       <div className="dsmm-actions">
-        <Button type="button" variant="primary" disabled={disabled || !state.dirty || snapshot === null || state.invalidFields.length > 0} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
-        <Button type="button" variant="outline" aria-describedby={`${prefix}-global-action`} disabled={disabled || state.dirty || editor.revision === null || !reconcilable || (applied && !selectionConflict)} onClick={() => { void props.apply(); }}>{t(state.busy === "apply" ? "applying" : "apply")}</Button>
+        <Button type="button" variant="primary" disabled={editorDisabled || !state.dirty || snapshot === null || state.invalidFields.length > 0} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
+        <Button type="button" variant="outline" aria-describedby={`${prefix}-global-action`} disabled={editorDisabled || state.dirty || editor.revision === null || !reconcilable || (applied && !selectionConflict)} onClick={() => { void props.apply(); }}>{t(state.busy === "apply" ? "applying" : "apply")}</Button>
         {editor.revision !== null && <Button type="button" variant="outline" disabled={disabled} onClick={() => { void props.reload(); }}>{t("reload")}</Button>}
       </div>
     </div>}
-    {state.issue !== null && <div className="dsmm-issue" id={`${prefix}-issue`} role="alert"><p>{t(issueKey(state.issue))}</p>{state.issue.kind === "domain" && state.issue.message !== undefined && <p>{t("details")}: {state.issue.message}</p>}</div>}
-    {snapshot?.selectionError !== undefined && <div className="dsmm-issue"><p>{t("details")}: {snapshot.selectionError.message}</p><p>{t(selectionConflict ? "selectionConflict" : "retry")}</p></div>}
+    {state.issue !== null && <div className="dsmm-issue" id={`${prefix}-issue`} role="alert"><p>{t(issueKey(state.issue))}</p></div>}
+    {snapshot?.selectionError !== undefined && <div className="dsmm-issue"><p>{t(selectionConflict ? "selectionConflict" : "retry")}</p></div>}
     <p className="dsmm-status" role="status" aria-live="polite" aria-atomic="true">{state.busy === "refresh" && snapshot === null ? t("loading") : state.busy === "read" ? t("reading") : notice}</p>
   </section>;
 }

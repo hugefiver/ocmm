@@ -1,6 +1,6 @@
 # DSMM：DSH 0.2.0-rc.2 原生 API 与完整 OCMM 行为 parity 实施计划
 
-日期：2026-10-07；D 增量修订：2026-10-08。状态：A `d8fbae7`、B `9a6768c`、C0 `9a87f07`、C `f97d0d4` 已提交。C 采用相关输入不变的组合验收，不称单次广泛组全绿；冷 LSP 在同字节 owned fixture 上通过，默认原入口环境限制未修复。D0 四项实现缺陷已由同 reviewer 有限复核闭合；最后相关组 142/142 与已核实未受影响广泛/独立检查组成必要验收，父已接受其适用范围，随本阶段实现提交，不称 post-fix 单次全绿。D/E 尚未实施。Desktop / Deepwork 模块增量已由新 plan-critic stage 复核，无新增计划 blocker。
+日期：2026-10-07；D 增量修订：2026-10-08。状态：A `d8fbae7`、B `9a6768c`、C0 `9a87f07`、C `f97d0d4`、D0 `0e16d41` 已提交。C/D0 采用相关输入与实际 consumer 分支的组合验收，不称修后单次广泛组全绿；冷 LSP 在同字节 owned fixture 上通过，默认原入口环境限制未修复。D 已实现原生 Plugins 页面及 rc.2 Web 实际验证，三项审查缺陷修正后同 reviewer 已闭合；当前 126 项受影响回归、编译/资源检查及 run24 活动会话证据通过，父接受按阶段提交，E 尚未实施。官方 Electron 实际运行及 Lighthouse/React 审计仍未验证，不将共享 Web 的证明包装为双载体全通过。
 
 ## 1. 已授权结果与边界
 
@@ -525,7 +525,7 @@ pnpm run build
 - 完整广泛 Windows 组最终 685 tests、683 pass/2 fail、0 skip/cancel，Node exit 1、signal null；测试期间 inputs 无变化。两项失败均为旧 profile fixture 直接创建 generic subagent，被实际 role policy 正确拒绝。原文件取得 17 tests、15 pass/2 fail、exit 1 后，仅三处 setup 改为 exact-parent 的真实 `dsmm-role-reviewer` provider，并等待 completed、finally 释放 native handles；所有旧/新 child admission、epoch、profile switch、model/effort picker、metadata、锁/CAS/ownership、resume 断言保持。当前原文件 17/17 与相关 native 四文件 57/57、测试类型检查均 exit 0；generic spawn negative、deny-write body 0/sentinel unchanged 和合法 read/result 仍通过。
 - 父核验该 fixture-only diff 与原始日志，按相关输入不变复用广泛组其余通过结果、当前 build/source/generated/frontend 与 repair/cold LSP 分组证据；不将历史 Node exit 1 改判，不重复无受影响理由的整套测试。这里是覆盖全部适用 case 的组合验收，不是单环境或单次 monolithic green。repair 的 3 个既有 Windows-only skip 与原 LSP 入口环境限制继续披露；artifact readiness 仍只证明分发契约，不是发布或功能通过。
 
-### D0：Core / Deepwork 模块边界实施与修正中，尚未提交
+### D0：Core / Deepwork 模块边界，已提交 `0e16d41`（以下保留原诊断时序）
 
 - 初始实现提供 global-only `modules.deepwork.enabled`、静态模块 descriptor、startup/admitted/next-root 捕获与安全状态投影，Core global Remote 安装与 DW 分支分开。父核验相关源码和 native fixture；构建、artifact ready 或组合专项计数不代表模块边界已通过。
 - 同一阶段独立审查实际复现三项 Important：module-off 在 `guards.scope:always` 的 Git deny/ask 之前返回，模拟 shell 工具体可执行；cold-off 未准入普通 native child identity，导致其原生 read 被 Core 拒绝；历史 mode-on 在 module gate 下被误判 effective-off，用户显式 mode-off 没有持久化。父读当前源码确认，交回唯一原实施任务做最小修正，保留已捕获只读/filter、native 更强权限与 idle/CAS，不能关闭整个 safety guard 或新造 role 身份换绿。
@@ -541,3 +541,15 @@ pnpm run build
 - 最终只读适用比较确认：旧已知 manifest 中的产品差异仅 role-policy、必要 native 回归、profiles 文档及四个生成文件，55 个公开 peer/CLI/compiler anchors 未变；父计划另列。旧广泛窗口实际 690 pass、0 fail/skip、Node 0 保留为修正前执行记录，当前 142 项更新 affected admission/native/capture 权限证明，其余未变 seam 按输入与实际分支复用，计数不相加或冒称最新全量命令。
 - repair 与 cold LSP closure 均间接包含已变化的 role-policy 字节，因此不宣称全依赖同 hash。repair 实际只使用静态 role ID 与 Session/persistence/lease，不实例化 live role policy；旧 Linux 7 pass/3 既有 Windows-only skip 可继续证明该范围。cold LSP 的普通 root/首次 reviewer、真实 transport/operand/cold 查询/取消退出均没有 retained-child reinstall 序列；fresh child wrapper/权限读取由当前 native 组覆盖，旧 2/2 续用于未变 seam，不证明重装后 MCP 新组合调用。父未要求虚构此组合契约或为覆盖 quota 添加用例。exact-owner/原 epoch mismatch 防护经源码与 reviewer 检查，没有单独动态负例，不以 same-id fake Agent 负例冒充；已通过实际核心缺陷的原序列 RED→GREEN，必要证明足以提交 D0。
 - 父接受当前无写者、精确 diff、生成一致性与上述检查，四项 Important 均闭合，无剩余阶段阻塞；不新增全量重跑、软件安装、权限例外或 Root 修改。原 workspace LSP 入口 EPERM 限制仍未修复，独立检查不是发布、实际官方 Desktop 或新 Plugins 页面保存验收。D0 实现与本记录同阶段提交，下一步进入 D。
+
+### D：原生 Plugins 页面与安全状态投影，验收闭合，随实现提交
+
+- 已交付 `plugins.item` 的 DSMM 卡片/独立页及实际 bundle/row Config contribution，Global 固定中央后端与实际 native profile form 分层保存；named JSONC/profile/session 管理保持独立。父核读真实 rc.2 Web 结果、原生 entry/namespace、分写 bytes、A override/B inherit、default pin/unset、CAS 保稿、cold pending/独立 restart 和窄屏/桌面截图。证据不是实际 Electron/Desktop 运行；末尾总 disposal 1 包含显式 restart/cleanup，不能把保存区段零 disposal 扩成整次运行零 disposal。
+- 原完整执行记录是 711 tests、698 pass/13 fail，不称全绿；七处旧文案断言已修正，余六项默认入口 LSP/Windows repair quiescence 失败按既有外部 seam 限定保留。114/114、最后 validation 50/50 与七处文案通过目前有 worker/tool-known 和 journal 记录，owned evidence 内缺对应原 TAP/完整 roster/数值 exit；不虚构逐文件执行认证或为补 receipt 重跑全套。当前独立内存 emit 与 browser bundle 一致性核对已通过。最后 validation-only 输入边界和仍适用浏览器 proof 分开，新增 nonempty/fallback32 不归入较早 run16 实测。
+- 新 D 独立 reviewer 确认 P1：只读 `deploymentAdmissionView()` 直接返回原 `admission.settings`，session RPC 的 `configuration` 和 next-root DTO 可传出虚构 LSP env sentinel、私有 cwd/preset 路径；React `safeValue()` 遮显示不能修复 transport 泄漏。必须在后端做有限安全状态投影，与受 C0 authority 保护的编辑器稀疏输入分离，不修改真实有效 settings、存储或调用权限。
+- 两项 P2：成功 session profile 切换回包遗漏已提交 admission 的 `configuration`，client 替换 session 后误报没有活动会话；字段检查器仅遍历 deployment desired sources，遗漏 named/session-only primary 路径。修正应直接复用已提交内存 admission 的安全投影，保留已提交事务成功语义，不再磁盘读取；区分 absent session 与已知 session 的暂缺投影，用各安全层字段集合并集准确展示缺失、来源及 capture。
+- 父核读当前源码确认上述三项，两个只读任务已结束、无并行产品写者或阶段测试冻结；恢复原 D frontend 任务作最小修正和受影响证据更新，再由同 reviewer 有限复核。原 C0 authority、native permissions/CAS、busy/child capture、Root/SDK 与用户资产保护不变，D 不提前提交，不引入新存储、状态机、UI-only secret regex、全量测试配额或 Desktop 安装。
+- 三项缺陷已修复并由同 reviewer 当前增量及直接依赖复核闭合：后端固定标记遮蔽私有路径/参数、匿名 env 键及聚合 mixed 来源，严格 DTO codec 拒绝泄漏；真实 getSettings、admission、存储及受授权 raw sparse 编辑输入不变。session Apply/Baseline 即时从 committed 内存 admission 返回安全 configuration，不追加提交后 IO；检查器对安全 values/sources/captures 稳定并集，准确区分 Absent、Unknown、已知会话暂缺投影与无会话。
+- 父实际读取 `d-review-fixes-20261009/green-affected-final.log`，当前单次相关组 126/126、0 fail/skip、实际 close exit 0；source compile、client build、test TS、离线 158/47/118 与 artifact 459 files/surfaces、0 forbidden/errors 均有当前配对 exit 0，最终 bundle 223.8kb。standalone RED/GREEN 不重复相加，原 711 及六项外部失败记录不改判。
+- 当前 run24 的真实 native Web 操作证明 Apply 与 Baseline 两个 HTTP 即时安全回包、named-only `overlay-only` 路径/来源/capture可见、epoch与overlay切换准确；父查看 375px 图片确认无横向溢出，reviewer核读三档图片和 ARIA。`result.json` 为 success true/errors 空、模型请求 0；未保存单独 numeric exit，不猜退出码。两 Host、15 个 owned Edge descendants、端口及空 profile 清理已核验。原 run16 的 entry/CAS/分写/布局与 light/dark 仅续用于未变 seam；保存零 disposal 和忙模型保护分别来自对应保存阶段及 native fixture，不称全程零 disposal。
+- 当前无产品写者，父核对完整 diff、生成产物及白名单后接受阶段提交。官方 Desktop 固定 SHA `5badb15009ae1756c3afe0ae0cef1faafc290ccc` 仅源码兼容，未安装或运行 Electron；Lighthouse/React audit 工具未安装/未运行。默认 LSP workspace executable 的 EPERM 和 Windows repair quiescence 限制仍保留；E 继续处理冷源码材料化、发行文档与代码审计收尾，不触 immutable 发布身份、用户配置或 Root control 源码。

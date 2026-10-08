@@ -14,13 +14,16 @@ import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { TYPERT_REMOTE } from "../lib/profile-remote.js";
-import { registerProfilesRpc } from "../lib/profile-rpc.js";
+import { DsmmConfigHost, registerProfilesRpc } from "../lib/profile-rpc.js";
 import { ProfileStore } from "../lib/profile-store.js";
 import { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DsmmProfileRuntimeOptions } from "../lib/profile-runtime.js";
 import { resolveConfig } from "../lib/settings.js";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
-import type { SessionProfileSelectRequest, SessionProfileSnapshot } from "../lib/profile-types.js";
+import type { DeploymentEditorSnapshot, SessionProfileSelectRequest, SessionProfileSnapshot } from "../lib/profile-types.js";
+import { ProfilesController } from "../lib/client/controller.js";
+import type { DsmmProfilesRemote } from "../lib/profile-remote.js";
+import { setImmediate } from "node:timers/promises";
 import { DsmmDeploymentConfig } from "../lib/deployment-config.js";
 import type { GlobalConfigSnapshot } from "../lib/deployment-config.js";
 
@@ -38,7 +41,7 @@ class MemoryCredentials extends CredentialProvider {
   }
 }
 
-async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOptions, globalConfig = false) {
+async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOptions, globalConfig = false, baseline = resolveConfig()) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-scoped-rpc-"));
   const ctx = new Context();
   try {
@@ -49,7 +52,7 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
     const connectionFiber = nativeConnection ? ctx.plugin(NativeConnection) : undefined;
     await connectionFiber?.await();
     const store = new ProfileStore(join(root, "dsmm-profiles"));
-    const runtime = new DsmmProfileRuntime(ctx as unknown as DshContext, resolveConfig(), store, options);
+    const runtime = new DsmmProfileRuntime(ctx as unknown as DshContext, baseline, store, options);
     await runtime.initialize();
     const carrier = { host: "127.0.0.1" }, settingsAuthority = { writable: true };
     let deployment: DsmmDeploymentConfig | undefined;
@@ -58,7 +61,10 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
       ctx.provide("webServer", carrier); ctx.provide("settings", settingsAuthority);
       deployment = new DsmmDeploymentConfig(ctx as unknown as DshContext, {});
     }
-    const rpc = ctx.plugin({ name: "session-profile-rpc", inject: ["typert"], apply(ready: Context) { registerProfilesRpc(ready, runtime, deployment); } });
+    const rpc = ctx.plugin({ name: "session-profile-rpc", inject: ["typert"], apply(ready: Context) {
+      registerProfilesRpc(ready, runtime);
+      if (deployment !== undefined) new DsmmConfigHost(ready, deployment, baseline, () => runtime, options?.startup?.sources);
+    } });
     await rpc.await();
     const gateway = ctx.typertGateway;
     const invoke = <T>(method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> => gateway.invoke({ namespace: "dsmmProfiles", method, args, ...(signal === undefined ? {} : { signal }) }) as Promise<T>;
@@ -94,6 +100,51 @@ function selectRequest(snapshot: SessionProfileSnapshot, id: string | null, revi
 function modeRequest(snapshot: SessionProfileSnapshot, active: boolean) {
   return { sessionId: snapshot.sessionId, active, expectedModeRevision: snapshot.deepwork!.revision, expectedAdmissionEpoch: snapshot.admissionEpoch };
 }
+
+test("native Gateway read-only admission DTOs redact private configuration without changing effective settings", async () => {
+  const baseline = resolveConfig({ lsp: { command: "REVIEW_COMMAND_SENTINEL", args: ["REVIEW_ARG_SENTINEL"], cwd: "C:/private-only-fixture", env: { TOKEN: "REVIEW_SENTINEL", REVIEW_KEY_SENTINEL: "private" } },
+    presets: { root: "C:/private-preset-fixture" }, runtimeRecovery: { idleContinuation: { prompt: "REVIEW_PROMPT_SENTINEL" } } });
+  const startup = { settings: baseline, global: {}, profile: {}, entryId: "include:dsmm", hostProfileKey: "owned", globalRevision: "absent", nativeRevision: "native",
+    sources: { "lsp.env.REVIEW_KEY_SENTINEL": "profile" as const, "lsp.env.TOKEN": "global" as const } };
+  const f = await fixture(true, { startup }, true, baseline);
+  try {
+    const agent = await f.createRoot("safe-read-root");
+    const session = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: agent.id });
+    const editor = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }) as DeploymentEditorSnapshot;
+    assert.equal(editor.startupSources?.["lsp.env"], "mixed");
+    assert.doesNotMatch(JSON.stringify({ desired: editor.desired, startup: editor.startup, sources: editor.sources, startupSources: editor.startupSources }), /REVIEW_\w*SENTINEL|private-only-fixture|private-preset-fixture/u);
+    for (const view of [session.configuration, editor.nextRoot]) {
+      assert.ok(view);
+      assert.doesNotMatch(JSON.stringify(view), /REVIEW_\w*SENTINEL|private-only-fixture|private-preset-fixture/u);
+      assert.equal((view.settings.lsp as typeof baseline.lsp).enabled, baseline.lsp.enabled);
+      assert.equal((view.settings.lsp as typeof baseline.lsp).command, "<configured>");
+      assert.deepEqual((view.settings.lsp as typeof baseline.lsp).args, ["<configured>"]);
+      assert.equal((view.settings.presets as typeof baseline.presets).root, "<configured>");
+      assert.equal(view.sources["lsp.env"], "mixed"); assert.equal(view.captures["lsp.env"], "startup");
+    }
+    assert.deepEqual(f.runtime.getSettings(agent), baseline, "projection never edits actual effective values");
+    const resultCodec = TYPERT_REMOTE.descriptors.find(row => row.method === "describeSession")!.result;
+    assert.equal(resultCodec.mode, "strict"); if (resultCodec.mode !== "strict") throw new Error("strict session result required");
+    assert.throws(() => resultCodec.create().parse({ ...session, configuration: { ...session.configuration, settings: baseline } }));
+    assert.throws(() => resultCodec.create().parse({ ...session, configuration: { ...session.configuration, sources: { "lsp.env.REVIEW_KEY_SENTINEL": "profile" } } }));
+    const editorCodec = TYPERT_REMOTE.descriptors.find(row => row.method === "describeSettings")!.result;
+    assert.equal(editorCodec.mode, "strict"); if (editorCodec.mode !== "strict") throw new Error("strict editor result required");
+    assert.throws(() => editorCodec.create().parse({ ...editor, startupSources: { "lsp.env.REVIEW_KEY_SENTINEL": "profile" } }));
+    await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: editor.globalRevision,
+      edits: [{ op: "set", path: ["lsp", "env"], value: { TOKEN: "EDITOR_SENTINEL" } }] } } });
+    const edited = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }) as DeploymentEditorSnapshot;
+    assert.deepEqual((edited.global.lsp as Record<string, unknown>).env, { TOKEN: "EDITOR_SENTINEL" }, "authorized raw sparse editor input remains editable");
+    assert.doesNotMatch(JSON.stringify({ desired: edited.desired, startup: edited.startup, nextRoot: edited.nextRoot, sources: edited.sources, startupSources: edited.startupSources }), /EDITOR_SENTINEL|REVIEW_\w*SENTINEL|private-only-fixture|private-preset-fixture/u);
+    const operator = f.ctx.connection.operator, impostor = { id: operator.id, ctx: new Context(), async dispose() {} };
+    for (const [namespace, method, args] of [["dsmmProfiles", "describeSession", { sessionId: agent.id }], ["dsmmConfig", "describeSettings", {}]] as const) {
+      await assert.rejects(f.gateway.invoke({ namespace, method, args, peer: impostor }), refused("not-owned"));
+    }
+    f.carrier.host = "0.0.0.0";
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }), refused("not-owned"));
+    f.carrier.host = "127.0.0.1"; f.settingsAuthority.writable = false;
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }), refused("not-owned"));
+  } finally { await f.dispose(); }
+});
 
 test("fixed global backend through native Gateway requires operator plus trusted local/writable carrier and rejects arbitrary roots", async () => {
   const f = await fixture(true, undefined, true);
@@ -249,6 +300,8 @@ test("native operator scoped selection preserves another root and the global poi
     assert.equal(selected.scope, "session-override");
     assert.equal(selected.selection.selectedId, "focused");
     assert.notEqual(selected.admissionEpoch, beforeA.admissionEpoch);
+    assert.deepEqual(selected.configuration, (await f.runtime.getSession(a)).configuration, "successful Gateway switch immediately returns its exact committed admission");
+    assert.equal((selected.configuration!.settings.workflow as { reviewCap: number }).reviewCap, 4);
     assert.equal(f.runtime.getSettings(a).workflow.reviewCap, 4);
     assert.equal(f.runtime.getSettings(b).workflow.reviewCap, resolveConfig().workflow.reviewCap);
     assert.deepEqual(await f.invoke("describeSession", { sessionId: b.id }), beforeB);
@@ -260,7 +313,40 @@ test("native operator scoped selection preserves another root and the global poi
     assert.equal(reset.scope, "deployment-baseline");
     assert.equal(reset.selection.selectedId, null);
     assert.notEqual(reset.admissionEpoch, selected.admissionEpoch);
+    assert.deepEqual(reset.configuration, (await f.runtime.getSession(a)).configuration);
+    assert.equal(reset.configuration!.named, null);
   } finally { await f.dispose(); }
+});
+
+test("successful Gateway session apply and baseline return immediately reach the real client store with named-only sources", async () => {
+  const f = await fixture(true, { validateCandidate() {} });
+  const remote: DsmmProfilesRemote = {
+    describe: async () => ({ ok: true, value: await f.invoke("describe", {}) }),
+    read: async id => ({ ok: true, value: await f.invoke("read", { id }) }),
+    save: async request => ({ ok: true, value: await f.invoke("save", { request }) }),
+    select: async request => ({ ok: true, value: await f.invoke("select", { request }) }),
+    describeSession: async sessionId => ({ ok: true, value: await f.invoke("describeSession", { sessionId }) }),
+    selectSession: async (sessionId, request) => ({ ok: true, value: await f.invoke("selectSession", { sessionId, request }) }),
+  };
+  const client = new ProfilesController(remote);
+  try {
+    const root = await f.createRoot("client-admission-root");
+    const saved = await f.store.save({ id: "overlay", expectedRevision: null, content: JSON.stringify({ version: 1, id: "overlay", settings: { roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "overlay-only" } } } } }) });
+    await client.refresh(); client.setSession(root.id!);
+    for (let round = 0; round < 100 && client.store.getSnapshot().sessionBusy !== null; round++) await setImmediate();
+    const before = client.store.getSnapshot().session!;
+    client.actions.chooseSessionProfile(saved.id); await client.actions.applySession();
+    const accepted = client.store.getSnapshot().session!;
+    assert.notEqual(accepted.admissionEpoch, before.admissionEpoch);
+    assert.deepEqual(accepted.configuration, (await f.runtime.getSession(root)).configuration);
+    assert.equal(accepted.configuration!.sources["roleRouting.dsmm-reviewer.primary.model"], "named-session");
+    assert.equal(accepted.configuration!.named?.revision, saved.revision);
+    await client.actions.resetSession();
+    const baseline = client.store.getSnapshot().session!;
+    assert.equal(baseline.scope, "deployment-baseline"); assert.notEqual(baseline.admissionEpoch, accepted.admissionEpoch);
+    assert.equal(baseline.configuration!.named, null);
+    assert.deepEqual(baseline.configuration!.settings.roleRouting, {});
+  } finally { client.dispose(); await f.dispose(); }
 });
 
 test("bad peers and malformed payloads refuse before native cold-session authority or backend mutation", async () => {

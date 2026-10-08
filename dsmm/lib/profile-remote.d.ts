@@ -3,6 +3,13 @@ import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry";
 import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 import type { DsmmModuleState } from "./modules.js";
+import type { DeploymentEditorSnapshot } from "./profile-types.js";
+export interface DsmmConfigRemote {
+    describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
+    save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>>;
+    describeModules(): Promise<RemoteResult<DsmmModuleState[]>>;
+    describeSettings(): Promise<RemoteResult<DeploymentEditorSnapshot>>;
+}
 export interface DsmmProfilesRemote {
     describe(): Promise<RemoteResult<ProfileSnapshot>>;
     read(id: string): Promise<RemoteResult<ProfileReadResult>>;
@@ -17,6 +24,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
         "dsmmConfig/describe": () => Promise<RemoteResult<GlobalConfigSnapshot>>;
         "dsmmConfig/save": (request: GlobalConfigSaveRequest) => Promise<RemoteResult<GlobalConfigSnapshot>>;
         "dsmmConfig/describeModules": () => Promise<RemoteResult<DsmmModuleState[]>>;
+        "dsmmConfig/describeSettings": DsmmConfigRemote["describeSettings"];
         "dsmmProfiles/describe": DsmmProfilesRemote["describe"];
         "dsmmProfiles/read": DsmmProfilesRemote["read"];
         "dsmmProfiles/save": DsmmProfilesRemote["save"];
@@ -27,11 +35,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     }
     interface TypertRemoteNamespaceMap {
         dsmmProfiles: DsmmProfilesRemote;
-        dsmmConfig: {
-            describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
-            save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>>;
-            describeModules(): Promise<RemoteResult<DsmmModuleState[]>>;
-        };
+        dsmmConfig: DsmmConfigRemote;
     }
     interface RemoteErrorDetailsMap {
         "dsmm-profiles/refused": ProfileErrorInfo;

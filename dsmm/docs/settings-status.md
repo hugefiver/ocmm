@@ -10,7 +10,7 @@ Commands belong to the native command adapter. Headless task text is not a slash
 
 ## C0 layered deployment configuration
 
-The working source remains version **0.1.9**. C0 supplies centralized storage/sparse inheritance/immutable capture; C consumes those boundaries for native role policy, continuation/background and startup MCP. D0 adds the global Deepwork module ceiling and safe control-plane projections. D's Config pages and publication/private migration/browser acceptance are separate and are not implied by these backend/native proofs.
+The working source remains version **0.1.9**. C0 supplies centralized storage/sparse inheritance/immutable capture; C consumes those boundaries for native role policy, continuation/background and startup MCP. D0 adds the global Deepwork module ceiling. D adds the actual native Plugins pages below, with isolated rc.2 Web browser evidence. Publication, private migration, final artifact gates and actual Electron acceptance remain separate.
 
 Effective composition is **built-in defaults → sparse global deployment base → explicit native DSH entry/profile overrides → applied immutable named-profile/session overlay**. The global base is `<resolvedDshHome>/plugins/dsmm/config.json`, a UTF-8 JSON object containing only explicit DSMM fields. A missing file means an empty layer. The native entry remains a separate sparse layer in the active profile's Cordis configuration, not a copy of merged defaults. Named Profiles are runtime overlays, not another deployment layer editor.
 
@@ -44,7 +44,7 @@ The following is an explicit native profile override, not the global file format
 
 Plain objects merge recursively and arrays replace whole arrays. Missing keys inherit; an empty object doesn't erase inherited children. Valid explicit `false`, `0`, `""` and `[]` aren't omission. Unset removes a key only from the edited layer: profile unset restores global inheritance, global unset restores defaults. `null` is accepted only where the field schema permits it. Unknown/prototype keys, non-JSON values, cycles and raw volatile refs are rejected; the complete merged desired settings are validated before startup or admission.
 
-Native Settings **Deepwork Profiles** / **Deepwork 配置档** remains separate from plugin Config. New named drafts and revisions share `<resolvedDshHome>/plugins/dsmm/profiles/`; selection/session state is scoped by canonical native profile identity and actual DSMM entry ID. An existing current-profile legacy library is strictly read-only, with its original immutable pins retained. See [runtime profiles](profiles.md) for formats and origin rules. These backend contracts don't prove completed Desktop activation or D's Config pages.
+Native Settings **Deepwork Profiles** / **Deepwork 配置档** remains separate from plugin Config. New named drafts and revisions share `<resolvedDshHome>/plugins/dsmm/profiles/`; selection/session state is scoped by canonical native profile identity and actual DSMM entry ID. An existing current-profile legacy library is strictly read-only, with its original immutable pins retained and its origin shown in the named editor. See [runtime profiles](profiles.md) for formats and origin rules. Neither Web evidence nor these backend contracts proves Electron activation.
 
 Save changes only the draft. Global Apply pins an immutable revision for **new unscoped Agents only**; existing even-blank Agents retain their admissions. The separate current-session selector uses the native view's actual session ID and idle maintenance/CAS/epoch fences. It changes only that ordinary root and future children; old children retain their old epoch. Cold resume honors an explicit sidecar or, when absent, the current global default. Global reset and session baseline pinning are distinct and leave drafts intact.
 
@@ -68,11 +68,86 @@ Startup captures the actual DW substrate once. Each new ordinary root admits **l
 
 For later Config consumers, `DSMM_MODULE_DESCRIPTORS` and `DsmmModuleState` (exported from the package root) are plain static first-party data, not dynamic third-party JS/provider/installer APIs. The additive, no-argument `dsmmConfig.describeModules` uses the same local writable operator authority as `describe`/`save` and reads the latest valid global state; it is not opened to unauthorized read-only carriers. It returns descriptor `{id,label,key}`, global/default desired source, `startupMounted`, `admitted` (`null` without an Agent), next-root admission/reason and pending/reason. `hostBundleEnabled` is explicitly `"unknown"`: installed files, loaded DSMM core, desired DW availability, mounted substrate, admitted module and active mode are different facts.
 
-`getSettings.moduleStates(agent)`, the optional session-profile response `modules`, and status `modules` project the receiving Agent's capture. `desired.capture` distinguishes `current-global`, `admission` and `startup`: a synchronous admission/status snapshot does not claim to have reread current disk state. A future UI should combine the authorized current-global projection with the actual session projection, rather than treat a captured next-root estimate as latest desired. The existing native profile form keeps its separate revision/CAS; these projections introduce neither a Root-path RPC nor a cross-layer atomic save. D's web/Desktop controls are not implemented by D0.
+`getSettings.moduleStates(agent)`, the optional session-profile response `modules`, and status `modules` project the receiving Agent's capture. `desired.capture` distinguishes `current-global`, `admission` and `startup`: a synchronous admission/status snapshot does not claim to have reread current disk state. D's UI combines the authorized current-global projection with the actual session projection instead of treating captured state as current desired. Native profile form revision/CAS remains separate; there is neither a Root-path RPC nor a cross-layer atomic save.
+
+### Native Plugins configuration (D)
+
+Open native **Plugins → DSMM**, or the installed **DSMM** bundle's page and its
+actual **Configure DSMM** row. The item registers `plugins.item`; bundle and row
+contributions use `plugins.bundle.config` (`@dsmm/dsmm`) and
+`plugins.row.config` (`@dsmm/dsmm#<actual-row-id>`). The public page props are
+`view: summary | page` plus optional `form`, not an invented standalone editor.
+Bundle pages do not automatically supply a form: DSMM obtains only the server-
+verified actual entry namespace's public ConfigForms seat. Row pages match their
+supplied native form's namespace, revision and exact base/user metadata. If that
+identity cannot be proved, profile controls are unavailable/readonly; they never
+fall back to writing Global. Other instances are not cross-written.
+
+The two editors have independent save/refresh/discard actions:
+
+- **Global DSMM** uses fixed `dsmmConfig.save(expectedRevision, edits)` and the
+  actual-byte global revision. A save touches only `config.json`, retaining
+  untouched sparse fields. It is independently discoverable with no conversation,
+  named-profile client service or mounted DW substrate.
+- **Current DSH profile override** uses the actual native form `mutate` with its
+  descriptor revision, never its schema-expanded `value` as raw presence. Only
+  changed fields and explicit unsets are sent. Existing startup-only
+  `sessionPersistence` is retained unchanged, not made editable or relocated.
+- Roles/skills, calibration, workflow/review, guards, routing/retry/recovery,
+  subagent depth/background, preset materialization and LSP have native structural
+  controls or bounded Advanced JSON for complete applicable field coverage.
+  Advanced accepts strict JSON up to 32768 characters, closed known schema,
+  duplicate/prototype-key rejection and immediate error feedback. Sparse primary
+  members can inherit lower-layer members; the full merged value is validated.
+  New providers/accounts/models are not installed or configured here. The existing
+  native catalog/picker and independent named JSONC editor retain model authority.
+- Missing keys **inherit**; explicit same-default values are **default pins**.
+  Unset removes only this layer, not higher Host pins. Modules' master is only in
+  Global; profile/named/session controls cannot bypass the ceiling. Only the
+  static known `deepwork` descriptor exists, not a registry/marketplace API.
+
+Module summary and the field-source disclosure separate **merged desired**,
+**startup-mounted/captured**, **next-root preview** (using the same admission
+preparation) and **current session admission**. Without an actual session, current
+admission is unknown; host bundle enablement stays unknown when not observable.
+Named/global/profile/default source and capture are distinct from raw CAS values.
+Cold-off desired-on shows pending independent restart, not success at hot mounting.
+Mounted-on desired-off affects new roots, not old parents/future children.
+
+Read-only `describeSession.configuration`, successful current-session selection,
+and `describeSettings` desired/startup/next-root layers use a Host-side defensive
+projection, not raw runtime settings or browser-only masking. LSP command,
+arguments and working directory, preset root and recovery continuation prompt
+use fixed `<configured>` markers; environment names are anonymous `variable-N`
+keys and values are `<redacted>`. Environment source/capture metadata is aggregated
+under `lsp.env` (mixed origins remain `mixed`), so even key names are not disclosed.
+The strict result codecs reject raw private values in those read-only layers.
+Actual `getSettings(agent)`, captured admissions and stored configuration are
+unchanged. Raw sparse Global/profile/native-form editor input remains available
+only through its existing C0 authorized editor boundary; it is not a status DTO.
+
+The inspector sorts the union of safe desired/startup/next-root/admitted values
+and source/capture paths, including fields present only in a named overlay. A
+missing field is **Absent**, not an invented built-in value; unavailable layers
+are **Unknown**. Startup sources come from the captured deployment when available.
+An actual session shows its ID, epoch and scope; a known session without its
+configuration projection is distinct from having no session. Apply and Baseline
+return the already-committed in-memory admission immediately, without a post-commit
+disk read or another validation that could reverse the successful transaction.
+Global refresh does not silently rebind or refresh a session admission. Dirty
+drafts/conflicts visibly remain separate from these captured revisions.
+
+Refresh preserves dirty edits and their original revision. A stale revision is a
+visible conflict; explicit **Discard draft and reload** alone rebases. Invalid
+numeric/JSON input stays visible and disables save. Entry changes, disconnection,
+connection-generation replacement and disposal fence old writes; no retry/rebase
+loop or common Save-all is used. Errors are localized sanitized allowlisted
+messages, never raw paths/arguments/environment/provider tokens; saving/success
+uses accessible busy/polite live feedback and native keyboard/focus behavior.
 
 ### Save authority and concurrency
 
-The fixed `dsmmConfig` Remote backend exposes `describe`, `describeModules` and `save` for exact set/unset edits with an expected global revision. It accepts no file, root or entry arguments and isn't a model-visible tool. All operations require a local writable control operator: the native invocation peer must equal `connection.operator`, the public current `webServer.host` must be exactly `127.0.0.1`, and `settings.writable` must be `true`. Unknown or remote/nonloopback carriers are unavailable; client `isLoopback` isn't authority. Reverse proxies and tunnels aren't automatically proven safe. Save rechecks lifetime/connection authority before commit, so disconnect or disposal cannot authorize a late write. Core owns the existing Typert descriptor contribution once; global configuration service lifetime does not depend on the DW/profile UI service mounting.
+The fixed `dsmmConfig` Remote backend exposes `describe`, `describeModules`, `describeSettings` and `save` for exact set/unset edits with an expected global revision. It accepts no file, root or entry arguments and isn't a model-visible tool. All operations require a local writable control operator: the native invocation peer must equal `connection.operator`, the public current `webServer.host` must be exactly `127.0.0.1`, and `settings.writable` must be `true`. Unknown or remote/nonloopback carriers are unavailable; client `isLoopback` isn't authority. Reverse proxies and tunnels aren't automatically proven safe. Save rechecks lifetime/connection authority before commit, so disconnect or disposal cannot authorize a late write. Core owns the existing Typert descriptor contribution once; global configuration service lifetime does not depend on the DW/profile UI service mounting.
 
 Reads create no directory, lock or config file. Saves use bounded safe file access, the actual bytes' SHA256 revision (or a distinct absent revision), a cooperative writer lock, final revision recheck and same-directory temporary-file rename. Stale or invalid input fails closed instead of overwriting it. Non-cooperating external editors can still race between the final recheck and rename; this isn't a universal external-editor transaction.
 
@@ -128,4 +203,4 @@ Configured role policy/chain and the actual persisted current route are distinct
 
 For ordinary roots, effective status reports `startup-lock`, no applied profile primary/fallback chain, and reasoning action `native-owned`. The original child-role configuration remains available under `effectiveSettings`; it is not falsely presented as an automatic main-model override. `profileModel` in a session-profile response is only the declared model for an explicit user action, never proof that the native model has already changed.
 
-Status describes the receiving Agent's admitted profile/revision/epoch, resolved strategy/retry policy and actual route state separately from desired deployment and future named defaults. Global bytes revision, native entry revision, startup capability and store origin are distinct facts, not one atomic cross-layer acknowledgment. `--dump-config` shows native Loader composition, not the complete global-aware DSMM effective snapshot or proof of runtime-profile application/authenticated UI behavior. C0 supplies backend boundaries; D's field-level Config presentation and browser QA remain pending.
+Status describes the receiving Agent's admitted profile/revision/epoch, resolved strategy/retry policy and actual route state separately from desired deployment and future named defaults. Global bytes revision, native entry revision, startup capability and store origin are distinct facts, not one atomic cross-layer acknowledgment. `--dump-config` shows native Loader composition, not the complete global-aware DSMM effective snapshot or proof of runtime-profile application/authenticated UI behavior. D's field-level native presentation has isolated rc.2 Web evidence; final artifact/publication and actual Electron acceptance remain separate.

@@ -16,6 +16,11 @@ import { NS, en, zh } from "./locales.js";
 import { ProfilesSection } from "./ProfilesSection.js";
 import { PROFILE_STYLES } from "./styles.js";
 import { SessionProfiles } from "./SessionProfiles.js";
+import type {} from "./plugins-contract.js";
+import { DeploymentController } from "./deployment-controller.js";
+import { DeploymentPage } from "./DeploymentPage.js";
+import { DEPLOYMENT_NS, deploymentEn, deploymentZh } from "./deployment-locales.js";
+import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
 export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue, SessionApplyOptions, ProfileModelSelectorRemote } from "./controller.js";
@@ -31,8 +36,46 @@ export const inject = ["slots", "locale", "remote"] as const;
 
 export async function apply(ctx: Context): Promise<void> {
   await ctx.remote.$mount(TYPERT_REMOTE);
+  let deployment: DeploymentController | null = null;
+  let profiles: ProfilesController | null = null;
+  // This core-owned graph must not depend on DW, named profiles or a session.
+  await ctx.inject(["remote.dsmmConfig"], (coreCtx) => {
+    const core = new DeploymentController(coreCtx.remote.dsmmConfig, "global");
+    void coreCtx.inject(["connection"], connectionCtx => {
+      core.bindConnection((connectionCtx.connection as unknown as ConnectionHandle).generation);
+      void core.refresh();
+    });
+    deployment = core;
+    if (profiles !== null) core.setSession(profiles.store.getSnapshot().session);
+    coreCtx.effect(() => () => { deployment = null; core.dispose(); }, "dsmm: core settings editor");
+    coreCtx.effect(() => coreCtx.locale.register(DEPLOYMENT_NS, { en: deploymentEn, zh: deploymentZh }), "dsmm: core locale");
+    coreCtx.effect(() => {
+      const style = document.createElement("style"); style.dataset.dsmmSettings = ""; style.textContent = PROFILE_STYLES;
+      document.head.append(style); return () => style.remove();
+    }, "dsmm: core styles");
+    const t = coreCtx.locale.bind(DEPLOYMENT_NS);
+    const inject = () => ({ core, remote: coreCtx.remote.dsmmConfig });
+    coreCtx.slots.inject("plugins.item", () => coreCtx.slots.register({ name: "plugins.item", id: "dsmm", label: () => t("title"), order: 30, locale: DEPLOYMENT_NS, inject }, DeploymentPage));
+    // Native ConfigForms owns its transport/authority; absent service leaves only core controls.
+    void coreCtx.inject(["configForms"], formCtx => {
+      const injectProfile = () => ({ ...inject(), forms: formCtx.configForms, profilePage: true });
+      formCtx.slots.inject("plugins.bundle.config", () => formCtx.slots.register({ name: "plugins.bundle.config", key: "@dsmm/dsmm", locale: DEPLOYMENT_NS, inject: injectProfile }, DeploymentPage));
+      let namespace: string | null = null, disposeRow: (() => void) | undefined;
+      const registerRow = () => {
+        const next = core.getSnapshot().snapshot?.namespace ?? null;
+        if (next === namespace) return;
+        disposeRow?.(); namespace = next;
+        if (next !== null) disposeRow = formCtx.slots.inject("plugins.row.config", () => formCtx.slots.register({ name: "plugins.row.config", key: `@dsmm/dsmm#${next}`, locale: DEPLOYMENT_NS, inject: () => ({ ...injectProfile(), rowNamespace: next }) }, DeploymentPage));
+      };
+      registerRow(); formCtx.effect(() => core.subscribe(registerRow)); formCtx.effect(() => () => disposeRow?.());
+    });
+    void core.refresh();
+  });
   await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
     const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
+    profiles = controller;
+    profileCtx.effect(() => controller.store.subscribe(() => deployment?.setSession(controller.store.getSnapshot().session)));
+    profileCtx.effect(() => () => { profiles = null; deployment?.setSession(null); });
     profileCtx.effect(() => () => controller.dispose(), "dsmm: profile editor");
     profileCtx.effect(() => profileCtx.locale.register(NS, { en, zh }), "dsmm: profile locale");
     profileCtx.effect(() => {

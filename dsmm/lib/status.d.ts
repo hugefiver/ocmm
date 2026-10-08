@@ -18,8 +18,14 @@ export interface DsmmStatusSnapshot {
         entryId: string;
         hostProfileKey: string;
         restartRequired: readonly string[];
-        sources: NonNullable<DsmmProfileAdmission["sources"]>;
-        sourceCaptures?: DsmmProfileAdmission["sourceCaptures"];
+        sources: Record<string, string>;
+        sourceCaptures?: {
+            fields: Record<string, string>;
+            startup?: {
+                globalRevision: string;
+                nativeRevision: string;
+            };
+        };
     };
     mode: {
         name: string;
@@ -75,4 +81,8 @@ export declare function createDsmmStatusSnapshot(input: {
     modules?: DsmmModuleState[];
 }): DsmmStatusSnapshot;
 export declare function formatDsmmStatus(snapshot: DsmmStatusSnapshot): string;
+/** Read-only diagnostics only; never use this copy as configuration input. */
+export declare function readOnlySettings(settings: DsmmSettings): DsmmSettings;
+/** Environment key names may themselves contain private data. */
+export declare function readOnlySettingSources(fields: Readonly<Record<string, string>>): Record<string, string>;
 //# sourceMappingURL=status.d.ts.map

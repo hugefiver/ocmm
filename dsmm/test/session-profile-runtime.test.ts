@@ -107,6 +107,7 @@ test("native idle switches isolate two roots and global default; old/new childre
     const second = await f.create({ agentPreset: "dsmm-orchestrator" }, undefined, { agentOptions: { provider: "fixture", model: "native-b", reasoningEffort: ReasoningEffortId("low") } });
     const beforeGlobal = await runtime.describe();
     const switchedA = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
+    assert.deepEqual(switchedA.configuration, (await runtime.getSession(structural(first))).configuration);
     const oldAdmission = runtime.admission(structural(first));
     const oldChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the old admission" }], signal: new AbortController().signal });
     children.push(oldChildRun);
@@ -263,6 +264,7 @@ test("native running and foreign maintenance activities refuse immediately; a qu
     assert.notEqual(committed.admissionEpoch, oldEpoch);
     assert.equal(headerRoutes(agent).at(-1)?.model, "native-default", "queued wake observes new profile policy without an implicit model change");
     assert.deepEqual(committed.profileModel, route("wake-new"));
+    assert.deepEqual(committed.configuration, (await current.getSession(structural(agent))).configuration, "queued wake cannot remove a committed safe admission projection");
   } finally { wait.release(); await f.dispose(); }
 });
 

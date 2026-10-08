@@ -373,11 +373,11 @@ function validatePluginMetadata(packageRoot, paths, errors) {
         || !isDeepStrictEqual(Object.keys(value), ["meta"])
         || value.meta === null || Array.isArray(value.meta) || typeof value.meta !== "object"
         || !isDeepStrictEqual(Object.keys(value.meta).sort(compareBytewise), ["description", "title"])
-        || value.meta.title !== "Deepwork" || typeof value.meta.description !== "string" || value.meta.description.trim().length === 0) {
+        || value.meta.title !== "DSMM" || typeof value.meta.description !== "string" || value.meta.description.trim().length === 0) {
         throw new Error("invalid plugin metadata");
       }
     } catch {
-      errors.push(`plugin metadata resource must contain exactly Deepwork title and nonempty description: ${resource}`);
+      errors.push(`plugin metadata resource must contain exactly DSMM title and nonempty description: ${resource}`);
     }
   }
 }
@@ -407,7 +407,7 @@ function validateNativeClient(packageRoot, paths, errors) {
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
       || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), [
-        "@dsmm/dsmm#dsmmConfig/describe", "@dsmm/dsmm#dsmmConfig/save", "@dsmm/dsmm#dsmmConfig/describeModules",
+        "@dsmm/dsmm#dsmmConfig/describe", "@dsmm/dsmm#dsmmConfig/save", "@dsmm/dsmm#dsmmConfig/describeModules", "@dsmm/dsmm#dsmmConfig/describeSettings",
         ...["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"].map((method) => `@dsmm/dsmm#dsmmProfiles/${method}`)
       ])) {
       throw new Error("invalid exports");

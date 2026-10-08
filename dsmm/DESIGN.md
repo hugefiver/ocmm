@@ -1,4 +1,4 @@
-# Deepwork native client design system
+# DSMM native client design system
 
 ## 0. Research Log
 
@@ -6,9 +6,70 @@ This is an extension of the existing DSH Settings interface, not a new applicati
 
 Read-only extraction used the installed DSH package's `dsh-client-ui-theme`, `dsh-client-ui-primitives`, `dsh-client-ui-settings-general`, `dsh-client-ui-settings-models` and `dsh-client-ui-settings-plugins`. Relevant authored sources are `ui-theme/src/styles/{base,design-platform,focus}.css`, `ui-primitives/src/{Button,Input}.module.css`, and the Settings/Models section CSS embedded in their published client bundles. The values below describe the shipped default theme; installed theme overrides remain authoritative. No vendor code, theme or user configuration is changed.
 
-This document records the prospective Deepwork 0.1.9 UI design contract. The interaction matrix and browser checks below are requirements, not claims of final 0.1.9 acceptance. Historical completed proofs remain unchanged; 0.1.7 is npm published and Desktop installed but its failed terminal verification is not a completed GitHub Release. Native browser authentication remains intact; an isolated component/in-process-carrier test does not establish authenticated Desktop/Web end-to-end behavior. The 0.1.9 plugin behavior is unchanged from 0.1.8; only release Action verification controls change to an exact shared 20-minute 404 visibility budget and a 45-minute verify job. The 0.1.8 npm publication is genuine but its original terminal receipt failed with GitHub skipped; Desktop remains on 0.1.7 and CLI/TUI on 0.1.6 until a separately completed successor rollout.
+This document records the working DSMM 0.1.9 native UI design contract. Stage D has real owned keyless rc.2 Web Plugins item/bundle/row proof, including separate layer saves, inheritance, conflict retention, cold-off pending, independent restart and native 375/768/1280 light/dark rendering. It is not final publication, frozen-artifact or actual Electron acceptance. Historical completed proofs remain unchanged; 0.1.7 is npm published and historically Desktop installed but its failed terminal verification is not a completed GitHub Release. Native browser authentication remains intact. The original release-only 0.1.9 proposal preserved 0.1.8 behavior; today's A/B/C0/C/D source changes are separate. Release Action verification controls retain an exact shared 20-minute 404 visibility budget and a 45-minute verify job. The 0.1.8 npm publication is genuine but its original terminal receipt failed with GitHub skipped; the historical Desktop 0.1.7 and CLI/TUI 0.1.6 rollout identities remain unchanged until a separately completed successor.
 
 ## 1. Atmosphere & Identity
+
+### Native Plugins (parity stage D)
+
+DSMM contributes to the official shared `plugins.item`, `plugins.bundle.config`
+and `plugins.row.config` ledgers. The standalone DSMM card opens a sessionless
+core page. Bundle and row pages use the exact public owner `view` and optional
+`form`; a package key, row ID, runtime entry ID and form namespace are separate
+identities. A profile editor is enabled only after the server's captured entry
+and native descriptor revision match the supplied form. Unmatched/absent forms
+are explained as unavailable, never replaced with a guessed namespace.
+
+The page has two independently saved layers: **DSMM Global config** (one trusted
+home's central base, shared by its DSH profiles) and **Current DSH profile
+overrides** (only the selected native entry). Deepwork master is global-only;
+profile controls cannot lift this ceiling. Named **Deepwork Profiles** remains
+an independent JSONC runtime-resource editor with its existing model catalog and
+explicit Use profile model action. No control changes the ordinary native model.
+
+Each layer uses sparse explicit values: unset means defaults globally, inheritance
+in the profile. Explicit same-default pins are visible. Native composition/base
+pins are identified separately; clearing a user override never promises to clear
+an upper host layer. Structured boolean/enum/number/string controls cover ordinary
+features, including roles and skills. Bounded, schema-described advanced groups
+cover nested routes, retry arrays and LSP configuration without arbitrary paths,
+unknown modules or executable schema callbacks. No merged/default-filled object
+is ever saved. A read-only field state inspector separates desired/source,
+startup capture, next-root constraints and an exact current-session admission;
+sessionless is unknown, not active.
+
+Read-only desired/startup/admission projections redact executable configuration,
+private directories and continuation prompt text on the Host, before transport.
+LSP environment names are anonymous counted entries; source/capture metadata is
+aggregated at `lsp.env` (mixed is explicit), never credential-bearing key paths.
+Only the authenticated editor's sparse input/provenance retains editable raw
+values. The inspector takes a stable sorted union of the safe layers and their
+source/capture paths: missing fields are absent, not defaults. A known native
+session keeps its ID/epoch/scope visible even when its projection is unavailable;
+successful named Apply/Baseline returns the already-committed safe admission.
+
+The two save bars are local to their sections. Refresh preserves dirty edits and
+does not silently rebase revision conflicts; discard/reload is a separate explicit
+action. A conflict or disconnected/unavailable scope keeps the draft. Identity
+change/disposal fences retained actions. Save announces only the accepted layer;
+it never restarts, cancels, reconciles, applies a named profile or mounts LSP.
+Restart-required text explains an independent native restart and its session
+cancellation semantics. Host bundle enabled/loaded is unknown unless observed;
+Deepwork desired/startup/admitted are not host installation status.
+
+The existing native typography, colors, spacing, radii, focus, motion and
+borders-only tokens below are authoritative. One column avoids a cramped native
+panel at 375px; wrapping source rows keep long EN/ZH labels readable at 768px;
+the 760px cap preserves the native reading measure at 1280px. No new font/brand,
+shadow, animation, dependencies or React audit packages are introduced.
+
+Stage-D interaction matrix: controls have native default/hover/pressed and visible
+focus states, local busy/disabled explanations, labeled invalid fields, retained
+error drafts and polite save announcements. Disclosures use native keyboard
+behavior; focus stays on save or moves to an invalid advanced group after a
+user-triggered validation refusal. Reduced motion preserves all information.
+Actual native Plugins browser evidence (375/768/1280, light/dark, keyboard,
+refusals and saves) is required; Web does not prove installed official Electron.
 
 A quiet, practical part of DSH Settings: system typography, compact controls, a readable configuration editor, clear selection and explicit save outcomes. Its signature is continuity with the host. The section is displayed as **Deepwork Profiles** / **Deepwork 配置档**, without replacing navigation, opening another application shell or relabeling native agent presets as configuration profiles. Native role display names use `DW …`; technical section, RPC, package and role IDs retain their DSMM identity. The naming/resource contract introduced in 0.1.3 changes no layout, theme, animation, component or dependency contract below.
 
@@ -109,7 +170,9 @@ This matrix is the pre-implementation checklist for the new section, not documen
 | Advanced JSONC disclosure | Native keyboard-operable details/summary; same underlying draft as structured fields | Readable invalid draft retained during errors | Invalid JSONC refuses structured edits; unchanged comments/unrelated fields remain byte-preserved |
 | Current-session profile scope | Distinct named selector and apply/baseline actions; public native current-session adapter only | Sessionless/unavailable/busy state explains refusal; stale view requests never publish to a new session | Accepted CAS/epoch snapshot proves success; global-default apply remains a separate action |
 | Compact Conversation profile menu | One icon-only native Button and portaled Menu, one profile list and one `@use-model` action; native keyboard selection, Escape/outside dismissal and focus return | Keep the trigger available to inspect reasons; disable mutations while committing, not idle, unavailable, sessionless or a Settings draft needs explicit save/discard | Short sanitized errors inside the menu; successes only in a visually hidden live region, without visible success prose |
-| Deepwork mode | Native menu toggle for other presets; explicit same-default intent persists | Sessionless/busy/unavailable mutation disabled; standing DW preset locked enabled with a label | Official minimal default off unless saved explicit `deepwork/mode`; retain mode across profile changes and reopen |
+| Deepwork mode | Native menu toggle for other presets; explicit same-default intent persists | Sessionless/busy/unavailable mutation disabled; standing DW persona active only inside its captured module ceiling | Official minimal default off unless saved explicit `deepwork/mode`; module-off cannot be bypassed; retain mode across profile changes and reopen |
+
+DW presets default on but are not locked; explicit off retains persona, read-only and Git/host permissions. A captured module-off ceiling remains unavailable, not a profile-editable bypass.
 
 Current-session scope text displays the exact live admitted profile/revision separately from the future global default. Session-selection CAS continues to use only the sidecar selection state; an absent sidecar is not relabeled as baseline or as a newly changed global default. Older responses without the optional admitted identity use explicit captured-default wording.
 
@@ -121,7 +184,7 @@ One root-scoped `conversation.header.leading` contribution is used for active, r
 
 The single profile list switches the profile while preserving the chosen native main model, with zero native selection calls. Exactly one `@use-model` **Use profile model** action requests the current admitted immutable profile's configured ordinary-root primary through native `session.selectModel`. It does not reapply a subsequently saved draft revision, increment the profile epoch or write a profile sidecar. There is no local model echo, shadow selector or DOM/native-store patch: the native model-selection projection/picker is authoritative. Missing model configuration, withdrawn selector or native selection failure retains the admitted profile and reports a short sanitized error. This explicit action has the same native semantics as choosing the Models tab, including native default-model persistence in the background; normal switching, profile saving and route-field editing never invoke it.
 
-For other native presets, the **Deepwork** toggle shows saved explicit `deepwork/mode` intent, otherwise official minimal mode defaults off. A same-default choice still persists intent. It remains authoritative across profile changes and reopen rather than inheriting a newly applied profile's `defaultActive`. Standing DW presets are locked enabled and identified as such; do not offer a contradictory off action. Native idle/ownership/session identity and persistence compatibility remain mutation gates.
+For other native presets, the **Deepwork** toggle shows saved explicit `deepwork/mode` intent, otherwise official minimal mode defaults off. A same-default choice still persists intent. It remains authoritative across profile changes and reopen rather than inheriting a newly applied profile's `defaultActive`. Standing DW presets select their persona only within the captured module ceiling; an off admission remains off and cannot be lifted by a mode control. Native idle/ownership/session identity and persistence compatibility remain mutation gates. Desired-off saves never remove already captured read-only or Git protection.
 
 The owned trigger uses only the native compact 28px control geometry and 16px icon. Portaled menu rows and essential headings wrap using the existing 14px/22px body scale and primary/secondary text tokens. Real browser checks must include the trigger focus ring and open menu's right edges against the viewport and native clipping ancestors, not only document scroll width.
 

@@ -2,6 +2,49 @@
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModuleState } from "./modules.js";
 import type { DsmmModelRoute, DsmmProfileScope } from "./settings.js";
+
+/** Non-executable schema projection for the native deployment editor. */
+export interface DeploymentSchemaNode {
+  type: string;
+  fields?: Record<string, DeploymentSchemaNode>;
+  inner?: DeploymentSchemaNode;
+  alternatives?: DeploymentSchemaNode[];
+  value?: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  required?: boolean;
+  keys?: readonly string[];
+  nonempty?: boolean;
+}
+export interface DeploymentAdmissionView {
+  /** Host-redacted read-only view, never raw editor input or actual runtime settings. */
+  settings: Record<string, unknown>;
+  sources: Record<string, string>;
+  captures: Record<string, string>;
+  restartRequired: readonly string[];
+  named: { id: string; revision: string } | null;
+}
+export interface DeploymentEditorSnapshot {
+  entryId: string;
+  namespace: string | null;
+  hostProfileKey: string;
+  global: Record<string, unknown>;
+  globalRevision: string;
+  profile: Record<string, unknown>;
+  nativeRevision: string;
+  nativeFormRevision: number | null;
+  nativeForm: { base: unknown; user: unknown } | null;
+  /** Host-redacted inspector layers. global/profile/nativeForm remain C0 editor input. */
+  desired: Record<string, unknown>;
+  sources: Record<string, string>;
+  startup: Record<string, unknown>;
+  startupSources?: Record<string, string>;
+  defaults: Record<string, unknown>;
+  schema: DeploymentSchemaNode;
+  nextRoot: DeploymentAdmissionView | null;
+  modules: DsmmModuleState[];
+}
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 
 export type ProfileErrorCode = "validation" | "conflict" | "not-found" | "lock-timeout" | "unsafe-path" | "io" | "activation" | "corrupt-selection" | "limit"
@@ -93,6 +136,7 @@ export interface SessionProfileSnapshot {
   deepwork?: SessionDeepworkState;
   /** Safe captured module admission; not a read of the current global editor. */
   modules?: DsmmModuleState[];
+  configuration?: DeploymentAdmissionView;
 }
 
 export interface SessionDeepworkState {

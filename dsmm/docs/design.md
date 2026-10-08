@@ -2,6 +2,47 @@
 
 Date: 2026-08-21
 
+## Current native configuration design (stage D, 2026-10-08)
+
+The historical MVP proposal below is retained as design history, not today's
+scope. The authority is the native parity plan §3.3/stage D and [DESIGN.md](../DESIGN.md).
+The product is the existing official Plugins page, not a new SPA or skin.
+
+- `plugins.item` owns DSMM's summary/page contribution; `plugins.bundle.config`
+  keys `@dsmm/dsmm`; `plugins.row.config` keys `@dsmm/dsmm#<actual-row-id>`.
+  Runtime entry ID, native form namespace, row ID and package ID are not
+  interchangeable. Identity is verified by server projection and the exact
+  native form descriptor/revision/base/user metadata before a profile write.
+- Global edits use only the fixed Core `dsmmConfig` service. Profile edits use
+  only the actual entry's public ConfigForms/ConfigPageForm transport. Separate
+  buttons/revisions preserve untouched sparse fields; no merged-default copy,
+  new store, root-path RPC, or cross-layer Save-all exists. Bundle views obtain
+  the verified actual namespace's public form; a standalone page without a
+  form honestly marks the profile region unavailable while Core remains usable.
+- All applicable feature families are exposed by structural controls and
+  bounded, closed-schema Advanced JSON. Unknown/duplicate/prototype keys and
+  invalid numbers remain visible and refuse save. Arrays replace, objects
+  inherit recursively; empty/default values remain explicit pins. Higher Host
+  pins are displayed, never promised removable by a lower-layer unset.
+- Desired, startup-mounted/captured, next-root preview and actual admitted
+  session are separate projections. Preview reuses the runtime's admission
+  preparation without creating a session. The host bundle state is unknown
+  when unobservable; module availability is not bundle enablement or mode.
+  Missing sessions stay unknown. Save never restarts, remounts, cancels or
+  reconciles running work; cold-off desired-on requires an independent restart.
+- Drafts retain their original CAS on refresh/conflict. Explicit discard alone
+  rebases. Entry/connection-generation changes and component disposal fence
+  stale writes; native readonly/nonloopback/operator refusal is not bypassed by
+  the global route. Named JSONC/model selection/session actions stay independent.
+- UI uses Host colors, font, controls, borders/radius and focus tokens; 14px/22px
+  reading rhythm, maximum 760px, native disclosures and wrapping actions. No new
+  brand, shadows or decorative motion. EN/ZH, sanitized alerts and polite live
+  feedback accompany real 375/768/1280 light/dark native Web evidence.
+
+The SDK stays rc.2. The official Desktop shared source contract is pinned at
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc` (0.2.1-alpha.1); actual Electron is
+uninstalled/unverified here. Web screenshots are not Desktop acceptance.
+
 ## Goal
 
 Build `dsmm` as a dsh-native subtree project that brings ocmm's deepwork workflow, role prompts, skills, model calibration, and safety conventions to DeepSeek Harness without globally enabling them for every session.

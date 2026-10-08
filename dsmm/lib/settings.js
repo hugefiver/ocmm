@@ -2,7 +2,7 @@ import Schema from "@deepseek-ai/schemastery";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import { DSMM_ROLES, DSMM_ROLE_IDS } from "./roles.js";
 import { DSMM_SKILL_NAMES } from "./skills.js";
-import { DEFAULT_DSMM_RUNTIME_POLICY, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
+import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export const DSMM_STATUS_COMMAND = "dsmm-status";
@@ -79,10 +79,12 @@ const MODEL_ROUTE_SCHEMA = Schema.object({
 const RATE_LIMIT_CONFIG_SCHEMA = Schema.object(Object.fromEntries(Object.keys(DEFAULT_DSMM_RUNTIME_POLICY.rateLimit).map((key) => [key, Schema.number()])));
 const ROUTING_STRATEGY_CONFIG_SCHEMA = Schema.union([Schema.const("startup-lock"), Schema.const("rate-limit-fallback")]);
 const RUNTIME_POLICY_CONFIG_SCHEMA = Schema.object({ strategy: ROUTING_STRATEGY_CONFIG_SCHEMA, rateLimit: RATE_LIMIT_CONFIG_SCHEMA });
+const ROLE_FALLBACK_ROUTE_LIMIT = 32;
+const ROLE_FALLBACK_ROUTES_SCHEMA = Schema.array(MODEL_ROUTE_SCHEMA);
 // A dictionary retains unknown keys for fail-closed validation by the resolver.
 const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
     primary: Schema.union([Schema.const(undefined), MODEL_ROUTE_SCHEMA]),
-    fallbackRoutes: Schema.union([Schema.const(undefined), Schema.array(MODEL_ROUTE_SCHEMA)]),
+    fallbackRoutes: Schema.union([Schema.const(undefined), ROLE_FALLBACK_ROUTES_SCHEMA]),
     strategy: ROUTING_STRATEGY_CONFIG_SCHEMA,
     rateLimit: RATE_LIMIT_CONFIG_SCHEMA
 }).required()).default({});
@@ -223,6 +225,32 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
 });
 const MODULES_SCHEMA = Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean() }) });
 const GLOBAL_FIELDS_SCHEMA = Schema.object({ ...CONFIG_FIELDS_SCHEMA.dict, modules: MODULES_SCHEMA });
+/** Only data is transported. Defaults remain resolved by the existing authority. */
+export function deploymentEditorSchema() {
+    const project = (schema) => ({
+        type: schema.type,
+        ...(schema.dict === undefined ? {} : { fields: Object.fromEntries(Object.entries(schema.dict).filter(([key]) => key !== "sessionPersistence").map(([key, child]) => {
+                const node = project(child);
+                if (schema === MODEL_ROUTE_SCHEMA)
+                    node.nonempty = true;
+                if (schema === RATE_LIMIT_CONFIG_SCHEMA) {
+                    const [min, max] = DSMM_RATE_LIMIT_BOUNDS[key];
+                    Object.assign(node, { min, max, step: 1 });
+                }
+                return [key, node];
+            })) }),
+        ...(schema.inner === undefined ? {} : { inner: project(schema.inner) }),
+        ...(schema.list === undefined ? {} : { alternatives: schema.list.map(project) }),
+        ...(["string", "number", "boolean"].includes(typeof schema.value) ? { value: schema.value } : {}),
+        ...(typeof schema.meta.min === "number" ? { min: schema.meta.min } : {}),
+        ...(typeof schema.meta.max === "number" ? { max: schema.meta.max } : {}),
+        ...(typeof schema.meta.step === "number" ? { step: schema.meta.step } : {}),
+        ...(schema.meta.required === true ? { required: true } : {}),
+        ...(schema === ROLE_ROUTING_SCHEMA ? { keys: [...DSMM_ROLE_IDS] } : {}),
+        ...(schema === ROLE_FALLBACK_ROUTES_SCHEMA ? { max: ROLE_FALLBACK_ROUTE_LIMIT } : {})
+    });
+    return project(GLOBAL_FIELDS_SCHEMA);
+}
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
 function sparseSchema(schema) {
     const { default: _default, required: _required, ...meta } = schema.meta;
@@ -476,7 +504,7 @@ export function resolveRoleRouting(input) {
         if (Object.hasOwn(value, "primary"))
             policy.primary = normalizeExplicitRoute(value.primary);
         if (Object.hasOwn(value, "fallbackRoutes")) {
-            if (!Array.isArray(value.fallbackRoutes) || value.fallbackRoutes.length > 32)
+            if (!Array.isArray(value.fallbackRoutes) || value.fallbackRoutes.length > ROLE_FALLBACK_ROUTE_LIMIT)
                 throw new TypeError("dsmm roleRouting fallbackRoutes must be an array with at most 32 entries");
             policy.fallbackRoutes = [];
             for (const entry of value.fallbackRoutes) {

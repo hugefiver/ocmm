@@ -149,7 +149,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
       if (deployment !== undefined) {
         readyCtx.provide?.("dsmmDeploymentConfig", deployment);
         readyCtx.inject?.(["typert"], (rpcCtx) => {
-          registerConfigRpc(rpcCtx as unknown as Context, deployment, getReadySettings());
+          registerConfigRpc(rpcCtx as unknown as Context, deployment, getReadySettings(), () => runtime, startup?.sources);
         });
       }
       const install = (installCtx: DshContext, settingsGetter: DsmmSettingsGetter): void => {

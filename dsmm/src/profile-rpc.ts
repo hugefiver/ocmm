@@ -13,6 +13,10 @@ import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapsho
 import { projectDeepworkModule } from "./modules.js";
 import type { DsmmModuleState } from "./modules.js";
 import type { DsmmSettings } from "./settings.js";
+import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
+import type { DeploymentEditorSnapshot } from "./profile-types.js";
+import type { DsmmProfileRuntime } from "./profile-runtime.js";
+import { readOnlySettings, readOnlySettingSources } from "./status.js";
 
 /** The public SessionController capability, without importing its client graph. */
 type NativeSessionAuthority = Pick<SessionController, "resolveAgent">;
@@ -167,9 +171,29 @@ export function assertLocalSettingsOperator(ctx: Context): void {
 
 export class DsmmConfigHost extends TypertRemoteService {
   private readonly lifetime = new AbortController();
-  constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig, private readonly startup?: DsmmSettings) {
+  constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig, private readonly startup?: DsmmSettings,
+    private readonly runtime?: () => DsmmProfileRuntime | undefined, private readonly startupSources?: Record<string, string>) {
     super(ctx, "dsmmConfig");
     ctx.effect(() => () => this.lifetime.abort());
+  }
+  @Remote
+  async describeSettings(): Promise<DeploymentEditorSnapshot> {
+    try {
+      assertLocalSettingsOperator(this.ctx);
+      if (this.startup === undefined) throw new DsmmProfileError("unavailable", "The startup capture is unavailable.");
+      const desired = await this.backend.readDesired();
+      assertLocalSettingsOperator(this.ctx);
+      const runtime = this.runtime?.() ?? this.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime | undefined;
+      return { entryId: desired.entryId, namespace: desired.nativeNamespace ?? null, hostProfileKey: desired.hostProfileKey,
+        global: desired.global as Record<string, unknown>, globalRevision: desired.globalRevision,
+        profile: desired.profile as Record<string, unknown>, nativeRevision: desired.nativeRevision,
+        nativeFormRevision: desired.nativeFormRevision ?? null, nativeForm: desired.nativeForm === undefined ? null : { base: desired.nativeForm.base ?? null, user: desired.nativeForm.user ?? null },
+        desired: { ...readOnlySettings(desired.settings) }, sources: readOnlySettingSources(desired.sources),
+        startup: { ...readOnlySettings(this.startup) }, defaults: DEFAULT_DSMM_SETTINGS as unknown as Record<string, unknown>,
+        ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
+        schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
+        modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
   }
   @Remote
   async describe(): Promise<GlobalConfigSnapshot> {
@@ -214,8 +238,8 @@ export function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, depl
 }
 
 /** Core-owned injection; works without any DW or profile business service. */
-export function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings): DsmmConfigHost {
-  const service = new DsmmConfigHost(ctx, deployment, startup);
+export function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>): DsmmConfigHost {
+  const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources);
   ctx.typert.register(TYPERT_HOST);
   return service;
 }

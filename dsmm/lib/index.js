@@ -125,7 +125,7 @@ function applyRuntime(ctx, config, deployment, startup) {
             if (deployment !== undefined) {
                 readyCtx.provide?.("dsmmDeploymentConfig", deployment);
                 readyCtx.inject?.(["typert"], (rpcCtx) => {
-                    registerConfigRpc(rpcCtx, deployment, getReadySettings());
+                    registerConfigRpc(rpcCtx, deployment, getReadySettings(), () => runtime, startup?.sources);
                 });
             }
             const install = (installCtx, settingsGetter) => {

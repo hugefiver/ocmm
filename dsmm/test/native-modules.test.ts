@@ -16,6 +16,8 @@ import type { DshAgent } from "../lib/dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSnapshot } from "../lib/deployment-config.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DsmmModuleState } from "../lib/modules.js";
+import type { DeploymentEditorSnapshot } from "../lib/profile-types.js";
+import { at } from "../lib/client/deployment-data.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
@@ -59,6 +61,18 @@ test("real Loader module admission preserves busy captures, fences off work, and
     const absent = await invoke<GlobalConfigSnapshot>("describe");
     assert.equal(absent.revision, "absent");
     assert.equal((await invoke<DsmmModuleState[]>("describeModules"))[0].desired.source, "defaults");
+    const editor = await invoke<DeploymentEditorSnapshot>("describeSettings");
+    const entry = await (mounted.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig).readDesired();
+    assert.equal(editor.entryId, entry.entryId);assert.equal(editor.namespace, entry.nativeNamespace);
+    assert.equal(editor.globalRevision, "absent");assert.equal(editor.schema.fields?.modules.type, "object");
+    assert.equal(editor.schema.fields?.sessionPersistence, undefined);
+    assert.deepEqual(editor.schema.fields?.roleRouting.keys, [...DSMM_ROLE_IDS]);
+    const routeFields = editor.schema.fields?.roleRouting.inner?.fields;
+    assert.equal(routeFields?.primary.alternatives?.[1]?.fields?.model.nonempty, true);
+    assert.equal(routeFields?.fallbackRoutes.alternatives?.[1]?.max, 32);
+    const retrySchema = editor.schema.fields?.runtimePolicy.fields?.rateLimit.fields?.maxRetries;
+    assert.equal(retrySchema?.min, 0); assert.equal(retrySchema?.max, 10); assert.equal(retrySchema?.step, 1);
+    assert.equal(at(editor.nextRoot?.settings, ["modules", "deepwork", "enabled"]), true);
     assert.equal((await mounted.ctx.agentPresets.resolve("dsmm-orchestrator")).broken, undefined);
     const parent = await mounted.create(), captured = runtime.admission(parent as DshAgent);
     assert.equal(captured.settings.modules.deepwork.enabled, true);
@@ -153,6 +167,10 @@ test("real Loader module admission preserves busy captures, fences off work, and
     const coldInvoke = <T>(method: string, args: Record<string, unknown> = {}) => cold.ctx.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer }) as Promise<T>;
     const module = (await coldInvoke<DsmmModuleState[]>("describeModules"))[0];
     assert.equal(module.startupMounted, false); assert.equal(module.desired.enabled, false); assert.equal(module.hostBundleEnabled, "unknown");
+    const coldEditor = await coldInvoke<DeploymentEditorSnapshot>("describeSettings");
+    assert.equal(at(coldEditor.startup, ["modules", "deepwork", "enabled"]), false);
+    assert.equal(at(coldEditor.nextRoot?.settings, ["modules", "deepwork", "enabled"]), false);
+    assert.equal(coldEditor.modules[0].hostBundleEnabled, "unknown");
     assert.equal(cold.ctx.get("mcp"), undefined);
     assert.equal(cold.subagents.getProvider("dsmm-role-coding"), foreignProvider);
     assert.equal(DSMM_ROLE_IDS.filter((role) => cold.subagents.getProvider(`dsmm-role-${role.slice(5)}`) !== undefined).length, 1, "zero DSMM providers; only the preexisting foreign provider survives");
@@ -219,11 +237,13 @@ test("real Loader module admission preserves busy captures, fences off work, and
     const coldRevision = await coldInvoke<GlobalConfigSnapshot>("describe");
     assert.equal(coldRevision.revision, offGlobal.revision);
     const impostor = new OperatorPeer(cold.ctx);
-    try { await assert.rejects(cold.ctx.typertGateway.invoke({ namespace: "dsmmConfig", method: "describeModules", args: {}, peer: impostor }), refused("not-owned")); }
+    try { for (const method of ["describeModules", "describeSettings"]) await assert.rejects(cold.ctx.typertGateway.invoke({ namespace: "dsmmConfig", method, args: {}, peer: impostor }), refused("not-owned")); }
     finally { await impostor.dispose(); }
     authority.writable = false;
     await assert.rejects(coldInvoke("describe"), refused("not-owned"));
+    await assert.rejects(coldInvoke("describeSettings"), refused("not-owned"));
     authority.writable = true;
+    carrier.host = "0.0.0.0";await assert.rejects(coldInvoke("describeSettings"), refused("not-owned"));carrier.host = "127.0.0.1";
     const restored = await coldInvoke<GlobalConfigSnapshot>("save", { request: { expectedRevision: coldRevision.revision, edits: [{ op: "unset", path: ["modules", "deepwork", "enabled"] }] } });
     assert.equal(restored.config.modules?.deepwork?.enabled, undefined);
     const pending = (await coldInvoke<DsmmModuleState[]>("describeModules"))[0];
@@ -231,6 +251,12 @@ test("real Loader module admission preserves busy captures, fences off work, and
     assert.equal(pending.startupMounted, false); assert.equal(pending.nextRoot.admitted, false); assert.equal(pending.reason, "restart-required");
     const pendingRoot = await cold.create(), pendingCapture = coldRuntime.admission(pendingRoot as DshAgent);
     assert.equal(pendingCapture.settings.modules.deepwork.enabled, false); assert.ok(pendingCapture.restartRequired!.includes("modules.deepwork.enabled"));
+    const pendingEditor = await coldInvoke<DeploymentEditorSnapshot>("describeSettings");
+    assert.equal(at(pendingEditor.desired, ["modules", "deepwork", "enabled"]), true);
+    assert.equal(at(pendingEditor.nextRoot?.settings, ["modules", "deepwork", "enabled"]), false);
+    assert.ok(pendingEditor.nextRoot?.restartRequired.includes("modules.deepwork.enabled"));
+    const admitted = await coldRuntime.getSession(pendingRoot as DshAgent);
+    assert.equal(at(admitted.configuration?.settings, ["modules", "deepwork", "enabled"]), false);
     await runFixtureTurn(pendingRoot);
     assert.doesNotMatch(JSON.stringify(cold.adapter.calls.at(-1)!.messages), /DEEPWORK MODE ENABLED!|ROLE_PERSONA_SENTINEL/u);
     assert.equal(cold.ctx.get("mcp"), undefined); assert.equal(existsSync(desiredCold.profile.presets!.root!), false);

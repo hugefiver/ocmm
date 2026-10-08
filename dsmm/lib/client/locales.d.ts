@@ -1,5 +1,9 @@
 export declare const NS = "settings.dsmm-profiles";
 export declare const en: {
+    centralOrigin: string;
+    legacyOrigin: string;
+    explicitOrigin: string;
+    readOnlyOrigin: string;
     headerCompactProfiles: string;
     headerCompactRefresh: string;
     headerNoSession: string;

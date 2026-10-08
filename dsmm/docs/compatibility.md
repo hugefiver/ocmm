@@ -1,4 +1,4 @@
-# Deepwork 0.1.9 Compatibility and Upgrade
+# DSMM 0.1.9 Compatibility and Upgrade
 
 This document describes the working 0.1.9 source contract and required acceptance evidence, including implemented C0 storage/capture boundaries. It doesn't claim that the final 0.1.9 artifact has passed Docker, been published or been activated in Desktop. Completed 0.1.5 and 0.1.6 publication/continuation evidence stays immutable and doesn't prove 0.1.9. Historical 0.1.1 checks and the stopped 0.1.2 frozen draft aren't substitute evidence; the old 0.1.2 tag/artifact/draft stay untouched and unpublished. The release Action controls retain an exact shared 20-minute 404 visibility budget and 45-minute verify job. The earlier release-only 0.1.9 scope no longer describes today's changed working source. The 0.1.8 npm publication is genuine but its original terminal receipt failed with GitHub skipped; Desktop remains on 0.1.7 and CLI/TUI on 0.1.6 until a separately completed successor rollout.
 
@@ -8,9 +8,19 @@ This document describes the working 0.1.9 source contract and required acceptanc
 
 The immutable 0.1.3 tag at `2bdea4b` is also preserved. Its run `37235817488` failed before pack/publish on pnpm 11's ignored esbuild/koffi build scripts. 0.1.4's published-origin bytes and failed original verify/404 history are preserved by their separate fixed continuation controls, not rewritten by a successor. The 0.1.9 gate requires fresh clean Linux installation/build evidence; existing compiled output is not a substitute.
 
-Deepwork is the native plugin title in both exported metadata locales, with localized descriptions. Profiles are displayed as **Deepwork Profiles** / **Deepwork 配置档**, and the current 22 canonical roles/categories as `DW …` (historically twelve roles). Package `@dsmm/dsmm`, Loader `dsmm`, role/tool/provider IDs, commands, schemas and persistence vocabulary remain compatible. Native metadata-reader and actual UI evidence must prove the display names; a manifest `displayName` is not a supported substitute.
+DSMM is the native package/Core title in both exported metadata locales, with localized descriptions; Deepwork is its module. Profiles remain **Deepwork Profiles** / **Deepwork 配置档**, and the current 22 canonical roles/categories remain `DW …` (historically twelve roles). Package `@dsmm/dsmm`, Loader `dsmm`, role/tool/provider IDs, commands, schemas and persistence vocabulary remain compatible. The real rc.2 native metadata reader and Plugins UI prove the new package title; a manifest `displayName` is not a supported substitute. Historical installed-package metadata isn't rewritten by this source change.
 
 ## Compatibility authority
+
+### D native configuration checkpoint (source and real rc.2 Web, not Electron)
+
+The official `plugins.item`, `plugins.bundle.config` and `plugins.row.config` contracts mount the DSMM card/page and actual package/entry forms. Global control uses the fixed `dsmmConfig` service; the selected profile override uses the real Host `ConfigPageForm`, exact entry/namespace/base/user/revision checks and only sparse set/unset operations. The standalone item clearly marks a missing optional form unavailable. Both layers provide complete schema-bound feature editing, inheritance/default pins, independent saves, preserved invalid/dirty conflict state, sanitized feedback and keyboard focus. The existing named JSONC/model/session editor is independent, with legacy origin and immutable pins visible/read-only.
+
+Fresh owned keyless Web Hosts proved actual native discovery and central-only versus profile-only writes, same-Home A/B inheritance/override/unset, unchanged refs/fiber, source/revision state, default pins, invalid-number retention, conflict refusal with dirty preservation, cold-off desired-on pending and user-independent restart to mounted-on. Busy-root native fixture proof covers role/skill/recovery changes: old parent/future child stay captured, new root adopts permitted changes, and saves do not cancel/reconcile/remount/respawn LSP. rc.2 emits native compatibility partial-dispose signals on profile patch; actual scope updates, disposal and request cancellation remain zero. Signals are not suppressed or represented as absent.
+
+The installed SDK/runtime stays `0.2.0-rc.2` (official source `639ed015397290b3745d163aafe02ffee4aa3f84`). The separate latest official Desktop **source compatibility target** is `deepseek-ai/deepseek-harness` commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`, `dsh-v0.2.1-alpha.1`. Its shared PluginManager contracts retain `view: 'summary' | 'page'` and optional `form`; the Desktop carrier uses the shared Web Host, Host-issued cookie and `dsh-app://app` origin forwarding. This is source compatibility, not permission inferred from a loopback-looking URL. The actual invocation peer/operator, public bound host, Host writability and precommit owner/lifetime checks remain required.
+
+No official Desktop executable is installed in this acceptance environment. No Electron activation is claimed and no Web screenshot substitutes for it. No SDK upgrade, package/audit tooling installation, account/sign-in, imported browser state or private profile migration occurred. Native host typography/tokens were verified at 375/768/1280 and native dark/light colors; Lighthouse/React audit packages are unavailable, so no audit scores are claimed. Publication, frozen Linux artifact acceptance and authorized Desktop execution remain later gates.
 
 ### C0 storage and lifecycle contract (source, not C/D completion)
 
@@ -46,7 +56,7 @@ Scope APIs are resolved through the existing declared `dsh-agent-preset-registry
 
 At the A checkpoint, deployment configuration used the main plugin's native Loader Config/entry, not `settings.register`; C0 now adds the separate sparse global base described above. Runtime profiles retain immutable admissions and idle/CAS persistence. Keyless contract tests use real Cordis Loader, native preset/AgentLoop/skill/tool services and a local LLM adapter; they don't prove plugin Config UI, authenticated Desktop, full B/C/D parity or publication.
 
-The current migration targets `@deepseek-ai/dsh@0.2.0-rc.2`, the official npm latest/next version resolved on 2026-10-03. `0.2.1-alpha.1` is an alpha channel, not the selected compatibility authority. The CLI's actual version and installed package identity must both match the pinned target.
+The installed SDK/CLI migration target remains `@deepseek-ai/dsh@0.2.0-rc.2`, the official npm latest/next version resolved on 2026-10-03. `0.2.1-alpha.1` is only the separately fixed Desktop source target described above, not authorization to upgrade SDK dependencies or claim runtime acceptance. The CLI's actual version and installed package identity must both match the pinned SDK target.
 
 DSH 0.1.1-rc.2 was the historical baseline; it is not the authority for this updated working tree. Installation ranges are not proof of compatibility with future releases.
 
@@ -61,7 +71,7 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 | Cordis | `~4.0.4` | supported by contract |
 | DSH component peers | `0.2.0-rc.2` | supported by contract |
 | Linux container | `Node 22 Bookworm` | independent frozen-artifact gate required |
-| Windows Desktop | installed official `0.2.0-rc.2` carrier/host | post-publication native check required |
+| Windows Desktop | official `0.2.1-alpha.1` fixed source target | shared contract compatibility only; executable absent, Electron unverified |
 | macOS | `Node >=22` | supported by contract |
 | Native Settings | additive Deepwork Profiles client and authenticated RPC | compiled UI/RPC/storage and actual Desktop are separate proofs |
 | Headless | deployment config and native role tools | no Agent preset selection in the one-shot runner |
@@ -69,7 +79,8 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 | LSP/MCP | `external ocmm-lsp mcp` | optional |
 | Runtime recovery | `process-local` | optional |
 | Per-role model/effort/fallback policy | native request, subagent and descriptor seams | opt-in; exact configured capability required |
-| C0 deployment layers | sparse central global base and explicit native entry/profile transport | backend storage/capture contract; D Config browser proof pending |
+| C0 deployment layers | sparse central global base and explicit native entry/profile transport | backend storage/capture plus D real native Web form/CAS proof |
+| Native Plugins | rc.2 item/bundle/row public slots and Host forms | real keyless Web acceptance; independent Global/profile saves and explicit restart |
 | Runtime profiles | central shared drafts/revisions, scoped default/sidecars; strict read-only legacy origin | new-root defaults; explicit idle overlay epochs; origin-pinned cold resume |
 | Durable DSMM metadata | deployment-only `sessionPersistence` on main DSMM entry | explicit startup integration; frozen-artifact/production acceptance pending |
 | DeepSeek V4 Pro calibration | `deepseek-official/deepseek-v4-pro` | optional |
@@ -77,7 +88,7 @@ The installation contracts include `@deepseek-ai/cordis@~4.0.4`, `@deepseek-ai/s
 
 ## Command and runtime boundaries
 
-`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands. The current native client provides Settings → Deepwork Profiles without replacing native navigation, provider/account UI, or the Agent preset selector. There are no model-visible profile-management tools or anonymous file endpoints.
+`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands. The current native client provides Plugins → DSMM and the separate Settings → Deepwork Profiles without replacing native navigation, provider/account/model UI, or the Agent preset selector. There are no model-visible profile-management tools or anonymous file endpoints.
 
 The 0.1.9 Web/Desktop header contributes one icon-only native profile menu in sessionless, blank and active views, yielding to native navigation ownership. One profile list handles normal profile switching that keeps the current model and invokes no native model selection. One `@use-model` **Use profile model** action reads the current admitted immutable profile model without reapplying a later saved revision; successful profile CAS remains authoritative for profile changes, not a prerequisite repeated by this independent model action. It retains native-default persistence like the Models tab and existing manual-model-intent race fencing. Disabled mutations leave the menu inspectable and refreshable. Successes are accessible live announcements only, not visible success prose; short sanitized refusal details use allowlisted codes/fields and refresh/retry guidance, never raw messages or paths. No verbose normal-menu descriptions or duplicate profile-model list remains. These are required new-menu contracts, not a claim of authenticated Desktop acceptance; the historical 0.1.6 SELECT and 0.1.7 menu proof contracts remain unchanged.
 

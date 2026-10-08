@@ -141,7 +141,7 @@ test("package includes only the exact operator repair entrypoints without exposi
   for (const path of scripts) assert.equal(existsSync(join(packageRoot, path)), true, path);
 });
 
-test("exported native plugin metadata displays Deepwork in both languages without renaming the package", () => {
+test("exported native plugin metadata displays DSMM Core in both languages without renaming the package", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   assert.equal(pkg.name, "@dsmm/dsmm");
   for (const language of ["en", "zh"]) {
@@ -150,7 +150,7 @@ test("exported native plugin metadata displays Deepwork in both languages withou
     const metadata = JSON.parse(readFileSync(join(packageRoot, resource), "utf8"));
     assert.deepEqual(Object.keys(metadata), ["meta"]);
     assert.deepEqual(Object.keys(metadata.meta).sort(), ["description", "title"]);
-    assert.equal(metadata.meta.title, "Deepwork");
+    assert.equal(metadata.meta.title, "DSMM");
     assert.equal(typeof metadata.meta.description, "string");
     assert.ok(metadata.meta.description.trim().length > 0);
   }

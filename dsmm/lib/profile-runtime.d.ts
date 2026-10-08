@@ -5,6 +5,7 @@ import type { DsmmProfileDocument } from "./profiles.js";
 import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { DeepworkModeController } from "./state.js";
 import type { DsmmDeploymentSnapshot } from "./settings.js";
+import type { DeploymentAdmissionView } from "./profile-types.js";
 export interface DsmmProfileRuntimeStore {
     readonly readOnly?: boolean;
     readonly origin?: "central" | "legacy" | "explicit";
@@ -66,6 +67,8 @@ export declare class DsmmProfileRuntime {
     read(id: string): Promise<ProfileReadResult>;
     save(request: ProfileSaveRequest): Promise<ProfileReadResult>;
     getStartupSettings(): DsmmSettings;
+    /** Preview uses the admission path but neither binds nor creates an Agent. */
+    previewDeployment(desired: DsmmDeploymentSnapshot): DeploymentAdmissionView;
     describeDeployment(agent?: DshAgent): Promise<{
         startup: DsmmDeploymentSnapshot | null;
         desired: DsmmDeploymentSnapshot | null;

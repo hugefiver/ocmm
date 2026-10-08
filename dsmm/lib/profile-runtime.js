@@ -13,6 +13,11 @@ import { resolveDshHome } from "./dsh-home.js";
 import { lstatSync } from "node:fs";
 import { projectDeepworkModule } from "./modules.js";
 import { Context } from "@deepseek-ai/cordis";
+import { readOnlySettings, readOnlySettingSources } from "./status.js";
+function deploymentAdmissionView(admission) {
+    return { settings: { ...readOnlySettings(admission.settings) }, sources: readOnlySettingSources(admission.sources ?? {}),
+        captures: readOnlySettingSources(admission.sourceCaptures?.fields ?? {}), restartRequired: [...admission.restartRequired ?? []], named: admission.profile === null ? null : { ...admission.profile } };
+}
 function immutableSettings(settings) {
     return freezeSettings(settings);
 }
@@ -75,6 +80,7 @@ export class DsmmProfileRuntime {
         return { sessionId: agent.id, globalDefault: selectionState(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
             rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch), deepwork: this.mode.describe(agent, admitted.settings.defaultActive),
             modules: [projectDeepworkModule(this.baseline, admitted.deployment, admitted)],
+            configuration: deploymentAdmissionView(admitted),
             ...(profileModel === undefined ? {} : { profileModel }),
             admissionEpoch: admitted.epoch, switchAllowed: reason === undefined, ...(reason === undefined ? {} : { switchUnavailableReason: reason }) };
     }
@@ -160,6 +166,7 @@ export class DsmmProfileRuntime {
                     assertCurrent(maintenanceSignal);
                     const epoch = newEpoch();
                     let profileModel;
+                    let committed;
                     const result = await this.store.selectSession(request, epoch, async (document) => {
                         const prepared = immutableSettings(resolveProfileSettings(admitted.baseline, document?.settings ?? {}));
                         await this.validate(prepared, agent, maintenanceSignal);
@@ -170,7 +177,8 @@ export class DsmmProfileRuntime {
                     }, {
                         assertCurrent: () => assertCurrent(maintenanceSignal),
                         committed: (selection, settings) => {
-                            this.bound.set(agent, this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override", admitted.baseline, admitted.deployment, admitted.restartRequired, selection.document));
+                            committed = this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override", admitted.baseline, admitted.deployment, admitted.restartRequired, selection.document);
+                            this.bound.set(agent, committed);
                             this.mode.changed(agent);
                         }
                     });
@@ -178,7 +186,8 @@ export class DsmmProfileRuntime {
                     // queued wake or disposal wins immediately when maintenance releases.
                     return { sessionId: request.sessionId, globalDefault: selectionState(this.current), selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
                         deepwork: this.mode.describe(agent, result.prepared.defaultActive),
-                        modules: [projectDeepworkModule(this.baseline, admitted.deployment, this.admission(agent))],
+                        modules: [projectDeepworkModule(this.baseline, committed.deployment, committed)],
+                        configuration: deploymentAdmissionView(committed),
                         ...(profileModel === undefined ? {} : { profileModel }),
                         scope: request.id === null ? "deployment-baseline" : "session-override", admissionEpoch: epoch, switchAllowed: true };
                 }
@@ -225,6 +234,10 @@ export class DsmmProfileRuntime {
     read(id) { return this.store.read(id); }
     save(request) { return this.store.save(request); }
     getStartupSettings() { return this.baseline; }
+    /** Preview uses the admission path but neither binds nor creates an Agent. */
+    previewDeployment(desired) {
+        return deploymentAdmissionView(this.prepare(this.currentDocument, this.current, this.current.epoch, "global-default", desired));
+    }
     async describeDeployment(agent) {
         const desired = await this.options.readDesired?.();
         return { startup: this.options.startup ?? null, desired: desired ?? null, admission: this.admission(agent) };

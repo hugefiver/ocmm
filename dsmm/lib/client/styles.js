@@ -38,6 +38,13 @@ export const PROFILE_STYLES = `
 .dsmm-profiles .dsmm-issue{padding:12px;border-left:4px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-issue p+p{margin-top:8px}
 .dsmm-profiles .dsmm-status{min-height:22px}
+.dsmm-deployment .dsmm-deployment-group{border-top:1px solid var(--dsw-alias-border-l4);padding-top:8px;min-width:0}
+.dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:12px;padding-top:8px}
+.dsmm-deployment code{font-family:var(--ds-font-family-code);overflow-wrap:anywhere}
+.dsmm-deployment label code,.dsmm-deployment summary code{display:block;color:var(--dsw-alias-label-secondary)}
+.dsmm-deployment pre{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--ds-font-family-code)}
+.dsmm-deployment .dsmm-deployment-state{display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;border-top:1px solid var(--dsw-alias-border-l4)}
+.dsmm-deployment .dsmm-deployment-state dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){.dsmm-profiles *{transition:none!important;animation:none!important}}
 `;
 //# sourceMappingURL=styles.js.map

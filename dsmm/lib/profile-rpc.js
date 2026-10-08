@@ -38,6 +38,8 @@ import { SessionId } from "@deepseek-ai/dsh-session";
 import { TYPERT_HOST } from "./profile-remote.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import { projectDeepworkModule } from "./modules.js";
+import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
+import { readOnlySettings, readOnlySettingSources } from "./status.js";
 /** Business service addressed only by native Typert Gateway invocations. */
 let DsmmProfilesHost = (() => {
     let _classSuper = TypertRemoteService;
@@ -207,15 +209,18 @@ export function assertLocalSettingsOperator(ctx) {
 let DsmmConfigHost = (() => {
     let _classSuper = TypertRemoteService;
     let _instanceExtraInitializers = [];
+    let _describeSettings_decorators;
     let _describe_decorators;
     let _describeModules_decorators;
     let _save_decorators;
     return class DsmmConfigHost extends _classSuper {
         static {
             const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
+            _describeSettings_decorators = [Remote];
             _describe_decorators = [Remote];
             _describeModules_decorators = [Remote];
             _save_decorators = [Remote];
+            __esDecorate(this, null, _describeSettings_decorators, { kind: "method", name: "describeSettings", static: false, private: false, access: { has: obj => "describeSettings" in obj, get: obj => obj.describeSettings }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _describe_decorators, { kind: "method", name: "describe", static: false, private: false, access: { has: obj => "describe" in obj, get: obj => obj.describe }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _describeModules_decorators, { kind: "method", name: "describeModules", static: false, private: false, access: { has: obj => "describeModules" in obj, get: obj => obj.describeModules }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _save_decorators, { kind: "method", name: "save", static: false, private: false, access: { has: obj => "save" in obj, get: obj => obj.save }, metadata: _metadata }, null, _instanceExtraInitializers);
@@ -223,12 +228,38 @@ let DsmmConfigHost = (() => {
         }
         backend = __runInitializers(this, _instanceExtraInitializers);
         startup;
+        runtime;
+        startupSources;
         lifetime = new AbortController();
-        constructor(ctx, backend, startup) {
+        constructor(ctx, backend, startup, runtime, startupSources) {
             super(ctx, "dsmmConfig");
             this.backend = backend;
             this.startup = startup;
+            this.runtime = runtime;
+            this.startupSources = startupSources;
             ctx.effect(() => () => this.lifetime.abort());
+        }
+        async describeSettings() {
+            try {
+                assertLocalSettingsOperator(this.ctx);
+                if (this.startup === undefined)
+                    throw new DsmmProfileError("unavailable", "The startup capture is unavailable.");
+                const desired = await this.backend.readDesired();
+                assertLocalSettingsOperator(this.ctx);
+                const runtime = this.runtime?.() ?? this.ctx.get("dsmmProfileRuntime");
+                return { entryId: desired.entryId, namespace: desired.nativeNamespace ?? null, hostProfileKey: desired.hostProfileKey,
+                    global: desired.global, globalRevision: desired.globalRevision,
+                    profile: desired.profile, nativeRevision: desired.nativeRevision,
+                    nativeFormRevision: desired.nativeFormRevision ?? null, nativeForm: desired.nativeForm === undefined ? null : { base: desired.nativeForm.base ?? null, user: desired.nativeForm.user ?? null },
+                    desired: { ...readOnlySettings(desired.settings) }, sources: readOnlySettingSources(desired.sources),
+                    startup: { ...readOnlySettings(this.startup) }, defaults: DEFAULT_DSMM_SETTINGS,
+                    ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
+                    schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
+                    modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
+            }
+            catch (error) {
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+            }
         }
         async describe() {
             try {
@@ -283,8 +314,8 @@ export function registerProfilesRpc(ctx, backend, deployment) {
     return service;
 }
 /** Core-owned injection; works without any DW or profile business service. */
-export function registerConfigRpc(ctx, deployment, startup) {
-    const service = new DsmmConfigHost(ctx, deployment, startup);
+export function registerConfigRpc(ctx, deployment, startup, runtime, startupSources) {
+    const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources);
     ctx.typert.register(TYPERT_HOST);
     return service;
 }

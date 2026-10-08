@@ -65,7 +65,9 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
       await a.settings.mutate(before.ns, [
         { op: "set", path: ["defaultActive"], value: false },
         { op: "set", path: ["workflow", "reviewCap"], value: 2 },
-        { op: "set", path: ["roles", "dsmm-planner"], value: true }
+        { op: "set", path: ["roles", "dsmm-planner"], value: true },
+        { op: "set", path: ["skills", "debugging"], value: false },
+        { op: "set", path: ["runtimeRecovery", "enabled"], value: true }
       ], before.revision);
       a.assertLive(); b.assertLive();
       assert.equal(Reflect.get(a.fiber.config, "defaultActive"), activeRef, "native refs retain identity");
@@ -77,11 +79,15 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
       assert.equal(oldRoot.status, "running");
       assert.equal(a.ctx.agents.get(oldRoot.id), oldRoot);
       assert.equal(a.runtime.admission(asDshAgent(oldRoot)), oldAdmission, "the complete old admission remains pinned");
-      assert.equal(oldAdmission.settings.workflow.reviewCap, 5);
+       assert.equal(oldAdmission.settings.workflow.reviewCap, 5);
+       assert.equal(oldAdmission.settings.skills.debugging, true);
+       assert.equal(oldAdmission.settings.runtimeRecovery.enabled, false);
       const persisted = a.persistedConfig();
       assert.equal(persisted.defaultActive, false);
       assert.equal(persisted.workflow?.reviewCap, 2);
-      assert.equal(persisted.roles?.["dsmm-planner"], true);
+       assert.equal(persisted.roles?.["dsmm-planner"], true);
+       assert.equal(persisted.skills?.debugging, false);
+       assert.equal(persisted.runtimeRecovery?.enabled, true);
       assert.notEqual(readFileSync(a.patchPath, "utf8"), originalPatchA, "ConfigEditor must write the native profile patch");
       assert.equal(readFileSync(b.patchPath, "utf8"), originalPatchB, "a native save must not patch another profile");
       assert.equal(readFileSync(globalPath, "utf8"), globalBytes, "profile save must not write the shared global base");
@@ -102,7 +108,9 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     const newAdmission = a.runtime.admission(asDshAgent(newRoot));
     assert.notEqual(newAdmission.epoch, oldAdmission.epoch);
     assert.equal(newAdmission.settings.defaultActive, false);
-    assert.equal(newAdmission.settings.workflow.reviewCap, 2);
+     assert.equal(newAdmission.settings.workflow.reviewCap, 2);
+     assert.equal(newAdmission.settings.skills.debugging, false);
+     assert.equal(newAdmission.settings.runtimeRecovery.enabled, true);
     assert.equal(newAdmission.deployment?.profile.roles?.["dsmm-planner"], true);
     assert.equal(newAdmission.settings.roles["dsmm-planner"], false, "a desired role cannot conjure missing startup substrate");
     assert.deepEqual(newAdmission.restartRequired, ["roles.dsmm-planner"]);

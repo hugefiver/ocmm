@@ -119,7 +119,7 @@ function createFormatterFixture(): DsmmStatusSnapshot {
         maxContinuations: 3
       }
     },
-    effectiveSettings: settings
+    effectiveSettings: { ...settings, runtimeRecovery: { ...settings.runtimeRecovery, idleContinuation: { ...settings.runtimeRecovery.idleContinuation, prompt: "<configured>" } } }
   };
 }
 
@@ -136,7 +136,7 @@ test("ordinary-root status reports native-owned model selection instead of dorma
   assert.deepEqual(snapshot.rolePolicy.fallbackRoutes, []); assert.equal(snapshot.rolePolicy.fallbackSource, "disabled");
   assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
   assert.equal(snapshot.route.currentReasoningEffort, "low");
-  assert.deepEqual(snapshot.effectiveSettings, { ...settings, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }, "routing policy remains inspectable while arbitrary LSP command contents remain private");
+  assert.deepEqual(snapshot.effectiveSettings, { ...settings, runtimeRecovery: { ...settings.runtimeRecovery, idleContinuation: { ...settings.runtimeRecovery.idleContinuation, prompt: "<configured>" } }, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }, "routing policy remains inspectable while arbitrary LSP command and prompt contents remain private");
   assert.equal(appended(), 0);
 });
 
@@ -298,7 +298,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
         maxContinuations: 2
       }
     },
-    effectiveSettings: { ...settings, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }
+    effectiveSettings: { ...settings, runtimeRecovery: { ...settings.runtimeRecovery, idleContinuation: { ...settings.runtimeRecovery.idleContinuation, prompt: "<configured>" } }, lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>"] } }
   });
   assert.equal(appended(), 0);
 });
@@ -573,7 +573,8 @@ test("effective settings are an exhaustive defensive copy with private paths and
   const copy = snapshot.effectiveSettings;
 
   assert.deepEqual(copy, { ...settings, presets: { ...settings.presets, root: "<configured>" },
-    lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>", "<configured>"], cwd: "<configured>", env: { CUSTOM_LSP: "<redacted>" } } });
+    runtimeRecovery: { ...settings.runtimeRecovery, idleContinuation: { ...settings.runtimeRecovery.idleContinuation, prompt: "<configured>" } },
+    lsp: { ...settings.lsp, command: "<configured>", args: ["<configured>", "<configured>"], cwd: "<configured>", env: { "variable-1": "<redacted>" } } });
   for (const output of [JSON.stringify(snapshot), formatDsmmStatus(snapshot)]) {
     assert.doesNotMatch(output, /PRIVATE_LSP_SENTINEL|PRIVATE_PARAMETER_SENTINEL/u);
   }
@@ -622,9 +623,9 @@ test("effective settings are an exhaustive defensive copy with private paths and
   assert.deepEqual(copy.runtimeRecovery.retryOnStatusCodes, [429, 503]);
   assert.deepEqual(copy.runtimeRecovery.retryOnCodes, ["eagain"]);
   assert.equal(copy.runtimeRecovery.fallbackRoutes[0].provider, "backup");
-  assert.equal(copy.runtimeRecovery.idleContinuation.prompt, "Continue safely.");
+  assert.equal(copy.runtimeRecovery.idleContinuation.prompt, "<configured>");
   assert.deepEqual(copy.lsp.args, ["<configured>", "<configured>"]);
-  assert.deepEqual(copy.lsp.env, { CUSTOM_LSP: "<redacted>" });
+  assert.deepEqual(copy.lsp.env, { "variable-1": "<redacted>" });
 
   copy.runtimeRecovery.fallbackRoutes[0].model = "snapshot-model";
   Object.assign(copy.lsp.env, { SNAPSHOT_ONLY: "yes" });

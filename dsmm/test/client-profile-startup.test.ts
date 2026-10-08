@@ -41,6 +41,7 @@ function startupDocument() {
     head: { append(node: StyleNode) { styles.add(node); } },
   } };
 }
+function profileStyles(styles: Set<StyleNode>): number { return [...styles].filter(node => Object.hasOwn(node.dataset, "dsmmProfiles")).length; }
 
 async function nativeClient<T>(packageName: string, document: ReturnType<typeof startupDocument>["document"], sourceOverride?: string): Promise<T> {
   const source = sourceOverride ?? await readFile(join(dirname(require.resolve(`${packageName}/package.json`)), "lib/client.js"), "utf8");
@@ -66,6 +67,7 @@ async function nativeClient<T>(packageName: string, document: ReturnType<typeof 
 }
 
 const SettingsShell: SlotComponent<ComposedProps<"root", string, "settings.section" | "conversation.header.leading", undefined, object>> = (props) => [props.renderSlot("settings.section", { close() {} }), props.renderSlot("conversation.header.leading", {})];
+const PluginsShell: SlotComponent<ComposedProps<"root", string, "plugins.item" | "plugins.bundle.config" | "plugins.row.config", undefined, object>> = props => props.renderSlot("plugins.item", { view: "summary" });
 
 async function fixture(sourceOverride?: string, deferUi = false) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-client-startup-"));
@@ -115,6 +117,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
     const entry = client.plugin(production);
     return { host, client, production, entry, remoteFiber, calls, styles: dom.styles, installUi,
       declareSettings: () => client.slots.register({ name: "root", children: { "settings.section": { kind: "list", scope: "root" }, "conversation.header.leading": { kind: "single", scope: "root" } } }, SettingsShell),
+      declarePlugins: () => client.slots.register({ name: "root", priority: 1, children: { "plugins.item": { kind: "list", scope: "root" }, "plugins.bundle.config": { kind: "keyed", scope: "root" }, "plugins.row.config": { kind: "keyed", scope: "root" } } }, PluginsShell),
       async dispose() { await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true }); },
     };
   } catch (error) {
@@ -196,7 +199,7 @@ test("replaying the uninjected production client reproduces the frozen native st
     await assert.rejects(f.entry.await(), /cannot get property "remote\.dsmmProfiles" without inject/u);
     assert.equal(f.entry.state, 3);
     assert.deepEqual(f.calls, [], "dependency refusal happens before native business calls");
-    assert.equal(f.styles.size, 0);
+    assert.equal(profileStyles(f.styles), 0);
     assert.equal(f.client.slots.entries("settings.section").length, 0);
   } finally { await f.dispose(); }
 });
@@ -211,7 +214,8 @@ test("production client activates after mounting the independently injected nati
     const child = namespaceChild(f);
     await child.await();
     assert.equal(child.state, 2);
-    assert.equal(f.styles.size, 1);
+    assert.equal(profileStyles(f.styles), 1);
+    assert.equal(f.styles.size, 2, "core and named editor own separate native lifetimes");
     assert.equal(f.client.locale.bind(NS)("title"), en.title, "parent locale injection remains available in the native child");
     const face = profilesFace(f);
     await settled(face);
@@ -274,7 +278,7 @@ test("production client waits for genuine native UI providers before mounting it
     assert.equal(f.client.slots.entries("settings.section").length, 0);
     f.declareSettings();
     await settled(profilesFace(f));
-    assert.equal(f.styles.size, 1);
+    assert.equal(profileStyles(f.styles), 1);
   } finally { await f.dispose(); }
 });
 
@@ -282,6 +286,7 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
   const f = await fixture();
   try {
     f.declareSettings();
+    f.declarePlugins();
     await f.entry.await();
     const child = namespaceChild(f);
     await child.await();
@@ -297,9 +302,16 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
     assert.equal(child.state, 0, "only the namespace-dependent child stops when that service withdraws");
     assert.equal(f.entry.state, 2);
     assert.equal(f.client.get("remote.dsmmProfiles"), undefined);
-    assert.equal(f.styles.size, 0);
+    assert.equal(profileStyles(f.styles), 0);
+    assert.equal(f.styles.size, 1, "named namespace withdrawal must not remove core UI styles");
     assert.equal(f.client.locale.bind(NS)("title"), "title");
     assert.equal(f.client.slots.entries("settings.section").length, 0);
+    const coreItems = f.client.slots.entries("plugins.item");
+    assert.equal(coreItems.length, 1, "sessionless Plugins core survives named namespace withdrawal");
+    assert.equal(coreItems[0].options.id, "dsmm");
+    assert.equal(SlotCore.resolveSlotLabel(coreItems[0].options.label), "DSMM");
+    assert.equal(f.client.get("uiSession"), undefined);
+    assert.equal(f.client.get("sessions"), undefined);
     const calls = f.calls.length;
     const snapshot = old.hooks.profiles.getSnapshot();
     await old.refresh(); await old.save(); await old.apply(); await old.reset();
@@ -316,7 +328,7 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
     assert.notEqual(current.hooks.profiles, old.hooks.profiles);
     await settled(current);
     assert.equal(current.hooks.profiles.getSnapshot().issue, null);
-    assert.equal(f.styles.size, 1);
+    assert.equal(profileStyles(f.styles), 1);
     assert.equal(f.client.locale.bind(NS)("title"), en.title);
     assert.deepEqual(f.calls, ["dsmmProfiles/describe", "dsmmProfiles/describe"]);
   } finally { await f.dispose(); }
@@ -327,7 +339,7 @@ test("unloading the client cancels a namespace-owned pending settings declaratio
   try {
     await f.entry.await();
     await namespaceChild(f).await();
-    assert.equal(f.styles.size, 1);
+    assert.equal(profileStyles(f.styles), 1);
     await f.entry.dispose();
     assert.equal(f.styles.size, 0);
     f.declareSettings();

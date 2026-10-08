@@ -163,7 +163,7 @@ const expectedCompatibility = [
   ["Cordis", "~4.0.4"],
   ["DSH component peers", "0.2.0-rc.2"],
   ["Linux container", "Node 22 Bookworm"],
-  ["Windows Desktop", "installed official `0.2.0-rc.2` carrier/host"],
+  ["Windows Desktop", "official `0.2.1-alpha.1` fixed source target"],
   ["macOS", "Node >=22"],
   ["Native Settings", "additive Deepwork Profiles client and authenticated RPC"],
   ["Headless", "deployment config and native role tools"],
@@ -172,6 +172,7 @@ const expectedCompatibility = [
   ["Runtime recovery", "process-local"],
   ["Per-role model/effort/fallback policy", "native request, subagent and descriptor seams"],
   ["C0 deployment layers", "sparse central global base and explicit native entry/profile transport"],
+  ["Native Plugins", "rc.2 item/bundle/row public slots and Host forms"],
   ["Runtime profiles", "central shared drafts/revisions, scoped default/sidecars; strict read-only legacy origin"],
   ["Durable DSMM metadata", "deployment-only `sessionPersistence` on main DSMM entry"],
   ["DeepSeek V4 Pro calibration", "deepseek-official/deepseek-v4-pro"],
@@ -275,7 +276,7 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
   assert.equal(rows.find(([surface]) => surface === "TUI")?.[2], "existing official 0.1.6 CLI/TUI installation verified; new 0.1.9 menu proof is Web/Desktop only");
   assert.equal(rows.find(([surface]) => surface === "macOS")?.[2], "supported by contract");
   assert.match(rows.find(([surface]) => surface === "Native Settings")?.[2] ?? "", /actual Desktop.*separate proofs/u);
-  assert.match(rows.find(([surface]) => surface === "C0 deployment layers")?.[2] ?? "", /backend storage\/capture contract; D Config browser proof pending/u);
+  assert.match(rows.find(([surface]) => surface === "C0 deployment layers")?.[2] ?? "", /backend storage\/capture plus D real native Web form\/CAS proof/u);
   assert.match(rows.find(([surface]) => surface === "Runtime profiles")?.[2] ?? "", /new-root defaults.*idle overlay epochs.*origin-pinned cold resume/u);
   assert.match(rows.find(([surface]) => surface === "Durable DSMM metadata")?.[2] ?? "", /explicit startup integration.*acceptance pending/u);
 });
@@ -283,7 +284,7 @@ test("compatibility matrix has the fixed rc.2 release contract", () => {
 test("compatibility authority is pinned to the reviewed rc.2 release", () => {
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
-  assert.match(compatibility, /^# Deepwork 0\.1\.9 Compatibility/mu);
+  assert.match(compatibility, /^# DSMM 0\.1\.9 Compatibility/mu);
   for (const heading of ["Compatibility authority", "Compatibility matrix", "Command and runtime boundaries", "Evidence limits"]) {
     assert.match(compatibility, new RegExp(`^## ${heading}$`, "mu"));
   }
@@ -302,7 +303,7 @@ test("compatibility document fixes command, headless, platform, and provider bou
   const compatibility = readFileSync(compatibilityPath, "utf8");
 
   assert.ok(compatibility.includes("`/deepwork` and `/dsmm-status` are host-adapter commands, not headless task-text commands."));
-  assert.match(compatibility, /native client provides Settings → Deepwork Profiles/u);
+  assert.match(compatibility, /native client provides Plugins → DSMM and the separate Settings → Deepwork Profiles/u);
   assert.match(compatibility, /no model-visible profile-management tools or anonymous file endpoints/u);
   assert.match(compatibility, /Headless uses native profile configuration plus DSMM's sparse global base/u);
   assert.match(compatibility, /`--dump-config` shows native Loader composition, not the complete global-aware DSMM effective snapshot/u);
@@ -500,7 +501,7 @@ test("README fixes the pending publication and stable packed-runtime boundaries"
   assert.match(readme, /^## Verification$/mu);
   for (const phrase of [
     "@deepseek-ai/dsh@0.2.0-rc.2",
-    "0.1.9 publication and Desktop acceptance remain pending",
+    "Publication, final artifact gates and actual Electron/Desktop acceptance remain pending",
     "dsh plugin --profile <profile> add <absolute-path-to-dsmm-dsmm-0.1.9.tgz>",
     "dsh --profile <profile> --dump-config",
     "pnpm --dir dsmm smoke:docker",
@@ -520,7 +521,7 @@ test("0.1.9 guides preserve completed release history and native root model auth
   const readme = readFileSync(readmePath, "utf8");
   const release = readFileSync(releasePath, "utf8");
   for (const document of [readme, release]) {
-    assert.match(document, /completed 0\.1\.5 publication/u);
+    assert.match(document, /completed 0\.1\.5 publication/iu);
     assert.match(document, /completed 0\.1\.6 publication\/continuation/u);
     assert.match(document, /0\.1\.2.*untouched and unpublished/u);
     assert.match(document, /37235817488/u);
@@ -582,11 +583,11 @@ test("0.1.9 documentation requires explicit durable mode and a single admitted-p
     assert.match(document, /saved explicit `deepwork\/mode`/u, path);
     assert.match(document, /same-default.*(?:persist|intent)/iu, path);
     assert.match(document, /profile changes and reopen|profile changes and fresh-process reopen/iu, path);
-    if (path === compatibilityPath || path === readmePath || path === join(packageRoot, "docs", "profiles.md") || path === join(packageRoot, "docs", "settings-status.md")) {
+    if (path !== releasePath) {
       assert.match(document, /DW (?:presets|roles).*(?:not locked|aren't locked)|DW roles are no longer locked/iu, path);
       assert.match(document, /explicit off.*(?:retain(?:s|ing)?|does not remove)/iu, path);
     } else {
-      // Other historical release/UI documents are outside stage A ownership.
+      // The historical release proof is unchanged; current product design follows the captured module ceiling.
       assert.match(document, /standing DW presets.*locked enabled/iu, path);
     }
     assert.match(document, /one profile list/iu, path);
@@ -706,7 +707,7 @@ test("release readiness checker rejects a stale or manifest-selected release ver
   }
 });
 
-test("release readiness checker requires both native Deepwork metadata resources", () => {
+test("release readiness checker requires both native DSMM metadata resources", () => {
   for (const path of ["locale/en.json", "locale/zh.json"]) {
     const fixtureRoot = createReleaseFixture();
     try {
@@ -718,15 +719,15 @@ test("release readiness checker requires both native Deepwork metadata resources
   }
 });
 
-test("release readiness checker rejects malformed or noncanonical Deepwork metadata", () => {
+test("release readiness checker rejects malformed or noncanonical DSMM metadata", () => {
   const cases = [
     ["invalid JSON", "{not-json}"],
     ["missing metadata", "{}"],
-    ["wrong title", JSON.stringify({ meta: { title: "DSMM", description: "Workflow bundle" } })],
-    ["empty description", JSON.stringify({ meta: { title: "Deepwork", description: "  \n" } })],
-    ["non-string description", JSON.stringify({ meta: { title: "Deepwork", description: 3 } })],
-    ["unexpected metadata field", JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle", extra: true } })],
-    ["unexpected root field", JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle" }, extra: true })]
+    ["wrong title", JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle" } })],
+    ["empty description", JSON.stringify({ meta: { title: "DSMM", description: "  \n" } })],
+    ["non-string description", JSON.stringify({ meta: { title: "DSMM", description: 3 } })],
+    ["unexpected metadata field", JSON.stringify({ meta: { title: "DSMM", description: "Workflow bundle", extra: true } })],
+    ["unexpected root field", JSON.stringify({ meta: { title: "DSMM", description: "Workflow bundle" }, extra: true })]
   ];
   for (const path of ["locale/en.json", "locale/zh.json"]) {
     const fixtureRoot = createReleaseFixture();
@@ -735,7 +736,7 @@ test("release readiness checker rejects malformed or noncanonical Deepwork metad
         writeFixtureFile(fixtureRoot, path, contents);
         const { receipt, status } = runReleaseChecker(fixtureRoot);
         assert.equal(status, 1, `${path}: ${label}`);
-        assert.deepEqual(receipt.errors, [`plugin metadata resource must contain exactly Deepwork title and nonempty description: ${path}`]);
+        assert.deepEqual(receipt.errors, [`plugin metadata resource must contain exactly DSMM title and nonempty description: ${path}`]);
       }
     } finally { removeReleaseFixture(fixtureRoot); }
   }
@@ -745,7 +746,7 @@ test("release readiness checker rejects extra locale assets without broadening f
   const fixtureRoot = createReleaseFixture();
   try {
     const extra = "locale/fr.json";
-    writeFixtureFile(fixtureRoot, extra, JSON.stringify({ meta: { title: "Deepwork", description: "Workflow bundle" } }));
+    writeFixtureFile(fixtureRoot, extra, JSON.stringify({ meta: { title: "DSMM", description: "Workflow bundle" } }));
     const { receipt, status } = runReleaseChecker(fixtureRoot);
     assert.equal(status, 1);
     assert.equal(receipt.forbiddenSurfaceCount, 1);

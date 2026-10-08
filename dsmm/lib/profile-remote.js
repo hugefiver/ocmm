@@ -156,7 +156,7 @@ function selectionState(value) {
     return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value) {
-    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules"]);
+    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration"]);
     if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope))
         fail("scope");
     return {
@@ -171,6 +171,7 @@ function sessionSnapshot(value) {
         ...optional(item, "rolePolicy", rolePolicy),
         ...optional(item, "profileModel", modelRoute),
         ...optional(item, "modules", moduleStates),
+        ...optional(item, "configuration", admissionView),
         ...optional(item, "deepwork", (input) => {
             const mode = object(input, ["active", "explicit", "locked", "revision"]);
             return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
@@ -230,6 +231,123 @@ function globalSnapshot(value) {
     object(row.config, [], Object.keys(row.config));
     return { config: jsonData(row.config), revision: selectionRevision(row.revision) };
 }
+function admissionView(value) {
+    const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"]);
+    object(row.settings, [], Object.keys(row.settings));
+    for (const key of ["sources", "captures"]) {
+        const map = object(row[key], [], Object.keys(row[key]));
+        for (const [path, value] of Object.entries(map)) {
+            if (path.startsWith("lsp.env."))
+                fail("private environment field");
+            text(value, key, 128);
+        }
+    }
+    if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256)
+        fail("restartRequired");
+    const named = row.named === null ? null : object(row.named, ["id", "revision"]);
+    return { settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources),
+        captures: jsonData(row.captures), restartRequired: row.restartRequired.map(value => text(value, "field", 256)),
+        named: named === null ? null : { id: id(named.id), revision: revision(named.revision) } };
+}
+function readOnlySettingsData(value) {
+    const settings = jsonData(value);
+    const configured = (value) => { if (value !== "" && value !== "<configured>")
+        fail("private configured value"); };
+    if (settings.lsp !== undefined) {
+        const lsp = object(settings.lsp, ["enabled", "serverName", "command", "args", "cwd", "env", "toolCallTimeoutMs", "failOnStartupError"]);
+        configured(lsp.command);
+        configured(lsp.cwd);
+        if (!Array.isArray(lsp.args) || lsp.args.some(value => value !== "<configured>"))
+            fail("private arguments");
+        const env = object(lsp.env, [], Object.keys(lsp.env));
+        for (const [key, value] of Object.entries(env))
+            if (!/^variable-[1-9][0-9]*$/u.test(key) || value !== "<redacted>")
+                fail("private environment");
+    }
+    if (settings.presets !== undefined) {
+        const presets = object(settings.presets, ["materialize"], ["root"]);
+        if (presets.root !== undefined && presets.root !== "<configured>")
+            fail("private directory");
+    }
+    if (settings.runtimeRecovery !== undefined) {
+        const recovery = object(settings.runtimeRecovery, ["enabled", "retryOnStatusCodes", "retryOnCodes", "fallbackRoutes", "maxFallbackAttempts", "idleContinuation"]);
+        const idle = object(recovery.idleContinuation, ["enabled", "maxContinuations", "prompt"]);
+        configured(idle.prompt);
+    }
+    return settings;
+}
+function editorSnapshot(value) {
+    const row = object(value, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources"]);
+    const result = jsonData(row);
+    text(row.entryId, "entryId", 256);
+    if (row.namespace !== null)
+        text(row.namespace, "namespace", 256);
+    revision(row.hostProfileKey);
+    selectionRevision(row.globalRevision);
+    revision(row.nativeRevision);
+    if (row.nativeFormRevision !== null)
+        integer(row.nativeFormRevision, "nativeFormRevision");
+    for (const key of ["global", "profile", "desired", "sources", "startup", "defaults", "schema"])
+        object(row[key], [], Object.keys(row[key]));
+    if (row.nativeForm !== null)
+        object(row.nativeForm, ["base", "user"]);
+    if (row.nextRoot !== null)
+        result.nextRoot = admissionView(row.nextRoot);
+    result.desired = readOnlySettingsData(row.desired);
+    result.startup = readOnlySettingsData(row.startup);
+    result.schema = schemaNode(row.schema);
+    for (const map of [result.sources, result.startupSources]) {
+        if (map === undefined)
+            continue;
+        object(map, [], Object.keys(map));
+        for (const [path, value] of Object.entries(map)) {
+            if (path.startsWith("lsp.env."))
+                fail("private environment field");
+            text(value, "source", 128);
+        }
+    }
+    result.modules = moduleStates(row.modules);
+    return result;
+}
+function schemaNode(value) {
+    const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
+    if (!["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(String(row.type)))
+        fail("schema type");
+    const node = { type: String(row.type) };
+    if (row.fields !== undefined)
+        node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields))).map(([key, child]) => [key, schemaNode(child)]));
+    if (row.inner !== undefined)
+        node.inner = schemaNode(row.inner);
+    if (row.alternatives !== undefined) {
+        if (!Array.isArray(row.alternatives))
+            fail("schema alternatives");
+        node.alternatives = row.alternatives.map(schemaNode);
+    }
+    if (Object.hasOwn(row, "value")) {
+        if (!["string", "number", "boolean"].includes(typeof row.value))
+            fail("schema value");
+        node.value = row.value;
+    }
+    for (const key of ["min", "max", "step"])
+        if (row[key] !== undefined) {
+            if (typeof row[key] !== "number" || !Number.isFinite(row[key]))
+                fail("schema bound");
+            node[key] = row[key];
+        }
+    if (row.required !== undefined)
+        node.required = boolean(row.required, "schema required");
+    if (row.nonempty !== undefined) {
+        if (row.type !== "string")
+            fail("schema nonempty");
+        node.nonempty = boolean(row.nonempty, "schema nonempty");
+    }
+    if (row.keys !== undefined) {
+        if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64)
+            fail("schema keys");
+        node.keys = row.keys.map(key => text(key, "schema key", 128));
+    }
+    return node;
+}
 function globalSaveRequest(value) {
     const row = object(value, ["expectedRevision", "edits"]);
     if (!Array.isArray(row.edits) || row.edits.length > 128)
@@ -278,6 +396,7 @@ export const TYPERT_REMOTE = {
         configDescriptor("describe"),
         configDescriptor("save", codec("GlobalConfigSaveRequest", globalSaveRequest)),
         { ...configDescriptor("describeModules"), result: codec("DsmmModuleStateArray", moduleStates) },
+        { ...configDescriptor("describeSettings"), result: codec("DeploymentEditorSnapshot", editorSnapshot) },
         {
             ...descriptor("selectMode", codec("SessionProfileSnapshot", sessionSnapshot)),
             parameters: [

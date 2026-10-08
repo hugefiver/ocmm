@@ -5,6 +5,8 @@ import type { DshAgent } from "./dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 import type { DsmmModuleState } from "./modules.js";
 import type { DsmmSettings } from "./settings.js";
+import type { DeploymentEditorSnapshot } from "./profile-types.js";
+import type { DsmmProfileRuntime } from "./profile-runtime.js";
 export interface ProfilesBackend {
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
@@ -35,8 +37,11 @@ export declare function assertLocalSettingsOperator(ctx: Context): void;
 export declare class DsmmConfigHost extends TypertRemoteService {
     private readonly backend;
     private readonly startup?;
+    private readonly runtime?;
+    private readonly startupSources?;
     private readonly lifetime;
-    constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined);
+    constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined, runtime?: (() => DsmmProfileRuntime | undefined) | undefined, startupSources?: Record<string, string> | undefined);
+    describeSettings(): Promise<DeploymentEditorSnapshot>;
     describe(): Promise<GlobalConfigSnapshot>;
     describeModules(): Promise<DsmmModuleState[]>;
     save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot>;
@@ -50,5 +55,5 @@ declare module "@deepseek-ai/cordis" {
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
 export declare function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, deployment?: DsmmDeploymentConfig): DsmmProfilesHost;
 /** Core-owned injection; works without any DW or profile business service. */
-export declare function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings): DsmmConfigHost;
+export declare function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>): DsmmConfigHost;
 //# sourceMappingURL=profile-rpc.d.ts.map

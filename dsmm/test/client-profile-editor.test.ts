@@ -101,9 +101,9 @@ type HeaderComponent = (props: HeaderInput) => unknown;
 function NativeProfileMenu() { throw new Error("Tree contract only; native Menu browser behavior is verified separately"); }
 function NativeProfileButton() { throw new Error("Tree contract only; native Button is not rendered in this fixture"); }
 function NativeProfileIcon() { throw new Error("Tree contract only; native SVG is not rendered in this fixture"); }
-async function nativeHeaderComponent(): Promise<HeaderComponent> {
+async function nativeHeaderComponent(name: "SessionProfiles" | "ProfilesSection" = "SessionProfiles"): Promise<HeaderComponent> {
   const require = createRequire(import.meta.url);
-  let factory: ((require: (id: string) => unknown) => { SessionProfiles: HeaderComponent }) | undefined;
+  let factory: ((require: (id: string) => unknown) => { SessionProfiles: HeaderComponent; ProfilesSection: HeaderComponent }) | undefined;
   const realm = createContext({ TextEncoder, TextDecoder,
     window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } },
   });
@@ -112,11 +112,11 @@ async function nativeHeaderComponent(): Promise<HeaderComponent> {
   return factory((id) => {
     // JSX tree contract only, not a renderer/browser substitute. All header
     // behavior runs from the compiled production module and real controller.
-    if (id === "react") return { ...require("react"), useId: () => "header-unit", useState: () => [false, () => {}], useEffect: () => {} };
+    if (id === "react") return { ...require("react"), useId: () => "header-unit", useRef: () => ({ current: null }), useState: () => [false, () => {}], useEffect: () => {} };
     if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: NativeProfileButton, Menu: NativeProfileMenu, IconBranchOutlineRegular: NativeProfileIcon, Input() { throw new Error("Header tree must not render an editor"); } };
     assert.equal(id, "react/jsx-runtime");
     return require(id);
-  }).SessionProfiles;
+  })[name];
 }
 function headerTree(component: HeaderComponent, controller: ProfilesController, id = controller.store.getSnapshot().currentSessionId): unknown {
   return component({ ...controller.actions, readProfileView: controller.store.getSnapshot, sessionId: id ?? undefined, useProfiles: (select) => select(controller.store.getSnapshot()), t: translate });
@@ -126,6 +126,26 @@ function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
   if (!isValidElement<Record<string, unknown>>(tree)) return [];
   return [tree, ...elements(tree.props.children), ...elements(tree.props.anchor), ...elements(tree.props.icon)];
 }
+
+test("named legacy editor keeps its pinned selection inspectable and disables every library mutation", async () => {
+  const component = await nativeHeaderComponent("ProfilesSection");
+  const f = fixture({ describe: async () => success({ ...snapshot, origin: "legacy", readOnly: true, selectedId: "p", appliedRevision: revision }) });
+  await f.controller.refresh(); await f.controller.actions.open("p");
+  f.controller.actions.editContent(content + "\n// local unsaved edit\n");
+  assert.equal(f.controller.store.getSnapshot().dirty, true);
+  const nodes = elements(headerTree(component, f.controller));
+  for (const copy of [en.new, en.save, en.apply, en.reset]) {
+    const button = nodes.find(node => node.type === NativeProfileButton && node.props.children === copy);
+    assert.ok(button, copy); assert.equal(button.props.disabled, true, copy);
+  }
+  assert.ok(nodes.some(node => node.props.children === en.legacyOrigin));
+  assert.ok(nodes.some(node => node.props.children === en.readOnlyOrigin));
+  assert.ok(nodes.some(node => node.type === "textarea" && node.props.readOnly === true && String(node.props.value).includes("untouched document comment")));
+  const refresh = nodes.find(node => node.type === NativeProfileButton && node.props.children === en.refresh);assert.equal(refresh?.props.disabled, false);
+  assert.equal(f.controller.store.getSnapshot().snapshot?.appliedRevision, revision);
+  assert.equal(f.calls.some(call => call === "save" || call === "select"), false);
+  f.controller.dispose();
+});
 
 test("profile control is an icon-only native portaled menu with no standalone visible label or status", async () => {
   assert.match(PROFILE_STYLES, /\.dsmm-profile-menu \[role=presentation\]\{[^}]*font:inherit;/u);

@@ -21,7 +21,7 @@ export interface DsmmStatusSnapshot {
   modules?: DsmmModuleState[];
   admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
   profileStore?: DsmmProfileAdmission["store"];
-  deployment?: { globalRevision: string; nativeRevision: string; entryId: string; hostProfileKey: string; restartRequired: readonly string[]; sources: NonNullable<DsmmProfileAdmission["sources"]>; sourceCaptures?: DsmmProfileAdmission["sourceCaptures"] };
+  deployment?: { globalRevision: string; nativeRevision: string; entryId: string; hostProfileKey: string; restartRequired: readonly string[]; sources: Record<string, string>; sourceCaptures?: { fields: Record<string, string>; startup?: { globalRevision: string; nativeRevision: string } } };
   mode: {
     name: string;
     active: boolean;
@@ -130,9 +130,9 @@ export function createDsmmStatusSnapshot(input: {
     ...(input.admission?.deployment === undefined ? {} : { deployment: {
       globalRevision: input.admission.deployment.globalRevision, nativeRevision: input.admission.deployment.nativeRevision,
       entryId: input.admission.deployment.entryId, hostProfileKey: input.admission.deployment.hostProfileKey,
-      restartRequired: [...input.admission.restartRequired ?? []], sources: { ...input.admission.sources },
+      restartRequired: [...input.admission.restartRequired ?? []], sources: readOnlySettingSources(input.admission.sources ?? {}),
       ...(input.admission.sourceCaptures === undefined ? {} : { sourceCaptures: {
-        fields: { ...input.admission.sourceCaptures.fields }, ...(input.admission.sourceCaptures.startup === undefined ? {} : { startup: { ...input.admission.sourceCaptures.startup } })
+        fields: readOnlySettingSources(input.admission.sourceCaptures.fields), ...(input.admission.sourceCaptures.startup === undefined ? {} : { startup: { ...input.admission.sourceCaptures.startup } })
       } })
     } }),
     ...(input.admission === undefined ? {} : { admission: {
@@ -194,7 +194,7 @@ export function createDsmmStatusSnapshot(input: {
         maxContinuations: settings.runtimeRecovery.idleContinuation.maxContinuations
       }
     },
-    effectiveSettings: copySettings(settings),
+    effectiveSettings: readOnlySettings(settings),
     ...(agent.ctx?.get?.<() => DsmmLspRuntimeState>("dsmmLspState") === undefined ? {} : { lspRuntime: agent.ctx.get!<() => DsmmLspRuntimeState>("dsmmLspState")!() })
   };
 }
@@ -288,7 +288,8 @@ function resolveCalibration(input: {
   return { mode: input.calibration, applies: true, policyEffort: input.policyEffort, action: "enforce" };
 }
 
-function copySettings(settings: DsmmSettings): DsmmSettings {
+/** Read-only diagnostics only; never use this copy as configuration input. */
+export function readOnlySettings(settings: DsmmSettings): DsmmSettings {
   return {
     modules: { deepwork: { enabled: settings.modules.deepwork.enabled } },
     modeName: settings.modeName,
@@ -322,7 +323,7 @@ function copySettings(settings: DsmmSettings): DsmmSettings {
       retryOnStatusCodes: [...settings.runtimeRecovery.retryOnStatusCodes],
       retryOnCodes: [...settings.runtimeRecovery.retryOnCodes],
       fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })),
-      idleContinuation: { ...settings.runtimeRecovery.idleContinuation }
+      idleContinuation: { ...settings.runtimeRecovery.idleContinuation, prompt: settings.runtimeRecovery.idleContinuation.prompt === "" ? "" : "<configured>" }
     },
     lsp: {
       enabled: settings.lsp.enabled,
@@ -330,9 +331,20 @@ function copySettings(settings: DsmmSettings): DsmmSettings {
       command: settings.lsp.command === "" ? "" : "<configured>",
       args: settings.lsp.args.map(() => "<configured>"),
       cwd: settings.lsp.cwd === "" ? "" : "<configured>",
-      env: Object.fromEntries(Object.keys(settings.lsp.env).map((key) => [key, "<redacted>"])),
+      env: Object.fromEntries(Object.keys(settings.lsp.env).map((_key, index) => [`variable-${index + 1}`, "<redacted>"])),
       toolCallTimeoutMs: settings.lsp.toolCallTimeoutMs,
       failOnStartupError: settings.lsp.failOnStartupError
     }
   };
+}
+
+/** Environment key names may themselves contain private data. */
+export function readOnlySettingSources(fields: Readonly<Record<string, string>>): Record<string, string> {
+  const result: Record<string, string> = {}, environment = new Set<string>();
+  for (const [path, value] of Object.entries(fields)) {
+    if (path === "lsp.env" || path.startsWith("lsp.env.")) environment.add(value);
+    else result[path] = value;
+  }
+  if (environment.size) result["lsp.env"] = environment.size === 1 ? [...environment][0] : "mixed";
+  return result;
 }

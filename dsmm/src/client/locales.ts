@@ -2,6 +2,7 @@ import type { DsmmRateLimitPolicy } from "../routing-policy.js";
 
 export const NS = "settings.dsmm-profiles";
 export const en = {
+  centralOrigin: "Named resources: shared central store.", legacyOrigin: "Named resources: legacy native-profile store (read-only).", explicitOrigin: "Named resources: explicitly configured store.", readOnlyOrigin: "This legacy store is read-only. Files are not copied or migrated; selection and current-session actions retain their own authority.",
   headerCompactProfiles: "Profiles · keep model", headerCompactRefresh: "Refresh", headerNoSession: "Select a session to make changes.",
   headerModeEnable: "Enable Deepwork", headerModeDisable: "Disable Deepwork", headerModePreset: "Deepwork · DW preset", headerModeUnavailable: "Deepwork unavailable", headerModeOn: "Deepwork enabled.", headerModeOff: "Deepwork disabled.", headerUseCurrentModel: "Use profile model",
   title: "Deepwork Profiles", description: "Save independent runtime configurations and choose which one new sessions use.",
@@ -34,7 +35,7 @@ export const en = {
   headerModelChoiceChanged: "Profile applied; newer native model choice kept.",
   headerActivationRefused: "Profile activation was refused. Check its configuration and native model catalog.", headerSelectionRefused: "The profile change could not be confirmed.", headerIssueCode: "Reason: {code}.", headerIssueField: "Configuration field: {field}.", headerRetryHint: "Refresh profiles and current-session state, resolve the indicated issue in Settings or native Models, then retry when the session is idle.",
   headerMaintenanceRefused: "Native maintenance owns this session. The previous profile is kept.", headerBusyRefused: "The session is busy. The previous profile is kept.", headerCancelledRefused: "The profile request was cancelled. Refresh current-session state before retrying; do not assume a change completed.", headerUnavailableRefused: "The native session or profile service is unavailable. Reconnect and refresh before retrying.", headerWaitRetryHint: "Wait for the native work or maintenance to finish, then Refresh and retry. No profile change is queued automatically.",
-  noSession: "No native session is selected. Session Apply is disabled; global defaults and drafts remain editable.",
+  noSession: "No native session is selected. Applying to the current session is unavailable.",
   sessionUnavailable: "The current session could not be confirmed. Refresh its state before retrying; the prior policy is kept.",
   sessionBusy: "Switching is unavailable: {reason}. The Host must reserve a truly idle ordinary session before applying.",
   sessionState: "Session {id}: {profile}; scope {scope}; admission epoch {epoch}.", sessionBaseline: "deployment baseline",
@@ -61,6 +62,7 @@ export const en = {
 };
 export type ProfilesLocaleKey = keyof typeof en;
 export const zh: Record<ProfilesLocaleKey, string> = {
+  centralOrigin: "具名资源：共享中央存储。", legacyOrigin: "具名资源：旧原生配置存储（只读）。", explicitOrigin: "具名资源：显式指定的存储。", readOnlyOrigin: "此旧存储只读，不复制或迁移文件；选择与当前会话操作仍使用各自的权限。",
   headerCompactProfiles: "配置档 · 保留模型", headerCompactRefresh: "刷新", headerNoSession: "选择会话后可更改。",
   headerModeEnable: "启用 Deepwork", headerModeDisable: "关闭 Deepwork", headerModePreset: "Deepwork · DW 预设", headerModeUnavailable: "Deepwork 不可用", headerModeOn: "Deepwork 已启用。", headerModeOff: "Deepwork 已关闭。", headerUseCurrentModel: "使用配置档模型",
   title: "Deepwork 配置档", description: "保存独立的运行时配置，并选择新会话使用的配置档。",
@@ -92,7 +94,7 @@ export const zh: Record<ProfilesLocaleKey, string> = {
   headerModelChoiceChanged: "配置档已应用，已保留更新的原生模型选择。",
   headerActivationRefused: "配置档启用被拒绝，请检查其配置和原生模型目录。", headerSelectionRefused: "无法确认配置档更改。", headerIssueCode: "原因：{code}。", headerIssueField: "配置字段：{field}。", headerRetryHint: "请刷新配置档和当前会话状态，在设置或原生模型页解决所示问题，然后在会话空闲时重试。",
   headerMaintenanceRefused: "原生维护正在占用此会话，原配置档已保留。", headerBusyRefused: "会话正在运行，原配置档已保留。", headerCancelledRefused: "配置档请求已取消，请刷新当前会话状态后重试，不要假定更改已完成。", headerUnavailableRefused: "原生会话或配置档服务不可用，请重新连接并刷新后重试。", headerWaitRetryHint: "请等待原生运行或维护结束，然后刷新并重试。不会自动排队应用配置档。",
-  noSession: "未选择原生会话。会话应用已禁用；仍可编辑全局默认值和草稿。", sessionUnavailable: "无法确认当前会话。重试前请刷新状态；原策略已保留。", sessionBusy: "暂不可切换：{reason}。Host 必须先保留真正空闲的普通会话。", sessionState: "会话 {id}：{profile}；范围 {scope}；准入代次 {epoch}。", sessionBaseline: "部署基线",
+  noSession: "未选择原生会话。无法应用到当前会话。", sessionUnavailable: "无法确认当前会话。重试前请刷新状态；原策略已保留。", sessionBusy: "暂不可切换：{reason}。Host 必须先保留真正空闲的普通会话。", sessionState: "会话 {id}：{profile}；范围 {scope}；准入代次 {epoch}。", sessionBaseline: "部署基线",
   sessionGlobalCaptured: "已捕获的全局默认值（没有明确会话覆盖）",
   sessionAdmittedProfile: "{id}（修订 {revision}）", sessionFutureDefault: "未来没有独立选择的会话的全局默认值：{profile}。这不会改变当前会话的准入。",
   sessionConflict: "会话选择或准入代次已在其他位置改变。原显示和草稿已保留。再次应用前请刷新当前会话状态。",

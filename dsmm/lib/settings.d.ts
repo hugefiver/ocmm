@@ -4,6 +4,7 @@ import type { DsmmLspSettings } from "./lsp.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmSkillName } from "./skills.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
+import type { DeploymentSchemaNode } from "./profile-types.js";
 export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
@@ -201,6 +202,8 @@ export interface RegisterSettingsOptions {
     install?: (readyCtx: DshContext, getSettings: () => DsmmSettings) => void;
 }
 export declare const DEFAULT_DSMM_SETTINGS: DsmmSettings;
+/** Only data is transported. Defaults remain resolved by the existing authority. */
+export declare function deploymentEditorSchema(): DeploymentSchemaNode;
 export declare const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
 export declare const DSMM_NATIVE_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
 export declare const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings>;
