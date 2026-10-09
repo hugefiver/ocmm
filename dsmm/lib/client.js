@@ -3325,10 +3325,19 @@ var PROFILE_STYLES = `
 .dsmm-profiles .dsmm-issue{padding:12px;border-left:4px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-issue p+p{margin-top:8px}
 .dsmm-profiles .dsmm-status{min-height:22px}
+.dsmm-deployment{gap:8px}
+.dsmm-deployment .dsmm-deployment-card{min-width:0;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md)}
+.dsmm-deployment .dsmm-deployment-card>summary{padding:8px 12px;font-weight:500;line-height:22px;min-height:32px;box-sizing:border-box}
+.dsmm-deployment .dsmm-deployment-card>summary:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsmm-deployment .dsmm-deployment-card>summary:active{background:var(--dsw-alias-interactive-bg-active)}
+.dsmm-deployment .dsmm-deployment-card>summary>span{margin-left:8px;font-weight:400}
+.dsmm-deployment .dsmm-deployment-card>summary>span:empty{display:none}
+.dsmm-deployment .dsmm-deployment-card>div,.dsmm-deployment .dsmm-deployment-card>fieldset{display:flex;flex-direction:column;gap:8px;padding:0 12px 12px;border:0}
+.dsmm-deployment .dsmm-deployment-card>fieldset>legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .dsmm-deployment .dsmm-deployment-group{border-top:1px solid var(--dsw-alias-border-l4);padding-top:8px;min-width:0}
-.dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:12px;padding-top:8px}
+.dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:8px;padding-top:8px}
 .dsmm-deployment code{font-family:var(--ds-font-family-code);overflow-wrap:anywhere}
-.dsmm-deployment label code,.dsmm-deployment summary code{display:block;color:var(--dsw-alias-label-secondary)}
+.dsmm-deployment label code,.dsmm-deployment summary code{margin-left:8px;font-size:12px;line-height:18px;font-weight:400;color:var(--dsw-alias-label-secondary)}
 .dsmm-deployment pre{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--ds-font-family-code)}
 .dsmm-deployment .dsmm-deployment-state{display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;border-top:1px solid var(--dsw-alias-border-l4)}
 .dsmm-deployment .dsmm-deployment-state dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
@@ -3597,27 +3606,28 @@ var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primi
 var DEPLOYMENT_NS = "plugins.dsmm";
 var deploymentEn = {
   title: "DSMM",
-  summary: "Global controls, profile overrides and captured Deepwork state.",
-  description: "Save deployment intent without changing the native model or running sessions. These two layers save independently.",
+  summary: "Global config and profile overrides",
+  description: "Layers save independently; native models and running sessions stay unchanged.",
   global: "DSMM Global config",
-  globalHint: "Shared base for all DSH profiles in this Home. Missing fields use built-in defaults.",
+  globalHint: "Shared by this Home’s DSH profiles. Unset fields use built-in defaults.",
   profile: "Current DSH profile overrides",
-  profileHint: "Only this native DSMM entry. Missing fields inherit Global config; explicit default values remain pins.",
-  unavailableForm: "Profile editing is unavailable here: an exact writable Host form for this entry has not been verified. Open its bundle or row configuration; never use Global save as a substitute.",
-  ceiling: "Deepwork master is Global-only. Neither a profile, named profile nor session mode can exceed its captured ceiling.",
-  hostUnknown: "Host bundle loaded/enabled: unknown. The Host’s bundle switch is separate from this module control.",
-  boundaries: "Saving does not restart, cancel, reconcile or mount LSP. Existing roots and their future children keep their capture. A new root captures the latest valid intent within startup capabilities. Startup-only changes need an independent explicit Host restart (which can cancel sessions).",
+  profileHint: "This entry only. Unset fields inherit Global config.",
+  profileUnavailable: "Unavailable",
+  unavailableForm: "No verified writable form. Open this entry’s bundle or row config to edit profile overrides.",
+  ceiling: "Deepwork master is Global-only; profiles and session modes cannot lift its captured ceiling.",
+  hostUnknown: "Host bundle status: unknown (separate switch).",
+  boundaries: "New roots capture saved settings within startup capabilities. Save does not restart or reload LSP; startup-only changes require a separate Host restart, which may cancel sessions.",
   saveGlobal: "Save Global config",
   saveProfile: "Save profile overrides",
   saving: "Saving…",
-  refresh: "Refresh state",
-  discard: "Discard draft and reload",
+  refresh: "Refresh",
+  discard: "Discard and reload",
   dirty: "Unsaved changes",
-  saved: "This layer was saved. Running sessions were not changed.",
+  saved: "Saved",
   inherit: "Inherit",
-  explicit: "Explicit override",
-  defaultPin: "Explicit built-in default pin",
-  hostPin: "Host composition pin remains after clearing the user override.",
+  explicit: "Override",
+  defaultPin: "Built-in default pinned",
+  hostPin: "Host pin remains when cleared",
   globalSource: "Global",
   profileSource: "DSH profile",
   defaultsSource: "Built-in default",
@@ -3629,49 +3639,50 @@ var deploymentEn = {
   next: "Next root",
   session: "Current-session admitted",
   noSession: "No active session: admission is unknown.",
-  sessionUnavailable: "This native session is known, but its admission projection is unavailable. Refresh the session after reconnecting; Global refresh does not rebind it.",
+  sessionUnavailable: "Session admission unavailable. Reconnect and refresh the session separately.",
   absent: "Absent",
   mixedSource: "Mixed sources",
-  inspectorStale: "These are captured revisions, not unsaved drafts. Refresh preserves conflicts and does not refresh or change the session admission.",
+  inspectorStale: "Saved state, not draft",
   pending: "Pending independent restart",
   unknown: "Unknown",
   on: "On",
   off: "Off",
   state: "Field sources and effective state",
   module: "Deepwork module",
-  advanced: "Bounded advanced JSON",
-  advancedHint: "Only the declared schema keys below are accepted. Omit fields to inherit. Arrays replace the whole field. No credentials, arbitrary providers or scripts. The Host also validates the full merged candidate.",
-  invalid: "Invalid field: correct the declared type, bounds or keys before saving. The draft is preserved.",
-  conflict: "The revision changed. Your draft is preserved; refresh does not rebase it. Review the other change, then explicitly discard and reload before editing again.",
-  unavailable: "This scope is unavailable. The draft is preserved. Reconnect and refresh before saving.",
-  "not-owned": "Read-only: this connection is not the authenticated operator of a local writable Host.",
-  validation: "The Host rejected this configuration. Check the declared fields and merged constraints; your draft is preserved.",
-  transport: "Disconnected or transport unavailable. Your draft is preserved; refresh after reconnecting.",
+  advanced: "Advanced JSON",
+  advancedHint: "Schema keys only; omit to inherit. Arrays replace. No credentials or scripts; use existing providers.",
+  invalid: "Invalid field. Check type, bounds and keys; draft retained.",
+  conflict: "Revision conflict; draft retained. Review changes, then discard and reload. Refresh does not merge.",
+  unavailable: "Scope unavailable; draft retained. Reconnect and refresh.",
+  "not-owned": "Read-only: requires an authenticated local Host operator.",
+  validation: "Host rejected configuration; draft retained. Check fields and merged constraints.",
+  transport: "Disconnected; draft retained. Reconnect and refresh.",
   namedIndependent: "Deepwork Profiles is a separate named JSONC runtime-resource editor in Settings. Saving here does not apply a named profile or select its model."
 };
 var deploymentZh = {
   title: "DSMM",
-  summary: "全局控制、DSH 配置覆盖与已捕获的 Deepwork 状态。",
-  description: "保存部署意图，不改原生模型或运行中会话。以下两层分别保存。",
+  summary: "全局配置与当前配置覆盖",
+  description: "两层独立保存，不改原生模型或运行中会话。",
   global: "DSMM 全局配置",
-  globalHint: "同一 Home 内全部 DSH 配置的共享基线。省略字段使用内建默认值。",
+  globalHint: "同一 Home 的 DSH 配置共用；未设置字段使用内建默认值。",
   profile: "当前 DSH 配置覆盖",
-  profileHint: "仅影响当前原生 DSMM 实例。省略字段继承全局配置；显式默认值仍是固定覆盖。",
-  unavailableForm: "此处配置覆盖不可编辑：尚未核验当前实例的可写 Host 表单。请打开其 bundle 或条目配置；不能借全局保存替代。",
-  ceiling: "Deepwork 总开关仅在全局层编辑。DSH 配置、具名配置和会话模式均不能突破已捕获的上限。",
-  hostUnknown: "宿主整包加载／启用状态：未知。宿主 bundle 开关与此子模块控制不同。",
-  boundaries: "保存不会重启、取消、协调重载或挂载 LSP。现有根会话及其未来子会话保持原捕获；新根会话在启动能力内捕获最新合法意图。仅启动时生效的更改需用户独立明确重启宿主（可能取消会话）。",
+  profileHint: "仅此实例；未设置字段继承全局配置。",
+  profileUnavailable: "不可用",
+  unavailableForm: "没有已核验的可写表单。请打开此实例的 bundle 或条目配置以编辑覆盖。",
+  ceiling: "Deepwork 总开关仅全局可改；配置和会话模式不能突破已捕获上限。",
+  hostUnknown: "宿主整包状态：未知（独立开关）。",
+  boundaries: "新根会话在启动能力内采用已保存设置。保存不重启或重载 LSP；仅启动时生效的更改需另行重启宿主，可能取消会话。",
   saveGlobal: "保存全局配置",
   saveProfile: "保存当前配置覆盖",
   saving: "正在保存…",
-  refresh: "刷新状态",
-  discard: "丢弃草稿并重新载入",
-  dirty: "有未保存更改",
-  saved: "本层已保存，运行中的会话未改变。",
+  refresh: "刷新",
+  discard: "丢弃并重载",
+  dirty: "未保存",
+  saved: "已保存",
   inherit: "继承",
-  explicit: "显式覆盖",
-  defaultPin: "显式固定为内建默认值",
-  hostPin: "清除此用户覆盖后，宿主组合层的固定值仍存在。",
+  explicit: "覆盖",
+  defaultPin: "固定为内建默认值",
+  hostPin: "清除后仍有宿主固定值",
   globalSource: "全局",
   profileSource: "DSH 配置",
   defaultsSource: "内建默认",
@@ -3683,24 +3694,24 @@ var deploymentZh = {
   next: "下一个根会话",
   session: "当前会话准入",
   noSession: "没有活动会话：准入状态未知。",
-  sessionUnavailable: "原生会话身份已知，但准入投影暂不可用。恢复连接后请刷新会话；全局刷新不会重新绑定它。",
+  sessionUnavailable: "会话准入暂不可用；恢复连接后另行刷新会话。",
   absent: "不存在",
   mixedSource: "混合来源",
-  inspectorStale: "此处是已捕获版本，不是未保存草稿。刷新保留冲突，也不会刷新或改变会话准入。",
+  inspectorStale: "已保存状态，非草稿",
   pending: "等待独立重启",
   unknown: "未知",
   on: "开启",
   off: "关闭",
   state: "字段来源与实际生效状态",
   module: "Deepwork 子模块",
-  advanced: "有界高级 JSON",
-  advancedHint: "仅接受下列 schema 声明的键。省略表示继承；数组整字段替换。不填凭据、任意提供商或脚本。宿主还会验证完整合并后的配置。",
-  invalid: "字段无效：请先修正声明的类型、范围或键。草稿已保留。",
-  conflict: "配置版本已变化，草稿已保留；刷新不会自动合并。请核对其他更改，再明确丢弃并重新载入后编辑。",
-  unavailable: "此作用域不可用，草稿已保留。重新连接并刷新后再保存。",
-  "not-owned": "只读：此连接不是本地可写宿主的已认证 operator。",
-  validation: "宿主拒绝此配置。请核对声明的字段与合并约束；草稿已保留。",
-  transport: "连接中断或传输不可用，草稿已保留；恢复连接后请刷新。",
+  advanced: "高级 JSON",
+  advancedHint: "仅 schema 声明的键；省略为继承，数组整项替换。不填凭据或脚本，仅用已有提供商。",
+  invalid: "字段无效，请核对类型、范围与键；草稿保留。",
+  conflict: "版本冲突，草稿保留。核对后丢弃并重载；刷新不自动合并。",
+  unavailable: "作用域不可用，草稿保留；重连后刷新。",
+  "not-owned": "只读：需要本地宿主已认证 operator 权限。",
+  validation: "宿主拒绝配置，草稿保留；核对字段及合并约束。",
+  transport: "连接中断，草稿保留；重连后刷新。",
   namedIndependent: "设置中的 Deepwork Profiles 是独立的具名 JSONC 运行时资源编辑器。在此保存不会应用具名配置或选择其模型。"
 };
 var deploymentFieldLabels = {
@@ -3879,7 +3890,7 @@ function Field({ schema, path, controller, invalid, t }) {
   const inherited = controller.layer === "global" ? at(snapshot2.defaults, path) : at(mergeLayer(mergeLayer(snapshot2.defaults, snapshot2.global), snapshot2.nativeForm?.base ?? {}), path);
   const disabled = state.busy || state.issue === "not-owned" || state.issue === "unavailable" || state.issue === "transport" || controller.layer === "profile" && !controller.canWriteProfile();
   const choices = enumValues(schema);
-  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting" && path[0] !== "lsp") return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-group", open: path[0] === "modules", children: [
+  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting" && path[0] !== "lsp") return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-group", children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("summary", { children: [
       label(path, t),
       " ",
@@ -3904,9 +3915,9 @@ function Field({ schema, path, controller, invalid, t }) {
         (choices ?? [true, false]).map((choice) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: JSON.stringify(choice), children: displayValue(choice, t) }, String(choice)))
       ] })
     ] }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ScalarField, { schema, path, controller, disabled, inherited, invalid, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "dsmm-hint", children: [
-      explicit === void 0 ? t("inherit") : equal(explicit, at(snapshot2.defaults, path)) ? t("defaultPin") : t("explicit"),
-      controller.layer === "profile" && at(snapshot2.nativeForm?.base, path) !== void 0 ? ` · ${t("hostPin")}` : ""
+    (explicit !== void 0 || controller.layer === "profile" && at(snapshot2.nativeForm?.base, path) !== void 0) && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "dsmm-hint", children: [
+      explicit === void 0 ? "" : equal(explicit, at(snapshot2.defaults, path)) ? t("defaultPin") : t("explicit"),
+      controller.layer === "profile" && at(snapshot2.nativeForm?.base, path) !== void 0 ? `${explicit === void 0 ? "" : " · "}${t("hostPin")}` : ""
     ] })
   ] });
 }
@@ -3925,25 +3936,33 @@ function Layer({ controller, t }) {
   };
   const title = controller.layer === "global" ? "global" : "profile";
   const disabled = state.busy || state.snapshot === null || state.issue !== null || invalid.size > 0 || controller.layer === "profile" && !controller.canWriteProfile();
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { "aria-busy": state.busy, "data-dsmm-layer": controller.layer, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t(title) }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t(title === "global" ? "globalHint" : "profileHint") }),
-    state.snapshot !== null && Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => controller.layer === "global" || key !== "modules").sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Field, { schema, path: [key], controller, invalid: updateInvalid, t }, key)),
-    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
-    invalid.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { role: "alert", children: t("invalid") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", disabled: disabled || !state.dirty, onClick: () => {
-        void controller.save();
-      }, children: t(state.busy ? "saving" : title === "global" ? "saveGlobal" : "saveProfile") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => {
-        void controller.refresh();
-      }, children: t("refresh") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null, onClick: () => {
-        setInvalid(/* @__PURE__ */ new Set());
-        void controller.refresh(true);
-      }, children: t("discard") })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("summary", { children: [
+        t(title),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { role: "status", "aria-live": "polite", className: "dsmm-hint", children: state.busy ? t("saving") : state.dirty ? t("dirty") : state.saved ? t("saved") : "" })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t(title) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t(title === "global" ? "globalHint" : "profileHint") }),
+        state.snapshot !== null && Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => controller.layer === "global" || key !== "modules").sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Field, { schema, path: [key], controller, invalid: updateInvalid, t }, key)),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", disabled: disabled || !state.dirty, onClick: () => {
+            void controller.save();
+          }, children: t(state.busy ? "saving" : title === "global" ? "saveGlobal" : "saveProfile") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => {
+            void controller.refresh();
+          }, children: t("refresh") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null, onClick: () => {
+            setInvalid(/* @__PURE__ */ new Set());
+            void controller.refresh(true);
+          }, children: t("discard") })
+        ] })
+      ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { role: "status", "aria-live": "polite", className: "dsmm-status", children: state.saved ? t("saved") : state.dirty ? t("dirty") : "" })
+    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
+    invalid.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }),
+    controller.layer === "profile" && !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
   ] });
 }
 function NativeProfileLayer({ namespace, forms, remote, form, core, t }) {
@@ -3963,11 +3982,7 @@ function NativeProfileLayer({ namespace, forms, remote, form, core, t }) {
   (0, import_react4.useEffect)(() => {
     if (controller.getSnapshot().snapshot !== null) void controller.refresh();
   }, [coreState.snapshot?.globalRevision, snapshot2.revision, controller]);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("ceiling") }),
-    !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Layer, { controller, t })
-  ] });
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Layer, { controller, t });
 }
 function StateInspector({ controller, session, t }) {
   const { snapshot: snapshot2, dirty, issue } = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
@@ -3976,8 +3991,11 @@ function StateInspector({ controller, session, t }) {
   const source = (value2) => t(value2 === "profile" ? "profileSource" : value2 === "global" ? "globalSource" : value2 === "defaults" ? "defaultsSource" : value2 === "named-session" ? "namedSource" : value2 === "startup" ? "startupSource" : value2 === "deployment" ? "deploymentCapture" : value2 === "mixed" ? "mixedSource" : "unknown");
   const value = (layer, path) => layer === void 0 ? t("unknown") : at(layer, path.split(".")) === void 0 ? t("absent") : displayValue(at(layer, path.split(".")), t);
   const metadata = (layer, path, entry) => layer !== void 0 && at(layer, path.split(".")) === void 0 && entry === void 0 ? t("absent") : source(entry);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-group", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("summary", { children: t("state") }),
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-card", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("summary", { children: [
+      t("state"),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dsmm-hint", children: (snapshot2.nextRoot?.restartRequired.length ?? 0) > 0 ? t("pending") : dirty || issue !== null ? t("inspectorStale") : "" })
+    ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { role: "status", "aria-live": "polite", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : `${t("namedSource")}: ${admitted.named?.id ?? "—"}` }),
       session !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
@@ -4056,42 +4074,51 @@ function DeploymentPage(props) {
   if (props.view === "summary") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: props.t("summary") });
   const { t } = props, snapshot2 = state.snapshot, module2 = snapshot2?.modules[0];
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("description") }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("description") }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("boundaries") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t("module") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("hostUnknown") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
-        t("desired"),
-        ": ",
-        module2 === void 0 ? t("unknown") : t(module2.desired.enabled ? "on" : "off"),
-        " · ",
-        module2?.desired.source ?? "—"
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("summary", { children: [
+        t("module"),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dsmm-hint", children: module2?.pending ? t("pending") : module2 === void 0 ? t("unknown") : t(module2.desired.enabled ? "on" : "off") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
-        t("startup"),
-        ": ",
-        module2 === void 0 ? t("unknown") : t(module2.startupMounted ? "on" : "off"),
-        " · ",
-        t("next"),
-        ": ",
-        module2 === void 0 ? t("unknown") : t(module2.nextRoot.admitted ? "on" : "off")
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
-        t("session"),
-        ": ",
-        state.session?.modules?.[0]?.admitted == null ? t("unknown") : t(state.session.modules[0].admitted ? "on" : "off")
-      ] }),
-      module2?.pending && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("pending") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("ceiling") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("hostUnknown") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
+          t("desired"),
+          ": ",
+          module2 === void 0 ? t("unknown") : t(module2.desired.enabled ? "on" : "off"),
+          " · ",
+          module2?.desired.source ?? "—"
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
+          t("startup"),
+          ": ",
+          module2 === void 0 ? t("unknown") : t(module2.startupMounted ? "on" : "off"),
+          " · ",
+          t("next"),
+          ": ",
+          module2 === void 0 ? t("unknown") : t(module2.nextRoot.admitted ? "on" : "off")
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
+          t("session"),
+          ": ",
+          state.session?.modules?.[0]?.admitted == null ? t("unknown") : t(state.session.modules[0].admitted ? "on" : "off")
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("ceiling") })
+      ] })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Layer, { controller: props.core, t }),
-    props.profilePage && props.forms !== void 0 && snapshot2?.namespace !== null && snapshot2?.namespace !== void 0 && (props.rowNamespace === void 0 || props.rowNamespace === snapshot2.namespace) ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NativeProfileLayer, { namespace: snapshot2.namespace, forms: props.forms, remote: props.remote, form: props.form, core: props.core, t }, `${snapshot2.hostProfileKey}:${snapshot2.entryId}`) : /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t("profile") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("unavailableForm") })
+    props.profilePage && props.forms !== void 0 && snapshot2?.namespace !== null && snapshot2?.namespace !== void 0 && (props.rowNamespace === void 0 || props.rowNamespace === snapshot2.namespace) ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NativeProfileLayer, { namespace: snapshot2.namespace, forms: props.forms, remote: props.remote, form: props.form, core: props.core, t }, `${snapshot2.hostProfileKey}:${snapshot2.entryId}`) : /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { className: "dsmm-deployment-card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("summary", { children: [
+          t("profile"),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dsmm-hint", children: t("profileUnavailable") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("profileHint") }) })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(StateInspector, { controller: props.core, session: state.session, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("namedIndependent") })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(StateInspector, { controller: props.core, session: state.session, t })
   ] });
 }
 

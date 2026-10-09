@@ -7,6 +7,7 @@ export declare const deploymentEn: {
     globalHint: string;
     profile: string;
     profileHint: string;
+    profileUnavailable: string;
     unavailableForm: string;
     ceiling: string;
     hostUnknown: string;

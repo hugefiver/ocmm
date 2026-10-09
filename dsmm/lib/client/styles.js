@@ -38,10 +38,19 @@ export const PROFILE_STYLES = `
 .dsmm-profiles .dsmm-issue{padding:12px;border-left:4px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-issue p+p{margin-top:8px}
 .dsmm-profiles .dsmm-status{min-height:22px}
+.dsmm-deployment{gap:8px}
+.dsmm-deployment .dsmm-deployment-card{min-width:0;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md)}
+.dsmm-deployment .dsmm-deployment-card>summary{padding:8px 12px;font-weight:500;line-height:22px;min-height:32px;box-sizing:border-box}
+.dsmm-deployment .dsmm-deployment-card>summary:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsmm-deployment .dsmm-deployment-card>summary:active{background:var(--dsw-alias-interactive-bg-active)}
+.dsmm-deployment .dsmm-deployment-card>summary>span{margin-left:8px;font-weight:400}
+.dsmm-deployment .dsmm-deployment-card>summary>span:empty{display:none}
+.dsmm-deployment .dsmm-deployment-card>div,.dsmm-deployment .dsmm-deployment-card>fieldset{display:flex;flex-direction:column;gap:8px;padding:0 12px 12px;border:0}
+.dsmm-deployment .dsmm-deployment-card>fieldset>legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .dsmm-deployment .dsmm-deployment-group{border-top:1px solid var(--dsw-alias-border-l4);padding-top:8px;min-width:0}
-.dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:12px;padding-top:8px}
+.dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:8px;padding-top:8px}
 .dsmm-deployment code{font-family:var(--ds-font-family-code);overflow-wrap:anywhere}
-.dsmm-deployment label code,.dsmm-deployment summary code{display:block;color:var(--dsw-alias-label-secondary)}
+.dsmm-deployment label code,.dsmm-deployment summary code{margin-left:8px;font-size:12px;line-height:18px;font-weight:400;color:var(--dsw-alias-label-secondary)}
 .dsmm-deployment pre{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--ds-font-family-code)}
 .dsmm-deployment .dsmm-deployment-state{display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;border-top:1px solid var(--dsw-alias-border-l4)}
 .dsmm-deployment .dsmm-deployment-state dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
