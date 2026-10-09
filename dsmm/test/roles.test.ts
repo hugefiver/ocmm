@@ -160,7 +160,7 @@ test("configured role tool options agree across native plugin rows and materiali
   const primary = { provider: "fixture", model: "review-primary", reasoningEffort: "max" };
   const roleRouting = { "dsmm-reviewer": { primary } };
   const config = roleSubagentConfig(reviewer, [], primary);
-  const plugin = rolePluginRows(orchestrator, DSMM_SKILL_NAMES, ["dsmm-orchestrator", "dsmm-reviewer"], roleRouting).find((row) => row.config?.toolName === "dsmm_reviewer");
+  const plugin = rolePluginRows(orchestrator, DSMM_SKILL_NAMES, ["dsmm-orchestrator", "dsmm-reviewer"], roleRouting).find((row) => !Array.isArray(row.config) && row.config?.toolName === "dsmm_reviewer");
   assert.deepEqual(plugin?.config, config);
   assert.deepEqual(config.agentOptions, primary);
   assert.notEqual(config.agentOptions, primary);
@@ -173,4 +173,38 @@ test("configured role tool options agree across native plugin rows and materiali
   assert.match(yaml, /provider: 'dsmm-role-reviewer'/u);
   assert.doesNotMatch(yaml, /modelSelectionSettings: true|toolName: 'dsmm_builder'/u);
   assert.equal(Object.hasOwn(roleSubagentConfig(reviewer), "agentOptions"), false, "unconfigured native child keeps inheritance");
+});
+
+test("native standard capabilities use role-sized groups without widening delegation or read/write access", () => {
+  const roots = new Set(["dsmm-orchestrator", "dsmm-builder", "dsmm-planner"]);
+  const longDevelopment = new Set(["dsmm-coding", "dsmm-frontend", "dsmm-deep", "dsmm-complex", "dsmm-cross-cutting"]);
+  for (const role of DSMM_ROLES) {
+    const rows = rolePluginRows(role);
+    const planning = rows.find((row) => row.id === "planning");
+    const compaction = rows.find((row) => row.id === "compaction");
+    const long = roots.has(role.id) || longDevelopment.has(role.id);
+    assert.equal(planning !== undefined, roots.has(role.id), role.id);
+    assert.equal(compaction !== undefined, long, role.id);
+    assert.equal(rows.some((row) => row.id === "tool-ask-user"), long, role.id);
+    assert.equal(rows.some((row) => row.id === "tool-todo"), long && role.id !== "dsmm-planner", role.id);
+    assert.equal(rows.some((row) => row.id === "tool-pwsh"), role.access !== "read-only", role.id);
+    if (planning) {
+      assert.equal(planning.group, true);
+      assert.deepEqual(planning.isolate, { planMode: true });
+      assert.ok(Array.isArray(planning.config));
+      const config = planning.config[0].config;
+      assert.ok(config && !Array.isArray(config));
+      assert.match(String(config.section), /Do not use todo_write.*exit_plan_mode/su);
+    }
+    if (compaction) {
+      assert.equal(compaction.name, "cordis:group");
+      assert.equal(compaction.group, true);
+      assert.deepEqual(compaction.isolate, { compaction: true, toolResultPruner: true });
+      assert.ok(Array.isArray(compaction.config));
+      assert.deepEqual(compaction.config.map((child) => child.name), ["@deepseek-ai/dsh-compaction-basic", "@deepseek-ai/dsh-command-compact", "@deepseek-ai/dsh-compaction-tool-result-pruner"]);
+      assert.deepEqual(compaction.config[2].config, { thresholdChars: 8192, headChars: 4096, tailChars: 1024 });
+      assert.equal(Object.hasOwn(compaction, "children"), false, "Loader consumes config arrays, not an invented children field");
+    }
+    assert.equal(rows.some((row) => /workflow|ralph|plugin-manager/u.test(row.name)), false);
+  }
 });

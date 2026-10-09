@@ -119,7 +119,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
   for (const packageSection of [pkg.peerDependencies, pkg.devDependencies]) {
     assert.equal(packageSection["@deepseek-ai/cordis"], "~4.0.4");
-    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl"]) {
+    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
       assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
     }
   }

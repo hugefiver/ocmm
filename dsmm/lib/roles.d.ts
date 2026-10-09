@@ -31,7 +31,9 @@ export declare function renderAgentCordis(role: DsmmRoleDefinition, skills?: rea
 export interface RolePluginRow {
     id: string;
     name: string;
-    config?: Record<string, unknown>;
+    config?: Record<string, unknown> | RolePluginRow[];
+    group?: boolean;
+    isolate?: Record<string, boolean>;
     disabled?: boolean;
 }
 /** Native definitions and YAML share this inventory; skills is an ignored positional compatibility argument. */

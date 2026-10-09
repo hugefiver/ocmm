@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerRolePresets } from "../lib/preset-registry.js";
 import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole } from "../lib/roles.js";
+import type { RolePluginRow } from "../lib/roles.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DshContext } from "../lib/dsh-types.js";
 
 test("native DSH registration declares enabled root roles and keeps auxiliary child tools", async () => {
-  const definitions: Array<{ id: string; name: string; plugins: Array<{ name: string; config?: Record<string, unknown> }> }> = [];
+  const definitions: Array<{ id: string; name: string; plugins: RolePluginRow[] }> = [];
   const registry = {
     async register(definition: typeof definitions[number]) {
       definitions.push(definition);
@@ -32,15 +33,16 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
   assert.ok(orchestrator);
   const enabledChildren = DSMM_ROLE_IDS.filter((id) => id !== "dsmm-orchestrator" && DEFAULT_DSMM_SETTINGS.roles[id]);
   assert.equal(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").length, enabledChildren.length);
-  assert.deepEqual(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").map((item) => item.config?.toolName), enabledChildren.map((id) => id.replace(/-/gu, "_")));
-  const planTool = orchestrator.plugins.find((item) => item.config?.toolName === "dsmm_plan_critic");
-  assert.deepEqual(planTool?.config?.toolFilter, { allow: ["read", "glob", "grep", "dsmm_code_search", "dsmm_doc_search", "dsmm_research", "dsmm_media_reader"] });
+  assert.deepEqual(orchestrator.plugins.filter((item) => item.name === "@deepseek-ai/dsh-tool-subagent").map((item) => !Array.isArray(item.config) ? item.config?.toolName : undefined), enabledChildren.map((id) => id.replace(/-/gu, "_")));
+  const planTool = orchestrator.plugins.find((item) => !Array.isArray(item.config) && item.config?.toolName === "dsmm_plan_critic");
+  assert.ok(planTool?.config && !Array.isArray(planTool.config));
+  assert.deepEqual(planTool.config.toolFilter, { allow: ["read", "glob", "grep", "dsmm_code_search", "dsmm_doc_search", "dsmm_research", "dsmm_media_reader"] });
   assert.equal(orchestrator.plugins.some((item) => item.name === "@deepseek-ai/dsh-tool-fs"), true);
   assert.equal("roots" in orchestrator, false);
 });
 
 test("disabled roles have neither native preset declarations nor callable child tools", async () => {
-  const definitions: Array<{ id: string; plugins: Array<{ config?: Record<string, unknown> }> }> = [];
+  const definitions: Array<{ id: string; plugins: RolePluginRow[] }> = [];
   let installer: ((ctx: DshContext) => unknown) | undefined;
   registerRolePresets({ inject(_deps, callback) { installer = callback; } }, () => ({
     ...DEFAULT_DSMM_SETTINGS,
@@ -58,7 +60,7 @@ test("disabled roles have neither native preset declarations nor callable child 
   assert.deepEqual(definitions.map((item) => item.id), ["dsmm-orchestrator", "dsmm-planner"]);
   const orchestrator = definitions.find((item) => item.id === "dsmm-orchestrator");
   assert.ok(orchestrator);
-  assert.equal(orchestrator.plugins.some((item) => item.config?.toolName === "dsmm_builder" || item.config?.toolName === "dsmm_oracle"), false);
+  assert.equal(orchestrator.plugins.some((item) => !Array.isArray(item.config) && (item.config?.toolName === "dsmm_builder" || item.config?.toolName === "dsmm_oracle")), false);
 });
 
 test("enabled auxiliary roles alone do not create native root presets", async () => {
@@ -131,7 +133,7 @@ test("native preset child inventory is profile-invariant and retains deployment 
   const settings = resolveConfig({ roles: { "dsmm-builder": false }, roleRouting: {
     "dsmm-reviewer": { primary }, "dsmm-builder": { primary: { provider: "fixture", model: "disabled-policy" } }
   } });
-  const definitions: Array<{ id: string; plugins: Array<{ config?: Record<string, unknown> }> }> = [];
+  const definitions: Array<{ id: string; plugins: RolePluginRow[] }> = [];
   let install: ((ctx: DshContext) => unknown) | undefined;
   registerRolePresets({ inject(_deps, callback) { install = callback; } }, () => settings);
   assert.ok(install);
@@ -141,11 +143,12 @@ test("native preset child inventory is profile-invariant and retains deployment 
   } : name === "agents" ? { list: () => [] } : undefined) as never, on() {} });
   assert.equal(definitions.some((definition) => definition.id === "dsmm-builder"), false);
   const orchestrator = definitions.find((definition) => definition.id === "dsmm-orchestrator")!;
-  const tool = orchestrator.plugins.find((row) => row.config?.toolName === "dsmm_reviewer")!.config!;
+  const tool = orchestrator.plugins.find((row) => !Array.isArray(row.config) && row.config?.toolName === "dsmm_reviewer")!.config!;
+  assert.ok(!Array.isArray(tool));
   assert.equal(Object.hasOwn(tool, "agentOptions"), false, "the provider admits the bound parent profile route before spawn");
   assert.equal(tool.provider, "dsmm-role-reviewer");
   assert.equal(tool.modelSelectionSettings, false);
   assert.deepEqual(tool.toolFilter, { allow: ["read", "glob", "grep", "dsmm_code_search", "dsmm_doc_search", "dsmm_research", "dsmm_media_reader"] });
-  assert.equal(orchestrator.plugins.some((row) => row.config?.toolName === "dsmm_builder"), false);
-  assert.equal(Object.hasOwn(orchestrator.plugins.find((row) => row.config?.toolName === "dsmm_oracle")!.config!, "agentOptions"), false);
+  assert.equal(orchestrator.plugins.some((row) => !Array.isArray(row.config) && row.config?.toolName === "dsmm_builder"), false);
+  assert.equal(Object.hasOwn(orchestrator.plugins.find((row) => !Array.isArray(row.config) && row.config?.toolName === "dsmm_oracle")!.config!, "agentOptions"), false);
 });

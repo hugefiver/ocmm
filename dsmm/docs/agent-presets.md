@@ -33,6 +33,23 @@ The published renderer's second skills argument is retained but ignored, preserv
 
 Standing templates emit source-permitted native child rows. Agent admission narrows them to identity, enabled snapshot and mounted capabilities; its role tools adapt directly to native start/jobs/continuable APIs. Native services own descriptors, turns, result/structured capture, storage, inbox, capacity, interruption and release. Explicit idle mode/profile/preset changes prepare the actual next realm at awaited assembly; desired saves never remount startup services. Native model-facing route selection remains disabled on role tools; explicit host provider/model/effort and native caller filters retain precedence. Each admitted descendant intersects the parent's admitted allow-list with its request and unions their deny-lists, retaining a frozen snapshot rather than a mutable caller object. Native original filters still execute unchanged; aliases, direct continuable starts and cold durable resumes cannot enlarge the parent's restrictions. Read-only admission filters/fences before first work, rather than inventing an unknown-name child filter for headless Agent-local utility tools.
 
+### Role-sized native standard defaults
+
+The reference is the **installed DSH 0.2.0-rc.2** public export `@deepseek-ai/dsh-web-app/presets/standard.patch.yml`, not an inferred web URL or automatic `extends` facility. `rolePluginRows` and generated YAML now share its native `cordis:group` shape: `group: true`, isolated services, and child rows in the group's **`config` array**.
+
+| Standing role composition | Planning group | Compaction/pruner group and human `/compact` | `ask_user_question` | `todo_write` |
+| --- | --- | --- | --- | --- |
+| Orchestrator, Builder | Yes | Yes | Yes | Yes |
+| Planner | Yes | Yes | Yes | No |
+| coding, frontend, deep, complex, cross-cutting | No | Yes | Yes | Yes |
+| Other auxiliary roles, including quick, searches, clarifier, media-reader, reviewers, Oracles and plan-critic | No additional group | No additional group | No additional row | No additional row |
+
+Cross-cutting remains opt-in/default disabled. The compaction group contains exact rc.2 `dsh-compaction-basic`, `dsh-command-compact`, and **`dsh-compaction-tool-result-pruner`** packages. The pruner's policy is `thresholdChars: 8192`, `headChars: 4096`, `tailChars: 1024`; todo retains `allowParallelInProgress: true`. Planning isolates `planMode` and retains the standard's deployment-owned guidance and `exit_plan_mode`; it does not grant Planner mutation rights or a plan-file writer. `/compact` is a human command, never a new model tool. Its actual summarization, when useful history exists, remains native and may invoke the selected model; an empty-history command performs no model request.
+
+This matrix describes **owned standing rows**, not a promise to remove every inherited service from short children. Native spawn joins the parent's retained preset rather than recomposing the target role's template; a short child can inherit its parent's compaction/planning services. Existing caller filters, role admission and mandatory read-only/delegation fences still decide callable tools. No runtime capability adapter or child-service-clearing framework is introduced here.
+
+Host commands, user-questions, sessions, token meter, permission/sandbox/cwd/process/model and transports stay Host-owned. DSMM does not copy those rows, credentials, telemetry, generic spawn/fork, workflow/ralph or plugin-manager tools from standard. The six new preset runtime peers are explicitly pinned to `0.2.0-rc.2`; the existing `dsh-tools` runtime peer is preserved. Native Loader proof covers first composition, isolated multi-preset command registrations, real `/compact` returning `No compactable history yet.`, default pruning, session-local todo writes, Planner mutation refusal and global DW-off zero role additions; this is not a Desktop install or paid-model compaction claim.
+
 `subagents.enableRunInBackground` defaults false, `subagents.backgroundMode` defaults `one-shot`, and omitted `subagents.maxDepth` retains the native limit (rc.2 default 1). These fields are sparse native/global deployment settings, captured at new-root admission, inherited by future children, and excluded from named runtime overlays. Opt-in continuable tools require an actual `prepareContinuable` method; capability flags alone are not enough. Message, interrupt, persistence, capacity, result and teardown remain native-owned. Agent-owned asynchronous scope unwind awaits `drainContinuableDescendants([exactAgent])` before the Agent detaches, not from a contained disposed observer.
 
 ## Stage C applicable parity and evidence

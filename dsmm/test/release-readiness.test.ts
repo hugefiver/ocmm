@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -115,7 +115,9 @@ function runReleaseChecker(root: string): { receipt: ReleaseReceipt; status: num
 }
 
 function createReleaseFixture(): string {
+  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "release-readiness-fixture", prefix: releaseFixturePrefix, time: Date.now() })}\n`);
   const fixtureRoot = mkdtempSync(join(tmpdir(), releaseFixturePrefix));
+  writeFileSync(join(fixtureRoot, ".run-owner"), `release-readiness:${basename(fixtureRoot)}`, { flag: "wx" });
   cpSync(packageRoot, fixtureRoot, {
     recursive: true,
     filter: (source) => !relative(packageRoot, source).split(sep).includes("node_modules")
@@ -127,6 +129,7 @@ function removeReleaseFixture(fixtureRoot: string): void {
   const resolvedFixture = resolve(fixtureRoot);
   assert.equal(dirname(resolvedFixture), releaseFixtureParent, "fixture is a direct child of the OS temporary directory");
   assert.ok(basename(resolvedFixture).startsWith(releaseFixturePrefix), "fixture has the expected prefix");
+  assert.equal(readFileSync(join(resolvedFixture, ".run-owner"), "utf8"), `release-readiness:${basename(resolvedFixture)}`);
   rmSync(resolvedFixture, { recursive: true, force: false });
 }
 
@@ -393,13 +396,24 @@ test("migration guide fixes the non-parity feature and cutover contracts", () =>
   assert.match(sequence[7], /real specified model.*read\/write\/tool-result/iu);
 });
 
-test("release guide fixes the preflight, publication, verification, and rollback contract", () => {
+test("release guide separates current DSMM readiness from immutable historical publication and rollback", () => {
   const release = readFileSync(releasePath, "utf8");
 
-  assert.match(release, /^# Deepwork 0\.1\.9 Release and Rollback$/mu);
-  const phases = ["## Phase 1: frozen artifact and independent Docker gate", "## Phase 2: authorized immutable publication", "## Phase 3: official installed-carrier Desktop rollout"];
+  assert.match(release, /^# DSMM 0\.1\.9 Source Readiness, Release and Rollback$/mu);
+  const historicalOffset = release.indexOf("## Historical release-only 0.1.9 proposal (not current authorization)");
+  assert.ok(historicalOffset > 0);
+  const current = release.slice(0, historicalOffset);
+  assert.match(current, /title: "DSMM"/u);
+  assert.match(current, /22 canonical roles\/categories/u);
+  assert.match(current, /fourteen configurable Agent-scoped native skills/u);
+  assert.match(current, /DW presets default on but are not locked/u);
+  assert.match(current, /global-only `modules\.deepwork\.enabled` master/u);
+  assert.match(current, /Publisher compatibility remains a separate blocker/u);
+  const syncOffset = current.indexOf("node dsmm/scripts/materialize-frontend.mjs --sync");
+  assert.ok(syncOffset >= 0 && syncOffset < current.indexOf("pnpm --dir dsmm build"));
+  const phases = ["### Phase 1: frozen artifact and independent Docker gate", "### Phase 2: authorized immutable publication", "### Phase 3: official installed-carrier Desktop rollout"];
   const phaseOffsets = phases.map((phase) => release.indexOf(phase));
-  assert.ok(phaseOffsets.every((offset) => offset >= 0));
+  assert.ok(phaseOffsets.every((offset) => offset > historicalOffset));
   assert.ok(phaseOffsets[0] < phaseOffsets[1] && phaseOffsets[1] < phaseOffsets[2], "Docker, publication and Desktop rollout are ordered gates");
 
   for (const phrase of [
@@ -419,7 +433,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
     assert.ok(release.includes(phrase), `release guide includes ${phrase}`);
   }
 
-  const preflight = release.slice(release.indexOf("## Preflight"), phaseOffsets[0]);
+  const preflight = release.slice(release.indexOf("### Preflight"), phaseOffsets[0]);
   for (const command of [
     "git rev-parse HEAD",
     "git status --short",
@@ -458,7 +472,7 @@ test("release guide fixes the preflight, publication, verification, and rollback
   assert.match(dockerGate, /Node 24 \/ pnpm 11\.9\.0/u);
   assert.match(dockerGate, /one new actual tarball/u);
   assert.match(dockerGate, /Native metadata reader yields Deepwork from both packaged locales/u);
-  const postPublication = release.slice(release.indexOf("### Publication identity verification"), phaseOffsets[2]);
+  const postPublication = release.slice(release.indexOf("#### Publication identity verification"), phaseOffsets[2]);
   for (const phrase of [
     "fresh isolated `DSH_HOME`",
     "registry installation",
@@ -471,13 +485,13 @@ test("release guide fixes the preflight, publication, verification, and rollback
   ]) {
     assert.ok(postPublication.includes(phrase), `post-publication verification includes ${phrase}`);
   }
-  const desktopGate = release.slice(phaseOffsets[2], release.indexOf("## Rollback"));
+  const desktopGate = release.slice(phaseOffsets[2], release.indexOf("### Rollback"));
   assert.match(postPublication, /import-bootstrap.*skipped \/ NOT_APPLICABLE/u);
   assert.match(postPublication, /Workflow success alone is insufficient/u);
   assert.match(desktopGate, /Only after terminal 0\.1\.9 completion/u);
   assert.match(desktopGate, /may \*\*not\*\* boot\/dump the reserved Desktop profile/u);
   assert.match(desktopGate, /actual Deepwork Profiles UI create\/edit\/save\/apply\/reset/u);
-  const rollback = release.slice(release.indexOf("## Rollback"));
+  const rollback = release.slice(release.indexOf("### Rollback"));
   assert.match(rollback, /official carrier.*remove `@dsmm\/dsmm`/u);
   assert.match(rollback, /add an exact known immutable version/u);
   assert.match(rollback, /Keep runtime drafts\/revisions and unrelated settings/u);
@@ -875,9 +889,9 @@ test("release readiness checker preserves the exact history companion export and
   }
 });
 
-test("release readiness checker pins native session and persistence contracts in peer and dev dependencies", () => {
+test("release readiness checker pins native tools, session and persistence contracts in peer and dev dependencies", () => {
   for (const section of ["peerDependencies", "devDependencies"]) {
-    for (const name of ["@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-persistence-jsonl"]) {
+    for (const name of ["@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-persistence-jsonl", "@deepseek-ai/dsh-plan-mode", "@deepseek-ai/dsh-compaction-basic", "@deepseek-ai/dsh-command-compact", "@deepseek-ai/dsh-compaction-tool-result-pruner", "@deepseek-ai/dsh-tool-ask-user", "@deepseek-ai/dsh-tool-todo"]) {
       const fixtureRoot = createReleaseFixture();
       try {
         updateFixtureManifest(fixtureRoot, (manifest) => { (manifest[section] as Record<string, string>)[name] = "^0.2.0-rc.2"; });
@@ -888,6 +902,21 @@ test("release readiness checker pins native session and persistence contracts in
       } finally { removeReleaseFixture(fixtureRoot); }
     }
   }
+});
+
+test("release readiness checker rejects a dev-only dsh-tools runtime dependency before pack", () => {
+  const fixtureRoot = createReleaseFixture();
+  try {
+    updateFixtureManifest(fixtureRoot, (manifest) => {
+      assert.equal((manifest.devDependencies as Record<string, string>)["@deepseek-ai/dsh-tools"], "0.2.0-rc.2");
+      delete (manifest.peerDependencies as Record<string, string>)["@deepseek-ai/dsh-tools"];
+    });
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.equal(receipt.outcome, "failed");
+    assert.equal(receipt.fileCount, 0);
+    assert.deepEqual(receipt.errors, ["manifest.peerDependencies must preserve release ranges"]);
+  } finally { removeReleaseFixture(fixtureRoot); }
 });
 
 test("release readiness checker rejects missing client metadata and duplicate Typert auto-loading", () => {

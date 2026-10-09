@@ -103,6 +103,7 @@ jobs:
           pnpm run typecheck
           pnpm test
           pnpm run build
+          node dsmm/scripts/materialize-frontend.mjs --sync
           pnpm --dir dsmm run typecheck
           pnpm --dir dsmm run typecheck:test
           pnpm --dir dsmm test

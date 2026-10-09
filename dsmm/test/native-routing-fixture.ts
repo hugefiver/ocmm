@@ -28,13 +28,21 @@ import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 
 useIsolatedDshEnvironment();
 
-// Only the fixture's missing public web-tool package uses the explicitly supplied
-// full CLI resolver. No private Loader slot or production import is overridden.
+// Host-loaded preset peers use the explicitly supplied full CLI resolver when
+// testing a partial source dependency closure. Production resolution is untouched.
 if (process.env.DSMM_TEST_DSH_ENTRY !== undefined) {
   const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY);
-  const webUrl = pathToFileURL(sdk.resolve("@deepseek-ai/dsh-tool-web")).href;
+  const presetPeers = ["tool-web", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"];
+  const urls = new Map(presetPeers.map((name) => {
+    const specifier = `@deepseek-ai/dsh-${name}`;
+    return [specifier, pathToFileURL(sdk.resolve(specifier)).href];
+  }));
+  // Scoped registries must share the fixture's real Agent/preset scope identity;
+  // a second installed copy has its own WeakMap and would register globals.
+  urls.set("@deepseek-ai/dsh-scope", pathToFileURL(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-scope")).href);
   const hook = registerHooks({ resolve(specifier, context, next) {
-    return specifier === "@deepseek-ai/dsh-tool-web" ? { url: webUrl, shortCircuit: true } : next(specifier, context);
+    const url = urls.get(specifier);
+    return url === undefined ? next(specifier, context) : { url, shortCircuit: true };
   } });
   after(() => hook.deregister());
 }
@@ -78,7 +86,7 @@ const require = createRequire(import.meta.url);
 const skillSdk = createRequire(require.resolve("@deepseek-ai/dsh-skill-filesystem"));
 const { SkillRegistry } = skillSdk("@deepseek-ai/dsh-skill");
 const presetSdk = createRequire(require.resolve("@deepseek-ai/dsh-agent-preset-registry"));
-const { Loader }: { Loader: new (ctx: Context, config?: { baseUrl?: string }) => Context["loader"] } = presetSdk("@deepseek-ai/cordis-plugin-loader");
+const { Loader, Group }: { Loader: new (ctx: Context, config?: { baseUrl?: string }) => Context["loader"]; Group: import("@deepseek-ai/cordis").Plugin } = presetSdk("@deepseek-ai/cordis-plugin-loader");
 
 /** Explicit full CLI resolution is test-only; no production absolute SDK path. */
 export async function nativeFixturePlugin(name: string, peer?: string) {
@@ -159,6 +167,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       const loaderFiber = ctx.plugin(Loader, { baseUrl: new URL("../", import.meta.url).href });
       await loaderFiber.await();
       loader = ctx.get("loader")!;
+      loader.builtins.group = { default: Group };
       loader.builtins["parity-presets"] = { default: AgentPresetRegistry };
       loader.builtins["parity-persona"] = require("@deepseek-ai/dsh-persona");
       loader.builtins["parity-dsmm"] = { default: DsmmPlugin };
@@ -193,6 +202,15 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       return handle.agent;
     };
     await options.beforeDsmm?.(ctx, create);
+    if (options.nativePresets) {
+      // Standard preset capabilities consume these real Host services. They are
+      // not role rows, and none of their adapters may perform external work here.
+      for (const [service, plugin] of [["commands", "dsh-commands"], ["tokenMeter", "dsh-token-meter"], ["userQuestions", "dsh-user-questions"]]) {
+        if (ctx.get(service) !== undefined) continue;
+        const module = await nativeFixturePlugin(`@deepseek-ai/${plugin}`, "@deepseek-ai/dsh-base");
+        await ctx.plugin(module.default, {}).await();
+      }
+    }
     const dsmmEntryId = loader === undefined ? undefined : await loader.create({ name: "cordis:parity-dsmm", config });
     await loader?.await();
     const dsmmFiber = dsmmEntryId === undefined ? ctx.plugin({

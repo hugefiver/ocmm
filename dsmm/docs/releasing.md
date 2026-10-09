@@ -1,4 +1,56 @@
-# Deepwork 0.1.9 Release and Rollback
+# DSMM 0.1.9 Source Readiness, Release and Rollback
+
+## Current working-source authority
+
+The package version remains **0.1.9**. Native parity stages A/B/C0/C/D0/D change the working source; this is not the earlier release-only/menu-visibility candidate, a new release identity or publication authorization. Do not bump, tag, publish, deploy or install from this checkpoint. The historical proposal below preserves old identities, installed-state facts and proof contracts; it is not the current product specification or an executable release checklist for these changed bytes.
+
+Current native metadata is `{meta: {title: "DSMM", description: <localized nonempty text>}}` in both exported locales. Package `@dsmm/dsmm`, Loader row `dsmm`, commands, public exports and technical role IDs are unchanged. Deepwork is the module/mode name, not the package/Core title. The catalog contains 22 canonical roles/categories (11 base roles and 11 categories) and fourteen configurable Agent-scoped native skills with metadata discovery and lazy resource/body loading. DW Orchestrator, DW Builder and DW Planner are eligible standing roots when enabled; the other 19 are auxiliary, and cross-cutting defaults off. Availability must be established by the actual native catalog/substrate, not template files.
+
+### Configuration, mode and captured state
+
+The global-only `modules.deepwork.enabled` master defaults `true`; ordinary session mode defaults `false`. A profile's `defaultActive` is not the global master and cannot bypass it. Saved explicit `deepwork/mode` intent wins over the profile mode default, including same-default intent. DW presets default on but are not locked: explicit off retains persona, read-only and Git/Host permissions. Module availability, mode intent and profile selection are separate state, not interchangeable switches.
+
+Core stays mounted when Deepwork is cold-off: official native **Plugins → DSMM**, the real bundle/entry Config page and the fixed `dsmmConfig` RPC remain available without creating a session. **Save Global DSMM** edits only central sparse `config.json`; **Save current DSH profile override** edits only the exact entry's native volatile form/patch under Host authorization and revision checks. Named JSONC **Deepwork Profiles** is independent, not a replacement deployment store. `DSMM_CONFIG_SCHEMA` remains the plain/sparse public interface; optional volatile `DSMM_NATIVE_CONFIG_SCHEMA` is separate native transport, not expanded business defaults.
+
+Inspection projects schema-allowlisted safe desired/startup/next-root/captured state; arbitrary raw config, paths, provider errors and credentials are not status output. The authorized configuration editor is the explicit raw-editor exception, not a model capability. Every Core RPC still requires actual invocation peer identity equal to `connection.operator`, public `webServer.host === '127.0.0.1'`, Host writability and final owner/lifetime checks; a loopback-looking client URL is not authority. Reads create no files or locks.
+
+Saves do not restart, remount, cancel, reapply a named profile or fake a hot switch. Existing busy/blank parents and their future children keep captured deployment/epoch. A new ordinary root admits current valid desired values only within the startup substrate and original permission intersection. An explicit idle session-profile Apply changes only that old root's overlay; existing children remain old. Startup-only or absent module capability is **restart-required**. Desired-on after cold-off remains pending until an independent supported restart; profiles cannot overcome the master ceiling. See [settings/status](settings-status.md), [profiles](profiles.md) and [compatibility](compatibility.md).
+
+### Cold tracked source and offline distribution checks
+
+A cold tracked checkout has the authored OCMM source inputs, DSMM source-sync assets and generated role presets, but not the gitignored third-party frontend bodies/data/Python or provenance inventory. Default build, source check and readiness remain offline and fail closed until those fixed resources exist. Missing-resource refusal is expected cold-source evidence, not permission for a build to download implicitly.
+
+From the repository root, after dependencies have been separately provisioned, run the one explicit source-materialization operation before **any** DSMM build (including `typecheck:test` and `test`, which build internally):
+
+```powershell
+node dsmm/scripts/materialize-frontend.mjs --sync
+node dsmm/scripts/materialize-frontend.mjs --check
+node --experimental-strip-types dsmm/scripts/check-source-assets.mjs
+pnpm --dir dsmm build
+pnpm --dir dsmm check:release
+```
+
+`--sync` alone permits network access to declared immutable GitHub trees/blobs and LICENSE texts at the three commits in `scripts/frontend-recipe.mjs`. It validates exact mapped paths and Git blob bytes before writing; no third-party Python/script is executed, HEAD substituted or missing path dropped. Offline readiness covers all **118** frontend resources plus provenance, **158** source-sync records and **47** generated role assets. A second sync of a ready tree reports zero requests and zero differences. Keep original Root prompts/skills available for the source validator; do not hand-write generated assets or substitute existing repo caches for cold-source evidence.
+
+For byte-preserving tracked-snapshot QA on Windows, use command-local `git -c core.autocrlf=false archive --format=tar --output <owned-snapshot.tar> HEAD`, then extract into a fresh marked directory. This does not change Git configuration. A default archive can apply checkout CRLF conversion even when HEAD's fixed LICENSE blobs are correct; such non-verbatim unowned bytes are deliberately refused by the materializer. Do not normalize or delete a license to bypass that guard. Neither this exact-blob snapshot nor read-only access to already installed dependencies proves a clean Linux `pnpm install`/`allowBuilds` path.
+
+The future-source CI step now explicitly runs `node dsmm/scripts/materialize-frontend.mjs --sync` before DSMM build-bearing commands. All normal build/check commands remain offline. This source preparation changes no fixed tag/control identity, publish authentication, retry/deadline, cache, job conclusion, registry lane or immutable receipt policy; it is not evidence that CI or publication is green.
+
+Development distribution acceptance additionally requires script-free `npm pack --dry-run --json --ignore-scripts` and a **real** `npm pack --json --ignore-scripts --pack-destination <marked-temporary-directory>` from the same built source, followed by unpacking and exact path/byte comparison with the preview. The current set is **459 files**, including compiled client/Core outputs, seven public exports, locales, complete skills/vendor resources, attribution/licenses and provenance. Resolve exports and exercise the unpacked module through real pinned rc.2 Cordis Loader, Settings and Gateway lifecycle in a keyless owned fixture: Core read/save/status remains usable cold-off, desired-on is pending, and no model request/job/install occurs. A preview, exports alone or importing checkout runtime does not prove standalone packed behavior. This development npm pack is not the release publisher's frozen pnpm artifact or installed-registry proof.
+
+### Three distinct native evidence surfaces
+
+1. **Actual Windows rc.2 Web**: real official native Config/Main entry paths and two isolated same-Home profile cases establish native Plugins discovery, independent saves, safe inspection and captured/restart behavior. Stable D evidence may be reused when those inputs are unchanged. A community tab is not the official primary entry point.
+2. **Official Desktop fixed source**: `deepseek-ai/deepseek-harness@5badb15009ae1756c3afe0ae0cef1faafc290ccc` (`0.2.1-alpha.1`) is a shared-contract compatibility target, not an installed SDK upgrade or actual Desktop execution.
+3. **Actual Electron/Desktop**: no executable is installed or run in this acceptance environment. Web/component/packed Loader evidence does not establish Electron activation, private profile migration or production installation.
+
+### Publisher compatibility remains a separate blocker
+
+The unchanged Root control `scripts/dsmm-release.mjs` still sets `pluginTitle: "Deepwork"` and `validateLocaleResources` requires that historical title/twelve-role contract. Current DSMM metadata can be rejected by that publisher despite local source/package readiness. Do not bypass it, change Root control in this stage, weaken validation or rewrite completed historical evidence. A future release needs separately authorized version/identity selection and control/proof compatibility acceptance before its frozen Linux artifact, publication, terminal checker and official-carrier rollout gates. None of those release/install gates was executed by this development checkpoint.
+
+## Historical release-only 0.1.9 proposal (not current authorization)
+
+The following procedure and historical facts are retained for audit. References to Deepwork metadata, twelve roles and standing DW locked mode belong to the old proof contract, **not** the current DSMM product above. They must not be applied to new changed bytes or adopted as current completion evidence.
 
 This is a prospective procedure for the explicitly authorized 0.1.9 commit, new release and later local Desktop installation, not a completed-release receipt. The new identities are `@dsmm/dsmm@0.1.9`, tag `dsmm-scoped-v0.1.9`, and `dsmm-dsmm-0.1.9.tgz`. Deepwork/DW display names do not rename package or protocol IDs. Existing 0.1.1 and older releases remain immutable. The stopped 0.1.2 tag, frozen artifact and draft Release remain untouched and unpublished: do not dispatch its bootstrap publisher, finalize its draft, overwrite its bytes or move/delete/recreate its tag.
 
@@ -12,7 +64,7 @@ The completed 0.1.4 publication and its separately authorized continuation remai
 
 The mandatory sequence is **fresh CI pack → independent frozen-byte Docker acceptance → verified OIDC npm/GitHub publication and terminal completion → authorized official-carrier Desktop rollout**. No global/system DSH, Desktop configuration, account/provider, credential, or real-session writes may occur before terminal verified publication. Local readiness alone does not authorize publication or migration.
 
-## Preflight
+### Preflight
 
 Run these checks from the exact source selected for review; they are readiness evidence, not publication steps. Confirm pinned DSH 0.2.0-rc.2 package/CLI identity, seven exact public exports, both metadata locale resources, peer/client exports, license parity and the exact packed file set. Recheck scoped npm authority and absence of the new version/tag before authorized publication; a registry lookup cannot reserve ownership. Do not change root ocmm/LSP versions or regenerate the unrelated Codex adapter.
 
@@ -37,7 +89,7 @@ Use pnpm for actual install/build/test/**pack/publish**. The `npm pack --dry-run
 
 For 0.1.9, clean Linux install/build verification must exercise the reviewed pnpm `allowBuilds` policy for exactly `esbuild@0.25.12` and `koffi@3.1.1`, with `strictDepBuilds: true`. A cached native binary or pre-existing `lib` tree cannot establish that the ignored-script failure is repaired. This is distinct from the deliberately script-free metadata dry-run above; do not weaken that diagnostic's lifecycle-script protection or approve all dependency scripts.
 
-## Phase 1: frozen artifact and independent Docker gate
+### Phase 1: frozen artifact and independent Docker gate
 
 Use the dedicated `.github/workflows/dsmm-release.yml` **future tag path** for the authorized `dsmm-scoped-v0.1.9` push, not the old bootstrap dispatch. Tag/version, peeled source commit, control commit and event identity must agree. CI uses pinned Node 24 / pnpm 11.9.0, checks/builds the exact source, verifies generated assets, and packs **one new actual tarball** with pnpm. Inspect `dsmm-dsmm-0.1.9.tgz`, record its actual size/SHA256/SHA1/SHA512 integrity, and freeze it. Never reuse the old 0.1.2 hash/receipt/artifact or any completed successor's bytes.
 
@@ -67,7 +119,7 @@ Bind the hook and every trusted support module explicitly, including `profile-ui
 
 The native component/RPC/storage test uses a supported composition-owned in-process carrier, not an anonymous production route or copied login. It is distinct from authenticated Desktop activation. Preserve sanitized scenario evidence and inspect the full intended diff before parent-owned authorized release operations. If any required scenario fails or the frozen bytes change, stop before publication/global migration.
 
-## Phase 2: authorized immutable publication
+### Phase 2: authorized immutable publication
 
 Publication requires explicit authorization for the new identity. Recheck `@dsmm/dsmm@0.1.9` and `dsmm-scoped-v0.1.9` are absent. Confirm the one-time npm Trusted Publisher registration for repository `hugefiver/ocmm`, workflow filename `dsmm-release.yml`, with direct publish allowed. If supported setup/MFA is still missing, request that step; do not add a static token fallback or recurring manual release gate. The main ocmm workflow/checker does not cover DSMM: its dedicated workflow and DSMM terminal checker do.
 
@@ -77,7 +129,7 @@ The future publish job revalidates the accepted run/attempt-bound bytes and publ
 
 Treat both identities as immutable: never overwrite an npm version and never move, delete, or recreate an immutable tag. Readiness documentation and a local tarball do not authorize a publish.
 
-### Publication identity verification
+#### Publication identity verification
 
 The prospective 0.1.9 release Action verifier gives public metadata, the exact tarball URL and genuine provenance one shared 20-minute (1,200-second / `1200000` ms) visibility deadline, with the `verify` job bounded to 45 minutes. The visibility budget is shared across all three read surfaces, never reset for each stage. Only HTTP 404 reads may wait within that budget; transport failures, other HTTP statuses, wrong bytes, altered source/run identities and invalid provenance still fail closed. This never retries publishing or weakens publisher absence checks. Failures expose only finite stage/code/HTTP-status diagnostics, never raw credentials or provider errors. The old 0.1.8 300-second budget and failed receipt stay immutable; the new controls apply only to the separately authorized new 0.1.9 identity. The original 0.1.7 CI cause remains unproven; this visibility hardening does not repair or reinterpret its failed receipt.
 
@@ -94,7 +146,7 @@ dsh --profile dsmm-0.1.9-verify --dump-config
 npm view @dsmm/dsmm@0.1.9 dist.integrity --registry "https://registry.npmjs.org/"
 ```
 
-### Published 0.1.6 continuation (separately authorized)
+#### Published 0.1.6 continuation (separately authorized)
 
 Historical audit reference only: this completed 0.1.6 publication/continuation remains immutable. Do not dispatch it again, republish its package or substitute its completion for the prospective 0.1.9 gate. The preserved identities and original failed history below belong only to 0.1.6.
 
@@ -110,7 +162,7 @@ node scripts/check-dsmm-release-completion.mjs terminal-continuation --origin-ve
 
 Only exit `0` with `COMPLETED` establishes that historical two-run terminal proof for 0.1.6, not permission for the new 0.1.9 rollout below. A green supplemental run alone is insufficient; `FAILED`/`UNRESOLVED` preserve immutable partial state. The omitted-selector APIs/CLI and old continuation workflow remain fixed to historical 0.1.4; neither that receipt nor its archive/provenance can establish 0.1.6 completion.
 
-## Phase 3: official installed-carrier Desktop rollout
+### Phase 3: official installed-carrier Desktop rollout
 
 Only after terminal 0.1.9 completion may authorized global migration begin. First perform the separately bounded isolated real-model/tool check against the exact registry package. Coordinate a fully quit Desktop, recheck concurrent edits, and preserve a recoverable local snapshot of only task-changed package-manager/DSMM-owned files—not the entire credential or session store. Use the exact installed official Desktop carrier to install `@dsmm/dsmm@0.1.9`. It may manage packages while the app is quit; it may **not** boot/dump the reserved Desktop profile. Never substitute standalone npm DSH, a renamed/copied profile, checkout imports, `app.asar` patches, global PATH/pnpm changes, or auth bypasses. Preserve the enabled state and do not repeat unrelated CLI/TUI installation.
 
@@ -120,7 +172,7 @@ Any old unmarked-log repair remains a separately authorized exact private target
 
 After a supported restart, verify actual Desktop package 0.1.9 activation, native Deepwork metadata, healthy selectable DW root names, retained auxiliary delegation/read-only denial, and actual Deepwork Profiles UI create/edit/save/apply/reset with independent file/pointer bytes. Verify live even-blank Agents remain unchanged on global Apply and current pinned selection persists across restart. Check one icon-only native profile menu in sessionless, blank and active views, safe refusal feedback and explicit model/effort authority: one normal profile list, one admitted-revision **Use profile model** action, durable Deepwork toggle intent on other presets, and standing DW locked enabled. Confirm accessible-only successes and short sanitized errors. Check unrelated deployment/provider/account/UI state remained intact. If authenticated native Desktop behavior cannot be observed, report that pending boundary; disk files, native metadata reads, headless tests and Docker component proof alone are insufficient for complete integration.
 
-## Rollback
+### Rollback
 
 Runtime rollback resets to the deployment baseline or explicitly reapplies a reviewed prior configuration with concurrency/revision checks. Never mutate immutable files or restore drafts over later user edits. Existing live Agents retain their snapshots.
 

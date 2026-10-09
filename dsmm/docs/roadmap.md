@@ -186,6 +186,12 @@ Expose dsmm settings ergonomically in dsh web-compatible surfaces while keeping 
 
 ## v1.0 — Stable dsmm release
 
+### Planned: abstract capabilities and Plugins management
+
+**Planned, not implemented.** Introduce default, reusable capability policies and a Plugins management surface with global/profile/role-scoped enablement and tuning, rather than hard-coding another role-specific switch framework. The current role-sized native standard defaults are a bounded composition increment, not that management API or UI.
+
+The design must bind each source baseline to an actually inspected version and frozen revision, distinguish Host services from role-owned rows and inherited native child composition, and retain fail-closed read-only/tool/delegation policy when new tools appear. DSH rc.2 is not claimed to provide preset `extends` or automatic standard inheritance. Saves should affect newly admitted roots, without remounting existing roots or rewriting their captured runtime services; any future profile policy must preserve the existing native model, caller-filter, immutable admission and module-off boundaries. No new schema, configuration controls or UI source implement these switches in this increment.
+
 Status: the initial scoped package is `@dsmm/dsmm@0.1.0`; `0.1.1` adds native per-role model/effort policies and ordered role fallbacks. The v1.0 stable milestone remains future work and does not imply all OpenCode hooks or client surfaces are compatible.
 
 ### Goal
