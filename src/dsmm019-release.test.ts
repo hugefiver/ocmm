@@ -5,7 +5,7 @@ import test from "node:test";
 import { POLICY, computeDigests, registryVerificationFailure, verifyRegistryArtifact } from "../scripts/dsmm-release.mjs";
 // @ts-expect-error Standalone terminal controller has no TypeScript declarations.
 import { EvidenceMismatch, verificationFailureForError, verifyPublishedArtifact } from "../scripts/check-dsmm-release-completion.mjs";
-// @ts-expect-error Historical fixture builder remains unchanged.
+// @ts-expect-error Standalone historical fixture builder has no TypeScript declarations.
 import { archiveFiles, makeAcceptedFixture, packageFiles } from "./dsmm-trusted-release-fixtures.mjs";
 
 /** Synthetic registry fixtures exercise verification, never publication proof. */

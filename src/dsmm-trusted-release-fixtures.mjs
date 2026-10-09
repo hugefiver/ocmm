@@ -73,6 +73,12 @@ export function archive(entries) {
   return gzipSync(Buffer.concat([...parts, Buffer.alloc(1024)]));
 }
 
+// Synthetic historical release data, independent of current branding and never publication proof.
+const FROZEN_HISTORICAL_LOCALE_RESOURCES = {
+  "locale/en.json": { meta: { title: "Deepwork", description: "Deepwork bundle for DeepSeek Harness." } },
+  "locale/zh.json": { meta: { title: "Deepwork", description: "DeepSeek Harness 的 Deepwork 工作流。" } },
+};
+
 export function packageFiles(version = "0.1.3") {
   const manifest = JSON.parse(readFileSync(new URL("../dsmm/package.json", import.meta.url), "utf8")); manifest.version = version;
   manifest.exports = manifestExportsForVersion(version);
@@ -83,7 +89,7 @@ export function packageFiles(version = "0.1.3") {
     ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`),
     "agent-presets/default.yml", "docs/research/reference.md", "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
   return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...compiledFilesForVersion(version)])].map((name) => [name, Buffer.from("fixture\n")]),
-    ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, readFileSync(new URL(`../dsmm/${path}`, import.meta.url))]) : [])]);
+    ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, Buffer.from(JSON.stringify(FROZEN_HISTORICAL_LOCALE_RESOURCES[path]))]) : [])]);
 }
 
 export function archiveFiles(files) { return archive([...files].map(([name, bytes]) => ({ name: `package/${name}`, bytes }))); }
