@@ -3568,7 +3568,7 @@ var DeploymentController = class _DeploymentController {
       if (current.entryId !== snapshot2.entryId || current.hostProfileKey !== snapshot2.hostProfileKey || current.globalRevision !== snapshot2.globalRevision) throw new Refusal("conflict");
       if (this.layer === "global") await unwrap(this.remote.save({ expectedRevision: snapshot2.globalRevision, edits }));
       else {
-        if (current.entryId !== snapshot2.entryId || current.hostProfileKey !== snapshot2.hostProfileKey || current.nativeRevision !== snapshot2.nativeRevision || current.globalRevision !== snapshot2.globalRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
+        if (current.nativeRevision !== snapshot2.nativeRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
         const form = this.form;
         if (!await form.mutate(edits, snapshot2.nativeFormRevision)) throw new Refusal("conflict");
       }

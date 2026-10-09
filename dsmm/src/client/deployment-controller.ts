@@ -129,7 +129,7 @@ export class DeploymentController {
       if (current.entryId !== snapshot.entryId || current.hostProfileKey !== snapshot.hostProfileKey || current.globalRevision !== snapshot.globalRevision) throw new Refusal("conflict");
       if (this.layer === "global") await unwrap(this.remote.save({ expectedRevision: snapshot.globalRevision, edits }));
       else {
-        if (current.entryId !== snapshot.entryId || current.hostProfileKey !== snapshot.hostProfileKey || current.nativeRevision !== snapshot.nativeRevision || current.globalRevision !== snapshot.globalRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
+        if (current.nativeRevision !== snapshot.nativeRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
         const form = this.form!;
         if (!await form.mutate(edits, snapshot.nativeFormRevision!)) throw new Refusal("conflict");
       }
