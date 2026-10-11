@@ -62,11 +62,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      GOBIN: ${{ runner.temp }}/dsmm-source-go/bin
-      GOPATH: ${{ runner.temp }}/dsmm-source-go/gopath
-      GOMODCACHE: ${{ runner.temp }}/dsmm-source-go/modules
-      GOCACHE: ${{ runner.temp }}/dsmm-source-go/cache
-      GOTMPDIR: ${{ runner.temp }}/dsmm-source-go/tmp
       GOENV: "off"
       GOWORK: "off"
       GOTOOLCHAIN: "local"
@@ -138,6 +133,16 @@ jobs:
           test "$("$RUNNER_TEMP/dsmm-source-pwsh/runtime/pwsh" -NoLogo -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()')" = "7.6.6"
           "$RUNNER_TEMP/dsmm-source-pwsh/runtime/pwsh" --version
           printf '%s\n' "$RUNNER_TEMP/dsmm-source-pwsh/runtime" >> "$GITHUB_PATH"
+      - name: Configure task-owned Go paths
+        if: steps.context.outputs.mode == 'future'
+        env:
+          GOBIN: ${{ runner.temp }}/dsmm-source-go/bin
+          GOPATH: ${{ runner.temp }}/dsmm-source-go/gopath
+          GOMODCACHE: ${{ runner.temp }}/dsmm-source-go/modules
+          GOCACHE: ${{ runner.temp }}/dsmm-source-go/cache
+          GOTMPDIR: ${{ runner.temp }}/dsmm-source-go/tmp
+        run: |
+          printf '%s\n' "GOBIN=$GOBIN" "GOPATH=$GOPATH" "GOMODCACHE=$GOMODCACHE" "GOCACHE=$GOCACHE" "GOTMPDIR=$GOTMPDIR" >> "$GITHUB_ENV"
       - name: Set up authorized task-owned Go toolchain
         if: steps.context.outputs.mode == 'future'
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

@@ -15,7 +15,10 @@ test("release Go/gopls configuration pins approved versions and confines source-
   const root = mkdtempSync(join(tmpdir(), "dsmm-go-scope-test-"));
   try {
     const workflow = yaml.load(readFileSync(new URL("../../.github/workflows/dsmm-release.yml", import.meta.url), "utf8"));
-    const prepare = workflow.jobs.prepare, environment = { ...workflow.env, ...prepare.env };
+    const prepare = workflow.jobs.prepare;
+    const paths = prepare.steps.find((step: { env?: Record<string, string> }) => step.env?.GOBIN !== undefined);
+    assert.ok(paths);
+    const environment = { ...workflow.env, ...prepare.env, ...paths.env };
     const expand = (value: string) => value.replace(/\$\{\{\s*(env|runner)\.(\w+)\s*\}\}/gu, (_match, context, key) => {
       const resolved = context === "runner" && key === "temp" ? root : context === "env" ? environment[key] : undefined;
       assert.equal(typeof resolved, "string"); return resolved;
@@ -35,6 +38,8 @@ test("release Go/gopls configuration pins approved versions and confines source-
     assert.equal(setup[0].with["check-latest"], false); assert.equal(setup[0].with.cache, false);
     assert.equal(resolve(expand(setup[0].env.RUNNER_TOOL_CACHE)), join(root, "dsmm-source-go", "toolchain"));
     assert.equal(setup[0].if, "steps.context.outputs.mode == 'future'");
+    assert.equal(paths.if, setup[0].if);
+    assert.ok(prepare.steps.indexOf(paths) < prepare.steps.indexOf(setup[0]));
     const installation = prepare.steps.find((step: { run?: string }) => step.run?.includes('go install "golang.org/x/tools/gopls@${GOPLS_VERSION}"'));
     assert.ok(installation); assert.equal(installation.if, setup[0].if);
     assert.ok(prepare.steps.indexOf(installation) < prepare.steps.findIndex((step: { run?: string }) => step.run?.includes("pnpm --dir dsmm test")));
