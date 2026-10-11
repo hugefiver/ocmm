@@ -121,6 +121,19 @@ jobs:
         if: steps.context.outputs.mode == 'future'
         working-directory: control
         run: node dsmm/scripts/extract-runtime-sdk.mjs --image "$DSMM_RUNTIME_IMAGE" --destination "$RUNNER_TEMP/dsmm-source-sdk"
+      - name: Configure existing source-test Rust toolchain
+        if: steps.context.outputs.mode == 'future'
+        working-directory: control
+        env:
+          RUSTUP_AUTO_INSTALL: "0"
+        run: |
+          rustup_home="$(rustup show home)"
+          cargo_path="$(rustup which cargo)"
+          toolchain="$(dirname "$(dirname "$cargo_path")")"
+          test -x "$toolchain/bin/cargo"
+          test -x "$toolchain/bin/rustc"
+          RUSTUP_TOOLCHAIN="$toolchain" cargo --version
+          printf '%s\n' "RUSTUP_HOME=$rustup_home" "RUSTUP_TOOLCHAIN=$toolchain" "RUSTUP_AUTO_INSTALL=0" "CARGO_HOME=$RUNNER_TEMP/dsmm-source-pwsh/home/.cargo" >> "$GITHUB_ENV"
       - name: Extract and verify pinned task-owned source-test PowerShell
         if: steps.context.outputs.mode == 'future'
         env:
