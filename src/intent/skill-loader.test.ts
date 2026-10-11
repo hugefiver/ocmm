@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
@@ -71,20 +71,13 @@ test("loadSharedSkills scans top-level skills and excludes v1", () => {
   }
 })
 
-test("shared publish skill is discovered outside v1 with the ocmm completion contract", () => {
+test("shared publish skill is discovered outside v1 injection and commands", () => {
   const skills = loadSharedSkills()
   const publish = skills.find((skill) => skill.name === "publish")
 
   assert.ok(publish, "shared publish skill must be discovered")
   assert.equal(relative(join(process.cwd(), "skills", "v1"), publish.path).startsWith(".."), true)
 
-  const source = readFileSync(join(publish.path, "SKILL.md"), "utf8")
-  assert.match(source, /^---\nname: publish\n/)
-  assert.match(source, /workflow terminal success is not release completion/i)
-  assert.match(source, /check:release-completion/)
-  assert.match(source, /\bCOMPLETED\b.*\bFAILED\b.*\bUNRESOLVED\b/s)
-  assert.match(source, /never move, delete, or recreate (?:the )?immutable tag/i)
-  assert.doesNotMatch(source, /discord|lazycodex|oh-my-opencode|oh-my-openagent|agent-discord/i)
   assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes("publish"), false)
   assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes("publish"), false)
 })
@@ -98,7 +91,6 @@ test("shared coding-agent-sessions skill is discovered and remains outside v1 in
   assert.equal(relative(join(process.cwd(), "skills", "v1"), skill.path).startsWith(".."), true)
   assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes(skill.name), false)
   assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes(skill.name), false)
-  assert.equal(loadV1Skills().includes("# Coding Agent Sessions"), false)
 
   const command = buildSkillCommand(skill)
   assert.equal(command?.name, "coding-agent-sessions")

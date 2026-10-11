@@ -3,11 +3,9 @@ name: receiving-code-review
 description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
 ---
 
-<!-- v1 fork of superpowers/receiving-code-review.
-     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
-     Adjustments: self-contained technical evaluation remains; findings are
-     evidence, not fixed verdict/receipt gates, and follow-up review is limited to
-     substantively changed inputs. See docs/v1-maintenance.md for sync rules. -->
+<!-- Local fork of obra/superpowers/receiving-code-review v6.2.0.
+     Evidence-based technical evaluation and affected-input follow-up review.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Code Review Reception
 
@@ -34,7 +32,7 @@ Clarify an item before implementing it when ambiguity would materially change th
 
 Escalate instead of deciding when a proposed response changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, requires an irreversible action, conflicts with the user's approved direction, or would otherwise be a pure guess.
 
-For a non-material ambiguity, choose a safe reversible interpretation from repository evidence. Record a significant ruling or assumption with its reason and cost if wrong.
+For a non-material ambiguity, choose a safe reversible interpretation from repository evidence. Keep only the resulting current constraint or unresolved verification limit, not a ruling history.
 
 ## Source-Specific Handling
 
@@ -50,7 +48,7 @@ For a non-material ambiguity, choose a safe reversible interpretation from repos
 Check whether the suggestion:
 
 - is correct for this codebase and supported platforms;
-- breaks existing behavior or approved acceptance criteria;
+- breaks committed contracts or final approved acceptance criteria;
 - overlooks why the current implementation exists;
 - adds unused or speculative functionality;
 - conflicts with global constraints or user decisions.
@@ -70,7 +68,9 @@ Keep real security, data-loss, protocol/API, compatibility, release, and irrever
 
 Group related findings when one coherent correction and evidence path covers them. Use focused deterministic tests at real regression seams, or other useful evidence such as typechecks, builds, runtime probes, and inspection where those better prove the outcome. There is no universal RED transcript, scenario count, one-review-per-finding, or full-suite requirement.
 
-Deep workers and implementers may choose a minimal evidence-based equivalent correction when it preserves the approved goal, constraints, permissions, and acceptance criteria. Record significant rulings or assumptions, why they were made, and the cost if wrong.
+Deep workers and implementers may choose a minimal evidence-based equivalent correction when it preserves the approved goal, constraints, permissions, and acceptance criteria. Report the resulting correction, current constraints, evidence, and unresolved risks. Don't preserve decision or development history.
+
+Judge tests against final valid requirements, functionality, and external interfaces. Don't require descriptive-text locks, decision-counterexample tests, or tests asserting that deleted components are absent. Update tests when requirements change and delete tests dedicated to removed components. Uncommitted intermediate behavior needn't be preserved; existing committed contracts and API/security/data/permission authorization remain binding.
 
 ## Follow-Up Review
 

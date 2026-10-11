@@ -1,101 +1,42 @@
 import assert from "node:assert/strict"
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, dirname, extname, join, relative } from "node:path"
+import { basename, join } from "node:path"
 import { test } from "node:test"
 
+import { loadSharedSkills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
 import {
+  buildCodexAgents,
   CODEX_MARKETPLACE_FILE,
+  CODEX_MARKETPLACE_NAME,
   CODEX_PLUGIN_DIR,
+  CODEX_PLUGIN_NAME,
   CODEX_PROJECT_AGENTS_DIR,
-  generateCodexPlugin,
+  CODEX_WORKFLOW_SKILL_NAME,
+  createCodexMcpManifest,
+  loadAdapterConfig,
 } from "./plugin-generator.ts"
 
 const repositoryRoot = process.cwd()
-const excludedPluginPaths = new Set(["dist"])
-const generatedTextExtensions = new Set([".json", ".md", ".mjs", ".ps1", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"])
-const generatedTextFilenames = new Set([".gitignore", ".npmignore", "LICENSE", "SOURCE"])
 
-function listFiles(root: string, excludedTopLevel = new Set<string>()): string[] {
-  assert.equal(existsSync(root), true, `generated root is missing: ${root}`)
+function readJson(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+}
 
-  function visit(directory: string): string[] {
-    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-      const absolute = join(directory, entry.name)
-      const relativePath = relative(root, absolute).replaceAll("\\", "/")
-      if (excludedTopLevel.has(relativePath.split("/", 1)[0]!)) return []
-      return entry.isDirectory() ? visit(absolute) : [relativePath]
-    })
+function readRuntimeAgentFields(path: string): Record<string, unknown> {
+  const fields: Record<string, unknown> = {}
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const assignment = line.match(/^(name|model|model_reasoning_effort|nickname_candidates)\s*=\s*(.+)$/)
+    if (!assignment) continue
+    const [, key, value] = assignment
+    assert.equal(Object.hasOwn(fields, key!), false, `${path}: duplicate ${key}`)
+    fields[key!] = JSON.parse(value!) as unknown
   }
-
-  return visit(root).sort()
+  return fields
 }
 
-function generatedFiles(root: string): string[] {
-  const marketplace = join(root, CODEX_MARKETPLACE_FILE)
-  assert.equal(existsSync(marketplace), true, `generated marketplace is missing: ${marketplace}`)
-  assert.equal(statSync(marketplace).isFile(), true, `generated marketplace is not a file: ${marketplace}`)
-
-  return [
-    CODEX_MARKETPLACE_FILE,
-    ...listFiles(join(root, CODEX_PROJECT_AGENTS_DIR))
-      .map((file) => `${CODEX_PROJECT_AGENTS_DIR}/${file}`),
-    ...listFiles(join(root, CODEX_PLUGIN_DIR), excludedPluginPaths)
-      .map((file) => `${CODEX_PLUGIN_DIR}/${file}`),
-  ].sort()
-}
-
-function compareGeneratedOutputs(freshRoot: string, trackedRoot: string): string[] {
-  const freshFiles = generatedFiles(freshRoot)
-  const trackedFiles = generatedFiles(trackedRoot)
-  const freshSet = new Set(freshFiles)
-  const trackedSet = new Set(trackedFiles)
-  const problems: string[] = []
-
-  for (const file of freshFiles) {
-    if (!trackedSet.has(file)) {
-      problems.push(`missing tracked file: ${file}`)
-      continue
-    }
-    if (!readFileSync(join(freshRoot, file)).equals(readFileSync(join(trackedRoot, file)))) {
-      problems.push(`stale tracked file: ${file}`)
-    }
-  }
-  for (const file of trackedFiles) {
-    if (!freshSet.has(file)) problems.push(`unexpected tracked file: ${file}`)
-  }
-
-  return problems
-}
-
-function filesContainingCarriageReturns(root: string): string[] {
-  return generatedFiles(root).filter((file) => {
-    const filename = basename(file)
-    const isText = generatedTextFilenames.has(filename) || generatedTextExtensions.has(extname(filename).toLowerCase())
-    return isText && readFileSync(join(root, file)).includes(0x0d)
-  })
-}
-
-function copyComparableGeneratedOutputs(sourceRoot: string, targetRoot: string): void {
-  for (const file of generatedFiles(sourceRoot)) {
-    const target = join(targetRoot, file)
-    mkdirSync(dirname(target), { recursive: true })
-    copyFileSync(join(sourceRoot, file), target)
-  }
-}
-
-test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", { concurrency: false }, async () => {
-  const runRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-freshness-"))
+test("tracked Codex artifacts deliver current configured runtime fields and resource inventory", { concurrency: false }, async () => {
+  const runRoot = mkdtempSync(join(tmpdir(), "ocmm-codex-resource-contract-"))
   const previousCodexHome = process.env.CODEX_HOME
   const previousNoProfile = process.env.OCMM_NO_PROFILE
   try {
@@ -103,26 +44,62 @@ test("tracked Codex artifacts exactly match a fresh CLI-equivalent generation", 
     mkdirSync(codexHome)
     process.env.CODEX_HOME = codexHome
     process.env.OCMM_NO_PROFILE = "1"
-    const result = await generateCodexPlugin({
-      projectRoot: repositoryRoot,
-      marketplacePath: join(runRoot, CODEX_MARKETPLACE_FILE),
-      projectAgentsRoot: join(runRoot, CODEX_PROJECT_AGENTS_DIR),
-      pluginRoot: join(runRoot, CODEX_PLUGIN_DIR),
+    const loaded = loadAdapterConfig(repositoryRoot)
+    assert.equal(loaded.host, "codex")
+
+    const pluginRoot = join(repositoryRoot, CODEX_PLUGIN_DIR)
+    const version = readJson(join(repositoryRoot, "package.json")).version
+    const manifest = readJson(join(pluginRoot, ".codex-plugin", "plugin.json"))
+    assert.equal(manifest.name, CODEX_PLUGIN_NAME)
+    assert.equal(manifest.version, version)
+    assert.equal(manifest.skills, "./skills/")
+    assert.equal(manifest.mcpServers, "./.mcp.json")
+    assert.deepEqual(readJson(join(pluginRoot, "package.json")), {
+      name: "deepwork-codex-plugin-runtime", version, private: true, type: "module",
     })
+    const marketplace = readJson(join(repositoryRoot, CODEX_MARKETPLACE_FILE))
+    assert.equal(marketplace.name, CODEX_MARKETPLACE_NAME)
+    const plugins = marketplace.plugins as Array<Record<string, unknown>>
+    assert.equal(plugins.length, 1)
+    assert.equal(plugins[0]?.name, CODEX_PLUGIN_NAME)
+    assert.deepEqual(plugins[0]?.source, { source: "local", path: `./${CODEX_PLUGIN_DIR}` })
+    assert.deepEqual(plugins[0]?.policy, { installation: "AVAILABLE", authentication: "ON_INSTALL" })
+    assert.deepEqual(readJson(join(pluginRoot, ".mcp.json")), createCodexMcpManifest(loaded.config, repositoryRoot, pluginRoot))
 
-    assert.equal(result.configHost, "codex", "freshness generation must use the project Codex config loader")
-    assert.deepEqual(filesContainingCarriageReturns(runRoot), [], "fresh generation must use LF for text artifacts")
-    assert.deepEqual(filesContainingCarriageReturns(repositoryRoot), [], "tracked text artifacts must use LF")
-    assert.deepEqual(compareGeneratedOutputs(runRoot, repositoryRoot), [])
+    const sourceSkillsRoot = join(repositoryRoot, "skills")
+    const agents = await buildCodexAgents({ config: loaded.config, cwd: repositoryRoot, skillsRoot: sourceSkillsRoot })
+    for (const agentsRoot of [join(pluginRoot, "agents"), join(repositoryRoot, CODEX_PROJECT_AGENTS_DIR)]) {
+      assert.deepEqual(readdirSync(agentsRoot).sort(), agents.map((agent) => `${agent.name}.toml`).sort())
+      for (const agent of agents) {
+        assert.deepEqual(readRuntimeAgentFields(join(agentsRoot, `${agent.name}.toml`)), {
+          name: agent.name,
+          model: agent.model,
+          model_reasoning_effort: agent.reasoningEffort,
+          nickname_candidates: [agent.name, agent.sourceName],
+        })
+      }
+    }
 
-    const staleRoot = join(runRoot, "stale-copy")
-    copyComparableGeneratedOutputs(repositoryRoot, staleRoot)
-    const staleReadme = join(staleRoot, CODEX_PLUGIN_DIR, "README.md")
-    writeFileSync(staleReadme, `${readFileSync(staleReadme, "utf8")}stale\n`, "utf8")
-    assert.deepEqual(
-      compareGeneratedOutputs(runRoot, staleRoot),
-      [`stale tracked file: ${CODEX_PLUGIN_DIR}/README.md`],
-    )
+    const disabled = new Set([...loaded.config.skills.disable, ...(loaded.config.disabledSkills ?? [])])
+    const sharedSkills = loadSharedSkills({
+      rootDir: sourceSkillsRoot,
+      sources: loaded.config.skills.sources,
+      enable: loaded.config.skills.enable,
+      disable: [...disabled],
+    })
+    const skillNames = [
+      CODEX_WORKFLOW_SKILL_NAME,
+      ...sharedSkills.map((skill) => basename(skill.path)),
+      ...V1_SKILL_DIRS.filter((name) => !disabled.has(name) && !disabled.has(`deepwork-${name}`)
+        && existsSync(join(sourceSkillsRoot, "v1", name, "SKILL.md"))).map((name) => `deepwork-${name}`),
+    ].sort()
+    const skillsRoot = join(pluginRoot, "skills")
+    assert.deepEqual(readdirSync(skillsRoot).sort(), skillNames)
+    for (const name of skillNames) {
+      const path = join(skillsRoot, name, "SKILL.md")
+      assert.equal(statSync(path).isFile(), true, `${name}: delivered skill resource`)
+      assert.equal(readFileSync(path, "utf8").match(/^name:\s*(.+)$/m)?.[1], name, `${name}: discoverable identity`)
+    }
   } finally {
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME
     else process.env.CODEX_HOME = previousCodexHome

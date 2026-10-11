@@ -56,7 +56,7 @@ export PYTHONBREAKPOINT=ipdb.set_trace
 export PYTHONBREAKPOINT=0
 ```
 
-**Journal this env var** — unset at Phase 9.
+Capture this environment variable's prior value in the temporary resource checklist and restore it at Phase 9.
 
 ---
 
@@ -190,7 +190,7 @@ debugpy.wait_for_client()  # blocks until attached
 debugpy.breakpoint()        # programmatic breakpoint
 ```
 
-**Journal**: the port (5678) and the listener file — unset at Phase 9.
+List the owned listener/process identity, port, and temporary source hunk in the resource checklist; close the owned listener and remove only that hunk at Phase 9.
 
 ---
 
@@ -233,16 +233,4 @@ Add these to Phase 8's silent-failure check:
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Remove breakpoint() / ipdb / pudb lines from source
-git diff | grep -E '(breakpoint\(\)|import ipdb|import pudb|import pdb; pdb\.set_trace)'
-# If the above has output, revert those files:
-git checkout <file>
-
-# Unset the global breakpoint override
-unset PYTHONBREAKPOINT
-
-# Kill any leftover debugpy listeners
-pkill -f 'debugpy' || true
-lsof -iTCP:5678 -sTCP:LISTEN -nP 2>/dev/null    # confirm free
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register this task's temporary breakpoint/import hunks, debugpy listener ports, process PIDs and start identities, and the exact prior `PYTHONBREAKPOINT` state (including whether it was unset). Remove only owned source hunks, never restore whole files. Restore the captured environment state and close only owned listeners after verifying PID and start identity; port 5678 alone doesn't establish ownership.

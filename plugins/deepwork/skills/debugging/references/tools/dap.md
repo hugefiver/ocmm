@@ -86,4 +86,4 @@ terminate
 quit
 ```
 
-Cleanup is part of the session: terminate the debuggee, then quit the REPL. `quit` destroys a socket transport or kills an adapter process started by this client; journal any wrapper scripts you created according to the skill's cleanup phase.
+Cleanup is part of the session: terminate the owned debuggee, then quit the REPL. `quit` destroys a socket transport or kills an adapter process started by this client. List wrapper scripts in the task-owned temporary resource checklist and remove only exact owned paths according to Phase 9.

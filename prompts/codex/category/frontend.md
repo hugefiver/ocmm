@@ -13,7 +13,7 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 1. **ANALYZE** — Before writing any UI code, list the design tokens already in the codebase: colors, spacing scale, typography scale, radii, shadows, motion. Read `tailwind.config.*`, `tokens.*`, `theme.*`, `globals.css`, etc. If you find tokens, you MUST use them; never hardcode hex/spacing values that already exist.
 2. **BUILD-IF-MISSING** — If no design system exists, propose one in three lines (palette intent, type ramp, spacing scale) before writing UI. Get the tokens in place first; build components on top.
 3. **BUILD-WITH-SYSTEM** — Compose components only from the tokenized primitives. Never escape into ad-hoc styles.
-4. **VERIFY** — After implementation, walk every breakpoint you can reasonably hit (mobile / tablet / desktop). Note one-line reasoning for each visual decision (why this spacing, why this contrast).
+4. **VERIFY** — After implementation, walk every breakpoint you can reasonably hit (mobile / tablet / desktop). Report rendered behavior, contrast/accessibility results, current risks, and unavailable coverage, not a rationale for each visual choice.
 
 ## DESIGN_QUALITY (the bar)
 
@@ -34,5 +34,5 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 ## DELIVERABLE
 
 - The component or page you were asked for.
-- A short note in your reply listing the tokens you used and why.
+- A short note listing the effective tokens, rendered verification results, and current constraints or unverified coverage, without a design-choice history.
 - Screenshots or a description of the rendered output at each breakpoint where the layout meaningfully changes.

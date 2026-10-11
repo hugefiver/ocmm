@@ -25,7 +25,7 @@ If your three hypotheses are all variations of "the handler has a bug", you don'
 | **Binary-level** (when applicable) | "The function we think is running is actually jumped over by a patched thunk / a different version loaded" |
 | **Build-vs-runtime** | "The code we're reading is not the code that's running — stale build, wrong symlink, cached wheel, or dist/ ahead of src/" |
 
-### For each hypothesis, write in the journal
+### Keep the active hypothesis set in conversation or disposable investigation state
 
 1. **Claim** — one sentence.
 2. **Distinguishing evidence** — the exact value or state that confirms or refutes it, AND where to read it (file:line, log source, breakpoint location, memory address).
@@ -65,7 +65,7 @@ When the `team_*` tools are present, create a **debug-squad** team and split inv
     {
       "kind": "subagent_type",
       "subagent_type": "explore",
-      "prompt": "You are the Reproduction Engineer. Your job: build the smallest reliable repro — a curl command, a vitest/pytest/go test, a tmux script, a Playwright script for browser bugs, a pwntools script for binary targets. It must reproduce on first try and be copy-pasteable by the Lead. Document exact input, expected output, observed output. Save repro artifacts under /tmp/ and tell the Lead to journal them. If the bug is browser-based you MUST use Playwright CLI — do not simulate with curl."
+      "prompt": "You are the Reproduction Engineer. Build the smallest reliable repro using the available runtime tools. Report exact input, expected output, and observed output. Save temporary repro artifacts in the task-owned temporary directory and return their exact ownership and cleanup identities to the Lead. Browser reproductions require Playwright CLI, not curl simulation."
     },
     {
       "kind": "subagent_type",
@@ -79,7 +79,7 @@ When the `team_*` tools are present, create a **debug-squad** team and split inv
 **Assignment rule**: one hypothesis → one `team_task_create`. Give each hypothesis to the member whose evidence source is most likely to confirm or refute it. Broadcast the full hypothesis list once via `team_send_message(to="*")` so members know what the others are testing.
 
 **Lead responsibilities**:
-- Maintain the journal (members do not write to it).
+- Maintain the task-owned temporary resource checklist and active investigation state.
 - Approve any source-code edits (including `debugger;` / `breakpoint()` / `dbg!` statements).
 - Synthesize member reports into updated hypothesis statuses.
 - Decide when to disband: `team_shutdown_request` → `team_approve_shutdown` → `team_delete`.
@@ -106,7 +106,7 @@ Dispatch all three through the current callable task schema. Pass `background: t
 
 ## Evidence capture discipline (both paths)
 
-For every piece of runtime state captured, record in the journal:
+For relevant runtime state, capture evidence in conversation or task-owned temporary storage, not a repository journal:
 
 ```markdown
 ### <ISO timestamp> — <what you looked at>
@@ -127,4 +127,4 @@ If you find yourself about to paraphrase, stop, go back, and copy the raw value.
 
 ## Round completion
 
-A "round" is complete when every hypothesis has either confirming or refuting evidence — or when you have exhausted the evidence sources available without a decisive result. If the round ends inconclusively, that counts as a failed round for the counter in the journal. See `04-hard-reasoning-escalation.md` for what to do at 2 consecutive failed rounds.
+A "round" is complete when every hypothesis has confirming or refuting evidence, or available evidence sources are exhausted without a decisive result. An inconclusive round increments the current failed-round count in disposable investigation state. Don't retain a round history in product artifacts. See `04-hard-reasoning-escalation.md` for the two-consecutive-failure threshold.

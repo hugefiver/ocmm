@@ -3,18 +3,32 @@ name: brainstorming
 description: "Use before creative or materially ambiguous work to clarify outcomes, constraints, risks, and an appropriate implementation direction."
 ---
 
-<!-- v1 fork of superpowers/brainstorming.
-     Upstream: obra/superpowers v6.3.0.
-     Adjustments: removed visual-companion and excluded-skill references;
-     discovery and design now scale with actual uncertainty and risk. A clear,
-     authorized task does not require a separate design gate, rigid checklist,
-     fixed option count, or repeated approval loop; complex implementation still
-     follows the workflow planning policy. See docs/v1-maintenance.md
-     for sync rules. -->
+<!-- Local fork of obra/superpowers/brainstorming v6.3.0.
+     Automatically injected final-state policy and proportional discovery.
+     Authorized work follows applicable planning without redundant design approval.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Brainstorming Outcomes Into Designs
 
-Use discovery and design to remove material uncertainty before implementation. The durable objective is a shared understanding of the goal, constraints, acceptance criteria, interfaces, risks, and ideal end state—not completion of a prescribed ceremony.
+Use discovery and design to remove material uncertainty before implementation. The objective is a shared understanding of the goal, constraints, acceptance criteria, interfaces, risks, and ideal end state, not completion of a prescribed ceremony.
+
+## Final-State Artifacts and Regression Tests
+
+These rules apply to every task, including agents and categories that receive this skill through automatic injection or packaging.
+
+Documents, code and comments, tests, and commit messages express only the concise final requirements, design, and behavior. Update intermediate changes directly to the final text. Don't retain development or decision histories, rejected alternatives, or decision counterexamples. Trace history only through the Git commit tree. The only document exception is a strictly chronological purpose, such as a roadmap or changelog; ordinary maintenance notes aren't history archives.
+
+`docs/superpowers/specs/` and `docs/superpowers/plans/` are reserved for final product requirements to be delivered. Each spec or plan describes its final deliverable, not an execution journal. Represent changed requirements with separate plans, not an accumulated change history. Other tasks use conversation-level coordination or a task-owned temporary plan and never write to those directories. Complexity can require planning without making a task a product-spec deliverable.
+
+Tests protect valid requirements, functional behavior, and external interfaces against regressions. Don't add string, regex, snapshot, or parsed-content locks for documentation, commit messages, package information, or error/log wording that has no functional or system-boundary significance. Verify executable configuration, protocol fields, and resource delivery through their behavior rather than locking descriptive text. Don't add decision-counterexample tests or tests asserting that a deleted component is absent. When requirements change, update corresponding tests. When a module, helper, tool, or subsystem is removed, delete tests dedicated to it. Negative tests for valid safety, protocol, and input-handling requirements remain appropriate.
+
+Git commits are the compatibility boundary. Uncommitted intermediate implementations may be changed incompatibly to meet final requirements without transition shims or tests preserving intermediate behavior. An existing component with uncommitted edits still has its committed contracts. This rule doesn't authorize changes to public APIs/protocols, security or data guarantees, permissions, or irreversible behavior, and doesn't authorize any Git write.
+
+Keep current constraints, authorization boundaries, unresolved risks, and verification evidence visible. State a necessary assumption as a current constraint or verification limit, not a ruling ledger. Agent reports stay in conversation; don't turn coordination, review conclusions, or evidence into workspace files unless explicitly requested as deliverables. Final-state discipline must never hide a real defect, blocker, or unverified requirement.
+
+Delegation and delivery need clear goals, useful completion evidence, and material constraints, not exhaustive resource/file inventories, per-item revision/hash/receipt locks, or fixed report fields. Workers may discover relevant files, tests, docs, and other resources within the authorized scope. Communicate scope and ownership boundaries, irreversible-operation limits, and required protocol/integrity identities when they matter; resource discovery never expands permissions. Keep results in conversation and require exact identities only for a concrete safety, integrity, or external protocol requirement.
+
+Temporary, debug, disposable, or retired files and directories do not need repeated stability checks, hash comparisons, or correct recorded status at every instant. Keep short-lived state in the agent session and synchronize useful results at delivery or major phase boundaries, not every checklist update. A completed disposable resource checklist can be deleted without first writing completion status; don't introduce repository debug journals or extra ledgers. Deliverables are proven by correct functionality, interfaces, and usability, not string/hash locks on all text files. Use hashes/checksums only for an explicitly necessary integrity, provenance/security, or protocol-identity requirement, preserving required release checks. Cleanup still requires exact task ownership, safe resolved paths, PID plus start identity for process termination, and preservation of user changes; lighter temporary-state handling never weakens authorization, API contracts, or data guarantees.
 
 ## Authorization and Intent
 
@@ -38,7 +52,7 @@ Choose and revise the path based on actual uncertainty, coordination, and risk. 
 
 Do not default upward merely because work is multi-file, creative, or unfamiliar. Do not default downward when concrete security, data-loss, compatibility, protocol/API, migration, release, or irreversible-operation risks require additional care.
 
-These paths size discovery and design; they do not replace workflow planning policy. Complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation even when requirements are clear and evidence is strong. Planning or criticism may be skipped only for a limited, simple, low-risk, clearly bounded change, or when the user explicitly requests the skip; record the short reason. An explicit skip never permits an unapproved security, data, API/protocol, permission, or irreversible-action decision.
+These paths size discovery and design; they do not replace workflow planning policy. Complex implementation of product business logic or behavior defaults to `planner` → `plan-critic` → implementation even when requirements are clear and evidence is strong. Planning or criticism for that work may be skipped only for a limited, simple, low-risk, clearly bounded change, or when the user explicitly requests the skip; state the applicable condition in conversation. Non-product routine operations, docs, maintenance, and release preparation use direct execution when resolvable, otherwise a material question or useful `complex`/specialist delegation, not automatic or repeated planner/critic/review cycles. Explicit process requirements and verification for concrete major safety risks remain binding. An explicit skip never permits an unapproved security, data, API/protocol, permission, or irreversible-action decision.
 
 ## Discovery
 
@@ -60,7 +74,7 @@ Do not manufacture alternatives, architecture, or refactoring to make the proces
 
 ## Outcome-Oriented Design
 
-Scale the design artifact to the work. It may be a concise statement in chat, a contextual task outline, or a durable spec when coordination and risk justify one. A useful design makes the following discoverable without requiring fixed sections or order:
+Scale the design artifact to the work within the product-spec and temporary-plan boundaries above. A useful design makes the following discoverable without requiring fixed sections or order:
 
 - goal and ideal end state;
 - scope, exclusions, constraints, permissions, and acceptance criteria;
@@ -75,11 +89,7 @@ Organize waves by independently meaningful outcomes and dependency order. For ea
 
 Resolve non-material ambiguity from the approved goal and repository evidence. Choose the smallest safe, reversible option that preserves the user's goal, constraints, permissions, and acceptance criteria.
 
-Record significant rulings and assumptions in the active tracking surface or final report with:
-
-- the decision or assumption;
-- the evidence or reason;
-- the cost if wrong.
+Keep only the resulting current requirements, constraints, unresolved risks, and useful evidence in task coordination and handoffs. Don't write a decision or assumption history.
 
 Escalate rather than guess when a choice changes scope or acceptance, weakens security or data guarantees, changes a public API/protocol, expands permissions, creates an irreversible effect, conflicts with a specific user mandate, or has no evidence-based path. Strict process is otherwise justified only by an explicit user request or concrete risk.
 
@@ -89,8 +99,8 @@ Self-review a material design for requirement coverage, internal consistency, in
 
 Request user review or approval only when their decision is needed, they explicitly requested the checkpoint, or a governing high-risk boundary requires it. Do not require approval section-by-section, repeat review because wording changed, or restart a design loop after a non-substantive edit. If substantive inputs change, revisit only the affected decisions and evidence.
 
-A saved spec is not mandatory for a clear bounded change. Create one when the user requests it or durable coordination materially benefits from it. Do not create a separate design/spec commit by default.
+A saved spec is not mandatory for a clear bounded change. Create a product spec only for final product requirements to be delivered; other tasks stay in conversation or a task-owned temporary plan. Do not create a separate design/spec commit by default.
 
 ## Implementation Handoff
 
-Once the goal is authorized and material uncertainty is resolved, proceed through the applicable implementation workflow without asking for a second design approval. Hand off the goal, ideal end state, constraints, acceptance criteria, dependencies/interfaces, material risks, useful evidence, and recorded rulings. Use a file-backed plan when complex work needs the default planner/critic sequence or durable coordination; delegated workers remain conditional on execution value.
+Once the goal is authorized and material uncertainty is resolved, proceed through the applicable implementation workflow without asking for a second design approval. Hand off the goal, ideal end state, constraints, acceptance criteria, dependencies/interfaces, material risks, and useful evidence. File-backed plans follow the location and final-deliverable rules above; delegated workers remain conditional on execution value.

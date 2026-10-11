@@ -1,16 +1,12 @@
 ---
 name: deepwork-writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Use before complex product behavior implementation, or when an explicit planning request or concrete major risk requires a plan; not for routine non-product multi-step work
 ---
 
-<!-- v1 fork of superpowers/writing-plans.
-     Upstream: obra/superpowers v6.3.0 (synced 2026-08-15).
-     Adjustments: removed executing-plans and using-git-worktrees references;
-     plans are outcome-oriented and scale with uncertainty, dependencies, and
-     risk rather than prescribing fixed steps, commits, or review receipts.
-     Complex implementation receives blocker-focused plan criticism without a
-     fixed receipt or repeated approval loop. See docs/v1-maintenance.md for
-     sync rules. -->
+<!-- Local fork of obra/superpowers/writing-plans v6.3.0.
+     Outcome-oriented final product plans; temporary coordination for other work.
+     Complex implementation receives orchestrator-owned blocker-focused criticism.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Writing Plans
 
@@ -20,13 +16,13 @@ Write an implementation plan that lets a capable engineer reach the approved out
 
 Assume the engineer is skilled but unfamiliar with this codebase and problem domain. Explain local conventions or non-obvious constraints that materially affect the work; do not prescribe details that repository evidence leaves safely open.
 
-**Default location for durable plans:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+**Product plan location:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`, only for final product requirements to be delivered. The same restriction applies to `docs/superpowers/specs/`. Each document describes its final deliverable; changed requirements use separate plans, not appended development or decision history. Other tasks use conversation-level coordination or a task-owned temporary plan, never these directories.
 
 ## When to Write a File-Backed Plan
 
-Do not write a plan merely because work has multiple steps. Use a durable plan for complex business or behavior implementation, or when discovery shows unclear boundaries or dependencies, cross-module coordination, novel behavior, migration/security/performance risk, or enough work that downstream executors need a shared artifact.
+Do not write a plan merely because work has multiple steps. Use a durable plan for complex implementation of product business logic or behavior, or when an explicit planning request or concrete major risk requires one. Non-product routine operations, docs, maintenance, and release preparation stay in conversation: resolve them directly, ask for material missing input, or use a useful `complex`/specialist worker without default planner/critic/review cycles. Dependencies or multiple files alone do not trigger a file-backed plan.
 
-Skip the planner/critic sequence only when the change is limited, simple, low risk, and clearly bounded, or when the user explicitly requests the skip. Record the short reason. Clear requirements, multiple familiar files, strong model capability, or sufficient evidence do not exempt complex work. A user-requested skip does not authorize changes to security/data guarantees, public APIs/protocols, permissions, or irreversible behavior.
+For complex product implementation, skip the planner/critic sequence only when the change is limited, simple, low risk, and clearly bounded, or when the user explicitly requests the skip. State the applicable condition in conversation. Clear requirements, multiple familiar files, strong model capability, or sufficient evidence do not exempt that work. A user-requested skip does not authorize changes to security/data guarantees, public APIs/protocols, permissions, or irreversible behavior. Planning complexity doesn't expand the product-plan directory's purpose.
 
 ## Scope and Discovery
 
@@ -40,7 +36,7 @@ Before decomposing work:
 
 If the work contains independent subsystems, split it into independently valuable plans or waves. If a material choice would alter scope, acceptance, safety, data, a public API/protocol, permissions, or an irreversible action, return it for approval rather than guessing.
 
-For a non-material open choice, choose a safe reversible default. Record a significant ruling or assumption with the evidence behind it, why it was chosen, and the cost if it is wrong.
+For a non-material open choice, choose a safe reversible default from evidence. Express only the resulting current constraint or unresolved risk needed for execution, not the choice history.
 
 ## Plan Shape
 
@@ -50,11 +46,11 @@ Use the structure that best explains the work. A useful plan normally makes thes
 - Source requirements/design and global constraints
 - Relevant current state
 - Dependencies and interfaces, including what each unit consumes and produces
-- Risks, assumptions, and significant rulings
+- Current risks, necessary assumptions, and authorization boundaries
 - Waves or tasks with clear outcome boundaries
 - Useful acceptance evidence for each wave and for the integrated result
 
-Do not turn the plan into a transcript. Include commands, code sketches, file paths, or signatures when they prevent ambiguity; omit them when repository patterns and acceptance criteria already make the implementation obvious.
+Describe the concise final requirements, design, and behavior. Update intermediate text directly; don't retain development history, rejected alternatives, or decision counterexamples. Include commands, code sketches, file paths, or signatures when they prevent ambiguity; omit them when repository patterns and acceptance criteria already make the implementation obvious.
 
 ## Waves and Tasks
 
@@ -77,13 +73,15 @@ Plans need not prescribe one executor action every 2-5 minutes. They also need n
 
 The plan defines the approved goal, constraints, permissions, and acceptance criteria. It may recommend an approach, task boundary, executor profile, or evidence path without freezing incidental mechanics.
 
-Deep workers and implementers may choose a minimal evidence-based equivalent when repository reality makes a planned detail unnecessary or inferior, provided they do not change the approved goal, constraints, permissions, or acceptance criteria. They record significant deviations, rulings, and assumptions with reasons and the cost if wrong.
+Deep workers and implementers may choose a minimal evidence-based equivalent when repository reality makes a planned detail unnecessary or inferior, provided they do not change the approved goal, constraints, permissions, or acceptance criteria. Handoffs describe the resulting implementation, current constraints, unresolved risks, and evidence, not a deviation or ruling log.
 
 They escalate instead of choosing when the decision changes scope or acceptance, weakens safety or data guarantees, changes a public API/protocol, expands permissions, introduces an irreversible action, or would otherwise be a pure guess.
 
-Executor recommendations are hints, not dispatch commands. The orchestrator selects a currently callable profile based on actual complexity and policy. Direct execution describes who performs implementation after applicable planning; it is not a way to skip the complex-work planner/critic sequence.
+Executor recommendations are hints, not dispatch commands. The orchestrator selects a currently callable profile based on actual complexity and policy. Direct execution describes who performs implementation after applicable planning; it is not a way to skip the complex product-implementation planner/critic sequence.
 
 ## Git Boundaries
+
+Git commits are the compatibility boundary. Uncommitted intermediate behavior may change incompatibly to satisfy final requirements without transition shims or tests preserving it. Existing committed contracts remain binding even in files with uncommitted edits; API, security, data, permission, and irreversible-operation changes still need their applicable authorization.
 
 Do not include routine commit steps or a default separate spec/plan commit. Git writes require authorization for the specific operation. A clear user request can authorize that exact operation without a second confirmation, but authorization never expands beyond its semantics:
 
@@ -103,9 +101,11 @@ Review the completed plan against its source:
 
 Fix issues inline. Do not require a second review simply because wording or formatting changed.
 
+Tests cover valid requirements, functionality, and external interfaces, not descriptive-text locks or decision counterexamples. Don't lock documentation, commit messages, package information, or non-contractual error/log wording through strings, regex, snapshots, or parsed content. Changed requirements update their tests; removed components lose their dedicated tests, with no replacement absence tests. Keep valid negative safety, protocol, and input-handling tests.
+
 ## Blocker-Focused Plan Review
 
-For complex business or behavior implementation, return the completed plan to the orchestrator for `plan-critic` review before implementation. The orchestrator owns dispatch; the planner never invokes the critic. For a valid narrow skip, state the reason instead. Give the critic the goal, acceptance criteria, current plan, source requirements, relevant evidence, and global constraints. No fixed field order, first-line verdict, receipt, hash, or repeated approval ritual is required.
+For complex implementation of product business logic or behavior, return the completed plan to the orchestrator for `plan-critic` review before implementation. The orchestrator owns dispatch; the planner never invokes the critic. Non-product work receives criticism only when explicitly required or warranted by a concrete major risk, not merely because a plan exists. For a valid skip, state the reason instead. Give the critic the goal, acceptance criteria, current plan, source requirements, relevant evidence, and global constraints. No fixed field order, first-line verdict, receipt, hash, or repeated approval ritual is required.
 
 Treat acknowledgements and status labels as informational, not evidence. Judge the returned analysis and cited evidence. Correct a substantive blocker, rebut it with concrete evidence, or escalate it for clarification before implementation. Non-blocking improvements do not hold implementation, and an unavailable, timed-out, or merely acknowledging critic does not manufacture approval or erase an unresolved blocker.
 
@@ -113,7 +113,7 @@ If review finds a substantive issue, update the plan and rerun only the affected
 
 ## Execution Handoff
 
-Hand off the approved outcome, reviewed plan or recorded narrow-skip reason, dependencies/interfaces, relevant evidence, global constraints, and recorded rulings. Use subagent-driven development or parallel dispatch only when delegation materially helps; otherwise implement directly through the appropriate workflow.
+Hand off the approved outcome, current reviewed plan or applicable narrow-skip condition, dependencies/interfaces, relevant evidence, global constraints, and unresolved risks. Use subagent-driven development or parallel dispatch only when delegation materially helps; otherwise implement directly through the appropriate workflow.
 
 ## Codex Compatibility
 
@@ -131,18 +131,18 @@ Use the first permitted route in this order:
 
 1. **Exact profile** — use `agent_type`, `agent_path`, or `agent_nickname` only when the current callable schema explicitly guarantees it selects a generated `dw-*` profile.
 2. **Direct composition** — use only when the current callable schema exposes every model field required by the role, the schema-exact `reasoning` or `reasoning_effort` field when the role requires reasoning, the role's full system/developer instructions, and all required skills. Report this route as composition, not exact-profile selection.
-3. **V1/V2 generic or flat dispatch** — use the canonical envelope below. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
-4. **Local execution** — when delegation is permitted, use only when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
+3. **V1/V2 generic or flat dispatch** — state the permitted role, bounded goal, and material constraints clearly; the brief prompts below are optional guidance. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
+4. **Local execution** — resolvable non-product routine work may run directly without entering dispatch routing. Otherwise use this fallback when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
 
-For generic or flat dispatch, put this canonical envelope in the task message:
+For generic or flat dispatch, clear prose is sufficient. These labels are illustrative, not required protocol fields or report sections:
 
-`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.
-`STOP WHEN:` State the exact completion condition and non-goal boundary.
-`EVIDENCE:` State the paths, commands, outputs, or observations that prove completion.
+`GOAL:` Describe the permitted role, bounded outcome, and material scope/ownership constraints.
+`STOP WHEN:` Describe the observable completion condition and relevant non-goals.
+`EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable `multi_agent_v2` namespace is guaranteed. V2-style flat tools never receive `fork_context`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 

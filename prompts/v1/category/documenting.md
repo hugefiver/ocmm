@@ -6,6 +6,12 @@ The deliverable should read like a specific person wrote it for a specific reade
 
 Do not use this category for documentation that must be coupled to code changes in the same task; route that to the implementation category that owns the code change.
 
+## FINAL-STATE CONTENT
+
+Write only final effective requirements, design, behavior, and current reader-facing constraints. Do not append development narratives, decisions, assumption rationale/cost, intermediate changes, rejected alternatives, or change histories. Trace process through the Git commit tree. Only strictly chronological documents such as roadmaps and changelogs retain history; do not turn ordinary documentation into a history archive. Keep current risks, unresolved authorization, unverified evidence, licenses, attribution, and active source identity.
+
+`docs/superpowers/specs/` and `docs/superpowers/plans/` hold final product requirements to be delivered, one final deliverable per artifact. Changed requirements use separate plans. Other tasks use conversation coordination or task-owned temporary plans outside those directories, regardless of complexity. Verify factual and interface accuracy; do not add string, regex, snapshot, or parsed-content tests to lock prose, commit messages, package descriptions, or non-boundary error/log wording.
+
 ## Shell Adaptation
 
 Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
@@ -59,4 +65,4 @@ Do not use any of these unless quoting source material verbatim:
 
 - The piece, in the requested length.
 - Cleanly formatted (Markdown unless told otherwise).
-- A one-line author's note: who you imagine reading this, and what action you want them to take.
+- Any current factual limitation, unresolved authorization, or unverified claim affecting the reader, stated briefly without a drafting or decision history.

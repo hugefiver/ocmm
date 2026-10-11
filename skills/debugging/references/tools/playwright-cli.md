@@ -58,11 +58,11 @@ npx playwright codegen --viewport-size=375,667 https://your-app.local    # iPhon
 npx playwright codegen --device="iPhone 14" https://your-app.local
 ```
 
-Click / type / navigate in the browser; watch the script build in the side panel. Copy the generated script into your journal as the repro for Phase 8.
+Use the run-owned empty browser context and save the reproduction script in the task-owned temporary root for Phase 8. Put its exact path in the resource checklist, not a repository journal.
 
 ### 2. A one-shot Playwright script — reproduce + capture
 
-Usually the Phase 8 QA artifact. Save to `/tmp/debug-repro.spec.ts` (journal it):
+Usually the Phase 8 QA artifact. Save under the task-owned temporary root and list its exact path for cleanup (replace illustrative `/tmp/` paths below):
 
 ```ts
 // /tmp/debug-repro.spec.ts
@@ -301,16 +301,4 @@ Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Remove trace files from debug runs
-rm -rf playwright-report/ test-results/ trace.zip
-
-# Remove debug spec files from /tmp
-rm -f /tmp/debug-*.spec.ts
-
-# Remove screenshot captures
-rm -f /tmp/debug-*.png
-
-# If you installed browsers just for this session (rare):
-# Don't remove them — they're useful for future sessions. They live in ~/Library/Caches/ms-playwright (macOS) or ~/.cache/ms-playwright (Linux).
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md) and the profile-marker and process-identity checks above. Register exact paths under the task-owned temporary root for reports, test results, traces, debug specs, and screenshots, plus owned browser/context identities and process PIDs and start identities. Delete only resolved, verified owned paths, not shared relative directories or `/tmp` filename patterns. Existing browser caches and profiles aren't cleanup targets; any authorized task-created browser installation needs its exact owned path recorded before cleanup.

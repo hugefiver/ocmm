@@ -5,7 +5,7 @@ Use this reference when a test is intermittent, passes in isolation, changes its
 ## Safety boundary
 
 - Start with an unchanged rerun. Do not install tools, terminate another user's process, overwrite user configuration, or use a shared temp root.
-- Journal every command, run-owned artifact, and cleanup action. Clean only artifacts that this run owns.
+- Capture relevant run evidence temporarily; list exact run-owned artifacts and cleanup actions in the temporary resource checklist. Clean only resources this run owns.
 - Retry wrappers, arbitrary sleeps, quarantine, deletion, and assertion weakening are not fixes. They hide evidence and must not be used to claim resolution.
 - Keep test commands and environment changes scoped to the affected test or suite. Do not turn a flaky-test investigation into a full-suite mutation.
 
@@ -55,7 +55,7 @@ pnpm test -- --test-name-pattern "affected test"
 Get-NetTCPConnection -LocalPort 3000
 ```
 
-Do not install a port inspector and never kill a port owner. If a listener is relevant, record it and namespace the port for the run instead. Journal cleanup and remove only the unique root created by the current investigation.
+Do not install a port inspector and never kill a port owner. If a listener is relevant, capture its identity and namespace the port for the run instead. Use the temporary resource checklist and remove only the unique root created by the current investigation.
 
 ## Cause-oriented repair
 
@@ -66,4 +66,4 @@ Do not install a port inspector and never kill a port owner. If a listener is re
 
 After two failed evidence rounds, the local workflow permits one `hard-reasoning` escalation only when the root cause is genuinely difficult. Reviewer and Oracle profiles are not debugging agents and must not be used for this triage.
 
-If the evidence remains unresolved, return a classification receipt: the three-run signature, observed shared-state checks, remaining hypotheses, controlled toggles attempted, run-owned artifacts cleaned, and the explicit statement that no fix is claimed.
+If the evidence remains unresolved, report the current classification, decisive shared-state evidence, remaining evidence gaps, owned-resource cleanup, and the explicit statement that no fix is claimed. Don't require a receipt or experiment history.

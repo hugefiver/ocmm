@@ -12,6 +12,17 @@ pnpm run build       # tsc -> dist/ and cargo release -> dist/bin/
 
 All three must pass before committing. TypeScript tests use `node --test --experimental-strip-types` (Node 22+), no test framework dependency. The Rust `ocmm-lsp` MCP server lives under `crates/ocmm-lsp/` and requires Cargo. `pnpm run build` writes both the local fallback binary name and the target-triple release name to `dist/bin/`.
 
+## Final-State Artifacts and Regression Tests
+
+- Documents, code and comments, tests, and commit messages describe only the concise final requirements, design, and behavior. Update the relevant content directly; do not retain development narratives, decision histories, intermediate changes, rejected alternatives, or decision counterexamples. Trace history through the Git commit tree. Only documents with a strictly chronological purpose, such as roadmaps and changelogs, record changes over time.
+- `docs/superpowers/specs/` and `docs/superpowers/plans/` are reserved for final product requirements to be delivered. Each spec or plan describes its final deliverable, not an execution journal. Represent changed requirements with separate plans, not an accumulated decision history. Other tasks use conversation-level coordination or a task-owned temporary plan, never these directories.
+- Tests protect valid requirements, functional behavior, and external interfaces against regressions. Do not add string, regex, snapshot, or parsed-content locks for documentation, commit messages, package information, or error/log wording that does not affect functionality or a system boundary. Verify actual configuration, executable interfaces, protocol fields, and resource delivery through their behavior rather than locking descriptive text. Deliverables require correct functionality, interfaces, and usability, not string/hash locks on all text files; hashes/checksums are reserved for explicitly necessary integrity, provenance/security, or protocol identity, including required release checks.
+- Update corresponding tests when requirements change. Delete tests dedicated to a removed requirement, subsystem, tool, helper, or internal module; never replace them with tests asserting its absence or the absence of rejected decision alternatives. Negative tests for valid safety, protocol, and input-handling requirements remain appropriate.
+- Git commits are the compatibility boundary. Uncommitted intermediate behavior may be changed incompatibly to satisfy final requirements without transition shims or tests preserving it. An uncommitted edit to an existing component does not erase its committed contracts; API, security, data, permission, and irreversible-operation changes still require their applicable authorization. This policy does not authorize Git writes.
+- Non-product routine operations, docs, maintenance, and release preparation use direct execution when resolvable, otherwise a material question or useful `complex`/specialist delegation, not automatic or repeated planner/critic/review cycles. Complex implementation of product business logic or behavior retains its planner/critic policy; explicit process requirements and verification for concrete major safety risks remain binding.
+- Delegation and delivery need clear goals, useful evidence, and material scope/ownership, permission, irreversible-operation, and protocol/integrity identity boundaries, not exhaustive resource/file inventories, per-item revision/hash/receipt locks, or fixed report fields. Workers may discover corresponding resources within the authorized scope; discovery never expands permissions. Reports stay in conversation.
+- Keep short-lived coordination and agent reports in conversation, not workspace plan/report/evidence files unless explicitly requested as deliverables. Synchronize useful results at delivery or major phase boundaries, not every checklist update. Temporary, debug, disposable, or retired artifacts need no repeated stability/hash comparisons or correct status record at every instant; delete a finished disposable checklist/journal without first writing completion status. Don't introduce repository debug journals or extra ledgers. Cleanup still requires exact task ownership, safe resolved paths, PID plus start identity for process termination, and preservation of user changes; lightweight temporary-state handling never weakens authorization, APIs, or data guarantees.
+
 ## Release Workflow
 
 The `.github/workflows/release.yml` workflow has two independent lanes:
@@ -188,11 +199,10 @@ $env:XDG_CACHE_HOME   = "$testDir/xdg-cache"
 
 Verify isolation with `opencode debug paths` — the generated OpenCode `data`, `bin`, `log`, `repos`, `cache`, `config`, and `state` paths should point inside `$testDir`. The fixed `home` and `tmp` rows may still point to the OS user home/temp roots.
 
-Capture an explicit probe artifact under the isolated directory so verification evidence is colocated with the test run:
+Inspect the isolation probe output in conversation; save it under the isolated directory only when a retained probe artifact is explicitly needed:
 
 ```powershell
-mkdir.exe -p "$testDir/evidence"
-opencode debug paths 2>&1 | tee "$testDir/evidence/opencode-debug-paths.txt"
+opencode debug paths
 ```
 
 Treat all raw logs and credentials in `$testDir` as temporary test material only (for example `opencode.json` API keys and debug logs). Do not copy them into project files or long-lived config locations.

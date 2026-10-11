@@ -17,7 +17,7 @@ Task tool (general-purpose):
     - acceptance criteria;
     - current working-tree diff or committed range, including new files;
     - relevant verification evidence and intentionally unverified items;
-    - global constraints, permissions, and material approved rulings;
+    - current global constraints and permissions;
     - focused dependency, interface, or risk context when needed.
 
     Inspect the actual change rather than relying on an implementer summary or
@@ -30,6 +30,13 @@ Task tool (general-purpose):
     approved goal, constraints, permissions, and acceptance criteria. Flag a
     proposed change to approved scope or behavior as a decision for the controller,
     not an automatic fix.
+
+    Review final valid requirements and committed contracts, not uncommitted
+    intermediate behavior or decision history. Reject descriptive-text locks,
+    decision-counterexample tests, and tests asserting removed components are
+    absent. Requirements changes update corresponding tests; removed components
+    lose their dedicated tests. Keep valid safety, protocol, and input-handling
+    negatives and the applicable API/security/data/permission authorization.
 
     Report concrete findings with severity, file/line location when available,
     impact, supporting evidence, and a practical correction when useful. Separate

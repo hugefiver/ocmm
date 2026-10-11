@@ -3,17 +3,14 @@ name: deepwork-requesting-code-review
 description: Use when an implemented change benefits from independent review before delivery or merge
 ---
 
-<!-- v1 fork of superpowers/requesting-code-review.
-     Upstream: obra/superpowers v6.3.0.
-     Adjustments: review is risk- and evidence-driven rather than unconditional;
-     requests carry the current change, goals, criteria, evidence, and constraints
-     without fixed packet fields, receipts, or verdict formats.
-     Reviewer-seat discipline remains: reviewers do not spawn additional review
-     seats. See docs/v1-maintenance.md for sync rules. -->
+<!-- Local fork of obra/superpowers/requesting-code-review v6.3.0.
+     Risk/evidence-driven implementation review of current changes and contracts.
+     Reviewers don't spawn additional review seats.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Requesting Code Review
 
-Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the work product and decision context, not the session transcript.
+Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the current work product, requirements, constraints, and evidence, not a decision history or session transcript.
 
 **Core principle:** Review current implemented code against the approved outcome. Reviewer and Oracle profiles are not research, ideation, architecture-design, root-cause debugging, plan review, or implementation workers.
 
@@ -37,7 +34,7 @@ Provide the reviewer, in whatever order is clearest:
 - acceptance criteria;
 - the current working-tree diff or committed range, including newly created files;
 - relevant verification evidence and any intentionally unverified item;
-- global constraints, permissions, and material approved rulings;
+- current global constraints and permissions;
 - focused dependency/interface or risk context needed to evaluate the change.
 
 Use the actual current diff or range rather than a prose-only summary. If output is large or sensitive, provide a safe reviewable artifact or focused slices plus a complete file manifest, without omitting changes material to the criteria.
@@ -63,6 +60,8 @@ Typical choices:
 - Additional lanes: only for an explicit evidence need, not because profiles happen to exist.
 
 Review roles inspect implementation; they do not approve plans or decide unapproved product scope.
+
+Review against final valid requirements and committed contracts, not uncommitted intermediate behavior. Documents, code/comments, tests, and commit messages state only the concise final design and behavior. Tests must protect functionality and external interfaces, not lock descriptive documentation, commit messages, package information, or non-contractual error/log wording through strings, regex, snapshots, or parsed content. Don't require decision-counterexample or removed-component absence tests. Changed requirements update tests; removed components lose their dedicated tests. API, security, data, permission, and irreversible-operation authorization still applies.
 
 ## Interpret the Result
 
@@ -106,18 +105,18 @@ Use the first permitted route in this order:
 
 1. **Exact profile** — use `agent_type`, `agent_path`, or `agent_nickname` only when the current callable schema explicitly guarantees it selects a generated `dw-*` profile.
 2. **Direct composition** — use only when the current callable schema exposes every model field required by the role, the schema-exact `reasoning` or `reasoning_effort` field when the role requires reasoning, the role's full system/developer instructions, and all required skills. Report this route as composition, not exact-profile selection.
-3. **V1/V2 generic or flat dispatch** — use the canonical envelope below. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
-4. **Local execution** — when delegation is permitted, use only when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
+3. **V1/V2 generic or flat dispatch** — state the permitted role, bounded goal, and material constraints clearly; the brief prompts below are optional guidance. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
+4. **Local execution** — resolvable non-product routine work may run directly without entering dispatch routing. Otherwise use this fallback when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
 
-For generic or flat dispatch, put this canonical envelope in the task message:
+For generic or flat dispatch, clear prose is sufficient. These labels are illustrative, not required protocol fields or report sections:
 
-`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.
-`STOP WHEN:` State the exact completion condition and non-goal boundary.
-`EVIDENCE:` State the paths, commands, outputs, or observations that prove completion.
+`GOAL:` Describe the permitted role, bounded outcome, and material scope/ownership constraints.
+`STOP WHEN:` Describe the observable completion condition and relevant non-goals.
+`EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable `multi_agent_v2` namespace is guaranteed. V2-style flat tools never receive `fork_context`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 

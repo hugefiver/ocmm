@@ -3,12 +3,9 @@ name: deepwork-dispatching-parallel-agents
 description: Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies
 ---
 
-<!-- v1 fork of superpowers/dispatching-parallel-agents.
-     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
-     Adjustments: platform-agnostic parallel dispatch is retained while worker
-     briefs, evidence, integration, and escalation are outcome-oriented and do
-     not impose mandatory review or Git ceremony. See docs/v1-maintenance.md for
-     sync rules. -->
+<!-- Local fork of obra/superpowers/dispatching-parallel-agents v6.2.0.
+     Independent file/resource ownership and outcome-oriented evidence integration.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Dispatching Parallel Agents
 
@@ -34,18 +31,18 @@ Do not parallelize related failures, exploratory debugging with an unknown share
 
 ## Create Focused Worker Briefs
 
-Give each worker, in whatever order is clearest:
+Explain enough for each worker to act safely; these are useful prompts, not required fields or an exhaustive resource inventory:
 
 - its goal and ideal end state;
 - acceptance criteria and useful evidence;
 - current context, dependencies, and interfaces;
-- exclusive files/resources or scope boundaries;
+- material exclusive ownership or scope boundaries;
 - global constraints and permissions;
-- material risks or prior rulings.
+- current constraints, authorization boundaries, or material risks.
 
-Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, significant assumptions or rulings, and unresolved concerns. A status label or acknowledgement is informational, not evidence.
+Workers may discover corresponding resources inside their authorized domain; don't require exhaustive file lists or per-item revision/hash/receipt locks. Discovery never expands permissions or shared-state ownership. Keep actual safety, irreversible-operation, and protocol/integrity identities explicit when needed. Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, current constraints, and unresolved concerns in conversation, not a ruling log or workspace report. A status label or acknowledgement is informational, not evidence.
 
-Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. They record significant deviations with reasons and cost if wrong. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
+Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. Their reports describe final outcomes, constraints, evidence, and unresolved risks, not deviations or decision histories. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
 
 ## Dispatch Concurrently
 
@@ -61,7 +58,7 @@ As workers return:
 - compare it to that worker's goal and acceptance criteria;
 - evaluate or run useful targeted evidence;
 - check cross-result interfaces, assumptions, and conflicts;
-- record significant integration rulings and their cost if wrong;
+- carry forward current integration constraints and unresolved risks;
 - verify the combined result against the overall ideal end state.
 
 This is an integration check, not a mandatory full review per worker or wave. Request focused or whole-change review only when risk, uncertainty, user instruction, or a governing process makes it useful.
@@ -104,18 +101,18 @@ Use the first permitted route in this order:
 
 1. **Exact profile** — use `agent_type`, `agent_path`, or `agent_nickname` only when the current callable schema explicitly guarantees it selects a generated `dw-*` profile.
 2. **Direct composition** — use only when the current callable schema exposes every model field required by the role, the schema-exact `reasoning` or `reasoning_effort` field when the role requires reasoning, the role's full system/developer instructions, and all required skills. Report this route as composition, not exact-profile selection.
-3. **V1/V2 generic or flat dispatch** — use the canonical envelope below. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
-4. **Local execution** — when delegation is permitted, use only when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
+3. **V1/V2 generic or flat dispatch** — state the permitted role, bounded goal, and material constraints clearly; the brief prompts below are optional guidance. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
+4. **Local execution** — resolvable non-product routine work may run directly without entering dispatch routing. Otherwise use this fallback when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
 
-For generic or flat dispatch, put this canonical envelope in the task message:
+For generic or flat dispatch, clear prose is sufficient. These labels are illustrative, not required protocol fields or report sections:
 
-`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.
-`STOP WHEN:` State the exact completion condition and non-goal boundary.
-`EVIDENCE:` State the paths, commands, outputs, or observations that prove completion.
+`GOAL:` Describe the permitted role, bounded outcome, and material scope/ownership constraints.
+`STOP WHEN:` Describe the observable completion condition and relevant non-goals.
+`EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable `multi_agent_v2` namespace is guaranteed. V2-style flat tools never receive `fork_context`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 

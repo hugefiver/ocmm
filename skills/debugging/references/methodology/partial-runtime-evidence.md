@@ -97,7 +97,7 @@ If the operation succeeded earlier (before quota ran out, before access was revo
 
 ### Tier 6 — Pure code reading with independent research verification
 
-If literally none of the above is available, read the code carefully and use one bounded `research` pass to verify cited claims against the available source. This is the weakest tier and you must explicitly mark conclusions as "unverified" in the journal.
+If none of the above is available, read the code carefully and use one bounded `research` pass to verify cited claims against the available source. This is the weakest tier: explicitly mark the claim as unverified in the deliverable, without creating a repository journal.
 
 ---
 
@@ -114,7 +114,7 @@ A defensible conclusion **prefers two independent signals from different tiers**
 | Tier 3 + Tier 4 (cross-check + contrastive run) | medium — both partial |
 | Tier 6 alone (code reading only) | **insufficient** — escalate or mark unverified |
 
-Record in the journal:
+State the current evidence and verification limit in conversation or the deliverable, not a repository journal:
 
 ```markdown
 ## Partial runtime evidence
@@ -201,17 +201,4 @@ Use `research` to verify factual artifact claims. Use the Phase 4 hard-reasoning
 
 ## Cleanup additions for partial-evidence work
 
-```bash
-# Proxy artifacts
-pkill -f mitmproxy 2>/dev/null
-rm -f ~/.mitmproxy/cache_* 2>/dev/null
-
-# Debug log files
-rm -f /tmp/trace.log /tmp/*-debug-trace.log
-
-# DYLD_INSERT / LD_PRELOAD shim libraries
-rm -f /tmp/*.dylib /tmp/*.so
-
-# Verify env vars set in your shell are not persisted
-unset HTTPS_PROXY APP_DEBUG APP_LOG_LEVEL APP_LOG_FILE 2>/dev/null
-```
+Put proxy processes, logs, shim libraries, and environment overrides in the temporary resource ownership checklist before creation. Follow Phase 9: stop only identity-verified owned processes, delete exact owned paths, and restore captured prior environment values. Never remove shared proxy caches or use wildcard cleanup.

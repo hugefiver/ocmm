@@ -3,17 +3,14 @@ name: requesting-code-review
 description: Use when an implemented change benefits from independent review before delivery or merge
 ---
 
-<!-- v1 fork of superpowers/requesting-code-review.
-     Upstream: obra/superpowers v6.3.0.
-     Adjustments: review is risk- and evidence-driven rather than unconditional;
-     requests carry the current change, goals, criteria, evidence, and constraints
-     without fixed packet fields, receipts, or verdict formats.
-     Reviewer-seat discipline remains: reviewers do not spawn additional review
-     seats. See docs/v1-maintenance.md for sync rules. -->
+<!-- Local fork of obra/superpowers/requesting-code-review v6.3.0.
+     Risk/evidence-driven implementation review of current changes and contracts.
+     Reviewers don't spawn additional review seats.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Requesting Code Review
 
-Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the work product and decision context, not the session transcript.
+Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the current work product, requirements, constraints, and evidence, not a decision history or session transcript.
 
 **Core principle:** Review current implemented code against the approved outcome. Reviewer and Oracle profiles are not research, ideation, architecture-design, root-cause debugging, plan review, or implementation workers.
 
@@ -37,7 +34,7 @@ Provide the reviewer, in whatever order is clearest:
 - acceptance criteria;
 - the current working-tree diff or committed range, including newly created files;
 - relevant verification evidence and any intentionally unverified item;
-- global constraints, permissions, and material approved rulings;
+- current global constraints and permissions;
 - focused dependency/interface or risk context needed to evaluate the change.
 
 Use the actual current diff or range rather than a prose-only summary. If output is large or sensitive, provide a safe reviewable artifact or focused slices plus a complete file manifest, without omitting changes material to the criteria.
@@ -63,6 +60,8 @@ Typical choices:
 - Additional lanes: only for an explicit evidence need, not because profiles happen to exist.
 
 Review roles inspect implementation; they do not approve plans or decide unapproved product scope.
+
+Review against final valid requirements and committed contracts, not uncommitted intermediate behavior. Documents, code/comments, tests, and commit messages state only the concise final design and behavior. Tests must protect functionality and external interfaces, not lock descriptive documentation, commit messages, package information, or non-contractual error/log wording through strings, regex, snapshots, or parsed content. Don't require decision-counterexample or removed-component absence tests. Changed requirements update tests; removed components lose their dedicated tests. API, security, data, permission, and irreversible-operation authorization still applies.
 
 ## Interpret the Result
 

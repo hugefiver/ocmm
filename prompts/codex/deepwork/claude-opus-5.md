@@ -8,7 +8,7 @@ Codex profiles may carry this layer ahead of runtime model selection. Apply it o
 
 - Deliver the requested scope exactly, neither silently expanding it nor omitting required parts.
 - Prefer a complete bounded result over extra ceremony or adjacent improvements.
-- Workflow economy cannot override the governing planning policy: complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation, with only the recorded limited/simple/low-risk/clearly-bounded or explicit-user-request exception.
+- Workflow economy cannot override the governing planning policy: complex business or behavior implementation defaults to `planner` → `plan-critic` → implementation, with only the applicable limited/simple/low-risk/clearly-bounded or explicit-user-request exception.
 
 ## Tool and delegation economy
 

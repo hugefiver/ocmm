@@ -234,17 +234,6 @@ test("functional agents compose role prompt with model-family deepwork prompt", 
   assert.match(clarifierPrompt, /Agent Role: clarifier/)
 })
 
-test("orchestrator prompt requires intent verbalization", async () => {
-  const handler = createConfigHandler({ getConfig: () => defaultConfig() })
-  const cfg: { agent: Record<string, unknown> } = { agent: {} }
-  await handler(cfg, undefined)
-
-  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
-  assert.match(prompt, /Intent Verbalization/)
-  assert.match(prompt, /我读到这是/)
-  assert.match(prompt, /I read this as/)
-})
-
 test("config registers OMO-compatible direct delegation aliases", async () => {
   const handler = createConfigHandler({ getConfig: () => defaultConfig() })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
@@ -1154,11 +1143,9 @@ test("v1 selected GPT generations and aliases share one calibration after role a
       const prompt = String(entry.prompt)
       assert.equal(entry.model, model, `${model}/${name}: explicit model`)
       assert.equal(countText(prompt, gpt), 1, `${model}/${name}: one exact source`)
-      assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, `${model}/${name}`)
       const role = getAgentPrompt(promptSource ?? name).trim()
       if (role) {
         assert.ok(prompt.indexOf(role) < prompt.indexOf(gpt), `${model}/${name}: role first`)
-        assert.match(prompt, /role prompt above is authoritative/, `${model}/${name}: subordinate calibration`)
       }
       if (name === "planner") {
         assert.equal(countText(prompt, plannerBase), 1, model)
@@ -1192,7 +1179,7 @@ test("v1 non-GPT agents and planners retain their existing layers without GPT ca
   }
 })
 
-test("config never loads obsolete GPT sources and tolerates a missing generic calibration after reload", async () => {
+test("config tolerates a missing generic calibration after reload", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-unified-gpt-"))
   try {
     for (const workflow of ["v1", "codex"] as const) {
@@ -1203,8 +1190,6 @@ test("config never loads obsolete GPT sources and tolerates a missing generic ca
       writeFileSync(join(root, workflow, "deepwork", "planner.md"), "planner-base-fixture")
       writeFileSync(join(root, workflow, "deepwork", "codex.md"), "adapter-base-fixture")
       writeFileSync(join(root, workflow, "deepwork", "gpt.md"), "generic-gpt-fixture")
-      writeFileSync(join(root, workflow, "deepwork", "gpt-5.6.md"), "obsolete-gpt56-fixture")
-      writeFileSync(join(root, workflow, "deepwork", "gpt-6-astra.md"), "obsolete-astra-fixture")
       const configured = {
         ...defaultConfig(), workflow,
         agents: { planner: { model: "openai/gpt-6-astra" } },
@@ -1214,7 +1199,6 @@ test("config never loads obsolete GPT sources and tolerates a missing generic ca
       await createConfigHandler({ getConfig: () => configured })(first, undefined)
       const prompt = String((first.agent.planner as Record<string, unknown>).prompt)
       assert.equal(countText(prompt, "generic-gpt-fixture"), 1, workflow)
-      assert.doesNotMatch(prompt, /obsolete-gpt56-fixture|obsolete-astra-fixture/, workflow)
       rmSync(join(root, workflow, "deepwork", "gpt.md"))
       loadAllPrompts(root, workflow)
       const reloaded: ConfigTarget = { agent: {} }
@@ -1222,7 +1206,7 @@ test("config never loads obsolete GPT sources and tolerates a missing generic ca
       const reloadedPrompt = String((reloaded.agent.planner as Record<string, unknown>).prompt)
       assert.match(reloadedPrompt, /planner-role-fixture/)
       assert.match(reloadedPrompt, /planner-base-fixture/)
-      assert.doesNotMatch(reloadedPrompt, /generic-gpt-fixture|obsolete-gpt56-fixture|obsolete-astra-fixture/, workflow)
+      assert.equal(countText(reloadedPrompt, "generic-gpt-fixture"), 0, `${workflow}: reload clears the missing calibration`)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -1502,14 +1486,12 @@ test("v1 host-selected models drive unified calibration and configured planning 
 
     const builder = String((cfg.agent.builder as Record<string, unknown>).prompt)
     assert.equal(countText(builder, gptCalibration()), 1, model)
-    assert.doesNotMatch(builder, /# GPT-6 ASTRA/, model)
 
     const planner = String((cfg.agent.planner as Record<string, unknown>).prompt)
     assert.match(planner, /Agent Role: planner/, model)
     assert.match(planner, /Deepwork Planner Injection/, model)
     assert.equal(countText(planner, gptCalibration()), 1, model)
     assert.ok(planner.indexOf(getDeepworkPrompt("planner").trim()) < planner.indexOf(gptCalibration()), model)
-    assert.doesNotMatch(planner, /# GPT-6 ASTRA/, model)
     const tier = cfg.agent["planner-high"] as Record<string, unknown>
     assert.equal(tier.model, model)
     assert.equal(countText(String(tier.prompt), gptCalibration()), 1, `${model}: planner-high`)

@@ -30,7 +30,7 @@ For complex research, state the specific branch question before exploring it and
 You are done when ALL of these are true:
 
 1. The deliverable exists and works on real input (not just on the toy case).
-2. Every test you broke is fixed; every test that should exist now does.
+2. Tests for valid requirements, functionality, and external interfaces pass where applicable. Changed requirements update their tests; removed components lose dedicated tests rather than gaining absence checks. Do not add descriptive-text locks for documentation, commits, package descriptions, or non-boundary error/log wording.
 3. You have probed the failure modes you can reach in this environment (concurrent calls, edge values, missing dependencies).
 4. You have left the codebase in a state another engineer can pick up — naming, comments only where needed, no dead branches.
 
@@ -53,4 +53,6 @@ If even one is false, keep going. Reporting "mostly done" is failure.
 ## DELIVERABLE
 
 - The thing you were asked for, complete.
-- A short report: what you found, the path you took, what surprised you.
+- A short report of findings, supporting evidence and source provenance, current constraints, unresolved authorization, and unverified claims, not the investigation path or decision history.
+
+Research complexity does not authorize a product spec/plan artifact. `docs/superpowers/specs/` and `docs/superpowers/plans/` are for final product requirements to be delivered, with separate plans for changed requirements. Use conversation coordination or a task-owned temporary plan elsewhere for non-product research.

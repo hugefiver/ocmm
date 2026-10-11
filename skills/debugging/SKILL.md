@@ -8,7 +8,9 @@ description: "MUST USE for any real runtime debugging across ANY language or bin
 You are a hypothesis-driven debugger. Two disciplines apply regardless of language, runtime, or whether you have source:
 
 1. **Runtime truth beats code reading.** Every claim about why the bug happens must come from observed state — never from a plausible story spun from reading code.
-2. **Leave no trace.** Debugging creates artifacts. Every artifact is journaled and removed before you call the task done.
+2. **Clean only owned resources.** Before creating a debug artifact, retain its exact identity and cleanup action in the session's resource checklist; no checklist file is required. Remove temporary artifacts before calling the task done, preserving existing user work and retained valid regression evidence.
+
+Keep investigation state and raw evidence in conversation or task-owned temporary storage, not a repository journal. Don't read, modify, delete, or adopt any existing `.debug-journal.md`, and don't edit Git exclude files for debugging notes. Reference instructions to record resources mean this temporary ownership checklist, not a development history. Durable code, comments, docs, and tests express only the final valid requirements, mechanism, and behavior. Tests protect functional and external-interface regressions, not descriptive wording, decision counterexamples, or removed-component absence; update tests with requirements and delete tests dedicated to removed components. Uncommitted intermediate behavior needn't be preserved, but committed contracts and API/security/data/permission authorization remain binding.
 
 The rest of this file is a map. **The knowledge is in `references/`.** This file cannot teach you how to debug — it can only tell you which reference will, for your exact situation.
 
@@ -68,7 +70,7 @@ Each phase has exactly one reference. Read it as you enter the phase — not in 
 | # | Phase | 📖 Open this when entering |
 |---|---|---|
 | 0 | **Environment assessment** — know the runtime, ports, symbols, env vars, watchers before attaching | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
-| 1 | **Journal setup** — single `.debug-journal.md` tracks every artifact for guaranteed revert | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
+| 1 | **Temporary resource ownership**: exact task-owned artifacts and safe cleanup actions | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
 | 2 | **Hypothesis formation** — minimum three, across orthogonal axes, each with distinguishing evidence | [references/methodology/02-investigate.md](references/methodology/02-investigate.md) |
 | 3 | **Parallel investigation** — team mode `debug-squad` when enabled, async subagents otherwise | [references/methodology/02-investigate.md](references/methodology/02-investigate.md) |
 | 4 | **Hard-reasoning escalation** — only after 2 consecutive failed evidence rounds make the task genuinely difficult; consult one hard-reasoning agent with orthogonal framings | [references/methodology/04-hard-reasoning-escalation.md](references/methodology/04-hard-reasoning-escalation.md) |
@@ -76,7 +78,7 @@ Each phase has exactly one reference. Read it as you enter the phase — not in 
 | 6 | **Root cause confirmation** — confirmed only when toggling the suspected cause toggles the bug | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
 | 7 | **Reproduction-first fix** — capture failure first, minimal change, same case passes, no scope expansion | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
 | 8 | **Manual QA** — actually use the system (tmux for CLI, Playwright for browser, real curl for API, real repro for binary) | [references/methodology/08-qa.md](references/methodology/08-qa.md) |
-| 9 | **Cleanup** — walk the journal, revert every artifact, verify `git diff` shows only the fix and any retained reproduction evidence | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
+| 9 | **Cleanup**: walk the temporary resource checklist, remove owned artifacts, verify only the fix and valid regression evidence were added to the initial working tree | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 | 10 | **Final verification** — four evidence gates before declaring done | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 
 **Phase references are short by design.** Reading one takes a minute. Skipping one costs an hour.
@@ -97,7 +99,7 @@ These are not phases — read them when the situation calls for them:
 
 <safety>
 1. **Runtime state is the only source of truth.** A hypothesis without an observed value is a guess. Do not fix guesses.
-2. **Every debug artifact is journaled before it is created.** Journal-then-modify, not modify-then-remember-maybe.
+2. **Every debug artifact has known ownership and a safe cleanup action before creation.** Session-level tracking is sufficient; never introduce a repository journal, extra ledger, or adopt another task's resources.
 3. **Never ship a fix without its reproduction.** The failing case captured BEFORE the fix, the same case passing after it, or the fix is unverified. Where the repository keeps tests for this behavior, that case is the regression test.
 4. **Never declare done on type-check/compile alone.** Types catch declaration bugs. Only running the actual user scenario catches the actual user bug.
 5. **Never ask the user a question that runtime evidence can already answer.** Escalation is for genuine ambiguity.

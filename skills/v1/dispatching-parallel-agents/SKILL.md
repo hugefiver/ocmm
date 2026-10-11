@@ -3,12 +3,9 @@ name: dispatching-parallel-agents
 description: Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies
 ---
 
-<!-- v1 fork of superpowers/dispatching-parallel-agents.
-     Upstream: obra/superpowers v6.2.0 (synced 2026-08-02).
-     Adjustments: platform-agnostic parallel dispatch is retained while worker
-     briefs, evidence, integration, and escalation are outcome-oriented and do
-     not impose mandatory review or Git ceremony. See docs/v1-maintenance.md for
-     sync rules. -->
+<!-- Local fork of obra/superpowers/dispatching-parallel-agents v6.2.0.
+     Independent file/resource ownership and outcome-oriented evidence integration.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Dispatching Parallel Agents
 
@@ -34,18 +31,18 @@ Do not parallelize related failures, exploratory debugging with an unknown share
 
 ## Create Focused Worker Briefs
 
-Give each worker, in whatever order is clearest:
+Explain enough for each worker to act safely; these are useful prompts, not required fields or an exhaustive resource inventory:
 
 - its goal and ideal end state;
 - acceptance criteria and useful evidence;
 - current context, dependencies, and interfaces;
-- exclusive files/resources or scope boundaries;
+- material exclusive ownership or scope boundaries;
 - global constraints and permissions;
-- material risks or prior rulings.
+- current constraints, authorization boundaries, or material risks.
 
-Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, significant assumptions or rulings, and unresolved concerns. A status label or acknowledgement is informational, not evidence.
+Workers may discover corresponding resources inside their authorized domain; don't require exhaustive file lists or per-item revision/hash/receipt locks. Discovery never expands permissions or shared-state ownership. Keep actual safety, irreversible-operation, and protocol/integrity identities explicit when needed. Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, current constraints, and unresolved concerns in conversation, not a ruling log or workspace report. A status label or acknowledgement is informational, not evidence.
 
-Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. They record significant deviations with reasons and cost if wrong. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
+Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. Their reports describe final outcomes, constraints, evidence, and unresolved risks, not deviations or decision histories. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
 
 ## Dispatch Concurrently
 
@@ -61,7 +58,7 @@ As workers return:
 - compare it to that worker's goal and acceptance criteria;
 - evaluate or run useful targeted evidence;
 - check cross-result interfaces, assumptions, and conflicts;
-- record significant integration rulings and their cost if wrong;
+- carry forward current integration constraints and unresolved risks;
 - verify the combined result against the overall ideal end state.
 
 This is an integration check, not a mandatory full review per worker or wave. Request focused or whole-change review only when risk, uncertainty, user instruction, or a governing process makes it useful.

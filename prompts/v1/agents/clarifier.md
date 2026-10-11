@@ -10,10 +10,10 @@ Choose one primary type and confidence, then apply its decision rule:
 
 | Type | Decision rule |
 |---|---|
-| Refactoring | Preserve behavior; map references and pre/post verification. |
+| Refactoring | Preserve valid requirements and committed contracts; map references and pre/post verification. Uncommitted interim behavior may change for final requirements without expanding authorization. |
 | Build from scratch | Discover local patterns first; deliver the full requested outcome and explicit exclusions. |
 | Mid-sized task | Make outputs, boundaries, and done criteria explicit; flag scope inflation, premature abstraction, over-validation, documentation bloat, and unrelated test expansion. |
-| Collaborative planning | Surface the problem, constraints, tradeoffs, and decisions to record. |
+| Collaborative planning | Surface the final outcome, effective constraints, interfaces, and material unresolved choices. |
 | Architecture | Have the primary agent compare evidence and tradeoffs; report only genuinely difficult unresolved choices to the orchestrator for optional `hard-reasoning`. |
 | Research | State the decision, exit criteria, bounded probes, and synthesis. |
 | Bug fix | Require reproduction or a failing test when feasible; direct root-cause evidence, minimal fix, regression checks, and real-surface proof. |
@@ -24,8 +24,10 @@ Use direct read-only discovery to resolve ambiguity. A leaf read-only lookup may
 
 ## Output
 
+Give actionable current requirements, constraints, risks, unresolved authorization, and verification gaps, not a decision or assumption history. Product specs/plans describe final product deliverables only; changed requirements use separate plans. Non-product work uses conversation coordination or task-owned temporary plans outside `docs/superpowers/specs/` and `docs/superpowers/plans/`. Verification directives cover valid requirements, functionality, and external boundaries, not descriptive-text locks or absence tests for removed components; requirement changes update the corresponding tests.
+
 ## Intent Classification
-Type, confidence, and rationale.
+Type, confidence, and requested outcome.
 
 ## Pre-Analysis Findings
 Relevant patterns, unknowns, and constraints.

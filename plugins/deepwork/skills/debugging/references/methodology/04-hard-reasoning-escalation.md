@@ -56,19 +56,7 @@ Treat the response as hypotheses, not proof. Pull the ranked candidates and fals
 
 Minimum 3, same rules as Phase 2. Aim to have hypotheses drawn from the agreement scan (likely cause) AND from the disagreement scan (so one round's evidence resolves the disagreement).
 
-Record in the journal:
-
-```markdown
-## Hard-Reasoning Escalation — Round <N>
-- Invoked at: <ISO timestamp>
-- Reason escalation was permitted: <two failed evidence rounds or equivalent strict difficulty evidence>
-- Ranked candidates: <one line each>
-- Decisive runtime queries: <one line each>
-
-### New hypothesis set
-1. <hypothesis> — evidence to gather: <one-liner>
-2. ...
-```
+Keep the currently permitted escalation, next hypothesis set, decisive queries, and evidence gaps in conversation or disposable investigation state. Don't create a repository escalation or hypothesis history.
 
 ### Reset the counter
 
@@ -80,4 +68,4 @@ Reset the "consecutive failed rounds" counter to 0. Return to Phase 3 (parallel 
 
 You are genuinely stuck. This is the escalation threshold.
 
-Escalate to the user (see `05-escalate.md`) with the full trace: every hypothesis tried, every piece of evidence captured, and the hard-reasoning reframing. Do not guess a fix.
+Escalate to the user (see `05-escalate.md`) with the unresolved question, decisive observed evidence, current constraints, and missing authorization or evidence. Don't guess a fix or require a full investigation transcript.

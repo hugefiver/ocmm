@@ -8,7 +8,9 @@ description: "MUST USE for any real runtime debugging across ANY language or bin
 You are a hypothesis-driven debugger. Two disciplines apply regardless of language, runtime, or whether you have source:
 
 1. **Runtime truth beats code reading.** Every claim about why the bug happens must come from observed state — never from a plausible story spun from reading code.
-2. **Leave no trace.** Debugging creates artifacts. Every artifact is journaled and removed before you call the task done.
+2. **Clean only owned resources.** Before creating a debug artifact, retain its exact identity and cleanup action in the session's resource checklist; no checklist file is required. Remove temporary artifacts before calling the task done, preserving existing user work and retained valid regression evidence.
+
+Keep investigation state and raw evidence in conversation or task-owned temporary storage, not a repository journal. Don't read, modify, delete, or adopt any existing `.debug-journal.md`, and don't edit Git exclude files for debugging notes. Reference instructions to record resources mean this temporary ownership checklist, not a development history. Durable code, comments, docs, and tests express only the final valid requirements, mechanism, and behavior. Tests protect functional and external-interface regressions, not descriptive wording, decision counterexamples, or removed-component absence; update tests with requirements and delete tests dedicated to removed components. Uncommitted intermediate behavior needn't be preserved, but committed contracts and API/security/data/permission authorization remain binding.
 
 The rest of this file is a map. **The knowledge is in `references/`.** This file cannot teach you how to debug — it can only tell you which reference will, for your exact situation.
 
@@ -68,7 +70,7 @@ Each phase has exactly one reference. Read it as you enter the phase — not in 
 | # | Phase | 📖 Open this when entering |
 |---|---|---|
 | 0 | **Environment assessment** — know the runtime, ports, symbols, env vars, watchers before attaching | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
-| 1 | **Journal setup** — single `.debug-journal.md` tracks every artifact for guaranteed revert | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
+| 1 | **Temporary resource ownership**: exact task-owned artifacts and safe cleanup actions | [references/methodology/00-setup.md](references/methodology/00-setup.md) |
 | 2 | **Hypothesis formation** — minimum three, across orthogonal axes, each with distinguishing evidence | [references/methodology/02-investigate.md](references/methodology/02-investigate.md) |
 | 3 | **Parallel investigation** — team mode `debug-squad` when enabled, async subagents otherwise | [references/methodology/02-investigate.md](references/methodology/02-investigate.md) |
 | 4 | **Hard-reasoning escalation** — only after 2 consecutive failed evidence rounds make the task genuinely difficult; consult one hard-reasoning agent with orthogonal framings | [references/methodology/04-hard-reasoning-escalation.md](references/methodology/04-hard-reasoning-escalation.md) |
@@ -76,7 +78,7 @@ Each phase has exactly one reference. Read it as you enter the phase — not in 
 | 6 | **Root cause confirmation** — confirmed only when toggling the suspected cause toggles the bug | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
 | 7 | **Reproduction-first fix** — capture failure first, minimal change, same case passes, no scope expansion | [references/methodology/06-fix.md](references/methodology/06-fix.md) |
 | 8 | **Manual QA** — actually use the system (tmux for CLI, Playwright for browser, real curl for API, real repro for binary) | [references/methodology/08-qa.md](references/methodology/08-qa.md) |
-| 9 | **Cleanup** — walk the journal, revert every artifact, verify `git diff` shows only the fix and any retained reproduction evidence | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
+| 9 | **Cleanup**: walk the temporary resource checklist, remove owned artifacts, verify only the fix and valid regression evidence were added to the initial working tree | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 | 10 | **Final verification** — four evidence gates before declaring done | [references/methodology/09-cleanup.md](references/methodology/09-cleanup.md) |
 
 **Phase references are short by design.** Reading one takes a minute. Skipping one costs an hour.
@@ -97,7 +99,7 @@ These are not phases — read them when the situation calls for them:
 
 <safety>
 1. **Runtime state is the only source of truth.** A hypothesis without an observed value is a guess. Do not fix guesses.
-2. **Every debug artifact is journaled before it is created.** Journal-then-modify, not modify-then-remember-maybe.
+2. **Every debug artifact has known ownership and a safe cleanup action before creation.** Session-level tracking is sufficient; never introduce a repository journal, extra ledger, or adopt another task's resources.
 3. **Never ship a fix without its reproduction.** The failing case captured BEFORE the fix, the same case passing after it, or the fix is unverified. Where the repository keeps tests for this behavior, that case is the regression test.
 4. **Never declare done on type-check/compile alone.** Types catch declaration bugs. Only running the actual user scenario catches the actual user bug.
 5. **Never ask the user a question that runtime evidence can already answer.** Escalation is for genuine ambiguity.
@@ -136,18 +138,18 @@ Use the first permitted route in this order:
 
 1. **Exact profile** — use `agent_type`, `agent_path`, or `agent_nickname` only when the current callable schema explicitly guarantees it selects a generated `dw-*` profile.
 2. **Direct composition** — use only when the current callable schema exposes every model field required by the role, the schema-exact `reasoning` or `reasoning_effort` field when the role requires reasoning, the role's full system/developer instructions, and all required skills. Report this route as composition, not exact-profile selection.
-3. **V1/V2 generic or flat dispatch** — use the canonical envelope below. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
-4. **Local execution** — when delegation is permitted, use only when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
+3. **V1/V2 generic or flat dispatch** — state the permitted role, bounded goal, and material constraints clearly; the brief prompts below are optional guidance. The child keeps its default or inherited runtime model unless the callable schema exposes and receives a valid explicit override.
+4. **Local execution** — resolvable non-product routine work may run directly without entering dispatch routing. Otherwise use this fallback when no callable native dispatch tool is available. When delegation is not permitted, preserve the role contract and its workflow owner rather than routing around that restriction.
 
-For generic or flat dispatch, put this canonical envelope in the task message:
+For generic or flat dispatch, clear prose is sufficient. These labels are illustrative, not required protocol fields or report sections:
 
-`GOAL:` State one imperative, bounded outcome, including the role, scope, constraints, and required work.
-`STOP WHEN:` State the exact completion condition and non-goal boundary.
-`EVIDENCE:` State the paths, commands, outputs, or observations that prove completion.
+`GOAL:` Describe the permitted role, bounded outcome, and material scope/ownership constraints.
+`STOP WHEN:` Describe the observable completion condition and relevant non-goals.
+`EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-The generic envelope does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
-When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the saved implementation plan and return one current-revision verdict.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
+When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 
 V2-style flat dispatch uses `spawn_agent` to create, `wait_agent` to await, `followup_task` to continue, and `interrupt_agent` to stop. Use each flat tool only when it is present in the current callable schema and pass only parameters exposed by that tool's schema. No stable `multi_agent_v2` namespace is guaranteed. V2-style flat tools never receive `fork_context`. Never synthesize a namespace, copy parameters between tools, or add hidden parameters.
 
