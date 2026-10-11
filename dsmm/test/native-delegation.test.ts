@@ -8,6 +8,11 @@ import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+import type { DshAgent, DshContext } from "../lib/dsh-types.js";
+import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
+import { DsmmRolePolicy } from "../lib/role-policy.js";
+import { resolveSelectedAgentPreset } from "../lib/session-scope.js";
+import { DeepworkModeController } from "../lib/state.js";
 
 function* call(name: string, args: unknown): Generator<StreamChunk> {
   const id = ToolCallId(`call-${name}`), argumentsText = JSON.stringify(args);
@@ -22,6 +27,62 @@ function* answer(text: string): Generator<StreamChunk> {
   yield { type: "text-delta", index: 0, text };
   yield { type: "block-end", index: 0, block: { type: "text", text } };
   yield { type: "finish", reason: { kind: "stop" } };
+}
+
+for (const gitWriteGuard of ["deny", "ask"] as const) {
+  test(`explicit ordinary-root Deepwork activation fences a zero-prefix coding child's Git write with ${gitWriteGuard} policy`, async () => {
+    const f = await nativeRoutingFixture({ defaultActive: false, guards: { gitWriteGuard }, roleRouting: {
+      "dsmm-coding": { primary: { provider: "fixture", model: "guarded-coding" } }
+    } }, { headless: true });
+    try {
+      const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+      const mode = new DeepworkModeController(f.ctx as unknown as DshContext);
+      const policy = new DsmmRolePolicy(f.ctx as unknown as DshContext, runtime.getSettings, mode);
+      let bodies = 0;
+      let remove: (() => void) | undefined;
+      try {
+        const writes: boolean[] = [];
+        const decisions: string[] = [];
+        f.ctx.on("tools/pre-execute", async (execution, next) => {
+          const decision = await next();
+          if (execution.name === "pwsh") decisions.push(decision.kind);
+          return decision;
+        }, { global: true, prepend: true });
+        f.ctx.on("tools/result", (execution, result) => { if (execution.name === "pwsh") writes.push(result.isError); }, { global: true });
+        let child: Agent | undefined;
+        f.ctx.on("agent/created", ({ agent }) => {
+          if (agent.session.header.origin !== "subagent") return;
+          child = agent;
+          assert.equal(policy.identity(agent as DshAgent).role, "dsmm-coding");
+          remove = agent.ctx.tools.register({ name: "pwsh", description: "Counter-only shell; never executes commands", parameters: { command: { type: "string", required: true } },
+            output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: String(value) }] },
+            async execute() { bodies++; return "COUNTER_ONLY"; } });
+        }, { global: true });
+        const turns = new Map<string, number>();
+        f.adapter.streamChunks = async function* (options) {
+          const turn = turns.get(options.model) ?? 0; turns.set(options.model, turn + 1);
+          if (turn === 0) yield* options.model === "native-default"
+            ? call("dsmm_coding", { description: "Admitted safety scope", prompt: "Exercise the counter-only shell" })
+            : call("pwsh", { command: "git push origin main" });
+          else yield* answer("GUARD_PROOF");
+        };
+        const parent = await f.create({ agentPreset: "standard" });
+        const session = await runtime.getSession(parent as DshAgent);
+        await runtime.selectMode({ sessionId: parent.id, active: true, expectedModeRevision: session.deepwork!.revision, expectedAdmissionEpoch: session.admissionEpoch }, parent as DshAgent);
+        await runFixtureTurn(parent);
+        assert.ok(child);
+        assert.equal(child.session.inheritedEventCount, 0);
+        assert.equal(resolveSelectedAgentPreset(child.session), undefined);
+        assert.equal(mode.active(child as DshAgent, false), false, "role admission must not reactivate common mode");
+        assert.equal(bodies, 0, "an admitted DSMM child must be fenced before the shell body, even without mode/preset metadata");
+        assert.deepEqual(decisions, [gitWriteGuard]);
+        assert.deepEqual(writes, [true], "deny and unavailable approval both fail closed through native tool execution");
+        assert.deepEqual([...turns], [["native-default", 2], ["guarded-coding", 2]]);
+        assert.equal(f.agents.get(child.id), undefined, "foreground delegation still releases its native child");
+        assert.equal(policy.identity(parent as DshAgent).role, "dsmm-orchestrator");
+      } finally { remove?.(); }
+    } finally { await f.dispose(); }
+  });
 }
 
 test("mock LLM drives root → deep → coding → read and returns the child's useful result through native tools", async () => {

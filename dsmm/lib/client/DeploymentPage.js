@@ -17,7 +17,7 @@ function displayValue(value, t) {
     const text = JSON.stringify(value);
     return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 }
-function AdvancedField({ schema, path, value, inherited, reset, disabled, onChange, setInvalid, t }) {
+function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }) {
     const id = useId(), name = path.join(".");
     const serialized = value === undefined ? "" : JSON.stringify(value, null, 2);
     const [text, setText] = useState(serialized);
@@ -29,7 +29,8 @@ function AdvancedField({ schema, path, value, inherited, reset, disabled, onChan
                             let parsed, valid = true;
                             try {
                                 parsed = parseAdvanced(next);
-                                valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(mergeLayer(inherited, parsed), schema);
+                                const candidate = parsed === undefined ? inherited : mergeLayer(inherited, parsed);
+                                valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === undefined ? candidate : mergeLayer(candidate, upper), schema);
                             }
                             catch {
                                 valid = false;
@@ -66,7 +67,7 @@ function Field({ schema, path, controller, invalid, t }) {
     if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting" && path[0] !== "lsp")
         return _jsxs("details", { className: "dsmm-deployment-group", children: [_jsxs("summary", { children: [label(path, t), " ", _jsx("code", { children: name })] }), _jsx("div", { children: Object.entries(schema.fields).map(([key, node]) => _jsx(Field, { schema: node, path: [...path, key], controller: controller, invalid: invalid, t: t }, key)) })] });
     if (!["boolean", "string", "number"].includes(schema.type) && choices === null)
-        return _jsx(AdvancedField, { schema: schema, path: path, value: explicit, inherited: inherited, reset: snapshot, disabled: disabled, t: t, onChange: value => controller.edit(path, value), setInvalid: invalid });
+        return _jsx(AdvancedField, { schema: schema, path: path, value: explicit, inherited: inherited, upper: controller.layer === "global" ? at(snapshot.profile, path) : undefined, reset: snapshot, disabled: disabled, t: t, onChange: value => controller.edit(path, value), setInvalid: invalid });
     return _jsxs("div", { className: "dsmm-field dsmm-deployment-field", children: [schema.type === "boolean" || choices !== null ? _jsxs(_Fragment, { children: [_jsxs("label", { htmlFor: id, children: [label(path, t), " ", _jsx("code", { children: name })] }), _jsxs("select", { id: id, disabled: disabled, value: explicit === undefined ? "inherit" : JSON.stringify(explicit), onChange: event => controller.edit(path, event.currentTarget.value === "inherit" ? undefined : JSON.parse(event.currentTarget.value)), children: [_jsxs("option", { value: "inherit", children: [t("inherit"), " \u00B7 ", displayValue(inherited, t)] }), (choices ?? [true, false]).map(choice => _jsx("option", { value: JSON.stringify(choice), children: displayValue(choice, t) }, String(choice)))] })] }) : _jsx(ScalarField, { schema: schema, path: path, controller: controller, disabled: disabled, inherited: inherited, invalid: invalid, t: t }), (explicit !== undefined || controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined) && _jsxs("p", { className: "dsmm-hint", children: [explicit === undefined ? "" : equal(explicit, at(snapshot.defaults, path)) ? t("defaultPin") : t("explicit"), controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined ? `${explicit === undefined ? "" : " · "}${t("hostPin")}` : ""] })] });
 }
 function Layer({ controller, t }) {

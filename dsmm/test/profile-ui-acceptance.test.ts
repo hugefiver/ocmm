@@ -1,17 +1,212 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import type { Agent } from "@deepseek-ai/dsh-agent";
+import { ToolCallId } from "@deepseek-ai/dsh-llm";
+import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
+import type { DshAgent } from "../lib/dsh-types.js";
+import { createProfileRuntime, DsmmProfileRuntime } from "../lib/profile-runtime.js";
+import { ProfileStore } from "../lib/profile-store.js";
+import { resolveConfig } from "../lib/settings.js";
+import { headerRoutes, nativeRoutingFixture } from "./native-routing-fixture.ts";
 // JS harnesses are test-only entrypoints, outside the emitted library program.
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, nativeClientPreflight } from "../scripts/profile-ui-harness-browser.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { extractNativeThemeStyles, NATIVE_IDS } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { acceptanceChromium, nativeUiStartupPatch, validatedNativeStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
+import { acceptanceChromium, nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
+
+const structural = (agent: Agent) => agent as unknown as DshAgent;
+
+test("cold UI reads release native listeners before old-child/apply/new-reviewer admission", async () => {
+  const f = await nativeRoutingFixture({ workflow: { reviewCap: 2 } });
+  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
+    const saved = await runtime.save({ id: "cold-ui", expectedRevision: null, content: JSON.stringify({ version: 1, id: "cold-ui", settings: { workflow: { reviewCap: 7 } } }) });
+    await runtime.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    const parent = await f.create();
+    const before = runtime.admission(structural(parent));
+    await runtime.save({ id: saved.id, expectedRevision: saved.revision, content: JSON.stringify({ version: 1, id: saved.id, settings: { workflow: { reviewCap: 9 } } }) });
+    for (let index = 0; index < 2; index += 1) {
+      const settings = await readColdProfileSettings(f.ctx, createProfileRuntime, resolveConfig({ workflow: { reviewCap: 2 } }), runtime.admission().deployment);
+      assert.equal(settings.workflow.reviewCap, 7, "cold read must reopen the pinned disk revision, not the latest draft or baseline");
+      assert.notEqual(settings, runtime.getSettings());
+      assert.ok(Object.isFrozen(settings) && Object.isFrozen(settings.workflow));
+    }
+    const oldChild = await f.create({ origin: "subagent" }, undefined, { parentAgent: parent });
+    assert.equal(f.agents.isOwnedBy(oldChild.id, parent), true);
+    assert.equal(runtime.admission(structural(oldChild)), before);
+    const reviewerRoute = { provider: "fixture", model: "ui-admitted-reviewer", reasoningEffort: "max" };
+    const sessionProfile = await runtime.save({ id: "ui-session", expectedRevision: null, content: JSON.stringify({ version: 1, id: "ui-session", settings: {
+      defaultActive: true, workflow: { reviewCap: 6 }, roleRouting: { "dsmm-reviewer": { primary: reviewerRoute } },
+    } }) });
+    const snapshot = await runtime.getSession(structural(parent));
+    const applied = await runtime.selectSession({ sessionId: parent.id, id: sessionProfile.id, expectedRevision: sessionProfile.revision,
+      expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch }, structural(parent));
+    const newChild: Agent = await startSuccessorReviewer(f.ctx, parent, runs);
+    const after = runtime.admission(structural(parent));
+    assert.equal(after.epoch, applied.admissionEpoch);
+    assert.notEqual(after.epoch, before.epoch);
+    assert.equal(runtime.admission(structural(oldChild)), before);
+    assert.equal(runtime.admission(structural(newChild)), after);
+    assert.equal(f.agents.get(newChild.id), newChild);
+    assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
+    assert.equal(foldSubagentDescriptor(newChild.session.snapshotEvents().slice(newChild.session.inheritedEventCount))!.provider, "dsmm-role-reviewer");
+    assert.deepEqual(headerRoutes(newChild), [reviewerRoute]);
+    assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [reviewerRoute]);
+    const tools = newChild.ctx.get("tools")!;
+    for (const name of ["write", "edit", "bash", "pwsh"]) {
+      assert.equal(tools.schemas(newChild).some((tool) => tool.name === name), false);
+      assert.equal((await tools.execute({ callId: ToolCallId(`ui-read-only-${name}`), name, arguments: {}, agent: newChild, signal: new AbortController().signal })).isError, true);
+    }
+    await runs[0]!.dispose();
+    assert.equal(f.agents.get(newChild.id), undefined);
+    assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
+  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
+});
+
+test("failed cold UI plugin startup releases native listeners before subsequent child creation", async () => {
+  const f = await nativeRoutingFixture();
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
+    const parent = await f.create();
+    const failure = new Error("cold reader plugin startup failure");
+    let released = false;
+    const failingReader: typeof createProfileRuntime = async (readerCtx, baseline, options) => {
+      readerCtx.effect!(() => async () => { await Promise.resolve(); released = true; });
+      await createProfileRuntime(readerCtx, baseline, options);
+      throw failure;
+    };
+    await assert.rejects(readColdProfileSettings(f.ctx, failingReader, resolveConfig(), runtime.admission().deployment), (error: unknown) => error === failure);
+    assert.equal(released, true, "failed reader cleanup must be awaited before returning");
+    const child = await f.create({ origin: "subagent" }, undefined, { parentAgent: parent });
+    assert.equal(f.agents.isOwnedBy(child.id, parent), true);
+    assert.equal(runtime.admission(structural(child)), runtime.admission(structural(parent)));
+  } finally { await f.dispose(); }
+});
+
+test("a refused native reviewer result retains its real run disposer for acceptance cleanup", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true });
+  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  try {
+    const parent = await f.create();
+    f.adapter.failModels.add("native-default");
+    await assert.rejects(startSuccessorReviewer(f.ctx, parent, runs), { code: "ERR_ASSERTION" });
+    assert.equal(runs.length, 1);
+    const child = runs[0]!.localAgent!;
+    assert.equal(f.agents.isOwnedBy(child.id, parent), true);
+    await runs[0]!.dispose();
+    assert.equal(f.agents.get(child.id), undefined);
+    assert.equal(f.agents.isOwnedBy(child.id, parent), false);
+  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
+});
+
+test("UI storage uses shared native documents and entry-scoped selection and session files", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "dsmm-ui-storage-")));
+  try {
+    const hostProfileDir = join(home, "profiles", "owned");
+    await mkdir(hostProfileDir, { recursive: true });
+    const options = { env: { DSH_HOME: home }, hostProfileDir, entryId: "actual-dsmm-owner", version: "0.2.0" };
+    const store = ProfileStore.fromCentral(home, hostProfileDir, options.entryId, { lockTimeoutMs: 0 });
+    const other = ProfileStore.fromCentral(home, hostProfileDir, "other-entry");
+    const content = '{"version":1,"id":"owned","settings":{"defaultActive":true}}\n';
+    const saved = await store.save({ id: "owned", content, expectedRevision: null });
+    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    await other.select({ id: null, expectedSelectionRevision: "absent" });
+    const storage = await validatedProfileStorage(store, options);
+    const otherStorage = await validatedProfileStorage(other, { ...options, entryId: "other-entry" });
+    assert.equal(storage.profileDir, otherStorage.profileDir);
+    assert.notEqual(storage.stateDir, otherStorage.stateDir);
+    assert.equal(storage.profileDir, store.profileDir);
+    assert.equal(storage.stateDir, store.stateDir);
+    assert.equal(await readFile(join(storage.profileDir, "owned.jsonc"), "utf8"), content);
+    assert.equal(JSON.parse(await readFile(storage.pointerPath, "utf8")).id, saved.id);
+    assert.equal(JSON.parse(await readFile(otherStorage.pointerPath, "utf8")).id, null);
+    const sessionId = "owned-session", epoch = "e".repeat(64);
+    await store.selectSession({ sessionId, id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: epoch }, epoch,
+      () => undefined, { assertCurrent() {}, committed() {} });
+    const sidecar = join(storage.stateDir, ".sessions", `${createHash("sha256").update(sessionId).digest("hex")}.json`);
+    assert.equal(JSON.parse(await readFile(sidecar, "utf8")).epoch, epoch);
+    assert.equal((await other.loadSessionSelection(sessionId)).admissionEpoch, null);
+    const pointerBefore = await readFile(storage.pointerPath);
+    const lockOwner = "owned-ui-write-refusal\n";
+    await writeFile(storage.lockPath, lockOwner, { flag: "wx" });
+    try {
+      assert.equal((await store.read(saved.id)).content, content);
+      assert.equal((await store.loadSelection()).appliedRevision, saved.revision);
+      await assert.rejects(store.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "lock-timeout" });
+      assert.equal(await readFile(storage.lockPath, "utf8"), lockOwner);
+      assert.deepEqual(await readFile(storage.pointerPath), pointerBefore);
+      assert.equal(await readFile(join(storage.profileDir, "owned.jsonc"), "utf8"), content);
+    } finally { await unlink(storage.lockPath); }
+    await mkdir(storage.lockPath);
+    try {
+      await assert.rejects(store.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "unsafe-path" });
+      assert.equal(await readFile(join(storage.profileDir, "owned.jsonc"), "utf8"), content);
+    } finally { await rmdir(storage.lockPath); }
+  } finally { await rm(home, { recursive: true, force: false }); }
+});
+
+test("UI storage validation rejects foreign identity, unknown origin and redirected owned paths", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "dsmm-ui-storage-boundary-")));
+  try {
+    const hostProfileDir = join(home, "profiles", "owned");
+    await mkdir(hostProfileDir, { recursive: true });
+    const options = { env: { DSH_HOME: home }, hostProfileDir, entryId: "actual-entry", version: "0.2.0" };
+    const store = ProfileStore.fromCentral(home, hostProfileDir, options.entryId);
+    await store.select({ id: null, expectedSelectionRevision: "absent" });
+    await validatedProfileStorage(store, options);
+    for (const candidate of [
+      { ...store, origin: "unknown" },
+      { ...store, profileDir: join(home, "..", "foreign-profiles") },
+      { ...store, profileDir: join(home, "plugins", "foreign", "profiles") },
+      { ...store, stateDir: ProfileStore.fromCentral(home, hostProfileDir, "foreign-entry").stateDir },
+    ]) await assert.rejects(validatedProfileStorage(candidate, options));
+    await assert.rejects(validatedProfileStorage(store, { ...options, env: {} }));
+    await assert.rejects(validatedProfileStorage({ profileDir: store.profileDir }, options));
+    const redirectedHome = join(home, "redirected");
+    await symlink(home, redirectedHome, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(validatedProfileStorage(store, { ...options, env: { DSH_HOME: redirectedHome } }));
+    await unlink(redirectedHome);
+    const stateBackup = join(home, "state-backup");
+    await rename(store.stateDir, stateBackup);
+    await symlink(stateBackup, store.stateDir, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(validatedProfileStorage(store, options));
+    await unlink(store.stateDir);
+  } finally { await rm(home, { recursive: true, force: false }); }
+});
+
+test("historical explicit UI storage keeps its read-lock contract while current legacy remains read-only", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "dsmm-ui-storage-historical-")));
+  try {
+    const hostProfileDir = join(home, "profiles", "owned"), profileDir = join(hostProfileDir, "dsmm-profiles");
+    await mkdir(profileDir, { recursive: true });
+    const store = new ProfileStore(profileDir, { lockTimeoutMs: 0 });
+    const content = '{"version":1,"id":"historical","settings":{}}\n';
+    const saved = await store.save({ id: "historical", content, expectedRevision: null });
+    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    const options = { env: { DSH_HOME: home }, hostProfileDir, version: "0.1.8" };
+    const historical = await validatedProfileStorage({ profileDir: store.profileDir }, options);
+    assert.equal(historical.pointerPath, join(profileDir, ".selection.json"));
+    assert.equal(historical.lockPath, join(profileDir, ".lock"));
+    await writeFile(historical.lockPath, "owned-historical-lock\n", { flag: "wx" });
+    try {
+      await assert.rejects(store.loadSelection(), { code: "lock-timeout" });
+      const legacy = ProfileStore.fromLegacy(profileDir);
+      const storage = await validatedProfileStorage(legacy, { ...options, version: "0.2.0" });
+      assert.equal(storage.origin, "legacy");
+      assert.equal((await legacy.loadSelection()).appliedRevision, saved.revision);
+      await assert.rejects(legacy.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "unavailable" });
+    } finally { await unlink(historical.lockPath); }
+  } finally { await rm(home, { recursive: true, force: false }); }
+});
 
 test("acceptance tools load the real required CommonJS face when no synthetic chromium export exists", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "dsmm-playwright-interop-"));

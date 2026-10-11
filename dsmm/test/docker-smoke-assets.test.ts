@@ -102,7 +102,7 @@ test("frozen artifact transport binds exact read-only files without mounting a s
   const args = artifactDockerArguments(options, "owned-native-runtime:fixture");
   assert.deepEqual(args.slice(0, 3), ["run", "--rm", "--init"], "Xvfb must not run as signal-special Docker PID 1");
   const mounts = args.flatMap((arg: string, index: number) => arg === "--mount" ? [args[index + 1]] : []);
-  assert.equal(mounts.length, 8);
+  assert.equal(mounts.length, 10);
   assert.equal(mounts[0], "type=bind,source=/owned/final-package.tgz,target=/dsmm-acceptance/package.tgz,readonly");
   assert.ok(mounts.every((mount: string) => mount.endsWith(",readonly")));
   assert.ok(mounts.every((mount: string) => /source=.+\.(?:mjs|tgz),target=/u.test(mount)));
@@ -110,6 +110,8 @@ test("frozen artifact transport binds exact read-only files without mounting a s
   assert.ok(args.includes("--expected-sha256"));
   assert.ok(args.includes("--require-hook"));
   assert.ok(mounts.some((mount: string) => mount.endsWith("target=/dsmm-acceptance/scripts/session-history-smoke.mjs,readonly")));
+  assert.ok(mounts.some((mount: string) => mount.endsWith("target=/dsmm-acceptance/scripts/native-core-smoke.mjs,readonly")));
+  assert.ok(mounts.some((mount: string) => mount.endsWith("target=/dsmm-acceptance/scripts/release-contract.mjs,readonly")));
   const evidenceArgs = artifactDockerArguments({ ...options, evidenceDir: "/owned/empty-ui-evidence" }, "owned-native-runtime:fixture");
   assert.ok(evidenceArgs.includes("type=bind,source=/owned/empty-ui-evidence,target=/dsmm-acceptance/ui-qa"));
   assert.ok(evidenceArgs.includes("DSMM_UI_EVIDENCE_DIR=/dsmm-acceptance/ui-qa"));
@@ -151,6 +153,25 @@ test("artifact runtime environment preserves native peer policy and excludes all
   assert.equal(env.FAKE_SECRET, undefined);
   assert.equal(env.DISPLAY, ":77");
   assert.equal(env.DSMM_BROWSER_EXECUTABLE, "/usr/bin/chromium");
+});
+
+test("artifact runtime environment forces telemetry opt-outs without inheriting credentials or DSH policy", async () => {
+  const { freshArtifactEnvironment } = await import(pathToFileURL(join(packageRoot, "scripts", "docker-smoke.mjs")).href);
+  const home = "/owned/empty-home";
+  for (const value of [undefined, "1", "0", "ambient-secret"]) {
+    const env = freshArtifactEnvironment(home, { PATH: "/native/bin", HOME: "/user-home", DSH_HOME: "/user-dsh",
+      XDG_CONFIG_HOME: "/user-config", XDG_DATA_HOME: "/user-data", XDG_STATE_HOME: "/user-state", XDG_CACHE_HOME: "/user-cache",
+      POWERSHELL_TELEMETRY_OPTOUT: value, DOTNET_CLI_TELEMETRY_OPTOUT: value,
+      NPM_TOKEN: "user-secret", DEEPSEEK_API_KEY: "user-secret", DSH_API_KEY: "user-secret", FAKE_SECRET: "user-secret",
+      PNPM_CONFIG_AUTO_INSTALL_PEERS: "true", DSH_TELEMETRY_MODE: "ENABLED", DSH_TELEMETRY_DISABLED: "0", DSH_PERMISSION_MODE: "full-access" });
+    assert.equal(env.POWERSHELL_TELEMETRY_OPTOUT, "1");
+    assert.equal(env.DOTNET_CLI_TELEMETRY_OPTOUT, "1");
+    assert.deepEqual(env, { PATH: "/native/bin", HOME: home, DSH_HOME: home,
+      XDG_CONFIG_HOME: join(home, "xdg-config"), XDG_DATA_HOME: join(home, "xdg-data"),
+      XDG_STATE_HOME: join(home, "xdg-state"), XDG_CACHE_HOME: join(home, "xdg-cache"),
+      POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+      DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1", DSH_PERMISSION_MODE: "workspace-write" });
+  }
 });
 
 test("startup storage handoff preserves only captured native owned-root configuration and fails closed", async () => {

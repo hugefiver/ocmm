@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Context } from "@deepseek-ai/cordis";
+import { Context, symbols } from "@deepseek-ai/cordis";
 import type { Service } from "@deepseek-ai/cordis";
 import { AgentRegistry } from "@deepseek-ai/dsh-agent";
 import type { Agent } from "@deepseek-ai/dsh-agent";
@@ -238,6 +238,87 @@ function gate() {
   const promise = new Promise<void>((resolve) => { release = resolve; });
   return { promise, release };
 }
+
+test("native Gateway Core reads refuse data after pending-read authority or lifetime changes", async (t) => {
+  for (const method of ["describe", "describeSettings", "describeModules"] as const) {
+    for (const change of ["none", "operator", "owner", "service", "request", "connection", "carrier", "writability"] as const) {
+      await t.test(`${method}: ${change}`, async () => {
+        const f = await fixture(true, undefined, true);
+        const entered = gate(), releaseRead = gate();
+        const connection = (Reflect.get(f.ctx.connection, symbols.original) ?? f.ctx.connection) as NativeConnection.HostConnectionService;
+        const connectionContext = Reflect.get(connection, "ctx") as Context;
+        const operator = connection.operator;
+        try {
+          await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: "absent",
+            edits: [{ op: "set", path: ["lsp", "env"], value: { TOKEN: "PENDING_CORE_READ_SENTINEL" } }] } } });
+          const authorized = await f.gateway.invoke({ namespace: "dsmmConfig", method, args: {}, peer: operator });
+          if (method !== "describeModules") assert.match(JSON.stringify(authorized), /PENDING_CORE_READ_SENTINEL/u);
+          const readGlobal = f.deployment!.readGlobal.bind(f.deployment);
+          f.deployment!.readGlobal = async () => {
+            const snapshot = await readGlobal();
+            entered.release();
+            await releaseRead.promise;
+            return snapshot;
+          };
+          const abort = new AbortController();
+          const pending = f.gateway.invoke({ namespace: "dsmmConfig", method, args: {}, peer: operator, signal: abort.signal })
+            .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+          await entered.promise;
+          if (change === "operator") Reflect.set(connection, "operator", { id: operator.id, ctx: f.ctx, async dispose() {} });
+          else if (change === "owner") {
+            // Replace the provided native service value, keeping the exact Peer
+            // and active provider fiber so only the connection owner changes.
+            const replacement = Object.create(Object.getPrototypeOf(connection), Object.getOwnPropertyDescriptors(connection)) as NativeConnection.HostConnectionService;
+            connectionContext.set("connection", replacement);
+            assert.equal(f.ctx.connection.operator, operator);
+            assert.notEqual(Reflect.get(f.ctx.connection, symbols.original), connection);
+          } else if (change === "service") await f.rpc.dispose();
+          else if (change === "request") abort.abort();
+          else if (change === "connection") await f.connectionFiber!.dispose();
+          else if (change === "carrier") f.carrier.host = "0.0.0.0";
+          else if (change === "writability") f.settingsAuthority.writable = false;
+          releaseRead.release();
+          const result = await pending;
+          if (change === "none") {
+            assert.ok(result.ok);
+            assert.deepEqual(result.value, authorized);
+          } else {
+            assert.ok(!result.ok, `Pending ${method} disclosed data after ${change}: ${JSON.stringify(result.ok ? result.value : null)}`);
+            if (change === "request") assert.equal(remoteErrorOf(result.error)?.code, "gateway/cancelled");
+            else assert.ok(refused(change === "service" ? "disposed" : "not-owned")(result.error));
+          }
+        } finally {
+          releaseRead.release();
+          Reflect.set(connection, "operator", operator);
+          if (change === "owner") connectionContext.set("connection", connection);
+          await f.dispose();
+        }
+      });
+    }
+  }
+});
+
+test("native Gateway Core save retains success when service disposal follows its durable commit", async () => {
+  const f = await fixture(true, undefined, true);
+  const committed = gate(), releaseSave = gate();
+  try {
+    const saveGlobal = f.deployment!.saveGlobal.bind(f.deployment);
+    f.deployment!.saveGlobal = async (request, assertAuthority) => {
+      const snapshot = await saveGlobal(request, assertAuthority);
+      committed.release();
+      await releaseSave.promise;
+      return snapshot;
+    };
+    const pending = f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: "absent",
+      edits: [{ op: "set", path: ["defaultActive"], value: true }] } } }) as Promise<GlobalConfigSnapshot>;
+    await committed.promise;
+    const durable = await f.deployment!.readGlobal();
+    assert.equal(durable.config.defaultActive, true);
+    await f.rpc.dispose();
+    releaseSave.release();
+    assert.deepEqual(await pending, durable);
+  } finally { releaseSave.release(); await f.dispose(); }
+});
 
 test("additive session descriptors are strict and carry no caller-supplied authority", () => {
   const describe = TYPERT_REMOTE.descriptors.find((entry) => entry.method === "describeSession")!;

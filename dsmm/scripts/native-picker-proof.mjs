@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { nativePickerContract, validateCompactHeaderGeometry, validateNativeMenuGeometry, validateNativePickerAfterStep } from "./native-picker-harness.mjs";
+import { isSource020 } from "./release-contract.mjs";
 
 const sha256 = /^[a-f0-9]{64}$/u;
 const provider = "dsmm-picker-fixture";
@@ -15,10 +16,13 @@ const widths = [375, 768, 1280];
 export const MENU_PHASES_017 = Object.freeze(["menu-sessionless-readonly", "menu-retained-blank", "menu-active", "menu-keyboard-dismiss-focus", "menu-loading-readonly", "menu-dirty-readonly", "menu-maintenance-refusal-refresh-explicit-retry", "menu-activation-refusal-safe-field"]);
 export const MENU_APPEARANCES_017 = Object.freeze(["light", "dark", "reduced"]);
 export const MODE_PHASES_018 = Object.freeze(["mode-standard-configured-default", "mode-minimal-default-off", "mode-enable-native-write", "mode-explicit-profile-switch", "mode-explicit-native-preset-change", "mode-explicit-cold-reopen", "mode-disable-native-write", "mode-dw-preset-owned"]);
+export const MODE_PHASES_020 = Object.freeze([...MODE_PHASES_018, "mode-dw-preset-disable", "mode-dw-preset-enable"]);
 
-export function validateSessionModeSteps(steps) {
+export function validateSessionModeSteps(steps, packageVersion = "0.1.8", options = {}) {
+  if (isSource020(packageVersion) || options.sourceContract !== undefined) nativePickerContract(packageVersion, options);
+  const mutableStanding = isSource020(packageVersion);
   assert.ok(Array.isArray(steps), "018 native session mode scenarios are missing");
-  exactInventory(steps.map(step => step.phase), MODE_PHASES_018);
+  exactInventory(steps.map(step => step.phase), mutableStanding ? MODE_PHASES_020 : MODE_PHASES_018);
   for (const step of steps) {
     const mode = step.after?.nativeMode;
     assert.equal(typeof step.sessionId, "string"); assert.ok(step.sessionId.length > 0);
@@ -28,9 +32,9 @@ export function validateSessionModeSteps(steps) {
     assert.deepEqual(step.after.nativeSelections, step.before.nativeSelections, "mode/preset/profile operation changed native model intent");
     assert.deepEqual(step.after.actualCurrentHeader, step.before.actualCurrentHeader, "mode operation rewrote native request route");
     const writes = rpcCalls(step, "dsmmProfiles/selectMode");
-    if (["mode-enable-native-write", "mode-disable-native-write"].includes(step.phase)) {
+    if (["mode-enable-native-write", "mode-disable-native-write", ...(mutableStanding ? ["mode-dw-preset-disable", "mode-dw-preset-enable"] : [])].includes(step.phase)) {
       assert.equal(writes.length, 1); const value = request(writes[0], step.sessionId);
-      assert.equal(value.active, step.phase === "mode-enable-native-write");
+      assert.equal(value.active, step.phase === "mode-enable-native-write" || step.phase === "mode-dw-preset-enable");
       assert.equal(value.expectedModeRevision, step.before.nativeMode.revision); assert.equal(value.expectedAdmissionEpoch, step.before.admission.epoch);
       assert.deepEqual(writes[0].accepted.deepwork, mode); assert.equal(mode.active, value.active); assert.equal(mode.explicit, true); assert.equal(mode.locked, false);
       assert.equal(step.metadata.length, 1); const event = step.metadata[0]; assert.equal(event.type, "deepwork/mode"); assert.deepEqual(event.data, { active: value.active });
@@ -50,10 +54,11 @@ export function validateSessionModeSteps(steps) {
       assert.ok(step.stockEvents > 0 && Number.isSafeInteger(step.stockEvents)); assert.ok(step.stockMetadata.some(event => event.type === "deepwork/mode" && event.ignorable === true && event.data.active === true));
       assert.match(step.visibleBeforeSha256, sha256); assert.equal(step.visibleAfterSha256, step.visibleBeforeSha256); assert.match(step.headersBeforeSha256, sha256); assert.equal(step.headersAfterSha256, step.headersBeforeSha256);
     }
-    if (step.phase === "mode-dw-preset-owned") { assert.equal(mode.active, true); assert.equal(mode.locked, true); assert.equal(step.preset, "dsmm-orchestrator"); }
+    if (step.phase === "mode-dw-preset-owned") { assert.equal(mode.active, true); assert.equal(mode.locked, !mutableStanding); assert.equal(step.preset, "dsmm-orchestrator"); }
+    if (mutableStanding && step.phase.startsWith("mode-dw-preset-")) { assert.equal(mode.locked, false); assert.equal(mode.explicit, true); assert.equal(step.preset, "dsmm-orchestrator"); }
     if (["mode-disable-native-write", "mode-dw-preset-owned"].includes(step.phase)) { assert.equal(step.submission, "native-agent-followup"); completedRequest(step, target); }
   }
-  return { modeScenarios: MODE_PHASES_018.length };
+  return { modeScenarios: mutableStanding ? MODE_PHASES_020.length : MODE_PHASES_018.length };
 }
 
 function menuHeader(snapshot, alert = false) {
@@ -137,9 +142,9 @@ export function requiresNativePickerProof(version) {
   assert.ok([major, minor, patch].every(Number.isSafeInteger));
   return major > 0 || minor > 1 || minor === 1 && patch >= 6;
 }
-export function requiresSessionModeProof(version) {
+export function requiresSessionModeProof(version, options = {}) {
   if (!requiresNativePickerProof(version)) return false;
-  return nativePickerContract(version) === "native-menu-mode-018";
+  return ["native-menu-mode-018", "native-menu-mode-020"].includes(nativePickerContract(version, options));
 }
 
 function exactInventory(actual, expected) {
@@ -207,11 +212,15 @@ function completedRequest(step, expected, sessionId = step.sessionId) {
   assert.ok(after.displayedButtons[0].aria.includes(expected.reasoningEffort));
 }
 
-/** Version-selected by the trusted release identity, never by a receipt flag. */
-export function validateNativePickerProof(receipt, { artifactSha256, packageVersion }) {
+/** Trusted identity and explicit source authority select grammar, never receipt flags. */
+export function validateNativePickerProof(receipt, { artifactSha256, packageVersion, sourceContract }) {
   assert.equal(requiresNativePickerProof(packageVersion), true);
-  const contract = nativePickerContract(packageVersion), modeContract = contract === "native-menu-mode-018", menu = contract !== "native-select-016";
-  const checkMenu = (snapshot, readonly = false) => openMenu(snapshot, readonly, modeContract);
+  const contract = nativePickerContract(packageVersion, { sourceContract }), modeContract = ["native-menu-mode-018", "native-menu-mode-020"].includes(contract), menu = contract !== "native-select-016";
+  const checkMenu = (snapshot, readonly = false) => {
+    openMenu(snapshot, readonly, modeContract);
+    const mode = snapshot.nativeMode ?? snapshot.publicNativeState?.controller?.session?.deepwork;
+    if (isSource020(packageVersion) && mode !== undefined) assert.equal(mode.locked, false, "020 cannot use a historical standing-mode lock");
+  };
   const acceptedIntent = modeContract ? admittedModelRead : acceptedProfile;
   const checkHeader = (snapshot, value, alert = false) => {
     if (menu) { menuHeader(snapshot, alert); checkMenu(snapshot); assert.equal(snapshot.nativeProfileDisplay.admittedId, value || null); assert.equal(snapshot.nativeProfileDisplay.admissionEpoch, snapshot.admission.epoch); }
@@ -219,7 +228,7 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
   };
   assert.match(artifactSha256, sha256);
   assert.equal(receipt?.artifactKind, "ci-frozen-artifact");
-  assert.equal(receipt.proofScope, modeContract ? "frozen-artifact-native-picker-and-native-menu-mode-018" : menu ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile");
+  assert.equal(receipt.proofScope, isSource020(packageVersion) ? "frozen-artifact-native-picker-and-native-menu-mode-020" : modeContract ? "frozen-artifact-native-picker-and-native-menu-mode-018" : menu ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile");
   assert.equal(receipt.packageVersion, packageVersion);
   assert.equal(receipt.artifactSha256, artifactSha256);
   assert.equal(receipt.publicationClaimed, false);
@@ -397,8 +406,8 @@ export function validateNativePickerProof(receipt, { artifactSha256, packageVers
         }
       }
     }
-    if (modeContract) validateSessionModeSteps(lane.modeSteps);
-    return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12, menuScenarios: MENU_PHASES_017.length, menuAppearances: 9, ...(modeContract ? { modeScenarios: MODE_PHASES_018.length } : {}) };
+    const modeSummary = modeContract ? validateSessionModeSteps(lane.modeSteps, packageVersion, { sourceContract }) : {};
+    return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12, menuScenarios: MENU_PHASES_017.length, menuAppearances: 9, ...modeSummary };
   }
   return { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: compactPhases.length, raceScenarios: 4, responsiveStates: 12 };
 }

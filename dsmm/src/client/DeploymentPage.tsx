@@ -30,9 +30,9 @@ function displayValue(value: unknown, t: Locale["t"]): string {
   const text = JSON.stringify(value); return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 }
 
-function AdvancedField({ schema, path, value, inherited, reset, disabled, onChange, setInvalid, t }: Locale & {
+function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }: Locale & {
   schema: DeploymentSchemaNode; path: string[]; value: unknown; disabled: boolean;
-  reset: unknown; inherited: unknown;
+  reset: unknown; inherited: unknown; upper: unknown;
   onChange(value: unknown): void; setInvalid(path: string, invalid: boolean): void;
 }) {
   const id = useId(), name = path.join(".");
@@ -46,7 +46,11 @@ function AdvancedField({ schema, path, value, inherited, reset, disabled, onChan
     <textarea id={id} rows={6} maxLength={32768} value={text} disabled={disabled} aria-invalid={invalid} aria-describedby={`${id}-hint ${id}-error`} onChange={event => {
       const next = event.currentTarget.value; setText(next);
       let parsed: unknown, valid = true;
-      try { parsed = parseAdvanced(next); valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(mergeLayer(inherited, parsed), schema); } catch { valid = false; }
+      try {
+        parsed = parseAdvanced(next);
+        const candidate = parsed === undefined ? inherited : mergeLayer(inherited, parsed);
+        valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === undefined ? candidate : mergeLayer(candidate, upper), schema);
+      } catch { valid = false; }
       setLocalInvalid(!valid); setInvalid(name, !valid); if (valid) onChange(parsed);
     }} />
     <p id={`${id}-error`} className="dsmm-hint">{invalid ? t("invalid") : ""}</p>
@@ -85,7 +89,7 @@ function Field({ schema, path, controller, invalid, t }: Locale & {
     <summary>{label(path, t)} <code>{name}</code></summary>
     <div>{Object.entries(schema.fields).map(([key, node]) => <Field key={key} schema={node} path={[...path, key]} controller={controller} invalid={invalid} t={t} />)}</div>
   </details>;
-  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return <AdvancedField schema={schema} path={path} value={explicit} inherited={inherited} reset={snapshot} disabled={disabled} t={t} onChange={value => controller.edit(path, value)} setInvalid={invalid} />;
+  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return <AdvancedField schema={schema} path={path} value={explicit} inherited={inherited} upper={controller.layer === "global" ? at(snapshot.profile, path) : undefined} reset={snapshot} disabled={disabled} t={t} onChange={value => controller.edit(path, value)} setInvalid={invalid} />;
   return <div className="dsmm-field dsmm-deployment-field">
     {schema.type === "boolean" || choices !== null ? <><label htmlFor={id}>{label(path, t)} <code>{name}</code></label><select id={id} disabled={disabled} value={explicit === undefined ? "inherit" : JSON.stringify(explicit)} onChange={event => controller.edit(path, event.currentTarget.value === "inherit" ? undefined : JSON.parse(event.currentTarget.value))}>
       <option value="inherit">{t("inherit")} · {displayValue(inherited, t)}</option>

@@ -3558,7 +3558,8 @@ var DeploymentController = class _DeploymentController {
       delete editable.sessionPersistence;
     }
     const lower = this.layer === "global" ? snapshot2.defaults : mergeLayer(mergeLayer(snapshot2.defaults, snapshot2.global), snapshot2.nativeForm?.base ?? {});
-    const merged = mergeLayer(lower, editable);
+    const candidate = mergeLayer(lower, editable);
+    const merged = this.layer === "global" ? mergeLayer(candidate, snapshot2.profile) : candidate;
     delete merged.sessionPersistence;
     if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, snapshot2.schema)) {
       this.publish({ issue: "validation" });
@@ -3793,7 +3794,7 @@ function displayValue(value, t) {
   const text2 = JSON.stringify(value);
   return text2.length > 120 ? `${text2.slice(0, 120)}…` : text2;
 }
-function AdvancedField({ schema, path, value, inherited, reset, disabled, onChange, setInvalid, t }) {
+function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }) {
   const id2 = (0, import_react4.useId)(), name = path.join(".");
   const serialized = value === void 0 ? "" : JSON.stringify(value, null, 2);
   const [text2, setText] = (0, import_react4.useState)(serialized);
@@ -3826,7 +3827,8 @@ function AdvancedField({ schema, path, value, inherited, reset, disabled, onChan
         let parsed, valid = true;
         try {
           parsed = parseAdvanced(next);
-          valid = parsed === void 0 || validateEditorValue(parsed, schema, true) && validateEditorValue(mergeLayer(inherited, parsed), schema);
+          const candidate = parsed === void 0 ? inherited : mergeLayer(inherited, parsed);
+          valid = parsed === void 0 || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === void 0 ? candidate : mergeLayer(candidate, upper), schema);
         } catch {
           valid = false;
         }
@@ -3898,7 +3900,7 @@ function Field({ schema, path, controller, invalid, t }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { children: Object.entries(schema.fields).map(([key, node]) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Field, { schema: node, path: [...path, key], controller, invalid, t }, key)) })
   ] });
-  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(AdvancedField, { schema, path, value: explicit, inherited, reset: snapshot2, disabled, t, onChange: (value) => controller.edit(path, value), setInvalid: invalid });
+  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(AdvancedField, { schema, path, value: explicit, inherited, upper: controller.layer === "global" ? at(snapshot2.profile, path) : void 0, reset: snapshot2, disabled, t, onChange: (value) => controller.edit(path, value), setInvalid: invalid });
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field dsmm-deployment-field", children: [
     schema.type === "boolean" || choices !== null ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { htmlFor: id2, children: [

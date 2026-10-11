@@ -317,31 +317,49 @@ test("lock timeout never steals another process's lock or changes file bytes", a
 test("two real processes serialize selection and expose a structured lock timeout", async () => {
   const f = fixture();
   let child: ReturnType<typeof spawn> | undefined;
+  let closed: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
   try {
     await f.store.describe();
     const moduleUrl = pathToFileURL(resolve(import.meta.dirname, "../lib/profile-store.js")).href;
-    const source = `import {ProfileStore} from ${JSON.stringify(moduleUrl)}; const store=new ProfileStore(${JSON.stringify(f.root)}); await store.select({id:null,expectedSelectionRevision:'absent'}, async()=>{process.stdout.write('LOCKED\\n'); await new Promise(resolve=>{process.stdin.resume();process.stdin.on('end',resolve);});});`;
-    child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["pipe", "pipe", "pipe"] });
+    const source = `import {ProfileStore} from ${JSON.stringify(moduleUrl)}; const store=new ProfileStore(${JSON.stringify(f.root)}); await store.select({id:null,expectedSelectionRevision:'absent'}, async()=>{const released=new Promise(resolve=>{process.stdin.resume();process.stdin.once('end',resolve);});process.send('LOCKED');await released;});process.disconnect();`;
+    child = spawn(process.execPath, [...process.execArgv, "--input-type=module", "-e", source], { stdio: ["pipe", "pipe", "pipe", "ipc"] });
+    const owned = child;
+    let stderr = "";
+    owned.stdout!.resume();
+    owned.stderr!.on("data", (chunk) => { stderr += chunk.toString(); });
+    closed = new Promise((done) => owned.once("close", (code, signal) => done({ code, signal })));
     await new Promise<void>((done, fail) => {
-      const timeout = setTimeout(() => fail(new Error("child lock probe timed out")), 5000);
-      child!.once("error", (error) => { clearTimeout(timeout); fail(error); });
-      child!.once("exit", (code) => { clearTimeout(timeout); if (code !== 0) fail(new Error("child lock probe failed")); });
-      child!.stdout!.once("data", () => { clearTimeout(timeout); done(); });
+      const detach = () => {
+        clearTimeout(timeout);
+        owned.off("error", onError);
+        owned.off("close", onClose);
+        owned.off("message", onMessage);
+      };
+      const onError = (error: Error) => { detach(); fail(error); };
+      const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+        detach(); fail(new Error(`child lock probe closed before LOCKED (code=${code}, signal=${signal}): ${stderr}`));
+      };
+      const onMessage = (message: unknown) => { if (message === "LOCKED") { detach(); done(); } };
+      const timeout = setTimeout(() => {
+        detach(); fail(new Error(`child lock probe timed out (exit=${owned.exitCode}, signal=${owned.signalCode}): ${stderr}`));
+      }, 5000);
+      owned.once("error", onError);
+      owned.once("close", onClose);
+      owned.on("message", onMessage);
     });
     const impatient = new ProfileStore(f.root, { lockTimeoutMs: 30, lockPollMs: 5 });
     await assert.rejects(impatient.select({ id: null, expectedSelectionRevision: "absent" }), fault("lock-timeout"));
     assert.equal(existsSync(join(f.root, ".selection.json")), false);
-    const completed = new Promise<void>((done, fail) => child!.once("exit", (code) => code === 0 ? done() : fail(new Error("child selection failed"))));
-    child.stdin!.end();
-    await completed;
-    child = undefined;
+    owned.stdin!.end();
+    const completed = await closed;
+    assert.equal(completed.code, 0, stderr);
+    assert.equal(completed.signal, null, stderr);
     assert.equal((await f.store.loadSelection()).selectedId, null);
     assert.notEqual((await f.store.loadSelection()).selectionRevision, "absent");
   } finally {
-    if (child !== undefined && child.exitCode === null) {
-      const exited = new Promise<void>((done) => child!.once("exit", () => done()));
-      child.kill();
-      await exited;
+    if (child !== undefined) {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await closed;
     }
     f.cleanup();
   }

@@ -8,7 +8,13 @@ FROM node:22-bookworm-slim
 ARG DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2
 RUN corepack enable && corepack prepare pnpm@12.8.1 --activate
 RUN npm install -g ${DSH_PACKAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb xauth fonts-liberation
+RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb xauth fonts-liberation libicu72 libgssapi-krb5-2 libssl3
+ADD --checksum=sha256:ddbc4a2d113bbd46d283cfedcbcd117a70caefd7673f41f2b4e0000badf103bc https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-x64.tar.gz /tmp/dsmm-powershell-7.6.6.tar.gz
+RUN mkdir -p /opt/dsmm-powershell/7.6.6 \
+    && tar -xzf /tmp/dsmm-powershell-7.6.6.tar.gz -C /opt/dsmm-powershell/7.6.6 \
+    && chmod +x /opt/dsmm-powershell/7.6.6/pwsh \
+    && ln -s /opt/dsmm-powershell/7.6.6/pwsh /usr/local/bin/pwsh \
+    && rm /tmp/dsmm-powershell-7.6.6.tar.gz
 RUN npm install --prefix /opt/dsmm-acceptance-tools --ignore-scripts playwright@1.63.0 esbuild@0.25.12
 RUN node --input-type=module -e 'import {createRequire} from "node:module"; import {execFileSync} from "node:child_process"; const r=createRequire("/usr/local/lib/node_modules/@deepseek-ai/dsh/package.json"); try { r.resolve("react"); r.resolve("react-dom/client"); } catch (error) { if (error.code !== "MODULE_NOT_FOUND") throw error; execFileSync("npm", ["install", "--prefix", "/opt/dsmm-acceptance-tools", "--ignore-scripts", "react@18.3.1", "react-dom@18.3.1"], {stdio: "inherit"}); }'
 COPY --from=lsp-builder /workspace/target/release/ocmm-lsp /usr/local/bin/ocmm-lsp
@@ -19,4 +25,10 @@ WORKDIR /dsmm-acceptance
 ENV DSMM_DOCKER_INNER=1
 ENV DSMM_ACCEPTANCE_TOOLS_MANIFEST=/opt/dsmm-acceptance-tools/package.json
 ENV DSMM_BROWSER_EXECUTABLE=/usr/bin/chromium
+ENV POWERSHELL_TELEMETRY_OPTOUT=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV HOME=/tmp/dsmm-runtime-home
+ENV XDG_CONFIG_HOME=/tmp/dsmm-runtime-home/config XDG_CACHE_HOME=/tmp/dsmm-runtime-home/cache XDG_DATA_HOME=/tmp/dsmm-runtime-home/data XDG_STATE_HOME=/tmp/dsmm-runtime-home/state
+RUN mkdir -p /tmp/dsmm-pwsh-build-home "$HOME" \
+    && HOME=/tmp/dsmm-pwsh-build-home XDG_CONFIG_HOME=/tmp/dsmm-pwsh-build-home/config XDG_CACHE_HOME=/tmp/dsmm-pwsh-build-home/cache XDG_DATA_HOME=/tmp/dsmm-pwsh-build-home/data XDG_STATE_HOME=/tmp/dsmm-pwsh-build-home/state pwsh -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion.ToString() -ne "7.6.6") { throw "PowerShell version mismatch" }; $PSVersionTable.PSVersion.ToString()' \
+    && rm -r /tmp/dsmm-pwsh-build-home
 CMD ["node", "/dsmm-acceptance/scripts/docker-smoke.mjs", "--artifact", "/dsmm-acceptance/package.tgz"]

@@ -116,7 +116,8 @@ export class DeploymentController {
       delete editable.sessionPersistence;
     }
     const lower = this.layer === "global" ? snapshot.defaults : mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {});
-    const merged = mergeLayer(lower, editable) as Record<string, unknown>;
+    const candidate = mergeLayer(lower, editable);
+    const merged = (this.layer === "global" ? mergeLayer(candidate, snapshot.profile) : candidate) as Record<string, unknown>;
     delete merged.sessionPersistence;
     if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, snapshot.schema)) { this.publish({ issue: "validation" }); return; }
     const edits = layerDiff(this.baseline, draft);

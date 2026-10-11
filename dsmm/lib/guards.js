@@ -2,6 +2,7 @@ import { isDsmmRoleId } from "./roles.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
+import { resolveAdmittedDsmmRole } from "./role-policy.js";
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 const STRUCTURED_TODO_PATTERN = /^\[[^\]]+\]\s+\[[^\]]+\]\s+to\s+.+\s+-\s+expect\s+.+/u;
 function asRecord(value) {
@@ -80,6 +81,8 @@ export function isSafetyScopeActive(exec, settings, controller) {
         return true;
     if (!settings.modules.deepwork.enabled)
         return false;
+    if (exec.agent !== undefined && resolveAdmittedDsmmRole(exec.agent, settings, false) !== undefined)
+        return true;
     if (controller.active(exec.agent, settings.defaultActive))
         return true;
     return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));

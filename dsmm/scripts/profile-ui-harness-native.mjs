@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readFile, writeFile } from "node:fs/promises";
+import { join, posix, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { requiresNativePickerProof } from "./native-picker-proof.mjs";
+import { startupProfileContract } from "./release-contract.mjs";
 
 /** Historical receipts deliberately keep their original fourteen-check grammar.
  * 018 session-mode browser proof is separately version-gated by the frozen
@@ -22,6 +23,11 @@ export const UI_CHECKS_015 = Object.freeze([
   "startupUnavailableNoReplayBoundary", "startupProfileLockContention",
   "sessionSidecarColdReopenStockHistory", "nativeManualModelSelectionWins",
 ]);
+export function sessionProfileChecksForVersion(version, options = {}) {
+  return startupProfileContract(version, options) === "central-read-lock-free-020"
+    ? UI_CHECKS_015.map((check) => check === "startupProfileLockContention" ? "startupProfileReadLockFreeWriteExclusion" : check)
+    : [...UI_CHECKS_015];
+}
 
 export const NATIVE_SCENARIOS_015 = Object.freeze([
   "startup-primary-lock", "startup-first-available", "startup-rate-limit",
@@ -36,8 +42,10 @@ export const proofDigest = (bytes) => createHash("sha256").update(bytes).digest(
 export const name = "dsmm-successor-startup-lock-audit";
 export const inject = ["loader", "appExit"];
 
-/** Loaded independently of the blocked DSMM fiber; never supplies its service. */
+/** Independent native observer; never supplies or replaces the DSMM runtime. */
 export function apply(ctx, config) {
+  const contract = startupProfileContract(config.version, { sourceContract: config.sourceContract });
+  if (contract === "central-read-lock-free-020" && config.scenario === "stable-selection") return observeReadLockFreeStartup(ctx, config);
   const startedAt = performance.now();
   let finished = false;
   let audit;
@@ -80,8 +88,18 @@ export function apply(ctx, config) {
         exactSet(rootRoster.map(({ id }) => id), ["dsmm-orchestrator", "dsmm-planner"], "blocked native roots");
         assert.ok(rootRoster.every(({ broken }) => typeof broken === "string"), "blocked root compositions were mislabeled ready");
       }
-      await writeFile(config.receipt, `${JSON.stringify({ phase: "before-native-loader", startupOutcome: "refused", elapsedMs: Math.ceil(performance.now() - startedAt), dsmmRuntimeReady: false, rootRoster, rootRosterDisposition, nativePresetIds, loaderEntries, failedAdmission, observedOperations }, null, 2)}\n`);
-    })().catch(async (error) => { await writeFile(config.receipt, `${JSON.stringify({ outcome: "FAILED", failure: error.message })}\n`); });
+      let sourceFailure;
+      if (contract === "central-read-lock-free-020") {
+        assert.equal(config.scenario, "corrupt-selection");
+        let failureCode;
+        try { await candidate.await(); } catch (error) { failureCode = error.code; }
+        assert.equal(failureCode, "corrupt-selection");
+        sourceFailure = { contract, scenario: config.scenario, failureCode, artifactSha256: config.artifactSha256, installedRoot: config.packageRoot, packageVersion: config.version,
+          processId: process.pid, loaderIdentity: { entryId: dsmm.id, optionsId: dsmm.options.id, name: dsmm.options.name, uid: dsmm.fiber.uid } };
+      }
+      await writeFile(config.receipt, `${JSON.stringify({ ...sourceFailure, phase: "before-native-loader", startupOutcome: "refused", elapsedMs: Math.ceil(performance.now() - startedAt), dsmmRuntimeReady: false, rootRoster, rootRosterDisposition, nativePresetIds, loaderEntries, failedAdmission, observedOperations }, null, 2)}\n`);
+    })().catch(async (error) => { await writeFile(config.receipt, `${JSON.stringify(contract === "central-read-lock-free-020"
+      ? { outcome: "FAILED", stage: "native-refusal", errorCode: error.code ?? "AUDIT_FAILED" } : { outcome: "FAILED", failure: error.message })}\n`); });
     return audit;
   };
   const timer = setInterval(() => { observe(); }, 25);
@@ -89,6 +107,103 @@ export function apply(ctx, config) {
   // release awaits public fiber disposal, so drain the observer before exit.
   ctx.on("internal/status", (fiber) => { if (fiber.state === 3) observe(fiber); }, { global: true, prepend: true });
   ctx.effect(() => async () => { observe(); finished = true; clearInterval(timer); await audit; });
+}
+
+function observeReadLockFreeStartup(ctx, config) {
+  const startedAt = performance.now();
+  let started = false;
+  let stage = "native-ready";
+  let nativeRootObservation;
+  const operations = { nativeRequestPreparations: 0, nativeToolDispatches: 0 };
+  ctx.on("agent/request", (request, next) => { operations.nativeRequestPreparations += 1; return next(); }, { global: true, prepend: true });
+  ctx.on("tools/pre-execute", (request, next) => { operations.nativeToolDispatches += 1; return next(); }, { global: true, prepend: true });
+  ctx.get("appReady").onReady(() => {
+    if (started) return;
+    started = true;
+    void audit().then(async (proof) => {
+      await writeFile(config.receipt, `${JSON.stringify(proof, null, 2)}\n`, { flag: "wx" });
+      ctx.get("appExit")(0);
+    }).catch(async (error) => {
+      await writeFile(config.receipt, `${JSON.stringify({ outcome: "FAILED", stage, errorCode: error.code ?? "AUDIT_FAILED", nativeRootObservation })}\n`, { flag: "wx" });
+      ctx.get("appExit")(1);
+    });
+  });
+  async function audit() {
+    stage = "installed-package";
+    const manifest = JSON.parse(await readFile(join(config.packageRoot, "package.json"), "utf8"));
+    assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(manifest.version, config.version);
+    const runtime = ctx.get("dsmmProfileRuntime");
+    assert.ok(runtime && ctx.get("dsmmProfiles")?.backend === runtime);
+    stage = "native-loader-identity";
+    const entries = [...ctx.get("loader").entries()];
+    const dsmmEntries = entries.filter(({ options }) => options.name === "@dsmm/dsmm");
+    assert.equal(dsmmEntries.length, 1);
+    const dsmm = dsmmEntries[0];
+    assert.equal(dsmm.fiber.state, 2); assert.equal(runtime.options.startup.entryId, dsmm.id);
+    assert.equal(dsmm.options.id, "dsmm");
+    stage = "actual-store-identity";
+    const store = runtime.store;
+    assert.equal(store.origin, "central");
+    for (const key of ["origin", "profileDir", "stateDir"]) assert.equal(store[key], config.storage[key]);
+    assert.equal(runtime.options.startup.entryId, config.storage.entryId);
+    const pointer = config.storage.pointerPath, lock = config.storage.lockPath;
+    stage = "owned-regular-lock";
+    const status = await lstat(lock);
+    assert.ok(status.isFile() && !status.isSymbolicLink() && status.nlink === 1);
+    const ownerBefore = await readFile(lock), pointerBefore = await readFile(pointer);
+    stage = "cold-disk-selection";
+    const selected = await store.loadSelection();
+    assert.ok(selected.selectedId && selected.content && selected.document);
+    assert.equal(selected.document.settings.workflow.reviewCap, 7);
+    const documentPath = join(store.profileDir, `${selected.selectedId}.jsonc`);
+    const revisionPath = join(store.profileDir, ".revisions", `${selected.appliedRevision}.jsonc`);
+    const documentBefore = await readFile(documentPath), revisionBefore = await readFile(revisionPath);
+    assert.equal(proofDigest(revisionBefore), selected.appliedRevision);
+    assert.deepEqual(documentBefore, revisionBefore);
+    const selection = { selectedId: selected.selectedId, appliedRevision: selected.appliedRevision, selectionRevision: selected.selectionRevision };
+    for (const key of Object.keys(selection)) assert.equal(runtime.admission()[key], selection[key]);
+    assert.equal(runtime.getSettings().workflow.reviewCap, 7);
+    assert.equal(ctx.get("agents").list().length, 0);
+    stage = "new-native-root";
+    const nativeRequire = (await import("node:module")).createRequire(config.dshManifest);
+    const { SessionId } = await import(pathToFileURL(nativeRequire.resolve("@deepseek-ai/dsh-session")).href);
+    const handle = await ctx.get("agents").create({ sessionId: SessionId(`dsmm-startup-lock-${process.pid}`), meta: { cwd: config.workspace, agentPreset: "dsmm-orchestrator" } });
+    let root;
+    try {
+      const agent = handle.agent, admission = runtime.admission(agent);
+      nativeRootObservation = { nativeOrigin: agent.session.header.origin ?? null, preset: agent.session.header.agentPreset ?? null, scope: admission.scope,
+        selectedId: admission.selectedId, appliedRevision: admission.appliedRevision, selectionRevision: admission.selectionRevision, reviewCap: runtime.getSettings(agent).workflow.reviewCap };
+      for (const key of Object.keys(selection)) assert.equal(admission[key], selection[key]);
+      assert.equal(agent.session.header.origin, undefined); assert.equal(agent.session.header.agentPreset, "dsmm-orchestrator");
+      assert.equal(agent.session.header.parentSession, undefined);
+      const nativeOwnerIds = ctx.get("agents").list().filter((candidate) => ctx.get("agents").isOwnedBy(agent.id, candidate)).map(({ id }) => id);
+      assert.deepEqual(nativeOwnerIds, []);
+      assert.equal(runtime.getSettings(agent).workflow.reviewCap, 7);
+      const events = agent.session.snapshotEvents();
+      assert.equal(events.some(({ type }) => ["turn/start", "request/header", "assistant/attempt", "assistant/message", "tool/call", "tool/result"].includes(type)), false);
+      root = { sessionId: agent.id, nativeOrigin: agent.session.header.origin ?? null, nativeParentSession: agent.session.header.parentSession ?? null, nativeOwnerIds,
+        preset: agent.session.header.agentPreset, scope: admission.scope,
+        ...selection, admissionEpoch: admission.epoch, reviewCap: runtime.getSettings(agent).workflow.reviewCap, requestOrToolEvents: 0 };
+    } finally { await handle.dispose(); }
+    stage = "actual-document-write";
+    let writeCode;
+    const attemptedContent = `${selected.content}\n`;
+    try { await runtime.save({ id: selected.selectedId, content: attemptedContent, expectedRevision: selected.appliedRevision }); }
+    catch (error) { writeCode = error.code; }
+    assert.equal(writeCode, "lock-timeout");
+    stage = "unchanged-disk-bytes";
+    const unchanged = async (path, before) => { const after = await readFile(path); assert.deepEqual(after, before); return { beforeSha256: proofDigest(before), afterSha256: proofDigest(after) }; };
+    const bytes = { document: await unchanged(documentPath, documentBefore), revision: await unchanged(revisionPath, revisionBefore),
+      pointer: await unchanged(pointer, pointerBefore), owner: await unchanged(lock, ownerBefore) };
+    assert.deepEqual(operations, { nativeRequestPreparations: 0, nativeToolDispatches: 0 });
+    return { contract: "central-read-lock-free-020", phase: "before-native-loader", scenario: "stable-selection", startupOutcome: "read-admitted-write-refused",
+      artifactSha256: config.artifactSha256, installedRoot: config.packageRoot, packageVersion: manifest.version, elapsedMs: Math.ceil(performance.now() - startedAt),
+      dsmmRuntimeReady: true, runtimeBackendIdentity: true, postAppReady: true, processId: process.pid, storage: config.storage, regularOwnedLock: true,
+      loaderEntries: entries.map((entry) => ({ id: entry.options.id, name: entry.options.name, uid: entry.fiber?.uid ?? null, state: entry.fiber?.state ?? null })),
+      loaderIdentity: { entryId: dsmm.id, optionsId: dsmm.options.id, name: dsmm.options.name, uid: dsmm.fiber.uid, startupEntryId: runtime.options.startup.entryId },
+      selection, coldReviewCap: runtime.getSettings().workflow.reviewCap, root, rootDisposed: true,
+      write: { operation: "runtime.save", code: writeCode, attemptedContentSha256: proofDigest(attemptedContent) }, bytes, observedOperations: operations };
+  }
 }
 const digest = (value, label) => assert.match(value, /^[a-f0-9]{64}$/u, `${label} needs actual SHA256 evidence`);
 const id = (value, label) => assert.ok(typeof value === "string" && value.length > 0 && value.length <= 512 && !/[\x00-\x1f]/u.test(value), `${label} is invalid`);
@@ -129,8 +244,116 @@ function validateAttempt(scenario, attempt, index) {
   assert.ok(["completed", "RATE_LIMIT", "NO_ADAPTER"].includes(attempt.result), "native attempt settlement is missing");
 }
 
+function validateRefusedStartup(contention) {
+  assert.equal(contention?.phase, "before-native-loader"); assert.equal(contention.pathBasename, ".lock");
+  assert.deepEqual(contention.nativeExit, { code: 1, signal: null }, "official native startup failure exit was suppressed or replaced");
+  assert.equal(contention.startupOutcome, "refused"); integer(contention.elapsedMs, 1, 30_000, "bounded startup lock wait");
+  digest(contention.pointerBeforeSha256, "startup pointer before"); assert.equal(contention.pointerAfterSha256, contention.pointerBeforeSha256);
+  digest(contention.ownerBeforeSha256, "lock ownership before"); assert.equal(contention.ownerAfterSha256, contention.ownerBeforeSha256);
+  assert.equal(contention.dsmmRuntimeReady, false, "startup contention silently admitted baseline");
+  assert.deepEqual(contention.observedOperations, { nativeRequestPreparations: 0, nativeToolDispatches: 0 }, "contended startup prepared native requests or dispatched tools");
+  assert.ok(Array.isArray(contention.loaderEntries), "actual native Loader inventory missing");
+  const loader = contention.loaderEntries.find(({ id }) => id === "dsmm");
+  assert.equal(loader?.state, 2, "outer native DSMM Loader state was fabricated instead of observing child admission failure");
+  integer(loader.uid, 1, 100_000, "actual DSMM Loader fiber UID");
+  const failure = contention.failedAdmission;
+  assert.equal(failure?.nativeOwnership, "public-parent-fiber-identity"); assert.equal(failure.loaderEntryId, "dsmm");
+  assert.equal(failure.loaderFiberUid, loader.uid);
+  integer(failure.failedFiber?.uid, 1, 100_000, "failed native profile-admission fiber UID");
+  assert.equal(failure.failedFiber.name, "installProfiles"); assert.equal(failure.failedFiber.state, 3);
+  assert.ok(Array.isArray(failure.ancestry) && failure.ancestry.length >= 2 && failure.ancestry.length <= 32, "public native admission ownership chain missing");
+  assert.deepEqual(failure.ancestry[0], failure.failedFiber);
+  assert.equal(new Set(failure.ancestry.map(({ uid }) => uid)).size, failure.ancestry.length, "native ownership ancestry repeats a fiber");
+  for (const fiber of failure.ancestry) { integer(fiber.uid, 1, 100_000, "native ancestry fiber UID"); id(fiber.name, "native ancestry fiber name"); integer(fiber.state, 0, 5, "native ancestry state"); }
+  assert.deepEqual(failure.ancestry.at(-1), { uid: loader.uid, name: "dsmm", state: loader.state }, "failed native fiber belongs to a foreign Loader entry");
+  assert.ok(Array.isArray(contention.nativePresetIds) && contention.nativePresetIds.includes("standard") && contention.nativePresetIds.includes("minimal"), "actual settled native baseline roster is missing");
+  assert.ok(Array.isArray(contention.rootRoster), "actual DSMM root roster is missing");
+  exactSet(contention.rootRoster.map(({ id }) => id), contention.nativePresetIds.filter((id) => id.startsWith("dsmm-")), "observed native DSMM roster projection");
+  if (contention.rootRosterDisposition === "not-registered") {
+    assert.deepEqual(contention.rootRoster, [], "failed pre-registration Loader exposed a DSMM root");
+  } else {
+    assert.equal(contention.rootRosterDisposition, "blocked-compositions", "startup roster disposition missing");
+    exactSet(contention.rootRoster.map(({ id }) => id), ["dsmm-orchestrator", "dsmm-planner"], "blocked native root inventory");
+    assert.ok(contention.rootRoster.every(({ broken }) => typeof broken === "string" && broken.length > 0), "blocked DSMM roots were mislabeled ready");
+  }
+}
+
+export function validateStartupProfileProof(proof, { version, sourceContract, artifactSha256, installedRoot, profileStorage, ownedHome }) {
+  const contract = startupProfileContract(version, { sourceContract });
+  if (contract === "historical-read-lock") {
+    validateRefusedStartup(proof);
+    return { contract };
+  }
+  assert.equal(proof?.contract, contract);
+  assert.equal(proof.artifactSha256, artifactSha256); digest(artifactSha256, "trusted startup artifact");
+  assert.equal(proof.installedRoot, installedRoot); assert.equal(proof.packageVersion, version);
+  assert.equal(proof.phase, "before-native-loader"); assert.equal(proof.scenario, "stable-selection");
+  assert.equal(proof.startupOutcome, "read-admitted-write-refused"); assert.deepEqual(proof.nativeExit, { code: 0, signal: null });
+  integer(proof.elapsedMs, 1, 30_000, "bounded startup read/write proof"); integer(proof.processId, 1, 2 ** 31 - 1, "independent native process");
+  integer(proof.parentProcessId, 1, 2 ** 31 - 1, "acceptance producer process"); assert.notEqual(proof.processId, proof.parentProcessId);
+  for (const key of ["dsmmRuntimeReady", "runtimeBackendIdentity", "postAppReady", "regularOwnedLock", "rootDisposed"]) assert.equal(proof[key], true, key);
+  assert.deepEqual(proof.observedOperations, { nativeRequestPreparations: 0, nativeToolDispatches: 0 });
+  const storage = proof.storage;
+  assert.equal(storage?.origin, "central"); assert.equal(storage.home, ownedHome);
+  const paths = installedRoot?.startsWith("/") ? posix : win32;
+  const inside = (path) => {
+    id(path, "owned startup path"); assert.equal(paths.isAbsolute(path), true); assert.equal(paths.normalize(path), path);
+    const within = paths.relative(ownedHome, path);
+    assert.ok(within && within !== ".." && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within));
+  };
+  id(ownedHome, "owned startup home"); assert.equal(paths.isAbsolute(ownedHome), true);
+  inside(installedRoot); inside(storage.hostProfileDir);
+  assert.equal(storage.hostProfileDir, paths.dirname(paths.dirname(paths.dirname(installedRoot))));
+  assert.equal(storage.profileDir, paths.join(ownedHome, "plugins", "dsmm", "profiles"));
+  id(storage.entryId, "actual startup entry");
+  const hostIdentity = paths === win32 ? storage.hostProfileDir.toLowerCase() : storage.hostProfileDir;
+  assert.equal(storage.stateDir, paths.join(storage.profileDir, ".state", proofDigest(JSON.stringify([hostIdentity, storage.entryId]))));
+  assert.equal(storage.pointerPath, paths.join(storage.stateDir, ".selection.json")); assert.equal(storage.lockPath, paths.join(storage.profileDir, ".lock"));
+  for (const key of ["origin", "profileDir", "stateDir", "entryId", "pointerPath", "lockPath"]) assert.equal(storage[key], profileStorage?.[key], `startup storage ${key}`);
+  const loaders = proof.loaderEntries?.filter(({ name }) => name === "@dsmm/dsmm");
+  assert.equal(loaders?.length, 1); const loader = loaders[0];
+  assert.equal(loader.id, "dsmm"); assert.equal(loader.state, 2); integer(loader.uid, 1, 100_000, "native Loader UID");
+  assert.deepEqual(proof.loaderIdentity, { entryId: storage.entryId, optionsId: "dsmm", name: "@dsmm/dsmm", uid: loader.uid, startupEntryId: storage.entryId });
+  const selection = proof.selection;
+  assert.match(selection?.selectedId, /^startup-lock-[a-f0-9-]{36}$/u);
+  digest(selection.appliedRevision, "cold immutable revision"); digest(selection.selectionRevision, "cold pointer revision");
+  for (const key of ["document", "revision", "pointer", "owner"]) {
+    digest(proof.bytes?.[key]?.beforeSha256, `startup ${key} before`);
+    assert.equal(proof.bytes[key].afterSha256, proof.bytes[key].beforeSha256);
+  }
+  assert.equal(proof.bytes.document.beforeSha256, selection.appliedRevision); assert.equal(proof.bytes.revision.beforeSha256, selection.appliedRevision);
+  assert.equal(proof.bytes.pointer.beforeSha256, selection.selectionRevision);
+  assert.equal(proof.write?.operation, "runtime.save"); assert.equal(proof.write.code, "lock-timeout");
+  digest(proof.write.attemptedContentSha256, "actual changed document write"); assert.notEqual(proof.write.attemptedContentSha256, selection.appliedRevision);
+  assert.equal(proof.coldReviewCap, 7);
+  const root = proof.root;
+  id(root?.sessionId, "new native root"); digest(root.admissionEpoch, "new native root epoch");
+  assert.equal(root.nativeOrigin, null); assert.equal(root.nativeParentSession, null); assert.deepEqual(root.nativeOwnerIds, []);
+  assert.equal(root.preset, "dsmm-orchestrator"); assert.equal(root.scope, "global-default");
+  assert.equal(root.reviewCap, 7); assert.equal(root.requestOrToolEvents, 0);
+  for (const key of Object.keys(selection)) assert.equal(root[key], selection[key]);
+  const corrupt = proof.corruptSelection;
+  assert.equal(corrupt?.contract, contract); assert.equal(corrupt.scenario, "corrupt-selection"); assert.equal(corrupt.failureCode, "corrupt-selection");
+  assert.equal(corrupt.artifactSha256, artifactSha256); assert.equal(corrupt.installedRoot, installedRoot); assert.equal(corrupt.packageVersion, version);
+  validateRefusedStartup(corrupt);
+  integer(corrupt.processId, 1, 2 ** 31 - 1, "independent corrupt-selection process");
+  assert.notEqual(corrupt.processId, proof.processId); assert.notEqual(corrupt.processId, proof.parentProcessId);
+  assert.deepEqual(corrupt.loaderIdentity, { entryId: storage.entryId, optionsId: "dsmm", name: "@dsmm/dsmm", uid: corrupt.failedAdmission.loaderFiberUid });
+  assert.equal(corrupt.ownerBeforeSha256, proof.bytes.owner.beforeSha256);
+  for (const key of ["document", "revision"]) {
+    assert.equal(corrupt[`${key}BeforeSha256`], proof.bytes[key].beforeSha256);
+    assert.equal(corrupt[`${key}AfterSha256`], corrupt[`${key}BeforeSha256`]);
+  }
+  assert.notEqual(corrupt.pointerBeforeSha256, proof.bytes.pointer.beforeSha256);
+  assert.equal(proof.restoredPointerSha256, proof.bytes.pointer.beforeSha256);
+  digest(proof.cleanup?.originalPointerSha256, "original pointer cleanup"); assert.equal(proof.cleanup.restoredOriginalPointerSha256, proof.cleanup.originalPointerSha256);
+  for (const key of ["ownedLockRemoved", "ownedDocumentRemoved", "ownedRevisionRemoved"]) assert.equal(proof.cleanup[key], true, key);
+  return { contract };
+}
+
 /** Check observed attempts, disk digests and native snapshots; check booleans are not proof. */
-export function validateSessionProfileProof(proof, { artifactSha256, installedRoot, version }) {
+export function validateSessionProfileProof(proof, { artifactSha256, installedRoot, version, sourceContract, profileStorage, ownedHome }) {
+  startupProfileContract(version, { sourceContract });
   const nativeOwnedRoot = requiresNativePickerProof(version);
   const schemaVersion = nativeOwnedRoot ? 2 : 1;
   assert.equal(proof?.schemaVersion, schemaVersion, "successor proof schema missing or differs from trusted version");
@@ -188,38 +411,7 @@ export function validateSessionProfileProof(proof, { artifactSha256, installedRo
   integer(cold.stockEvents, 1, 100_000, "stock cold-read event count"); integer(cold.coreEvents, 1, cold.stockEvents, "stock core events");
   digest(cold.visibleBeforeSha256, "live native visible history"); assert.equal(cold.visibleAfterSha256, cold.visibleBeforeSha256);
   digest(cold.headersBeforeSha256, "live native request headers"); assert.equal(cold.headersAfterSha256, cold.headersBeforeSha256);
-  const contention = proof.startupLock;
-  assert.equal(contention?.phase, "before-native-loader"); assert.equal(contention.pathBasename, ".lock");
-  assert.deepEqual(contention.nativeExit, { code: 1, signal: null }, "official native startup failure exit was suppressed or replaced");
-  assert.equal(contention.startupOutcome, "refused"); integer(contention.elapsedMs, 1, 30_000, "bounded startup lock wait");
-  digest(contention.pointerBeforeSha256, "startup pointer before"); assert.equal(contention.pointerAfterSha256, contention.pointerBeforeSha256);
-  digest(contention.ownerBeforeSha256, "lock ownership before"); assert.equal(contention.ownerAfterSha256, contention.ownerBeforeSha256);
-  assert.equal(contention.dsmmRuntimeReady, false, "startup contention silently admitted baseline");
-  assert.deepEqual(contention.observedOperations, { nativeRequestPreparations: 0, nativeToolDispatches: 0 }, "contended startup prepared native requests or dispatched tools");
-  assert.ok(Array.isArray(contention.loaderEntries), "actual native Loader inventory missing");
-  const loader = contention.loaderEntries.find(({ id }) => id === "dsmm");
-  assert.equal(loader?.state, 2, "outer native DSMM Loader state was fabricated instead of observing child admission failure");
-  integer(loader.uid, 1, 100_000, "actual DSMM Loader fiber UID");
-  const failure = contention.failedAdmission;
-  assert.equal(failure?.nativeOwnership, "public-parent-fiber-identity"); assert.equal(failure.loaderEntryId, "dsmm");
-  assert.equal(failure.loaderFiberUid, loader.uid);
-  integer(failure.failedFiber?.uid, 1, 100_000, "failed native profile-admission fiber UID");
-  assert.equal(failure.failedFiber.name, "installProfiles"); assert.equal(failure.failedFiber.state, 3);
-  assert.ok(Array.isArray(failure.ancestry) && failure.ancestry.length >= 2 && failure.ancestry.length <= 32, "public native admission ownership chain missing");
-  assert.deepEqual(failure.ancestry[0], failure.failedFiber);
-  assert.equal(new Set(failure.ancestry.map(({ uid }) => uid)).size, failure.ancestry.length, "native ownership ancestry repeats a fiber");
-  for (const fiber of failure.ancestry) { integer(fiber.uid, 1, 100_000, "native ancestry fiber UID"); id(fiber.name, "native ancestry fiber name"); integer(fiber.state, 0, 5, "native ancestry state"); }
-  assert.deepEqual(failure.ancestry.at(-1), { uid: loader.uid, name: "dsmm", state: loader.state }, "failed native fiber belongs to a foreign Loader entry");
-  assert.ok(Array.isArray(contention.nativePresetIds) && contention.nativePresetIds.includes("standard") && contention.nativePresetIds.includes("minimal"), "actual settled native baseline roster is missing");
-  assert.ok(Array.isArray(contention.rootRoster), "actual DSMM root roster is missing");
-  exactSet(contention.rootRoster.map(({ id }) => id), contention.nativePresetIds.filter((id) => id.startsWith("dsmm-")), "observed native DSMM roster projection");
-  if (contention.rootRosterDisposition === "not-registered") {
-    assert.deepEqual(contention.rootRoster, [], "failed pre-registration Loader exposed a DSMM root");
-  } else {
-    assert.equal(contention.rootRosterDisposition, "blocked-compositions", "startup roster disposition missing");
-    exactSet(contention.rootRoster.map(({ id }) => id), ["dsmm-orchestrator", "dsmm-planner"], "blocked native root inventory");
-    assert.ok(contention.rootRoster.every(({ broken }) => typeof broken === "string" && broken.length > 0), "blocked DSMM roots were mislabeled ready");
-  }
+  validateStartupProfileProof(proof.startupLock, { artifactSha256, installedRoot, version, sourceContract, profileStorage, ownedHome });
   const scenarios = proof.routeScenarios;
   assert.ok(Array.isArray(scenarios)); exactSet(scenarios.map(({ name }) => name), NATIVE_SCENARIOS_015, "native route scenarios");
   const byName = new Map(scenarios.map((scenario) => [scenario.name, scenario]));

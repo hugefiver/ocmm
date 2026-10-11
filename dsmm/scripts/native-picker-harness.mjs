@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { startNativePickerServer } from "./native-picker-browser.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
+import { isSource020 } from "./release-contract.mjs";
 
 export const PICKER_ARTIFACT_SHA256 = "c42d2e3f799e677258e1624a752fc0928286747e292c26b908524218b8751c9f";
 export const PICKER_ARTIFACT_URL = "https://registry.npmjs.org/@dsmm/dsmm/-/dsmm-0.1.5.tgz";
@@ -20,14 +21,19 @@ const profileRoute = Object.freeze({ provider, model: "configured-default", reas
 const ownedProfileIds = new Set(["picker-b", "picker-no-model"]);
 
 /** Closed reviewed grammars; unreviewed future versions fail closed. */
-export function nativePickerContract(version) {
+export function nativePickerContract(version, { sourceContract } = {}) {
+  if (sourceContract !== undefined) {
+    assert.equal(sourceContract, "0.2.0", "unsupported source picker contract");
+    assert.equal(version, sourceContract, "source picker contract differs from trusted version");
+    return "native-menu-mode-020";
+  }
   assert.ok(version === "0.1.6" || version === "0.1.7" || version === "0.1.8" || version === "0.1.9", "unsupported native picker proof version");
   if (version === "0.1.8" || version === "0.1.9") return "native-menu-mode-018";
   return version === "0.1.7" ? "native-menu-017" : "native-select-016";
 }
 
-export function nativePickerDiagnosticContract(version) {
-  return version === "0.1.5" ? "native-select-016" : nativePickerContract(version);
+export function nativePickerDiagnosticContract(version, options = {}) {
+  return version === "0.1.5" && options.sourceContract === undefined ? "native-select-016" : nativePickerContract(version, options);
 }
 
 export function validateNativeMenuGeometry(geometry, { minimumLabels = 3 } = {}) {
@@ -97,14 +103,14 @@ export function pickerArtifactOptions(args) {
 }
 
 /** CI can only install its explicitly frozen bytes, never the registry BEFORE. */
-export function frozenPickerArtifactOptions({ artifact, sha256, packageVersion }) {
+export function frozenPickerArtifactOptions({ artifact, sha256, packageVersion, sourceContract }) {
   assert.ok(typeof artifact === "string" && isAbsolute(artifact), "frozen picker requires an explicit absolute artifact path");
   assert.match(sha256, /^[a-f0-9]{64}$/u, "frozen picker requires an explicit artifact SHA256");
   assert.match(packageVersion, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u, "frozen picker requires a trusted stable package version");
   const [major, minor, patch] = packageVersion.split(".").map(Number);
   assert.ok(major > 0 || minor > 1 || (minor === 1 && patch >= 6), "frozen picker is a 0.1.6-or-later acceptance gate");
-  nativePickerContract(packageVersion);
-  return { kind: "ci-frozen-artifact", artifact, sha256, packageVersion, lanes: ["present"], receiptName: "picker-frozen-receipt.json" };
+  nativePickerContract(packageVersion, { sourceContract });
+  return { kind: "ci-frozen-artifact", artifact, sha256, packageVersion, ...(sourceContract === undefined ? {} : { sourceContract }), lanes: ["present"], receiptName: "picker-frozen-receipt.json" };
 }
 
 export function validateNativePickerAfterStep(step) {
@@ -223,6 +229,7 @@ export async function runPickerLane(ctx, config) {
   let lastStart;
   let profileGate, providerGate, modelGate, refuseModelAfterCommit = false, modelRefused = false;
   let describeGate, activationRefused = false, menuCandidate = false, modeCandidate = false;
+  let contract;
   const report = { outcome: "BOUNDARY", lane: config.lane, artifactSha256: config.sha256, artifactKind: config.artifactKind, sourceIdentity: config.sourceIdentity, dsmm: config.lane === "present", nativeCalls, providerCalls: calls, steps: [], compactSteps: [],
     authentication: { signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false }, cleanup: {} };
   class PickerAdapter extends LlmAdapter {
@@ -255,8 +262,9 @@ export async function runPickerLane(ctx, config) {
     const installedManifest = JSON.parse(await readFile(join(config.packageRoot, "package.json"), "utf8"));
     assert.equal(installedManifest.name, "@dsmm/dsmm");
     if (config.artifactKind === "ci-frozen-artifact") assert.equal(installedManifest.version, config.packageVersion, "frozen picker installed a different package version");
-    const contract = config.artifactKind === "ci-frozen-artifact" ? nativePickerContract(installedManifest.version) : nativePickerDiagnosticContract(installedManifest.version);
-    modeCandidate = contract === "native-menu-mode-018" || config.artifactKind === "local-current-source" && (await readFile(join(config.packageRoot, "lib", "client.js"), "utf8")).includes("@use-model");
+    const sourceContract = config.artifactKind === "local-current-source" && isSource020(installedManifest.version) ? "0.2.0" : config.sourceContract;
+    contract = config.artifactKind === "ci-frozen-artifact" ? nativePickerContract(installedManifest.version, { sourceContract }) : nativePickerDiagnosticContract(installedManifest.version, { sourceContract });
+    modeCandidate = contract === "native-menu-mode-018" || contract === "native-menu-mode-020" || config.artifactKind === "local-current-source" && (await readFile(join(config.packageRoot, "lib", "client.js"), "utf8")).includes("@use-model");
     menuCandidate = modeCandidate || contract === "native-menu-017";
     if (menuCandidate) report.menuSteps = [];
     report.installedCandidate = { packageRoot: config.packageRoot, name: installedManifest.name, version: installedManifest.version,
@@ -603,7 +611,20 @@ export async function runPickerLane(ctx, config) {
           modeOffStep.submission = "native-agent-followup";
           modeOffStep.actualCalls = await submitNativeMode(sessionId, "mode-disabled-preserves-native-route"); modeOffStep.afterRequest = await snapshot(sessionId);
           await openOwned("dsmm-orchestrator"); beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
-          await openProfileMenu(); assert.equal(await menuPopup.getByRole("menuitem", { name: "Deepwork · DW preset", exact: true }).isDisabled(), true); await closeProfileMenu();
+          if (contract === "native-menu-mode-020") {
+            assert.equal(beforeMode.nativeMode.locked, false);
+            const ownedSeq = ctx.get("agents").get(sessionId).session.snapshotEvents().at(-1)?.seq ?? -1;
+            await toggle(false);
+            const agent = ctx.get("agents").get(sessionId);
+            await modeEvidence("mode-dw-preset-disable", beforeMode, modeStart, { preset: "dsmm-orchestrator", metadata: agent.session.snapshotEvents().filter(event => event.seq > ownedSeq && event.type === "deepwork/mode"), storedMetadata: await storedModes(sessionId) });
+            beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+            const enableSeq = agent.session.snapshotEvents().at(-1)?.seq ?? -1;
+            await toggle(true);
+            await modeEvidence("mode-dw-preset-enable", beforeMode, modeStart, { preset: "dsmm-orchestrator", metadata: agent.session.snapshotEvents().filter(event => event.seq > enableSeq && event.type === "deepwork/mode"), storedMetadata: await storedModes(sessionId) });
+            beforeMode = await snapshot(sessionId); modeStart = nativeCalls.length;
+          } else {
+            await openProfileMenu(); assert.equal(await menuPopup.getByRole("menuitem", { name: "Deepwork · DW preset", exact: true }).isDisabled(), true); await closeProfileMenu();
+          }
           await modeEvidence("mode-dw-preset-owned", beforeMode, modeStart, { preset: "dsmm-orchestrator" });
           const modeOwnedStep = report.modeSteps.at(-1);
           modeOwnedStep.submission = "native-agent-followup";
@@ -990,14 +1011,20 @@ export async function runPickerLane(ctx, config) {
   return report;
 }
 
-export async function runFrozenNativePickerAcceptance({ artifact, sha256, packageVersion, dshManifest, toolsManifest, browserExecutable, evidenceRoot, env }) {
-  const candidate = frozenPickerArtifactOptions({ artifact, sha256, packageVersion });
+export async function runFrozenNativePickerAcceptance({ artifact, sha256, packageVersion, sourceContract, dshManifest, toolsManifest, browserExecutable, evidenceRoot, env }) {
+  const candidate = frozenPickerArtifactOptions({ artifact, sha256, packageVersion, sourceContract });
   for (const [label, path] of Object.entries({ dshManifest, toolsManifest, browserExecutable, evidenceRoot })) {
     assert.ok(typeof path === "string" && isAbsolute(path), `frozen picker needs explicit absolute ${label}`);
   }
   const report = await runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest, browserExecutable, evidenceRoot, env, observerDiagnostic: false });
   assert.equal(report.outcome, "COMPLETED", `frozen picker acceptance failed: ${report.failure ?? report.lanes.find((lane) => lane.failure)?.failure ?? "native Host/browser boundary"}`);
   return report;
+}
+
+export function freshNativePickerEnvironment(home, parentEnv) {
+  return { PATH: parentEnv.PATH, LANG: parentEnv.LANG, LC_ALL: parentEnv.LC_ALL, TZ: parentEnv.TZ, DISPLAY: parentEnv.DISPLAY, XAUTHORITY: parentEnv.XAUTHORITY, HOME: home, DSH_HOME: home,
+    XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_STATE_HOME: join(home, "state"), XDG_CACHE_HOME: join(home, "cache"),
+    POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1", DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1" };
 }
 
 async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest, browserExecutable, evidenceRoot, env: parentEnv, observerDiagnostic }) {
@@ -1010,7 +1037,7 @@ async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest,
   const workspace = join(owned, "workspace");
   await mkdir(workspace);
   const report = { artifactKind: candidate.kind, artifactSha256: candidate.sha256,
-    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: nativePickerContract(candidate.packageVersion) === "native-menu-mode-018" ? "frozen-artifact-native-picker-and-native-menu-mode-018" : nativePickerContract(candidate.packageVersion) === "native-menu-017" ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile" }
+    ...(candidate.kind === "ci-frozen-artifact" ? { packageVersion: candidate.packageVersion, publicationClaimed: false, proofScope: nativePickerContract(candidate.packageVersion, candidate) === "native-menu-mode-020" ? "frozen-artifact-native-picker-and-native-menu-mode-020" : nativePickerContract(candidate.packageVersion, candidate) === "native-menu-mode-018" ? "frozen-artifact-native-picker-and-native-menu-mode-018" : nativePickerContract(candidate.packageVersion, candidate) === "native-menu-017" ? "frozen-artifact-native-picker-and-native-menu-017" : "frozen-artifact-native-picker-and-compact-profile" }
       : candidate.sourceIdentity ? { sourceIdentity: candidate.sourceIdentity, publicationClaimed: false, proofScope: observerDiagnostic ? "observer-attachment-diagnostic-only" : "current-source-native-picker-and-compact-profile", immutableBeforeSha256: PICKER_ARTIFACT_SHA256 }
       : { artifactUrl: candidate.url }), lanes: [] };
   try {
@@ -1023,8 +1050,7 @@ async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest,
     await writeFile(artifact, bytes, { flag: "wx" });
     for (const lane of candidate.lanes) {
       const home = join(owned, lane); await mkdir(home);
-      const env = { PATH: parentEnv.PATH, LANG: parentEnv.LANG, LC_ALL: parentEnv.LC_ALL, TZ: parentEnv.TZ, DISPLAY: parentEnv.DISPLAY, XAUTHORITY: parentEnv.XAUTHORITY, HOME: home, DSH_HOME: home,
-        XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_STATE_HOME: join(home, "state"), XDG_CACHE_HOME: join(home, "cache"), DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1" };
+      const env = freshNativePickerEnvironment(home, parentEnv);
       const profile = `picker-${lane}`;
       const command = (args) => { const result = spawnSync("dsh", args, { env, cwd: workspace, encoding: "utf8", timeout: 45_000 }); assert.equal(result.status, 0, result.stderr); };
       command(["--profile", profile, "--from-default-profile", "web", "--dump-config"]);
@@ -1044,7 +1070,7 @@ async function runOwnedPickerAcceptance(candidate, { dshManifest, toolsManifest,
       } });
       rows.push({ insert: [{ id: "dsmm-native-picker-owned-diagnostic", name: pathToFileURL(fileURLToPath(import.meta.url)).href, config: {
         lane, receipt, packageRoot, sha256: candidate.sha256, artifactKind: candidate.kind, observerDiagnostic,
-        ...(candidate.packageVersion ? { packageVersion: candidate.packageVersion } : {}), ...(candidate.sourceIdentity ? { sourceIdentity: candidate.sourceIdentity } : {}), workspace, evidenceRoot,
+        ...(candidate.packageVersion ? { packageVersion: candidate.packageVersion } : {}), ...(candidate.sourceContract ? { sourceContract: candidate.sourceContract } : {}), ...(candidate.sourceIdentity ? { sourceIdentity: candidate.sourceIdentity } : {}), workspace, evidenceRoot,
         dshManifest: nativeRequire.resolve("@deepseek-ai/dsh/package.json"), toolsManifest, browserExecutable,
       } }] });
       await writeFile(patch, nativeRequire("js-yaml").dump(rows));

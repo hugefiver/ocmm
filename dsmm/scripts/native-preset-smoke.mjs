@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isSource020, pluginTitleForVersion, PRESET_NAMES_020, ROLE_TOOLS_020 } from "./release-contract.mjs";
 
 export const name = "dsmm-final-native-preset-acceptance";
 export const inject = ["appReady", "appExit", "agents", "llm", "subagents"];
@@ -70,6 +71,8 @@ export async function apply(ctx, config) {
   ctx.effect(() => () => { disposed = true; if (typeof onReady === "function") onReady(); });
 
   async function audit() {
+    const version = config.nativeOnly ? null : JSON.parse(readFileSync(join(config.packageRoot, "package.json"), "utf8")).version;
+    const roleTools = isSource020(version) ? ROLE_TOOLS_020 : ROLE_TOOLS;
     const report = { outcome: "FAILED", template: config.template, postAppReady: true, presetRegistryPresent: false,
       model: { kind: "deterministic-test-only-adapter", externalModelCalls: false, calls }, uiAuthentication: "NOT_EXERCISED" };
     const handles = [];
@@ -115,9 +118,11 @@ export async function apply(ctx, config) {
         const { readPluginMeta } = await load("@deepseek-ai/dsh-app-boot");
         const meta = readPluginMeta("@dsmm/dsmm", pathToFileURL(profileManifest).href);
         assert.equal(meta?.error, undefined);
-        assert.deepEqual(meta?.title, { en: "Deepwork", zh: "Deepwork" });
+        const title = pluginTitleForVersion(version);
+        assert.deepEqual(meta?.title, { en: title, zh: title });
         const presetNames = installed.DSMM_ROLES.map(({ id, name }) => ({ id, name }));
-        assert.equal(presetNames.length, 12);
+        assert.equal(presetNames.length, isSource020(version) ? 22 : 12);
+        if (isSource020(version)) assert.deepEqual(presetNames, PRESET_NAMES_020);
         assert.ok(presetNames.every(({ name }) => name.startsWith("DW ")));
         const rootPresetNames = (report.presets ?? []).filter(({ id }) => id.startsWith("dsmm-")).map(({ id, name }) => ({ id, name }));
         for (const preset of rootPresetNames) assert.deepEqual(preset, presetNames.find(({ id }) => id === preset.id));
@@ -155,7 +160,7 @@ export async function apply(ctx, config) {
         await registry.select(parent, "dsmm-orchestrator");
         const orchestrator = await snapshot(parent, registry);
         assert.match(orchestrator.prompt, /You are DW Orchestrator \(role ID: dsmm-orchestrator\)/u);
-        assert.deepEqual(orchestrator.roleTools, ROLE_TOOLS);
+        assert.deepEqual(orchestrator.roleTools, roleTools);
         assert.equal(orchestrator.tools.includes("write"), true);
         await registry.select(parent, "dsmm-planner");
         const planner = await snapshot(parent, registry);
@@ -164,7 +169,7 @@ export async function apply(ctx, config) {
         await registry.select(parent, "dsmm-orchestrator");
         const restored = await snapshot(parent, registry);
         assert.equal(restored.tools.includes("write"), true, "blank root switch lifts planner restrictions");
-        assert.deepEqual(restored.roleTools, ROLE_TOOLS);
+        assert.deepEqual(restored.roleTools, roleTools);
         const restoredTools = toolsFor(parent, registry);
         const restoredWritePath = join(config.workspace, "restored-orchestrator-write.txt");
         const restoredWriteBytes = "restored orchestrator mutation capability\n";
@@ -181,12 +186,16 @@ export async function apply(ctx, config) {
           personaAndToolsChanged: true, plannerDenials, mutationRestored: true, nativeWriteAndRead: true, roleTools: orchestrator.roleTools };
       } else {
         const headless = await snapshot(parent);
-        assert.deepEqual(headless.roleTools, ROLE_TOOLS);
+        assert.deepEqual(headless.roleTools, roleTools);
         report.headlessTools = { outcome: "COMPLETED", roleTools: headless.roleTools, disabledBuilderAbsent: true };
       }
       const subagents = ctx.get("subagents");
-      for (const tool of ROLE_TOOLS) assert.ok(subagents.getProvider(`dsmm-role-${tool.slice(5).replace(/_/gu, "-")}`), `enabled native provider ${tool}`);
+      for (const tool of roleTools) assert.ok(subagents.getProvider(`dsmm-role-${tool.slice(5).replace(/_/gu, "-")}`), `enabled native provider ${tool}`);
       assert.equal(subagents.getProvider("dsmm-role-builder"), undefined);
+      if (isSource020(version)) {
+        assert.equal(subagents.getProvider("dsmm-role-cross-cutting"), undefined);
+        report.delegation = { roleTools: [...roleTools], disabledBuilderAbsent: true, disabledCrossCuttingAbsent: true };
+      }
       const children = [];
       const checkedChildren = new Set();
       childListener = ctx.on("agent/request", async ({ agent }, next) => {

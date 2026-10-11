@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { throwAfterCleanup } from "./docker-cleanup-errors.mjs";
 import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
+import { isSource020, validateCoreProof } from "./release-contract.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PROFILE = "dsmm-v1-smoke";
@@ -16,7 +17,7 @@ const DSH_VERSION = "0.2.0-rc.2";
 const ARTIFACT_RECEIPT_PREFIX = "DSMM_FINAL_ARTIFACT_RECEIPT ";
 const STOCK_PERSISTENCE_ID = "session-persistence-jsonl";
 const STOCK_PERSISTENCE_MODULE = "@deepseek-ai/dsh-session-persistence-jsonl";
-export const PROFILE_UI_HARNESS_FILES = Object.freeze(["profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs"]);
+export const PROFILE_UI_HARNESS_FILES = Object.freeze(["profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs", "native-picker-harness.mjs", "native-picker-browser.mjs", "native-picker-proof.mjs", "release-contract.mjs"]);
 const requiredRolePlugins = [
   "dsh-agent-preset-registry", "dsh-tool-subagent", "dsh-tool-fs", "dsh-tool-fs-search",
   "dsh-tool-bash", "dsh-tool-pwsh", "dsh-tool-jobs", "dsh-skill-filesystem",
@@ -77,7 +78,7 @@ export function artifactDockerArguments(options, imageTag) {
   const args = ["run", "--rm", "--init", "--network", "bridge", "--shm-size", "256m", "--mount", `type=bind,source=${options.artifact},target=/dsmm-acceptance/package.tgz,readonly`];
   // Bind only explicit harness files and the chosen artifact, never a home,
   // profile, credentials directory, source checkout, or ancestor directory.
-  for (const file of ["docker-smoke.mjs", "docker-cleanup-errors.mjs", "native-preset-smoke.mjs", "session-history-smoke.mjs", "lsp-mcp-smoke.mjs", "lsp-smoke-fixture.mjs"]) {
+  for (const file of ["docker-smoke.mjs", "docker-cleanup-errors.mjs", "native-preset-smoke.mjs", "native-core-smoke.mjs", "release-contract.mjs", "session-history-smoke.mjs", "lsp-mcp-smoke.mjs", "lsp-smoke-fixture.mjs"]) {
     args.push("--mount", `type=bind,source=${join(root, "scripts", file)},target=/dsmm-acceptance/scripts/${file},readonly`);
   }
   if (options.hook !== undefined) args.push("--mount", `type=bind,source=${options.hook},target=/dsmm-acceptance/hook.mjs,readonly`);
@@ -145,6 +146,7 @@ export function freshArtifactEnvironment(home, ambient = process.env) {
     .flatMap((key) => ambient[key] === undefined ? [] : [[key, ambient[key]]]));
   return { ...env, HOME: home, DSH_HOME: home, XDG_CONFIG_HOME: join(home, "xdg-config"), XDG_DATA_HOME: join(home, "xdg-data"),
     XDG_STATE_HOME: join(home, "xdg-state"), XDG_CACHE_HOME: join(home, "xdg-cache"),
+    POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1",
     DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1", DSH_PERMISSION_MODE: "workspace-write" };
 }
 
@@ -246,6 +248,27 @@ async function runInnerArtifactSmoke(options) {
       if (result.status !== 0) receipt.native[template].outcome = "FAILED";
       assertSentinels(sentinels, snapshots);
       installs.push({ env, profile, profilePackage, packageRoot, home, sentinels, snapshots, nativeStorage });
+    }
+    if (isSource020(manifest.version)) {
+      const home = join(owned, "core-home"), workspace = join(owned, "core-workspace");
+      mkdirSync(home); mkdirSync(workspace);
+      const env = freshArtifactEnvironment(home), profile = "dsmm-artifact-core";
+      runDsh(env, ["--profile", profile, "--from-default-profile", "web", "--dump-config"], "initialize cold-off Core profile");
+      runDsh(env, ["plugin", "--profile", profile, "add", options.artifact], "install frozen Core artifact");
+      const packageRoot = dirname(createRequire(join(home, "profiles", profile, "package.json")).resolve(`${PACKAGE_NAME}/package.json`));
+      inside(packageRoot, home, "installed Core artifact");
+      mkdirSync(join(home, "plugins", "dsmm"), { recursive: true });
+      writeFileSync(join(home, "plugins", "dsmm", "config.json"), JSON.stringify({ modules: { deepwork: { enabled: false } } }), { flag: "wx" });
+      const output = join(owned, "core-receipt.json"), patch = join(owned, "core-audit.patch.yml");
+      writeFileSync(patch, yaml.dump([{ id: "session-title-llm", disabled: true }, { insert: [{ id: "dsmm-core-audit", name: pathToFileURL(join(root, "scripts", "native-core-smoke.mjs")).href,
+        config: { receipt: output, sha256: options.sha256, dshManifest, packageRoot, home, workspace } }] }]));
+      const coreRun = spawnSync("dsh", ["--profile", profile, "--patch", patch, "--no-open", "--host", "127.0.0.1", "--port", "0"],
+        { cwd: workspace, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+      receipt.nativeCore = existsSync(output) ? JSON.parse(readFileSync(output, "utf8"))
+        : { outcome: "FAILED", stage: "native-core-startup", errorCode: coreRun.error?.code ?? `EXIT_${coreRun.status}` };
+      if (coreRun.status !== 0) receipt.nativeCore.outcome = "FAILED";
+      success({ ...coreRun, stdout: "", stderr: "" }, "native cold-off Core contracts");
+      receipt.nativeCore = validateCoreProof(receipt.nativeCore, { sha256: options.sha256, version: manifest.version });
     }
     // Both native Host subprocesses have exited. The operator uses a fresh
     // ordinary SDK graph, never peer installation into either DSH profile.

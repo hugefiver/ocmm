@@ -114,6 +114,10 @@ test("retained native reviewer keeps its own immutable admission after parent mo
         await reinstall.await();
         assert.equal(f.agents.get(child.id), child);
         assert.equal(f.agents.isOwnedBy(child.id, parent), true);
+        const replacement = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+        assert.notEqual(replacement, runtime);
+        assert.ok(replacement.admission(child as DshAgent) === captured, "the replacement settings getter preserves the exact child capture");
+        assert.equal(replacement.admission(child as DshAgent).epoch, identity.epoch);
         const after = await execute("write", "retained-write-after");
         const read = await execute("read", "retained-read-after");
         t.diagnostic(`actual native reinstall: before write error=${before.isError}, after=${after.isError}, write bodies=${writes}, sentinel=${sentinel}; read error=${read.isError}, value=${JSON.stringify(read.value)}; old child epoch preserved while parent changed`);
@@ -125,6 +129,56 @@ test("retained native reviewer keeps its own immutable admission after parent mo
         assert.equal(policy.admit(child as DshAgent), identity, "shared admission is idempotent without following today's parent mode or epoch");
         assert.equal(identity.epoch, captured.epoch);
         assert.throws(() => policy.admit({ ...child, id: child.id } as DshAgent), (error: unknown) => error instanceof Error && "code" in error && error.code === "UNAUTHORIZED");
+      } finally { remove(); }
+    } finally { await run.dispose(); }
+  } finally { await reinstall?.dispose(); await f.dispose(); }
+});
+
+test("replacement runtime preserves a retained coding child's captured Git denial after a parent-only guard overlay", async (t) => {
+  const config = { defaultActive: true, guards: { gitWriteGuard: "deny" as const } };
+  const f = await nativeRoutingFixture(config, { headless: true });
+  let reinstall: ReturnType<typeof f.ctx.plugin> | undefined;
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const parent = await f.create();
+    const run = await f.subagents.start("dsmm-role-coding", { parent, prompt: [], signal: new AbortController().signal });
+    try {
+      await run.result;
+      const child = run.localAgent!;
+      const captured = runtime.admission(child as DshAgent);
+      assert.equal(captured.settings.guards.gitWriteGuard, "deny");
+      let bodies = 0;
+      const remove = child.ctx.tools.register({ name: "pwsh", description: "Counter-only retained shell; never executes commands", parameters: { command: { type: "string", required: true } },
+        output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: String(value) }] },
+        async execute() { bodies++; return "COUNTER_ONLY"; } });
+      const execute = (agent: typeof child, id: string) => agent.ctx.tools.execute({ agent, name: "pwsh", arguments: { command: "git push origin main" }, callId: ToolCallId(id), signal: new AbortController().signal });
+      try {
+        assert.equal((await execute(child, "retained-git-before")).isError, true);
+        const overlay = await runtime.save({ id: "parent-guard-off", expectedRevision: null, content: '{"version":1,"id":"parent-guard-off","settings":{"guards":{"gitWriteGuard":"off"}}}' });
+        const session = await runtime.getSession(parent as DshAgent);
+        await runtime.selectSession({ sessionId: parent.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch }, parent as DshAgent);
+        const parentAdmission = runtime.admission(parent as DshAgent);
+        assert.notEqual(parentAdmission.epoch, captured.epoch);
+        assert.equal(parentAdmission.settings.guards.gitWriteGuard, "off");
+        assert.equal(runtime.admission(child as DshAgent), captured);
+        assert.equal((await execute(child, "retained-git-parent-overlay")).isError, true);
+        assert.equal(bodies, 0);
+        await f.dsmmFiber.dispose();
+        reinstall = f.ctx.plugin({ name: "dsmm-retained-coding-reinstall", inject: ["profileContext"], apply(ctx) { return dsmmPlugin.apply(ctx as unknown as DshContext, config); } });
+        await reinstall.await();
+        const replacement = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+        assert.notEqual(replacement, runtime);
+        const after = await execute(child, "retained-git-after-reinstall");
+        const rebound = replacement.admission(child as DshAgent);
+        t.diagnostic(`replacement runtime: child guard=${rebound.settings.guards.gitWriteGuard}, child epoch preserved=${rebound.epoch === captured.epoch}, parent guard=${replacement.getSettings(parent as DshAgent).guards.gitWriteGuard}, shell error=${after.isError}, bodies=${bodies}`);
+        assert.equal(bodies, 0, "the replacement runtime must not grant an old child its parent's newer Git policy");
+        assert.equal(after.isError, true);
+        assert.equal(rebound, captured);
+        assert.equal(rebound.epoch, captured.epoch);
+        assert.equal(rebound.settings.guards.gitWriteGuard, "deny");
+        assert.equal(replacement.admission(parent as DshAgent).epoch, parentAdmission.epoch);
+        assert.equal(replacement.getSettings(parent as DshAgent).guards.gitWriteGuard, "off");
+        assert.equal((await child.ctx.tools.execute({ agent: child, name: "read", arguments: {}, callId: ToolCallId("retained-coding-read"), signal: new AbortController().signal })).value, "read");
       } finally { remove(); }
     } finally { await run.dispose(); }
   } finally { await reinstall?.dispose(); await f.dispose(); }

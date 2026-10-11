@@ -80,6 +80,7 @@ export declare class DsmmProfileRuntime {
     private declaredProfileModel;
     private agents;
     private bind;
+    private bindChild;
     private owner;
     private assertRoot;
     private admit;

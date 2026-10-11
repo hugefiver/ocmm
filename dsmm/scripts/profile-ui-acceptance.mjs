@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
-import { UI_CHECKS_015, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
+import { sessionProfileChecksForVersion, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof, validateStartupProfileProof } from "./profile-ui-harness-native.mjs";
 import { runFrozenNativePickerAcceptance } from "./native-picker-harness.mjs";
 import { requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "./native-picker-proof.mjs";
+import { isSource020, nativePickerCheckForVersion, startupProfileContract } from "./release-contract.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -31,6 +32,38 @@ export function validatedNativeStorage(nativeStorage, env) {
   assert.equal(resolve(nativeStorage.root), resolve(join(env.DSH_HOME, "sessions")), "native storage root differs from the proved fresh-profile session directory");
   assert.equal(nativeStorage.compression, "zstd", "native storage compression must preserve the proved zstd default");
   return { root: nativeStorage.root, compression: nativeStorage.compression };
+}
+
+export async function validatedProfileStorage(store, { env, hostProfileDir, entryId, version }) {
+  assert.ok(store && typeof store === "object", "native runtime store is required");
+  assert.ok(typeof env.DSH_HOME === "string" && isAbsolute(env.DSH_HOME), "profile storage requires the runner's isolated DSH_HOME");
+  const home = resolve(env.DSH_HOME);
+  assert.equal(await realpath(home), home, "owned DSH_HOME must not be redirected");
+  assert.ok(typeof hostProfileDir === "string" && isAbsolute(hostProfileDir), "native Host profile identity must be absolute");
+  const host = resolve(hostProfileDir);
+  const origin = store.origin ?? "explicit";
+  assert.ok(["central", "legacy", "explicit"].includes(origin), "unknown native profile store origin");
+  if (isSource020(version)) assert.notEqual(origin, "explicit", "source runtime must supply its actual store origin");
+  let expectedProfileDir = join(host, "dsmm-profiles"), expectedStateDir = expectedProfileDir;
+  if (origin === "central") {
+    assert.ok(typeof entryId === "string" && entryId.trim().length > 0 && entryId.length <= 256 && !/[\x00-\x1f\x7f]/u.test(entryId), "actual native startup entry identity is required");
+    const identity = process.platform === "win32" ? host.toLowerCase() : host;
+    expectedProfileDir = join(home, "plugins", "dsmm", "profiles");
+    expectedStateDir = join(expectedProfileDir, ".state", proofDigest(JSON.stringify([identity, entryId])));
+  }
+  assert.equal(store.profileDir, expectedProfileDir, "runtime document directory differs from the owned native store");
+  const stateDir = origin === "explicit" ? store.stateDir ?? store.profileDir : store.stateDir;
+  assert.equal(stateDir, expectedStateDir, "runtime state directory differs from the actual Host/entry identity");
+  for (const directory of new Set([host, store.profileDir, stateDir])) {
+    const within = relative(home, directory);
+    assert.ok(within !== "" && within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within), "profile storage escaped the owned DSH_HOME");
+    for (let current = directory; current !== home; current = dirname(current)) {
+      const status = await lstat(current);
+      assert.ok(status.isDirectory() && !status.isSymbolicLink(), "profile storage traverses a redirected or non-directory path");
+      assert.equal(await realpath(current), current, "profile storage directory is redirected");
+    }
+  }
+  return { origin, profileDir: store.profileDir, stateDir, ...(origin === "central" ? { entryId } : {}), pointerPath: join(stateDir, ".selection.json"), lockPath: join(store.profileDir, ".lock") };
 }
 
 export function nativeUiStartupPatch({ nativeStorage, env, auditConfig }) {
@@ -89,16 +122,19 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
     if (result.code !== 0) { report.outcome = "FAILED"; report.nativeExit = result; }
     if (report.outcome === "COMPLETED" && requiresSessionProfileProof(installed.version)) {
       try {
-        report.successorProof.startupLock = await runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage });
-        validateSessionProfileProof(report.successorProof, { artifactSha256: sha256, installedRoot: packageRoot, version: installed.version });
-        for (const check of UI_CHECKS_015) report.checks[check] = true;
+        const sourceContract = isSource020(installed.version) ? "0.2.0" : undefined;
+        report.successorProof.startupLock = await runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage, profileStorage: report.storageProof,
+          version: installed.version, sourceContract, packageRoot, artifactSha256: sha256, dshManifest });
+        validateSessionProfileProof(report.successorProof, { artifactSha256: sha256, installedRoot: packageRoot, version: installed.version, sourceContract, profileStorage: report.storageProof, ownedHome: env.DSH_HOME });
+        for (const check of sessionProfileChecksForVersion(installed.version, { sourceContract })) report.checks[check] = true;
         if (requiresNativePickerProof(installed.version)) {
           report.nativePickerProof = await runFrozenNativePickerAcceptance({ artifact, sha256, packageVersion: installed.version,
+            sourceContract,
             dshManifest, toolsManifest: env.DSMM_ACCEPTANCE_TOOLS_MANIFEST, browserExecutable: env.DSMM_BROWSER_EXECUTABLE,
             evidenceRoot: join(evidenceRoot, "native-picker"), env });
-          const pickerSummary = validateNativePickerProof(report.nativePickerProof, { artifactSha256: sha256, packageVersion: installed.version });
-          if (requiresSessionModeProof(installed.version)) assert.equal(pickerSummary.modeScenarios, 8, "018 Docker acceptance omitted native mode persistence scenarios");
-          report.checks.nativePickerCompactProfileAcceptance = true;
+          const pickerSummary = validateNativePickerProof(report.nativePickerProof, { artifactSha256: sha256, packageVersion: installed.version, sourceContract });
+          if (requiresSessionModeProof(installed.version, { sourceContract })) assert.equal(pickerSummary.modeScenarios, isSource020(installed.version) ? 10 : 8, "Docker acceptance omitted native mode persistence scenarios");
+          report.checks[nativePickerCheckForVersion(installed.version, { sourceContract })] = true;
         }
       } catch (error) { report.outcome = "FAILED"; report.failure = error.stack ?? String(error); }
     }
@@ -111,10 +147,117 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
 }
 
 /** Place an owned regular lock before a second real DSH Loader is launched. */
-async function runStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage }) {
-  const profileDir = join(dirname(profilePackage), "dsmm-profiles");
-  const pointer = join(profileDir, ".selection.json");
-  const lock = join(profileDir, ".lock");
+export async function runStartupLockContention(options) {
+  const contract = startupProfileContract(options.version, { sourceContract: options.sourceContract });
+  return contract === "central-read-lock-free-020" ? runReadLockFreeStartup(options) : runHistoricalStartupLockContention(options);
+}
+
+export async function withNativeProfileResolution({ nativeRequire, dshManifest, profilePackage, env }, operation) {
+  const { Context } = nativeRequire("@deepseek-ai/cordis");
+  const { PluginPackages, loadProfileDirectory, createRuntimeResolution } = nativeRequire("@deepseek-ai/dsh-app-boot");
+  const ctx = new Context();
+  try {
+    const profile = loadProfileDirectory("dsh", dirname(profilePackage), dshManifest);
+    const resolution = await createRuntimeResolution({ installAnchor: dshManifest, profile, home: env.DSH_HOME });
+    await ctx.plugin(PluginPackages, { resolution }).await();
+    return await operation(ctx);
+  } finally { await ctx.fiber.dispose(); }
+}
+
+async function runReadLockFreeStartup({ runRoot, nativeRequire, profilePackage, workspace, env, storage, profileStorage, version, sourceContract, packageRoot, artifactSha256, dshManifest }) {
+  const actualStorage = await validatedProfileStorage(profileStorage, { env, hostProfileDir: dirname(profilePackage), entryId: profileStorage.entryId, version });
+  assert.equal(actualStorage.origin, "central", "startup write-lock proof requires the actual writable central store");
+  assert.equal(dirname(dirname(dirname(packageRoot))), dirname(profilePackage));
+  const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(manifest.version, version);
+  return withNativeProfileResolution({ nativeRequire, dshManifest, profilePackage, env }, () =>
+    runResolvedReadLockFreeStartup({ runRoot, nativeRequire, profilePackage, workspace, env, storage, actualStorage, version, sourceContract, packageRoot, artifactSha256, dshManifest }));
+}
+
+async function runResolvedReadLockFreeStartup({ runRoot, nativeRequire, profilePackage, workspace, env, storage, actualStorage, version, sourceContract, packageRoot, artifactSha256, dshManifest }) {
+  const { ProfileStore } = await import(pathToFileURL(join(packageRoot, "lib", "profile-store.js")).href);
+  const store = ProfileStore.fromCentral(env.DSH_HOME, dirname(profilePackage), actualStorage.entryId);
+  assert.equal(store.profileDir, actualStorage.profileDir); assert.equal(store.stateDir, actualStorage.stateDir);
+  const { pointerPath: pointer, lockPath: lock } = actualStorage;
+  const originalPointer = await readFile(pointer);
+  await store.loadSelection();
+  const profileId = `startup-lock-${randomUUID()}`;
+  const content = `${JSON.stringify({ version: 1, id: profileId, settings: { defaultActive: true, workflow: { reviewCap: 7 } } }, null, 2)}\n`;
+  const saved = await store.save({ id: profileId, content, expectedRevision: null });
+  const documentPath = join(store.profileDir, `${profileId}.jsonc`), revisionPath = join(store.profileDir, ".revisions", `${saved.revision}.jsonc`);
+  let expectedPointer = originalPointer;
+  let seeded = false;
+  let owner;
+  let proof;
+  try {
+    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: proofDigest(originalPointer) });
+    seeded = true;
+    expectedPointer = await readFile(pointer);
+    owner = `${randomUUID()}\n`;
+    await writeFile(lock, owner, { flag: "wx", mode: 0o600 });
+    const auditStorage = { ...actualStorage, home: env.DSH_HOME, hostProfileDir: dirname(profilePackage) };
+    const launch = async (scenario) => {
+      const receipt = join(runRoot, `startup-${scenario}-receipt.json`), patchPath = join(runRoot, `startup-${scenario}.patch.yml`);
+      const rows = nativeUiStartupPatch({ nativeStorage: storage, env, auditConfig: {} });
+      rows[3] = { insert: [{ id: "dsmm-successor-startup-lock-audit", name: new URL("./profile-ui-harness-native.mjs", import.meta.url).href,
+        config: { receipt, scenario, version, sourceContract, packageRoot, artifactSha256, dshManifest, workspace, storage: auditStorage } }] };
+      await writeFile(patchPath, nativeRequire("js-yaml").dump(rows), { flag: "wx" });
+      const child = spawn("dsh", ["--profile", basename(dirname(profilePackage)), "--patch", patchPath, "--no-open", "--host", "127.0.0.1", "--port", "0"], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
+      // Drain launch output without retaining native authentication material.
+      for (const stream of [child.stdout, child.stderr]) stream.resume();
+      const timeout = setTimeout(() => child.kill("SIGTERM"), 25_000);
+      let nativeExit;
+      try { nativeExit = await new Promise((settle, reject) => { child.once("error", reject); child.once("exit", (code, signal) => settle({ code, signal })); }); }
+      finally { clearTimeout(timeout); }
+      const proof = JSON.parse(await readFile(receipt, "utf8"));
+      assert.notEqual(proof.outcome, "FAILED", `startup ${scenario} audit failed: ${JSON.stringify(proof)}`);
+      return { ...proof, nativeExit };
+    };
+    proof = await launch("stable-selection");
+    assert.deepEqual(await readFile(pointer), expectedPointer); assert.equal(await readFile(lock, "utf8"), owner);
+    const stablePointer = expectedPointer;
+    const corruptPointer = Buffer.from('{"version":1,"id":"invalid-cold-selection","revision":"not-a-revision"}\n');
+    await writeFile(pointer, corruptPointer);
+    expectedPointer = corruptPointer;
+    try {
+      const corruptSelection = await launch("corrupt-selection");
+      assert.deepEqual(await readFile(pointer), corruptPointer); assert.equal(await readFile(lock, "utf8"), owner);
+      proof.corruptSelection = { ...corruptSelection, pathBasename: ".lock", pointerBeforeSha256: proofDigest(corruptPointer), pointerAfterSha256: proofDigest(await readFile(pointer)),
+        ownerBeforeSha256: proofDigest(owner), ownerAfterSha256: proofDigest(await readFile(lock)),
+        documentBeforeSha256: saved.revision, documentAfterSha256: proofDigest(await readFile(documentPath)),
+        revisionBeforeSha256: saved.revision, revisionAfterSha256: proofDigest(await readFile(revisionPath)) };
+    } finally {
+      assert.deepEqual(await readFile(pointer), corruptPointer);
+      assert.equal(await readFile(lock, "utf8"), owner);
+      await writeFile(pointer, stablePointer);
+      expectedPointer = stablePointer;
+    }
+    proof.parentProcessId = process.pid;
+    proof.restoredPointerSha256 = proofDigest(await readFile(pointer));
+  } finally {
+    assert.deepEqual(await readFile(pointer), expectedPointer);
+    if (owner !== undefined) assert.equal(await readFile(lock, "utf8"), owner);
+    if (seeded) {
+      await writeFile(pointer, originalPointer);
+      if (owner !== undefined) await unlink(lock);
+      assert.equal(await readFile(revisionPath, "utf8"), content);
+      await unlink(revisionPath);
+    }
+    assert.equal(await readFile(documentPath, "utf8"), content);
+    await unlink(documentPath);
+    assert.deepEqual(await readFile(pointer), originalPointer);
+    if (proof) {
+      for (const path of [lock, documentPath, revisionPath]) await assert.rejects(lstat(path), { code: "ENOENT" });
+      proof.cleanup = { originalPointerSha256: proofDigest(originalPointer), restoredOriginalPointerSha256: proofDigest(await readFile(pointer)),
+        ownedLockRemoved: true, ownedDocumentRemoved: true, ownedRevisionRemoved: true };
+    }
+  }
+  validateStartupProfileProof(proof, { version, sourceContract, artifactSha256, installedRoot: packageRoot, profileStorage: actualStorage, ownedHome: env.DSH_HOME });
+  return proof;
+}
+
+async function runHistoricalStartupLockContention({ runRoot, nativeRequire, profilePackage, workspace, env, storage, profileStorage, version }) {
+  const { pointerPath: pointer, lockPath: lock } = await validatedProfileStorage(profileStorage, { env, hostProfileDir: dirname(profilePackage), entryId: profileStorage.entryId, version });
   const pointerBefore = await readFile(pointer);
   const owner = `${randomUUID()}\n`;
   await writeFile(lock, owner, { flag: "wx", mode: 0o600 });
@@ -146,10 +289,33 @@ async function runStartupLockContention({ runRoot, nativeRequire, profilePackage
   }
 }
 
-async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileDir, workspace, screenshot, report }) {
+export async function readColdProfileSettings(ctx, createProfileRuntime, baseline, startup) {
+  let runtime;
+  const fiber = ctx.plugin({ name: "dsmm-ui-cold-profile-read", async apply(readerCtx) {
+    runtime = await createProfileRuntime(readerCtx, baseline, { startup });
+  } });
+  try { await fiber.await(); return runtime.getSettings(); }
+  finally { await fiber.dispose(); }
+}
+
+export async function startSuccessorReviewer(ctx, parent, handles) {
+  const run = await ctx.get("subagents").start("dsmm-role-reviewer", {
+    parent, prompt: [{ type: "text", text: "Complete the owned new-admission reviewer fixture" }], signal: new AbortController().signal,
+  });
+  handles.push(run);
+  assert.equal((await run.result).stopReason, "completed");
+  const agent = run.localAgent;
+  assert.ok(agent, "native reviewer run did not return its exact local Agent");
+  assert.equal(ctx.get("agents").get(agent.id), agent);
+  assert.equal(ctx.get("agents").isOwnedBy(agent.id, parent), true);
+  return agent;
+}
+
+async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileStorage, workspace, screenshot, report }) {
   const load = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
-  const [{ createUserMessage }, { Session, SessionId }, { Context }, { default: StockPersistence }] = await Promise.all([
+  const [{ createUserMessage, ToolCallId }, { Session, SessionId }, { Context }, { default: StockPersistence }, { foldSubagentDescriptor }] = await Promise.all([
     load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session"), load("@deepseek-ai/cordis"), load("@deepseek-ai/dsh-session-persistence-jsonl"),
+    load("@deepseek-ai/dsh-subagent"),
   ]);
   const parse = createRequire(join(packageRoot, "package.json"))("jsonc-parser").parse;
   const field = (name) => page.getByLabel(name, { exact: true });
@@ -161,8 +327,8 @@ async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles
   };
   const describeSession = (agent) => invoke("describeSession", { sessionId: agent.id });
   const selectSession = (agent, saved, snapshot) => invoke("selectSession", { sessionId: agent.id, request: { sessionId: agent.id, id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch } });
-  const sidecarPath = (agent) => join(profileDir, "dsmm-profiles", ".sessions", `${proofDigest(agent.id)}.json`);
-  const pointerPath = join(profileDir, "dsmm-profiles", ".selection.json");
+  const sidecarPath = (agent) => join(profileStorage.stateDir, ".sessions", `${proofDigest(agent.id)}.json`);
+  const pointerPath = profileStorage.pointerPath;
   const globalPointerBefore = proofDigest(await readFile(pointerPath));
   const globalSelectionBefore = (await runtime.describe()).selectionRevision;
   assert.equal(await page.getByRole("button", { name: "Apply profile to current session", exact: true }).count(), 0, "sessionless Settings fabricated a current session");
@@ -226,6 +392,8 @@ async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles
     return handle.agent;
   };
   const oldChild = await child("old-epoch-child");
+  const beforeParentAdmission = runtime.admission(roots[0]);
+  assert.equal(runtime.admission(oldChild), beforeParentAdmission);
   await page.evaluate(async (sessionId) => {
     const sessions = window.__dsmmUiContext.root.get("sessions");
     window.__dsmmRetainedSession?.release();
@@ -238,8 +406,19 @@ async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles
   await page.waitForFunction(() => document.querySelector("[data-dsmm-session-scope]")?.getAttribute("aria-busy") === "false");
   const after = [await describeSession(roots[0]), await selectSession(roots[1], secondSaved, before[1])];
   assert.equal(runtime.admission(oldChild).epoch, before[0].admissionEpoch);
-  const newChild = await child("new-epoch-child");
+  assert.equal(runtime.admission(oldChild), beforeParentAdmission);
+  const newChild = await startSuccessorReviewer(ctx, roots[0], handles);
+  assert.equal(runtime.admission(newChild), runtime.admission(roots[0]));
   assert.equal(runtime.admission(newChild).epoch, after[0].admissionEpoch);
+  assert.equal(foldSubagentDescriptor(newChild.session.snapshotEvents().slice(newChild.session.inheritedEventCount)).provider, "dsmm-role-reviewer");
+  const reviewerTools = newChild.ctx.get("tools");
+  const reviewerReadOnly = [];
+  for (const name of ["write", "edit", "bash", "pwsh"]) {
+    assert.equal(reviewerTools.schemas(newChild).some((tool) => tool.name === name), false);
+    const denied = await reviewerTools.execute({ callId: ToolCallId(`dsmm-ui-reviewer-${name}`), name, arguments: {}, agent: newChild, signal: new AbortController().signal });
+    assert.equal(denied.isError, true);
+    reviewerReadOnly.push({ name, excluded: true, denied: true });
+  }
   await screenshot("current-session-structured-1280");
   const rootProof = await Promise.all(roots.map(async (agent, index) => ({ sessionId: agent.id, selectedId: after[index].selection.selectedId, appliedRevision: after[index].selection.appliedRevision,
     epochBefore: before[index].admissionEpoch, epochAfter: after[index].admissionEpoch, sidecarSha256: proofDigest(await readFile(sidecarPath(agent))), snapshot: after[index] })));
@@ -308,7 +487,7 @@ async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles
     await screenshot(`structured-${dark ? "dark-reduced" : "light"}-${width}`);
   }
   return { schemaVersion: 1, editor: editorProof, sessions: { globalPointerBefore, globalPointerAfter, roots: rootProof, uiSelectedSessionId: roots[0].id, uiAppliedEpoch: after[0].admissionEpoch,
-    reappliedEpoch: reapplied.admissionEpoch, reappliedSidecarSha256, refusals, children: [oldChild, newChild].map((agent) => ({ sessionId: agent.id, epoch: runtime.admission(agent).epoch, nativeOwnedBy: roots[0].id })) }, cold };
+    reappliedEpoch: reapplied.admissionEpoch, reappliedSidecarSha256, refusals, reviewerReadOnly, children: [oldChild, newChild].map((agent) => ({ sessionId: agent.id, epoch: runtime.admission(agent).epoch, nativeOwnedBy: roots[0].id })) }, cold };
 }
 
 export const name = "dsmm-native-ui-acceptance";
@@ -499,6 +678,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.equal(report.browserBoot.sessionScope.noActiveSession, true, "owned settings component must preserve the native absent-Session projection");
     await page.getByRole("heading", { name: "Deepwork Profiles", exact: true }).waitFor();
     await idle();
+    await page.evaluate(() => window.__dsmmUiContext.root.get("connection").reconnect());
     report.nativeClient.seed = await page.evaluate(() => window.__dsmmNativeSeedProof);
     assert.match(report.nativeClient.seed.reactVersion, /^18\./u);
     assert.deepEqual(report.nativeClient.seed.primitiveNames.sort(), ["Button", "Input"]);
@@ -526,6 +706,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     await action("Apply saved profile").focus(); await page.keyboard.press("Enter"); await idle();
     await assertText(page.locator("[data-dsmm-selection]"), /browser-native/u);
     const selected = await runtime.describe();
+    const profileStorage = await validatedProfileStorage(runtime.store, { env, hostProfileDir: profileDir, entryId: runtime.options?.startup?.entryId, version: installedVersion });
     assert.equal(selected.appliedRevision, saved.revision);
     const selectedRoot = await createRoot();
     assert.equal(runtime.getSettings(selectedRoot).workflow.reviewCap, 7);
@@ -539,11 +720,13 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.equal(runtime.getSettings(await createRoot()).workflow.reviewCap, 7);
     report.checks.changedDraftDoesNotMutatePinnedSelection = true;
     await page.reload(); await idle();
+    await page.evaluate(() => window.__dsmmUiContext.root.get("connection").reconnect());
     await page.getByLabel("Profile to edit", { exact: true }).selectOption(PROFILE_ID); await idle();
     assert.equal(await editor.inputValue(), profileText(9));
     await assertText(page.locator("[data-dsmm-editor-state]"), /not applied/u);
-    const restartedRuntime = await createProfileRuntime(ctx, resolveConfig({ workflow: { reviewCap: 2 } }));
-    assert.equal(restartedRuntime.getSettings().workflow.reviewCap, 7, "cold reload failed to load immutable selected bytes");
+    const coldSettings = await readColdProfileSettings(ctx, createProfileRuntime, resolveConfig({ workflow: { reviewCap: 2 } }), runtime.options.startup);
+    assert.equal(coldSettings.workflow.reviewCap, 7, "cold reload failed to load immutable selected bytes");
+    assert.ok(Object.isFrozen(coldSettings) && Object.isFrozen(coldSettings.workflow));
     report.checks.browserReloadAndDiskSelectionPersistence = true;
     await editor.fill("{ broken JSONC"); await action("Save profile").click(); await idle();
     await assertText(page.getByRole("alert"), /refused validation|not valid/u);
@@ -581,14 +764,14 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.equal((await runtime.read(PROFILE_ID)).content, profileText(5));
     report.checks.busyDisablesCompetingCommits = true;
     // Cause a genuine file-backend refusal with an owned lock, never a canned RPC.
-    const lockPath = join(profileDir, "dsmm-profiles", ".lock");
+    const lockPath = profileStorage.lockPath;
     await mkdir(lockPath);
     blockedLock = lockPath;
     try {
       await editor.fill(profileText(4)); await action("Save profile").click(); await idle();
       await assertText(page.getByRole("alert"), /could not commit/u);
       assert.equal(await editor.inputValue(), profileText(4));
-      assert.equal((await readFile(join(profileDir, "dsmm-profiles", `${PROFILE_ID}.jsonc`), "utf8")), profileText(5));
+      assert.equal((await readFile(join(profileStorage.profileDir, `${PROFILE_ID}.jsonc`), "utf8")), profileText(5));
       await screenshot("backend-error-1280");
     } finally { await rmdir(lockPath); blockedLock = undefined; }
     report.checks.realBackendErrorRetainsDraftAndFiles = true;
@@ -637,10 +820,10 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.deepEqual(pageErrors, [], "browser raised an uncontained runtime or network error");
     assert.deepEqual(server.errors, [], "owned static server failed");
     assert.ok(report.nativeCalls.some(({ domainCode }) => domainCode === "validation") && report.nativeCalls.some(({ domainCode }) => domainCode === "conflict"));
-    report.storageProof = { profileDir: join(profileDir, "dsmm-profiles"), savedRevision: saved.revision, appliedRevisionBeforeReset: selected.appliedRevision, latestRawRevision: (await runtime.read(PROFILE_ID)).revision, selectionAfterReset: await runtime.describe(), genuineNativeGateway: true, genuineOperatorPeer: true, cannedProfileRpc: false };
+    report.storageProof = { ...profileStorage, savedRevision: saved.revision, appliedRevisionBeforeReset: selected.appliedRevision, latestRawRevision: (await runtime.read(PROFILE_ID)).revision, selectionAfterReset: await runtime.describe(), genuineNativeGateway: true, genuineOperatorPeer: true, cannedProfileRpc: false };
     if (successor) {
       ownedSessionRequests = true;
-      report.successorProof = await runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileDir, workspace, screenshot, report });
+      report.successorProof = await runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileStorage, workspace, screenshot, report });
       report.successorProof.artifactSha256 = sha256;
       report.successorProof.installedRoot = packageRoot;
       report.successorProof.schemaVersion = nativeOwnedRoot ? 2 : 1;

@@ -64,6 +64,9 @@ export interface DsmmProfileRuntimeOptions {
 
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission { baseline: DsmmSettings }
 
+// Exact live native children retain their capture across DSMM runtime replacement.
+const childAdmissions = new WeakMap<DshAgent, { parent: DshAgent; admission: AdmittedProfile }>();
+
 function immutableSettings(settings: DsmmSettings): DsmmSettings {
   return freezeSettings(settings);
 }
@@ -104,7 +107,7 @@ export class DsmmProfileRuntime {
       // or reserve maintenance from inside this serial creation listener.
       await this.admit(agent, signal);
     }, { global: true, prepend: true });
-    this.ctx.on?.("agent/disposed", ({ agent }: { agent: DshAgent }) => { this.disposedAgents.add(agent); }, { global: true });
+    this.ctx.on?.("agent/disposed", ({ agent }: { agent: DshAgent }) => { this.disposedAgents.add(agent); childAdmissions.delete(agent); }, { global: true });
     this.ctx.effect?.(() => () => { this.disposed = true; });
     // Installation into an already-running host treats those Agents as admitted
     // now, while all later profile switches continue to preserve their snapshot.
@@ -376,9 +379,24 @@ export class DsmmProfileRuntime {
     // The native factory enters the exact child/owner pair before announcing
     // creation. Durable lineage and inherited persona never establish ownership.
     const parent = this.owner(agent);
-    const admitted = parent === undefined ? this.current : this.bind(parent);
+    const admitted = this.bindChild(agent, parent) ?? this.current;
     this.bound.set(agent, admitted);
     return admitted;
+  }
+
+  private bindChild(agent: DshAgent, parent: DshAgent | undefined): AdmittedProfile | undefined {
+    const retained = childAdmissions.get(agent);
+    if (retained !== undefined) {
+      const registry = this.agents();
+      if (parent !== retained.parent || registry?.get !== undefined && (agent.id === undefined || registry.get(agent.id) !== agent)) {
+        throw new DsmmProfileError("not-owned", "The retained child's exact live owner changed; its captured admission was not rebound.");
+      }
+    }
+    if (parent === undefined) return undefined;
+    const admission = retained?.admission ?? this.bind(parent);
+    this.bound.set(agent, admission);
+    childAdmissions.set(agent, { parent, admission });
+    return admission;
   }
 
   private owner(agent: DshAgent): DshAgent | undefined {
@@ -399,7 +417,7 @@ export class DsmmProfileRuntime {
   private async admit(agent: DshAgent, signal?: AbortSignal, startup?: DsmmDeploymentSnapshot): Promise<void> {
     if (this.bound.has(agent)) return;
     const parent = this.owner(agent);
-    if (parent !== undefined) { this.bound.set(agent, this.bind(parent)); return; }
+    if (this.bindChild(agent, parent) !== undefined) return;
     if (agent.id === undefined) { this.bind(agent); return; }
     this.admitting.add(agent);
     try {

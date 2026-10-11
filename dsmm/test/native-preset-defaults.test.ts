@@ -11,9 +11,9 @@ import { nativeFixturePlugin, nativeRoutingFixture } from "./native-routing-fixt
 
 test("native entry-list YAML parses nested role groups and agrees with rc.2's exported standard defaults", async () => {
   const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
-  const include = await nativeFixturePlugin("@deepseek-ai/cordis-plugin-include", "@deepseek-ai/dsh-base");
+  const include = await nativeFixturePlugin("@deepseek-ai/cordis-plugin-include", "@deepseek-ai/dsh-agent-preset-registry");
   const yaml = createRequire(sdk.resolve("@deepseek-ai/dsh-agent-preset-registry"))("js-yaml");
-  const registry = await nativeFixturePlugin("@deepseek-ai/dsh-agent-preset-registry", "@deepseek-ai/dsh-base");
+  const registry = await nativeFixturePlugin("@deepseek-ai/dsh-agent-preset-registry");
   const standard = yaml.load(readFileSync(sdk.resolve("@deepseek-ai/dsh-web-app/presets/standard.patch.yml"), "utf8"), { schema: include.entryListSchema })[0].insert[0].config.plugins;
   for (const role of DSMM_ROLES) {
     const parsed = yaml.load(renderAgentCordis(role), { schema: include.entryListSchema });

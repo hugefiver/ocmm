@@ -6,6 +6,7 @@ import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
 import type { ShellDialect, ShellDialectViolation } from "./shell-command.js";
 import type { DeepworkModeController } from "./state.js";
+import { resolveAdmittedDsmmRole } from "./role-policy.js";
 import type { DsmmRolePolicy } from "./role-policy.js";
 import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshAgent } from "./dsh-types.js";
@@ -93,6 +94,7 @@ export function isSafetyScopeActive(exec: DshToolExecution, settings: DsmmSettin
   if (settings.guards.scope === "off") return false;
   if (settings.guards.scope === "always") return true;
   if (!settings.modules.deepwork.enabled) return false;
+  if (exec.agent !== undefined && resolveAdmittedDsmmRole(exec.agent, settings, false) !== undefined) return true;
   if (controller.active(exec.agent, settings.defaultActive)) return true;
   return isDsmmRoleId(resolveSelectedAgentPreset(exec.agent?.session));
 }

@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { startupProfileFixture } from "./startup-profile-fixture.ts";
 // @ts-expect-error Source-only release verifier is deliberately not published.
-import { MENU_PHASES_017, MENU_APPEARANCES_017, MODE_PHASES_018, requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "../scripts/native-picker-proof.mjs";
+import { MENU_PHASES_017, MENU_APPEARANCES_017, MODE_PHASES_018, requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof, validateSessionModeSteps } from "../scripts/native-picker-proof.mjs";
+// @ts-expect-error Source-only release controls are deliberately not published.
+import * as controls from "../scripts/dsmm-release.mjs";
+// @ts-expect-error Source-only release controls are deliberately not published.
+import { COMPILED_NAMES_020, CORE_CHECKS_020, PRESET_NAMES_020, ROLE_TOOLS_020, SKILL_EXECUTABLES_020 } from "../scripts/release-contract.mjs";
+// @ts-expect-error Historical synthetic acceptance fixture; never publication proof.
+import { archiveFiles, contextInput, makeAcceptedFixture, packageFiles } from "../../src/dsmm-trusted-release-fixtures.mjs";
+// @ts-expect-error Historical synthetic acceptance fixture; never publication proof.
+import { successorReceiptFixture } from "../../src/dsmm015-release-fixtures.mjs";
+// @ts-expect-error Test-only closed carrier never executes external operations.
+import { runCliControls } from "./release-cli-fixture.mjs";
 
 const artifactSha256 = "a".repeat(64), epoch = "b".repeat(64);
 const target = { provider: "dsmm-picker-fixture", model: "target", reasoningEffort: "high" };
@@ -272,7 +283,8 @@ function fixture018() {
       for (const item of items) item.disabled = true;
     }
   }
-  const modeSteps = MODE_PHASES_018.map((phase: string) => {
+  const modePhases: readonly string[] = MODE_PHASES_018;
+  const modeSteps = modePhases.map((phase) => {
     const before = { ...snapshot(), ...menuSnapshot(), nativeSelections: [], nativeMode: { active: true, explicit: false, locked: false, revision: modeRevision } };
     const after = structuredClone(before); decorate018(before); decorate018(after);
     const mode = after.nativeMode;
@@ -305,10 +317,9 @@ function fixture018() {
       presetEvents: [{ type: "agent-preset/selected", data: { agentPreset: "standard" } }], nativeAgentReplaced: true, stockEvents: 1,
       stockMetadata: [{ type: "deepwork/mode", ignorable: true, data: { active: true } }], visibleBeforeSha256: epoch, visibleAfterSha256: epoch, headersBeforeSha256: epoch, headersAfterSha256: epoch };
   });
-  Reflect.set(receipt.lanes[0], "modeSteps", modeSteps);
-  return receipt;
+  return { ...receipt, lanes: [{ ...receipt.lanes[0], modeSteps }] };
 }
-const validate018 = (receipt: ReturnType<typeof fixture018>) => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.8" });
+const validate018 = (receipt: ReturnType<typeof fixture017> | ReturnType<typeof fixture018>) => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.8" });
 
 test("018 requires compact single-model action, admitted read races and native persisted mode scenarios", () => {
   assert.deepEqual(validate018(fixture018()), { outcome: "COMPLETED", basicScenarios: 4, compactScenarios: 11, raceScenarios: 4, responsiveStates: 12, menuScenarios: 8, menuAppearances: 9, modeScenarios: 8 });
@@ -317,11 +328,13 @@ test("018 requires compact single-model action, admitted read races and native p
   assert.equal(validate017(fixture017()).outcome, "COMPLETED", "historical receipts retain their original grammar");
 });
 
-test("mode proof boundary is reviewed stable 018 and exact 019 only, and never changes older receipts", () => {
+test("mode proof boundary is reviewed 018/019 and distinct 020, and never changes older receipts", () => {
   for (const version of ["0.1.1", "0.1.5", "0.1.6", "0.1.7"]) assert.equal(requiresSessionModeProof(version), false);
   assert.equal(requiresSessionModeProof("0.1.8"), true);
   assert.equal(requiresSessionModeProof("0.1.9"), true);
-  for (const version of ["0.1.10", "0.2.0", "1.0.0", "0.1.08", "0.1.8-beta", "0.1.8\n", "9007199254740992.0.0"]) assert.throws(() => requiresSessionModeProof(version));
+  assert.throws(() => requiresSessionModeProof("0.2.0"));
+  assert.equal(requiresSessionModeProof("0.2.0", { sourceContract: "0.2.0" }), true);
+  for (const version of ["0.1.10", "0.2.1", "1.0.0", "0.1.08", "0.1.8-beta", "0.1.8\n", "9007199254740992.0.0"]) assert.throws(() => requiresSessionModeProof(version));
 });
 
 test("019 requires the entire unchanged 018 native mode proof and still rejects future and incomplete receipts", () => {
@@ -330,7 +343,7 @@ test("019 requires the entire unchanged 018 native mode proof and still rejects 
   const validate019 = () => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.9" });
   assert.deepEqual(validate019(), validate018(fixture018()), "019 carries the full existing inventory without changing the 018 grammar");
   assert.throws(() => validateNativePickerProof(fixture018(), { artifactSha256, packageVersion: "0.1.9" }), "018 identity is not a 019 artifact proof");
-  assert.throws(() => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.10" }), "unreviewed 020 fails closed");
+  assert.throws(() => validateNativePickerProof(receipt, { artifactSha256, packageVersion: "0.1.10" }), "unreviewed versions fail closed");
   replace(receipt, ["lanes", 0, "modeSteps"], []); assert.throws(validate019, "019 cannot omit existing mode persistence proof");
 });
 
@@ -351,4 +364,102 @@ test("018 rejects missing mode persistence, implicit mode, model mutation, stale
     [["lanes", 0, "menuSteps", 2, "snapshot", "menu", "labels", 1], "Switch and use profile model"],
     [["lanes", 0, "compactSteps", 1, "nativeCalls", 0, "endpoint"], "dsmmProfiles/selectSession"],
   ] as [(string | number)[], unknown][]) { const receipt = fixture018(); replace(receipt, path, value); assert.throws(() => validate018(receipt), path.join(".")); }
+});
+
+function fixture020() {
+  const receipt = fixture018();
+  replace(receipt, ["packageVersion"], "0.2.0"); replace(receipt, ["proofScope"], "frozen-artifact-native-picker-and-native-menu-mode-020");
+  replace(receipt, ["lanes", 0, "installedCandidate", "version"], "0.2.0");
+  const modes = receipt.lanes[0].modeSteps;
+  const owned = modes.find(step => step.phase === "mode-dw-preset-owned");
+  assert.ok(owned);
+  owned.after.nativeMode.locked = false; owned.after.nativeMode.explicit = true;
+  const row = owned.after.menu.items.find(item => item.text === "Deepwork · DW preset");
+  assert.ok(row);
+  row.text = "Disable Deepwork"; row.disabled = false;
+  for (const [phase, template] of [["mode-dw-preset-disable", "mode-disable-native-write"], ["mode-dw-preset-enable", "mode-enable-native-write"]]) {
+    const templateStep = modes.find(step => step.phase === template);
+    assert.ok(templateStep);
+    const step = structuredClone(templateStep);
+    step.phase = phase; step.preset = "dsmm-orchestrator"; modes.push(step);
+  }
+  return receipt;
+}
+test("default mode-step consumers retain 018 grammar and require explicit source authority for 020", () => {
+  assert.equal(validateSessionModeSteps(fixture018().lanes[0].modeSteps).modeScenarios, 8);
+  assert.throws(() => validateSessionModeSteps(fixture020().lanes[0].modeSteps));
+  assert.throws(() => validateSessionModeSteps(fixture020().lanes[0].modeSteps, "0.2.0"));
+  assert.equal(validateSessionModeSteps(fixture020().lanes[0].modeSteps, "0.2.0", { sourceContract: "0.2.0" }).modeScenarios, 10);
+});
+
+test("020 requires mutable standing-mode durable writes without adopting historical locked proof", () => {
+  const validate020 = (value: ReturnType<typeof fixture020>) => validateNativePickerProof(value, { artifactSha256, packageVersion: "0.2.0", sourceContract: "0.2.0" });
+  assert.equal(validate020(fixture020()).modeScenarios, 10);
+  const relabelled = fixture018();
+  replace(relabelled, ["packageVersion"], "0.2.0"); replace(relabelled, ["lanes", 0, "installedCandidate", "version"], "0.2.0");
+  replace(relabelled, ["proofScope"], "frozen-artifact-native-picker-and-native-menu-mode-020");
+  assert.throws(() => validate020(relabelled));
+  for (const [path, value] of [
+    [["lanes", 0, "modeSteps", 7, "after", "nativeMode", "locked"], true],
+    [["lanes", 0, "modeSteps", 8, "storedMetadata", 0, "ignorable"], false],
+    [["lanes", 0, "modeSteps", 9, "nativeCalls", 0, "payload", "args", "request", "expectedModeRevision"], epoch],
+  ] as [(string | number)[], unknown][]) { const receipt = fixture020(); replace(receipt, path, value); assert.throws(() => validate020(receipt)); }
+  assert.equal(validate018(fixture018()).modeScenarios, 8, "historical standing lock remains required");
+});
+
+test("local release controls accept complete 020 proof and preserve historical 013 acceptance", () => {
+  const historical = makeAcceptedFixture();
+  assert.equal(controls.validateTarballBuffer(historical.tarball, { version: "0.1.3", expectedDigests: historical.identity }).version, "0.1.3");
+  assert.equal(controls.validateDockerReceipt(historical.receipt, historical.identity).outcome, "COMPLETED");
+  const files = packageFiles("0.2.0");
+  files.set("prompts/source/catalog.json", Buffer.from(JSON.stringify(PRESET_NAMES_020.map((row: { id: string }) => ({ ...row, mode: row.id === "dsmm-planner" ? "all" : ["dsmm-builder", "dsmm-orchestrator"].includes(row.id) ? "primary" : "subagent", enabledByDefault: row.id !== "dsmm-cross-cutting" })))));
+  files.set("prompts/source/manifest.json", Buffer.from(JSON.stringify({ files: [] })));
+  for (const language of ["en", "zh"]) files.set(`locale/${language}.json`, Buffer.from(JSON.stringify({ meta: { title: "DSMM", description: "Synthetic current metadata" } })));
+  for (const name of COMPILED_NAMES_020) for (const extension of ["js", "d.ts"]) files.set(`lib/${name}.${extension}`, Buffer.from("synthetic compiled fixture\n"));
+  for (const path of SKILL_EXECUTABLES_020) files.set(path, Buffer.from("synthetic skill resource\n"));
+  const tarball = archiveFiles(files), sha256 = controls.computeDigests(tarball).sha256;
+  const context = controls.resolveReleaseContext({ ...contextInput(), ref: "refs/tags/dsmm-scoped-v0.2.0", packageVersion: "0.2.0", workflowRef: "hugefiver/ocmm/.github/workflows/dsmm-release.yml@refs/tags/dsmm-scoped-v0.2.0" });
+  const receipt = successorReceiptFixture(sha256);
+  receipt.artifact.package.version = "0.2.0";
+  for (const entry of receipt.installedPackages) entry.version = "0.2.0";
+  receipt.sessionHistory.packageVersion = "0.2.0"; receipt.sessionHistory.installedPackage.version = "0.2.0";
+  for (const template of ["web", "headless"]) {
+    const native = receipt.native[template];
+    native.branding.pluginTitle = "DSMM"; native.branding.presetNames = structuredClone(PRESET_NAMES_020);
+    native.delegation = { roleTools: [...ROLE_TOOLS_020], disabledBuilderAbsent: true, disabledCrossCuttingAbsent: true };
+  }
+  receipt.nativeCore = { outcome: "COMPLETED", artifactSha256: sha256, packageVersion: "0.2.0", installedPackage: "@dsmm/dsmm", postAppReady: true,
+    externalModelCalls: false, productionAuthenticationModified: false, clientSha256: artifactSha256, checks: Object.fromEntries(CORE_CHECKS_020.map((key: string) => [key, true])) };
+  const ui = receipt.uiProfiles;
+  const startup = startupProfileFixture(sha256);
+  ui.checks = Object.fromEntries(controls.uiChecksForVersion("0.2.0").map((key: string) => [key, true]));
+  ui.installedRoot = startup.options.installedRoot; ui.nativeClient.dsmmClient = `${ui.installedRoot}/lib/client.js`;
+  ui.nativeStorage.root = `${startup.options.ownedHome}/sessions`;
+  receipt.native.web.persistence.config.root = ui.nativeStorage.root; receipt.nativeBaseline.web.persistence.config.root = ui.nativeStorage.root;
+  Object.assign(ui.storageProof, startup.options.profileStorage);
+  ui.successorProof.schemaVersion = 2;
+  ui.successorProof.installedRoot = ui.installedRoot; ui.successorProof.startupLock = startup.proof;
+  for (const scenario of ui.successorProof.routeScenarios) Object.assign(scenario, { roleScope: "child", nativeOrigin: "subagent", nativeDescriptor: { mode: "one-shot", provider: `dsmm-role-${scenario.role.slice(5)}` } });
+  const choice = ui.successorProof.nativeSelection, inherited = { provider: "dsmm-selection-fixture", model: "native-inherited", reasoningEffort: "high" };
+  Object.assign(choice.headers[0], inherited, { durableHeader: inherited });
+  Object.assign(choice.attempts[0], inherited, { phase: "native-default" });
+  ui.nativePickerProof = fixture020();
+  ui.nativePickerProof.artifactSha256 = sha256; ui.nativePickerProof.lanes[0].artifactSha256 = sha256;
+  const identity = controls.createArtifactIdentity(context, tarball, Buffer.from(JSON.stringify(receipt)), { sourceChecks: "COMPLETED" });
+  assert.equal(identity.version, "0.2.0"); assert.equal(identity.dockerAcceptance.outcome, "COMPLETED");
+  assert.equal(controls.validateDockerReceipt(receipt, identity).outcome, "COMPLETED");
+  for (const [path, value] of [
+    [["native", "web", "branding", "pluginTitle"], "Deepwork"],
+    [["native", "headless", "branding", "presetNames"], PRESET_NAMES_020.slice(0, 12)],
+    [["nativeCore", "checks", "masterCannotBeBypassed"], false],
+    [["nativeCore", "artifactSha256"], epoch],
+    [["native", "web", "delegation", "roleTools"], ROLE_TOOLS_020.slice(1)],
+    [["native", "headless", "readonlyChild", "denied"], ["write"]],
+  ] as [(string | number)[], unknown][]) { const altered = structuredClone(receipt); replace(altered, path, value); assert.throws(() => controls.validateDockerReceipt(altered, identity)); }
+  const oldMetadata = new Map(files); oldMetadata.set("locale/en.json", Buffer.from(JSON.stringify({ meta: { title: "Deepwork", description: "old" } })));
+  assert.throws(() => controls.validateTarballBuffer(archiveFiles(oldMetadata), { version: "0.2.0" }));
+  assert.throws(() => controls.validateTarballBuffer(tarball, { version: "0.2.0", expectedDigests: { ...identity, sha256: epoch } }));
+  assert.throws(() => controls.validateArtifactIdentity({ ...identity, runAttempt: "2" }, { context }));
+  assert.throws(() => controls.validateArtifactIdentity({ ...identity, controlSha: "b".repeat(40) }));
+  assert.equal(runCliControls({ tarball, receipt, identity, context, files }).outcome, "COMPLETED");
 });

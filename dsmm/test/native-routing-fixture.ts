@@ -132,7 +132,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     ];
     await Promise.all(fibers.map((fiber) => fiber.await()));
     if (options.persistence) {
-      const query = await nativeFixturePlugin("@deepseek-ai/dsh-session-query-sqlite", "@deepseek-ai/dsh-base");
+      const query = await nativeFixturePlugin("@deepseek-ai/dsh-session-query-sqlite");
       await ctx.plugin(query.default, { path: join(fixtureDir, "derived-query.sqlite"), openAt: "never" }).await();
     }
     if (options.nativeJobs) {
@@ -205,9 +205,13 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     if (options.nativePresets) {
       // Standard preset capabilities consume these real Host services. They are
       // not role rows, and none of their adapters may perform external work here.
-      for (const [service, plugin] of [["commands", "dsh-commands"], ["tokenMeter", "dsh-token-meter"], ["userQuestions", "dsh-user-questions"]]) {
+      for (const [service, plugin, peer] of [
+        ["commands", "dsh-commands", "dsh-command-compact"],
+        ["tokenMeter", "dsh-token-meter", "dsh-compaction-tool-result-pruner"],
+        ["userQuestions", "dsh-user-questions", "dsh-tool-ask-user"]
+      ]) {
         if (ctx.get(service) !== undefined) continue;
-        const module = await nativeFixturePlugin(`@deepseek-ai/${plugin}`, "@deepseek-ai/dsh-base");
+        const module = await nativeFixturePlugin(`@deepseek-ai/${plugin}`, `@deepseek-ai/${peer}`);
         await ctx.plugin(module.default, {}).await();
       }
     }

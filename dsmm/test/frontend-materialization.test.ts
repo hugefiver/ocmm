@@ -168,11 +168,17 @@ test("actual tarball ships every ignored resource and native skill resourceBase 
     const staged = join(directory, "package");
     // Supply existing declared SDK peers, never install a package or create a
     // source-checkout dependency in the distribution itself.
-    const peers = createRequire(import.meta.url);
-    mkdirSync(join(staged, "node_modules/@deepseek-ai"), { recursive: true });
-    for (const name of ["cordis", "dsh-agent-preset-registry"]) {
-      const installed = dirname(peers.resolve(`@deepseek-ai/${name}/package.json`));
-      symlinkSync(installed, join(staged, "node_modules/@deepseek-ai", name), "junction");
+    const pinnedEntry = process.env.DSMM_TEST_DSH_ENTRY;
+    if (pinnedEntry !== undefined) {
+      assert.equal(JSON.parse(readFileSync(pinnedEntry, "utf8")).version, "0.2.0-rc.2");
+      symlinkSync(join(dirname(pinnedEntry), "node_modules"), join(staged, "node_modules"), "junction");
+    } else {
+      const peers = createRequire(import.meta.url);
+      mkdirSync(join(staged, "node_modules/@deepseek-ai"), { recursive: true });
+      for (const name of ["cordis", "dsh-agent-preset-registry"]) {
+        const installed = dirname(peers.resolve(`@deepseek-ai/${name}/package.json`));
+        symlinkSync(installed, join(staged, "node_modules/@deepseek-ai", name), "junction");
+      }
     }
     const module = await import(pathToFileURL(join(staged, "lib/skills.js")).href);
     const loaded = await module.readBundledSkill("frontend", new AbortController().signal);

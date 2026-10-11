@@ -41,6 +41,7 @@ export declare class DsmmConfigHost extends TypertRemoteService {
     private readonly startupSources?;
     private readonly lifetime;
     constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined, runtime?: (() => DsmmProfileRuntime | undefined) | undefined, startupSources?: Record<string, string> | undefined);
+    private captureReadAuthority;
     describeSettings(): Promise<DeploymentEditorSnapshot>;
     describe(): Promise<GlobalConfigSnapshot>;
     describeModules(): Promise<DsmmModuleState[]>;

@@ -176,13 +176,25 @@ export class DsmmConfigHost extends TypertRemoteService {
     super(ctx, "dsmmConfig");
     ctx.effect(() => () => this.lifetime.abort());
   }
+  private captureReadAuthority(): () => void {
+    assertLocalSettingsOperator(this.ctx);
+    const connection = this.ctx.get("connection")!;
+    const owner: unknown = Reflect.get(connection, symbols.original) ?? connection;
+    const lifetime = this.lifetime.signal;
+    return () => {
+      if (lifetime.aborted) throw new DsmmProfileError("disposed", "The deployment editor was disposed; no late read is allowed.");
+      assertLocalSettingsOperator(this.ctx);
+      const current = this.ctx.get("connection")!;
+      if ((Reflect.get(current, symbols.original) ?? current) !== owner) throw new DsmmProfileError("not-owned", "The operator connection changed; refresh before reading.");
+    };
+  }
   @Remote
   async describeSettings(): Promise<DeploymentEditorSnapshot> {
     try {
-      assertLocalSettingsOperator(this.ctx);
+      const assertAuthority = this.captureReadAuthority();
       if (this.startup === undefined) throw new DsmmProfileError("unavailable", "The startup capture is unavailable.");
       const desired = await this.backend.readDesired();
-      assertLocalSettingsOperator(this.ctx);
+      assertAuthority();
       const runtime = this.runtime?.() ?? this.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime | undefined;
       return { entryId: desired.entryId, namespace: desired.nativeNamespace ?? null, hostProfileKey: desired.hostProfileKey,
         global: desired.global as Record<string, unknown>, globalRevision: desired.globalRevision,
@@ -197,16 +209,21 @@ export class DsmmConfigHost extends TypertRemoteService {
   }
   @Remote
   async describe(): Promise<GlobalConfigSnapshot> {
-    try { assertLocalSettingsOperator(this.ctx); return await this.backend.readGlobal(); }
+    try {
+      const assertAuthority = this.captureReadAuthority();
+      const snapshot = await this.backend.readGlobal();
+      assertAuthority();
+      return snapshot;
+    }
     catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
   }
   @Remote
   async describeModules(): Promise<DsmmModuleState[]> {
     try {
-      assertLocalSettingsOperator(this.ctx);
+      const assertAuthority = this.captureReadAuthority();
       if (this.startup === undefined) throw new DsmmProfileError("unavailable", "The startup module capture is unavailable.");
       const desired = await this.backend.readDesired();
-      assertLocalSettingsOperator(this.ctx);
+      assertAuthority();
       return [projectDeepworkModule(this.startup, desired, undefined, true)];
     } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
   }
