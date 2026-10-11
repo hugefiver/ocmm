@@ -83,7 +83,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Enable pinned pnpm
+        env:
+          COREPACK_HOME: ${{ runner.temp }}/dsmm-source-pnpm/corepack
         run: |
+          test -d "$RUNNER_TEMP"
+          test ! -e "$RUNNER_TEMP/dsmm-source-pnpm"
+          mkdir -m 700 "$RUNNER_TEMP/dsmm-source-pnpm"
+          mkdir "$COREPACK_HOME"
+          printf '%s\n' "COREPACK_HOME=$COREPACK_HOME" >> "$GITHUB_ENV"
           corepack enable
           corepack prepare pnpm@11.9.0 --activate
           test "$(pnpm --version)" = "$PNPM_VERSION"
