@@ -18,7 +18,7 @@ Apply this additive layer only to a Claude Opus 5 or 5.5 orchestrator (including
 
 ## Evidence cadence
 
-- Run each evidence gate once while its inputs remain unchanged.
+- Reuse passing evidence while it still covers the claim and no change materially affects tested behavior or interfaces; rerun only affected or missing checks.
 - Preserve every required final review and required evidence; efficiency never removes them.
 
 ## Communication

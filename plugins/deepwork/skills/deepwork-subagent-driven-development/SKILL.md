@@ -39,7 +39,7 @@ For two or more independent tasks with no shared state or overlapping files, con
 3. Choose direct execution or a useful worker boundary for each task or wave.
 4. After work returns, inspect the actual changes and evidence and resolve integration issues. Keep short-lived coordination in session; synchronize useful results at delivery or major phase boundaries, not every checklist update.
 5. Request focused or whole-change review only when risk, uncertainty, change shape, or user instruction makes independent review useful.
-6. Verify the integrated result with evidence proportionate to the plausible regression and report any unverified item.
+6. Coordinate integrated/global verification, consolidating necessary heavy checks at task completion or important phase boundaries; report any unverified item.
 
 The plan is guidance, not an immutable script. A worker may use a minimal evidence-based equivalent when repository reality makes a planned detail unnecessary or inferior, provided the approved goal, constraints, permissions, and acceptance criteria remain unchanged. Describe the resulting current implementation and any unresolved risk, not a deviation history. Decisions in the stop classes above return to the controller or user.
 
@@ -54,7 +54,7 @@ Explain only what the worker needs to act safely toward the outcome; these are u
 - global constraints and permissions;
 - current constraints, authorization boundaries, or known risks.
 
-Workers may discover corresponding resources within the authorized scope; the brief need not name every file, revision, hash, or receipt. Discovery does not expand permissions or bypass ownership, irreversible-operation, or protocol-identity boundaries. Do not make a worker read an entire plan when a clear bounded brief is sufficient. Do not prescribe fixed report fields, a first-line status, test transcript, scenario count, commit, or reviewer approval. Ask for the resulting implementation, changed files, verification evidence, and unresolved risks needed for integration.
+Workers may discover corresponding resources within the authorized scope; the brief need not name every file, revision, hash, or receipt. Discovery does not expand permissions or bypass ownership, irreversible-operation, or protocol-identity boundaries. Do not make a worker read an entire plan when a clear bounded brief is sufficient. Do not prescribe fixed report fields, a first-line status, test transcript, scenario count, commit, or reviewer approval. Ask for the resulting implementation, changed files, local verification evidence/results, and material risks or unverified coverage needed for integration.
 
 ### Recommended Executor Decision
 
@@ -121,6 +121,8 @@ Do not poll aggressively, sleep, or repeatedly ask for status. While you have lo
 ## Verification
 
 Choose evidence that can demonstrate the requested behavior or invariant. Depending on the change, this can include focused deterministic tests, existing regression tests, typechecks, builds, runtime probes, inspection of generated output, or protocol/security checks.
+
+Workers run lightweight local checks for their substantive changes; the controller owns integration and consolidated global/heavy verification, not a full-suite run per small task. Apply brainstorming's material-relevance reuse rule: unrelated code, dependency, or environment changes don't invalidate passing evidence; changes affecting tested behavior or interfaces require only affected checks and explicit coverage gaps. Required safety, release, pre-commit, and user-mandated checks remain binding.
 
 Do not impose a universal RED gate, test transcript, scenario count, or full-suite run for every task. Add or run tests where a plausible deterministic regression seam warrants them. Never weaken real safeguards or substitute an acknowledgement for evidence.
 
@@ -193,7 +195,7 @@ For generic or flat dispatch, clear prose is sufficient. These labels are illust
 `STOP WHEN:` Describe the observable completion condition and relevant non-goals.
 `EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Workers run lightweight local checks for substantive changes and return outcomes, changes, local evidence/results, and material risks or unverified coverage in conversation, not workspace reports. The orchestrator owns integration and consolidated global/heavy verification, not full suites per small task; required safety, release, pre-commit, and user checks remain binding. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
 When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 

@@ -41,7 +41,7 @@ Use the actual current diff or range rather than a prose-only summary. If output
 
 Do not require a fixed packet schema, first-line verdict, receipt, or transcript. Do not paste accumulated conversation history. Do not tell the reviewer what conclusion to reach or add open-ended directions unrelated to the change.
 
-The reviewer evaluates supplied evidence and may request missing evidence. They should not rerun expensive checks without a reason, and they do not dispatch other reviewers, workers, or evidence-gathering subagents.
+The reviewer evaluates supplied evidence by material relevance and requests missing or affected coverage, not blanket reruns for unrelated code, dependency, or environment changes. The orchestrator coordinates consolidated global/heavy checks; reviewers do not duplicate them or dispatch other reviewers, workers, or evidence-gathering subagents. Required safety, release, pre-commit, and user checks remain binding.
 
 ## Reviewer Selection
 
@@ -114,7 +114,7 @@ For generic or flat dispatch, clear prose is sufficient. These labels are illust
 `STOP WHEN:` Describe the observable completion condition and relevant non-goals.
 `EVIDENCE:` Describe useful completion evidence; the worker may find corresponding resources within scope.
 
-Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Return useful outcomes and evidence in conversation, not workspace reports. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
+Workers may discover relevant resources within the communicated scope; do not require exhaustive file lists, per-item revision/hash/receipt locks, or fixed report fields. Discovery does not expand permissions or bypass material ownership, irreversible-operation, or protocol/integrity identity boundaries. Workers run lightweight local checks for substantive changes and return outcomes, changes, local evidence/results, and material risks or unverified coverage in conversation, not workspace reports. The orchestrator owns integration and consolidated global/heavy verification, not full suites per small task; required safety, release, pre-commit, and user checks remain binding. A generic brief does not load a profile, select a model, attach a skill, or enable a missing feature.
 
 When the planning logical-tier selector chooses the unsuffixed normal profile and the callable schema proves exact-profile selection is available, the V1 example is `multi_agent_v1.spawn_agent(agent_type="dw-plan-critic", message="Review the current implementation plan and return concrete findings with supporting evidence.")`. V1 may send `model` only when the current callable schema exposes `model`. V1 may send exactly the schema-named `reasoning` or `reasoning_effort` field only when that exact field is exposed. If either field is hidden, omit it; never send both reasoning spellings. V1 may add `fork_context` only when the callable V1 schema exposes it and an explicit inheritance decision requires it.
 

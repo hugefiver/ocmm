@@ -26,6 +26,11 @@ Task tool (general-purpose):
     security, performance, data, compatibility, protocol/API, migration, release,
     or irreversible-operation risks.
 
+    Assess existing evidence by material relevance. Request missing or affected
+    coverage; don't duplicate global/heavy checks coordinated by the controller.
+    Unrelated code, dependency, or environment changes aren't automatic invalidation.
+    Keep required safety, release, pre-commit, and explicit user checks intact.
+
     Allow minimal evidence-based equivalent implementations when they preserve the
     approved goal, constraints, permissions, and acceptance criteria. Flag a
     proposed change to approved scope or behavior as a decision for the controller,

@@ -14,7 +14,7 @@ Task tool (general-purpose):
     - relevant current state and context;
     - dependencies and interfaces;
     - material scope and ownership boundaries;
-    - useful verification evidence;
+    - useful lightweight local verification evidence;
     - global constraints and permissions;
     - current constraints, authorization boundaries, or known risks.
 
@@ -57,8 +57,11 @@ Task tool (general-purpose):
     Follow established local patterns and keep changes within scope. Preserve real
     security, data-loss, protocol/API, compatibility, and irreversible-operation
     safeguards. Add or run deterministic tests where a plausible regression seam
-    warrants them; otherwise use the smallest useful evidence such as existing
-    tests, typechecks, builds, runtime probes, or focused inspection.
+    warrants them; run lightweight local checks relevant to your substantive changes.
+    The controller owns integration and consolidated global/heavy checks; do not run
+    a full suite per small task. Reuse still-applicable evidence under brainstorming's
+    material-relevance rule and rerun only affected or missing checks. Required safety,
+    release, pre-commit, and explicit user checks remain binding.
 
     There is no universal RED gate, transcript, scenario count, per-task reviewer,
     or commit requirement. Verification must demonstrate the relevant behavior or
@@ -74,8 +77,8 @@ Task tool (general-purpose):
 
     ## Return
 
-    Return the implemented outcome, changed and new files, evidence and results,
-    current constraints and unresolved concerns in conversation, not workspace
+    Return the implemented outcome, changed and new files, local evidence/results,
+    current constraints, material risks and unverified coverage in conversation, not workspace
     plan/report/evidence files unless explicitly requested as deliverables.
     Status labels such as DONE, DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT are optional and
     informational; an acknowledgement or label alone is not evidence.

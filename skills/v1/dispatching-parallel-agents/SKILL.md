@@ -40,7 +40,7 @@ Explain enough for each worker to act safely; these are useful prompts, not requ
 - global constraints and permissions;
 - current constraints, authorization boundaries, or material risks.
 
-Workers may discover corresponding resources inside their authorized domain; don't require exhaustive file lists or per-item revision/hash/receipt locks. Discovery never expands permissions or shared-state ownership. Keep actual safety, irreversible-operation, and protocol/integrity identities explicit when needed. Do not paste session history or require a fixed response format. Ask for actual changed and new files, evidence/results, current constraints, and unresolved concerns in conversation, not a ruling log or workspace report. A status label or acknowledgement is informational, not evidence.
+Workers may discover corresponding resources inside their authorized domain; don't require exhaustive file lists or per-item revision/hash/receipt locks. Discovery never expands permissions or shared-state ownership. Keep actual safety, irreversible-operation, and protocol/integrity identities explicit when needed. Do not paste session history or require a fixed response format. Ask for actual changed and new files, local evidence/results, current constraints, and material risks or unverified coverage in conversation, not a ruling log or workspace report. A status label or acknowledgement is informational, not evidence.
 
 Workers may choose minimal evidence-based equivalent changes when repository reality supports them, provided the approved goal, constraints, permissions, and acceptance criteria do not change. Their reports describe final outcomes, constraints, evidence, and unresolved risks, not deviations or decision histories. They escalate changes to scope/acceptance, security or data guarantees, public APIs/protocols, permissions, irreversible actions, or decisions that would be pure guesses.
 
@@ -51,6 +51,8 @@ Use the host's currently callable parallel-dispatch mechanism. Submit calls toge
 Before dispatch, verify ownership boundaries and side-effect isolation. Do not allow workers to expand their own permissions or spawn peer implementation, planning, coordination, Reviewer, or Oracle seats.
 
 ## Reconcile and Integrate
+
+Workers run lightweight local checks for their substantive changes, not full suites per small task. The parent coordinates integration and global verification, consolidating necessary heavy checks at task completion or important phase boundaries. Reuse evidence by material relevance under brainstorming: unrelated parallel code, dependency, or environment changes don't stale it; rerun affected or missing checks and report uncovered risks. Required safety, release, pre-commit, and user checks remain binding.
 
 As workers return:
 

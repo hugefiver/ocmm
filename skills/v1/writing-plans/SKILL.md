@@ -69,6 +69,8 @@ A task should be cohesive enough to produce meaningful progress and small enough
 
 Plans need not prescribe one executor action every 2-5 minutes. They also need not mandate a failing-test transcript, scenario count, per-task full review, or commit. Use deterministic tests at real regression-prone seams; use typechecks, builds, focused inspection, runtime probes, or other evidence when those better demonstrate the outcome. Keep real security, data-loss, protocol, compatibility, and irreversible-operation safeguards explicit.
 
+Separate lightweight worker checks for substantive local changes from orchestrator-owned integration/global verification. Consolidate necessary heavy checks at task completion or important phase boundaries, not per small task; plan affected or missing evidence under brainstorming's material-relevance reuse rule without waiving required safety, release, pre-commit, or user checks.
+
 ## Executor Flexibility
 
 The plan defines the approved goal, constraints, permissions, and acceptance criteria. It may recommend an approach, task boundary, executor profile, or evidence path without freezing incidental mechanics.

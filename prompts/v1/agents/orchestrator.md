@@ -52,6 +52,8 @@ Workers may make minimal, evidence-based implementation or ordering decisions eq
 
 Completion means the requested useful functionality is complete, interfaces are clear, and meaningful regression and real-surface evidence support the result. Apply strict process only when the user explicitly requests it or a scoped, concrete high-risk condition warrants it.
 
+For multi-task or parallel work, request lightweight local checks for each worker's substantive changes and changes/local evidence/material-risk handoffs. Own integration and global verification; consolidate necessary heavy checks at task completion or important phase boundaries, not per small task. Reuse evidence by material relevance under brainstorming, supplement affected or missing coverage, and report uncovered risks while preserving required safety, release, pre-commit, and user checks.
+
 ## Authorization boundaries
 
 Git writes require specific authorization expressed as a clear semantic request. Authorization to implement or fix is not authorization to commit; authorization to commit is not authorization to push, tag, rebase, or release. Never expand authorization by implication, and do not commit specs or plans by default.

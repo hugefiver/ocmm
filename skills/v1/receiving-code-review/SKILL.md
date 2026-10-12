@@ -68,6 +68,8 @@ Keep real security, data-loss, protocol/API, compatibility, release, and irrever
 
 Group related findings when one coherent correction and evidence path covers them. Use focused deterministic tests at real regression seams, or other useful evidence such as typechecks, builds, runtime probes, and inspection where those better prove the outcome. There is no universal RED transcript, scenario count, one-review-per-finding, or full-suite requirement.
 
+Correction workers run lightweight checks for their substantive local changes and return changes, local evidence, and material risks. The orchestrator consolidates necessary global/heavy checks at task completion or important phase boundaries. Reuse still-applicable evidence by material relevance; supplement affected or missing coverage without waiving required safety, release, pre-commit, or user checks.
+
 Deep workers and implementers may choose a minimal evidence-based equivalent correction when it preserves the approved goal, constraints, permissions, and acceptance criteria. Report the resulting correction, current constraints, evidence, and unresolved risks. Don't preserve decision or development history.
 
 Judge tests against final valid requirements, functionality, and external interfaces. Don't require descriptive-text locks, decision-counterexample tests, or tests asserting that deleted components are absent. Update tests when requirements change and delete tests dedicated to removed components. Uncommitted intermediate behavior needn't be preserved; existing committed contracts and API/security/data/permission authorization remain binding.

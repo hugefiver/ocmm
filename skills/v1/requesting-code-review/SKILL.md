@@ -41,7 +41,7 @@ Use the actual current diff or range rather than a prose-only summary. If output
 
 Do not require a fixed packet schema, first-line verdict, receipt, or transcript. Do not paste accumulated conversation history. Do not tell the reviewer what conclusion to reach or add open-ended directions unrelated to the change.
 
-The reviewer evaluates supplied evidence and may request missing evidence. They should not rerun expensive checks without a reason, and they do not dispatch other reviewers, workers, or evidence-gathering subagents.
+The reviewer evaluates supplied evidence by material relevance and requests missing or affected coverage, not blanket reruns for unrelated code, dependency, or environment changes. The orchestrator coordinates consolidated global/heavy checks; reviewers do not duplicate them or dispatch other reviewers, workers, or evidence-gathering subagents. Required safety, release, pre-commit, and user checks remain binding.
 
 ## Reviewer Selection
 
