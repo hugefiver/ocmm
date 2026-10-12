@@ -8,11 +8,14 @@ import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
-import type { DshAgent, DshContext } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent, DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { DsmmRolePolicy } from "../lib/role-policy.js";
 import { resolveSelectedAgentPreset } from "../lib/session-scope.js";
 import { DeepworkModeController } from "../lib/state.js";
+import { DSMM_ROLES } from "../lib/roles.js";
+
+type DshAgent = Omit<PackageDshAgent, "ctx">;
 
 function* call(name: string, args: unknown): Generator<StreamChunk> {
   const id = ToolCallId(`call-${name}`), argumentsText = JSON.stringify(args);
@@ -62,7 +65,7 @@ for (const gitWriteGuard of ["deny", "ask"] as const) {
         f.adapter.streamChunks = async function* (options) {
           const turn = turns.get(options.model) ?? 0; turns.set(options.model, turn + 1);
           if (turn === 0) yield* options.model === "native-default"
-            ? call("dsmm_coding", { description: "Admitted safety scope", prompt: "Exercise the counter-only shell" })
+            ? call("dsmm_category", { category: "dsmm-coding", description: "Admitted safety scope", prompt: "Exercise the counter-only shell" })
             : call("pwsh", { command: "git push origin main" });
           else yield* answer("GUARD_PROOF");
         };
@@ -98,8 +101,8 @@ test("mock LLM drives root → deep → coding → read and returns the child's 
     const turns = new Map<string, number>();
     f.adapter.streamChunks = async function* (options) {
       const turn = turns.get(options.model) ?? 0; turns.set(options.model, turn + 1);
-      if (turn === 0) yield* call(options.model === "native-default" ? "dsmm_deep" : options.model === "local-deep" ? "dsmm_coding" : "read",
-        options.model === "local-coding" ? {} : { description: "Bounded local evidence", prompt: "Return the read proof" });
+      if (turn === 0) yield* call(options.model === "local-coding" ? "read" : "dsmm_category",
+        options.model === "local-coding" ? {} : { category: options.model === "native-default" ? "dsmm-deep" : "dsmm-coding", description: "Bounded local evidence", prompt: "Return the read proof" });
       else {
         assert.match(JSON.stringify(options.messages), options.model === "local-coding" ? /read/ : /READ_PROOF/);
         yield* answer("READ_PROOF: child read completed");
@@ -127,7 +130,13 @@ test("native identity fences research, bounded builder and local coordinators ac
       const run = await f.subagents.start(`dsmm-role-${role}`, { parent, prompt: [{ type: "text", text: "Bounded role proof" }], persona: "I am the root dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 });
       try {
         await run.result; const child = run.localAgent!; const tools = child.ctx.tools;
-        for (const target of allowed) assert.ok(tools.get(`dsmm_${target.replaceAll("-", "_")}`, child), `${role} catalog permits ${target}`);
+        for (const target of allowed) {
+          if (DSMM_ROLES.find(row => row.id === `dsmm-${target}`)!.kind === "role") assert.ok(tools.get(`dsmm_${target.replaceAll("-", "_")}`, child), `${role} catalog permits ${target}`);
+          else {
+            const schema = tools.schemas(child).find(row => row.name === "dsmm_category")!;
+            assert.ok((schema.parameters as { properties: { category: { enum: string[] } } }).properties.category.enum.includes(`dsmm-${target}`));
+          }
+        }
         for (const target of forbidden) {
           const name = `dsmm_${target.replaceAll("-", "_")}`;
           assert.equal(tools.get(name, child), undefined, `${role} hides ${target}`);
@@ -200,7 +209,7 @@ test("bounded Builder's admitted deny-write remains effective in its legal quick
         else if (turn === 2) yield* call("write", {});
         else yield* answer("FILTERED_READ_PROOF");
       };
-      const alias = await child.ctx.tools.execute({ agent: child, name: "dsmm_quick", arguments: { description: "Inherited native filter", prompt: "Read, then try the refused write" },
+      const alias = await child.ctx.tools.execute({ agent: child, name: "dsmm_category", arguments: { category: "dsmm-quick", description: "Inherited native filter", prompt: "Read, then try the refused write" },
         callId: ToolCallId("filtered-quick-alias"), signal: new AbortController().signal });
       assert.equal(alias.isError, false); assert.match(JSON.stringify(alias), /FILTERED_READ_PROOF/);
       assert.deepEqual(aliasResults, [{ name: "read", isError: false }, { name: "write", isError: true }]);
@@ -276,7 +285,7 @@ test("opt-in native continuable role accepts a second message on the same child,
       await new Promise<void>((resolve) => options.signal!.addEventListener("abort", () => resolve(), { once: true }));
     };
     const tools = parent.ctx.tools;
-    const result = await tools.execute({ name: "dsmm_coding", callId: ToolCallId("continuable-role"), arguments: { description: "Native continuation proof", prompt: "Wait for the next message" }, agent: parent, signal: new AbortController().signal });
+    const result = await tools.execute({ name: "dsmm_category", callId: ToolCallId("continuable-role"), arguments: { category: "dsmm-coding", description: "Native continuation proof", prompt: "Wait for the next message" }, agent: parent, signal: new AbortController().signal });
     assert.equal(result.isError, false);
     const { subagentId } = result.value as { subagentId: string };
     const child = f.agents.get(subagentId as Agent["id"]);

@@ -1,9 +1,12 @@
 import type { Stats } from "node:fs";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionProfileSelectRequest } from "./profile-types.js";
 import type { DsmmProfileDocument } from "./profiles.js";
+import type { ProfileDiagnostic } from "./profile-diagnostics.js";
+import type { ChildAdmissionCapture } from "./child-capture.js";
 export type SaveProfileRequest = ProfileSaveRequest;
 export type SelectProfileRequest = ProfileSelectRequest;
 export interface LoadedProfileSelection extends ProfileSelectionState {
+    warnings?: ProfileDiagnostic[];
     document: DsmmProfileDocument | null;
     content: string | null;
 }
@@ -13,6 +16,8 @@ export interface LoadedSessionProfileSelection extends LoadedProfileSelection {
 }
 export declare const MAX_SESSION_PROFILE_CHOICES = 1024;
 export interface SessionProfileCommit<T> {
+    /** Fallible synchronous preparation before the final fence/rename; never publication. */
+    prepare?(selection: LoadedSessionProfileSelection, prepared: T): void;
     /** Trusted native liveness/cancellation fence; invoked immediately before rename. */
     assertCurrent(): void;
     /** Synchronous publication after durable commit. Must not throw or await. */
@@ -77,6 +82,12 @@ export declare class ProfileStore {
     get readOnly(): boolean;
     get writeRestriction(): string | undefined;
     private assertWritable;
+    /** Host-only immutable state. No RPC exposes this writer or a filesystem path. */
+    createChildAdmission(input: ChildAdmissionCapture, assertCurrent?: () => void): Promise<ChildAdmissionCapture>;
+    readChildAdmission(childId: string, parentId: string): Promise<ChildAdmissionCapture | null>;
+    /** Only a trusted native session-deleted handler may call this; drain never does. */
+    deleteChildAdmission(childId: string, parentId: string): Promise<void>;
+    private childAdmission;
     private readOperation;
     private locked;
 }

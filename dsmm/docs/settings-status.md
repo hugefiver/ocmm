@@ -1,206 +1,59 @@
 # Deepwork settings and status
 
-## Commands and inspection
+These are built source contracts, not a claim that the published `@dsmm/dsmm@0.2.0` artifact contains every source feature. Named policy is covered in [profiles](profiles.md), routing in [model routing](model-routing.md), and child authority in [Agent presets](agent-presets.md).
 
-`/deepwork [off|message]` changes the receiving session's mode. `/dsmm-status` reports bounded normalized state; `/dsmm-status json` returns a defensive JSON snapshot with version 1. Other input returns `Usage: /dsmm-status [json]`.
+## Deployment layers and native editors
 
-Human-facing status/mode copy uses Deepwork. Technical commands, JSON fields and configurable `modeName` remain unchanged. In the stage A working source, the **Deepwork** toggle controls common workflow and DSMM skill visibility with one activation decision: ordinary presets are opt-in/effective-default, official minimal defaults off, and DW roles default on only until a saved explicit `deepwork/mode` choice. Even a same-default choice persists; this intent survives profile changes and reopen. DW roles are no longer locked; explicit off does not remove persona/read-only/Git/host permissions. Busy commands are rejected instead of mutating an open turn or silently queueing a pre-step change. The header's existing idle/CAS path remains authoritative. This source change does not claim publication, installation or Config UI acceptance.
+Effective settings resolve from **defaults → sparse global base → explicit native entry/profile override → admitted immutable named overlay**. The global base is `<resolvedDshHome>/plugins/dsmm/config.json`; a missing file is an empty layer. This is DSMM's storage convention, not a mandated Host layout. Trusted home resolution uses explicit `profileContext.home`, then `DSH_HOME`, then the official home default.
 
-Commands belong to the native command adapter. Headless task text is not a slash-command invocation.
+<a id="native-plugins-configuration-d"></a>
 
-## C0 layered deployment configuration
+**Plugins → DSMM** edits the global base through fixed `remote.dsmmConfig`. The DSMM bundle and actual row Config pages also offer the current native-profile override through the public `ConfigPageForm`. Runtime entry ID, package ID, row ID and form namespace aren't interchangeable. A profile write requires the actual namespace, descriptor revision and matching raw base/user provenance. If that identity isn't available, the profile editor is unavailable or read-only; it never falls back to Global. The standalone Plugins item has no supplied profile form.
 
-The working source remains version **0.1.9**. C0 supplies centralized storage/sparse inheritance/immutable capture; C consumes those boundaries for native role policy, continuation/background and startup MCP. D0 adds the global Deepwork module ceiling. D adds the actual native Plugins pages below, with isolated rc.2 Web browser evidence. Publication, private migration, final artifact gates and actual Electron acceptance remain separate.
+Global and native-profile controls have independent Save, Refresh and Discard actions and revisions. There's no Save all or cross-layer transaction. Missing keys inherit, explicit same-default values pin, and Unset removes only the edited layer's key, not a higher Host pin. Plain objects merge recursively and arrays replace. Full merged validation follows sparse-layer validation; unknown/prototype keys, non-JSON values and raw volatile refs refuse.
 
-Effective composition is **built-in defaults → sparse global deployment base → explicit native DSH entry/profile overrides → applied immutable named-profile/session overlay**. The global base is `<resolvedDshHome>/plugins/dsmm/config.json`, a UTF-8 JSON object containing only explicit DSMM fields. A missing file means an empty layer. The native entry remains a separate sparse layer in the active profile's Cordis configuration, not a copy of merged defaults. Named Profiles are runtime overlays, not another deployment layer editor.
-
-`src/dsh-home.ts` resolves the public `resolveDshHome` export through `createRequire` anchored at the declared `dsh-skill-filesystem` peer. Priority is explicit trusted `profileContext.home`, then `DSH_HOME`, then the official `~/.dsh` default. Resolution failure is explicit, not a fallback to a developer's global SDK. **`home/plugins/dsmm` is DSMM's convention, not an official mandated plugin layout.** `profileContext.dir` identifies the native profile; it isn't used to guess home.
-
-`DSMM_CONFIG_SCHEMA` remains the plain sparse public ABI. Native Loader `Config` uses the separate `DSMM_NATIVE_CONFIG_SCHEMA`, with flat optional volatile transport fields. Full business defaults and validation apply after layer resolution, not as transport defaults. Legacy raw flat callers keep every explicit value, including a value equal to the built-in default. The removed `settings.register()` namespace and old `$DSH_HOME/settings.yaml` aren't DSMM storage interfaces.
-
-Direct public `Config(input)` calls return plain flat data and require complete explicit model-route pairs, preserving `resolveConfig(Config(input))`. Native Cordis consumes the same Config object's Standard Schema protocol to obtain sparse volatile refs. Sparse deployment-layer validation can inherit primary members across global/native layers; their full merge is revalidated. No schema-expanded defaults or resolved refs are used to infer raw presence.
-
-The snapshot's `profile` is the assembled explicit native entry layer, which can include bundle/home/CLI pins; it isn't a claim that every field came from the editable profile file. When available, `nativeForm.base`/`user` retain the public redacted descriptor provenance and `nativeFormRevision` is its actual CAS. Higher host pins cannot be cleared by profile unset; native ConfigEditor rejects a write whose result is overridden by another host layer. DSMM doesn't inspect private layers or evaluate `!!js` to guess presence.
-
-The following is an explicit native profile override, not the global file format. Keep existing values when editing a Cordis patch; its `config` replaces the row's config object:
-
-```yaml
-- id: dsmm
-  config:
-    defaultActive: true
-    modeName: deepwork
-    workflow:
-      policy: risk-based
-    deepseekFlashCalibration: auto
-    deepseekFlashDefaultReasoningEffort: high
-    deepseekFlashMaxReasoningPresets:
-      - dsmm-plan-critic
-      - dsmm-reviewer
-    runtimeRecovery:
-      enabled: false
-    lsp:
-      enabled: false
-```
-
-Plain objects merge recursively and arrays replace whole arrays. Missing keys inherit; an empty object doesn't erase inherited children. Valid explicit `false`, `0`, `""` and `[]` aren't omission. Unset removes a key only from the edited layer: profile unset restores global inheritance, global unset restores defaults. `null` is accepted only where the field schema permits it. Unknown/prototype keys, non-JSON values, cycles and raw volatile refs are rejected; the complete merged desired settings are validated before startup or admission.
-
-Native Settings **Deepwork Profiles** / **Deepwork 配置档** remains separate from plugin Config. New named drafts and revisions share `<resolvedDshHome>/plugins/dsmm/profiles/`; selection/session state is scoped by canonical native profile identity and actual DSMM entry ID. An existing current-profile legacy library is strictly read-only, with its original immutable pins retained and its origin shown in the named editor. See [runtime profiles](profiles.md) for formats and origin rules. Neither Web evidence nor these backend contracts proves Electron activation.
-
-Save changes only the draft. Global Apply pins an immutable revision for **new unscoped Agents only**; existing even-blank Agents retain their admissions. The separate current-session selector uses the native view's actual session ID and idle maintenance/CAS/epoch fences. It changes only that ordinary root and future children; old children retain their old epoch. Cold resume honors an explicit sidecar or, when absent, the current global default. Global reset and session baseline pinning are distinct and leave drafts intact.
-
-Here, “global Apply/default” means the runtime's scoped named-profile selection, not the shared global deployment file.
-
-### Global module ceiling (D0)
-
-The only recognized module is `deepwork`, controlled by `modules.deepwork.enabled` **only in the global `config.json` layer**:
-
-```json
-{"modules":{"deepwork":{"enabled":false}}}
-```
-
-Missing/unset means `true`, preserving existing availability; ordinary-session `defaultActive` still defaults to `false`. This is an allowed upper bound, not a session-mode override and not a pin for every other global field. Native profile/volatile Config, direct legacy flat Config, named profiles and session overlays reject `modules`; unknown module IDs/fields and nonboolean enabled values refuse. Internally resolved/captured settings include the field without becoming an external profile input.
-
-Core remains installed and usable when Deepwork is off: fixed global configuration read/save, profile storage and immutable captures/CAS, status and mandatory identity/read-only/filter/native-permission fences. A cold-off startup does not register DW persona/common/calibration/workflow skills, role providers/aliases/controls, materialize presets, or mount DW routing/recovery/LSP. It does not delete bundled assets, presets or user data, or withdraw host/project skills, tools, LSP or subagents. A static DW preset may remain visible in the native filesystem picker; choosing it refuses before prompt-body/model execution. Unknown DSMM standing roots also refuse.
-
-With `guards.scope:"always"`, configured shell safety and Git deny/approval gates remain Core safety, including on a cold-off ordinary root. `guards.scope:"off"` retains its existing optional-guard semantics; mandatory identity/native permissions still apply. DW plan/todo/question/output helpers remain unavailable while the module is off. Genuine native foreign children receive Core identity admission from their exact live parent and captured epoch, without installing DW role tools or granting a generic-spawn bypass to a DW-authorized parent.
-
-Startup captures the actual DW substrate once. Each new ordinary root admits **latest valid global desired ∩ startup-mounted substrate ∩ existing policy**. Saving off on a mounted Host leaves old busy/idle parents and their future children on their exact captures, while new roots are off. Their generic/directed skills, standing presets, role aliases, continuable resume and mode-on requests cannot bypass the ceiling. Mode-on reports unavailable; saved historical mode intent is retained but never reported effective while the admitted module is off. Idle profile/mode changes only update that root's overlay/intent and do not absorb newer module state. Saving on after cold-off changes desired/pending only: no mount, reconciliation, disposal, cancellation, process launch or restart queue. New roots remain off/restart-required until an independently authorized Host restart. Restoring on does not rebind old off roots.
-
-For later Config consumers, `DSMM_MODULE_DESCRIPTORS` and `DsmmModuleState` (exported from the package root) are plain static first-party data, not dynamic third-party JS/provider/installer APIs. The additive, no-argument `dsmmConfig.describeModules` uses the same local writable operator authority as `describe`/`save` and reads the latest valid global state; it is not opened to unauthorized read-only carriers. It returns descriptor `{id,label,key}`, global/default desired source, `startupMounted`, `admitted` (`null` without an Agent), next-root admission/reason and pending/reason. `hostBundleEnabled` is explicitly `"unknown"`: installed files, loaded DSMM core, desired DW availability, mounted substrate, admitted module and active mode are different facts.
-
-`getSettings.moduleStates(agent)`, the optional session-profile response `modules`, and status `modules` project the receiving Agent's capture. `desired.capture` distinguishes `current-global`, `admission` and `startup`: a synchronous admission/status snapshot does not claim to have reread current disk state. D's UI combines the authorized current-global projection with the actual session projection instead of treating captured state as current desired. Native profile form revision/CAS remains separate; there is neither a Root-path RPC nor a cross-layer atomic save.
-
-### Native Plugins configuration (D)
-
-Open native **Plugins → DSMM**, or the installed **DSMM** bundle's page and its
-actual **Configure DSMM** row. The item registers `plugins.item`; bundle and row
-contributions use `plugins.bundle.config` (`@dsmm/dsmm`) and
-`plugins.row.config` (`@dsmm/dsmm#<actual-row-id>`). The public page props are
-`view: summary | page` plus optional `form`, not an invented standalone editor.
-Bundle pages do not automatically supply a form: DSMM obtains only the server-
-verified actual entry namespace's public ConfigForms seat. Row pages match their
-supplied native form's namespace, revision and exact base/user metadata. If that
-identity cannot be proved, profile controls are unavailable/readonly; they never
-fall back to writing Global. Other instances are not cross-written.
-
-The two editors have independent save/refresh/discard actions:
-
-- **Global DSMM** uses fixed `dsmmConfig.save(expectedRevision, edits)` and the
-  actual-byte global revision. A save touches only `config.json`, retaining
-  untouched sparse fields. It is independently discoverable with no conversation,
-  named-profile client service or mounted DW substrate.
-- **Current DSH profile override** uses the actual native form `mutate` with its
-  descriptor revision, never its schema-expanded `value` as raw presence. Only
-  changed fields and explicit unsets are sent. Existing startup-only
-  `sessionPersistence` is retained unchanged, not made editable or relocated.
-- Roles/skills, calibration, workflow/review, guards, routing/retry/recovery,
-  subagent depth/background, preset materialization and LSP have native structural
-  controls or bounded Advanced JSON for complete applicable field coverage.
-  Advanced accepts strict JSON up to 32768 characters, closed known schema,
-  duplicate/prototype-key rejection and immediate error feedback. Sparse primary
-  members can inherit lower-layer members; the full merged value is validated.
-  New providers/accounts/models are not installed or configured here. The existing
-  native catalog/picker and independent named JSONC editor retain model authority.
-- Missing keys **inherit**; explicit same-default values are **default pins**.
-  Unset removes only this layer, not higher Host pins. Modules' master is only in
-  Global; profile/named/session controls cannot bypass the ceiling. Only the
-  static known `deepwork` descriptor exists, not a registry/marketplace API.
-
-Module summary and the field-source disclosure separate **merged desired**,
-**startup-mounted/captured**, **next-root preview** (using the same admission
-preparation) and **current session admission**. Without an actual session, current
-admission is unknown; host bundle enablement stays unknown when not observable.
-Named/global/profile/default source and capture are distinct from raw CAS values.
-Cold-off desired-on shows pending independent restart, not success at hot mounting.
-Mounted-on desired-off affects new roots, not old parents/future children.
-
-Read-only `describeSession.configuration`, successful current-session selection,
-and `describeSettings` desired/startup/next-root layers use a Host-side defensive
-projection, not raw runtime settings or browser-only masking. LSP command,
-arguments and working directory, preset root and recovery continuation prompt
-use fixed `<configured>` markers; environment names are anonymous `variable-N`
-keys and values are `<redacted>`. Environment source/capture metadata is aggregated
-under `lsp.env` (mixed origins remain `mixed`), so even key names are not disclosed.
-The strict result codecs reject raw private values in those read-only layers.
-Actual `getSettings(agent)`, captured admissions and stored configuration are
-unchanged. Raw sparse Global/profile/native-form editor input remains available
-only through its existing C0 authorized editor boundary; it is not a status DTO.
-
-The inspector sorts the union of safe desired/startup/next-root/admitted values
-and source/capture paths, including fields present only in a named overlay. A
-missing field is **Absent**, not an invented built-in value; unavailable layers
-are **Unknown**. Startup sources come from the captured deployment when available.
-An actual session shows its ID, epoch and scope; a known session without its
-configuration projection is distinct from having no session. Apply and Baseline
-return the already-committed in-memory admission immediately, without a post-commit
-disk read or another validation that could reverse the successful transaction.
-Global refresh does not silently rebind or refresh a session admission. Dirty
-drafts/conflicts visibly remain separate from these captured revisions.
-
-Refresh preserves dirty edits and their original revision. A stale revision is a
-visible conflict; explicit **Discard draft and reload** alone rebases. Invalid
-numeric/JSON input stays visible and disables save. Entry changes, disconnection,
-connection-generation replacement and disposal fence old writes; no retry/rebase
-loop or common Save-all is used. Errors are localized sanitized allowlisted
-messages, never raw paths/arguments/environment/provider tokens; saving/success
-uses accessible busy/polite live feedback and native keyboard/focus behavior.
+Native structural controls and bounded schema-aware Advanced JSON cover applicable deployment settings. Advanced input is strict JSON, not named-document JSONC. Invalid text and conflicts stay visible. Refresh preserves dirty input and its original revision; explicit discard/reload rebases it. Connection replacement, disconnection, entry replacement and disposal fence old writes. Saving doesn't restart, cancel, apply a named profile or respawn LSP.
 
 ### Save authority and concurrency
 
-The fixed `dsmmConfig` Remote backend exposes `describe`, `describeModules`, `describeSettings` and `save` for exact set/unset edits with an expected global revision. It accepts no file, root or entry arguments and isn't a model-visible tool. All operations require a local writable control operator: the native invocation peer must equal `connection.operator`, the public current `webServer.host` must be exactly `127.0.0.1`, and `settings.writable` must be `true`. Unknown or remote/nonloopback carriers are unavailable; client `isLoopback` isn't authority. Reverse proxies and tunnels aren't automatically proven safe. Save rechecks lifetime/connection authority before commit, so disconnect or disposal cannot authorize a late write. Core owns the existing Typert descriptor contribution once; global configuration service lifetime does not depend on the DW/profile UI service mounting.
+`dsmmConfig.describe`, `describeModules`, `describeSettings` and `save` use the existing local writable operator boundary. The native invocation peer must equal `connection.operator`, public `webServer.host` must be exactly `127.0.0.1`, and `settings.writable` must be true. A client loopback assertion, tunnel or reverse proxy isn't authority. These aren't model-visible tools and accept no arbitrary file, root or entry arguments.
 
-Reads create no directory, lock or config file. Saves use bounded safe file access, the actual bytes' SHA256 revision (or a distinct absent revision), a cooperative writer lock, final revision recheck and same-directory temporary-file rename. Stale or invalid input fails closed instead of overwriting it. Non-cooperating external editors can still race between the final recheck and rename; this isn't a universal external-editor transaction.
+Global saves use expected actual-byte revision, cooperative locking, a final revision recheck and same-directory atomic replacement. Authority and lifetime are rechecked before commit. Native-profile saves use public form mutation and descriptor CAS, not a hash guessed to be native CAS. External non-cooperating editors can still race at the final rename boundary. A save acknowledges its layer, not adoption by every live consumer.
 
-Global save changes only `config.json`: no profile patch, Loader reload/patch/dispose, cancellation or automatic profile apply. Native profile saves use only the volatile transport, with native authorization and entry CAS. The two layers have separate revisions and no cross-layer transaction. A save response acknowledges that layer, not that every running consumer has adopted it.
+Native ConfigEditor can emit `loader/partial-dispose` during empty-pending reconciliation without actual fiber or Agent disposal. The signal alone isn't proof of a lifecycle change; consumers must observe actual lifetime and admission boundaries.
 
-**Native signal distinction:** the rc.2 ConfigEditor/Include forced empty-pending reconciliation path emits the compatibility `loader/partial-dispose` signal even when it doesn't update or dispose a fiber. The real regression observes that signal while proving retained refs/fiber/services, zero actual scope/Agent disposals or updates, and completion of the original busy request. The signal alone isn't a lifecycle acknowledgment; no SDK patch, signal filtering or automatic restart hides it. Consumers must use actual lifetime/admission boundaries rather than treating this signal as disposal proof.
+<a id="global-module-ceiling-d0"></a>
 
-## Workflow compatibility
+## Availability and capture
 
-`workflow.policy` selects `risk-based` or `legacy`. An explicit policy wins; old explicitly supplied `strictGates`, `reviewCap`, or `finalReviewPolicy` selects legacy behavior when policy is omitted. With neither new nor legacy controls, risk-based behavior is the default. Schema parsing preserves this distinction.
+`modules.deepwork.enabled` is a global-only ceiling and defaults true; ordinary `defaultActive` defaults false. Native profile overrides and named/session overlays can't enable the module. Cold-off leaves Core storage, captures/CAS, configuration/status and mandatory native permissions available, without mounting DW role/routing/recovery/LSP substrate. Static preset files aren't proof of callable roles.
 
-Risk-based behavior scales discovery, planning, and review to uncertainty and integration risk. Legacy fields remain readable in the normalized snapshot, but are not a universal fixed-review loop under risk-based policy.
+On a mounted Host, desired-off affects new roots, not existing parents or their future children. Desired-on after cold-off remains restart-required until an independent Host restart. No hot-mount or restart queue is implied. An idle profile change doesn't absorb newer global deployment. Mode-on can't bypass an admitted off module; mode-off can replace saved on intent without pretending the module was active.
 
-## Other settings
+The inspector separates merged desired, startup-mounted/captured, next-root preview, and current-session admission. Without an actual session, current admission is unknown. Host bundle enablement also remains unknown when the public interface can't observe it. Sources, capture origins, global bytes revision, native descriptor revision and named pin aren't one acknowledgment.
 
-`roleRouting` defaults to an empty map. Each canonical role accepts optional `primary`, ordered `fallbackRoutes`, `strategy` and bounded `rateLimit` fields. Profile-level `runtimePolicy` supplies inherited strategy/retry defaults. Child Agents use their configured startup lock or explicit per-role rate-limit rollover. Ordinary top-level Agents instead preserve the native model tab's exact model/effort and only retry on that same route. Native catalog/form controls edit JSONC paths without changing native global model defaults. The compact header menu has one profile list and one `@use-model` **Use profile model** action; a normal profile switch never selects a model. The action reads the current admitted immutable profile model without reapplying a later saved revision, uses native-default persistence like the Models tab, and preserves newer manual intent through existing race fencing. Successes are accessible live announcements only; visible errors are short sanitized codes/fields, not verbose normal menu descriptions. The deployment-only `roles` enable map remains separate. Unknown keys/malformed routes fail; omitted and explicit empty chains differ. See [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md).
+Read-only configuration projections redact LSP command/arguments/cwd, preset root and recovery prompt; environment values and names aren't disclosed. Authorized sparse editor input is a separate boundary, not a status DTO. A missing projected field is absent; an unavailable layer is unknown, not an invented default.
 
-`DEFAULT_DSMM_SETTINGS` supplies the complete business defaults; the public sparse schema doesn't expand them into overrides. The current inventory has 22 roles/categories and 14 configurable skills, with cross-cutting opt-in/default false. Active Agent scopes expose enabled DSMM skills as native metadata/lazy bodies; explicit off wins even on a DW preset. Roles/skills remain outside named runtime profiles. Managed preset-directory materialization remains off by default and is an export facility rather than native discovery. Content/catalog presence doesn't prove the remaining C execution mechanisms.
+## Runtime controls
 
-Runtime overlays allow only `defaultActive`, `roleRouting`, `runtimePolicy`, `workflow`, `guards`, `runtimeRecovery`, and both `deepseekV4Pro*`/`deepseekFlash*` Calibration, DefaultReasoningEffort and MaxReasoningPresets fields. `modules`, `roles`, `skills`, `modeName`, `promptOrder`, `section`, `presets`, `subagents`, `lsp`, `sessionPersistence`, native provider/account/install controls, embedded profiles and unknown fields are rejected. A missing named-profile selection leaves the captured deployment baseline unchanged. Auth and native session logs stay in their existing locations; centralized storage doesn't move them or expand `sessionPersistence` authority.
+`/deepwork [off|message]` changes the receiving session's mode. Explicit intent, including a same-default choice, survives profile changes and reopen. Official minimal conversations default off; DW presets default on unless explicit intent says otherwise. Off hides common workflow/DSMM skills, not persona, read-only restrictions or host/Git permissions. Busy mutations refuse instead of queuing. Slash commands belong to the native command adapter, not headless task text.
 
-`subagents.enableRunInBackground:false` and `backgroundMode:"one-shot"` default to foreground one-shot. Explicit opt-in can use native jobs or continuable children. Omitted `maxDepth` uses the host default (rc.2 1); explicit nonnegative integer limits remain native-enforced. These sparse deployment fields capture at new-root admission and remain frozen for old parents/future children. Missing startup jobs/control/persistence/provider substrate yields `restartRequired: ["subagents"]` and effective background disabled, not fabricated readiness. No new queue/controller is created.
+`/dsmm-status` reports normalized bounded state; `/dsmm-status json` returns a defensive version-1 snapshot. Status separates admitted profile/revision/epoch, actual route state, effective settings and captured module/runtime binding. Ordinary roots report native-owned effort and keep the native model tab's route, not an applied child-role primary. `profileModel` is advisory for explicit **Use profile model**, never proof that selection already happened.
 
-## Capture and restart boundaries
+`workflow.policy` accepts `risk-based` or `legacy`. Explicit policy wins. Without it, explicitly supplied `strictGates`, `reviewCap` or `finalReviewPolicy` selects legacy; otherwise risk-based is the default. Named role restrictions retain required Orchestrator/Planner/Plan Critic, plus legacy-conditional Reviewer/Oracle. They can't enable a role outside startup/deployment ceilings.
 
-Startup awaits global/profile read, merge and validation before any consumer mounts. The startup snapshot is frozen. Persistent registration, standing presets, `modeName`, `promptOrder`, preset materialization and LSP retain startup settings; late dependency install/injection doesn't reread desired settings.
+`roleRouting[id].levels` accepts only explicit `low`, `high` and `max` overrides; invocation omission means `normal`. These are call resources, not workflow tiers or generated roles. `subagents.toolTopology` defaults `per-role` and may be narrowed/configured in a named overlay. Background, depth and route-override permission remain deployment-only. `subagents.allowRouteOverride` defaults false. See [routing](model-routing.md) for the exact tool and target grammar.
 
-When a native preset registry already exists, its frozen startup definitions finish registering before retained ordinary Agents are audited/admitted. Optional absent registries retain the existing late-install lifetime path, using that same startup getter. Direct trusted Cordis callers without a Loader entry use the stable `trusted-direct` namespace; fiber allocation never becomes a persisted entry identity.
+`locale` is an optional visible-output preference using the supported locale IDs in [profiles](profiles.md#inheritance-and-ceilings). Omission inherits; the current user's explicit language request wins. It doesn't change UI locale or protocol vocabulary. Both retired `*MaxReasoningPresets` fields reject with `deprecated-field`; there is no automatic migration. The only nonblocking document warning is `blank-label`, with schema-safe diagnostics and source location where available.
 
-A new ordinary root awaits the latest valid global/profile desired deployment and combines it with the applied immutable named overlay, never a later draft. Existing roots retain their entire captured snapshot, including blank/idle roots. Future children of an old parent inherit that parent's complete snapshot and epoch rather than today's desired settings. An explicit idle session-profile switch replaces only the allowed runtime overlay on that root's old deployment baseline.
+## Child runtime composition
 
-New-root capture validates schema/file safety and standing startup capabilities, not every dormant role's model catalog entry. Native root requests retain the model tab's authority; child/alias preflight owns exact candidate selection, fallback and hard effort refusal before requests. Named selection/current-session Apply and retained-Agent startup admission keep their full semantic catalog audits and readiness guards. Capture isn't an automatic model-selection action or a promise that every declared role route is callable.
+Default deployment uses foreground one-shot work: `enableRunInBackground:false`, `backgroundMode:"one-shot"`, and omitted `maxDepth` delegates to the native Host limit. Captured settings and actual startup capabilities determine availability. A configured flag isn't proof that jobs, persistence, continuation or delivery fencing is ready.
 
-Role enable policy is constrained by the startup substrate and original permissions. A capability absent at startup is restart-required, not made available by saving desired settings. No restart/idle queue exists. Desired off isn't a claim that old admitted work was cancelled.
+The built source exports `@dsmm/dsmm/subagent-runtime` (`./subagent-runtime`) for explicit cold-start composition. The optional [subagent runtime patch](../patches/subagent-runtime.yml) disables the exact stock subagent row and installs the DSMM runtime in the same Host service scope. Verify the actual stock row identity and copy explicit capacity/depth configuration before restarting; preserve spawn/fork/model/Gateway services. A duplicate provider refuses. The default [bundle patch](../cordis.patch.yml) is unchanged and doesn't replace stock subagents automatically.
 
-`getSettings(agent)` is the authority for an existing Agent. No-argument `getSettings()` remains the validated runtime named default, not raw desired settings. Invalid external edits refuse new admissions and writes without invalidating old frozen admissions. Cold resume creates a new admission from current valid desired deployment and the correct origin's pinned sidecar/default; it doesn't promise persistence of an exited process's old memory snapshot.
+The public runtime projection reports `binding: stock | dsmm | unavailable`, `deliveryFenceReady`, `restartRequired`, and a bounded reason when applicable. Loading Core, saving settings or seeing a role catalog doesn't prove fenced delivery. Managed continuation requires the explicit ready composition. Native lifecycle, inbox, jobs and storage remain native-owned; DSMM doesn't install a second scheduler or retry controller.
 
-Existing `deepseekV4ProCalibration`, `deepseekV4ProDefaultReasoningEffort`, and `deepseekV4ProMaxReasoningPresets` remain compatible for child Agents. Flash has independent corresponding `deepseekFlash*` settings; calibration modes are off/auto/strict. Auto preserves explicit effort, strict chooses supported policy effort, and unsupported capabilities never justify guessed parameters. Ordinary root effort is always native-owned, including when a calibration setting says strict.
+Old-child compatibility exposes conservative captured evidence, `provenFields` and limitations, not full configuration recovery. The legacy read adapter is default off and requires explicit trusted Host composition. It isn't a JSON attestation switch or a source of invented approval/durability guarantees. See [compatibility](compatibility.md) for that separate adapter boundary.
 
-Guard scope defaults to `deepwork-or-dsmm-agent`; shell safety and helpers remain enabled and Git writes require host approval. LSP and runtime recovery default off. Recovery caps are finite; an empty fallback list does not enable automatic model discovery or substitution.
-
-## Snapshot boundaries
-
-The snapshot reports `mode`, `route`, `calibration`, `runtimeRecovery`, and `effectiveSettings`. Route flags distinguish exact V4 Pro and V41 Flash matches. Desired policy effort is not a claim that an adapter advertised or applied it.
-
-Status does not perform capability/network queries, expose credentials or provider errors, or report process-local pending retries. Model calibration is enforced in the actual request waterfall, not by status or prompt text.
-
-Status masks configured preset/LSP working-directory paths, all LSP command/argument contents and LSP environment values with fixed markers; runtime LSP settings aren't changed. The trusted backend's `describeDeployment()` retains separate plain startup, desired and admitted snapshots, with the raw native input hash and optional native form CAS revision explicitly distinguished. `deployment.sources` describes desired input; admission `sources` describes effective values after startup pins/role constraints and named overlays. `sourceCaptures.fields` identifies startup versus captured deployment versus named-session origins, and its startup revision pair prevents attributing pinned values to the newer desired revision.
-
-A named overlay's complete primary route replaces its lower primary, including removal of omitted effort. Effective provenance removes that entire replaced primary subtree before marking the overlay; nonexistent lower-only members aren't left in `sources` or capture fields.
-
-Configured role policy/chain and the actual persisted current route are distinct facts. The normalized settings snapshot defensively copies nested role routes and lists; configuration presence is not a claim of successful provider authentication or a completed fallback.
-
-For ordinary roots, effective status reports `startup-lock`, no applied profile primary/fallback chain, and reasoning action `native-owned`. The original child-role configuration remains available under `effectiveSettings`; it is not falsely presented as an automatic main-model override. `profileModel` in a session-profile response is only the declared model for an explicit user action, never proof that the native model has already changed.
-
-Status describes the receiving Agent's admitted profile/revision/epoch, resolved strategy/retry policy and actual route state separately from desired deployment and future named defaults. Global bytes revision, native entry revision, startup capability and store origin are distinct facts, not one atomic cross-layer acknowledgment. `--dump-config` shows native Loader composition, not the complete global-aware DSMM effective snapshot or proof of runtime-profile application/authenticated UI behavior. D's field-level native presentation has isolated rc.2 Web evidence; final artifact/publication and actual Electron acceptance remain separate.
+*Author's note: For a DSH deployment operator; distinguish a successful configuration save from captured runtime availability before applying policy.*

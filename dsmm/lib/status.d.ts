@@ -3,11 +3,19 @@ import type { DsmmModelFamily } from "./model-family.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
-import type { DsmmRoleRuntimeState } from "./profile-types.js";
+import type { DsmmRoleAvailabilityState, DsmmRoleRuntimeState, SubagentRuntimeAdmissionView, ProfileDiagnostic } from "./profile-types.js";
 import type { DsmmLspRuntimeState } from "./lsp.js";
 import type { DsmmModuleState } from "./modules.js";
 export declare const DSMM_STATUS_VERSION: 1;
 export interface DsmmStatusSnapshot {
+    roles?: DsmmRoleAvailabilityState[];
+    warnings?: ProfileDiagnostic[];
+    subagentRuntime?: SubagentRuntimeAdmissionView;
+    locale?: {
+        value: NonNullable<DsmmSettings["locale"]>;
+        source: string;
+        capture: string;
+    };
     version: typeof DSMM_STATUS_VERSION;
     modules?: DsmmModuleState[];
     admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
@@ -77,6 +85,7 @@ export declare function createDsmmStatusSnapshot(input: {
     settings: DsmmSettings;
     modeActive: boolean;
     admission?: DsmmProfileAdmission;
+    subagentRuntime?: SubagentRuntimeAdmissionView;
     roleRuntimeState?: DsmmRoleRuntimeState;
     modules?: DsmmModuleState[];
 }): DsmmStatusSnapshot;

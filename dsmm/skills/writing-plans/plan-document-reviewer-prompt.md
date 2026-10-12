@@ -2,7 +2,7 @@
 
 # Plan Document Reviewer Prompt Template
 
-Use this template for the default blocker-focused review of a complex implementation plan, or when review is otherwise required after the plan is complete. The orchestrator dispatches it; the planner does not.
+Use this template for the default blocker-focused review of a complex product-implementation plan, or when an explicit requirement or concrete major risk warrants plan review. A non-product plan alone does not trigger review. The orchestrator dispatches it; the planner does not.
 
 **Purpose:** Determine whether the plan can reach the approved outcome without missing material dependencies, interfaces, risks, or acceptance evidence.
 
@@ -27,6 +27,15 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     require fixed headings, tiny scripted steps, a RED transcript, scenario counts,
     per-task reviews, commits, or a particular implementation when an evidence-based
     equivalent preserves the approved goal, constraints, permissions, and acceptance.
+
+    Check that the plan describes only its final deliverable, not development or
+    decision history. Superpowers specs/plans are only for final product requirements;
+    changed requirements use separate plans. Other tasks use conversation or a
+    task-owned temporary plan. Evidence must protect valid requirements, functionality,
+    and external interfaces, not descriptive-text locks, decision counterexamples, or
+    removed-component absence tests. Update tests with requirements and delete tests
+    dedicated to removed components. Uncommitted intermediate behavior needn't be
+    preserved; committed contracts and authorization boundaries remain binding.
 
     Report concrete findings with their impact and supporting evidence. A substantive
     blocker must be corrected, rebutted with evidence, or escalated before implementation;

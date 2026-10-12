@@ -8,6 +8,10 @@ function route(value) {
         && (value.reasoningEffort === undefined || typeof value.reasoningEffort === "string")
         && Object.keys(value).every((key) => ["provider", "model", "reasoningEffort"].includes(key));
 }
+function level(value) {
+    return route(value) || record(value) && typeof value.reasoningEffort === "string"
+        && Object.keys(value).every(key => key === "reasoningEffort");
+}
 function validTree(node, depth = 0) {
     if (depth > 32)
         return false;
@@ -35,6 +39,14 @@ export function structuredDocument(content) {
     const settings = document.settings;
     if (settings.defaultActive !== undefined && typeof settings.defaultActive !== "boolean")
         return null;
+    if (settings.locale !== undefined && typeof settings.locale !== "string")
+        return null;
+    if (settings.roles !== undefined && (!record(settings.roles) || !Object.values(settings.roles).every(value => typeof value === "boolean")))
+        return null;
+    if (settings.subagents !== undefined && (!record(settings.subagents) || Object.keys(settings.subagents).some(key => key !== "toolTopology")
+        || settings.subagents.toolTopology !== undefined && (typeof settings.subagents.toolTopology !== "string"
+            || !["per-role", "parameterized"].includes(settings.subagents.toolTopology))))
+        return null;
     if (settings.roleRouting !== undefined && !record(settings.roleRouting))
         return null;
     if (settings.runtimePolicy !== undefined && !record(settings.runtimePolicy))
@@ -48,8 +60,11 @@ export function structuredDocument(content) {
             normalizeRoutingStrategy(runtimePolicy.strategy);
         if (runtimePolicy.rateLimit !== undefined)
             normalizeRateLimitOverrides(runtimePolicy.rateLimit);
-        for (const raw of Object.values(policies)) {
-            if (!record(raw) || Object.keys(raw).some((key) => !["primary", "fallbackRoutes", "strategy", "rateLimit"].includes(key)))
+        for (const [role, raw] of Object.entries(policies)) {
+            if (!record(raw) || Object.keys(raw).some((key) => !["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"].includes(key)))
+                return null;
+            if (raw.levels !== undefined && (role === "dsmm-orchestrator" || !record(raw.levels)
+                || Object.entries(raw.levels).some(([key, value]) => !["low", "high", "max"].includes(key) || !level(value))))
                 return null;
             if (raw.primary !== undefined && !route(raw.primary))
                 return null;
@@ -71,7 +86,7 @@ export function editStructuredPath(content, path, value) {
     if (structuredDocument(content) === null)
         return null;
     try {
-        return applyEdits(content, modify(content, path, value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+        return applyEdits(content, modify(content, path, value, {}));
     }
     catch {
         return null;

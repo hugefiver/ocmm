@@ -42,5 +42,5 @@ export function splitCategory(text: string): { base: string; calibrations: Map<s
 export function buildRolePersona(role: SourceRoleContent): string {
   const source = role.promptArtifact === null ? role.description : readPromptAsset(role.promptArtifact.replace("prompts/source/", ""));
   const body = role.kind === "category" ? splitCategory(source).base : source;
-  return [`You are ${role.name} (role ID: ${role.id}).`, role.mode === "primary" || role.mode === "all" ? readPromptAsset("shared/locale.md") : "", body, readPromptAsset("shared/dsh-host-contract.md"), readPromptAsset(role.terminalArtifact.replace("prompts/source/", ""))].filter(Boolean).join("\n\n---\n\n");
+  return [`You are ${role.name} (role ID: ${role.id}).`, readPromptAsset("shared/locale.md"), body, readPromptAsset("shared/dsh-host-contract.md"), readPromptAsset(role.terminalArtifact.replace("prompts/source/", ""))].filter(Boolean).join("\n\n---\n\n");
 }

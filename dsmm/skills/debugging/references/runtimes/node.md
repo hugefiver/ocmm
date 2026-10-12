@@ -44,7 +44,7 @@ The breakpoint list will happily display it, so you think it's set. It isn't.
 | **Chrome DevTools GUI** (`chrome://inspect`) | CLI not required, faster iteration | Not usable if user specifically asked for CLI |
 | **Debug the built `dist/` JS** | Source maps are working end-to-end | Requires `npm run build` on every source change |
 
-The `debugger;` statement is the most reliable. Journal the edit — revert at Phase 9.
+The `debugger;` statement is the most reliable. List the exact temporary hunk in the resource checklist and remove only that hunk at Phase 9.
 
 ---
 
@@ -206,7 +206,7 @@ These are the patterns that most commonly look like success but aren't. Always c
 | Callback-style API where callback never fires | Error happened before callback scheduled |
 | Handler returns `res.json(...)` twice | Second call is silent on some Express versions |
 
-When you find one, add a temporary `console.error('[DEBUG]', ...)` to make it loud — journal it, revert at Phase 9.
+When you find one, use temporary instrumentation to expose it. List the exact owned hunk in the resource checklist and remove it at Phase 9 without discarding existing edits.
 
 ---
 
@@ -225,7 +225,7 @@ tmux send-keys -t debug-client 'node inspect 127.0.0.1:9229' Enter
 tmux capture-pane -p -t debug-server -S -50
 ```
 
-Journal both session names. Kill both at Phase 9:
+List both task-owned session identities in the temporary resource checklist. Close only those owned sessions at Phase 9:
 
 ```bash
 tmux kill-session -t debug-server
@@ -248,15 +248,4 @@ Phrase as a note, not a request: "I can push through with `debugger;` statements
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Revert source-level debug statements
-git diff | grep -E '(debugger;|console\.log\(.*DEBUG|\[ARBITER-DEBUG|\[DEBUG)'
-# Revert any matching files:
-git checkout <file>
-
-# Kill inspector-attached processes
-pkill -f 'node --inspect' || true
-pkill -f 'bun --inspect' || true
-pkill -f 'deno.*--inspect' || true
-lsof -iTCP:9229 -sTCP:LISTEN -nP 2>/dev/null
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register this task's temporary `debugger;` and logging hunks, inspector process PIDs and start identities, listener ports, and debugger/tmux session identities in the temporary resource checklist. Remove only those source hunks, never restore whole files. Close only owned sessions; verify the recorded PID and start identity before terminating a process. A listener on port 9229 isn't ownership evidence.

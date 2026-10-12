@@ -7,6 +7,10 @@ export { NS, en, zh } from "./locales.js";
 export { TYPERT_REMOTE } from "../profile-remote.js";
 export { SessionProfiles } from "./SessionProfiles.js";
 export { structuredDocument, editStructuredPath, moveFallback } from "./structured.js";
+export { ChildrenController } from "./children-controller.js";
+export type { ChildrenActions, ChildrenSnapshot, ChildrenIssue } from "./children-controller.js";
+export { ChildrenPanel } from "./ChildrenPanel.js";
+export { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
 /** No self-dependency on a namespace that this contribution has not mounted. */
 export declare const inject: readonly ["slots", "locale", "remote"];
 export declare function apply(ctx: Context): Promise<void>;

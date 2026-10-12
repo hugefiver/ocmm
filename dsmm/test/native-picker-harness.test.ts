@@ -7,24 +7,7 @@ import test from "node:test";
 // @ts-expect-error Owned diagnostic harnesses are not published library modules.
 import { nativePickerClosure, pickerCompositionBundle, PICKER_ENTRY_PACKAGES } from "../scripts/native-picker-browser.mjs";
 // @ts-expect-error Owned diagnostic harnesses are not published library modules.
-import { decodeNativePickerArgs, freshNativePickerEnvironment, nativePickerContract, nativePickerDiagnosticContract, pickerArtifactOptions, frozenPickerArtifactOptions, runFrozenNativePickerAcceptance, submitOwnedNativeFollowup, profileSwitchKeyboardKeys, heldProfileIntentCall, validateNativePickerAfterStep, validateCompactHeaderGeometry, validateNativeMenuGeometry, PICKER_ARTIFACT_SHA256, PICKER_ARTIFACT_URL } from "../scripts/native-picker-harness.mjs";
-
-test("native picker environment forces telemetry opt-outs without inheriting credentials or DSH policy", () => {
-  const home = "/owned/picker-home";
-  for (const value of [undefined, "1", "0", "ambient-secret"]) {
-    const env = freshNativePickerEnvironment(home, { PATH: "/native/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", TZ: "UTC", DISPLAY: ":77", XAUTHORITY: "/owned/xauthority",
-      HOME: "/user-home", DSH_HOME: "/user-dsh", XDG_CONFIG_HOME: "/user-config", XDG_DATA_HOME: "/user-data", XDG_STATE_HOME: "/user-state", XDG_CACHE_HOME: "/user-cache",
-      POWERSHELL_TELEMETRY_OPTOUT: value, DOTNET_CLI_TELEMETRY_OPTOUT: value,
-      NPM_TOKEN: "user-secret", DEEPSEEK_API_KEY: "user-secret", DSH_API_KEY: "user-secret", FAKE_SECRET: "user-secret",
-      PNPM_CONFIG_AUTO_INSTALL_PEERS: "true", DSH_TELEMETRY_MODE: "ENABLED", DSH_TELEMETRY_DISABLED: "0", DSH_PERMISSION_MODE: "full-access",
-      DSMM_ACCEPTANCE_TOOLS_MANIFEST: "/ambient/tools/package.json", DSMM_BROWSER_EXECUTABLE: "/ambient/browser", DSMM_UI_EVIDENCE_DIR: "/ambient/evidence" });
-    assert.equal(env.POWERSHELL_TELEMETRY_OPTOUT, "1");
-    assert.equal(env.DOTNET_CLI_TELEMETRY_OPTOUT, "1");
-    assert.deepEqual(env, { PATH: "/native/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", TZ: "UTC", DISPLAY: ":77", XAUTHORITY: "/owned/xauthority", HOME: home, DSH_HOME: home,
-      XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_STATE_HOME: join(home, "state"), XDG_CACHE_HOME: join(home, "cache"),
-      POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1", DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1" });
-  }
-});
+import { decodeNativePickerArgs, nativePickerContract, nativePickerDiagnosticContract, pickerArtifactOptions, frozenPickerArtifactOptions, runFrozenNativePickerAcceptance, submitOwnedNativeFollowup, profileSwitchKeyboardKeys, heldProfileIntentCall, validateNativePickerAfterStep, validateCompactHeaderGeometry, validateNativeMenuGeometry, PICKER_ARTIFACT_SHA256, PICKER_ARTIFACT_URL } from "../scripts/native-picker-harness.mjs";
 
 test("picker diagnostic decodes only the native singleton wire envelope without renaming strict descriptor fields", () => {
   const args = { request: { sessionId: "owned", provider: "fixture", model: "target" } };

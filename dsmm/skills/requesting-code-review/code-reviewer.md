@@ -19,7 +19,7 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     - acceptance criteria;
     - current working-tree diff or committed range, including new files;
     - relevant verification evidence and intentionally unverified items;
-    - global constraints, permissions, and material approved rulings;
+    - current global constraints and permissions;
     - focused dependency, interface, or risk context when needed.
 
     Inspect the actual change rather than relying on an implementer summary or
@@ -28,10 +28,22 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     security, performance, data, compatibility, protocol/API, migration, release,
     or irreversible-operation risks.
 
+    Assess existing evidence by material relevance. Request missing or affected
+    coverage; don't duplicate global/heavy checks coordinated by the controller.
+    Unrelated code, dependency, or environment changes aren't automatic invalidation.
+    Keep required safety, release, pre-commit, and explicit user checks intact.
+
     Allow minimal evidence-based equivalent implementations when they preserve the
     approved goal, constraints, permissions, and acceptance criteria. Flag a
     proposed change to approved scope or behavior as a decision for the controller,
     not an automatic fix.
+
+    Review final valid requirements and committed contracts, not uncommitted
+    intermediate behavior or decision history. Reject descriptive-text locks,
+    decision-counterexample tests, and tests asserting removed components are
+    absent. Requirements changes update corresponding tests; removed components
+    lose their dedicated tests. Keep valid safety, protocol, and input-handling
+    negatives and the applicable API/security/data/permission authorization.
 
     Report concrete findings with severity, file/line location when available,
     impact, supporting evidence, and a practical correction when useful. Separate

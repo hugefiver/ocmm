@@ -5,6 +5,9 @@ import type { DsmmRoleId } from "./roles.js";
 import type { DsmmSkillName } from "./skills.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 import type { DeploymentSchemaNode } from "./profile-types.js";
+import type { DsmmLocale } from "./profile-locale.js";
+export { DSMM_LOCALES } from "./profile-locale.js";
+export type { DsmmLocale } from "./profile-locale.js";
 export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
@@ -14,6 +17,17 @@ export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
+export type DsmmInvocationLevel = "normal" | "low" | "high" | "max";
+export type DsmmLevelOverride = {
+    reasoningEffort: string;
+    provider?: never;
+    model?: never;
+} | DsmmModelRoute;
+export interface DsmmInvocationOptions {
+    level?: DsmmInvocationLevel;
+    route?: DsmmLevelOverride;
+}
+export type DsmmToolTopology = "per-role" | "parameterized";
 export interface DsmmWorkflowSettings {
     policy: "risk-based" | "legacy";
     strictGates: boolean;
@@ -25,6 +39,8 @@ export interface DsmmPresetSettings {
     root?: string;
 }
 export interface DsmmSubagentSettings {
+    toolTopology: DsmmToolTopology;
+    allowRouteOverride: boolean;
     enableRunInBackground: boolean;
     backgroundMode: "one-shot" | "continuable";
     /** Omitted delegates to the native host limit (rc.2 default 1). */
@@ -53,6 +69,7 @@ export interface DsmmModelRoute {
 export interface DsmmRecoveryRoute extends DsmmModelRoute {
 }
 export interface DsmmRoleRoutingConfig {
+    levels?: Partial<Record<Exclude<DsmmInvocationLevel, "normal">, DsmmLevelOverride>>;
     primary?: DsmmModelRoute;
     fallbackRoutes?: DsmmModelRoute[];
     strategy?: DsmmRoutingStrategy;
@@ -80,6 +97,7 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
     idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 export interface DsmmPluginConfig {
+    locale?: DsmmLocale;
     /** Only global deployment input; native/legacy profile transport rejects it. */
     modules?: {
         deepwork?: {
@@ -95,10 +113,8 @@ export interface DsmmPluginConfig {
     section?: string;
     deepseekV4ProCalibration?: DeepseekCalibration;
     deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-    deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
     deepseekFlashCalibration?: DeepseekCalibration;
     deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-    deepseekFlashMaxReasoningPresets?: DsmmRoleId[];
     defaultActive?: boolean;
     promptOrder?: number;
     skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -113,6 +129,7 @@ export interface DsmmPluginConfig {
     lsp?: Partial<DsmmLspSettings>;
 }
 export interface DsmmSettings {
+    locale?: DsmmLocale;
     modules: {
         deepwork: {
             enabled: boolean;
@@ -123,10 +140,8 @@ export interface DsmmSettings {
     promptOrder: number;
     deepseekV4ProCalibration: DeepseekCalibration;
     deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-    deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
     deepseekFlashCalibration: DeepseekCalibration;
     deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-    deepseekFlashMaxReasoningPresets: DsmmRoleId[];
     skills: Record<DsmmSkillName, boolean>;
     roles: Record<DsmmRoleId, boolean>;
     roleRouting: DsmmRoleRouting;
@@ -140,12 +155,17 @@ export interface DsmmSettings {
 }
 export type DsmmProfileScope = "global-default" | "session-override" | "deployment-baseline";
 export interface DsmmProfileAdmission {
+    childCapture?: import("./child-capture.js").ChildAdmissionCapture;
+    childEvidence?: import("./child-capture.js").ChildAdmissionEvidenceView;
+    warnings?: import("./profile-diagnostics.js").ProfileDiagnostic[];
+    roleAvailability?: import("./profile-types.js").DsmmRoleAvailabilityState[];
+    subagentRuntime?: import("./profile-types.js").SubagentRuntimeAdmissionView;
     settings: DsmmSettings;
     profile: {
         id: string;
         revision: string;
     } | null;
-    epoch: string;
+    readonly epoch: string;
     scope: DsmmProfileScope;
     deployment?: DsmmDeploymentSnapshot;
     restartRequired?: readonly string[];
@@ -186,6 +206,7 @@ export interface DsmmDeploymentSnapshot {
 export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
     admission?: (agent?: DshAgent) => DsmmProfileAdmission;
     moduleStates?: (agent?: DshAgent) => import("./modules.js").DsmmModuleState[];
+    subagentRuntime?: () => import("./profile-types.js").SubagentRuntimeAdmissionView;
 };
 export interface DsmmResolvedRoleRuntimePolicy {
     readonly strategy: DsmmRoutingStrategy;
@@ -217,6 +238,9 @@ export declare function validateDeploymentPath(path: readonly string[]): void;
 export declare function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConfig;
 export declare function resolveDeployment(global: DsmmPluginConfig, profile: DsmmPluginConfig): DsmmSettings;
 export declare function validateResolvedSettings(settings: DsmmSettings): DsmmSettings;
+export declare function rejectDeprecatedFields(input: object, prefix?: string): void;
+export declare function validateLocale(value: unknown, field?: string): asserts value is DsmmLocale;
+export declare function normalizeLevelOverride(value: unknown, field?: string): DsmmLevelOverride;
 export declare function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting;
 export declare function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean;
 export declare function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings;

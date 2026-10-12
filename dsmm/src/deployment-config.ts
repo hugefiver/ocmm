@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { Context } from "@deepseek-ai/cordis";
-import { parseTree } from "jsonc-parser";
-import type { Node, ParseError } from "jsonc-parser";
 import type { DshContext } from "./dsh-types.js";
 import { resolveDshHome } from "./dsh-home.js";
 import { FixedConfigFileStore } from "./config-file-store.js";
@@ -9,6 +7,7 @@ import { copyJson, freezeSettings, resolveDeployment, validateDeploymentPath, va
 import type { DsmmDeploymentSnapshot, DsmmPluginConfig } from "./settings.js";
 import { DsmmProfileError } from "./profiles.js";
 import { resolve } from "node:path";
+import { diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
 
 export type DeploymentPathEdit = { op: "set"; path: string[]; value: unknown } | { op: "unset"; path: string[] };
 export interface GlobalConfigSaveRequest { expectedRevision: string; edits: DeploymentPathEdit[] }
@@ -16,21 +15,16 @@ export interface GlobalConfigSnapshot { config: DsmmPluginConfig; revision: stri
 
 function configurationError(): never { throw new DsmmProfileError("validation", "Deepwork deployment configuration is invalid; restore valid plain JSON before saving or admitting a new session."); }
 
-function validateJsonTree(node: Node, depth = 0): void {
-  if (depth > 64) configurationError();
-  if (node.type === "object") {
-    const names = (node.children ?? []).map((property) => property.children?.[0]?.value as unknown);
-    if (new Set(names).size !== names.length) configurationError();
-  }
-  for (const child of node.children ?? []) validateJsonTree(child, depth + 1);
-}
 export function parseGlobalConfig(content: string | null): DsmmPluginConfig {
   if (content === null) return {};
-  const errors: ParseError[] = [];
-  const tree = parseTree(content, errors, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-  if (tree?.type !== "object" || errors.length > 0) configurationError();
-  validateJsonTree(tree);
-  try { return validateSparseConfig(JSON.parse(content), true); } catch { return configurationError(); }
+  const inspected = inspectJsonDocument(content, false);
+  const issue = inspected.diagnostics[0];
+  if (issue !== undefined) throw new DsmmProfileError("validation", `${issue.field}: ${issue.reason}`, issue.field, issue.code, issue.location);
+  if (inspected.tree?.type !== "object") configurationError();
+  try { return validateSparseConfig(JSON.parse(content), true); } catch (error) {
+    if (error instanceof DsmmConfigValidationError) throw new DsmmProfileError("validation", error.message, error.diagnostic.field, error.diagnostic.code, fieldLocation(content, inspected.tree, error.diagnostic.field, diagnosticSourcePath(error)));
+    return configurationError();
+  }
 }
 
 /** Only schema fields, never filesystem paths or array indexes. Full candidate is revalidated. */
@@ -44,7 +38,7 @@ export function editGlobalConfig(config: DsmmPluginConfig, edits: DeploymentPath
       || edit.op === "set" && !Object.hasOwn(edit, "value")
       || !Array.isArray(edit.path) || edit.path.length === 0 || edit.path.length > 8
       || edit.path.some((key) => typeof key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key))) configurationError();
-    try { validateDeploymentPath(edit.path); } catch { configurationError(); }
+    validateDeploymentPath(edit.path);
     let node = result;
     for (const key of edit.path.slice(0, -1)) {
       const child = node[key];
@@ -54,7 +48,7 @@ export function editGlobalConfig(config: DsmmPluginConfig, edits: DeploymentPath
     const key = edit.path.at(-1)!;
     if (edit.op === "set") node[key] = copyJson(edit.value);
     else Reflect.deleteProperty(node, key);
-    try { result = validateSparseConfig(result, true) as Record<string, unknown>; } catch { configurationError(); }
+    result = validateSparseConfig(result, true) as Record<string, unknown>;
   }
   return result as DsmmPluginConfig;
 }
@@ -114,7 +108,7 @@ export class DsmmDeploymentConfig {
         snapshot[key] = presentValue(value, Reflect.get(presence, key));
       }
       return { config: validateSparseConfig(snapshot), revision: hash(presence) };
-    } catch { return configurationError(); }
+    } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; return configurationError(); }
   }
 
   async readGlobal(): Promise<GlobalConfigSnapshot> {
@@ -125,7 +119,7 @@ export class DsmmDeploymentConfig {
     const profile = this.profile();
     const global = await this.readGlobal();
     let settings;
-    try { settings = resolveDeployment(global.config, profile.config); } catch { return configurationError(); }
+    try { settings = resolveDeployment(global.config, profile.config); } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; return configurationError(); }
     const entry = this.ctx instanceof Context ? this.ctx.fiber.entry : undefined;
     const descriptor = entry === undefined ? undefined : this.ctx.get?.<{ describe(options?: { redactSecrets: boolean }): Array<{ ns: string; revision: number; base?: unknown; user?: unknown }> }>("settings")?.describe({ redactSecrets: true }).find((row) => row.ns === entry.options.id);
     if (this.profile().revision !== profile.revision || this.store.read().revision !== global.revision) throw new DsmmProfileError("conflict", "Deployment sources changed while projecting native state; refresh before retrying.");
@@ -140,7 +134,7 @@ export class DsmmDeploymentConfig {
     const current = await this.readGlobal();
     if (current.revision !== request.expectedRevision) throw new DsmmProfileError("conflict", "The global base changed; refresh before saving.");
     const config = editGlobalConfig(current.config, request.edits);
-    try { resolveDeployment(config, this.profile().config); } catch { configurationError(); }
+    try { resolveDeployment(config, this.profile().config); } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; configurationError(); }
     const saved = await this.store.save(`${JSON.stringify(config, null, 2)}\n`, request.expectedRevision, assertAuthority);
     return { config, revision: saved.revision };
   }

@@ -9,7 +9,7 @@ export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-
 const mime = { ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
 
 /** Serve only run-owned test HTML and exact installed, unmodified artifacts. */
-export async function startProfileUiServer({ nativeRequire, packageRoot, sha256 }) {
+export async function startProfileUiServer({ nativeRequire, packageRoot, sha256, composition = compositionBundle() }) {
   const frontendManifest = nativeRequire.resolve("@deepseek-ai/dsh-web-frontend/package.json");
   const frontendRoot = await realpath(join(dirname(frontendManifest), "dist"));
   const assets = await readdir(join(frontendRoot, "assets"));
@@ -32,7 +32,7 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256 
     for (const dependency of inject) assert.ok(NATIVE_IDS.includes(dependency) || dependency === COMPOSITION_ID, `${id} requires unprovided native client package ${dependency}`);
     rows.push({ id, url, inject, external: declaration?.external ?? [] });
   }
-  bundles.set("/bundles/composition.js", Buffer.from(compositionBundle()));
+  bundles.set("/bundles/composition.js", Buffer.from(composition));
   rows.push({ id: COMPOSITION_ID, url: "/bundles/composition.js", inject: ["@deepseek-ai/dsh-client-ui-renderer"], external: ["@deepseek-ai/dsh-client-connection/client", "@deepseek-ai/dsh-client-locale/client"] });
   bundles.set("/bundles/dsmm.js", await readFile(join(packageRoot, "lib", "client.js")));
   rows.push({ id: "@dsmm/dsmm", url: "/bundles/dsmm.js", inject: [COMPOSITION_ID, "@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-renderer"] });

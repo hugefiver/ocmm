@@ -24,7 +24,9 @@ export const UI_CHECKS_015 = Object.freeze([
   "sessionSidecarColdReopenStockHistory", "nativeManualModelSelectionWins",
 ]);
 export function sessionProfileChecksForVersion(version, options = {}) {
-  return startupProfileContract(version, options) === "central-read-lock-free-020"
+  const contract = startupProfileContract(version, options);
+  assert.notEqual(contract, "stable-native-first-021", "021 requires the stable native acceptance producer");
+  return contract === "central-read-lock-free-020"
     ? UI_CHECKS_015.map((check) => check === "startupProfileLockContention" ? "startupProfileReadLockFreeWriteExclusion" : check)
     : [...UI_CHECKS_015];
 }
@@ -45,6 +47,7 @@ export const inject = ["loader", "appExit"];
 /** Independent native observer; never supplies or replaces the DSMM runtime. */
 export function apply(ctx, config) {
   const contract = startupProfileContract(config.version, { sourceContract: config.sourceContract });
+  assert.notEqual(contract, "stable-native-first-021", "021 requires its own startup acceptance producer");
   if (contract === "central-read-lock-free-020" && config.scenario === "stable-selection") return observeReadLockFreeStartup(ctx, config);
   const startedAt = performance.now();
   let finished = false;
@@ -280,6 +283,7 @@ function validateRefusedStartup(contention) {
 
 export function validateStartupProfileProof(proof, { version, sourceContract, artifactSha256, installedRoot, profileStorage, ownedHome }) {
   const contract = startupProfileContract(version, { sourceContract });
+  assert.notEqual(contract, "stable-native-first-021", "021 is not the 020 startup proof grammar");
   if (contract === "historical-read-lock") {
     validateRefusedStartup(proof);
     return { contract };
@@ -353,7 +357,7 @@ export function validateStartupProfileProof(proof, { version, sourceContract, ar
 
 /** Check observed attempts, disk digests and native snapshots; check booleans are not proof. */
 export function validateSessionProfileProof(proof, { artifactSha256, installedRoot, version, sourceContract, profileStorage, ownedHome }) {
-  startupProfileContract(version, { sourceContract });
+  assert.notEqual(startupProfileContract(version, { sourceContract }), "stable-native-first-021", "021 is not historical session-profile proof grammar");
   const nativeOwnedRoot = requiresNativePickerProof(version);
   const schemaVersion = nativeOwnedRoot ? 2 : 1;
   assert.equal(proof?.schemaVersion, schemaVersion, "successor proof schema missing or differs from trusted version");

@@ -162,10 +162,8 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     promptOrder: 50,
     deepseekV4ProCalibration: "auto",
     deepseekV4ProDefaultReasoningEffort: "high",
-    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     deepseekFlashCalibration: "auto",
     deepseekFlashDefaultReasoningEffort: "high",
-    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
@@ -173,7 +171,7 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     presets: {
       materialize: false
     },
-    subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
+    subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
     runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
@@ -213,10 +211,8 @@ test("resolveConfig overlays plugin config on defaults", () => {
     promptOrder: 60,
     deepseekV4ProCalibration: "off",
     deepseekV4ProDefaultReasoningEffort: "high",
-    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     deepseekFlashCalibration: "auto",
     deepseekFlashDefaultReasoningEffort: "high",
-    deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
@@ -224,7 +220,7 @@ test("resolveConfig overlays plugin config on defaults", () => {
     presets: {
       materialize: false
     },
-    subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
+    subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
     guards: DEFAULT_GUARD_SETTINGS,
     runtimeRecovery: DEFAULT_RUNTIME_RECOVERY_SETTINGS,
@@ -251,22 +247,6 @@ test("resolveConfig supports every DeepSeek V4 Pro default reasoning effort", ()
   for (const effort of ["off", "low", "high"] as const) {
     assert.equal(resolveConfig({ deepseekV4ProDefaultReasoningEffort: effort }).deepseekV4ProDefaultReasoningEffort, effort);
   }
-});
-
-test("resolveConfig canonicalizes DeepSeek V4 Pro max reasoning presets", () => {
-  const normalized = resolveConfig({
-    deepseekV4ProDefaultReasoningEffort: "low",
-    deepseekV4ProMaxReasoningPresets: [
-      "dsmm-reviewer",
-      "invalid-role",
-      "dsmm-plan-critic",
-      "dsmm-reviewer"
-    ]
-  } as unknown as DsmmPluginConfig);
-
-  assert.equal(normalized.deepseekV4ProDefaultReasoningEffort, "low");
-  assert.deepEqual(normalized.deepseekV4ProMaxReasoningPresets, ["dsmm-plan-critic", "dsmm-reviewer"]);
-  assert.deepEqual(resolveConfig({ deepseekV4ProMaxReasoningPresets: [] }).deepseekV4ProMaxReasoningPresets, []);
 });
 
 test("resolveConfig supports partial lsp setting overlays", () => {

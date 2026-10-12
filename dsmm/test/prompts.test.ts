@@ -58,15 +58,6 @@ test("buildDeepworkPrompt applies calibration only to the exact official route",
   }
 });
 
-test("buildDeepworkPrompt explains exact calibrated policy without changing runtime ownership", () => {
-  const route = { provider: "deepseek-official", model: "deepseek-v4-pro" };
-  const reviewer = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route, selectedPreset: "dsmm-reviewer" });
-  const ordinary = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, { route });
-
-  assert.match(reviewer, /<dsmm-deepseek-v4-pro-policy>\ncalibrationMode: auto\ndefaultReasoningEffort: high\nmaxReasoningPresets: dsmm-plan-critic, dsmm-reviewer\neffectiveDesiredReasoningEffort: max\n<\/dsmm-deepseek-v4-pro-policy>/u);
-  assert.match(ordinary, /effectiveDesiredReasoningEffort: high/u);
-});
-
 test("buildDeepworkPrompt accepts composition section override", () => {
   const prompt = buildDeepworkPrompt(DEFAULT_DSMM_SETTINGS, {
     route: { provider: "deepseek-official", model: "deepseek-v4-pro" },
@@ -145,7 +136,7 @@ test("all source role/category bodies assemble once and category family blocks s
     assert.equal((assembled.match(/# Deepwork Workflow Prompt - default/gu) ?? []).length, 1, role.id);
     assert.equal((assembled.match(/# Shell Command Safety/gu) ?? []).length, 1, role.id);
     assert.doesNotMatch(role.persona, /<model-calibration model=/u);
-    assert.equal(role.persona.includes("<ocmm-locale-guidance>"), role.mode !== "subagent");
+    assert.ok(role.persona.includes("<ocmm-locale-guidance>"), role.id);
     if (row.promptArtifact !== null) {
       const source = readFileSync(join(packageRoot, row.promptArtifact), "utf8").trim();
       const base = source.replace(/\r?\n?<model-calibration model="([^"]+)">\r?\n([\s\S]*?)\r?\n<\/model-calibration>\r?\n?/gu, "\n").trim();

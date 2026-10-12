@@ -1,12 +1,12 @@
 # DSMM native client design system
 
-## 0. Research Log
+## 0. Native contract
 
 This is an extension of the existing DSH Settings interface, not a new application or a redesign. The selected reference is the native DSH 0.2.0-rc.2 system; no unrelated brand, font, styling framework or animation dependency is needed. Historical design research is unavailable and is not reconstructed here.
 
 Read-only extraction used the installed DSH package's `dsh-client-ui-theme`, `dsh-client-ui-primitives`, `dsh-client-ui-settings-general`, `dsh-client-ui-settings-models` and `dsh-client-ui-settings-plugins`. Relevant authored sources are `ui-theme/src/styles/{base,design-platform,focus}.css`, `ui-primitives/src/{Button,Input}.module.css`, and the Settings/Models section CSS embedded in their published client bundles. The values below describe the shipped default theme; installed theme overrides remain authoritative. No vendor code, theme or user configuration is changed.
 
-This document records the working DSMM 0.1.9 native UI design contract. Stage D has real owned keyless rc.2 Web Plugins item/bundle/row proof, including separate layer saves, inheritance, conflict retention, cold-off pending, independent restart and native 375/768/1280 light/dark rendering. It is not final publication, frozen-artifact or actual Electron acceptance. Historical completed proofs remain unchanged; 0.1.7 is npm published and historically Desktop installed but its failed terminal verification is not a completed GitHub Release. Native browser authentication remains intact. The original release-only 0.1.9 proposal preserved 0.1.8 behavior; today's A/B/C0/C/D source changes are separate. Release Action verification controls retain an exact shared 20-minute 404 visibility budget and a 45-minute verify job. The 0.1.8 npm publication is genuine but its original terminal receipt failed with GitHub skipped; the historical Desktop 0.1.7 and CLI/TUI 0.1.6 rollout identities remain unchanged until a separately completed successor.
+DSMM-owned settings extend public native slots and preserve native authentication, navigation, model selection and service ownership. Browser verification does not prove installed Electron behavior or publication.
 
 ## 1. Atmosphere & Identity
 
@@ -198,6 +198,32 @@ Native `SettingsFormModel`/`configForms` manage the host plugin-config document,
 
 ### Implemented Reusable Patterns
 
+### Profiles: four independent zones
+
+Browse lists saved labels, IDs, immutable revisions and persistent warnings/errors. Opening changes only the editor; dirty changes require explicit discard confirmation with Escape cancellation and focus return. Edit shows draft and saved revision separately, with Save/Reload at the top. Structured routes, invocation levels, business locale, optional roles and topology share the original JSONC draft. Structured edits change only their addressed path; comments and unrelated bytes remain untouched. Blank labels retain their original bytes and use the ID as display fallback.
+
+Future default shows the exact `selectedId`, `appliedRevision` and `selectionRevision` pin. Only a saved revision can be selected; Save neither selects a future default nor applies to the current session. Reset affects only future sessions. Current session displays exact `admittedSelection` and `admissionEpoch`; the sidecar selection remains CAS authority, not inferred live admission. Missing admission identity is unknown/captured, never inferred from a newer future default. Apply/Baseline retain exact-root idle/CAS authority and leave the native root model untouched; Use profile model remains an explicit separate native action.
+
+Advanced JSONC is initially collapsed. A user-triggered validation refusal opens it and focuses/selects the Host's UTF-16 location; background refresh never steals focus. Persistent warning rows expose code, field and a nonblocking marker outside any disclosure; optional explanations may collapse. Draft, saved, future-pin and current-admission warnings remain separate. Unknown fields and exceptions never echo raw diagnostic values. Error code, safe field and location remain actionable; all errors other than blank-label warnings still block their operation.
+
+Invocation `normal` is a read-only default-route alias; only low/high/max overrides are editable, and orchestrator has no levels. Each override is inherit, exact effort-only, or a complete provider/model route; changing mode replaces that override, and an explicit model change clears only its stale effort. Catalog refresh/unavailability preserves manual values. Business locale is inherited when omitted and does not change the en/zh interface locale. Named profiles expose only subagent topology, never deployment-only permissions/background/depth. Role required/ceiling state comes from server metadata, with reasons adjacent to controls; absent metadata stays unknown and cannot justify lifting a ceiling. Current-session startup-binding readiness uses only the server admission DTO, never desired settings as actual state.
+
+Each zone is a one-column, borders-only semantic section using the existing spacing and type tokens. No session means an explicit unavailable current zone. Child lists, queue/steer and same-run handoff belong in the Conversation runtime surface only after a real child DTO/RPC exists; no pending/fake child controls are part of Profiles.
+
+### Conversation child controls
+
+An additive `conversation.view` entry with id `dsmm-children` supplies the native Deepwork children tab; the host owns tab navigation and Session scope. The view uses the existing one-column 760px measure, native typography, wrapping IDs, borders-only fieldsets, Button and semantic forms. It does not replace Profiles or the native composer/attachment surface.
+
+The child controller consumes the separate `@dsmm/dsmm-children` remote contribution and binds the exact public native Session binding and connection generation. Session/owner/connection replacement and observed parent admission changes fence callbacks and late responses. Missing scope/service is unavailable, not an empty successful catalog. Describe and descendants are independently diagnosable; mismatched epochs are not combined. Status is explicitly last observed and refreshed read-only, without a second scheduler or fabricated activity.
+
+Run rows display only published invocation identity, role, level, route source, mode and run/child/job IDs. A starting row has no fabricated invocation or action ID. Same-run background transition uses its observed toolCallId/runId and captured parent epoch; a pending click is single-flight, and accepted job receipts are retained without claiming the child completed. Compatibility `route` and `routeSource` are labelled as invocation projections, not route comparison or verified live headers.
+
+Route comparison uses only the shared `DsmmRoleRouteComparison`: Initial route is separately known from `invocation-capture` or unknown with `missing-invocation-capture`; Latest own native request route is separately known from `own-native-request-header` or unknown with its reported `no-own-request-header`, `invalid-own-request-header` or `not-observed` reason. The two routes and their effort values never substitute for each other. Run details use `invocation.routeComparison`; the child row presents its top-level `routeComparison` before invocation details, including legacy rows with no invocation. Missing comparison is explicitly unobserved, not repaired from compatibility route, root/profile settings or route-lock lookup. A legacy native execution observation is not labelled as an initial capture; missing invocation never creates a role or invocation level. These semantic definition lists remain one-column, use the existing metadata tokens and wrap long provider/model/source text.
+
+Direct continuable children have labelled Queue/Steer message forms, native text/image ContentBlocks and interrupt actions only when the server capabilities and row controls both permit them. Picked image bytes are encoded as image bodies, never fabricated durable attachment references or Agent senders. Image capability refusal leaves text and picked drafts available for correction; no automatic upload retry or message resend occurs. Accepted messages and interrupt acknowledgements do not alter observed execution/activity or completion. Transport loss retains the draft with an unknown-outcome guard; the user must check the native child conversation and explicitly allow a new message before sending again.
+
+Descendant rows remain inspection-only even when the caller can see the subtree; diagnostics for corrupt/unsupported/unavailable branches remain visible. Captured and legacy-conservative evidence, original/parent epochs, proven fields and all limitations are persistent semantic text, not hidden behind a badge or inferred from desired settings. Disabled controls expose finite local bilingual explanations and a Refresh recovery path. Native focus rings and form keyboard semantics remain; no motion, shadow, framework, font or dependency is added. Browser/native QA remains distinct from controller/component tests and compile/bundle evidence.
+
 The host primitives above are dependencies, not package-owned implementations. Package-owned patterns below are implemented and reused at least twice.
 
 The structured editor uses a reusable route field group for primary and fallback candidates and a reusable runtime-policy group for profile defaults and role overrides. Both use the host primitives and the geometry above, with borders-only fieldsets and wrapping action rows. Their selectors are advisory, and exact manual values remain editable without a catalog listing.
@@ -214,7 +240,7 @@ Changing an editor's profile is distinct from activating that profile. Do not si
 
 DSMM content uses borders-only grouping and the host's existing neutral surfaces. Native layer-1/layer-2/module surfaces, md control radii and subtle divider tokens supply the hierarchy; no new shadows, floating cards, nested modal or backdrop. The host Settings shell already owns `--dsw-elevation-prominent` and its panel radius. DSMM must not copy or override that shell. Strengthening an editable control boundary with an existing text token for accessibility is scoped to DSMM controls, not a vendor/theme redesign.
 
-## 8. Accessibility Constraints & Accepted Debt
+## 8. Accessibility constraints
 
 Target WCAG 2.2 AA for the DSMM-owned section and its tested states. All text/control/status names must remain understandable without color, hover or a pointing device.
 

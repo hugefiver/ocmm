@@ -393,22 +393,7 @@ If reverse-engineering proprietary software, the extracted source is the vendor'
 
 ## Phase 9 cleanup specifics for bundled-JS work
 
-```bash
-# Remove extracted bundles — they may contain proprietary source
-rm -f /tmp/extracted-bundle.js /tmp/extracted-*.js
-rm -rf /tmp/asar-extracted/
-rm -rf /tmp/_MEI*
-
-# Remove strings dumps
-rm -f /tmp/*-strings.txt /tmp/*-strings-v*.txt
-
-# Remove Python helper scripts created for parsing
-rm -f /tmp/extract_bundled_js.py /tmp/parse_template.py
-
-# Verify the extraction directory is gone (if you used a workspace dir)
-ls /Users/$USER/local-workspaces/*-extracted/ 2>/dev/null
-# rm -rf only after journal review confirms nothing important is there
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register exact task-owned paths for extracted bundles, ASAR or `_MEI` extraction directories, strings dumps, and parsing helpers in the temporary resource checklist. Resolve and verify each path and its ownership before deletion, then verify cleanup. Don't infer ownership from a filename, directory prefix, or location under `/tmp`; extracted proprietary source must stay out of commits and public reports.
 
 ---
 

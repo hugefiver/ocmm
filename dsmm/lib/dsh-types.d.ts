@@ -7,6 +7,8 @@ export interface DshSessionHeader {
     cwd?: string;
     agentPreset?: string;
     origin?: string;
+    parentSession?: string;
+    delegationDepth?: number;
 }
 export interface DshSession {
     readonly id?: string;
@@ -252,11 +254,12 @@ export interface DshContext {
     commands?: DshCommandsRegistry;
     tools?: DshToolRuntime;
     llm?: DshLlmRuntime;
+    dsmmRuntimeIntegration?: import("./runtime-integration.js").DsmmHostRuntimeIntegration;
     get?<T = unknown>(name: string): T | undefined;
     provide?(name: string, service: unknown): unknown;
     plugin?(plugin: unknown, config?: unknown): PromiseLike<unknown>;
     inject?(dependencies: string[], installer: (readyCtx: DshContext) => unknown): unknown;
-    effect?(callback: () => void | (() => void)): unknown;
+    effect?(callback: () => () => void): unknown;
     on?(event: "agent/request", listener: (frame: AgentRequestFrame, next: () => Promise<DshLlmCallConfig>) => Promise<DshLlmCallConfig>, options?: boolean | {
         prepend?: boolean;
         global?: boolean;

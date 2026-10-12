@@ -35,7 +35,7 @@ Examples of a valid toggle proof:
 
 If you can't construct a toggle proof, you haven't confirmed the cause. Run one more round.
 
-### Update the journal
+### Capture current mechanism and proof in temporary evidence
 
 ```markdown
 ## Root cause (confirmed <ISO timestamp>)
@@ -61,7 +61,7 @@ Capture a case that fails *specifically because of this bug*. Where the reposito
 - **Failure output clearly shows what the bug looks like.** If someone reads only the failure output, they understand what's broken.
 - **Minimum infrastructure.** Don't spin up the whole server if a smaller reproducible run captures the mechanism.
 
-Run the test or scenario. Confirm it fails before the fix. Paste the failure output into the journal:
+Run the test or scenario. Confirm it fails before the fix. Capture the failure output in conversation or task-owned temporary evidence:
 
 ```markdown
 ### Red phase (<ISO timestamp>)
@@ -92,7 +92,7 @@ Resist all of these. Fix the bug. Note the surrounding issues for follow-up. Mov
 
 Only cleanup directly related to the fix. Do not re-architect.
 
-If the code around the fix is rough, note it in the journal as a follow-up for the user; do not expand scope here. Refactoring during a bugfix is how one-line fixes turn into hundred-line diffs nobody can review.
+If the code around the fix has an unresolved concern, report its current impact to the user; don't expand scope or create a repository follow-up journal.
 
 ### 4. Regression — full suite green
 
@@ -104,9 +104,9 @@ If they don't, your "fix" broke something else. Back to Phase 6 with the new fai
 
 If diagnosis burned extra rounds *because state was invisible* — no log line told you which branch ran, what the value was, whether the fallback engaged — that invisibility is a defect adjacent to the bug, and this is the one moment where adding a log line is NOT "just in case": this session is the evidence that the line earns its place. Ship the fix WITH that line, written to the standard of `references/logging.md` — level chosen by consumer, placed at the decision point, data in fields not interpolation, through the project's designated logger. If the project deliberately does not log, respect that and skip this step.
 
-This does not soften the artifact rule: every temporary `print` / `dbg!` / `console.log` planted *during* diagnosis stays journaled and gets scrubbed in Phase 9. The triage is the consumer test — a line whose ongoing consumer you can name is part of the fix; a line that only served today's session is an artifact.
+Every temporary `print` / `dbg!` / `console.log` added during diagnosis belongs in the task-owned resource checklist and is removed in Phase 9. A line with a current ongoing consumer may be part of the authorized fix; a line used only for diagnosis is temporary instrumentation.
 
-### Update the journal
+### Capture current verification evidence
 
 ```markdown
 ### Green phase (<ISO timestamp>)
@@ -122,4 +122,4 @@ Full suite: <N tests, <M failures — should be 0> (or <none exists>)
 
 No captured failure → no proof the fix addresses the reported bug. Only proof it doesn't break tests that already existed. Keep the reproduction as a test where the repository keeps tests for this behavior; otherwise the captured before/after run is the proof.
 
-Where tests are kept, a test written *after* the fix might still pass with the fix reverted. If that's the case, the test doesn't lock the bug — it locks something else. Always verify the same case fails without the fix and passes with it, whether test or captured run. The journal should show both outputs.
+Where tests are kept, verify that the same valid regression case fails without the fix and passes with it. Keep before/after outputs in task-owned temporary evidence or conversation, not a repository journal. Tests protect final valid functionality and external interfaces, not descriptive wording, decision counterexamples, or removed-component absence. Update tests for changed requirements and delete tests dedicated to removed components; committed contracts and authorization remain binding.

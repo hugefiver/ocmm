@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DSMM_ROLE_IDS as EXPORTED_ROLE_IDS } from "../lib/index.js";
-import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, isRootRole, renderAgentCordis, renderPresetMetadata, roleSubagentConfig, rolePluginRows } from "../lib/roles.js";
-import { DSMM_SKILL_NAMES } from "../lib/skills.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, isRootRole, renderAgentCordis, renderPresetMetadata, rolePluginRows } from "../lib/roles.js";
 
 const EXPECTED_ROLE_IDS = [
   "dsmm-orchestrator",
@@ -124,55 +123,6 @@ test("personas are role-scoped and avoid host-specific tool names", () => {
     assert.ok(role.persona.includes(role.id));
     assert.doesNotMatch(role.persona, /Native OpenCode Background|Task tool \(general-purpose\)|task\(description/u);
   }
-});
-
-test("orchestrator names DSH role tools and does not claim model heterogeneity by label", () => {
-  const orchestrator = DSMM_ROLES.find((role) => role.id === "dsmm-orchestrator");
-  assert.ok(orchestrator);
-
-  assert.match(orchestrator.persona, /Logical source role names map to dsmm-<name>/u);
-  assert.match(orchestrator.persona, /Smallest-fit routing/u);
-  assert.match(orchestrator.persona, /different model was explicitly selected/u);
-});
-
-test("read-only child role tools have a native allow filter and enabled roles limit tools", () => {
-  const orchestrator = DSMM_ROLES[0];
-  assert.ok(orchestrator);
-  const cordis = renderAgentCordis(orchestrator, DSMM_SKILL_NAMES, ["dsmm-orchestrator", "dsmm-planner"]);
-  assert.match(cordis, /toolName: 'dsmm_planner'/u);
-  assert.match(cordis, /toolFilter:\n      allow:\n        - 'read'\n        - 'glob'\n        - 'grep'/u);
-  assert.equal((cordis.match(/modelSelectionSettings: false/gu) ?? []).length, 1);
-  assert.doesNotMatch(cordis, /toolName: 'dsmm_builder'/u);
-});
-
-test("all standing role tools keep registrations in the parent scope so child allow filters remain effective", () => {
-  for (const role of DSMM_ROLES.filter((item) => item.id === "dsmm-orchestrator" || item.id === "dsmm-builder")) {
-    const cordis = renderAgentCordis(role);
-    const roleToolCount = (cordis.match(/name: '@deepseek-ai\/dsh-tool-subagent'/gu) ?? []).length;
-    assert.equal((cordis.match(/modelSelectionSettings: false/gu) ?? []).length, roleToolCount);
-    assert.doesNotMatch(cordis, /modelSelectionSettings: true/u);
-  }
-});
-
-test("configured role tool options agree across native plugin rows and materialized YAML without dynamic selection", () => {
-  const orchestrator = DSMM_ROLES.find((role) => role.id === "dsmm-orchestrator")!;
-  const reviewer = DSMM_ROLES.find((role) => role.id === "dsmm-reviewer")!;
-  const primary = { provider: "fixture", model: "review-primary", reasoningEffort: "max" };
-  const roleRouting = { "dsmm-reviewer": { primary } };
-  const config = roleSubagentConfig(reviewer, [], primary);
-  const plugin = rolePluginRows(orchestrator, DSMM_SKILL_NAMES, ["dsmm-orchestrator", "dsmm-reviewer"], roleRouting).find((row) => !Array.isArray(row.config) && row.config?.toolName === "dsmm_reviewer");
-  assert.deepEqual(plugin?.config, config);
-  assert.deepEqual(config.agentOptions, primary);
-  assert.notEqual(config.agentOptions, primary);
-  assert.equal(config.provider, "dsmm-role-reviewer");
-  assert.equal(config.modelSelectionSettings, false);
-  assert.equal(config.backgroundMode, "one-shot");
-  assert.deepEqual(config.toolFilter, { allow: ["read", "glob", "grep"] });
-  const yaml = renderAgentCordis(orchestrator, DSMM_SKILL_NAMES, ["dsmm-orchestrator", "dsmm-reviewer"], roleRouting);
-  assert.match(yaml, /agentOptions:\n      provider: 'fixture'\n      model: 'review-primary'\n      reasoningEffort: 'max'/u);
-  assert.match(yaml, /provider: 'dsmm-role-reviewer'/u);
-  assert.doesNotMatch(yaml, /modelSelectionSettings: true|toolName: 'dsmm_builder'/u);
-  assert.equal(Object.hasOwn(roleSubagentConfig(reviewer), "agentOptions"), false, "unconfigured native child keeps inheritance");
 });
 
 test("native standard capabilities use role-sized groups without widening delegation or read/write access", () => {

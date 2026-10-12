@@ -161,7 +161,7 @@ assert p.poll() is not None and p.poll() != 0, 'expected crash, got clean exit'
 log.success(f'confirmed crash (exit {p.poll()})')
 ```
 
-Journal this script path. Run it as your "red test":
+Put this script's exact owned path in the temporary resource checklist. Run it as your failing reproduction:
 
 ```bash
 python /tmp/debug-repro.py
@@ -244,24 +244,12 @@ This is the best way to debug a specific crash repeatably — pwntools drives in
 
 - **Python version**: pwntools supports Python 3.8+. Very old distros may not have it.
 - **`p.interactive()` blocks.** It's for manual exploration; remove it from automated scripts.
-- **ASLR on local runs**: turn off for reproducibility during debugging: `echo 0 | sudo tee /proc/sys/kernel/randomize_va_space` (remember to revert — journal this!).
+- **ASLR on local runs**: changing system ASLR needs specific authorization. If authorized, capture its prior state and exact restoration action in the temporary resource checklist before changing it; restore that state at cleanup.
 - **`gdb.debug()` requires `gdb-multiarch`** for cross-arch binaries.
-- **Subprocess cleanup**: if your script crashes, orphan `./target` processes may linger. Kill them at Phase 9 or add `atexit` cleanup.
+- **Subprocess cleanup**: if your script crashes, task-owned target processes may linger. Phase 9 or `atexit` cleanup must verify each recorded PID and start identity before terminating it; a binary name alone doesn't establish ownership.
 
 ---
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Remove pwntools debug scripts
-rm -f /tmp/debug-*.py
-rm -f /tmp/debug-crashes.txt
-
-# Kill orphan target processes from failed runs
-pkill -f './target' || true     # adjust to actual binary name
-
-# Restore ASLR if disabled
-# echo 2 | sudo tee /proc/sys/kernel/randomize_va_space     # Linux default
-
-# Revert any binary patches applied for testing (see native-binary.md for details)
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register exact owned script/crash-output paths, target and debugger process PIDs and start identities, and any specifically authorized ASLR change's captured prior value and restoration action. Verify process identity before terminating an orphan; a binary name isn't ownership evidence. Restore ASLR to its captured value, not an assumed default. Restore only this task's temporary binary patches using the recorded target identity, offsets, and original bytes, preserving the authorized final fix.

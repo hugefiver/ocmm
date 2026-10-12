@@ -224,7 +224,7 @@ If any of those leak into production, the dev gate is broken. Fix the gate befor
 ## Cross-skill references
 
 - For **render performance / Lighthouse 100** work, see `../perfection/react-perf-tooling.md` — Playwright + `react-scan/lite` integration used during automated audits.
-- For **debugging an in-flight React bug**, see `../../debugging/references/tools/react-devtools.md` — runtime/static use during a bug hunt rather than initial setup.
+- For **debugging an in-flight React bug**, load the native debugging skill when available and resolve its actual references/runtimes/node.md and references/tools/playwright-cli.md from that skill's returned resourceBase. Use already available React/browser tooling; no cross-skill relative path or unbundled react-devtools resource is assumed. If debugging is unavailable, report that limitation.
 - The Phase 0 Design System Gate (in `README.md`) and this React Dev Tooling Gate are both pre-implementation gates. Run Phase 0 first (design system must exist), then inspect existing tooling and its development gate; absent tooling is a reported coverage limitation, not installation authority.
 
 ## Mantra

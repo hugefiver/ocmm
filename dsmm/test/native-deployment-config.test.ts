@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import type { DshAgent } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
 import { nativeConfigRun } from "./native-config-fixture.ts";
 import { runFixtureTurn } from "./native-routing-fixture.ts";
 
-const asDshAgent = (agent: Agent) => agent as DshAgent;
+type DshAgent = Omit<PackageDshAgent, "ctx">;
+
+const asDshAgent = (agent: Agent): DshAgent => agent;
 function gate() {
   let release!: () => void;
   const promise = new Promise<void>((resolve) => { release = resolve; });

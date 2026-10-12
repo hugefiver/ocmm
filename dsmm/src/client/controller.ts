@@ -5,15 +5,16 @@ import type {} from "@deepseek-ai/dsh-agent-preset-registry";
 import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
 import type { DsmmProfilesRemote } from "../profile-remote.js";
 import { isProfileId } from "../profile-remote.js";
-import type { ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
+import type { ProfileDiagnostic, ProfileDiagnosticCode, ProfileDiagnosticLocation, ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
+import { safeIssue } from "./diagnostics.js";
 import type { SessionProfileSnapshot } from "../profile-types.js";
 import type { ModelCatalog, SessionSelectModelRequest, SessionSelectModelValue } from "@deepseek-ai/dsh-api-session-controller";
 import { editStructuredPath, moveFallback } from "./structured.js";
 import type { JsonPath } from "./structured.js";
 
-export interface ProfileEditor { id: string; content: string; revision: string | null }
+export interface ProfileEditor { id: string; content: string; revision: string | null; warnings?: ProfileDiagnostic[] }
 export interface ProfilesNotice { key: "saved" | "applied" | "reset"; id?: string }
-export interface ProfilesIssue { kind: "domain" | "transport" | "assembly"; code: string; message?: string; field?: string; source?: "selection" | "profile-model" }
+export interface ProfilesIssue { kind: "domain" | "transport" | "assembly"; code: string; message?: string; field?: string; reason?: ProfileDiagnosticCode; location?: ProfileDiagnosticLocation; source?: "selection" | "profile-model" }
 export interface SessionApplyOptions { useProfileModel?: boolean }
 export interface ProfilesViewSnapshot {
   snapshot: ProfileSnapshot | null;
@@ -34,8 +35,10 @@ export interface ProfilesViewSnapshot {
   sessionNotice: "applied" | "reset" | "applied-with-model" | "mode-on" | "mode-off" | null;
   invalidFields: string[];
   editorEpoch: number;
+  validationEpoch: number;
 }
 export interface ProfilesActions {
+  readProfileView(): ProfilesViewSnapshot;
   refresh(): Promise<void>;
   open(id: string): Promise<void>;
   create(): Promise<void>;
@@ -85,7 +88,7 @@ export function canReconcileSelection(snapshot: ProfileSnapshot | null): boolean
 /** Stable native Store seat, with no filesystem or transport authority. */
 export class ProfilesController {
   private current: ProfilesViewSnapshot = { snapshot: null, editor: null, dirty: false, busy: null, issue: null, notice: null, pendingEditor: null,
-    catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0 };
+    catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0, validationEpoch: 0 };
   private accepted: ProfileEditor | null = null;
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -118,6 +121,7 @@ export class ProfilesController {
     },
   };
   readonly actions: ProfilesActions = {
+    readProfileView: () => this.store.getSnapshot(),
     refresh: () => this.refresh(), open: (id) => this.open(id), create: () => this.open(NEW_EDITOR), reload: () => this.reload(),
     editId: (id) => this.editId(id), editContent: (content) => this.editContent(content),
     save: () => this.save(), apply: () => this.apply(), reset: () => this.reset(),
@@ -326,7 +330,7 @@ export class ProfilesController {
     const result = await request;
     if (result.ok) return result.value;
     if (result.error.code === "dsmm-profiles/refused") {
-      throw { kind: "domain", ...result.error.details } satisfies ProfilesIssue;
+      throw safeIssue(result.error.details);
     }
     if (["gateway/input-invalid", "gateway/arguments-invalid"].includes(String(result.error.code))) {
       throw { kind: "domain", code: "validation", field, message: "The native Host rejected a request field. Check the profile ID and document size before retrying." } satisfies ProfilesIssue;
@@ -343,7 +347,10 @@ export class ProfilesController {
     const live = (): boolean => !this.disposed && generation === this.generation;
     this.publish({ busy, issue: null, notice: null });
     try { await operation(live); }
-    catch (error) { if (live()) this.publish({ issue: this.issue(error) }); }
+    catch (error) { if (live()) {
+      const issue = this.issue(error);
+      this.publish({ issue, ...(busy === "save" && issue.kind === "domain" && issue.code === "validation" ? { validationEpoch: this.current.validationEpoch + 1 } : {}) });
+    } }
     finally { if (live()) this.publish({ busy: null }); }
   }
   async refresh(): Promise<void> {
@@ -427,7 +434,7 @@ export class ProfilesController {
     const editor = this.current.editor;
     if (editor === null || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0) return;
     if (!isProfileId(editor.id)) {
-      this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null });
+      this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null, validationEpoch: this.current.validationEpoch + 1 });
       return;
     }
     await this.perform("save", async (live) => {
@@ -437,7 +444,7 @@ export class ProfilesController {
       // The accepted response proves save; applying remains a separate commit.
       const old = this.current.snapshot!;
       const profiles = old.profiles.filter((item) => item.id !== document.id);
-      profiles.push({ id: document.id, revision: document.revision, ...(document.label === undefined ? {} : { label: document.label }) });
+      profiles.push({ id: document.id, revision: document.revision, ...(document.label === undefined ? {} : { label: document.label }), ...(document.warnings === undefined ? {} : { warnings: document.warnings }) });
       profiles.sort((a, b) => a.id.localeCompare(b.id));
       this.publish({ snapshot: { ...old, profiles }, notice: { key: "saved", id: document.id } });
     });
@@ -460,7 +467,7 @@ export class ProfilesController {
   }
   private acceptSelection(snapshot: ProfileSnapshot, notice: ProfilesNotice): void {
     this.publish({ snapshot, notice: snapshot.selectionError === undefined ? notice : null,
-      issue: snapshot.selectionError === undefined ? null : { kind: "domain", ...snapshot.selectionError, source: "selection" } });
+      issue: snapshot.selectionError === undefined ? null : { ...safeIssue(snapshot.selectionError), source: "selection" } });
   }
 }
 

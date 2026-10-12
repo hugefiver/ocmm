@@ -62,7 +62,7 @@ Multiple values at once:
 dbg!(&user, &request, elapsed.as_millis());
 ```
 
-`dbg!` writes to stderr, so it won't corrupt stdout-based pipelines. **Journal each `dbg!` you add**; revert at Phase 9.
+`dbg!` writes to stderr, so it won't corrupt stdout-based pipelines. List each temporary owned hunk in the resource checklist and remove only those hunks at Phase 9.
 
 ---
 
@@ -217,20 +217,4 @@ Now `rust-gdb ./target/release/my_binary` works on release builds. This is requi
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Revert dbg! macro additions
-git diff | grep -E 'dbg!\('
-# For any file with dbg! additions:
-git checkout <file>
-
-# Unset env vars
-unset RUST_LOG RUST_BACKTRACE
-
-# Kill any rust-gdb/lldb sessions
-pkill -f 'rust-gdb' || true
-pkill -f 'rust-lldb' || true
-pkill -f '^lldb ' || true
-
-# tokio-console binds 6669 by default
-lsof -iTCP:6669 -sTCP:LISTEN -nP 2>/dev/null
-```
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register this task's temporary `dbg!` hunks, debugger and tokio-console process PIDs and start identities, listener ports, and exact prior `RUST_LOG`/`RUST_BACKTRACE` states (including whether each was unset). Remove only owned source hunks, never restore whole files. Restore the captured environment states and close only owned sessions after verifying process identity; port 6669 alone doesn't establish ownership.

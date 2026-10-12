@@ -1,6 +1,61 @@
-# DSMM 0.2.0 Source Readiness, Release and Rollback
+# DSMM Source Readiness, Release and Rollback
 
-## Current working-source authority
+## 0.2.1 first usable release contract
+
+The authorized source identity is **@dsmm/dsmm@0.2.1**, tag **dsmm-scoped-v0.2.1**, artifact **dsmm-dsmm-0.2.1.tgz**. This is a distinct source and acceptance contract, not a relabelled 0.2.0 receipt or an inferred later-version override. The public npm 0.2.0 package and every historical tag, package, asset and receipt remain immutable. Parent-owned Git operations select the final committed source; a working checkout or local smoke receipt is not release completion.
+
+### Stable delivery boundary
+
+The nine public exports are `.`, `./preset-skills`, `./session-persistence`, `./subagent-runtime`, `./legacy-read-host`, `./client`, `./package.json`, `./locale/en.json` and `./locale/zh.json`. The `./subagent-runtime` entry resolves to the real **Host-owned native plugin** `lib/runtime-integration.{js,d.ts}`, not the internal runtime class alone. `./legacy-read-host` exposes a **programmatic library factory**, not a Loader plugin or automatic migration facility. Runtime JS and declarations, compiled client, packaged locales, skills, licenses and source provenance must all be present and match the frozen tarball and registry installation.
+
+Stable acceptance covers configuration levels and topology, locale selection, Profiles draft/global-default/root-overlay/captured-child state, sanitized diagnostics, and native child controls. Saving a draft is not activation; global Apply affects future ordinary roots; current-session Apply is owner-authorized, idle-only and CAS-fenced; captured children retain their original immutable metadata and route. Read-only child policy, lifecycle ownership, before-inbox admission/delivery cutoffs, strict operator/Gateway authority and revision/epoch fences remain mandatory. Core stays mounted cold-off and exposes global/native-profile editors without creating sessions, remounting or silently restarting. A profile cannot bypass the global module master or startup substrate.
+
+`experimentalLegacyRead` is **OFF unless explicitly configured through programmatic composition**. The removed `legacyRead` option is not consumed. Automatic legacy migration/rollout and the unfinished experimental legacy surface are not required release gates. The complete 375px/theme/Lighthouse matrix and production authenticated Web/Desktop activation are not claimed by the bounded first-usable browser acceptance.
+
+### Explicit source and receipt APIs
+
+The DSMM-local `release-contract.mjs` exposes exact `isSource021`, `sourceContractForVersion`, `startupProfileContract`, `COMPILED_NAMES_021`, `PUBLIC_RUNTIME_EXPORTS_021` and `STABLE_UI_CHECKS_021` policies. `startupProfileContract("0.2.1", {sourceContract: "0.2.1"})` selects **`stable-native-first-021`**. It does not select the 0.2.0 central startup proof or the old menu/mode grammar. An omitted source contract retains the historical default interpretation; an explicit mismatched or unreviewed source contract fails closed. Historical picker/session-profile producers refuse the explicit 0.2.1 identity rather than fabricate old UI proof.
+
+`dsmm-release.mjs` selects the independent six-check stable UI grammar only for exact 0.2.1 and binds it to installed version, artifact SHA256, genuine native Gateway/operator, observed RPC/stream activity, actual native bootstrap and cleanup. `dsmm-registry-install-probe.mjs` selects nine exports and the complete stable compiled inventory only for 0.2.1. `check-dsmm-release-completion.mjs` consumes these local validators; Root controls and all 0.1.x/0.2.0 metadata, roles, mode, startup, receipt and default interpretations remain unchanged.
+
+### Fresh frozen-byte CI acceptance
+
+The required dedicated workflow sequence is:
+
+1. Resolve the exact tag, peeled source, workflow/control commit, event, fixed run/attempt and trusted default-branch ancestry. Verify source inputs in a fresh cold checkout with the fixed offline source snapshot; no old-Root fallback, skip or developer-cache substitution is accepted.
+2. Run source checks and build. Materialize only the explicitly authorized fixed third-party resources before build-bearing commands. Preserve unchanged Root package/lock/dependency policy; missing SDK/native/language-server tools fail and require reporting, not workstation installation.
+3. Pack **once with pinned pnpm**, between pre/post `assert-source` guards. Freeze the exact `dsmm-dsmm-0.2.1.tgz` bytes. Only the checked generated outputs and fixed materialized resources may accompany tracked tagged inputs.
+4. Independently install the frozen artifact into fresh native Web/headless homes. Bind the tarball and every trusted acceptance/support script read-only. No checkout import, repack, receipt adoption or fake callback-only UI is acceptance.
+5. Recheck cold Core, native readonly/persistence/history/LSP/lifecycle gates and real stable browser behavior. The cold public native composition must load base/web/DSMM bundles, explicitly disable stock subagent, load exactly one custom Host-owned runtime and Main, observe binding `dsmm`, `deliveryFenceReady: true`, `restartRequired: false`, and experimental legacy unconfigured/unavailable.
+6. Publish those unchanged accepted bytes through GitHub Actions OIDC with genuine CI provenance. No local publish token/static-auth fallback, publish retry or overwrite is permitted.
+7. Verify public registry digests, genuine provenance, exact registry bytes and a fresh profile-owned native headless installation; only then finalize non-overwriting public GitHub assets/checksums.
+8. Run the DSMM-local terminal checker for the exact terminated run/attempt from the released checkout.
+
+The real compiled browser gate uses the native Renderer and supported composition-owned operator/Gateway at **1280×900**, with a local deterministic SDK provider and no online account, credentials or quota. Its exact six checks are `publicNativeCapturedChild`, `browserEditSaveWarning`, `browserFutureApplyAndStaleCas`, `browserCurrentApplyAndStaleCas`, `browserChildrenNativeInboxReceipt` and `browserChildrenNativeMessage`. The same receipt also requires a browser-triggered foreground-to-background transition for the exact published native run/child, one idempotent native job, actual job completion/output, read-only child denials and no-event/no-model-call cutoff refusals. Page errors and external requests must be empty; the producer must observe genuine native child message delivery and captured metadata, not merely return completion callbacks. No pre-CI local smoke receipt satisfies this gate: each new frozen CI tarball must exercise these surfaces again.
+
+The required read-only hook support set is `profile-ui-harness-{server,browser,native}.mjs`, `native-picker-{harness,browser,proof}.mjs`, `release-contract.mjs`, `stable-native-acceptance.mjs` and `profile-ui-harness-stable021{,-native}.mjs`. The historical hook remains available for its own identities; exact 0.2.1 dispatches only to the stable producer. Its owned shell renders actual installed Profiles/Children contributions using the native Renderer and native UiSession scope, without replacing vendor bundles or manufacturing a session binding.
+
+The owned native root uses the supported `standard` preset composition, including a Jobs controller serving its actual owner scope. Captured child identity binds the native session ID, admission epoch, route and immutable capture; start-count evidence compares the native child catalog. Background request-count evidence binds the original child model and fixture invocation, while native parent completion handling retains the parent's model authority.
+
+The 0.2.1 registry visibility budget remains **120,000 ms** by default, with at most **300,000 ms** explicitly permitted. Metadata, archive and provenance share one deadline; only post-publication HTTP 404 reads may wait. The special 20-minute policy remains exclusive to historical 0.1.9. Wrong bytes/provenance/identities and non-404 transport failures fail closed; publisher absence checks stay single-shot.
+
+### Terminal authority and immutable failure handling
+
+After the authorized matching workflow terminates, use the released checkout and a new receipt path:
+
+```powershell
+node dsmm/scripts/check-dsmm-release-completion.mjs terminal --run-id <actual-run> --run-attempt <actual-attempt> --control-sha <tagged-control-sha> --receipt <new-021-terminal-receipt.json>
+```
+
+Only exit **0** with receipt outcome **COMPLETED** proves release completion. The five exact jobs (`import-bootstrap` skipped/NOT_APPLICABLE on the future lane), source/tag/control, fixed run/attempt, fresh Docker acceptance, registry install/provenance and public assets/checksums must agree. Workflow success, source tests, local packed smoke or an installed package alone are insufficient. Exit 1/FAILED or 2/UNRESOLVED preserves partial publication: report it, do not move/delete/recreate the tag, adopt another run's proof, repack, overwrite packages/assets or repair in place. A new version or same-identity rerun needs its applicable separate authorization.
+
+Actual production login and Electron/Desktop activation remain unexercised; local installation or global/session migration is not authorized by the release proof. Rollback uses supported carrier operations and reviewed immutable versions with CAS/ownership checks, never credential/session restoration or overwriting later user changes.
+
+## Historical 0.2.0 source and proof authority
+
+The following exact 0.2.0 contract retains its own metadata, catalog, mode/startup and receipt interpretation. It does not define 0.2.1 acceptance or authorize reuse of 0.2.0 bytes.
+
+### 0.2.0 working-source authority
 
 The reviewed source candidate is **@dsmm/dsmm@0.2.0**, tag **dsmm-scoped-v0.2.0**, artifact **dsmm-dsmm-0.2.0.tgz**. Native parity stages A/B/C0/C/D0/D change the working source; this is not the earlier release-only/menu-visibility candidate. Source readiness is not publication or installation completion. Only separately authorized parent-owned commit/push/tag/release operations may publish these bytes; installation waits for terminal completion. The historical proposal below preserves old identities, installed-state facts and proof contracts; it is not the current product specification or an executable release checklist for these changed bytes.
 

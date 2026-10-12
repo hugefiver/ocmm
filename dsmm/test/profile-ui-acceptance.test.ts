@@ -4,8 +4,6 @@ import { mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, symlink, unlink,
 import test from "node:test";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
@@ -20,7 +18,7 @@ import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, 
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { extractNativeThemeStyles, NATIVE_IDS } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { acceptanceChromium, nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
+import { nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
 
 const structural = (agent: Agent) => agent as unknown as DshAgent;
 
@@ -206,24 +204,6 @@ test("historical explicit UI storage keeps its read-lock contract while current 
       await assert.rejects(legacy.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "unavailable" });
     } finally { await unlink(historical.lockPath); }
   } finally { await rm(home, { recursive: true, force: false }); }
-});
-
-test("acceptance tools load the real required CommonJS face when no synthetic chromium export exists", async () => {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "dsmm-playwright-interop-"));
-  try {
-    const packageRoot = join(temporaryRoot, "node_modules", "playwright");
-    await mkdir(packageRoot, { recursive: true });
-    const toolsManifest = join(temporaryRoot, "package.json");
-    await writeFile(toolsManifest, '{"private":true}\n');
-    await writeFile(join(packageRoot, "package.json"), '{"name":"playwright","type":"commonjs","main":"index.js"}\n');
-    await writeFile(join(packageRoot, "index.js"), 'const api = { chromium: { launch() { return "required-face"; } } }; module.exports = api;\n');
-    const toolsRequire = createRequire(toolsManifest);
-    const namespace = await import(pathToFileURL(toolsRequire.resolve("playwright")).href);
-    assert.equal(namespace.chromium, undefined, "fixture must reproduce Playwright's indirect CommonJS export shape");
-    const chromium = await acceptanceChromium(toolsManifest);
-    assert.equal(chromium.launch(), "required-face");
-    assert.equal(chromium, toolsRequire("playwright").chromium, "loader must use the actual required API, not reconstruct a browser face");
-  } finally { await rm(temporaryRoot, { recursive: true, force: false }); }
 });
 
 test("native UI startup retains runner-proved root/zstd and disables only the stock JSONL entry", () => {

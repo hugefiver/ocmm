@@ -1,11 +1,7 @@
-import { parentAgentOptionsForDelegation, SubagentError } from "@deepseek-ai/dsh-subagent";
-import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
-import { DSMM_ROLE_IDS } from "./roles.js";
-import { resolveRoleRuntimePolicy } from "./routing-policy.js";
-import { selectInitialModelRoute } from "./role-routing.js";
-export function roleProviderName(role) {
-    return `dsmm-role-${role.slice("dsmm-".length)}`;
-}
+import { SubagentError } from "@deepseek-ai/dsh-subagent";
+import { DSMM_ROLE_IDS, roleProviderName } from "./roles.js";
+export { roleProviderName } from "./roles.js";
+import { currentRoleInvocation, duringRoleInvocation, invocationAgentOptions, resolveRoleInvocation } from "./role-invocation.js";
 export function roleFromProviderName(provider) {
     return DSMM_ROLE_IDS.find((role) => role !== "dsmm-orchestrator" && roleProviderName(role) === provider);
 }
@@ -15,28 +11,8 @@ function supportedSpawn(provider) {
         && provider.inheritsParentContext === false && provider.agentRouteDefaults === undefined;
 }
 export async function roleAgentOptions(parent, role, settings, signal, explicit) {
-    const primary = settings.roleRouting[role]?.primary;
-    const options = primary === undefined ? explicit : { ...primary,
-        reasoningEffort: primary.reasoningEffort === undefined ? undefined : ReasoningEffortId(primary.reasoningEffort), ...explicit };
-    if (primary !== undefined && explicit?.reasoningEffort === undefined
-        && (explicit?.provider !== undefined && explicit.provider !== primary.provider || explicit?.model !== undefined && explicit.model !== primary.model))
-        options.reasoningEffort = undefined;
-    const inherited = parentAgentOptionsForDelegation(parent);
-    const provider = options?.provider ?? inherited.provider, model = options?.model ?? inherited.model;
-    if (provider === undefined || model === undefined)
-        throw new Error("dsmm role delegation requires an effective provider and model");
-    const changed = provider !== inherited.provider || model !== inherited.model;
-    const effort = options?.reasoningEffort ?? (primary === undefined && !changed ? inherited.reasoningEffort : undefined);
-    const llm = parent.ctx.get("llm");
-    if (llm?.resolveCallConfig === undefined)
-        throw new Error("dsmm role delegation requires the parent Agent native LLM service");
-    const candidates = [{ provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) },
-        ...explicit?.provider !== undefined || explicit?.model !== undefined ? [] : resolveRoleRuntimePolicy(settings, role).fallbackRoutes.map((route) => ({ ...route,
-            ...(explicit?.reasoningEffort === undefined ? {} : { reasoningEffort: explicit.reasoningEffort }) }))];
-    const selected = await selectInitialModelRoute(llm, candidates, signal);
-    signal.throwIfAborted();
-    return primary === undefined && selected.provider === provider && selected.model === model ? explicit : { ...options, ...selected,
-        reasoningEffort: selected.reasoningEffort === undefined ? undefined : ReasoningEffortId(selected.reasoningEffort) };
+    const invocation = currentRoleInvocation(parent, role) ?? await resolveRoleInvocation(parent, role, settings, signal, {}, explicit);
+    return invocationAgentOptions(invocation, explicit);
 }
 /** Only the native outer start owns descriptors, capability admission and returned runs. */
 export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = getSettings, policy) {
@@ -72,7 +48,13 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                                 throw new SubagentError("DSMM module or role is disabled", "UNAUTHORIZED");
                             if (!admitted.subagents.enableRunInBackground || admitted.subagents.backgroundMode !== "continuable")
                                 throw new SubagentError("DSMM continuable delegation requires explicit admitted opt-in", "UNAUTHORIZED");
-                            policy?.prepareContinuable(request.parent, role, request.signal);
+                            const preparing = policy?.prepareContinuable(request.parent, role, request.signal);
+                            const invocation = currentRoleInvocation(request.parent, role);
+                            request.signal.throwIfAborted();
+                            if (!active || registry.getProvider("spawn") !== spawn)
+                                throw new SubagentError("DSMM continuable provider changed during preflight", "NO_PROVIDER");
+                            if (preparing !== undefined)
+                                policy.recordContinuableCreation(request.sessionId, request.parent, role, invocation, preparing.epoch, request.signal);
                             return spawn.prepareContinuable(request);
                         };
                     },
@@ -92,7 +74,9 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                         const parentSettings = getSettings(request.parent);
                         if (!parentSettings.modules.deepwork.enabled || !parentSettings.roles[role])
                             throw new Error("dsmm role provider is disabled by deployment configuration");
-                        const agentOptions = await roleAgentOptions(request.parent, role, parentSettings, request.signal, request.agentOptions);
+                        const invocation = currentRoleInvocation(request.parent, role)
+                            ?? await resolveRoleInvocation(request.parent, role, parentSettings, request.signal, {}, request.agentOptions);
+                        const agentOptions = invocationAgentOptions(invocation, request.agentOptions);
                         request.signal.throwIfAborted();
                         if (!active || registry.getProvider("spawn") !== spawn)
                             throw new Error("dsmm role spawn provider changed during route validation; retry delegation");
@@ -101,14 +85,25 @@ export function registerRoleProviders(ctx, getSettings, getDeploymentSettings = 
                         // Preserve the native descriptor, authority filters and lifecycle;
                         // this alias owns only profile-derived route defaults and preflight.
                         const routed = agentOptions === request.agentOptions ? request : { ...request, agentOptions };
-                        const maxDepth = request.maxDepth ?? registry.resolveMaxDepth?.(parentSettings.subagents.maxDepth);
+                        const ceiling = parentSettings.subagents.maxDepth;
+                        if (request.maxDepth !== undefined && ceiling !== undefined && request.maxDepth > ceiling)
+                            throw new SubagentError("DSMM request exceeds the admitted parent depth ceiling", "UNAUTHORIZED");
+                        const maxDepth = request.maxDepth ?? registry.resolveMaxDepth?.(ceiling);
                         if (maxDepth !== undefined && !spawn.capabilities.depthLimit)
                             throw new SubagentError("DSMM spawn cannot enforce the native depth limit", "UNSUPPORTED_CAPABILITY");
                         const resolved = maxDepth === undefined ? routed : { ...routed, maxDepth };
                         if (resolved.agentOptions !== undefined && !spawn.capabilities.agentOptions)
                             throw new SubagentError("DSMM spawn cannot accept the configured or selected child route", "UNSUPPORTED_CAPABILITY");
-                        return policy === undefined ? spawn.start(resolved)
-                            : policy.duringDelegation(request.parent, role, () => spawn.start(resolved), request.toolFilter);
+                        let admittedChild;
+                        const run = await duringRoleInvocation(request.parent, invocation, () => policy === undefined ? spawn.start(resolved)
+                            : policy.duringDelegation(request.parent, role, () => spawn.start(resolved), request.toolFilter, maxDepth, agent => { admittedChild = agent; }));
+                        // Public holder boundary: revoke this exact residency before opaque native teardown.
+                        return policy === undefined ? run : { ...run, dispose() {
+                                const child = run.localAgent ?? admittedChild;
+                                if (child !== undefined)
+                                    policy.revokeResidency(child);
+                                return run.dispose();
+                            } };
                     }
                 });
                 const provider = registry.getProvider(roleProviderName(role));

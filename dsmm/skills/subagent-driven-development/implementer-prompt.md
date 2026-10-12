@@ -10,14 +10,15 @@ Assignment content (not a tool-call schema; send through a permitted callable na
   prompt: |
     Implement the supplied task or wave toward its approved ideal end state.
 
-    Provide, in whatever order is clearest:
+    Provide only the context needed for safe execution; these are prompts, not
+    required fields or an exhaustive resource list:
     - goal and acceptance criteria;
     - relevant current state and context;
     - dependencies and interfaces;
-    - owned files or scope boundaries;
-    - useful verification evidence;
+    - material scope and ownership boundaries;
+    - useful lightweight local verification evidence;
     - global constraints and permissions;
-    - significant prior rulings or known risks.
+    - current constraints, authorization boundaries, or known risks.
 
     Work from: [directory]
 
@@ -28,8 +29,13 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     detail when repository evidence supports it, but do not change the approved
     goal, constraints, permissions, or acceptance criteria.
 
-    Record significant rulings, assumptions, and deviations with the evidence or
-    reason, plus the cost if wrong. Escalate instead of choosing when a decision
+    Discover relevant files, tests, docs, and resources within that authorized scope.
+    No exhaustive file list or per-item revision/hash/receipt lock is required.
+    Resource discovery does not expand permissions; honor material ownership,
+    irreversible-operation, and required protocol/integrity identity boundaries.
+
+    Report the resulting implementation, current constraints, unresolved risks,
+    and evidence, not a ruling or development history. Escalate when a decision
     changes scope or acceptance, weakens security or data guarantees, changes a
     public API/protocol, expands permissions, requires an irreversible action, or
     would otherwise be a pure guess.
@@ -53,17 +59,29 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     Follow established local patterns and keep changes within scope. Preserve real
     security, data-loss, protocol/API, compatibility, and irreversible-operation
     safeguards. Add or run deterministic tests where a plausible regression seam
-    warrants them; otherwise use the smallest useful evidence such as existing
-    tests, typechecks, builds, runtime probes, or focused inspection.
+    warrants them; run lightweight local checks relevant to your substantive changes.
+    The controller owns integration and consolidated global/heavy checks; do not run
+    a full suite per small task. Reuse still-applicable evidence under brainstorming's
+    material-relevance rule and rerun only affected or missing checks. Required safety,
+    release, pre-commit, and explicit user checks remain binding.
 
     There is no universal RED gate, transcript, scenario count, per-task reviewer,
     or commit requirement. Verification must demonstrate the relevant behavior or
     invariant rather than merely report that a command ran.
 
+    Documents, code/comments, tests, and commit messages describe only concise final
+    requirements, design, and behavior. Update intermediate text directly. Tests
+    protect valid requirements and functional/external contracts, not descriptive
+    text, decision counterexamples, or the absence of removed components. Update
+    tests with requirements and delete tests dedicated to removed components.
+    Uncommitted intermediate behavior may change incompatibly for final requirements;
+    existing committed contracts and API/security/data/permission authorization remain.
+
     ## Return
 
-    Report the implemented outcome, changed and new files, evidence and results,
-    significant rulings/assumptions, and unresolved concerns. Status labels such as
-    DONE, DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT are optional and
+    Return the implemented outcome, changed and new files, local evidence/results,
+    current constraints, material risks and unverified coverage in conversation, not workspace
+    plan/report/evidence files unless explicitly requested as deliverables.
+    Status labels such as DONE, DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT are optional and
     informational; an acknowledgement or label alone is not evidence.
 ```

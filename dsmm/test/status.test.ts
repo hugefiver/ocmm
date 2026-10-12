@@ -466,30 +466,6 @@ test("auxiliary status snapshot applies the complete calibration action matrix",
   }
 });
 
-test("auxiliary status snapshot uses configured max reasoning presets only after role narrowing", () => {
-  const reviewer = createAgent({
-    origin: "subagent", descriptorRole: "dsmm-reviewer",
-    events: [{ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } }],
-    ...officialRoute()
-  });
-  const defaultSnapshot = createDsmmStatusSnapshot({
-    agent: reviewer.agent,
-    settings: DEFAULT_DSMM_SETTINGS,
-    modeActive: false
-  });
-  const removedSnapshot = createDsmmStatusSnapshot({
-    agent: reviewer.agent,
-    settings: {
-      ...DEFAULT_DSMM_SETTINGS,
-      deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic"]
-    },
-    modeActive: false
-  });
-
-  assert.equal(defaultSnapshot.calibration.policyEffort, "max");
-  assert.equal(removedSnapshot.calibration.policyEffort, "high");
-});
-
 test("runtime recovery summary reports configuration separately from applicability", () => {
   const settings = resolveConfig({
     runtimeRecovery: {
@@ -532,7 +508,6 @@ test("effective settings are an exhaustive defensive copy with private paths and
     defaultActive: true,
     promptOrder: 80,
     deepseekV4ProDefaultReasoningEffort: "low",
-    deepseekV4ProMaxReasoningPresets: ["dsmm-reviewer"],
     skills: { brainstorming: false },
     roles: { "dsmm-reviewer": false },
     presets: { materialize: true, root: "C:/presets" },
@@ -581,7 +556,6 @@ test("effective settings are an exhaustive defensive copy with private paths and
   assert.equal(settings.lsp.command, "C:/PRIVATE_LSP_SENTINEL/private-server.exe", "runtime settings are not redacted in place");
   assert.deepEqual(settings.lsp.args, ["--config=C:/PRIVATE_LSP_SENTINEL/config.json", "PRIVATE_PARAMETER_SENTINEL"]);
   assert.notEqual(copy, settings);
-  assert.notEqual(copy.deepseekV4ProMaxReasoningPresets, settings.deepseekV4ProMaxReasoningPresets);
   assert.notEqual(copy.skills, settings.skills);
   assert.notEqual(copy.roles, settings.roles);
   assert.notEqual(copy.presets, settings.presets);
@@ -599,7 +573,6 @@ test("effective settings are an exhaustive defensive copy with private paths and
   assert.notEqual(copy.lsp.args, settings.lsp.args);
   assert.notEqual(copy.lsp.env, settings.lsp.env);
 
-  settings.deepseekV4ProMaxReasoningPresets.push("dsmm-plan-critic");
   settings.skills.brainstorming = true;
   settings.roles["dsmm-reviewer"] = true;
   settings.presets.root = "C:/changed";
@@ -613,7 +586,6 @@ test("effective settings are an exhaustive defensive copy with private paths and
   settings.lsp.args.push("--changed");
   settings.lsp.env.CHANGED = "true";
 
-  assert.deepEqual(copy.deepseekV4ProMaxReasoningPresets, ["dsmm-reviewer"]);
   assert.equal(copy.skills.brainstorming, false);
   assert.equal(copy.roles["dsmm-reviewer"], false);
   assert.equal(copy.presets.root, "<configured>");

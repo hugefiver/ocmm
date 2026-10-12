@@ -1,22 +1,36 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
-import { transpileModule } from "typescript";
-import { BUILTIN_AGENTS } from "../../src/data/agents.ts";
-import { BUILTIN_CATEGORIES } from "../../src/data/categories.ts";
-import { BASE_ROLES, CATEGORIES, DSH_TOOL_CONTRACT, EXCLUSIONS, SKILL_SOURCES, SOURCE_BASELINE, WORKFLOW_VARIANTS } from "./source-inventory.mjs";
-import { ADAPTATION_RULES, adaptPrompt, adaptSkill, section } from "./source-adaptations.mjs";
+import { ModuleKind, transpileModule } from "typescript";
+import { BASE_ROLES, CATEGORIES, DSH_TOOL_CONTRACT, EXCLUSIONS, SKILL_SOURCES, WORKFLOW_VARIANTS } from "./source-inventory.mjs";
+import { ADAPTATION_RULES, adaptLocale, adaptPrompt, adaptSkill, adaptTerminal, section } from "./source-adaptations.mjs";
 import { FRONTEND_PINS, frontendAttribution, frontendRecipe } from "./frontend-recipe.mjs";
 import { checkFrontendAssets } from "./materialize-frontend.mjs";
+import { loadSourceInputs } from "./source-inputs.mjs";
+import { skillResourceProblems } from "./source-input-resources.mjs";
 
 const dsmmRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const repoRoot = dirname(dsmmRoot);
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const slash = (value) => value.replaceAll("\\", "/");
-const readSource = (path) => readFileSync(join(repoRoot, path), "utf8").replaceAll("\r\n", "\n");
 
-export function sourceOutputs() {
+export function sourceOutputs({ root = dsmmRoot, inputRoot = join(root, "source-inputs"), inputs = loadSourceInputs(inputRoot) } = {}) {
+  const consumed = new Set();
+  const readInput = (path) => {
+    const bytes = inputs.files.get(path);
+    if (bytes === undefined) throw new Error(`missing source input: ${path}`);
+    consumed.add(path);
+    return bytes;
+  };
+  const readSource = (path) => readInput(path).toString("utf8").replaceAll("\r\n", "\n");
+  const catalog = (path, name) => {
+    const exports = {};
+    const compiled = transpileModule(readSource(path), { compilerOptions: { module: ModuleKind.CommonJS } }).outputText;
+    runInNewContext(compiled, { exports }, { timeout: 1000 });
+    if (!Array.isArray(exports[name])) throw new Error(`source catalog anchor drift: ${path}: ${name}`);
+    return exports[name];
+  };
+  const BUILTIN_AGENTS = catalog("src/data/agents.ts", "BUILTIN_AGENTS");
+  const BUILTIN_CATEGORIES = catalog("src/data/categories.ts", "BUILTIN_CATEGORIES");
   if (json(BUILTIN_AGENTS.map((role) => role.name)) !== json(BASE_ROLES) || json(BUILTIN_CATEGORIES.map((role) => role.name)) !== json(CATEGORIES)) throw new Error("source catalog anchor drift: review canonical inventory before syncing");
   const outputs = new Map(), trace = [], anchors = [];
   const add = (artifact, content, source, consumer, rules = []) => {
@@ -36,11 +50,11 @@ export function sourceOutputs() {
   requireAnchor("src/intent/model-family.ts", 'name === "kimi-for-coding-highspeed"');
   for (const variant of WORKFLOW_VARIANTS) {
     const source = `prompts/v1/deepwork/${variant}.md`;
-    add(`prompts/source/deepwork/${variant}.md`, adaptPrompt(source, readSource(source)), source, "src/prompts.ts: buildDeepworkPrompt", ["native-skill-load", "native-dispatch", "source-role-authority", "dsh-common-scope"]);
+    add(`prompts/source/deepwork/${variant}.md`, adaptPrompt(source, readSource(source)), source, "src/prompts.ts: buildDeepworkPrompt", ["native-skill-load", "native-dispatch", "source-role-authority", "dsh-common-scope", "native-lifecycle"]);
   }
   for (const role of ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]) {
     const source = `prompts/v1/agents/${role}.md`;
-    add(`prompts/source/agents/${role}.md`, adaptPrompt(source, readSource(source)), source, "src/roles.ts: DSMM_ROLES.persona", ["source-role-authority", "native-dispatch"]);
+    add(`prompts/source/agents/${role}.md`, adaptPrompt(source, readSource(source)), source, "src/roles.ts: DSMM_ROLES.persona", ["source-role-authority", "native-dispatch", "native-profile-selection", "native-lifecycle"]);
   }
   for (const category of CATEGORIES) {
     const source = `prompts/v1/category/${category}.md`;
@@ -56,9 +70,8 @@ export function sourceOutputs() {
     section(configSource, "const LOCALE_GUIDANCE_TAG", "function fmtModel", "src/hooks/config.ts"),
     section(configSource, "function buildLocaleGuidance", "function prependPromptPrefix", "src/hooks/config.ts")
   ].join("\n");
-  const locale = runInNewContext(`${transpileModule(localeSource, {}).outputText}\nbuildLocaleGuidance(undefined)`)
-    .replace("No locale is configured.", "No DSMM locale override is configured; preserve the host's explicit locale if supplied.");
-  add("prompts/source/shared/locale.md", `${locale}\n`, "src/hooks/config.ts: buildLocaleGuidance(default)", "src/prompt-content.ts: primary/all persona prefix", ["source-role-authority"]);
+  const locale = adaptLocale(runInNewContext(`${transpileModule(localeSource, {}).outputText}\nbuildLocaleGuidance(undefined)`));
+  add("prompts/source/shared/locale.md", `${locale}\n`, "src/hooks/config.ts: buildLocaleGuidance(default)", "src/prompt-content.ts: all role/category persona prefix; src/prompts.ts: exact Agent captured locale", ["source-role-authority", "native-locale"]);
   const policySource = [
     section(configSource, "const PRIMARY_COORDINATORS", "function taskAllowlist", "src/hooks/config.ts"),
     section(configSource, "const DELEGATION_CONTRACT_TAG", "function appendPromptSuffix", "src/hooks/config.ts"),
@@ -82,12 +95,11 @@ export function sourceOutputs() {
     const readOnly = ["planner", "plan-critic", "reviewer", "oracle", "oracle-2nd", "clarifier", "code-search", "doc-search", "media-reader"].includes(name);
     const group = primary ? "primary-coordinator" : utility.includes(name) ? "utility-leaf" : readOnly ? "read-only-workflow" : ["deep", "complex", "cross-cutting"].includes(name) ? "local-coordinator" : "standard-workflow";
     const allowedChildren = group === "primary-coordinator" ? ordered.filter((target) => target !== "orchestrator") : group === "utility-leaf" ? [] : group === "read-only-workflow" ? readOnlyUtility : group === "local-coordinator" ? [...utility, ...specialists] : utility;
-    let terminal = policies({ name, includeCompressionPolicy: !primary, includeReviewSessionEfficiency: name === "orchestrator" });
-    terminal = terminal.replaceAll("`task_id`", "native child identity (only if continuation is exposed)");
+    let terminal = adaptTerminal(`src/hooks/config.ts: terminalPromptSuffixFor(${name})`, policies({ name, includeCompressionPolicy: !primary, includeReviewSessionEfficiency: name === "orchestrator" }), { reviewSession: name === "orchestrator" });
     if (primary) terminal += `\n\n<dsmm-delegation-contract>\nA trusted root/stage-owner ${name} coordinates authorized work and owns formal planning, criticism, review dispatch and final acceptance. Root Builder is not a bounded worker. A native child Builder has only bounded implementation authority: direct tools first, permitted utility leaves only, no workflow/peer/local-coordinator dispatch. Do not self-promote from a persona or root preset name. Missing/conflicting trusted identity fails closed. Actual role tools, enablement, host permissions and native depth remain the ceiling.\n</dsmm-delegation-contract>`;
     else terminal += "\n\nThe source delegation allowance is conditional on actual native callability and the caller's inherited authority; formal workflow stages belong to the trusted root/stage owner. No static text grants a tool or overrides an execution restriction.\n";
     const terminalArtifact = `prompts/source/terminal/${name}.md`;
-    add(terminalArtifact, `${terminal.trim()}\n`, "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; plan §3.4 DSH identity adaptation", "src/roles.ts: persona", ["source-role-authority", "native-dispatch"]);
+    add(terminalArtifact, `${terminal.trim()}\n`, "src/hooks/config.ts: terminalPromptSuffixFor/delegationContractFor; scripts/sync-source-assets.mjs: DSH identity adaptation", "src/roles.ts: persona", ["source-role-authority", "native-dispatch", "native-lifecycle"]);
     const promptSource = kind === "category" ? `prompts/v1/category/${name}.md` : source.promptSource ? `prompts/v1/agents/${source.promptSource}.md` : ["orchestrator", "planner", "clarifier", "plan-critic"].includes(name) ? `prompts/v1/agents/${name}.md` : name === "reviewer" ? "prompts/v1/agents/reviewer.md" : null;
     return {
       id: `dsmm-${name}`, sourceId: name, kind,
@@ -105,11 +117,9 @@ export function sourceOutputs() {
 
   const descriptions = {};
   for (const [name, source] of Object.entries(SKILL_SOURCES)) {
-    for (const file of sourceFiles(join(repoRoot, source))) {
-      const path = slash(relative(join(repoRoot, source), file));
-      if ([".gitignore", ".npmignore"].includes(path)) continue;
-      if (name === "frontend" && ["ATTRIBUTION.md", "LICENSE-Apache-2.0.txt"].includes(path)) continue;
-      const input = readFileSync(file);
+    for (const file of [...inputs.files.keys()].filter((path) => path.startsWith(`${source}/`)).sort()) {
+      const path = file.slice(source.length + 1);
+      const input = readInput(file);
       const content = extname(file) === ".md" ? adaptSkill(source, path, input.toString("utf8")) : input;
       add(`skills/${name}/${path}`, content, `${source}/${path}`, "src/skills.ts: metadata, readBundledSkill resourceBase; native read/shell resources", ["resource-base", "authorization", ...(extname(file) === ".md" ? ["native-dispatch"] : [])]);
       if (path === "SKILL.md") {
@@ -122,28 +132,36 @@ export function sourceOutputs() {
   add("skills/frontend/ATTRIBUTION.md", frontendAttribution(), "skills/frontend/ATTRIBUTION.md + scripts/frontend-recipe.mjs fixed-pin adaptation", "frontend distribution notices; test/source-sync.test.ts", ["authorization", "resource-base"]);
   add("skills/frontend/.gitignore", "# Explicit fixed-pin materialization; project-original design resources remain tracked.\nreferences/design/*.md\n!references/design/_INDEX.md\n!references/design/README.md\n!references/design/aside.md\n!references/design/clone-from-url.md\n!references/design/design-system-architecture.md\n!references/design/interaction-skill.md\n!references/design/react-dev-tooling-skill.md\nreferences/ui-ux-db/\n.frontend-materialized.json\n", "scripts/frontend-recipe.mjs: third-party body distribution policy", "Git source hygiene; materialized bodies are never committed");
   add("skills/frontend/.npmignore", "# Override .gitignore: every fixed-pin materialized body/data/script/inventory must pack.\n__pycache__/\n**/__pycache__/\n*.pyc\nnode_modules/\n.DS_Store\n", "scripts/frontend-recipe.mjs: full resource distribution policy", "npm package files; no missing materialized references allowed");
-  const frontend = checkFrontendAssets(dsmmRoot);
-  for (const row of frontend.files.length === 0 ? frontendRecipe(dsmmRoot) : frontend.files) trace.push({ source: `${FRONTEND_PINS[row.upstream].repository}@${FRONTEND_PINS[row.upstream].commit}/${row.source}`, artifact: `skills/frontend/${row.target}`, consumer: "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)", rules: ["verbatim fixed-pin bytes; path mapping only"], ...(row.blob === undefined ? {} : { blob: row.blob }), test: "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate" });
+  const index = outputs.get("skills/frontend/references/design/_INDEX.md");
+  if (index === undefined) throw new Error("missing generated frontend index");
+  const recipe = frontendRecipe(root, index.toString("utf8"));
+  const frontend = checkFrontendAssets(root, recipe);
+  if (frontend.outcome !== "ready") throw new Error(`frontend resource closure drift: ${frontend.errors.join("; ")}`);
+  const collisions = recipe.filter((row) => outputs.has(`skills/frontend/${row.target}`));
+  if (collisions.length) throw new Error(`source/frontend resource collision: ${collisions.map((row) => row.target).join(",")}`);
+  for (const row of frontend.files) trace.push({ source: `${FRONTEND_PINS[row.upstream].repository}@${FRONTEND_PINS[row.upstream].commit}/${row.source}`, artifact: `skills/frontend/${row.target}`, consumer: "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)", rules: ["verbatim fixed-pin bytes; path mapping only"], ...(row.blob === undefined ? {} : { blob: row.blob }), test: "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate" });
   trace.push({ source: "scripts/frontend-recipe.mjs immutable path/blob provenance", artifact: "skills/frontend/.frontend-materialized.json", consumer: "offline completeness/integrity and package gate", rules: ["explicit-only network synchronization"] });
-  const skillsSource = readFileSync(join(dsmmRoot, "src/skills.ts"), "utf8");
+  const skillsSource = readFileSync(join(root, "src/skills.ts"), "utf8").replaceAll("\r\n", "\n");
   const begin = "// BEGIN SOURCE SKILL METADATA", end = "// END SOURCE SKILL METADATA";
   const metadata = `export const DSMM_SKILL_DESCRIPTIONS: Record<DsmmAvailableSkillName, string> = ${JSON.stringify(descriptions, null, 2)};\n`;
   outputs.set("src/skills.ts", Buffer.from(skillsSource.replace(section(skillsSource, begin, end, "src/skills.ts"), `${begin}\n${metadata}`)));
-  add("prompts/source/manifest.json", json({ sourceBaseline: SOURCE_BASELINE, host: "DSH 0.2.0-rc.2", license: "LicenseRef-AAAPL; full package LICENSE applies to OCMM-derived modifications; original third-party notices retained per skill", attribution: "OCMM Hugefiver; v1 workflow forks retain obra/superpowers lineage; standalone notices/licenses copied recursively", rules: ADAPTATION_RULES, anchors, roles: rows.map(({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact }) => ({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact, consumer: "src/roles.ts persona + active src/prompts.ts calibration", test: "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts" })), skills: SKILL_SOURCES, exclusions: EXCLUSIONS, files: trace }), "scripts/source-inventory.mjs and actual recursive source inventory", "maintenance sync/check; test/source-sync.test.ts");
+  const unused = [...inputs.files.keys()].filter((path) => !consumed.has(path));
+  if (unused.length) throw new Error(`unused source inputs outside generator closure: ${unused.join(",")}`);
+  const resources = skillResourceProblems(root, outputs);
+  if (resources.length) throw new Error(`source resource closure drift: ${JSON.stringify(resources)}`);
+  add("prompts/source/manifest.json", json({ sourceRef: inputs.provenance.rootBaselineCommit, sourceInput: "DSMM-owned source-inputs/root snapshot; sourceRef is the Root baseline, overlayPaths are raw-byte differences including uncommitted/untracked inputs or checkout byte conversion, not a fabricated Root commit", sourceProvenance: inputs.provenance, host: "DSH 0.2.0-rc.2", license: "LicenseRef-AAAPL; full package LICENSE applies to OCMM-derived modifications; original third-party notices retained per skill", attribution: "OCMM Hugefiver; v1 workflow forks retain obra/superpowers lineage; standalone notices/licenses copied recursively", rules: ADAPTATION_RULES, anchors, roles: rows.map(({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact }) => ({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact, consumer: "src/roles.ts persona + active src/prompts.ts calibration", test: "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts" })), skills: SKILL_SOURCES, exclusions: EXCLUSIONS, files: trace }), "scripts/source-inventory.mjs and validated source-inputs/manifest.json", "maintenance sync/check; test/source-sync.test.ts");
   return outputs;
 }
 
-function sourceFiles(directory) {
-  return readdirSync(directory).sort().flatMap((name) => {
-    if (["__pycache__", "node_modules", ".git"].includes(name) || name.endsWith(".pyc")) return [];
-    const path = join(directory, name), stat = lstatSync(path);
-    if (stat.isSymbolicLink()) throw new Error(`source resource link requires explicit mapping: ${path}`);
-    return stat.isDirectory() ? sourceFiles(path) : [path];
-  });
-}
-
-export function syncSourceAssets({ check = false, root = dsmmRoot } = {}) {
-  const outputs = sourceOutputs(), differences = [];
+export function syncSourceAssets({ check = false, root = dsmmRoot, sourceRoot = dsmmRoot, inputRoot = join(sourceRoot, "source-inputs") } = {}) {
+  const outputs = sourceOutputs({ root: sourceRoot, inputRoot }), differences = [];
+  const frontend = frontendRecipe(sourceRoot, outputs.get("skills/frontend/references/design/_INDEX.md").toString("utf8")).map((row) => `skills/frontend/${row.target}`);
+  const allowed = new Set([...outputs.keys(), ...frontend, "skills/frontend/.frontend-materialized.json"]);
+  for (const directory of ["prompts/source", ...Object.keys(SKILL_SOURCES).map((name) => `skills/${name}`)]) {
+    if (!existsSync(join(root, directory))) continue;
+    for (const path of artifactFiles(root, directory)) if (!allowed.has(path)) differences.push(path);
+  }
+  if (!check && differences.length) throw new Error(`unexpected prepared source resources; review/remove explicitly before sync: ${differences.join(",")}`);
   for (const [artifact, content] of outputs) {
     const path = join(root, artifact);
     if (existsSync(path) && readFileSync(path).equals(content)) continue;
@@ -151,6 +169,16 @@ export function syncSourceAssets({ check = false, root = dsmmRoot } = {}) {
     if (!check) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
   }
   return { outputs: outputs.size, differences };
+}
+
+function artifactFiles(root, directory) {
+  if (lstatSync(join(root, directory)).isSymbolicLink()) throw new Error(`linked prepared source directory: ${directory}`);
+  return readdirSync(join(root, directory)).sort().flatMap((name) => {
+    if (["__pycache__", "node_modules", ".git"].includes(name) || name.endsWith(".pyc")) return [];
+    const path = `${directory}/${name}`, stat = lstatSync(join(root, path));
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw new Error(`linked or non-regular prepared source resource: ${path}`);
+    return stat.isDirectory() ? artifactFiles(root, path) : [path];
+  });
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

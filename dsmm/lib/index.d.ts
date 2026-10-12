@@ -1,7 +1,8 @@
 import type { DshContext } from "./dsh-types.js";
 import type { DsmmPluginConfig } from "./settings.js";
+import type { DsmmHostStartupOptions } from "./runtime-integration.js";
 export declare const name = "dsmm";
-export declare const inject: readonly ["profileContext"];
+export declare const inject: readonly ["profileContext", "agents"];
 export type Config = DsmmPluginConfig;
 export declare const Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
 export type { DeepworkSessionEventMap } from "./dsh-events.js";
@@ -37,12 +38,20 @@ export { DSMM_MODULE_DESCRIPTORS, deepworkEnabled, projectDeepworkModule } from 
 export type { DsmmModuleState } from "./modules.js";
 export type { DsmmProfileRuntimeStore, DsmmProfileRuntimeOptions } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
-export declare function apply(ctx: DshContext, config?: Config): void | Promise<void>;
+export type { DsmmHostStartupOptions } from "./runtime-integration.js";
+/** Experimental Host collaborators are programmatic only; serialized settings cannot authenticate them. */
+export declare function createDsmmHostPlugin(startup: DsmmHostStartupOptions): {
+    name: string;
+    Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
+    inject: string[] | readonly ["profileContext", "agents"];
+    apply(ctx: DshContext, config?: Config): void | Promise<void>;
+};
+export declare function apply(ctx: DshContext, config?: Config, hostStartup?: DsmmHostStartupOptions): void | Promise<void>;
 declare const _default: {
     name: string;
-    inject: readonly ["profileContext"];
+    inject: readonly ["profileContext", "agents"];
     Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
-    apply: typeof apply;
+    apply(ctx: DshContext, config?: Config): void | Promise<void>;
 };
 export default _default;
 //# sourceMappingURL=index.d.ts.map

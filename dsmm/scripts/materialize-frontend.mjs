@@ -32,8 +32,8 @@ function cachedInventory(root, recipe) {
   return value;
 }
 
-export function checkFrontendAssets(root = packageRoot) {
-  const recipe = frontendRecipe(root), allowed = new Set(recipe.map((row) => row.target));
+export function checkFrontendAssets(root = packageRoot, recipe = frontendRecipe(root)) {
+  const allowed = new Set(recipe.map((row) => row.target));
   const errors = [], inventory = cachedInventory(root, recipe);
   if (inventory === undefined) errors.push("missing/stale frontend provenance inventory; run explicit pnpm run sync:frontend (network), never an implicit build download");
   for (const row of recipe) {

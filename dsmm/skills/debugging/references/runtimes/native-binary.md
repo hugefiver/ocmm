@@ -109,7 +109,7 @@ print(repr(data[max(0,pos-100):pos+200]))
 
 If you must keep using `strings`, lower the threshold: `strings -n 1 -t x ./target | rg ...`. The signal-to-noise drops sharply but short content is preserved.
 
-Write the triage summary to the journal:
+Keep current triage facts in conversation or task-owned temporary evidence:
 
 ```markdown
 ## Binary triage
@@ -189,7 +189,7 @@ spctl --assess --type execute -vv ./target       # Gatekeeper assessment
 tmp=$(mktemp -d)
 codesign -dvv --extract-certificates="$tmp/cert" ./target 2>&1
 ls -la "$tmp"
-# rm -rf "$tmp"  # journal first, clean up later
+# Clean only this exact owned directory after checking the resource checklist.
 
 # Strings inside specific segments only (less noise than full-binary strings)
 otool -s __TEXT __cstring ./target               # C string section
@@ -297,8 +297,8 @@ else
   echo "Using service: $SERVICE"
 fi
 
-# 2. JOURNAL the original proxy state before changing it (REQUIRED for safe rollback):
-networksetup -getwebproxy "$SERVICE"        # save this output to journal
+# 2. Capture original state in the temporary resource checklist before an authorized change:
+networksetup -getwebproxy "$SERVICE"        # capture exact prior state temporarily
 networksetup -getsecurewebproxy "$SERVICE"  # save this too
 
 # 3. Start mitmproxy with persistent CA at ~/.mitmproxy/
@@ -316,13 +316,10 @@ HTTPS_PROXY=http://127.0.0.1:8888 SSL_CERT_FILE=~/.mitmproxy/mitmproxy-ca-cert.p
 networksetup -setwebproxy "$SERVICE" 127.0.0.1 8888
 networksetup -setsecurewebproxy "$SERVICE" 127.0.0.1 8888
 
-# 6. Cleanup — RESTORE original state from journal, untrust CA:
-networksetup -setwebproxystate "$SERVICE" off
-networksetup -setsecurewebproxystate "$SERVICE" off
-sudo security delete-certificate -c "mitmproxy" /Library/Keychains/System.keychain
+# 6. Cleanup follows ../methodology/09-cleanup.md using captured service and certificate identities.
 ```
 
-**Critical**: forgetting step 6 leaves all your subsequent traffic mis-routed and silently MITM-able. Journal every step.
+System proxy and trust changes require specific authorization. Follow [central cleanup rules](../methodology/09-cleanup.md). Before any authorized change, capture the service's exact proxy configuration, certificate fingerprint and keychain, and prior certificate/trust state in the temporary resource checklist. Restore that state, including any prior trust settings; remove a certificate only if this task introduced it and its exact identity is verified. Don't assume proxies were disabled or delete a certificate by name. The checklist records temporary resource ownership and restoration data, not repository development history.
 
 ### What to look for
 
@@ -407,7 +404,7 @@ For tiny fixes (one byte, one branch inversion):
 printf '\x90\x90' | dd of=./target bs=1 seek=$((0x1234)) conv=notrunc
 ```
 
-Journal the exact `dd` command and the original bytes so you can revert.
+Before an authorized binary patch, capture the exact target identity, offset, original bytes, and restoration action in the temporary resource checklist. Never adopt another task's patch as an owned cleanup target.
 
 ### Option C: Wrap / shim
 
@@ -439,48 +436,6 @@ If it's a third-party binary and none of the above are feasible, the "fix" is a 
 
 ## Phase 9 cleanup specifics
 
-```bash
-# Kill debugger sessions
-pkill -f 'gdb' || true
-pkill -f 'lldb' || true
+Follow [central cleanup rules](../methodology/09-cleanup.md). Register exact owned scratch projects, core dumps, traces, shim libraries, and extracted data, plus debugger and proxy PIDs and start identities. Restore only this task's temporary binary patch at its recorded target identity and offsets using captured original bytes, preserving the authorized final fix.
 
-# Ghidra scratch projects (if made just for this session)
-# Named something like ~/ghidra-projects/debug-<timestamp>:
-ls -la ~/ghidra-projects/ 2>/dev/null
-# rm -rf ~/ghidra-projects/debug-scratch         # only if the journal says to
-
-# Core dumps left from crashes
-rm -f ./core ./core.* ~/core.*
-
-# strace/ltrace output files
-rm -f trace.out ltrace.out
-
-# If you made a binary patch (Option B above), confirm revert
-# The journal should have the original bytes — restore them:
-# printf '<original-bytes>' | dd of=./target bs=1 seek=<offset> conv=notrunc
-
-# Trace-output files
-rm -f /tmp/debug-*.bin /tmp/debug-*.strace /tmp/debug-*.ltrace
-
-# macOS-specific:
-# Restore proxy settings if you set them (CRITICAL — leaves system traffic mis-routed otherwise)
-# Use the SAME $SERVICE you used when enabling the proxy (read it from the journal).
-# Do NOT hardcode "Wi-Fi" — many machines route traffic over Ethernet, USB tether, or a VPN service.
-[ -n "$SERVICE" ] && {
-  networksetup -setwebproxystate "$SERVICE" off 2>/dev/null
-  networksetup -setsecurewebproxystate "$SERVICE" off 2>/dev/null
-}
-# Or restore explicitly from the journaled original state — see the proxy section above.
-
-# Stop mitmproxy
-pkill -f 'mitmproxy' 2>/dev/null
-
-# Remove DYLD shim libraries you built
-rm -f /tmp/*-shim.dylib
-
-# Clear extracted strings dumps (these can be huge and may contain secrets)
-rm -f /tmp/*-strings*.txt
-
-# Verify hostname resolution returns to normal (mitmproxy can leave entries)
-scutil --dns | head -20
-```
+For authorized macOS proxy/trust changes, restore the exact captured prior state for the same service and certificate identity. Don't assume the prior proxy was disabled, delete certificates by a shared name, or clean another task's files. Report any restoration that can't be verified.

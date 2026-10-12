@@ -1,5 +1,5 @@
-import { desiredDeepseekEffort, isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
 import { readPromptAsset as asset, SOURCE_ROLE_CATALOG, splitCategory } from "./prompt-content.js";
+import { CHILD_EVIDENCE_FIELDS } from "./child-evidence.js";
 export { SOURCE_ROLE_CATALOG, buildRolePersona } from "./prompt-content.js";
 const activation = `<dsmm-deepwork-mode>
 Use this workflow only while the \`{{modeName}}\` mode is effectively active. This is an opt-in boundary: ordinary presets default off; DW roles default on, but explicit off wins and retains only persona/access. Never force common workflow or skills on merely from a role name.
@@ -49,8 +49,8 @@ DeepSeek V4 Pro calibration is active.
 - First classify the task and identify the evidence needed.
 - Use tools before making repository-specific or API-specific claims.
 - Runtime reasoning effort is enforced by \`agent/request\`, not this prompt.
-- In \`auto\` calibration, explicit upstream reasoning effort is preserved; \`strict\` overrides it with computed policy.
-- Only adapter-advertised reasoning efforts are emitted; \`max\` is selected only for configured DW presets.
+- Ordinary root model and effort stay under the native model picker. Explicit preflighted invocation effort takes precedence over calibration.
+- For other eligible child requests, \`auto\` preserves explicit upstream effort; \`strict\` uses the configured default only when the adapter advertises a supported effort. If none is advertised, leave the request unchanged.
 - Keep final answers concise and do not expose private chain-of-thought.
 - When tool calls are enabled through the provider, preserve the provider-required reasoning/tool-call continuity.
 
@@ -61,11 +61,112 @@ DeepSeek-V41-Flash applies only to the verified deepseek-official/deepseek-flash
 
 - Keep work outcome-first and avoid procedural review or approval loops.
 - Runtime reasoning effort is chosen by the adapter only from the resolved model's advertised efforts. If the catalog advertises no reasoning efforts, leave the request unchanged.
-- Auto preserves explicit upstream effort; strict overrides it only with an advertised effort.
+- Ordinary root model and effort stay native-owned; explicit preflighted invocation effort takes precedence. For other eligible child requests, auto preserves explicit upstream effort; strict uses only an advertised effort.
 - Do not assume max, high, temperature, or another model's capabilities. Do not claim model heterogeneity when all child roles use the same route.
 - Maintain tool-call continuity required by the provider and never reveal private reasoning.
 
 </dsmm-deepseek-flash-calibration>`;
+const localeNames = {
+    en: "English", "zh-Hans": "Simplified Chinese", "zh-Hant": "Traditional Chinese", ja: "Japanese", ko: "Korean",
+    de: "German", fr: "French", es: "Spanish", "pt-BR": "Brazilian Portuguese", ru: "Russian"
+};
+export function buildDsmmLocaleGuidance(settings) {
+    return `<dsmm-visible-output-language>
+${JSON.stringify({ capturedLocale: settings.locale ?? null, visibleOutputLanguage: settings.locale === undefined ? null : localeNames[settings.locale] })}
+${settings.locale === undefined ? "No DSMM locale is captured; inherit applicable host/user language guidance, otherwise use the current request and conversation context." : `This Agent's immutable captured locale is ${settings.locale} (${localeNames[settings.locale]}). Use it as the default for visible replies, plans and role/category output.`}
+The current user's explicit output-language request takes precedence. Preserve that instruction in child assignments. A parent's later profile change does not rewrite this child's captured preference. Preserve code, identifiers, commands, paths, protocol fields and exact quotations verbatim. This affects visible output only: it neither promises an internal reasoning language nor changes the host UI/project locale. Do not infer configuration or authority with natural-language matching.
+</dsmm-visible-output-language>`;
+}
+function toolProperties(tool) {
+    return (tool.parameters.properties ?? {});
+}
+// Output projection must not serialize credentials/extra properties on structurally compatible DTOs.
+function projectInvocation({ routeKind, view }) {
+    return { routeKind, view: {
+            role: view.role, label: view.label, level: view.level, routeSource: view.routeSource, mode: view.mode,
+            ...(view.route === undefined ? {} : { route: { provider: view.route.provider, model: view.route.model,
+                    ...(view.route.reasoningEffort === undefined ? {} : { reasoningEffort: view.route.reasoningEffort }) } }),
+            ...(view.runId === undefined ? {} : { runId: view.runId }), ...(view.childId === undefined ? {} : { childId: view.childId }),
+            ...(view.jobId === undefined ? {} : { jobId: view.jobId })
+        } };
+}
+function projectChildEvidence(evidence) {
+    return { mode: evidence.mode, parentAdmissionEpoch: evidence.parentAdmissionEpoch,
+        ...(evidence.mode === "captured" && evidence.originalAdmissionEpoch !== undefined ? { originalAdmissionEpoch: evidence.originalAdmissionEpoch } : {}),
+        provenFields: [...new Set(evidence.provenFields.filter(field => CHILD_EVIDENCE_FIELDS.includes(field)))],
+        limitations: evidence.limitations.filter(row => CHILD_EVIDENCE_FIELDS.includes(row.field)
+            && ["missing-evidence", "not-persisted", "unverified", "parent-denied"].includes(row.code)
+            && ["capability-denied", "native-default", "display-only"].includes(row.effect))
+            .slice(0, CHILD_EVIDENCE_FIELDS.length).map(row => ({ field: row.field, code: row.code, effect: row.effect })) };
+}
+/** Register independently of the common-mode section, in the exact Agent scope. */
+export function buildDsmmAgentGuidance(settings, observed) {
+    const availability = new Map(observed.roleAvailability?.map(row => [row.id, row]));
+    const delegation = observed.delegation.flatMap(entry => {
+        const tool = observed.tools.find(tool => tool.name === entry.name);
+        if (tool === undefined)
+            return [];
+        const properties = toolProperties(tool);
+        const targetEnum = entry.targetParameter === undefined ? undefined : properties[entry.targetParameter]?.enum;
+        const targets = entry.targets.filter(id => (!availability.has(id) || availability.get(id).admitted)
+            && (entry.targetParameter === undefined || Array.isArray(targetEnum) && targetEnum.includes(id)));
+        if (targets.length === 0)
+            return [];
+        const levelEnum = properties.level?.enum;
+        return [{ tool: entry.name, kind: entry.kind, ...(entry.targetParameter === undefined ? {} : { targetParameter: entry.targetParameter }),
+                targets: targets.map(id => ({ id, ...(properties.level === undefined ? {} : { levels: ["normal", "low", "high", "max"]
+                            .filter(level => Array.isArray(levelEnum) && levelEnum.includes(level) && (level === "normal" || settings.roleRouting[id]?.levels?.[level] !== undefined)) }) })),
+                parameters: Object.keys(properties).filter(name => (name !== "route" || settings.subagents.allowRouteOverride)
+                    && (name !== "run_in_background" || settings.subagents.enableRunInBackground)),
+                routeOverride: settings.subagents.allowRouteOverride && properties.route !== undefined,
+                background: settings.subagents.enableRunInBackground && properties.run_in_background !== undefined }];
+    });
+    const controls = observed.tools.filter(tool => ["send_message", "interrupt_agent", "job_output", "job_list", "job_kill", "dsmm_children"].includes(tool.name));
+    const runtime = observed.runtimeAdmission === undefined ? undefined : {
+        binding: observed.runtimeAdmission.binding, deliveryFenceReady: observed.runtimeAdmission.deliveryFenceReady,
+        restartRequired: observed.runtimeAdmission.restartRequired,
+        ...(observed.runtimeAdmission.reason === undefined ? {} : { reason: observed.runtimeAdmission.reason })
+    };
+    const deliveryFenceReady = runtime?.binding === "dsmm" && runtime.deliveryFenceReady;
+    const managedDelivery = deliveryFenceReady && observed.capabilities?.managedChildDelivery === true;
+    const lifecycle = {
+        backgroundEnabled: settings.subagents.enableRunInBackground,
+        backgroundMode: settings.subagents.backgroundMode,
+        nativeJobs: settings.subagents.enableRunInBackground && observed.capabilities?.nativeJobs === true,
+        continuable: settings.subagents.enableRunInBackground && observed.capabilities?.continuable === true && deliveryFenceReady,
+        managedChildDelivery: managedDelivery,
+        sendMessage: managedDelivery && controls.some(tool => tool.name === "send_message"),
+        childToParentReporting: observed.scope === "child" && controls.some(tool => tool.name === "send_message"),
+        foregroundHandoffSurface: settings.subagents.enableRunInBackground && observed.capabilities?.nativeJobs ? observed.capabilities.foregroundHandoff?.surface ?? null : null,
+        browserPromptSurface: managedDelivery ? observed.capabilities?.nativeBrowserPrompt?.surface ?? null : null,
+        ...(runtime === undefined ? {} : { runtimeAdmission: runtime })
+    };
+    const sections = [buildDsmmLocaleGuidance(settings), `<dsmm-admitted-delegation>
+${JSON.stringify({ scope: observed.scope, topology: settings.subagents.toolTopology, delegation,
+            controls: controls.map(tool => ({ tool: tool.name, parameters: Object.keys(toolProperties(tool)) })),
+            ...(observed.roleAvailability === undefined ? {} : { roleAvailability: observed.roleAvailability.map(row => ({ id: row.id, admitted: row.admitted, ...(row.reason === undefined ? {} : { reason: row.reason }) })) }) }, null, 2)}
+</dsmm-admitted-delegation>
+Only the listed callable entries and target enums are observed here. Role availability alone is not tool availability. Inspect their native schemas; do not invent suffix roles, fields or tools. Omitted level and normal retain the default route; low/high/max are selectable only for the listed configured target levels, not workflow rigor or a fixed reasoning effort. Each level is a complete provider/model selection or an effort-only override with exact native preflight. Route override is deployment opt-in and additionally requires an exposed route parameter: provider/model must be paired; changing models discards the previous effort; effort-only uses the selected model's exact supported effort. An explicit complete invocation route does not silently use role fallback. Reusing a child does not reselect its role, level or route. Layout/level never enlarge target, read-only, inherited tool, ownership or depth authority. The ordinary root native model picker remains authoritative. Missing required planning/review capability returns to the stage owner, not a bypass.
+`];
+    if (observed.invocation !== undefined)
+        sections.push(`<dsmm-observed-invocation>\n${JSON.stringify(projectInvocation(observed.invocation), null, 2)}\n</dsmm-observed-invocation>\nThe routeKind labels this observation: initial is preflighted start, not a claim about the current fallback route; actual is supplied by observed native request/status. Level is resource selection, never added permissions or a smaller verification obligation.`);
+    sections.push(`<dsmm-child-lifecycle>
+<dsmm-child-lifecycle-state>\n${JSON.stringify(lifecycle, null, 2)}\n</dsmm-child-lifecycle-state>
+${settings.subagents.enableRunInBackground ? "Background is enabled in this Agent's captured deployment policy; only tools that expose run_in_background may request it." : "Background is disabled in this Agent's captured policy; do not request it."}
+${lifecycle.continuable && settings.subagents.backgroundMode === "continuable" ? "The admitted continuable configuration defaults background; explicit run_in_background:false still creates a non-reusable one-shot." : "No managed continuable default is established by this observation. One-shot calls default foreground; do not infer continuation from a persona or filename."}
+${lifecycle.nativeJobs ? "Native jobs can own one-shot background work when the actual job controller admits it; use the returned job ID and exposed job controls." : "Native-job background ownership/controller is not established here; do not invent a job handle."}
+${lifecycle.foregroundHandoffSurface !== null ? `The user surface ${lifecycle.foregroundHandoffSurface} may hand the existing foreground run to a native job, never start a duplicate. It rechecks exact operator/session/epoch, run ownership and background capacity before ownership transfer; failed preflight leaves foreground ownership/cancellation intact. A successful handoff releases only the foreground wait, not a child completion. Cancellation/settlement cannot revive a run.` : "No foreground-to-background user control is established here. Do not invent a tool or RPC for it."}
+${lifecycle.sendMessage ? "Exposed send_message can address a permitted existing direct continuable child: running delivery reaches the nearest step, idle starts a next turn, and cold continuation uses the same durable child ID. An inbox receipt means accepted, not executed/completed. A settled one-shot cannot be revived. Reuse carries the child's original captured route/locale/authority intersected with the current exact parent's authority; it never inherits the parent's latest profile as its original policy." : "Managed parent-to-child continuation through send_message is not established here; do not advertise safe reuse from a static role or SDK method alone."}
+${lifecycle.browserPromptSurface !== null ? `The actual native user surface ${lifecycle.browserPromptSurface} uses queue/steer for continuable children, with native attachment validation. Its operator/connection/session/epoch/lifetime gate precedes inbox acceptance. Do not impersonate an Agent sender. After acceptance do not automatically retry; an unknown disconnect outcome needs verification, not a guessed idempotency guarantee.` : "No operator-gated native user queue/steer surface is established here; do not announce an unconnected DSMM RPC."}
+${controls.some(tool => tool.name === "interrupt_agent") ? "Exposed interrupt_agent requests cancellation, not proof of completion or a message-delivery fence." : "No child interruption tool is observed here."}
+${lifecycle.childToParentReporting ? "Native child-to-parent reporting retains exact-sender/adjacency semantics; it does not grant parent-to-child delegation authority or replace the managed delivery gate." : ""}
+${runtime === undefined ? "Managed runtime binding/readiness is unobserved; no delivery-fence guarantee follows from these resources." : deliveryFenceReady ? "The observed unique DSMM PUBLIC SubagentRuntime binding has a ready delivery fence. Binding readiness alone does not prove existing-child delivery capability. Where observed, current exact-parent tickets and target original evidence gate acceptance; later parent Apply does not rebind old children or cancel already accepted work. Native parent/Host teardown still cancels/drains owned work." : `Runtime binding=${runtime.binding}; deliveryFenceReady=${runtime.deliveryFenceReady}; restartRequired=${runtime.restartRequired}${runtime.reason === undefined ? "" : `; reason=${runtime.reason}`}. Managed child features require explicit startup composition: disable the stock subagents registration row, install the unique PUBLIC DSMM SubagentRuntime subclass, then restart. Never unload/drain a running stock instance to hot-replace it, register a shadow provider, or change the user's host configuration automatically.`}
+Native capacity/depth, provider support, direct-parent ownership, captured permissions and cancellation remain mandatory in every branch. No OpenCode task_id/resume/retry protocol is supplied.
+</dsmm-child-lifecycle>`);
+    if (observed.childEvidence !== undefined)
+        sections.push(`<dsmm-child-evidence>\n${JSON.stringify(projectChildEvidence(observed.childEvidence), null, 2)}\n</dsmm-child-evidence>\n${observed.childEvidence.mode === "legacy-conservative" ? "Any actually admitted continuation of this captureless legacy child is limited to useful proven capabilities under the same durable ID, intersected with current normal parent authority and native lineage/depth/tool filters. Evidence alone is not delivery availability. Missing evidence denies that capability with its reason; it is neither a blanket denial of all legacy children nor permission to copy the parent's latest policy, synthesize old capture/level, rewrite records or revive a one-shot." : "The child's original immutable capture is its authority ceiling. A different current parent epoch is not an instruction to rebind it."}`);
+    return sections.join("\n\n---\n\n");
+}
 export function buildDeepworkPrompt(settings, options = {}) {
     const role = SOURCE_ROLE_CATALOG.find((role) => role.id === (options.roleId === undefined ? options.selectedPreset : options.roleId));
     const common = role === undefined ? BASE_DEEPWORK_PROMPT : [activation, asset("deepwork/default.md")].join("\n\n---\n\n");
@@ -78,14 +179,15 @@ reviewCap: ${String(settings.workflow.reviewCap)}
 finalReviewPolicy: ${settings.workflow.finalReviewPolicy}
 </dsmm-workflow-policy>` : `<dsmm-workflow-policy>policy: risk-based</dsmm-workflow-policy>`;
     const route = options.route;
-    const model = route !== undefined && isDeepseekV4ProRoute(route) ? "v4-pro"
-        : route !== undefined && isDeepseekFlashRoute(route) ? "flash" : undefined;
+    // Content assembly must not load the native routing/provider graph.
+    const providerId = route?.provider.toLowerCase(), modelId = route?.model.toLowerCase();
+    const model = providerId === "deepseek-official" && modelId === "deepseek-v4-pro" ? "v4-pro"
+        : ["deepseek-official", "deepseek-account"].includes(providerId ?? "") && modelId === "deepseek-flash" ? "flash" : undefined;
     const calibration = model === "flash" ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration;
     const calibrationPolicy = model === undefined ? "" : `<dsmm-deepseek-${model}-policy>
 calibrationMode: ${calibration}
-defaultReasoningEffort: ${model === "flash" ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort}
-maxReasoningPresets: ${(model === "flash" ? settings.deepseekFlashMaxReasoningPresets : settings.deepseekV4ProMaxReasoningPresets).join(", ")}
-effectiveDesiredReasoningEffort: ${desiredDeepseekEffort(settings, options.selectedPreset, model)}
+configuredDesiredReasoningEffort: ${model === "flash" ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort}
+This configured default is not an observed request effort. Native root selection, explicit invocation effort and adapter capability remain authoritative.
 </dsmm-deepseek-${model}-policy>`;
     const calibrated = model !== undefined && calibration !== "off"
         ? `${base}\n\n${model === "flash" ? DEEPSEEK_FLASH_OVERLAY : DEEPSEEK_V4_PRO_OVERLAY}\n\n${calibrationPolicy}` : base;

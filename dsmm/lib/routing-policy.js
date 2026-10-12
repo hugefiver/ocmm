@@ -57,6 +57,15 @@ function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 const resolvedRoleRuntimePolicies = new WeakMap();
+/** Install a preflighted invocation only on this child's immutable settings identity. */
+export function captureRoleRuntimePolicy(settings, role, policy) {
+    let policies = resolvedRoleRuntimePolicies.get(settings);
+    if (policies === undefined) {
+        policies = new Map();
+        resolvedRoleRuntimePolicies.set(settings, policies);
+    }
+    policies.set(role, policy);
+}
 /** Resolve once per immutable settings admission; omission and explicit [] remain distinct. */
 export function resolveRoleRuntimePolicy(settings, role) {
     let policies = resolvedRoleRuntimePolicies.get(settings);

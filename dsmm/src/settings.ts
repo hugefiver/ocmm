@@ -9,6 +9,12 @@ import type { DsmmSkillName } from "./skills.js";
 import { DEFAULT_DSMM_RUNTIME_POLICY, DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 import type { DeploymentSchemaNode } from "./profile-types.js";
+import { DEPRECATED_DSMM_FIELDS, DsmmConfigValidationError, safeDiagnosticField } from "./profile-diagnostics.js";
+import { DSMM_LOCALES } from "./profile-locale.js";
+import type { DsmmLocale } from "./profile-locale.js";
+
+export { DSMM_LOCALES } from "./profile-locale.js";
+export type { DsmmLocale } from "./profile-locale.js";
 
 export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 export { resolveRoleRuntimePolicy } from "./routing-policy.js";
@@ -21,6 +27,10 @@ export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
+export type DsmmInvocationLevel = "normal" | "low" | "high" | "max";
+export type DsmmLevelOverride = { reasoningEffort: string; provider?: never; model?: never } | DsmmModelRoute;
+export interface DsmmInvocationOptions { level?: DsmmInvocationLevel; route?: DsmmLevelOverride }
+export type DsmmToolTopology = "per-role" | "parameterized";
 
 export interface DsmmWorkflowSettings {
   policy: "risk-based" | "legacy";
@@ -35,6 +45,8 @@ export interface DsmmPresetSettings {
 }
 
 export interface DsmmSubagentSettings {
+  toolTopology: DsmmToolTopology;
+  allowRouteOverride: boolean;
   enableRunInBackground: boolean;
   backgroundMode: "one-shot" | "continuable";
   /** Omitted delegates to the native host limit (rc.2 default 1). */
@@ -66,6 +78,7 @@ export interface DsmmModelRoute {
 export interface DsmmRecoveryRoute extends DsmmModelRoute {}
 
 export interface DsmmRoleRoutingConfig {
+  levels?: Partial<Record<Exclude<DsmmInvocationLevel, "normal">, DsmmLevelOverride>>;
   primary?: DsmmModelRoute;
   fallbackRoutes?: DsmmModelRoute[];
   strategy?: DsmmRoutingStrategy;
@@ -98,6 +111,7 @@ type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fall
 };
 
 export interface DsmmPluginConfig {
+  locale?: DsmmLocale;
   /** Only global deployment input; native/legacy profile transport rejects it. */
   modules?: { deepwork?: { enabled?: boolean } };
   /** Startup-only native storage binding; never a runtime-profile field. */
@@ -106,10 +120,8 @@ export interface DsmmPluginConfig {
   section?: string;
   deepseekV4ProCalibration?: DeepseekCalibration;
   deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-  deepseekV4ProMaxReasoningPresets?: DsmmRoleId[];
   deepseekFlashCalibration?: DeepseekCalibration;
   deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-  deepseekFlashMaxReasoningPresets?: DsmmRoleId[];
   defaultActive?: boolean;
   promptOrder?: number;
   skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -125,16 +137,15 @@ export interface DsmmPluginConfig {
 }
 
 export interface DsmmSettings {
+  locale?: DsmmLocale;
   modules: { deepwork: { enabled: boolean } };
   modeName: string;
   defaultActive: boolean;
   promptOrder: number;
   deepseekV4ProCalibration: DeepseekCalibration;
   deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-  deepseekV4ProMaxReasoningPresets: DsmmRoleId[];
   deepseekFlashCalibration: DeepseekCalibration;
   deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-  deepseekFlashMaxReasoningPresets: DsmmRoleId[];
   skills: Record<DsmmSkillName, boolean>;
   roles: Record<DsmmRoleId, boolean>;
   roleRouting: DsmmRoleRouting;
@@ -150,9 +161,14 @@ export interface DsmmSettings {
 export type DsmmProfileScope = "global-default" | "session-override" | "deployment-baseline";
 
 export interface DsmmProfileAdmission {
+  childCapture?: import("./child-capture.js").ChildAdmissionCapture;
+  childEvidence?: import("./child-capture.js").ChildAdmissionEvidenceView;
+  warnings?: import("./profile-diagnostics.js").ProfileDiagnostic[];
+  roleAvailability?: import("./profile-types.js").DsmmRoleAvailabilityState[];
+  subagentRuntime?: import("./profile-types.js").SubagentRuntimeAdmissionView;
   settings: DsmmSettings;
   profile: { id: string; revision: string } | null;
-  epoch: string;
+  readonly epoch: string;
   scope: DsmmProfileScope;
   deployment?: DsmmDeploymentSnapshot;
   restartRequired?: readonly string[];
@@ -185,6 +201,7 @@ export interface DsmmDeploymentSnapshot {
 export type DsmmSettingsGetter = ((agent?: DshAgent) => DsmmSettings) & {
   admission?: (agent?: DshAgent) => DsmmProfileAdmission;
   moduleStates?: (agent?: DshAgent) => import("./modules.js").DsmmModuleState[];
+  subagentRuntime?: () => import("./profile-types.js").SubagentRuntimeAdmissionView;
 };
 
 export interface DsmmResolvedRoleRuntimePolicy {
@@ -211,10 +228,8 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   promptOrder: 50,
   deepseekV4ProCalibration: "auto",
   deepseekV4ProDefaultReasoningEffort: "high",
-  deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
   deepseekFlashCalibration: "auto",
   deepseekFlashDefaultReasoningEffort: "high",
-  deepseekFlashMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"],
   skills: createDefaultSkillSettings(),
   roles: createDefaultRoleSettings(),
   roleRouting: {},
@@ -222,7 +237,7 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   presets: {
     materialize: false
   },
-  subagents: { enableRunInBackground: false, backgroundMode: "one-shot" },
+  subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
   workflow: {
     policy: "risk-based",
     strictGates: true,
@@ -284,6 +299,9 @@ const MODEL_ROUTE_SCHEMA = Schema.object({
   model: Schema.string().required(),
   reasoningEffort: Schema.string()
 });
+const LEVEL_OVERRIDE_SCHEMA = Schema.union([MODEL_ROUTE_SCHEMA, Schema.object({ reasoningEffort: Schema.string().required() })]);
+const LEVELS_SCHEMA = Schema.object({ low: LEVEL_OVERRIDE_SCHEMA, high: LEVEL_OVERRIDE_SCHEMA, max: LEVEL_OVERRIDE_SCHEMA });
+const LOCALE_SCHEMA = Schema.union(DSMM_LOCALES.map(locale => Schema.const(locale)));
 const RATE_LIMIT_CONFIG_SCHEMA = Schema.object(Object.fromEntries(Object.keys(DEFAULT_DSMM_RUNTIME_POLICY.rateLimit).map((key) => [key, Schema.number()])));
 const ROUTING_STRATEGY_CONFIG_SCHEMA = Schema.union([Schema.const("startup-lock"), Schema.const("rate-limit-fallback")]);
 const RUNTIME_POLICY_CONFIG_SCHEMA = Schema.object({ strategy: ROUTING_STRATEGY_CONFIG_SCHEMA, rateLimit: RATE_LIMIT_CONFIG_SCHEMA });
@@ -292,6 +310,7 @@ const ROLE_FALLBACK_ROUTES_SCHEMA = Schema.array(MODEL_ROUTE_SCHEMA);
 
 // A dictionary retains unknown keys for fail-closed validation by the resolver.
 const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
+  levels: LEVELS_SCHEMA,
   primary: Schema.union([Schema.const(undefined), MODEL_ROUTE_SCHEMA]),
   fallbackRoutes: Schema.union([Schema.const(undefined), ROLE_FALLBACK_ROUTES_SCHEMA]),
   strategy: ROUTING_STRATEGY_CONFIG_SCHEMA,
@@ -302,6 +321,8 @@ const ROLE_ROUTING_SCHEMA = Schema.dict(Schema.object({
 // before object defaults can erase an explicitly malformed routing policy.
 const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input: unknown) => {
   if (!isRoutingRecord(input)) return input;
+  rejectDeprecatedFields(input);
+  if (Object.hasOwn(input, "locale")) validateLocale(input.locale);
   if (isRoutingRecord(input.runtimeRecovery) && Array.isArray(input.runtimeRecovery.fallbackRoutes)) {
     for (const route of input.runtimeRecovery.fallbackRoutes) {
       if (isRoutingRecord(route)) normalizeRecoveryEffort(route);
@@ -317,6 +338,8 @@ const PRESETS_SCHEMA = Schema.object({
   root: Schema.string()
 });
 const SUBAGENTS_SCHEMA = Schema.object({
+  toolTopology: Schema.union([Schema.const("per-role"), Schema.const("parameterized")]).default("per-role"),
+  allowRouteOverride: Schema.boolean().default(false),
   enableRunInBackground: Schema.boolean().default(false),
   backgroundMode: Schema.union([Schema.const("one-shot"), Schema.const("continuable")]).default("one-shot"),
   maxDepth: Schema.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER)
@@ -407,9 +430,6 @@ const DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA = Schema.union([
   Schema.const("high")
 ]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort);
 
-const DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA = Schema.array(String)
-  .default([...DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets]) as Schema<DsmmRoleId[]>;
-
 const LSP_SCHEMA = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.enabled),
   serverName: Schema.string().default(DEFAULT_DSMM_SETTINGS.lsp.serverName),
@@ -422,6 +442,7 @@ const LSP_SCHEMA = Schema.object({
 });
 
 const CONFIG_FIELDS_SCHEMA = Schema.object({
+  locale: LOCALE_SCHEMA,
   sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
     root: Schema.string().required(),
     compression: Schema.union([Schema.const("zstd"), Schema.const("none")])
@@ -432,10 +453,8 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   roleRouting: ROLE_ROUTING_SCHEMA,
@@ -510,16 +529,15 @@ export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.defau
 }) as unknown as Schema<DsmmPluginConfig>;
 
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+  locale: LOCALE_SCHEMA,
   modules: Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean().default(true) }) }),
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
   deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekV4ProMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
   deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekFlashMaxReasoningPresets: DEEPSEEK_MAX_REASONING_PRESETS_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA as Schema<Record<DsmmRoleId, boolean>>,
   roleRouting: ROLE_ROUTING_SCHEMA,
@@ -533,17 +551,19 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
 })]).default({}) as Schema<DsmmSettings>;
 
 export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
+  rejectDeprecatedFields(config);
+  if (Object.hasOwn(config, "locale")) validateLocale(config.locale);
+  if (config.subagents !== undefined) validateShape(config.subagents, SUBAGENTS_SCHEMA, ["subagents"]);
   const settings: DsmmSettings = {
+    ...(config.locale === undefined ? {} : { locale: config.locale }),
     modules: { deepwork: { enabled: config.modules?.deepwork?.enabled ?? DEFAULT_DSMM_SETTINGS.modules.deepwork.enabled } },
     modeName: normalizeModeName(config.modeName),
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
     deepseekV4ProCalibration: config.deepseekV4ProCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration,
     deepseekV4ProDefaultReasoningEffort: config.deepseekV4ProDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort,
-    deepseekV4ProMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekV4ProMaxReasoningPresets, DEFAULT_DSMM_SETTINGS.deepseekV4ProMaxReasoningPresets),
     deepseekFlashCalibration: config.deepseekFlashCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekFlashCalibration,
     deepseekFlashDefaultReasoningEffort: config.deepseekFlashDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekFlashDefaultReasoningEffort,
-    deepseekFlashMaxReasoningPresets: resolveMaxReasoningPresets(config.deepseekFlashMaxReasoningPresets, DEFAULT_DSMM_SETTINGS.deepseekFlashMaxReasoningPresets),
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     roleRouting: resolveRoleRouting(config.roleRouting),
@@ -596,34 +616,48 @@ export function freezeSettings<T>(input: T): T {
   return result;
 }
 
-function validateShape(value: unknown, schema: Schema): void {
-  if (value === null || value === undefined) throw new TypeError("Deepwork explicit configuration must not be null or undefined");
+function validateShape(value: unknown, schema: Schema, path: (string | number)[] = []): void {
+  const fail = (code: import("./profile-diagnostics.js").ProfileDiagnosticCode = "invalid-type"): never => { throw new DsmmConfigValidationError(code, path); };
+  if (value === null || value === undefined) fail();
   if (schema.type === "object") {
-    if (typeof value !== "object" || Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an object");
-    for (const [key, child] of Object.entries(value)) {
+    if (typeof value !== "object" || Array.isArray(value)) fail();
+    for (const [key, child] of Object.entries(value as object)) {
       const field = schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined;
-      if (field === undefined) throw new TypeError("Deepwork configuration contains an unknown field");
-      validateShape(child, field);
+      if (field === undefined) throw new DsmmConfigValidationError("unknown-field", [...path, key]);
+      validateShape(child, field, [...path, key]);
     }
   } else if (schema.type === "dict") {
     if (typeof value !== "object" || Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an object");
-    for (const child of Object.values(value)) validateShape(child, schema.inner!);
+    for (const [key, child] of Object.entries(value as object)) validateShape(child, schema.inner!, [...path, key]);
   } else if (schema.type === "array") {
     if (!Array.isArray(value)) throw new TypeError("Deepwork configuration field must be an array");
-    for (const child of value) validateShape(child, schema.inner!);
+    value.forEach((child, index) => validateShape(child, schema.inner!, [...path, index]));
   } else if (schema.type === "union") {
     for (const child of schema.list ?? []) {
-      try { validateShape(value, child); return; } catch { /* Try the other declared alternatives. */ }
+      try { validateShape(value, child, path); return; } catch { /* Try the other declared alternatives. */ }
     }
-    throw new TypeError("Deepwork configuration field does not match its declared type");
+    fail("unsupported-value");
   } else {
-    schema(value);
+    try { schema(value); } catch { fail(); }
   }
 }
 
 /** Sparse grammar and full semantic validation are separate from native refs. */
 export function validateSparseConfig(input: unknown, global = false): DsmmPluginConfig {
+  if (isRoutingRecord(input)) rejectDeprecatedFields(input);
   const config = copyJson(input) as DsmmPluginConfig;
+  if (isRoutingRecord(config.roleRouting)) {
+    for (const [role, policy] of Object.entries(config.roleRouting)) if (isRoutingRecord(policy) && Object.hasOwn(policy, "levels")) {
+      if (!(DSMM_ROLE_IDS as readonly string[]).includes(role)) throw new DsmmConfigValidationError("unknown-field", ["roleRouting", role]);
+      if (role === "dsmm-orchestrator") throw new DsmmConfigValidationError("unsupported-value", `roleRouting.${role}.levels`);
+      if (!isRoutingRecord(policy.levels)) throw new DsmmConfigValidationError("invalid-type", `roleRouting.${role}.levels`);
+      for (const [level, value] of Object.entries(policy.levels)) {
+        const field = safeDiagnosticField(["roleRouting", role, "levels", level]);
+        if (!["low", "high", "max"].includes(level)) throw new DsmmConfigValidationError("unsupported-value", ["roleRouting", role, "levels", level]);
+        normalizeLevelOverride(value, field);
+      }
+    }
+  }
   validateShape(config, global ? GLOBAL_FIELDS_SCHEMA : CONFIG_FIELDS_SCHEMA);
   if (global && Object.hasOwn(config, "sessionPersistence")) throw new TypeError("Native session storage is not a global deployment field");
   // A deployment layer may override one primary-route member and inherit the
@@ -639,24 +673,26 @@ export function validateSparseConfig(input: unknown, global = false): DsmmPlugin
 }
 
 export function validateDeploymentPath(path: readonly string[]): void {
+  const deprecated = path.find(key => (DEPRECATED_DSMM_FIELDS as readonly string[]).includes(key));
+  if (deprecated !== undefined) throw new DsmmConfigValidationError("deprecated-field", path);
   let schema: Schema = GLOBAL_FIELDS_SCHEMA;
   if (path.length === 0 || path[0] === "sessionPersistence") throw new TypeError("Not an editable deployment field");
   for (const key of path) {
     if (schema.type === "union") schema = schema.list?.find((node) => node.type === "object") ?? schema;
     const child = schema.type === "object" ? schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined : schema.type === "dict" ? schema.inner : undefined;
-    if (child === undefined) throw new TypeError("Unknown deployment field path");
+    if (child === undefined) throw new DsmmConfigValidationError("unknown-field", path);
     schema = child;
   }
 }
 
 export function mergeConfigLayers(...layers: DsmmPluginConfig[]): DsmmPluginConfig {
-  const merge = (base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> => {
+  const merge = (base: Record<string, unknown>, overlay: Record<string, unknown>, path: string[] = []): Record<string, unknown> => {
     const result = copyJson(base);
     for (const [key, value] of Object.entries(overlay)) {
       const previous = result[key];
-      result[key] = value !== null && typeof value === "object" && !Array.isArray(value)
+      result[key] = path.at(-1) !== "levels" && value !== null && typeof value === "object" && !Array.isArray(value)
         && previous !== null && typeof previous === "object" && !Array.isArray(previous)
-        ? merge(previous as Record<string, unknown>, value as Record<string, unknown>) : copyJson(value);
+        ? merge(previous as Record<string, unknown>, value as Record<string, unknown>, [...path, key]) : copyJson(value);
     }
     return result;
   };
@@ -682,9 +718,25 @@ function validatePresentRuntimePolicy(value: unknown): unknown {
   return value;
 }
 
-function resolveMaxReasoningPresets(input: readonly unknown[] | undefined, defaults: readonly DsmmRoleId[]): DsmmRoleId[] {
-  const requested = new Set(input ?? defaults);
-  return DSMM_ROLE_IDS.filter((id) => requested.has(id));
+export function rejectDeprecatedFields(input: object, prefix = ""): void {
+  for (const key of DEPRECATED_DSMM_FIELDS) if (Object.hasOwn(input, key)) throw new DsmmConfigValidationError("deprecated-field", `${prefix}${key}`);
+}
+export function validateLocale(value: unknown, field = "locale"): asserts value is DsmmLocale {
+  if (typeof value !== "string" || !(DSMM_LOCALES as readonly string[]).includes(value)) throw new DsmmConfigValidationError("unsupported-value", field);
+}
+export function normalizeLevelOverride(value: unknown, field = "route"): DsmmLevelOverride {
+  try { value = copyJson(value); } catch { throw new DsmmConfigValidationError("invalid-route", field); }
+  if (!isRoutingRecord(value)) throw new DsmmConfigValidationError("invalid-route", field);
+  for (const key of Object.keys(value)) if (!["provider", "model", "reasoningEffort"].includes(key)) throw new DsmmConfigValidationError("unknown-field", [...field.split("."), key]);
+  if (Object.hasOwn(value, "provider") || Object.hasOwn(value, "model")) {
+    try {
+      const route = normalizeExplicitRoute(value);
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/u.test(route.provider) || route.model.length > 512 || route.model.includes("://") || /[\u0000-\u001f\u007f]/u.test(route.model) || route.reasoningEffort !== undefined && (route.reasoningEffort.length > 64 || /[\u0000-\u001f\u007f]/u.test(route.reasoningEffort))) throw new Error("Invalid bounded route");
+      return route;
+    } catch { throw new DsmmConfigValidationError("invalid-route", field); }
+  }
+  if (typeof value.reasoningEffort !== "string" || value.reasoningEffort.trim() === "" || value.reasoningEffort.length > 64 || /[\u0000-\u001f\u007f]/u.test(value.reasoningEffort)) throw new DsmmConfigValidationError("invalid-route", `${field}.reasoningEffort`);
+  return { reasoningEffort: value.reasoningEffort.trim() };
 }
 
 export function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting {
@@ -692,19 +744,34 @@ export function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRole
   if (!isRoutingRecord(input)) throw new TypeError("dsmm roleRouting must be an object");
   const result: DsmmRoleRouting = {};
   for (const [key, value] of Object.entries(input)) {
-    if (!(DSMM_ROLE_IDS as readonly string[]).includes(key)) throw new TypeError("dsmm roleRouting contains an unknown role");
-    if (!isRoutingRecord(value) || Object.keys(value).some((field) => !["primary", "fallbackRoutes", "strategy", "rateLimit"].includes(field))) {
-      throw new TypeError("dsmm roleRouting role policy must contain only primary, fallbackRoutes, strategy and rateLimit");
+    if (!(DSMM_ROLE_IDS as readonly string[]).includes(key)) throw new DsmmConfigValidationError("unknown-field", ["roleRouting", key]);
+    if (!isRoutingRecord(value) || Object.keys(value).some((field) => !["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"].includes(field))) {
+      if (!isRoutingRecord(value)) throw new DsmmConfigValidationError("invalid-type", `roleRouting.${key}`);
+      throw new DsmmConfigValidationError("unknown-field", ["roleRouting", key, Object.keys(value).find(field => !["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"].includes(field))!]);
     }
     const policy: DsmmRoleRoutingConfig = {};
+    if (Object.hasOwn(value, "levels")) {
+      const field = `roleRouting.${key}.levels`;
+      if (key === "dsmm-orchestrator") throw new DsmmConfigValidationError("unsupported-value", field);
+      if (!isRoutingRecord(value.levels)) throw new DsmmConfigValidationError("invalid-type", field);
+      policy.levels = {};
+      for (const [level, override] of Object.entries(value.levels)) {
+        if (!["low", "high", "max"].includes(level)) throw new DsmmConfigValidationError("unsupported-value", `${field}.${level}`);
+        policy.levels[level as "low" | "high" | "max"] = normalizeLevelOverride(override, `${field}.${level}`);
+      }
+    }
     if (Object.hasOwn(value, "strategy")) policy.strategy = normalizeRoutingStrategy(value.strategy);
     if (Object.hasOwn(value, "rateLimit")) policy.rateLimit = normalizeRateLimitOverrides(value.rateLimit);
-    if (Object.hasOwn(value, "primary")) policy.primary = normalizeExplicitRoute(value.primary);
+    if (Object.hasOwn(value, "primary")) {
+      try { policy.primary = normalizeExplicitRoute(value.primary); }
+      catch { throw new DsmmConfigValidationError("invalid-route", `roleRouting.${key}.primary`); }
+    }
     if (Object.hasOwn(value, "fallbackRoutes")) {
       if (!Array.isArray(value.fallbackRoutes) || value.fallbackRoutes.length > ROLE_FALLBACK_ROUTE_LIMIT) throw new TypeError("dsmm roleRouting fallbackRoutes must be an array with at most 32 entries");
       policy.fallbackRoutes = [];
-      for (const entry of value.fallbackRoutes) {
-        const route = normalizeExplicitRoute(entry);
+      for (const [index, entry] of value.fallbackRoutes.entries()) {
+        let route: DsmmModelRoute;
+        try { route = normalizeExplicitRoute(entry); } catch { throw new DsmmConfigValidationError("invalid-route", `roleRouting.${key}.fallbackRoutes[${index}]`); }
         if (!policy.fallbackRoutes.some((existing) => existing.provider === route.provider && existing.model === route.model)) policy.fallbackRoutes.push(route);
       }
     }

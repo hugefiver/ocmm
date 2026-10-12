@@ -1,7 +1,8 @@
-import { getNodeValue, parseTree } from "jsonc-parser";
+import { getNodeValue } from "jsonc-parser";
 import { DSMM_ROLE_IDS } from "./roles.js";
-import { resolveConfig } from "./settings.js";
-import { normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy } from "./routing-policy.js";
+import { DSMM_LOCALES, resolveConfig, normalizeLevelOverride } from "./settings.js";
+import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy } from "./routing-policy.js";
+import { DEPRECATED_DSMM_FIELDS, diagnostic, diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
 export const MAX_PROFILE_BYTES = 128 * 1024;
 export const MAX_PROFILE_COUNT = 128;
 export const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
@@ -9,17 +10,23 @@ export const MAX_PROFILE_REVISIONS = 1024;
 export class DsmmProfileError extends Error {
     code;
     field;
-    constructor(code, message, field) {
+    reason;
+    location;
+    constructor(code, message, field, reason, location) {
         super(message);
         this.name = "DsmmProfileError";
         this.code = code;
         this.field = field;
+        this.reason = reason;
+        this.location = location;
     }
     toInfo() {
-        return { code: this.code, message: this.message, ...(this.field === undefined ? {} : { field: this.field }) };
+        return { code: this.code, message: this.message, ...(this.field === undefined ? {} : { field: this.field }), ...(this.reason === undefined ? {} : { reason: this.reason }), ...(this.location === undefined ? {} : { location: this.location }) };
     }
 }
 export function profileErrorInfo(error, fallback = "io") {
+    if (error instanceof DsmmConfigValidationError)
+        return { code: "validation", message: error.message, field: error.diagnostic.field, reason: error.diagnostic.code, ...(error.diagnostic.location === undefined ? {} : { location: error.diagnostic.location }) };
     return error instanceof DsmmProfileError ? error.toInfo() : { code: fallback, message: "Deepwork profile operation failed; the previous selection and files were retained." };
 }
 export function validateProfileId(id) {
@@ -31,60 +38,115 @@ export function validateProfileRevision(revision, field = "expectedRevision") {
     if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision))
         invalid(field, "must be a SHA256 file revision");
 }
-const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekV4ProMaxReasoningPresets", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "deepseekFlashMaxReasoningPresets"];
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
 export function parseProfileDocument(content, expectedId) {
+    const result = validateProfileDocument(content, expectedId);
+    const error = result.diagnostics.find(item => item.severity === "error");
+    if (error !== undefined)
+        throw new DsmmProfileError("validation", `${error.field}: ${error.reason}`, error.field, error.code, error.location);
+    return result.document;
+}
+export function validateProfileDocument(content, expectedId) {
     if (typeof content !== "string")
-        invalid("content", "must be JSONC text");
+        return { diagnostics: [diagnostic("invalid-type", "content")] };
     if (content.length > MAX_PROFILE_BYTES)
         throw new DsmmProfileError("limit", "Profile files must not exceed 128 KiB.", "content");
     const encoded = new TextEncoder().encode(content);
     if (encoded.byteLength > MAX_PROFILE_BYTES)
         throw new DsmmProfileError("limit", "Profile files must not exceed 128 KiB.", "content");
     if (new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(encoded) !== content)
-        invalid("content", "must round-trip through UTF-8 without unpaired UTF-16 surrogates");
-    const errors = [];
-    const tree = parseTree(content.replace(/^\uFEFF/u, ""), errors, { allowTrailingComma: true, disallowComments: false, allowEmptyContent: false });
-    if (tree === undefined || errors.length > 0)
-        invalid("content", "must contain one valid JSONC document (comments and trailing commas are allowed)");
-    validateTree(tree, 0);
-    const document = record(getNodeValue(tree), "document");
-    keys(document, ["version", "id", "label", "settings"], "document");
-    if (document.version !== 1)
-        invalid("version", "must be 1");
-    validateProfileId(document.id);
-    if (expectedId !== undefined && document.id !== expectedId)
-        invalid("id", "must match the profile filename ID");
-    if (Object.hasOwn(document, "label"))
-        string(document.label, "label", 120);
-    const overlay = record(document.settings, "settings");
-    keys(overlay, OVERLAY_FIELDS, "settings", "Only runtime settings are supported; keep roles, skills, installation, providers, credentials, presets and LSP configuration in the native deployment configuration.");
+        return { diagnostics: [diagnostic("invalid-type", "content")] };
+    const inspected = inspectJsonDocument(content);
+    if (inspected.diagnostics.length)
+        return { diagnostics: inspected.diagnostics };
+    const tree = inspected.tree;
+    try {
+        const document = record(getNodeValue(tree), "document");
+        keys(document, ["version", "id", "label", "settings"], "document");
+        if (document.version !== 1)
+            invalid("version", "must be 1", "unsupported-value");
+        validateProfileId(document.id);
+        if (expectedId !== undefined && document.id !== expectedId)
+            invalid("id", "must match the profile filename ID");
+        if (Object.hasOwn(document, "label")) {
+            if (typeof document.label !== "string" || document.label.length > 120 || /[\u0000-\u001F\u007F]/u.test(document.label)
+                || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(document.label)) !== document.label)
+                invalid("label", "must be valid bounded text without controls");
+        }
+        const overlay = record(document.settings, "settings");
+        validateProfileOverlay(overlay);
+        const result = clone(document);
+        return { document: result, diagnostics: profileDocumentWarnings(result).map(info => ({ ...info, location: fieldLocation(content, tree, info.field) })) };
+    }
+    catch (error) {
+        if (!(error instanceof DsmmProfileError) && !(error instanceof DsmmConfigValidationError))
+            throw error;
+        const code = error instanceof DsmmConfigValidationError ? error.diagnostic.code : error.reason ?? "invalid-type";
+        const field = error instanceof DsmmConfigValidationError ? error.diagnostic.field : error.field ?? "document";
+        return { diagnostics: [diagnostic(code, field, fieldLocation(content, tree, field, diagnosticSourcePath(error)))] };
+    }
+}
+export function profileDocumentWarnings(document) {
+    return document?.label !== undefined && document.label.trim() === "" ? [diagnostic("blank-label", "label")] : [];
+}
+export function validateProfileOverlay(input) {
+    const overlay = record(input, "settings");
+    keys(overlay, OVERLAY_FIELDS, "settings");
     optional(overlay, "defaultActive", bool, "settings");
     for (const prefix of ["deepseekV4Pro", "deepseekFlash"]) {
         optional(overlay, `${prefix}Calibration`, (value, field) => enumeration(value, ["off", "auto", "strict"], field), "settings");
         optional(overlay, `${prefix}DefaultReasoningEffort`, (value, field) => enumeration(value, ["off", "low", "high"], field), "settings");
-        optional(overlay, `${prefix}MaxReasoningPresets`, roleList, "settings");
     }
     optional(overlay, "roleRouting", roleRouting, "settings");
     optional(overlay, "runtimePolicy", runtimePolicy, "settings");
     optional(overlay, "workflow", workflow, "settings");
     optional(overlay, "guards", guards, "settings");
     optional(overlay, "runtimeRecovery", recovery, "settings");
-    const result = clone(document);
-    // The package's existing resolver remains authoritative for semantic normalization.
-    try {
-        resolveConfig(result.settings);
-    }
-    catch {
-        invalid("settings", "contains an invalid Deepwork runtime policy");
-    }
-    return result;
+    optional(overlay, "locale", (value, field) => enumeration(value, DSMM_LOCALES, field), "settings");
+    optional(overlay, "roles", (value, field) => {
+        const roles = record(value, field);
+        keys(roles, DSMM_ROLE_IDS, field);
+        for (const [role, enabled] of Object.entries(roles))
+            bool(enabled, `${field}.${role}`);
+    }, "settings");
+    optional(overlay, "subagents", (value, field) => {
+        const settings = record(value, field);
+        keys(settings, ["toolTopology"], field);
+        optional(settings, "toolTopology", (value, path) => enumeration(value, ["per-role", "parameterized"], path), field);
+    }, "settings");
+    const settings = resolveConfig(overlay);
+    for (const role of requiredDeepworkRoles(settings))
+        if (overlay.roles?.[role] === false)
+            invalid(`settings.roles.${role}`, "is required", "required-role");
 }
 export function mergeProfileConfig(baseline, overlay) {
     return mergeRecords(baseline, overlay);
 }
 export function resolveProfileSettings(baseline, overlay) {
-    return resolveConfig(mergeProfileConfig(baseline, overlay));
+    const ceiling = resolveConfig(baseline);
+    const settings = resolveConfig(mergeProfileConfig(baseline, overlay));
+    for (const role of requiredDeepworkRoles(settings))
+        if (overlay.roles?.[role] === false)
+            invalid(`settings.roles.${role}`, "is required", "required-role");
+    for (const [role, enabled] of Object.entries(overlay.roles ?? {}))
+        if (enabled && (!ceiling.modules.deepwork.enabled || !ceiling.roles[role]))
+            invalid(`settings.roles.${role}`, "exceeds captured deployment", "deployment-ceiling");
+    return settings;
+}
+export function requiredDeepworkRoles(settings) {
+    const required = ["dsmm-orchestrator", "dsmm-planner", "dsmm-plan-critic"];
+    if (settings.workflow.policy === "legacy") {
+        if (settings.workflow.finalReviewPolicy !== "off")
+            required.push("dsmm-reviewer");
+        if (settings.workflow.finalReviewPolicy === "simple-oracle-complex-reviewer")
+            required.push("dsmm-oracle");
+    }
+    return required;
+}
+export function requiredReason(settings, role) {
+    if (!requiredDeepworkRoles(settings).includes(role))
+        return undefined;
+    return ["dsmm-orchestrator", "dsmm-planner", "dsmm-plan-critic"].includes(role) ? "deepwork-planning" : "legacy-review";
 }
 function mergeRecords(baseline, overlay) {
     const result = {};
@@ -92,7 +154,7 @@ function mergeRecords(baseline, overlay) {
         result[key] = clone(value);
     for (const [key, value] of Object.entries(overlay)) {
         // Routes are complete values, whereas each role's policy keys merge independently.
-        result[key] = key !== "primary" && isRecord(value) && isRecord(result[key]) ? mergeRecords(result[key], value) : clone(value);
+        result[key] = !["primary", "low", "high", "max"].includes(key) && isRecord(value) && isRecord(result[key]) ? mergeRecords(result[key], value) : clone(value);
     }
     return result;
 }
@@ -100,23 +162,6 @@ function clone(value) {
     if (Array.isArray(value))
         return value.map(clone);
     return isRecord(value) ? mergeRecords({}, value) : value;
-}
-function validateTree(node, depth) {
-    if (depth > 32)
-        invalid("content", "exceeds the maximum JSON nesting depth");
-    if (node.type === "object") {
-        const found = new Set();
-        for (const property of node.children ?? []) {
-            const key = property.children?.[0]?.value;
-            if (typeof key !== "string" || FORBIDDEN_KEYS.has(key))
-                invalid("content", "contains an unsafe object key");
-            if (found.has(key))
-                invalid("content", "contains a duplicate object key; remove the duplicate before saving");
-            found.add(key);
-        }
-    }
-    for (const child of node.children ?? [])
-        validateTree(child, depth + 1);
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -126,16 +171,22 @@ function record(value, field) {
         invalid(field, "must be an object");
     return value;
 }
-function keys(value, allowed, field, extra = "Remove unsupported fields before saving.") {
-    if (Object.keys(value).some((key) => !allowed.includes(key)))
-        invalid(field, `contains unsupported fields. ${extra}`);
+function keys(value, allowed, field, _extra = "Remove unsupported fields before saving.") {
+    for (const key of DEPRECATED_DSMM_FIELDS)
+        if (Object.hasOwn(value, key))
+            throw new DsmmConfigValidationError("deprecated-field", [...field === "document" ? [] : field.split("."), key]);
+    for (const key of Object.keys(value)) {
+        if (!allowed.includes(key))
+            throw new DsmmConfigValidationError("unknown-field", [...field === "document" ? [] : field.split("."), key]);
+    }
 }
 function optional(value, key, validator, field) {
     if (Object.hasOwn(value, key))
         validator(value[key], `${field}.${key}`);
 }
-function invalid(field, message) {
-    throw new DsmmProfileError("validation", `${field} ${message}.`, field);
+function invalid(field, _message, code = "invalid-type") {
+    const info = diagnostic(code, field);
+    throw new DsmmProfileError("validation", `${info.field}: ${info.reason}`, info.field, code);
 }
 function bool(value, field) {
     if (typeof value !== "boolean")
@@ -147,7 +198,7 @@ function string(value, field, maximum) {
 }
 function enumeration(value, allowed, field) {
     if (typeof value !== "string" || !allowed.includes(value))
-        invalid(field, `must be one of ${allowed.join(", ")}`);
+        invalid(field, `must be one of ${allowed.join(", ")}`, "unsupported-value");
 }
 function integer(value, field, minimum, maximum) {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum)
@@ -156,13 +207,7 @@ function integer(value, field, minimum, maximum) {
 function array(value, field, maximum, validator) {
     if (!Array.isArray(value) || value.length > maximum)
         invalid(field, `must be an array with at most ${maximum} entries`);
-    for (const item of value)
-        validator(item, field);
-}
-function roleList(value, field) {
-    array(value, field, DSMM_ROLE_IDS.length, (role, path) => enumeration(role, DSMM_ROLE_IDS, path));
-    if (new Set(value).size !== value.length)
-        invalid(field, "must not contain duplicate roles");
+    value.forEach((item, index) => validator(item, `${field}[${index}]`));
 }
 function route(value, field) {
     const item = record(value, field);
@@ -184,7 +229,23 @@ function roleRouting(value, field) {
     for (const [role, raw] of Object.entries(item)) {
         const path = `${field}.${role}`;
         const policy = record(raw, path);
-        keys(policy, ["primary", "fallbackRoutes", "strategy", "rateLimit"], path);
+        keys(policy, ["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"], path);
+        optional(policy, "levels", (value, field) => {
+            if (role === "dsmm-orchestrator")
+                invalid(field, "root model is native-owned", "unsupported-value");
+            const levels = record(value, field);
+            if (Object.hasOwn(levels, "normal"))
+                invalid(`${field}.normal`, "normal is a read-only default alias", "unsupported-value");
+            keys(levels, ["low", "high", "max"], field);
+            for (const [level, override] of Object.entries(levels)) {
+                const at = `${field}.${level}`;
+                normalizeLevelOverride(override, at);
+                if (isRecord(override) && (Object.hasOwn(override, "provider") || Object.hasOwn(override, "model")))
+                    route(override, at);
+                else
+                    string(override.reasoningEffort, `${at}.reasoningEffort`, 64);
+            }
+        }, path);
         optional(policy, "primary", route, path);
         optional(policy, "fallbackRoutes", routeList, path);
         optional(policy, "strategy", strategy, path);
@@ -196,10 +257,16 @@ function strategy(value, field) {
         normalizeRoutingStrategy(value);
     }
     catch {
-        invalid(field, "must be startup-lock or rate-limit-fallback");
+        invalid(field, "must be startup-lock or rate-limit-fallback", "unsupported-value");
     }
 }
 function rateLimit(value, field) {
+    const item = record(value, field);
+    keys(item, Object.keys(DSMM_RATE_LIMIT_BOUNDS), field);
+    for (const [key, value] of Object.entries(item)) {
+        const [min, max] = DSMM_RATE_LIMIT_BOUNDS[key];
+        integer(value, `${field}.${key}`, min, max);
+    }
     try {
         normalizeRateLimitOverrides(value);
     }

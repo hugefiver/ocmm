@@ -27,6 +27,8 @@ export declare function normalizeRoutingStrategy(value: unknown): DsmmRoutingStr
 export declare function normalizeRateLimitOverrides(value: unknown): Partial<DsmmRateLimitPolicy>;
 export declare function normalizeRateLimitPolicy(value?: unknown, defaults?: Readonly<DsmmRateLimitPolicy>): DsmmRateLimitPolicy;
 export declare function normalizeRuntimePolicy(value?: unknown): DsmmRuntimePolicySettings;
+/** Install a preflighted invocation only on this child's immutable settings identity. */
+export declare function captureRoleRuntimePolicy(settings: DsmmSettings, role: DsmmRoleId, policy: DsmmResolvedRoleRuntimePolicy): void;
 /** Resolve once per immutable settings admission; omission and explicit [] remain distinct. */
 export declare function resolveRoleRuntimePolicy(settings: DsmmSettings, role?: DsmmRoleId): DsmmResolvedRoleRuntimePolicy;
 //# sourceMappingURL=routing-policy.d.ts.map

@@ -6,7 +6,12 @@ import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./s
 import { DeepworkModeController } from "./state.js";
 import type { DsmmDeploymentSnapshot } from "./settings.js";
 import type { DeploymentAdmissionView } from "./profile-types.js";
+import type { ChildAdmissionCompletion, DsmmChildAdmissionAuthority, LegacyChildEvidenceReader, ParentAdmissionTicket } from "./child-admission-contract.js";
+import type { ChildAdmissionCapture, ChildAdmissionEvidence, PreparedChildAdmission } from "./child-capture.js";
 export interface DsmmProfileRuntimeStore {
+    createChildAdmission?(capture: ChildAdmissionCapture, assertCurrent?: () => void): Promise<ChildAdmissionCapture>;
+    readChildAdmission?(childId: string, parentId: string): Promise<ChildAdmissionCapture | null>;
+    deleteChildAdmission?(childId: string, parentId: string): Promise<void>;
     readonly readOnly?: boolean;
     readonly origin?: "central" | "legacy" | "explicit";
     readonly writeRestriction?: string;
@@ -25,6 +30,18 @@ export interface DsmmProfileRuntimeStore {
     }>;
 }
 export interface DsmmProfileRuntimeOptions {
+    /** Separate Host-owned central sidecars keep legacy profile libraries read-only. */
+    childCaptureStore?: Pick<DsmmProfileRuntimeStore, "createChildAdmission" | "readChildAdmission" | "deleteChildAdmission">;
+    childAuthority?: DsmmChildAdmissionAuthority;
+    /** Exact entry identity bound by the stable Host authority; never wire input. */
+    childAuthorityOwner?: object;
+    childAdmission?: ChildAdmissionCompletion;
+    /** B's synchronous candidate-role/ceiling validation; Apply preparation must not publish identity changes. */
+    validateRootRole?: (agent: DshAgent, admission: DsmmProfileAdmission) => void;
+    /** Host session substrate decides this; resident mode makes no restart claim. */
+    childCapturePersistence?: "durable" | "resident";
+    /** Parent composition may enable its bound policy after guards exist, before retained Agents are admitted. */
+    onAdmissionGuardsInstalled?: (runtime: DsmmProfileRuntime) => void | Promise<void>;
     /** Trusted test/integration seam, never a wire-supplied path or callback. */
     validateCandidate?: (settings: DsmmSettings) => void | Promise<void>;
     modeController?: DeepworkModeController;
@@ -45,6 +62,7 @@ export declare class DsmmProfileRuntime {
     private readonly ctx;
     private readonly store;
     private readonly options;
+    readonly childCaptureStore: Pick<DsmmProfileRuntimeStore, "createChildAdmission" | "readChildAdmission" | "deleteChildAdmission">;
     readonly getSettings: DsmmSettingsGetter;
     private current;
     private currentDocument;
@@ -80,10 +98,21 @@ export declare class DsmmProfileRuntime {
     private declaredProfileModel;
     private agents;
     private bind;
-    private bindChild;
     private owner;
     private assertRoot;
+    /** Host-only awaited completion for fresh, retained and cold exact Agents; no execution occurs here. */
+    completeAdmission(agent: DshAgent, signal?: AbortSignal, startup?: DsmmDeploymentSnapshot): Promise<DsmmProfileAdmission>;
     private admit;
+    /** Awaited native creation completion: evidence + persistence + role identity + exact-parent authority. */
+    completeChildAdmission(agent: DshAgent, parent: DshAgent, prepared: PreparedChildAdmission, signal?: AbortSignal): Promise<void>;
+    /** C's scoped resolver callback: original resident/durable evidence, then explicit trusted legacy folds. */
+    resolveOriginalChildEvidence(ticket: ParentAdmissionTicket, childId: string, signal: AbortSignal, readLegacy?: LegacyChildEvidenceReader): Promise<ChildAdmissionEvidence>;
+    private assertOwnedParentTicket;
+    private subagentRuntimeView;
+    private assertDeliveryFence;
+    private assertRootRole;
+    private validateRootRole;
+    private roleAvailability;
     private validate;
 }
 /** No guessed home fallback: native deployment context owns this directory. */

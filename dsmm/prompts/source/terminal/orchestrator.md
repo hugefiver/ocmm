@@ -11,7 +11,7 @@
 <ocmm-review-session-efficiency-policy>
 ## Review Session Efficiency Policy
 A review stage is one role, one authoritative artifact or decision target, and one review objective from initial dispatch through corrections until approval or receipt, abandonment, or handoff to another workflow phase.
-Continue the same reviewer or plan-critic native child identity (only if continuation is exposed) for corrections and rechecks inside that stage.
+Continue the same reviewer or plan-critic child only when it was started in native continuable mode, its returned child ID is valid, and the exposed send_message surface permits that follow-up. A one-shot result has no continuation handle: start a fresh permitted focused child with the correction context. Never send task_id, resume or retry fields. Native message acceptance is not review completion.
 A plan-critic rejection followed by a corrected version of the same plan remains the same stage; reviewer findings followed by fixes to the same implementation review also remain the same stage.
 Start a fresh session at every stage boundary: design review to plan review, plan-critic approval to implementation, implementation to final acceptance, or any change of role, artifact, or review objective.
 Also start fresh when prior context is unavailable or invalid for the current target, continuation fails, or intentionally independent evidence is required.

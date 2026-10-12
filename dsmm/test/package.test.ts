@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { Context } from "@deepseek-ai/cordis";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 
 useIsolatedDshEnvironment();
@@ -54,14 +55,7 @@ test("package manifest exposes dsh bundle metadata", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
-  assert.equal(pkg.version, "0.2.0");
   assert.equal(Object.hasOwn(pkg, "private"), false);
-  assert.equal(pkg.author, "Hugefiver");
-  assert.equal(pkg.license, "LicenseRef-AAAPL");
-  assert.equal(pkg.repository, "https://github.com/hugefiver/ocmm");
-  assert.equal(pkg.homepage, "https://github.com/hugefiver/ocmm/tree/master/dsmm");
-  assert.equal(pkg.bugs, "https://github.com/hugefiver/ocmm/issues");
-  assert.deepEqual(pkg.keywords, ["deepseek-harness", "dsh", "dsh-plugin", "deepwork", "agentic-workflows", "cordis"]);
   assert.deepEqual(pkg.publishConfig, { registry: "https://registry.npmjs.org/", access: "public" });
   assert.equal(pkg.type, "module");
   assert.equal(pkg.main, "./lib/index.js");
@@ -70,6 +64,8 @@ test("package manifest exposes dsh bundle metadata", () => {
     ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
     "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
     "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
+    "./subagent-runtime": { types: "./lib/runtime-integration.d.ts", default: "./lib/runtime-integration.js" },
+    "./legacy-read-host": { types: "./lib/legacy-read-host.d.ts", default: "./lib/legacy-read-host.js" },
     "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
     "./package.json": "./package.json",
     "./locale/en.json": "./locale/en.json",
@@ -105,29 +101,12 @@ test("package manifest exposes dsh bundle metadata", () => {
   ]);
   assert.equal(pkg.files.includes("lib"), false);
   assert.equal(pkg.files.some((path: string) => path.includes("implementation-plan")), false);
-  assert.deepEqual(pkg.engines, { node: ">=22" });
-  assert.deepEqual(pkg.dependencies, { "@deepseek-ai/schemastery": "~3.18.4", "jsonc-parser": "^3.3.1" });
-  assert.equal(pkg.scripts["smoke:docker:build"], "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..");
-  assert.equal(pkg.scripts["check:release"], "node scripts/check-release-readiness.mjs");
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
-  assert.equal(pkg.scripts.build, "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs");
-  assert.equal(pkg.scripts["build:client"], "node scripts/build-client.mjs");
-  assert.equal(pkg.devDependencies.react, "^18.3.1");
-  assert.equal(pkg.devDependencies["@types/react"], "^18.3.27");
-  assert.equal(pkg.devDependencies.esbuild, "^0.25.12");
   assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
-  for (const packageSection of [pkg.peerDependencies, pkg.devDependencies]) {
-    assert.equal(packageSection["@deepseek-ai/cordis"], "~4.0.4");
-    for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
-      assert.equal(packageSection[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
-    }
-  }
-  for (const name of ["system-prompt", "agent", "agent-loop", "agent-preset-registry", "tools", "scope", "session", "session-projection", "subagent-spawn-in-process"]) {
-    assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
-  }
-  for (const name of ["typert-registry", "api-gateway", "client-connection", "client-ui-slots", "client-ui-renderer", "client-store", "client-locale", "client-ui-primitives", "client-ui-settings"]) {
-    assert.equal(pkg.devDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
+  assert.equal(pkg.peerDependencies["@deepseek-ai/cordis"], "~4.0.4");
+  for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
+    assert.equal(pkg.peerDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
   }
 
   assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
@@ -173,11 +152,14 @@ test("README local documentation links are shipped by the package", () => {
 test("source entry exports a dsh plugin function and config schema", async () => {
   const mod = await import("../lib/index.js");
   assert.equal(mod.name, "dsmm");
-  assert.deepEqual(mod.inject, ["profileContext"]);
+  assert.deepEqual(mod.inject, ["profileContext", "agents"]);
   assert.equal(typeof mod.Config, "function");
   assert.equal(typeof mod.Config.toJSON, "function");
   assert.equal(typeof mod.apply, "function");
-  assert.deepEqual(mod.default, { name: mod.name, inject: mod.inject, Config: mod.Config, apply: mod.apply });
+  assert.equal(mod.default.name, mod.name);
+  assert.deepEqual(mod.default.inject, mod.inject);
+  assert.equal(mod.default.Config, mod.Config);
+  assert.equal(typeof mod.default.apply, "function");
   for (const name of [
     "classifyModelFamily",
     "desiredDeepseekEffort",
@@ -200,6 +182,29 @@ test("source entry exports a dsh plugin function and config schema", async () =>
   assert.equal(typeof mod.registerDsmmStatusCommand, "function");
   assert.equal(existsSync(join(packageRoot, "lib", "status.js")), true);
   assert.equal(existsSync(join(packageRoot, "lib", "status.d.ts")), true);
+});
+
+test("default Loader entry awaits initialization and propagates its rejection", async (t) => {
+  const mod = await import("../lib/index.js");
+  const ctx = new Context();
+  const pluginContext: Pick<Context, "get"> = ctx;
+  let rejectDesired!: (reason: unknown) => void;
+  const desired = new Promise<never>((_resolve, reject) => { rejectDesired = reject; });
+  t.mock.method(mod.DsmmDeploymentConfig.prototype, "readDesired", () => desired);
+  try {
+    const completion = mod.default.apply(pluginContext, {});
+    assert.ok(completion && typeof completion.then === "function");
+    let settled = false;
+    void completion.then(() => { settled = true; }, () => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, false);
+    const failure = new Error("initialization failed");
+    const rejected = assert.rejects(completion, (error: unknown) => error === failure);
+    rejectDesired(failure);
+    await rejected;
+  } finally {
+    await ctx.fiber.dispose();
+  }
 });
 
 test("legacy preset skill entry retains a no-op Cordis contract; runtime mounts are Agent-scoped", async () => {

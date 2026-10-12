@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { UI_CHECKS_015, sessionProfileChecksForVersion, requiresSessionProfileProof, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { isSource020, nativePickerCheckForVersion, pluginTitleForVersion, PRESET_NAMES_020, ROLE_TOOLS_020, SKILL_EXECUTABLES_020, validateCoreProof } from "./release-contract.mjs";
+import { isSource020, isSource021, isReviewedSource, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, PUBLIC_RUNTIME_EXPORTS_021, STABLE_UI_CHECKS_021, SKILL_EXECUTABLES_020, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
 import { assertPackSource, CONTROL_FILES } from "./release-source.mjs";
 
 export const POLICY = Object.freeze({
@@ -104,6 +104,7 @@ export const UI_CHECKS = Object.freeze([
 export { UI_CHECKS_015, requiresSessionProfileProof, requiresNativePickerProof };
 export const UI_CHECKS_016 = Object.freeze(["nativePickerCompactProfileAcceptance"]);
 export function uiChecksForVersion(version) {
+  if (isSource021(version)) return [...STABLE_UI_CHECKS_021];
   const sourceContract = isSource020(version) ? "0.2.0" : undefined;
   return [...UI_CHECKS, ...(requiresSessionProfileProof(version) ? sessionProfileChecksForVersion(version, { sourceContract }) : []),
     ...(requiresNativePickerProof(version) ? [nativePickerCheckForVersion(version, { sourceContract })] : [])];
@@ -124,6 +125,54 @@ export function assertSanitizedReceipt(receipt) {
   inspect(receipt);
 }
 
+export function validateStableUiProof021(ui, { sha256: artifactSha256, version }) {
+  equal(version, "0.2.1", "stable UI trusted version");
+  equal(ui.sourceContract, "0.2.1", "stable UI source contract");
+  equal(ui.packageVersion, version, "stable UI installed version");
+  equal(ui.artifactSha256, artifactSha256, "stable UI frozen bytes");
+  equal(ui.pageErrors, [], "stable UI browser errors");
+  equal(ui.externalRequests, [], "stable UI external requests");
+  equal(ui.viewport, { width: 1280, height: 900 }, "stable UI real viewport");
+  validateStableBootstrap(ui.bootstrap);
+  equal(ui.artifactSha256After, artifactSha256, "stable UI unchanged artifact");
+  invariant(sha256.test(ui.clientSha256), "stable compiled client digest required");
+  equal(ui.clientSha256After, ui.clientSha256, "stable UI unchanged client");
+  equal(Object.keys(ui.checks ?? {}).sort(byteOrder), [...STABLE_UI_CHECKS_021].sort(byteOrder), "stable exact UI checks");
+  truth(ui.checks, STABLE_UI_CHECKS_021, "stable UI checks");
+  invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "stable session CAS Gateway calls required");
+  invariant(["describe", "descendants", "prompt"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmChildren/${method}` && call.strictGateway === true && call.result === "accepted")), "stable native child Gateway calls required");
+  invariant(["$events", "session/follow", "session/control"].every(endpoint => ui.nativeStreams?.some(stream => stream.endpoint === endpoint
+    && stream.strictGateway === true && stream.result === "accepted" && stream.frames > 0 && stream.disposed === true)), "stable native disposed observer streams required");
+  equal(ui.model?.kind, "deterministic-test-only-adapter", "stable native model adapter"); equal(ui.model?.externalModelCalls, false, "stable external model calls");
+  for (const scope of ["future", "current"]) {
+    const cas = ui.cas?.[scope]; equal(cas?.code, "conflict", `stable ${scope} CAS refusal`);
+    invariant(sha256.test(cas.beforeSha256), `stable ${scope} CAS bytes required`); equal(cas.afterSha256, cas.beforeSha256, `stable ${scope} CAS unchanged bytes`);
+  }
+  invariant(sha256.test(ui.cas.current.epoch), "stable current admission epoch required");
+  const native = ui.native, observed = native?.messageObservation;
+  invariant(typeof native?.rootId === "string" && typeof native.childId === "string" && native.rootId !== native.childId, "stable distinct parent/child identity required");
+  truth(native, ["directNativeOwnership"], "stable native child");
+  equal(native.readonlyDenied, ["write", "edit", "bash", "pwsh"], "stable captured readonly child permissions");
+  invariant(sha256.test(native.originalChildEpoch) && sha256.test(native.originalCaptureSha256), "stable immutable original capture required");
+  equal(native.rootModel, "native-root", "stable native parent model authority");
+  equal(observed?.childId, native.childId, "stable delivered child"); equal(observed?.originalChildEpoch, native.originalChildEpoch, "stable original child epoch");
+  equal(observed?.liveModel, native.model, "stable original native child route"); equal(observed?.captureAfterSha256, native.originalCaptureSha256, "stable immutable capture bytes");
+  invariant(Number.isSafeInteger(observed.acceptedNativeReviewerRequestsWithMessage) && observed.acceptedNativeReviewerRequestsWithMessage > 0, "stable actual native inbox consumption required");
+  invariant(typeof native.inboxReceipt?.messageId === "string" && native.inboxReceipt.messageId.length > 0, "stable native inbox receipt required");
+  invariant(ui.model.calls?.some(call => call.model === native.model), "stable actual native child model calls required");
+  const background = ui.background;
+  invariant(["runId", "childId", "jobId"].every(key => typeof background?.[key] === "string" && background[key].length > 0), "stable native background identities required");
+  equal(background.status, "completed", "stable native background completion"); equal(background.repeatedStatus, "already-background", "stable idempotent handoff");
+  equal(background.starts, 1, "stable same-run start count"); equal(background.requests, 1, "stable background model request count");
+  equal(background.foregroundKind, "background", "stable foreground handoff receipt"); truth(background, ["sameRun", "sameChild", "resultObserved"], "stable same-run background");
+  invariant(ui.nativeCalls.some(call => call.endpoint === "dsmmChildren/background" && call.strictGateway === true && call.result === "accepted"), "stable native background Gateway call required");
+  truth(ui.safety, ["claimedOperatorPeerRefused", "foreignParentRefused", "beforeInboxCancellation"], "stable native delivery authority");
+  invariant(sha256.test(ui.safety.childEventsBeforeSha256) && Number.isSafeInteger(ui.safety.nativeModelCallsBefore), "stable cutoff baseline evidence required");
+  equal(ui.safety.childEventsAfterSha256, ui.safety.childEventsBeforeSha256, "stable cutoff unchanged child events");
+  equal(ui.safety.nativeModelCallsAfter, ui.safety.nativeModelCallsBefore, "stable cutoff no native request");
+  return ui;
+}
+
 export function validateDockerReceipt(receipt, identity) {
   invariant(object(receipt) && object(identity), "receipt and identity must be objects");
   assertSanitizedReceipt(receipt);
@@ -142,6 +191,10 @@ export function validateDockerReceipt(receipt, identity) {
   for (const template of ["web", "headless"]) {
     const native = receipt.native?.[template]; const baseline = receipt.nativeBaseline?.[template];
     complete(native, `native.${template}`); complete(baseline, `baseline.${template}`);
+    if (isSource021(identity.version)) {
+      equal(native.sourceContract, "0.2.1", "stable native source contract");
+      validateStableBootstrap(native.bootstrap, { template });
+    }
     equal(native.template, template, "native template"); truth(native, ["postAppReady"], `native.${template}`);
     equal(native.presetRegistryPresent, template === "web", "native preset registry");
     truth(baseline, ["postAppReady"], `baseline.${template}`);
@@ -152,12 +205,12 @@ export function validateDockerReceipt(receipt, identity) {
       equal(native.branding?.pluginTitle, pluginTitleForVersion(identity.version), "native plugin title");
       invariant(Array.isArray(native.branding?.presetNames), "native preset display evidence missing");
       equal([...native.branding.presetNames].sort((left, right) => byteOrder(left.id, right.id)),
-        [...(isSource020(identity.version) ? PRESET_NAMES_020 : DW_PRESET_NAMES)].sort((left, right) => byteOrder(left.id, right.id)), "exact versioned DW preset names");
+        [...(isReviewedSource(identity.version) ? presetNamesForVersion(identity.version) : DW_PRESET_NAMES)].sort((left, right) => byteOrder(left.id, right.id)), "exact versioned DW preset names");
       const rootIds = template === "web" ? ["dsmm-orchestrator", "dsmm-planner"] : [];
       if (template === "web") equal([...(native.rootIds ?? [])].sort(byteOrder), [...rootIds].sort(byteOrder), "native branded root IDs");
       invariant(Array.isArray(native.branding?.rootPresetNames), "actual native root display evidence missing");
       equal([...native.branding.rootPresetNames].sort((left, right) => byteOrder(left.id, right.id)),
-        (isSource020(identity.version) ? PRESET_NAMES_020 : DW_PRESET_NAMES).filter((preset) => rootIds.includes(preset.id)).sort((left, right) => byteOrder(left.id, right.id)), "actual native root DW names");
+        (isReviewedSource(identity.version) ? presetNamesForVersion(identity.version) : DW_PRESET_NAMES).filter((preset) => rootIds.includes(preset.id)).sort((left, right) => byteOrder(left.id, right.id)), "actual native root DW names");
     }
     const persistence = native.persistence;
     equal(persistence?.backendName, "dsmm-session-persistence", "native persistence provider");
@@ -181,12 +234,12 @@ export function validateDockerReceipt(receipt, identity) {
     complete(native.readonlyChild, "native readonly child");
     truth(native.readonlyChild, ["nativeSpawn", "persona"], "native readonly child");
     equal(native.readonlyChild.denied, ["write", "edit", "bash", "pwsh", "dsmm_reviewer", "dsmm_builder"], "readonly child policy");
-    if (isSource020(identity.version)) {
-      equal(native.delegation?.roleTools, ROLE_TOOLS_020, "actual canonical native role tools");
+    if (isReviewedSource(identity.version)) {
+      equal(native.delegation?.roleTools, roleToolsForVersion(identity.version), "actual canonical native role tools");
       truth(native.delegation, ["disabledBuilderAbsent", "disabledCrossCuttingAbsent"], "native delegation");
     }
   }
-  if (isSource020(identity.version)) validateCoreProof(receipt.nativeCore, identity);
+  if (isReviewedSource(identity.version)) validateCoreProof(receipt.nativeCore, identity);
   truth(receipt.native.web.checks, ["healthyNativeRoster", "exactEnabledRoots"], "native web checks");
   complete(receipt.native.web.blankSelection, "native blank selection");
   truth(receipt.native.web.blankSelection, ["nativeSelect", "personaAndToolsChanged", "mutationRestored", "nativeWriteAndRead"], "native blank selection");
@@ -196,7 +249,7 @@ export function validateDockerReceipt(receipt, identity) {
   equal(receipt.sourceUnitTests?.outcome, "NOT_RUN", "artifact runner source-test nonclaim");
   const ui = receipt.uiProfiles;
   complete(ui, "UI/profile acceptance"); truth(ui, ["postAppReady"], "UI/profile acceptance");
-  equal(ui.kind, "native-client-component-owned-carrier", "UI native carrier");
+  equal(ui.kind, isSource021(identity.version) ? "native-client-stable-first-021" : "native-client-component-owned-carrier", "UI native carrier");
   equal(ui.artifactSha256, identity.sha256, "UI artifact digest");
   const requiredUiChecks = uiChecksForVersion(identity.version);
   equal(Object.keys(ui.checks ?? {}).sort(byteOrder), requiredUiChecks.sort(byteOrder), "exact UI check set");
@@ -214,11 +267,13 @@ export function validateDockerReceipt(receipt, identity) {
   equal(ui.nativeStorage?.root, receipt.native.web.persistence.config.root, "UI/native storage root");
   equal(ui.nativeStorage?.compression, "zstd", "UI storage compression");
   equal(ui.nativeStorage?.provider, "dsmm-session-persistence", "UI storage provider");
-  invariant(Array.isArray(ui.nativeCalls) && ["describe", "read", "save", "select"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "all native profile RPC methods required");
+  invariant(Array.isArray(ui.nativeCalls) && ["describe", ...(isSource021(identity.version) ? [] : ["read"]), "save", "select"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "all native profile RPC methods required");
   invariant(Array.isArray(ui.nativeStreams) && ui.nativeStreams.some((stream) => stream.endpoint === "session/control" && stream.strictGateway === true && stream.result === "accepted" && stream.disposed === true && stream.frames > 0), "disposed native session/control stream required");
   truth(ui.cleanup, ["browserContextClosed", "nativeAgentsDisposed", "ownedTemporaryRootRemoved", "nativeHostExited"], "UI cleanup");
   equal(ui.cleanup?.errors, [], "UI cleanup errors");
-  if (requiresSessionProfileProof(identity.version)) {
+  if (isSource021(identity.version)) {
+    validateStableUiProof021(ui, identity);
+  } else if (requiresSessionProfileProof(identity.version)) {
     invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "successor scoped native RPC methods required");
     invariant(ui.nativeCalls.some((call) => call.endpoint === "session/modelCatalog" && call.strictGateway === true && call.result === "accepted"), "actual native parameterless catalog RPC required");
     invariant(ui.nativeCalls.some((call) => call.endpoint === "session/selectModel" && call.strictGateway === true && call.result === "accepted"), "actual native user model-selection RPC required");
@@ -239,7 +294,7 @@ export function validateDockerReceipt(receipt, identity) {
   invariant(!Object.hasOwn(receipt, "failure") && !Object.hasOwn(receipt, "error") && (!Object.hasOwn(receipt, "cleanupFailures") || isDeepStrictEqual(receipt.cleanupFailures, [])), "Docker failure/cleanup evidence contradicts completion");
   invariant(receipt.runtimeImage?.ownership === "owned" || receipt.runtimeImage?.ownership === "borrowed", "runtime image ownership missing");
   equal(receipt.runtimeImage.cleanup, receipt.runtimeImage.ownership === "owned" ? "COMPLETED" : "NOT_APPLICABLE", "Docker image cleanup");
-  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, uiCheckCount: requiredUiChecks.length,
+  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, ...(isSource021(identity.version) ? { sourceContract: "0.2.1" } : {}), uiCheckCount: requiredUiChecks.length,
     sourceUnitTests: "NOT_RUN", realAuthentication: "NOT_EXERCISED" };
 }
 
@@ -250,6 +305,8 @@ const PUBLIC_EXPORTS = Object.freeze({
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" }, "./package.json": "./package.json",
 });
 export function manifestExportsForVersion(version) {
+  if (isSource021(version)) return { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])),
+    ...Object.fromEntries(Object.entries(PUBLIC_RUNTIME_EXPORTS_021).map(([name, path]) => [name, { types: `./${path.replace(/\.js$/u, ".d.ts")}`, default: `./${path}` }])) };
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])) } : { ...PUBLIC_EXPORTS };
 }
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
@@ -268,7 +325,7 @@ function safeArchivePath(value) {
 
 export function isForbiddenPackagePath(path, version) {
   const segments = path.toLowerCase().split("/"); const name = segments.at(-1);
-  if (isSource020(version) && path.startsWith("skills/")) {
+  if (isReviewedSource(version) && path.startsWith("skills/")) {
     if (SKILL_EXECUTABLES_020.includes(path)) return false;
     if (/\.(?:py|pyw|sh|ps1|psm1|mjs|cjs|js|bat|cmd)$/iu.test(path)) return true;
   }
@@ -323,7 +380,7 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   }
   invariant(terminated, "tar archive has no terminator");
   for (const file of requiredFiles) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
-  if (isSource020(version)) for (const file of SKILL_EXECUTABLES_020) {
+  if (isReviewedSource(version)) for (const file of SKILL_EXECUTABLES_020) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required skill resource: ${file}`);
   }
   if (requiresSessionProfileProof(version)) for (const file of compiledFilesForVersion(version)) {
@@ -333,11 +390,11 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
     || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
   validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), version);
-  if (isSource020(version)) {
+  if (isReviewedSource(version)) {
     invariant(files.has("prompts/source/catalog.json") && files.has("prompts/source/manifest.json"), "source role/resource inventory missing");
     const catalog = JSON.parse(files.get("prompts/source/catalog.json").toString("utf8"));
     invariant(Array.isArray(catalog), "source role catalog must be an array");
-    equal(catalog.map(({ id, name }) => ({ id, name })), PRESET_NAMES_020, "source canonical role catalog");
+    equal(catalog.map(({ id, name }) => ({ id, name })), presetNamesForVersion(version), "source canonical role catalog");
     equal(catalog.filter(({ mode }) => mode === "primary" || mode === "all").map(({ id }) => id).sort(byteOrder), ["dsmm-builder", "dsmm-orchestrator", "dsmm-planner"], "source eligible root roles");
     equal(catalog.find(({ id }) => id === "dsmm-cross-cutting")?.enabledByDefault, false, "cross-cutting default permission");
   }
@@ -392,6 +449,10 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.workflow.ref, `${POLICY.repository}/${POLICY.workflowFile}@${identity.ref}`, "identity workflow ref");
   if (identity.mode === "future") equal(identity.controlSha, identity.releaseSha, "future source/control identity");
   equal(identity.dockerAcceptance?.outcome, "COMPLETED", "artifact Docker acceptance");
+  if (isSource021(identity.version)) {
+    equal(identity.dockerAcceptance.sourceContract, "0.2.1", "explicit stable acceptance identity");
+    equal(identity.dockerAcceptance.uiCheckCount, STABLE_UI_CHECKS_021.length, "stable acceptance scope");
+  }
   equal(identity.dockerAcceptance?.origin, identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
   equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "COMPLETED", "source-check policy");
   if (identity.mode === "bootstrap") {
@@ -530,7 +591,7 @@ export function resolveContextFromEnvironment(controlRoot, env = process.env) {
     workflowRef: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA, controlSha, peeledSha,
     runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT, packageVersion: manifest.version,
     controlInDefaultHistory: isAncestor(controlRoot, controlSha), sourceInDefaultHistory: isAncestor(controlRoot, peeledSha),
-    sourceHasControls: isSource020(manifest.version) ? CONTROL_FILES.every((path) => hasGitPath(controlRoot, peeledSha, path))
+    sourceHasControls: isReviewedSource(manifest.version) ? CONTROL_FILES.every((path) => hasGitPath(controlRoot, peeledSha, path))
       : hasGitPath(controlRoot, peeledSha, POLICY.workflowFile) && hasGitPath(controlRoot, peeledSha, "scripts/dsmm-release.mjs") });
 }
 
@@ -697,7 +758,7 @@ export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibi
   invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= visibilityCap, "invalid registry visibility deadline");
   invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
   const deadline = now() + visibilityDeadlineMs;
-  const prospective = identity.mode === "future" && ["0.1.8", "0.1.9", "0.2.0"].includes(identity.version);
+  const prospective = identity.mode === "future" && ["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version);
   let stage = "registry-metadata";
   // The reviewed 0.1.8/0.1.9 contracts bound every public visibility read to one
   // deadline. Historical contracts and all publisher absence checks stay intact.

@@ -11,11 +11,13 @@ import { DsmmDeploymentConfig, editGlobalConfig, parseGlobalConfig } from "../li
 import { DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, copyJson, resolveDeployment } from "../lib/settings.js";
 import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import type { DshAgent } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { createDsmmStatusSnapshot } from "../lib/status.js";
 import { parseProfileDocument } from "../lib/profiles.js";
+
+type DshAgent = Omit<PackageDshAgent, "ctx">;
 
 test("public home peer resolves from the declared filesystem anchor and honors host > env > default", () => {
   const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-skill-filesystem"));

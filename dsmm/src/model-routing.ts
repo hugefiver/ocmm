@@ -8,6 +8,7 @@ import { childOwnedSessionEvents, sessionEvents } from "./session-scope.js";
 import { isCurrentRecoveryStep } from "./recovery-policy.js";
 import type { DeepseekDefaultReasoningEffort, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
+import { capturedRoleInvocation } from "./role-invocation.js";
 
 export type DeepseekReasoningEffort = DeepseekDefaultReasoningEffort | "max";
 export type DeepseekModelRoute = "v4-pro" | "flash";
@@ -22,10 +23,7 @@ export function isDeepseekFlashRoute(config: Pick<DshLlmCallConfig, "provider" |
 }
 
 export function desiredDeepseekEffort(settings: DsmmSettings, preset?: string, route: DeepseekModelRoute = "v4-pro"): DeepseekReasoningEffort {
-  const maxPresets = route === "flash" ? settings.deepseekFlashMaxReasoningPresets : settings.deepseekV4ProMaxReasoningPresets;
-  return preset !== undefined && maxPresets.some((configuredPreset) => configuredPreset === preset)
-    ? "max"
-    : route === "flash" ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
+  return route === "flash" ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
 }
 
 export function selectAdvertisedEffort(desired: DeepseekReasoningEffort, reasoning: DshModelReasoningInfo | undefined): string | undefined {
@@ -78,7 +76,8 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
         const active = controller.active(frame.agent, settings.defaultActive);
         const role = resolveEffectiveDsmmRole(frame.agent, settings, active);
         const policy = role === undefined ? undefined : settings.roleRouting[role];
-        const primary = policy?.primary;
+        const invocation = capturedRoleInvocation(frame.agent);
+        const primary = invocation?.initialRoute ?? policy?.primary;
         const epoch = getSettings.admission?.(frame.agent).epoch;
         const identity = await establishRolePolicy(frame, settings, role, readyCtx, epoch);
         const fallbacks = effectiveRoleFallbackRoutes(settings, role);
@@ -88,7 +87,8 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
         const currentStep = isCurrentRecoveryStep(frame.agent.session.header?.origin === "subagent" ? childOwnedSessionEvents(frame.agent.session) : sessionEvents(frame.agent.session), frame.turn, frame.step);
         if (role !== undefined && identity !== undefined && currentStep) {
           let lock = roleRouteLock(frame.agent, identity);
-          const exactPolicy = primary !== undefined || policy?.fallbackRoutes !== undefined || fallbacks.length > 0;
+          const exactPolicy = invocation === undefined ? primary !== undefined || policy?.fallbackRoutes !== undefined || fallbacks.length > 0
+            : invocation.routeSource !== "inherited" || invocation.exactEffort || fallbacks.length > 0;
           const captured = assembledSelections.get(frame.agent);
           const manual = captured?.signal === frame.signal ? captured.intent : undefined;
           if (ordinaryRoot) {
@@ -135,18 +135,20 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
           if (lock === undefined) {
             const inherited = { provider: downstream.provider, model: downstream.model,
               ...(downstream.reasoningEffort === undefined ? {} : { reasoningEffort: downstream.reasoningEffort }) };
-            const candidates = orderedModelRoutes([liveAlias ? inherited : primary ?? inherited, ...fallbacks]);
+            const candidates = invocation?.candidates ?? orderedModelRoutes([liveAlias ? inherited : primary ?? inherited, ...fallbacks]);
             const persisted = accepted;
             const llm = frame.agent.ctx?.get?.<DshLlmRuntime>("llm")
               ?? (readyCtx.get !== undefined ? readyCtx.get<DshLlmRuntime>("llm") : readyCtx.llm);
-            const selected = persisted ?? (exactPolicy ? await selectInitialModelRoute(llm ?? {} as DshLlmRuntime, candidates, frame.signal) : inherited);
+            const selected = persisted ?? invocation?.initialRoute ?? (exactPolicy ? await selectInitialModelRoute(llm ?? {} as DshLlmRuntime, candidates, frame.signal) : inherited);
             frame.signal.throwIfAborted();
             lock = pinRoleRoute(frame.agent, identity, selected, candidates);
             if (persisted !== undefined) lock.startupSettled = true;
             lockedAgents.add(frame.agent);
           }
           downstream = applyModelRoute(downstream, lock.route);
-          if (exactPolicy || lock.attempts > 0) return downstream;
+          const newRouteWithoutEffort = invocation !== undefined && !invocation.exactEffort
+            && (invocation.routeSource === "level" || invocation.routeSource === "invocation-route");
+          if ((exactPolicy || lock.attempts > 0) && !newRouteWithoutEffort) return downstream;
         }
         // Ordinary roots belong to the native model tab, including its exact effort.
         if (ordinaryRoot) return downstream;

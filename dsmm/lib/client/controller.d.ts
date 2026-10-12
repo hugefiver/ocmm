@@ -3,7 +3,7 @@ import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller/client";
 import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
 import type { DsmmProfilesRemote } from "../profile-remote.js";
-import type { ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
+import type { ProfileDiagnostic, ProfileDiagnosticCode, ProfileDiagnosticLocation, ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
 import type { SessionProfileSnapshot } from "../profile-types.js";
 import type { ModelCatalog, SessionSelectModelRequest, SessionSelectModelValue } from "@deepseek-ai/dsh-api-session-controller";
 import type { JsonPath } from "./structured.js";
@@ -11,6 +11,7 @@ export interface ProfileEditor {
     id: string;
     content: string;
     revision: string | null;
+    warnings?: ProfileDiagnostic[];
 }
 export interface ProfilesNotice {
     key: "saved" | "applied" | "reset";
@@ -21,6 +22,8 @@ export interface ProfilesIssue {
     code: string;
     message?: string;
     field?: string;
+    reason?: ProfileDiagnosticCode;
+    location?: ProfileDiagnosticLocation;
     source?: "selection" | "profile-model";
 }
 export interface SessionApplyOptions {
@@ -45,8 +48,10 @@ export interface ProfilesViewSnapshot {
     sessionNotice: "applied" | "reset" | "applied-with-model" | "mode-on" | "mode-off" | null;
     invalidFields: string[];
     editorEpoch: number;
+    validationEpoch: number;
 }
 export interface ProfilesActions {
+    readProfileView(): ProfilesViewSnapshot;
     refresh(): Promise<void>;
     open(id: string): Promise<void>;
     create(): Promise<void>;

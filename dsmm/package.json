@@ -1,6 +1,6 @@
 {
   "name": "@dsmm/dsmm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness deepwork mode bundle for ocmm-style agentic workflows.",
   "author": "Hugefiver",
   "license": "LicenseRef-AAAPL",
@@ -34,6 +34,14 @@
     "./session-persistence": {
       "types": "./lib/session-persistence.d.ts",
       "default": "./lib/session-persistence.js"
+    },
+    "./subagent-runtime": {
+      "types": "./lib/runtime-integration.d.ts",
+      "default": "./lib/runtime-integration.js"
+    },
+    "./legacy-read-host": {
+      "types": "./lib/legacy-read-host.d.ts",
+      "default": "./lib/legacy-read-host.js"
     },
     "./client": {
       "types": "./lib/client/index.d.ts",

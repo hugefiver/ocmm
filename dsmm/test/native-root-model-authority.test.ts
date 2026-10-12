@@ -51,7 +51,7 @@ test("historically accepted model intent never replays over a root's different n
 });
 
 for (const effort of ["low", undefined]) test(`root strict calibration preserves the native ${effort ?? "adapter-default"} effort`, async () => {
-  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict", deepseekV4ProMaxReasoningPresets: ["dsmm-reviewer"] });
+  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict" });
   try {
     const current = { provider: "deepseek-official", model: "deepseek-v4-pro", ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) };
     const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, { current, assembled: undefined });

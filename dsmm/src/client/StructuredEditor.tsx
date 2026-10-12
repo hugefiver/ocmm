@@ -2,13 +2,15 @@ import { useEffect, useId, useState } from "react";
 import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ModelCatalog } from "@deepseek-ai/dsh-api-session-controller";
-import type { DsmmModelRoute } from "../settings.js";
+import { DSMM_LOCALES } from "../profile-locale.js";
+import type { DsmmInvocationLevel, DsmmLevelOverride, DsmmModelRoute } from "../settings.js";
 import type { DsmmRateLimitPolicy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "../routing-policy.js";
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitPolicy } from "../routing-policy.js";
 import type { ProfilesActions, ProfilesViewSnapshot } from "./controller.js";
 import { structuredDocument } from "./structured.js";
 import type { JsonPath } from "./structured.js";
 import { RETRY_FIELD_LABEL_KEYS } from "./locales.js";
+import { RoleAvailability, roleAvailability } from "./RoleAvailability.js";
 
 type Locale = PropsLocale<"settings.dsmm-profiles">;
 type Edit = ProfilesActions["editPath"];
@@ -48,6 +50,8 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
   const efforts = model?.reasoning?.efforts ?? [];
   const providerListed = group !== undefined;
   const modelListed = model !== undefined;
+  const [manualProvider, setManualProvider] = useState(!providerListed);
+  const [manualModel, setManualModel] = useState(!modelListed);
   const updateModel = (provider: string, modelId: string) => {
     // This is an explicit user change, not a catalog refresh. Clear only this
     // route's adapter-owned effort; do not save or touch the native model default.
@@ -55,18 +59,18 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
   };
   return <div className="dsmm-route-fields">
     <div className="dsmm-field"><label htmlFor={`${prefix}-provider`}>{t("routeProvider", { name })}</label>
-      <select id={`${prefix}-provider`} disabled={disabled} value={providerListed ? value.provider : MANUAL} onChange={(event) => updateModel(event.currentTarget.value === MANUAL ? "" : event.currentTarget.value, "")}>
+      <select id={`${prefix}-provider`} disabled={disabled} value={manualProvider || !providerListed ? MANUAL : value.provider} onChange={(event) => { setManualProvider(event.currentTarget.value === MANUAL); setManualModel(true); updateModel(event.currentTarget.value === MANUAL ? "" : event.currentTarget.value, ""); }}>
         <option value={MANUAL}>{providerListed ? t("manual") : t("manualValue", { value: value.provider || t("unset") })}</option>
         {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
       </select>
-      {!providerListed && <Input aria-label={t("manualProvider", { name })} className="dsmm-input" value={value.provider} disabled={disabled} onChange={(event) => updateModel(event.currentTarget.value, value.model)} />}
+      {(manualProvider || !providerListed) && <Input aria-label={t("manualProvider", { name })} className="dsmm-input" value={value.provider} disabled={disabled} onChange={(event) => updateModel(event.currentTarget.value, value.model)} />}
     </div>
     <div className="dsmm-field"><label htmlFor={`${prefix}-model`}>{t("routeModel", { name })}</label>
-      <select id={`${prefix}-model`} disabled={disabled} value={modelListed ? value.model : MANUAL} onChange={(event) => updateModel(value.provider, event.currentTarget.value === MANUAL ? "" : event.currentTarget.value)}>
+      <select id={`${prefix}-model`} disabled={disabled} value={manualModel || !modelListed ? MANUAL : value.model} onChange={(event) => { setManualModel(event.currentTarget.value === MANUAL); updateModel(value.provider, event.currentTarget.value === MANUAL ? "" : event.currentTarget.value); }}>
         <option value={MANUAL}>{modelListed ? t("manual") : t("manualValue", { value: value.model || t("unset") })}</option>
         {group?.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} ({candidate.id})</option>)}
       </select>
-      {!modelListed && <Input aria-label={t("manualModel", { name })} className="dsmm-input" value={value.model} disabled={disabled} onChange={(event) => updateModel(value.provider, event.currentTarget.value)} />}
+      {(manualModel || !modelListed) && <Input aria-label={t("manualModel", { name })} className="dsmm-input" value={value.model} disabled={disabled} onChange={(event) => updateModel(value.provider, event.currentTarget.value)} />}
     </div>
     <div className="dsmm-field"><label htmlFor={`${prefix}-effort`}>{t("routeEffort", { name })}</label>
       <select id={`${prefix}-effort`} disabled={disabled} value={value.reasoningEffort ?? ""} onChange={(event) => edit([...path, "reasoningEffort"], event.currentTarget.value || undefined)}>
@@ -97,6 +101,25 @@ function PolicyFields({ value, inherited, path, name, disabled, actions, t }: Lo
   </div>;
 }
 
+function LevelFields({ level, value, path, catalog, disabled, actions, t }: Locale & {
+  level: Exclude<DsmmInvocationLevel, "normal">; value?: DsmmLevelOverride; path: JsonPath; catalog: ModelCatalog | null; disabled: boolean; actions: ProfilesActions;
+}) {
+  const prefix = useId();
+  const mode = value === undefined ? "inherit" : value.provider === undefined ? "effort" : "route";
+  return <fieldset data-dsmm-level={level}><legend>{t("levelName", { level })}</legend>
+    <div className="dsmm-field"><label htmlFor={`${prefix}-mode`}>{t("levelMode", { level })}</label>
+      <select id={`${prefix}-mode`} value={mode} disabled={disabled} onChange={event => actions.editPath(path,
+        event.currentTarget.value === "inherit" ? undefined : event.currentTarget.value === "effort" ? { reasoningEffort: "" } : { provider: "", model: "" })}>
+        <option value="inherit">{t("levelUnconfigured")}</option><option value="effort">{t("levelEffortOnly")}</option><option value="route">{t("levelFullRoute")}</option>
+      </select>
+    </div>
+    {mode === "effort" && <div className="dsmm-field"><label htmlFor={`${prefix}-effort`}>{t("routeEffort", { name: level })}</label>
+      <Input id={`${prefix}-effort`} className="dsmm-input" value={value?.reasoningEffort ?? ""} disabled={disabled} onChange={event => actions.editPath([...path, "reasoningEffort"], event.currentTarget.value)} />
+    </div>}
+    {value?.provider !== undefined && <RouteFields value={value} path={path} name={t("levelName", { level })} catalog={catalog} disabled={disabled} edit={actions.editPath} editRoute={actions.editRoute} t={t} />}
+  </fieldset>;
+}
+
 /** The same raw draft drives every control; there is no form-to-document rewrite. */
 export function StructuredEditor({ state, actions, disabled, t }: Locale & {
   state: ProfilesViewSnapshot; actions: ProfilesActions; disabled: boolean;
@@ -116,17 +139,45 @@ export function StructuredEditor({ state, actions, disabled, t }: Locale & {
   } }
   catch { /* Invalid effective values remain a raw/Host validation error. */ }
   const rolePath: JsonPath = ["settings", "roleRouting", role?.id ?? ""];
+  const availability = roleAvailability(role?.availability);
+  const namedRoles = document.settings.roles as Record<string, boolean> | undefined;
+  const topology = (document.settings.subagents as { toolTopology?: string } | undefined)?.toolTopology;
   return <div className="dsmm-structured" data-dsmm-structured>
-    <div className="dsmm-field"><label htmlFor={`${prefix}-label`}>{t("profileLabel")}</label><Input id={`${prefix}-label`} className="dsmm-input" value={document.label ?? ""} disabled={disabled} onChange={(event) => actions.editPath(["label"], event.currentTarget.value || undefined)} /></div>
+    <div className="dsmm-field"><label htmlFor={`${prefix}-label`}>{t("profileLabel")}</label><Input id={`${prefix}-label`} className="dsmm-input" value={document.label ?? ""} disabled={disabled} onChange={(event) => actions.editPath(["label"], event.currentTarget.value)} />
+      <Button type="button" variant="outline" disabled={disabled || document.label === undefined} onClick={() => actions.editPath(["label"], undefined)}>{t("omitLabel")}</Button>
+    </div>
+    <div className="dsmm-field"><label htmlFor={`${prefix}-locale`}>{t("businessLocale")}</label>
+      <select id={`${prefix}-locale`} value={String(document.settings.locale ?? "")} disabled={disabled} aria-describedby={`${prefix}-locale-hint`} onChange={event => actions.editPath(["settings", "locale"], event.currentTarget.value || undefined)}>
+        <option value="">{t("inheritLocale")}</option>
+        {typeof document.settings.locale === "string" && !(DSMM_LOCALES as readonly string[]).includes(document.settings.locale) && <option value={document.settings.locale}>{t("unsupportedLocale")}</option>}
+        {DSMM_LOCALES.map(locale => <option value={locale} key={locale}>{locale}</option>)}
+      </select><p id={`${prefix}-locale-hint`} className="dsmm-hint">{t("localeHint")}</p>
+    </div>
+    <div className="dsmm-field"><label htmlFor={`${prefix}-topology`}>{t("toolTopology")}</label>
+      <select id={`${prefix}-topology`} value={topology ?? ""} disabled={disabled} aria-describedby={`${prefix}-topology-hint`} onChange={event => actions.editPath(["settings", "subagents", "toolTopology"], event.currentTarget.value || undefined)}>
+        <option value="">{t("inherit")}</option><option value="per-role">per-role</option><option value="parameterized">parameterized</option>
+      </select><p id={`${prefix}-topology-hint`} className="dsmm-hint">{t("topologyHint")}</p>
+    </div>
     <div className="dsmm-field"><label htmlFor={`${prefix}-active`}>{t("defaultActive")}</label><select id={`${prefix}-active`} disabled={disabled} value={document.settings.defaultActive === undefined ? "" : String(document.settings.defaultActive)} onChange={(event) => actions.editPath(["settings", "defaultActive"], event.currentTarget.value === "" ? undefined : event.currentTarget.value === "true")}><option value="">{t("inherit")}</option><option value="true">{t("enabled")}</option><option value="false">{t("disabled")}</option></select><p className="dsmm-hint">{t("activeHint")}</p></div>
     <fieldset><legend>{t("profileDefaults")}</legend><PolicyFields t={t} value={document.runtimePolicy} inherited={baseline} path={["settings", "runtimePolicy"]} name={t("profileDefaults")} disabled={disabled} actions={actions} /></fieldset>
     <div className="dsmm-field"><label htmlFor={`${prefix}-role`}>{t("roleSelect")}</label><select id={`${prefix}-role`} disabled={disabled || roles.length === 0 || state.invalidFields.length > 0} value={role?.id ?? ""} onChange={(event) => setSelectedRole(event.currentTarget.value)}>{roles.length === 0 && <option value="">{t("rolesUnavailable")}</option>}{roles.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}{candidate.enabled ? "" : ` — ${t("roleDisabled")}`}</option>)}</select></div>
-    {role !== undefined && policy !== undefined && <fieldset data-dsmm-role={role.id}><legend>{role.label}</legend>
-      <p className="dsmm-hint">{t(role.enabled ? "roleEnabled" : "roleDisabled")}</p>
+    {role !== undefined && policy !== undefined && <fieldset key={role.id} data-dsmm-role={role.id}><legend>{role.label}</legend>
+      <RoleAvailability value={role.availability} t={t} />
+      <div className="dsmm-field"><label htmlFor={`${prefix}-role-enabled`}>{t("namedRole", { name: role.label })}</label>
+        <select id={`${prefix}-role-enabled`} value={namedRoles?.[role.id] === undefined ? "" : String(namedRoles[role.id])} disabled={disabled} aria-describedby={`${prefix}-role-hint`} onChange={event => actions.editPath(["settings", "roles", role.id], event.currentTarget.value === "" ? undefined : event.currentTarget.value === "true")}>
+          <option value="">{t("inherit")}</option><option value="true" disabled={availability === undefined || !availability.startupAvailable || !availability.deploymentEnabled || availability.reason === "module-off"}>{t("enabled")}</option>
+          <option value="false" disabled={availability === undefined || availability.required}>{t("disabled")}</option>
+        </select><p id={`${prefix}-role-hint`} className="dsmm-hint">{t("namedRoleHint")}</p>
+      </div>
       <PolicyFields t={t} value={policy} inherited={inherited} path={rolePath} name={role.label} disabled={disabled} actions={actions} />
       <div className="dsmm-field"><label htmlFor={`${prefix}-primary-mode`}>{t("primaryMode", { name: role.label })}</label><select id={`${prefix}-primary-mode`} disabled={disabled} value={policy.primary === undefined ? "inherit" : "explicit"} onChange={(event) => actions.editPath([...rolePath, "primary"], event.currentTarget.value === "inherit" ? undefined : { provider: "", model: "" })}><option value="inherit">{t("inheritRoute")}</option><option value="explicit">{t("configuredRoute")}</option></select></div>
       {policy.primary !== undefined && <RouteFields t={t} value={policy.primary} path={[...rolePath, "primary"]} name={t("primaryName", { name: role.label })} catalog={state.catalog} disabled={disabled} edit={actions.editPath} editRoute={actions.editRoute} />}
       <p className="dsmm-hint">{t("effortChangeHint")}</p>
+      <p className="dsmm-hint">{t("normalLevel")}</p>
+      {role.id === "dsmm-orchestrator" ? <p className="dsmm-hint">{t("orchestratorLevels")}</p> : <>
+        <p className="dsmm-hint">{t("levelsHint")}</p>
+        {(["low", "high", "max"] as const).map(level => <LevelFields key={level} level={level} value={policy.levels?.[level]} path={[...rolePath, "levels", level]} catalog={state.catalog} disabled={disabled} actions={actions} t={t} />)}
+      </>}
       <div className="dsmm-field"><label htmlFor={`${prefix}-fallback-mode`}>{t("fallbackMode", { name: role.label })}</label><select id={`${prefix}-fallback-mode`} disabled={disabled} value={policy.fallbackRoutes === undefined ? "inherit" : "explicit"} onChange={(event) => actions.editPath([...rolePath, "fallbackRoutes"], event.currentTarget.value === "inherit" ? undefined : [])}><option value="inherit">{t("inheritChain")}</option><option value="explicit">{t("configuredChain")}</option></select></div>
       {policy.fallbackRoutes?.length === 0 && <p className="dsmm-hint">{t("emptyChain")}</p>}
       {policy.fallbackRoutes?.map((candidate, index) => {

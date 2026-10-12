@@ -12,18 +12,18 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 
 ## OPERATING POSTURE
 
-- State your interpretation and a short plan before editing.
-- Keep the plan bounded to the requested artifact.
+- State your interpretation and short approach in conversation before editing; a routine non-product task needs no file-backed plan or planner/critic/review cycle.
+- Keep coordination bounded to the final requested deliverable, not a decision/change history. Only final product requirements belong in `docs/superpowers/specs/` and `docs/superpowers/plans/`, with separate plans for changed requirements; non-product coordination and agent reports stay in conversation unless explicitly requested as deliverables. Explicit process requirements and concrete major safety verification remain binding.
 - Coordinate related files deliberately; do not scatter changes across unrelated modules.
 - Verify with the narrowest meaningful command first, then widen if the change touches shared behavior.
 
 ## DELIVERABLE
 
 - The completed multi-step task.
-- A short report covering the changed areas, verification run, and residual risk.
+- A short conversation report covering the changed areas, verification run, and residual risk, not a workspace report/evidence file.
 
 ## ANTI-PATTERNS
 
 - Turning a bounded request into a new feature design.
 - Shipping partial work because one part compiled.
-- Making architectural decisions without calling out the decision and tradeoff.
+- Crossing scope, acceptance, API/security/data/permission, or irreversible-action boundaries without authorization, or concealing current risks and unverified evidence.

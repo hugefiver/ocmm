@@ -12,7 +12,8 @@ test("headless role catalog is ready before assembly, defaults foreground, and f
     const admittedAgent = agent as unknown as DshAgent;
     const tools = agent.ctx.tools;
     assert.ok(tools.get("dsmm_reviewer", agent));
-    assert.equal(tools.get("dsmm_cross_cutting", agent), undefined);
+    const category = tools.schemas(agent).find(row => row.name === "dsmm_category")!;
+    assert.equal((category.parameters as { properties: { category: { enum: string[] } } }).properties.category.enum.includes("dsmm-cross-cutting"), false);
     const background = await tools.execute({ name: "dsmm_reviewer", callId: ToolCallId("default-background-rejected"), arguments: { description: "Explicit unsupported background", prompt: "No background permission", run_in_background: true }, agent, signal: new AbortController().signal });
     assert.equal(background.isError, true);
     assert.equal(f.agents.list().length, 1);
@@ -36,7 +37,8 @@ test("native and headless ordinary roots consume the same enabled role policy", 
       const agent = await f.create();
       const catalog = agent.ctx.tools.schemas(agent).map((tool) => tool.name).filter((name) => name.startsWith("dsmm_")).sort();
       assert.equal(catalog.includes("dsmm_builder"), false);
-      assert.equal(catalog.includes("dsmm_cross_cutting"), false);
+      const category = agent.ctx.tools.schemas(agent).find(row => row.name === "dsmm_category")!;
+      assert.equal((category.parameters as { properties: { category: { enum: string[] } } }).properties.category.enum.includes("dsmm-cross-cutting"), false);
       catalogs.push(catalog);
     } finally { await f.dispose(); }
   }

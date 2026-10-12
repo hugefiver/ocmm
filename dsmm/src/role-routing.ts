@@ -79,9 +79,9 @@ export async function selectInitialModelRoute(llm: DshLlmRuntime, candidates: re
   for (const route of orderedModelRoutes(candidates)) {
     signal?.throwIfAborted();
     try {
-      await llm.resolveCallConfig({ ...route }, signal);
+      const prepared = await llm.resolveCallConfig({ ...route }, signal);
       signal?.throwIfAborted();
-      return { ...route };
+      return canonicalRoute(prepared);
     } catch (error) {
       signal?.throwIfAborted();
       if (!isUnavailableRouteFailure(error)) throw error;

@@ -20,6 +20,7 @@ const requiredExact = [
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["runtime-integration", "legacy-read-host"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/lsp.md",
   "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
@@ -60,6 +61,8 @@ const expectedExports = {
   ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
   "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
+  "./subagent-runtime": { types: "./lib/runtime-integration.d.ts", default: "./lib/runtime-integration.js" },
+  "./legacy-read-host": { types: "./lib/legacy-read-host.d.ts", default: "./lib/legacy-read-host.js" },
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
   "./locale/en.json": "./locale/en.json",
   "./locale/zh.json": "./locale/zh.json",
@@ -301,7 +304,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -322,7 +325,7 @@ function validateManifest(manifest, errors) {
   if (manifest.type !== "module") errors.push("manifest.type must equal module");
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
-  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the seven public exports");
+  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the nine public exports");
   if (!isDeepStrictEqual(manifest.engines, { node: ">=22" })) errors.push("manifest.engines must equal the Node 22 policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
@@ -410,7 +413,12 @@ function validateNativeClient(packageRoot, paths, errors) {
     const client = sandbox.clientExports;
     if (typeof client?.apply !== "function" || !Array.isArray(client?.inject)
       || !isDeepStrictEqual(Array.from(client.inject), ["slots", "locale", "remote"])
-      || typeof client.ProfilesController !== "function" || typeof client.ProfilesSection !== "function"
+       || typeof client.ProfilesController !== "function" || typeof client.ProfilesSection !== "function"
+       || typeof client.ChildrenController !== "function" || typeof client.ChildrenPanel !== "function"
+       || client.ROLE_CONTROL_REMOTE?.package !== "@dsmm/dsmm-children"
+       || !Array.isArray(client.ROLE_CONTROL_REMOTE?.descriptors)
+       || !isDeepStrictEqual(Array.from(client.ROLE_CONTROL_REMOTE.descriptors, (descriptor) => descriptor.id),
+         ["describe", "descendants", "background", "prompt", "interrupt"].map((method) => `@dsmm/dsmm-children#dsmmChildren/${method}`))
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
       || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), [
@@ -457,7 +465,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.2.0") errors.push("npm pack receipt version must equal 0.2.0");
+  if (entry.version !== "0.2.1") errors.push("npm pack receipt version must equal 0.2.1");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);

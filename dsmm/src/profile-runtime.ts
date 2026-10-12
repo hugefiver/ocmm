@@ -4,9 +4,9 @@ import type { DshAgent, DshContext, DshLlmRuntime } from "./dsh-types.js";
 import { ProfileStore, validateSessionProfileId } from "./profile-store.js";
 import type { LoadedProfileSelection, LoadedSessionProfileSelection, SessionProfileCommit } from "./profile-store.js";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
-import { DsmmProfileError, resolveProfileSettings } from "./profiles.js";
+import { DsmmProfileError, profileDocumentWarnings, requiredReason, resolveProfileSettings } from "./profiles.js";
 import type { DsmmProfileDocument } from "./profiles.js";
-import { DSMM_ROLES, isRootRole } from "./roles.js";
+import { DSMM_ROLES, isRootRole, isDsmmRoleId } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute, DsmmPluginConfig, DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { roleRouteRuntimeState, selectInitialModelRoute } from "./role-routing.js";
@@ -22,6 +22,11 @@ import { projectDeepworkModule } from "./modules.js";
 import { Context } from "@deepseek-ai/cordis";
 import type { DeploymentAdmissionView } from "./profile-types.js";
 import { readOnlySettings, readOnlySettingSources } from "./status.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
+import type { ChildAdmissionCompletion, DsmmChildAdmissionAuthority, LegacyChildEvidenceReader, ParentAdmissionTicket } from "./child-admission-contract.js";
+import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "./child-capture.js";
+import type { ChildAdmissionCapture, ChildAdmissionEvidence, PreparedChildAdmission } from "./child-capture.js";
+import type { DsmmRoleAvailabilityState, SubagentRuntimeAdmissionView } from "./profile-types.js";
 
 function deploymentAdmissionView(admission: DsmmProfileAdmission): DeploymentAdmissionView {
   return { settings: { ...readOnlySettings(admission.settings) }, sources: readOnlySettingSources(admission.sources ?? {}),
@@ -39,6 +44,9 @@ interface NativePresetAudit {
 }
 
 export interface DsmmProfileRuntimeStore {
+  createChildAdmission?(capture: ChildAdmissionCapture, assertCurrent?: () => void): Promise<ChildAdmissionCapture>;
+  readChildAdmission?(childId: string, parentId: string): Promise<ChildAdmissionCapture | null>;
+  deleteChildAdmission?(childId: string, parentId: string): Promise<void>;
   readonly readOnly?: boolean;
   readonly origin?: "central" | "legacy" | "explicit";
   readonly writeRestriction?: string;
@@ -52,6 +60,18 @@ export interface DsmmProfileRuntimeStore {
 }
 
 export interface DsmmProfileRuntimeOptions {
+  /** Separate Host-owned central sidecars keep legacy profile libraries read-only. */
+  childCaptureStore?: Pick<DsmmProfileRuntimeStore, "createChildAdmission" | "readChildAdmission" | "deleteChildAdmission">;
+  childAuthority?: DsmmChildAdmissionAuthority;
+  /** Exact entry identity bound by the stable Host authority; never wire input. */
+  childAuthorityOwner?: object;
+  childAdmission?: ChildAdmissionCompletion;
+  /** B's synchronous candidate-role/ceiling validation; Apply preparation must not publish identity changes. */
+  validateRootRole?: (agent: DshAgent, admission: DsmmProfileAdmission) => void;
+  /** Host session substrate decides this; resident mode makes no restart claim. */
+  childCapturePersistence?: "durable" | "resident";
+  /** Parent composition may enable its bound policy after guards exist, before retained Agents are admitted. */
+  onAdmissionGuardsInstalled?: (runtime: DsmmProfileRuntime) => void | Promise<void>;
   /** Trusted test/integration seam, never a wire-supplied path or callback. */
   validateCandidate?: (settings: DsmmSettings) => void | Promise<void>;
   modeController?: DeepworkModeController;
@@ -65,7 +85,7 @@ export interface DsmmProfileRuntimeOptions {
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission { baseline: DsmmSettings }
 
 // Exact live native children retain their capture across DSMM runtime replacement.
-const childAdmissions = new WeakMap<DshAgent, { parent: DshAgent; admission: AdmittedProfile }>();
+const childAdmissions = new WeakMap<DshAgent, { parent: DshAgent; admission: AdmittedProfile; evidence: ChildAdmissionEvidence }>();
 
 function immutableSettings(settings: DsmmSettings): DsmmSettings {
   return freezeSettings(settings);
@@ -73,6 +93,7 @@ function immutableSettings(settings: DsmmSettings): DsmmSettings {
 
 /** Global defaults admit new roots; scoped idle switches replace one root's epoch. */
 export class DsmmProfileRuntime {
+  readonly childCaptureStore: Pick<DsmmProfileRuntimeStore, "createChildAdmission" | "readChildAdmission" | "deleteChildAdmission">;
   readonly getSettings: DsmmSettingsGetter = (agent) => agent === undefined ? this.current.settings : this.bind(agent).settings;
   private current: AdmittedProfile;
   private currentDocument: DsmmProfileDocument | null = null;
@@ -91,11 +112,13 @@ export class DsmmProfileRuntime {
     private readonly store: DsmmProfileRuntimeStore,
     private readonly options: DsmmProfileRuntimeOptions = {}
   ) {
+    this.childCaptureStore = options.childCaptureStore ?? store;
     this.baseline = immutableSettings(baseline);
     this.mode = options.modeController ?? new DeepworkModeController({ get: (name) => ctx.get?.(name) }, (agent) => this.getSettings(agent).modules.deepwork.enabled);
     this.current = this.prepare(null, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
     this.getSettings.admission = (agent) => this.admission(agent);
     this.getSettings.moduleStates = (agent) => { const admission = this.admission(agent); return [projectDeepworkModule(this.baseline, admission.deployment, admission)]; };
+    this.getSettings.subagentRuntime = () => this.subagentRuntimeView();
   }
 
   async initialize(): Promise<void> {
@@ -105,13 +128,24 @@ export class DsmmProfileRuntime {
     this.ctx.on?.("agent/created", async ({ agent, signal }: { agent: DshAgent; signal?: AbortSignal }) => {
       // Factory initialization already owns native maintenance: never whenIdle
       // or reserve maintenance from inside this serial creation listener.
-      await this.admit(agent, signal);
+      await this.completeAdmission(agent, signal);
     }, { global: true, prepend: true });
-    this.ctx.on?.("agent/disposed", ({ agent }: { agent: DshAgent }) => { this.disposedAgents.add(agent); childAdmissions.delete(agent); }, { global: true });
-    this.ctx.effect?.(() => () => { this.disposed = true; });
+    this.ctx.on?.("agent/disposed", ({ agent }: { agent: DshAgent }) => { this.options.childAuthority?.revokeParent(agent, "agent-disposed"); this.disposedAgents.add(agent); childAdmissions.delete(agent); }, { global: true });
+    this.ctx.effect?.(() => () => { this.disposed = true; for (const agent of this.agents()?.list() ?? []) if (this.bound.has(agent)) this.options.childAuthority?.revokeParent(agent, "runtime-disposed"); });
+    if (this.options.onAdmissionGuardsInstalled !== undefined) await this.options.onAdmissionGuardsInstalled(this);
     // Installation into an already-running host treats those Agents as admitted
     // now, while all later profile switches continue to preserve their snapshot.
-    for (const agent of this.agents()?.list() ?? []) await this.admit(agent, undefined, this.options.startup);
+    const visited = new Set<DshAgent>(), visiting = new Set<DshAgent>();
+    const admitExisting = async (agent: DshAgent): Promise<void> => {
+      if (visited.has(agent)) return;
+      if (visiting.has(agent)) throw new DsmmProfileError("not-owned", "Existing Agent ownership has a cycle; no child authority was inferred.");
+      visiting.add(agent);
+      const parent = this.owner(agent);
+      if (parent !== undefined) await admitExisting(parent);
+      await this.completeAdmission(agent, undefined, this.options.startup);
+      visiting.delete(agent); visited.add(agent);
+    };
+    for (const agent of this.agents()?.list() ?? []) await admitExisting(agent);
   }
 
   admission(agent?: DshAgent): AdmittedProfile { return agent === undefined ? this.current : this.bind(agent); }
@@ -132,6 +166,7 @@ export class DsmmProfileRuntime {
       rolePolicy: roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch), deepwork: this.mode.describe(agent, admitted.settings.defaultActive),
       modules: [projectDeepworkModule(this.baseline, admitted.deployment, admitted)],
       configuration: deploymentAdmissionView(admitted),
+      warnings: structuredClone(admitted.warnings ?? []), roles: structuredClone(admitted.roleAvailability ?? []), subagentRuntime: this.subagentRuntimeView(),
       ...(profileModel === undefined ? {} : { profileModel }),
       admissionEpoch: admitted.epoch, switchAllowed: reason === undefined, ...(reason === undefined ? {} : { switchUnavailableReason: reason }) };
   }
@@ -186,6 +221,10 @@ export class DsmmProfileRuntime {
       this.assertRoot(agent);
       if (signal?.aborted || maintenanceSignal?.aborted) throw new DsmmProfileError("cancelled", "Session profile selection was cancelled; the previous admission was retained.");
       if (this.bind(agent) !== admitted || admitted.epoch !== request.expectedAdmissionEpoch) throw new DsmmProfileError("conflict", "The session admission changed. Refresh before selecting again.");
+      if (this.options.childAuthority !== undefined) {
+        const ticket = this.options.childAuthority.acquireParentTicket(agent);
+        if (ticket.admission !== admitted || ticket.owner !== (this.options.childAuthorityOwner ?? this)) throw new DsmmProfileError("not-owned", "The stable Host authority does not own this exact admission.");
+      }
       assertAuthority?.();
     };
     assertCurrent();
@@ -200,8 +239,11 @@ export class DsmmProfileRuntime {
           const epoch = newEpoch();
           let profileModel: DsmmModelRoute | undefined;
           let committed!: AdmittedProfile;
+          let next!: AdmittedProfile;
           const result = await this.store.selectSession(request, epoch, async (document) => {
             const prepared = immutableSettings(resolveProfileSettings(admitted.baseline as DsmmPluginConfig, document?.settings ?? {}));
+            this.assertRootRole(agent, prepared);
+            if (["roles", "guards", "subagents"].some(key => JSON.stringify(Reflect.get(prepared, key)) !== JSON.stringify(Reflect.get(admitted.settings, key)))) this.assertDeliveryFence();
             await this.validate(prepared, agent, maintenanceSignal);
             const role = resolveEffectiveDsmmRole(agent, prepared, this.mode.active(agent, prepared.defaultActive));
             profileModel = this.declaredProfileModel(prepared, role);
@@ -209,18 +251,26 @@ export class DsmmProfileRuntime {
             return prepared;
           }, {
             assertCurrent: () => assertCurrent(maintenanceSignal),
+            prepare: (selection, settings) => {
+              next = this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override", admitted.baseline, admitted.deployment, admitted.restartRequired, selection.document, selection.warnings);
+              this.validateRootRole(agent, next);
+              this.options.childAuthority?.prepareParentAdmission(agent, admitted.epoch, next);
+            },
             committed: (selection, settings) => {
-              committed = this.profileAdmission(selection, settings, epoch, request.id === null ? "deployment-baseline" : "session-override", admitted.baseline, admitted.deployment, admitted.restartRequired, selection.document);
-              this.bound.set(agent, committed);
-              this.mode.changed(agent);
+              const install = (): void => { this.bound.set(agent, next); };
+              if (this.options.childAuthority !== undefined) this.options.childAuthority.publishParentAdmission(agent, admitted.epoch, next, install);
+              else install();
+              committed = next;
             }
           });
+          try { this.mode.changed(agent); } catch { /* Observers cannot undo a successful durable admission publication. */ }
           // A committed selection remains a successful transaction even if a
           // queued wake or disposal wins immediately when maintenance releases.
           return { sessionId: request.sessionId, globalDefault: selectionState(this.current), selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
             deepwork: this.mode.describe(agent, result.prepared.defaultActive),
             modules: [projectDeepworkModule(this.baseline, committed.deployment, committed)],
             configuration: deploymentAdmissionView(committed),
+            warnings: structuredClone(committed.warnings ?? []), roles: structuredClone(committed.roleAvailability ?? []), subagentRuntime: this.subagentRuntimeView(),
             ...(profileModel === undefined ? {} : { profileModel }),
             scope: request.id === null ? "deployment-baseline" : "session-override", admissionEpoch: epoch, switchAllowed: true };
         } finally { this.switching.delete(agent); }
@@ -240,11 +290,12 @@ export class DsmmProfileRuntime {
       || persisted.selectionRevision !== current.selectionRevision;
     return {
       ...persisted,
+      selectedWarnings: structuredClone(current.warnings ?? []),
       roles: DSMM_ROLES.map((role) => {
         const configured = this.baseline.roleRouting[role.id];
         const runtimePolicy = { ...(configured?.strategy === undefined ? {} : { strategy: configured.strategy }),
           ...(configured?.rateLimit === undefined ? {} : { rateLimit: structuredClone(configured.rateLimit) }) };
-        return { id: role.id, label: role.name, enabled: this.baseline.roles[role.id],
+        return { id: role.id, label: role.name, enabled: this.current.settings.roles[role.id], availability: this.current.roleAvailability?.find(state => state.id === role.id),
           ...(Object.keys(runtimePolicy).length === 0 ? {} : { runtimePolicy }) };
       }),
       editorDefaults: structuredClone(this.baseline.runtimePolicy),
@@ -290,7 +341,7 @@ export class DsmmProfileRuntime {
       });
       // There is no await between successful durable commit and publication of
       // the complete settings value. Draft saves never reach this assignment.
-      this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default", baseline, this.options.startup, this.current.restartRequired, selectedDocument);
+       this.current = this.profileAdmission(result.selection, result.prepared, newEpoch(), "global-default", baseline, this.options.startup, this.current.restartRequired, selectedDocument, (result.selection as LoadedProfileSelection).warnings);
       this.currentDocument = selectedDocument;
       return this.describe();
     });
@@ -303,6 +354,12 @@ export class DsmmProfileRuntime {
     const effective = structuredClone(desired);
     const restartRequired: string[] = [];
     effective.modules.deepwork.enabled = desired.modules.deepwork.enabled && this.baseline.modules.deepwork.enabled;
+    effective.subagents.allowRouteOverride = desired.subagents.allowRouteOverride && this.baseline.subagents.allowRouteOverride;
+    if (desired.subagents.allowRouteOverride && !this.baseline.subagents.allowRouteOverride) restartRequired.push("subagents.allowRouteOverride");
+    if (this.baseline.subagents.maxDepth !== undefined && (desired.subagents.maxDepth === undefined || desired.subagents.maxDepth > this.baseline.subagents.maxDepth)) {
+      effective.subagents.maxDepth = this.baseline.subagents.maxDepth;
+      restartRequired.push("subagents.maxDepth");
+    }
     if (desired.modules.deepwork.enabled && !this.baseline.modules.deepwork.enabled) restartRequired.push("modules.deepwork.enabled");
     for (const role of DSMM_ROLES) {
       if (desired.roles[role.id] && !this.baseline.roles[role.id]) restartRequired.push(`roles.${role.id}`);
@@ -320,10 +377,10 @@ export class DsmmProfileRuntime {
     if (deployment !== undefined && this.options.startup !== undefined
       && (deployment.profile.section ?? deployment.global.section) !== (this.options.startup.profile.section ?? this.options.startup.global.section)) restartRequired.push("section");
     const baseline = immutableSettings(effective);
-    return this.profileAdmission(selection, immutableSettings(resolveProfileSettings(baseline as DsmmPluginConfig, document?.settings ?? {})), epoch, scope, baseline, deployment, restartRequired, document);
+    return this.profileAdmission(selection, immutableSettings(resolveProfileSettings(baseline as DsmmPluginConfig, document?.settings ?? {})), epoch, scope, baseline, deployment, restartRequired, document, (selection as LoadedProfileSelection).warnings);
   }
 
-  private profileAdmission(selection: ProfileSelectionState, settings: DsmmSettings, epoch: string, scope: DsmmProfileAdmission["scope"], baseline = this.baseline, deployment = this.options.startup, restartRequired: readonly string[] = [], document: DsmmProfileDocument | null = null): AdmittedProfile {
+  private profileAdmission(selection: ProfileSelectionState, settings: DsmmSettings, epoch: string, scope: DsmmProfileAdmission["scope"], baseline = this.baseline, deployment = this.options.startup, restartRequired: readonly string[] = [], document: DsmmProfileDocument | null = null, warnings = profileDocumentWarnings(document)): AdmittedProfile {
     const sources: NonNullable<DsmmProfileAdmission["sources"]> = { ...deployment?.sources };
     const fields: NonNullable<DsmmProfileAdmission["sourceCaptures"]>["fields"] = Object.fromEntries(Object.keys(sources).map((path) => [path, "deployment"]));
     const pinStartup = (prefix: string): void => {
@@ -336,6 +393,8 @@ export class DsmmProfileRuntime {
     };
     for (const key of ["modeName", "promptOrder", "presets", "lsp"]) pinStartup(key);
     if (deployment?.settings.modules.deepwork.enabled && !baseline.modules.deepwork.enabled) pinStartup("modules.deepwork.enabled");
+    if (deployment?.settings.subagents.allowRouteOverride && !baseline.subagents.allowRouteOverride) pinStartup("subagents.allowRouteOverride");
+    if (deployment !== undefined && deployment.settings.subagents.maxDepth !== baseline.subagents.maxDepth) pinStartup("subagents.maxDepth");
     for (const role of DSMM_ROLES) {
       if (deployment?.settings.roles[role.id] && !baseline.roles[role.id]) pinStartup(`roles.${role.id}`);
     }
@@ -345,12 +404,12 @@ export class DsmmProfileRuntime {
       } else { sources[path.join(".")] = "named-session"; fields[path.join(".")] = "named-session"; }
     };
     for (const [role, policy] of Object.entries(document?.settings.roleRouting ?? {})) {
-      if (policy?.primary === undefined) continue;
-      const prefix = `roleRouting.${role}.primary.`;
-      for (const path of Object.keys(sources).filter((path) => path.startsWith(prefix))) { delete sources[path]; delete fields[path]; }
+      const prefixes = [...policy?.primary === undefined ? [] : [`roleRouting.${role}.primary.`], ...Object.keys(policy?.levels ?? {}).map(level => `roleRouting.${role}.levels.${level}.`)];
+      for (const prefix of prefixes) for (const path of Object.keys(sources).filter((path) => path.startsWith(prefix))) { delete sources[path]; delete fields[path]; }
     }
     mark(document?.settings ?? {}, []);
     return Object.freeze({ ...selectionState(selection), settings, baseline, epoch, scope, ...(deployment === undefined ? {} : { deployment }),
+      warnings: freezeSettings(warnings), roleAvailability: freezeSettings(this.roleAvailability(settings, baseline, deployment, document)), subagentRuntime: freezeSettings(this.subagentRuntimeView()),
       ...(this.store.origin === undefined ? {} : { store: Object.freeze({ origin: this.store.origin, readOnly: this.store.readOnly === true,
         ...(this.store.writeRestriction === undefined ? {} : { writeRestriction: this.store.writeRestriction }) }) }),
       sources: Object.freeze(sources), sourceCaptures: Object.freeze({ fields: Object.freeze(fields), ...(this.options.startup === undefined ? {} : { startup: Object.freeze({
@@ -379,24 +438,15 @@ export class DsmmProfileRuntime {
     // The native factory enters the exact child/owner pair before announcing
     // creation. Durable lineage and inherited persona never establish ownership.
     const parent = this.owner(agent);
-    const admitted = this.bindChild(agent, parent) ?? this.current;
+    if (parent === undefined && agent.session.header?.origin === "subagent") throw new DsmmProfileError("not-owned", "A child requires exact direct-parent admission, not current root defaults.");
+    if (parent !== undefined) throw new DsmmProfileError("activation", "A retained child must complete role validation and authority registration before its settings are published.");
+    const admitted = this.current;
+    this.assertRootRole(agent, admitted.settings);
+    this.validateRootRole(agent, admitted);
     this.bound.set(agent, admitted);
+    try { this.options.childAuthority?.registerParent(agent, admitted, this.options.childAuthorityOwner ?? this); }
+    catch (error) { this.bound.delete(agent); throw error; }
     return admitted;
-  }
-
-  private bindChild(agent: DshAgent, parent: DshAgent | undefined): AdmittedProfile | undefined {
-    const retained = childAdmissions.get(agent);
-    if (retained !== undefined) {
-      const registry = this.agents();
-      if (parent !== retained.parent || registry?.get !== undefined && (agent.id === undefined || registry.get(agent.id) !== agent)) {
-        throw new DsmmProfileError("not-owned", "The retained child's exact live owner changed; its captured admission was not rebound.");
-      }
-    }
-    if (parent === undefined) return undefined;
-    const admission = retained?.admission ?? this.bind(parent);
-    this.bound.set(agent, admission);
-    childAdmissions.set(agent, { parent, admission });
-    return admission;
   }
 
   private owner(agent: DshAgent): DshAgent | undefined {
@@ -414,10 +464,27 @@ export class DsmmProfileRuntime {
     }
   }
 
+  /** Host-only awaited completion for fresh, retained and cold exact Agents; no execution occurs here. */
+  async completeAdmission(agent: DshAgent, signal?: AbortSignal, startup?: DsmmDeploymentSnapshot): Promise<DsmmProfileAdmission> {
+    await this.admit(agent, signal, startup);
+    return this.bound.get(agent)!;
+  }
+
   private async admit(agent: DshAgent, signal?: AbortSignal, startup?: DsmmDeploymentSnapshot): Promise<void> {
     if (this.bound.has(agent)) return;
     const parent = this.owner(agent);
-    if (this.bindChild(agent, parent) !== undefined) return;
+    if (parent !== undefined) {
+      this.assertDeliveryFence();
+      if (this.options.childAdmission === undefined) throw new DsmmProfileError("unavailable", "Child admission completion is not installed; no child policy was inferred from its current parent.");
+      const ticket = this.options.childAuthority!.acquireParentTicket(parent);
+      this.assertOwnedParentTicket(ticket);
+      const merged = AbortSignal.any([ticket.signal, ...signal === undefined ? [] : [signal]]);
+      const prepared = await this.options.childAdmission.prepare(agent, parent, ticket, merged);
+      merged.throwIfAborted();
+      await this.completeChildAdmission(agent, parent, prepared, merged);
+      return;
+    }
+    if (agent.session.header?.origin === "subagent") throw new DsmmProfileError("not-owned", "A child cannot be admitted as a new root without its exact live direct parent.");
     if (agent.id === undefined) { this.bind(agent); return; }
     this.admitting.add(agent);
     try {
@@ -432,12 +499,146 @@ export class DsmmProfileRuntime {
       const candidate = selection.admissionEpoch === null
         ? this.options.readDesired === undefined ? this.current : this.prepare(this.currentDocument, this.current, newEpoch(), "global-default", deployment)
         : this.prepare(selection.document, selection, selection.admissionEpoch, selection.selectedId === null ? "deployment-baseline" : "session-override", deployment);
+      this.assertRootRole(agent, candidate.settings);
       if (this.options.readDesired !== undefined) await this.validate(candidate.settings, agent, signal, startup !== undefined);
       signal?.throwIfAborted();
       if (this.disposed || this.disposedAgents.has(agent)) throw new DsmmProfileError("disposed", "The session was disposed during deployment admission.");
       if (registry?.get !== undefined && registry.get(agent.id) !== agent) throw new DsmmProfileError("not-owned", "The live session changed during deployment admission.");
+      this.validateRootRole(agent, candidate);
       this.bound.set(agent, candidate);
+      try { this.options.childAuthority?.registerParent(agent, candidate, this.options.childAuthorityOwner ?? this); }
+      catch (error) { this.bound.delete(agent); throw error; }
     } finally { this.admitting.delete(agent); }
+  }
+
+  /** Awaited native creation completion: evidence + persistence + role identity + exact-parent authority. */
+  async completeChildAdmission(agent: DshAgent, parent: DshAgent, prepared: PreparedChildAdmission, signal?: AbortSignal): Promise<void> {
+    this.assertDeliveryFence();
+    if (this.options.childAdmission === undefined) throw new DsmmProfileError("unavailable", "Child role validation is unavailable.");
+    const ticket = this.options.childAuthority!.acquireParentTicket(parent);
+    this.assertOwnedParentTicket(ticket);
+    const merged = AbortSignal.any([ticket.signal, ...signal === undefined ? [] : [signal]]);
+    const evidence = "mode" in prepared.evidence ? parseLegacyChildEvidence(prepared.evidence) : parseChildAdmissionCapture(prepared.evidence);
+    const check = (): void => {
+      merged.throwIfAborted();
+      if (this.disposed || this.disposedAgents.has(agent) || this.owner(agent) !== parent || this.agents()?.get?.(agent.id!) !== agent || this.agents()?.get?.(parent.id!) !== parent || evidence.childSessionId !== agent.id || evidence.parentSessionId !== parent.id) throw new DsmmProfileError("not-owned", "The exact child or its direct parent changed during admission.");
+      const current = this.options.childAuthority!.acquireParentTicket(parent);
+      this.assertOwnedParentTicket(current);
+      if (current.admission !== ticket.admission || current.owner !== ticket.owner) throw new DsmmProfileError("conflict", "The child creation parent ticket changed.");
+    };
+    check();
+    if (prepared.creation && "mode" in evidence) throw new DsmmProfileError("validation", "New children require a full original capture, not legacy evidence.");
+    const original = "mode" in evidence ? prepared.admission : admissionFromChildCapture(evidence, this.baseline);
+    const retained = childAdmissions.get(agent);
+    if (retained !== undefined && retained.parent !== parent) throw new DsmmProfileError("not-owned", "The retained child's exact direct parent changed.");
+    if (retained !== undefined && prepared.creation) throw new DsmmProfileError("validation", "A retained child cannot be admitted as a new creation.");
+    if (retained !== undefined && JSON.stringify(retained.evidence) !== JSON.stringify(evidence)) throw new DsmmProfileError("corrupt-selection", "Retained child evidence cannot be replaced by a new parent policy.");
+    const admission: AdmittedProfile = retained?.admission ?? freezeSettings({ ...original, baseline: original.settings,
+      selectedId: original.profile?.id ?? null, appliedRevision: original.profile?.revision ?? null, selectionRevision: "absent" });
+    if (!("mode" in evidence)) {
+      if (prepared.creation && evidence.originalAdmissionEpoch !== ticket.parentEpoch) throw new DsmmProfileError("conflict", "The child creation invocation epoch changed.");
+      if (prepared.admission.epoch !== evidence.originalAdmissionEpoch || JSON.stringify(prepared.admission.profile) !== JSON.stringify(evidence.profilePin)) throw new DsmmProfileError("validation", "Child admission identity does not match its original capture.");
+      if (this.options.childCapturePersistence === "resident") {
+        if (!prepared.creation && retained === undefined) throw new DsmmProfileError("unavailable", "Resident-only child capture has no cold restart guarantee.");
+      } else {
+        if (this.childCaptureStore.readChildAdmission === undefined || this.childCaptureStore.createChildAdmission === undefined) throw new DsmmProfileError("unavailable", "Durable child capture storage is unavailable.");
+        if (prepared.creation) await this.childCaptureStore.createChildAdmission(evidence, check);
+        else {
+          const stored = await this.childCaptureStore.readChildAdmission(evidence.childSessionId, evidence.parentSessionId);
+          if (JSON.stringify(stored) !== JSON.stringify(evidence)) throw new DsmmProfileError("corrupt-selection", "The child evidence does not match its immutable stored capture.");
+        }
+      }
+    } else {
+      if (prepared.admission.profile !== null) throw new DsmmProfileError("validation", "Legacy admission cannot synthesize an original profile pin.");
+      if (this.childCaptureStore.readChildAdmission === undefined) throw new DsmmProfileError("unavailable", "Legacy admission requires a safe capture-absence check.");
+      if (await this.childCaptureStore.readChildAdmission(evidence.childSessionId, evidence.parentSessionId) !== null) throw new DsmmProfileError("corrupt-selection", "A captured child cannot be downgraded to legacy recovery.");
+    }
+    check();
+    this.options.childAdmission.validateRole(agent, parent, { ...prepared, evidence, admission, retained: retained !== undefined });
+    check();
+    this.bound.set(agent, admission);
+    try { this.options.childAuthority!.registerParent(agent, admission, this.options.childAuthorityOwner ?? this); }
+    catch (error) { this.bound.delete(agent); throw error; }
+    childAdmissions.set(agent, { parent, admission, evidence });
+  }
+
+  /** C's scoped resolver callback: original resident/durable evidence, then explicit trusted legacy folds. */
+  async resolveOriginalChildEvidence(ticket: ParentAdmissionTicket, childId: string, signal: AbortSignal, readLegacy?: LegacyChildEvidenceReader): Promise<ChildAdmissionEvidence> {
+    validateSessionProfileId(childId);
+    const merged = AbortSignal.any([ticket.signal, signal]);
+    const check = (): void => {
+      merged.throwIfAborted();
+      this.assertDeliveryFence();
+      if (this.disposed || this.disposedAgents.has(ticket.parent) || this.agents()?.get?.(ticket.parent.id!) !== ticket.parent) throw new DsmmProfileError("not-owned", "Original child evidence requires its exact live direct parent.");
+      const current = this.options.childAuthority!.acquireParentTicket(ticket.parent);
+      this.assertOwnedParentTicket(current);
+      if (current.owner !== ticket.owner || current.admission !== ticket.admission || current.parentEpoch !== ticket.parentEpoch) throw new DsmmProfileError("conflict", "The original child evidence ticket changed.");
+    };
+    check();
+    const child = this.agents()!.get!(childId);
+    if (child !== undefined && this.owner(child) !== ticket.parent) throw new DsmmProfileError("not-owned", "Original evidence is scoped to the actual direct child, not an ancestor.");
+    const retained = child === undefined ? undefined : childAdmissions.get(child);
+    if (retained !== undefined && retained.parent !== ticket.parent) throw new DsmmProfileError("not-owned", "The retained evidence has a different exact parent.");
+    const checkChild = (): void => {
+      const current = this.agents()!.get!(childId);
+      if (current !== undefined && this.owner(current) !== ticket.parent) throw new DsmmProfileError("not-owned", "The addressed child's direct owner changed during evidence reading.");
+      if (retained !== undefined && (current !== child || childAdmissions.get(child!) !== retained)) throw new DsmmProfileError("conflict", "The retained child residency changed during evidence reading.");
+    };
+    const stored = await this.childCaptureStore.readChildAdmission?.(childId, ticket.parent.id!);
+    check(); checkChild();
+    if (stored !== undefined && stored !== null) {
+      const capture = parseChildAdmissionCapture(stored);
+      if (capture.childSessionId !== childId || capture.parentSessionId !== ticket.parent.id || retained !== undefined && JSON.stringify(retained.evidence) !== JSON.stringify(capture)) throw new DsmmProfileError("corrupt-selection", "Original child capture identity does not match its scoped residency.");
+      return capture;
+    }
+    if (retained !== undefined) {
+      if (!("mode" in retained.evidence)) {
+        if (this.options.childCapturePersistence !== "resident") throw new DsmmProfileError("corrupt-selection", "The durable original child capture is missing; legacy recovery is not allowed.");
+        return retained.evidence;
+      }
+      if (stored === undefined) throw new DsmmProfileError("unavailable", "Legacy evidence requires a safe capture-absence check.");
+      return retained.evidence;
+    }
+    if (stored === undefined || readLegacy === undefined) throw new DsmmProfileError("unavailable", "Original capture is unavailable; only an explicit trusted legacy evidence reader can recover a captureless child.");
+    const evidence = parseLegacyChildEvidence(await readLegacy(ticket, childId, merged));
+    check(); checkChild();
+    if (evidence.childSessionId !== childId || evidence.parentSessionId !== ticket.parent.id) throw new DsmmProfileError("not-owned", "Legacy evidence does not identify the addressed direct child.");
+    return evidence;
+  }
+
+  private assertOwnedParentTicket(ticket: ParentAdmissionTicket): void {
+    if (ticket.owner !== (this.options.childAuthorityOwner ?? this) || this.bound.get(ticket.parent) !== ticket.admission || ticket.parentEpoch !== ticket.admission.epoch) throw new DsmmProfileError("not-owned", "Child admission requires this entry's exact completed parent admission and owner.");
+  }
+
+  private subagentRuntimeView(): SubagentRuntimeAdmissionView {
+    const view = this.options.childAuthority?.view() ?? { binding: "unavailable" as const, deliveryFenceReady: false, restartRequired: true, reason: "explicit-composition-required" as const };
+    if (view.binding === "dsmm" && view.deliveryFenceReady && (this.options.childAdmission === undefined || this.options.validateRootRole === undefined)) return { ...view, deliveryFenceReady: false, restartRequired: true, reason: "authority-not-ready" };
+    return view;
+  }
+  private assertDeliveryFence(): void {
+    const view = this.subagentRuntimeView();
+    if (view.binding !== "dsmm" || !view.deliveryFenceReady || this.options.childAuthority === undefined) throw new DsmmProfileError("unavailable", "This operation requires the explicit DSMM SubagentRuntime composition and ready Host admission authority; configure and restart before retrying.");
+  }
+  private assertRootRole(agent: DshAgent, settings: DsmmSettings): void {
+    const role = resolveSelectedAgentPreset(agent.session);
+    if (isDsmmRoleId(role) && (!settings.modules.deepwork.enabled || !settings.roles[role])) throw new DsmmProfileError("activation", "The selected root role is disabled by the candidate admission.", `settings.roles.${role}`, "deployment-ceiling");
+  }
+  private validateRootRole(agent: DshAgent, admission: DsmmProfileAdmission): void {
+    if (this.options.childAuthority !== undefined && this.options.validateRootRole === undefined) throw new DsmmProfileError("unavailable", "Root role admission completion is unavailable; no direct-parent authority was registered.");
+    this.options.validateRootRole?.(agent, admission);
+  }
+  private roleAvailability(settings: DsmmSettings, baseline: DsmmSettings, deployment?: DsmmDeploymentSnapshot, document?: DsmmProfileDocument | null): DsmmRoleAvailabilityState[] {
+    return DSMM_ROLES.map(role => {
+      const required = requiredReason(settings, role.id), named = document?.settings.roles?.[role.id];
+      const startup = this.baseline.roles[role.id], desired = deployment?.settings.roles[role.id] ?? baseline.roles[role.id];
+      const admitted = settings.modules.deepwork.enabled && settings.roles[role.id];
+      const reason = !settings.modules.deepwork.enabled ? "module-off" : !desired ? "deployment-disabled" : !startup ? "startup-unavailable" : named === false ? "profile-disabled" : undefined;
+      const startupCeiling = !startup && desired;
+      const source = named !== undefined ? "named-session" : startupCeiling ? this.options.startup?.sources[`roles.${role.id}`] ?? "defaults" : deployment?.sources[`roles.${role.id}`] ?? "defaults";
+      const capture = named !== undefined ? "named-session" : startupCeiling ? "startup" : "deployment";
+      return { id: role.id, required: required !== undefined, ...(required === undefined ? {} : { requiredReason: required }), startupAvailable: startup, deploymentEnabled: desired,
+        ...(named === undefined ? {} : { namedEnabled: named }), admitted, ...(reason === undefined ? {} : { reason }), source, capture };
+    });
   }
 
   private async validate(settings: DsmmSettings, agent?: DshAgent, signal?: AbortSignal, auditCatalog = true): Promise<void> {
@@ -469,6 +670,14 @@ export class DsmmProfileRuntime {
     for (const role of DSMM_ROLES) {
       if (!settings.roles[role.id]) continue;
       const policy = resolveRoleRuntimePolicy(settings, role.id);
+      for (const [level, override] of Object.entries(settings.roleRouting[role.id]?.levels ?? {})) {
+        const field = `settings.roleRouting.${role.id}.levels.${level}`;
+        if (override.provider !== undefined) chains.push({ routes: [override, ...policy.fallbackRoutes], field });
+        else {
+          if (policy.primary === undefined && inheritedRoute === undefined) throw new DsmmProfileError("activation", "Open a native chat to validate the inherited model's exact level effort.", field, "invalid-route");
+          chains.push({ routes: [policy.primary ?? inheritedRoute!, ...policy.fallbackRoutes].map(route => ({ ...route, reasoningEffort: override.reasoningEffort })), field });
+        }
+      }
       // No explicit primary inherits native routing. Dormant fallbacks alone
       // cannot make a usable inherited route fail profile Apply. If that exact
       // route is unavailable here, native request preflight remains authority.
@@ -508,7 +717,8 @@ export async function createProfileRuntime(ctx: DshContext, baseline: DsmmSettin
   // constructor path has one compatibility namespace, not a guessed entry.
   const entry = options.startup?.entryId ?? (ctx instanceof Context ? ctx.fiber.entry?.id : undefined) ?? "trusted-direct";
   const store = exists ? ProfileStore.fromLegacy(legacy) : ProfileStore.fromCentral(resolveDshHome(profile.home), profile.dir, entry);
-  const runtime = new DsmmProfileRuntime(ctx, baseline, store, options);
+  const childCaptureStore = options.childCaptureStore ?? (exists ? ProfileStore.fromCentral(resolveDshHome(profile.home), profile.dir, entry) : store);
+  const runtime = new DsmmProfileRuntime(ctx, baseline, store, { ...options, childCaptureStore });
   await runtime.initialize();
   return runtime;
 }

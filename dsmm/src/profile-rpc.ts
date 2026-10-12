@@ -5,7 +5,7 @@ import type { HostConnectionHandle } from "@deepseek-ai/dsh-client-connection";
 import type { SessionController } from "@deepseek-ai/dsh-api-session-controller";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
-import { TYPERT_HOST } from "./profile-remote.js";
+import { parseProfileErrorInfo, TYPERT_HOST } from "./profile-remote.js";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import type { DshAgent, DshAgentsRegistry } from "./dsh-types.js";
@@ -47,7 +47,7 @@ export class DsmmProfilesHost extends TypertRemoteService {
     }
     invocation.signal.throwIfAborted();
     try { return await operation(); }
-    catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", profileErrorInfo(error)); }
+    catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
 
   @Remote
@@ -205,7 +205,7 @@ export class DsmmConfigHost extends TypertRemoteService {
         ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
         schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
         modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
-    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
   @Remote
   async describe(): Promise<GlobalConfigSnapshot> {
@@ -215,7 +215,7 @@ export class DsmmConfigHost extends TypertRemoteService {
       assertAuthority();
       return snapshot;
     }
-    catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+    catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
   @Remote
   async describeModules(): Promise<DsmmModuleState[]> {
@@ -225,7 +225,7 @@ export class DsmmConfigHost extends TypertRemoteService {
       const desired = await this.backend.readDesired();
       assertAuthority();
       return [projectDeepworkModule(this.startup, desired, undefined, true)];
-    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
   @Remote
   async save(request: GlobalConfigSaveRequest): Promise<GlobalConfigSnapshot> {
@@ -240,7 +240,7 @@ export class DsmmConfigHost extends TypertRemoteService {
         if ((Reflect.get(current, symbols.original) ?? current) !== owner) throw new DsmmProfileError("not-owned", "The operator connection changed; refresh before saving.");
       };
       return await this.backend.saveGlobal(request, assertAuthority);
-    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error)); }
+    } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
 }
 

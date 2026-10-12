@@ -33,7 +33,7 @@ Ghidra is a Java Swing app. Looks dated, works well.
 ## First-time workflow (memorize this — it's not obvious)
 
 1. **Start Ghidra**: `ghidraRun`
-2. **Create a project**: File → New Project → Non-Shared → name it `debug-<binary-name>` (journal this path so you can rm it at Phase 9 if disposable).
+2. **Create a project**: File → New Project → Non-Shared → create it in the task-owned temporary root and put its exact path in the resource checklist for Phase 9.
 3. **Import the binary**: File → Import File → pick your target. Accept default format detection.
 4. **Double-click the imported binary** in the project listing. Ghidra asks to analyze it — say **yes**, accept defaults for the first pass. This takes anywhere from seconds (small binary) to tens of minutes (large binary).
 5. **Once analysis completes**, you're in the CodeBrowser view.
@@ -168,12 +168,12 @@ The community has a large collection: https://github.com/NationalSecurityAgency/
 
 ## Bookmarks + Notes
 
-Ghidra has built-in bookmarks and comments. Use them as your journal inside the project:
+Ghidra has built-in bookmarks and comments. Use them for current analysis facts in a task-owned scratch project:
 
 - Right-click an address → `Set Bookmark` → tag as `Note`. Attach a description.
 - Right-click → `Comments → Set EOL Comment` (shows up inline in decompiler).
 
-Treat these as part of the journal. If you end up promoting this Ghidra project (keeping it after the debug session), the comments become durable documentation.
+Don't preserve hypothesis trials or decision history in a retained project. If retention is authorized, keep only final findings, current mechanism, and supporting evidence; otherwise remove the task-owned scratch project during cleanup.
 
 ---
 
@@ -200,15 +200,4 @@ Ghidra is the right tool when you need to **read the logic** of a binary you don
 
 ## Phase 9 cleanup specifics
 
-```bash
-# If you created a scratch project just for this debug session, journal path and remove:
-# (the journal should have the exact path)
-# Example:
-ls ~/ghidra-projects/ 2>/dev/null
-# rm -rf ~/ghidra-projects/debug-<binary-name>
-
-# If you promoted the project (kept it), it's not cleanup — note it in the final summary to the user
-
-# Kill any running Ghidra headless processes
-pkill -f 'analyzeHeadless' || true
-```
+Follow Phase 9 using the temporary resource checklist: remove only the exact owned scratch project and terminate only an identity-verified task-owned headless process. Never delete another project or use process-name-wide kills. Report any authorized retained analysis artifact with final findings only.

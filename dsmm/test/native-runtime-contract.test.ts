@@ -11,7 +11,7 @@ import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { createScope, scopeOf, scopeParentOf } from "@deepseek-ai/dsh-scope";
 import { SystemPrompt, renderPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
-import type { DshAgent, DshContext, DshSkillCandidate, DshSkillProvider, DshSkillRegistry } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent, DshContext, DshSkillCandidate, DshSkillProvider, DshSkillRegistry } from "../lib/dsh-types.js";
 import { registerSafetyGuards } from "../lib/guards.js";
 import { resolveManagedPresetRoot } from "../lib/preset-materializer.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
@@ -20,9 +20,11 @@ import { DSMM_SKILL_NAMES, bundledSkillMetadata, readBundledSkill, registerBundl
 import { DeepworkModeController } from "../lib/state.js";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
+type DshAgent = Omit<PackageDshAgent, "ctx">;
+
 const noRoles = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, false]));
 const native = () => nativeRoutingFixture({ roles: noRoles }, { nativePresets: true, spawn: false });
-const adapterAgent = (agent: import("@deepseek-ai/dsh-agent").Agent) => agent as DshAgent;
+const adapterAgent = (agent: import("@deepseek-ai/dsh-agent").Agent): DshAgent => agent;
 
 test("mounting DSMM after an ordinary root registers enabled startup presets before auditing and binding it", async () => {
   let retained: import("@deepseek-ai/dsh-agent").Agent | undefined;

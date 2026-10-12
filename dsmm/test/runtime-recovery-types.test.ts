@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { Context } from "@deepseek-ai/cordis";
+import type { Agent } from "@deepseek-ai/dsh-agent";
 import type {
   AgentRequestErrorFrame,
   AgentTurnStoppingFrame,
@@ -14,9 +16,13 @@ import type {
   DshSessionEvent,
   DshStepBoundaryEventData,
   DshTodoWriteEventData
-} from "../lib/dsh-types.js";
+} from "../src/dsh-types.js";
 
 test("recovery types match the pinned DSH rc.2 structural contracts", async () => {
+  const nativeAgentCompatible: Agent extends DshAgent ? true : false = true;
+  const nativeContextCompatible: Context extends DshContext ? true : false = true;
+  assert.equal(nativeAgentCompatible, true);
+  assert.equal(nativeContextCompatible, true);
   const stepBoundary = { turn: 4, step: 2 } satisfies DshStepBoundaryEventData;
   const header = {
     config: { provider: "primary", model: "primary-model", reasoningEffort: "high" }

@@ -5,11 +5,13 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { DsmmDeploymentConfig } from "../lib/deployment-config.js";
 import { DsmmDeploymentConfig as DeploymentConfig } from "../lib/deployment-config.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import type { DshAgent, DshContext } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent, DshContext } from "../lib/dsh-types.js";
 import dsmmPlugin from "../lib/index.js";
 import { DsmmRolePolicy } from "../lib/role-policy.js";
 import { DeepworkModeController } from "../lib/state.js";
 import { nativeRoutingFixture } from "./native-routing-fixture.ts";
+
+type DshAgent = Omit<PackageDshAgent, "ctx">;
 
 test("old busy parent and future native children retain effective epoch while new roots capture off/on and missing startup substrate requires restart", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "owned-child" } } } }, {

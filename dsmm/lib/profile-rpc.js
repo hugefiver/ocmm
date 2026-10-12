@@ -35,7 +35,7 @@ var __esDecorate = (this && this.__esDecorate) || function (ctor, descriptorIn, 
 import { symbols } from "@deepseek-ai/cordis";
 import { Remote, RemoteError, TypertRemoteService, remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { SessionId } from "@deepseek-ai/dsh-session";
-import { TYPERT_HOST } from "./profile-remote.js";
+import { parseProfileErrorInfo, TYPERT_HOST } from "./profile-remote.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import { projectDeepworkModule } from "./modules.js";
 import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
@@ -87,7 +87,7 @@ let DsmmProfilesHost = (() => {
                 return await operation();
             }
             catch (error) {
-                throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", profileErrorInfo(error));
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
         describe() { return this.invoke(() => this.backend.describe()); }
@@ -272,7 +272,7 @@ let DsmmConfigHost = (() => {
                     modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
             }
             catch (error) {
-                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
         async describe() {
@@ -283,7 +283,7 @@ let DsmmConfigHost = (() => {
                 return snapshot;
             }
             catch (error) {
-                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
         async describeModules() {
@@ -296,7 +296,7 @@ let DsmmConfigHost = (() => {
                 return [projectDeepworkModule(this.startup, desired, undefined, true)];
             }
             catch (error) {
-                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
         async save(request) {
@@ -315,7 +315,7 @@ let DsmmConfigHost = (() => {
                 return await this.backend.saveGlobal(request, assertAuthority);
             }
             catch (error) {
-                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", profileErrorInfo(error));
+                throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
     };

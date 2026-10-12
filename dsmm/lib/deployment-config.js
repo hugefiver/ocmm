@@ -1,35 +1,27 @@
 import { createHash } from "node:crypto";
 import { Context } from "@deepseek-ai/cordis";
-import { parseTree } from "jsonc-parser";
 import { resolveDshHome } from "./dsh-home.js";
 import { FixedConfigFileStore } from "./config-file-store.js";
 import { copyJson, freezeSettings, resolveDeployment, validateDeploymentPath, validateSparseConfig } from "./settings.js";
 import { DsmmProfileError } from "./profiles.js";
 import { resolve } from "node:path";
+import { diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
 function configurationError() { throw new DsmmProfileError("validation", "Deepwork deployment configuration is invalid; restore valid plain JSON before saving or admitting a new session."); }
-function validateJsonTree(node, depth = 0) {
-    if (depth > 64)
-        configurationError();
-    if (node.type === "object") {
-        const names = (node.children ?? []).map((property) => property.children?.[0]?.value);
-        if (new Set(names).size !== names.length)
-            configurationError();
-    }
-    for (const child of node.children ?? [])
-        validateJsonTree(child, depth + 1);
-}
 export function parseGlobalConfig(content) {
     if (content === null)
         return {};
-    const errors = [];
-    const tree = parseTree(content, errors, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-    if (tree?.type !== "object" || errors.length > 0)
+    const inspected = inspectJsonDocument(content, false);
+    const issue = inspected.diagnostics[0];
+    if (issue !== undefined)
+        throw new DsmmProfileError("validation", `${issue.field}: ${issue.reason}`, issue.field, issue.code, issue.location);
+    if (inspected.tree?.type !== "object")
         configurationError();
-    validateJsonTree(tree);
     try {
         return validateSparseConfig(JSON.parse(content), true);
     }
-    catch {
+    catch (error) {
+        if (error instanceof DsmmConfigValidationError)
+            throw new DsmmProfileError("validation", error.message, error.diagnostic.field, error.diagnostic.code, fieldLocation(content, inspected.tree, error.diagnostic.field, diagnosticSourcePath(error)));
         return configurationError();
     }
 }
@@ -46,12 +38,7 @@ export function editGlobalConfig(config, edits) {
             || !Array.isArray(edit.path) || edit.path.length === 0 || edit.path.length > 8
             || edit.path.some((key) => typeof key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key)))
             configurationError();
-        try {
-            validateDeploymentPath(edit.path);
-        }
-        catch {
-            configurationError();
-        }
+        validateDeploymentPath(edit.path);
         let node = result;
         for (const key of edit.path.slice(0, -1)) {
             const child = node[key];
@@ -64,12 +51,7 @@ export function editGlobalConfig(config, edits) {
             node[key] = copyJson(edit.value);
         else
             Reflect.deleteProperty(node, key);
-        try {
-            result = validateSparseConfig(result, true);
-        }
-        catch {
-            configurationError();
-        }
+        result = validateSparseConfig(result, true);
     }
     return result;
 }
@@ -137,7 +119,9 @@ export class DsmmDeploymentConfig {
             }
             return { config: validateSparseConfig(snapshot), revision: hash(presence) };
         }
-        catch {
+        catch (error) {
+            if (error instanceof DsmmConfigValidationError)
+                throw error;
             return configurationError();
         }
     }
@@ -152,7 +136,9 @@ export class DsmmDeploymentConfig {
         try {
             settings = resolveDeployment(global.config, profile.config);
         }
-        catch {
+        catch (error) {
+            if (error instanceof DsmmConfigValidationError)
+                throw error;
             return configurationError();
         }
         const entry = this.ctx instanceof Context ? this.ctx.fiber.entry : undefined;
@@ -174,7 +160,9 @@ export class DsmmDeploymentConfig {
         try {
             resolveDeployment(config, this.profile().config);
         }
-        catch {
+        catch (error) {
+            if (error instanceof DsmmConfigValidationError)
+                throw error;
             configurationError();
         }
         const saved = await this.store.save(`${JSON.stringify(config, null, 2)}\n`, request.expectedRevision, assertAuthority);

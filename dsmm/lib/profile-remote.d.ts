@@ -4,6 +4,8 @@ import type { ProfileErrorInfo, ProfileReadResult, ProfileSaveRequest, ProfileSe
 import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 import type { DsmmModuleState } from "./modules.js";
 import type { DeploymentEditorSnapshot } from "./profile-types.js";
+import type { DsmmRoleAvailabilityState, ProfileDiagnostic, SubagentRuntimeAdmissionView } from "./profile-types.js";
+import type { DsmmInvocationView, DsmmRoleRouteComparison } from "./profile-types.js";
 export interface DsmmConfigRemote {
     describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
     save(request: GlobalConfigSaveRequest): Promise<RemoteResult<GlobalConfigSnapshot>>;
@@ -46,6 +48,12 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
 export declare function isProfileId(value: unknown): value is string;
 /** Opaque native identities are never interpreted as paths. */
 export declare function isNativeSessionId(value: unknown): value is string;
+export declare function parseProfileErrorInfo(value: unknown): ProfileErrorInfo;
+export declare function parseProfileDiagnostic(value: unknown): ProfileDiagnostic;
+export declare function parseRoleAvailability(value: unknown): DsmmRoleAvailabilityState;
+export declare function parseSubagentRuntimeAdmissionView(value: unknown): SubagentRuntimeAdmissionView;
+export declare function parseDsmmRoleRouteComparison(value: unknown): DsmmRoleRouteComparison;
+export declare function parseDsmmInvocationView(value: unknown): DsmmInvocationView;
 /** Explicit strict Host contract; no SRC fallback or browser-supplied authority. */
 export declare const TYPERT_REMOTE: TypertRemoteContribution;
 export declare const TYPERT_HOST: TypertContribution;

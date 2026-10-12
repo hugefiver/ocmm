@@ -7,6 +7,10 @@ import type { DsmmModelRoute } from "./settings.js";
 import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 import type { DsmmModuleState } from "./modules.js";
 import type { DeploymentEditorSnapshot, DeploymentAdmissionView } from "./profile-types.js";
+import type { DsmmRoleAvailabilityState, ProfileDiagnostic, ProfileDiagnosticLocation, SubagentRuntimeAdmissionView } from "./profile-types.js";
+import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
+import type { DsmmInvocationView, DsmmInitialRoleRoute, DsmmLiveRoleRoute, DsmmRoleRouteComparison } from "./profile-types.js";
+import { diagnostic, isSafeDiagnosticField, PROFILE_DIAGNOSTIC_REASONS } from "./profile-diagnostics.js";
 
 export interface DsmmConfigRemote {
   describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
@@ -106,6 +110,7 @@ function role(value: unknown): DsmmRoleId {
 }
 function object(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail("object");
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some(property => !Object.hasOwn(property, "value") || !property.enumerable)) fail("object");
   const result = value as Record<string, unknown>;
   if (Object.keys(result).some((key) => !required.includes(key) && !optional.includes(key))
     || required.some((key) => !Object.hasOwn(result, key))) fail("object keys");
@@ -114,15 +119,63 @@ function object(value: unknown, required: readonly string[], optional: readonly 
 function optional<T>(value: Record<string, unknown>, key: string, parse: (input: unknown) => T): Record<string, T> {
   return Object.hasOwn(value, key) ? { [key]: parse(value[key]) } : {};
 }
-function errorInfo(value: unknown): ProfileErrorInfo {
-  const item = object(value, ["code", "message"], ["field"]);
+export function parseProfileErrorInfo(value: unknown): ProfileErrorInfo {
+  const item = object(value, ["code", "message"], ["field", "reason", "location"]);
   const code = text(item.code, "code");
   if (!errorCodes.has(code)) fail("code");
-  return { code: code as ProfileErrorInfo["code"], message: text(item.message, "message", 4096), ...optional(item, "field", (input) => text(input, "field", 256)) };
+  const reason = item.reason === undefined ? undefined : text(item.reason, "reason", 64);
+  if (reason !== undefined && (!Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, reason) || reason === "blank-label")) fail("reason");
+  const field = item.field === undefined ? undefined : diagnosticField(item.field);
+  return { code: code as ProfileErrorInfo["code"], message: reason === undefined ? text(item.message, "message", 4096) : `${field ?? "document"}: ${diagnostic(reason as ProfileDiagnostic["code"], field ?? "document").reason}`,
+    ...(field === undefined ? {} : { field }), ...(reason === undefined ? {} : { reason: reason as ProfileDiagnostic["code"] }), ...optional(item, "location", diagnosticPosition) };
+}
+const errorInfo = parseProfileErrorInfo;
+function diagnosticField(value: unknown): string { if (!isSafeDiagnosticField(value)) fail("field"); return value; }
+function diagnosticPosition(value: unknown): ProfileDiagnosticLocation {
+  const item = object(value, ["offset", "length", "line", "column"]);
+  const result = { offset: integer(item.offset, "offset", 128 * 1024), length: integer(item.length, "length", 128 * 1024), line: integer(item.line, "line", 128 * 1024 + 1), column: integer(item.column, "column", 128 * 1024 + 1) };
+  if (result.line < 1 || result.column < 1 || result.offset + result.length > 128 * 1024) fail("location");
+  return result;
+}
+export function parseProfileDiagnostic(value: unknown): ProfileDiagnostic {
+  const row = object(value, ["severity", "code", "field", "reason"], ["location"]);
+  if (typeof row.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row.code)) fail("diagnostic code");
+  const result = diagnostic(row.code as ProfileDiagnostic["code"], diagnosticField(row.field));
+  if (row.severity !== result.severity || row.reason !== result.reason) fail("diagnostic severity/reason");
+  return { ...result, ...optional(row, "location", diagnosticPosition) };
+}
+function warnings(value: unknown): ProfileDiagnostic[] {
+  if (!Array.isArray(value) || value.length > 1) fail("warnings");
+  return value.map(value => {
+    const result = parseProfileDiagnostic(value);
+    if (result.severity !== "warning" || result.code !== "blank-label" || result.field !== "label") fail("warning");
+    return result;
+  });
+}
+export function parseRoleAvailability(value: unknown): DsmmRoleAvailabilityState {
+  const row = object(value, ["id", "required", "startupAvailable", "deploymentEnabled", "admitted", "source", "capture"], ["requiredReason", "namedEnabled", "reason"]);
+  if (typeof row.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row.source) || typeof row.capture !== "string" || !["startup", "deployment", "named-session"].includes(row.capture)) fail("role source/capture");
+  if (row.reason !== undefined && (typeof row.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row.reason))) fail("role reason");
+  if (row.requiredReason !== undefined && (typeof row.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row.requiredReason))) fail("requiredReason");
+  return { id: role(row.id), required: boolean(row.required, "required"), startupAvailable: boolean(row.startupAvailable, "startupAvailable"), deploymentEnabled: boolean(row.deploymentEnabled, "deploymentEnabled"), admitted: boolean(row.admitted, "admitted"), source: row.source as DsmmRoleAvailabilityState["source"], capture: row.capture as DsmmRoleAvailabilityState["capture"],
+    ...optional(row, "namedEnabled", value => boolean(value, "namedEnabled")), ...(row.reason === undefined ? {} : { reason: row.reason as DsmmRoleAvailabilityState["reason"] }), ...(row.requiredReason === undefined ? {} : { requiredReason: row.requiredReason as DsmmRoleAvailabilityState["requiredReason"] }) };
+}
+function roleAvailabilityList(value: unknown): DsmmRoleAvailabilityState[] {
+  if (!Array.isArray(value) || value.length > 22) fail("roles");
+  const result = value.map(parseRoleAvailability);
+  if (new Set(result.map(role => role.id)).size !== result.length) fail("roles");
+  return result;
+}
+export function parseSubagentRuntimeAdmissionView(value: unknown): SubagentRuntimeAdmissionView {
+  const row = object(value, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
+  if (typeof row.binding !== "string" || !["stock", "dsmm", "unavailable"].includes(row.binding) || row.reason !== undefined && (typeof row.reason !== "string" || !["explicit-composition-required", "duplicate-provider", "authority-not-ready"].includes(row.reason))) fail("subagentRuntime");
+  const ready = boolean(row.deliveryFenceReady, "deliveryFenceReady");
+  if (ready && (row.binding !== "dsmm" || row.reason !== undefined)) fail("subagentRuntime readiness");
+  return { binding: row.binding as SubagentRuntimeAdmissionView["binding"], deliveryFenceReady: ready, restartRequired: boolean(row.restartRequired, "restartRequired"), ...(row.reason === undefined ? {} : { reason: row.reason as SubagentRuntimeAdmissionView["reason"] }) };
 }
 function readResult(value: unknown): ProfileReadResult {
-  const item = object(value, ["id", "revision", "content"], ["label"]);
-  return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)) };
+  const item = object(value, ["id", "revision", "content"], ["label", "warnings"]);
+  return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)), ...optional(item, "warnings", warnings) };
 }
 function content(value: unknown): string {
   const result = text(value, "content", 128 * 1024);
@@ -130,22 +183,23 @@ function content(value: unknown): string {
   return result;
 }
 function snapshot(value: unknown): ProfileSnapshot {
-  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction"]);
+  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings"]);
   if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail("profiles");
   return {
     profiles: item.profiles.map((input) => {
-      const row = object(input, ["id", "revision"], ["label", "error"]);
-      return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input) => text(input, "label", 120)), ...optional(row, "error", errorInfo) };
+      const row = object(input, ["id", "revision"], ["label", "error", "warnings"]);
+      return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input) => text(input, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
     }),
     selectedId: item.selectedId === null ? null : id(item.selectedId),
     appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision),
     selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
     ...optional(item, "selectionError", errorInfo),
+    ...optional(item, "selectedWarnings", warnings),
     ...optional(item, "roles", (input) => {
       if (!Array.isArray(input) || input.length > 22) fail("roles");
       const result = input.map((value) => {
-        const row = object(value, ["id", "label", "enabled"], ["runtimePolicy"]);
-        return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "runtimePolicy", (input) => {
+        const row = object(value, ["id", "label", "enabled"], ["runtimePolicy", "availability"]);
+        return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "availability", parseRoleAvailability), ...optional(row, "runtimePolicy", (input) => {
           const policy = object(input, [], ["strategy", "rateLimit"]);
           return { ...optional(policy, "strategy", normalizeRoutingStrategy), ...optional(policy, "rateLimit", normalizeRateLimitOverrides) };
         }) };
@@ -154,7 +208,7 @@ function snapshot(value: unknown): ProfileSnapshot {
       return result;
     }),
     ...optional(item, "editorDefaults", runtimePolicy),
-    ...optional(item, "origin", (input) => { if (!["central", "legacy", "explicit"].includes(String(input))) fail("origin"); return input as "central" | "legacy" | "explicit"; }),
+    ...optional(item, "origin", (input) => { if (typeof input !== "string" || !["central", "legacy", "explicit"].includes(input)) fail("origin"); return input as "central" | "legacy" | "explicit"; }),
     ...optional(item, "readOnly", (input) => boolean(input, "readOnly")),
     ...optional(item, "writeRestriction", (input) => text(input, "writeRestriction", 1024)),
   };
@@ -186,12 +240,47 @@ function modelRoute(value: unknown): DsmmModelRoute {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://")) fail("route");
   return { provider, model, ...optional(route, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
 }
+function initialRoleRoute(value: unknown): DsmmInitialRoleRoute {
+  const row = object(value, ["status"], ["source", "route", "reason"]);
+  if (row.status === "known") {
+    object(row, ["status", "source", "route"]);
+    if (row.source !== "invocation-capture") fail("initialRoute source");
+    return { status: "known", source: "invocation-capture", route: modelRoute(row.route) };
+  }
+  object(row, ["status", "reason"]);
+  if (row.status !== "unknown" || row.reason !== "missing-invocation-capture") fail("initialRoute reason");
+  return { status: "unknown", reason: "missing-invocation-capture" };
+}
+function liveRoleRoute(value: unknown): DsmmLiveRoleRoute {
+  const row = object(value, ["status"], ["source", "route", "reason"]);
+  if (row.status === "known") {
+    object(row, ["status", "source", "route"]);
+    if (row.source !== "own-native-request-header") fail("liveRoute source");
+    return { status: "known", source: "own-native-request-header", route: modelRoute(row.route) };
+  }
+  object(row, ["status", "reason"]);
+  if (row.status !== "unknown" || typeof row.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row.reason)) fail("liveRoute reason");
+  return { status: "unknown", reason: row.reason as Extract<DsmmLiveRoleRoute, { status: "unknown" }>["reason"] };
+}
+export function parseDsmmRoleRouteComparison(value: unknown): DsmmRoleRouteComparison {
+  const row = object(jsonData(value), ["childId", "initialRoute", "liveRoute"]);
+  return { childId: sessionId(row.childId), initialRoute: initialRoleRoute(row.initialRoute), liveRoute: liveRoleRoute(row.liveRoute) };
+}
+export function parseDsmmInvocationView(value: unknown): DsmmInvocationView {
+  const row = object(jsonData(value), ["role", "label", "level", "routeSource", "mode"], ["route", "runId", "childId", "jobId", "routeComparison"]);
+  if (typeof row.level !== "string" || !["normal", "low", "high", "max"].includes(row.level) || !(DSMM_ROUTE_SOURCES as readonly unknown[]).includes(row.routeSource) || typeof row.mode !== "string" || !["one-shot", "continuable"].includes(row.mode)) fail("invocation");
+  const target = role(row.role);
+  if (target === "dsmm-orchestrator") fail("invocation target");
+  const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : undefined;
+  if (routeComparison !== undefined && (!Object.hasOwn(row, "childId") || routeComparison.childId !== row.childId)) fail("invocation routeComparison childId");
+  return { role: target, label: text(row.label, "label", 120), level: row.level as DsmmInvocationView["level"], routeSource: row.routeSource as DsmmInvocationView["routeSource"], mode: row.mode as DsmmInvocationView["mode"], ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...(routeComparison === undefined ? {} : { routeComparison }) };
+}
 function selectionState(value: unknown): ProfileSelectionState {
   const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
   return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value: unknown): SessionProfileSnapshot {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration"]);
+  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
   return {
     sessionId: sessionId(item.sessionId), globalDefault: selectionState(item.globalDefault), selection: selectionState(item.selection),
@@ -205,6 +294,9 @@ function sessionSnapshot(value: unknown): SessionProfileSnapshot {
     ...optional(item, "profileModel", modelRoute),
     ...optional(item, "modules", moduleStates),
     ...optional(item, "configuration", admissionView),
+    ...optional(item, "warnings", warnings),
+    ...optional(item, "roles", roleAvailabilityList),
+    ...optional(item, "subagentRuntime", parseSubagentRuntimeAdmissionView),
     ...optional(item, "deepwork", (input) => {
       const mode = object(input, ["active", "explicit", "locked", "revision"]);
       return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
@@ -232,7 +324,7 @@ function modeSelectRequest(value: unknown): SessionModeSelectRequest {
   return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: revision(item.expectedModeRevision), expectedAdmissionEpoch: revision(item.expectedAdmissionEpoch) };
 }
 function codec(symbol: string, parse: (value: unknown) => unknown): TypertCodec {
-  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse }) };
+  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: value => parse(jsonData(value)) }) };
 }
 function descriptor(method: string, result: TypertCodec, parameter?: { name: string; codec: TypertCodec }): InvocationDescriptor {
   return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === undefined ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
@@ -243,7 +335,14 @@ function jsonData(value: unknown, depth = 0, active = new Set<object>()): unknow
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "object" || value === null || active.has(value)) fail("JSON value");
-  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail("JSON object");
+  if (Array.isArray(value) ? Object.getPrototypeOf(value) !== Array.prototype : Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail("JSON object");
+  if (Object.getOwnPropertySymbols(value).length) fail("JSON symbols");
+  const properties = Object.getOwnPropertyDescriptors(value);
+  for (const [key, property] of Object.entries(properties)) {
+    if (Array.isArray(value) && key === "length") continue;
+    if (!Object.hasOwn(property, "value") || !property.enumerable || Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail("JSON property");
+  }
+  if (Array.isArray(value) && Object.keys(value).length !== value.length) fail("JSON array holes");
   active.add(value);
   const result = Array.isArray(value) ? value.map((child) => jsonData(child, depth + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child]) => {
     if (["__proto__", "prototype", "constructor"].includes(key)) fail("JSON key");
@@ -311,8 +410,8 @@ function editorSnapshot(value: unknown): DeploymentEditorSnapshot {
 }
 function schemaNode(value: unknown): DeploymentEditorSnapshot["schema"] {
   const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
-  if (!["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(String(row.type))) fail("schema type");
-  const node = { type: String(row.type) } as DeploymentEditorSnapshot["schema"];
+  if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type)) fail("schema type");
+  const node = { type: row.type } as DeploymentEditorSnapshot["schema"];
   if (row.fields !== undefined) node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields as object))).map(([key, child]) => [key, schemaNode(child)]));
   if (row.inner !== undefined) node.inner = schemaNode(row.inner);
   if (row.alternatives !== undefined) { if (!Array.isArray(row.alternatives)) fail("schema alternatives"); node.alternatives = row.alternatives.map(schemaNode); }
@@ -347,7 +446,7 @@ function moduleStates(value: unknown): DsmmModuleState[] {
     const descriptor = object(row.descriptor, ["id", "label", "key"]);
     if (descriptor.id !== "deepwork" || descriptor.label !== "Deepwork" || descriptor.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown") fail("module descriptor");
     const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-    if (!["defaults", "global"].includes(String(desired.source)) || !["current-global", "admission", "startup"].includes(String(desired.capture))
+    if (typeof desired.source !== "string" || !["defaults", "global"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
       || ![null, "global-disabled", "restart-required"].includes(next.reason as string | null)
       || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason as string | null)) fail("module state");
     return { descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }, hostBundleEnabled: "unknown",

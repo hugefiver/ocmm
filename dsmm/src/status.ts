@@ -10,13 +10,17 @@ import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-poli
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
 import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
-import type { DsmmRoleRuntimeState } from "./profile-types.js";
+import type { DsmmRoleAvailabilityState, DsmmRoleRuntimeState, SubagentRuntimeAdmissionView, ProfileDiagnostic } from "./profile-types.js";
 import type { DsmmLspRuntimeState } from "./lsp.js";
 import type { DsmmModuleState } from "./modules.js";
 
 export const DSMM_STATUS_VERSION = 1 as const;
 
 export interface DsmmStatusSnapshot {
+  roles?: DsmmRoleAvailabilityState[];
+  warnings?: ProfileDiagnostic[];
+  subagentRuntime?: SubagentRuntimeAdmissionView;
+  locale?: { value: NonNullable<DsmmSettings["locale"]>; source: string; capture: string };
   version: typeof DSMM_STATUS_VERSION;
   modules?: DsmmModuleState[];
   admission?: Pick<DsmmProfileAdmission, "profile" | "epoch" | "scope">;
@@ -87,6 +91,7 @@ export function createDsmmStatusSnapshot(input: {
   settings: DsmmSettings;
   modeActive: boolean;
   admission?: DsmmProfileAdmission;
+  subagentRuntime?: SubagentRuntimeAdmissionView;
   roleRuntimeState?: DsmmRoleRuntimeState;
   modules?: DsmmModuleState[];
 }): DsmmStatusSnapshot {
@@ -125,6 +130,10 @@ export function createDsmmStatusSnapshot(input: {
 
   return {
     version: DSMM_STATUS_VERSION,
+    ...(input.admission?.roleAvailability === undefined ? {} : { roles: structuredClone(input.admission.roleAvailability) }),
+    ...(input.admission?.warnings === undefined ? {} : { warnings: structuredClone(input.admission.warnings) }),
+    ...(input.subagentRuntime === undefined && input.admission?.subagentRuntime === undefined ? {} : { subagentRuntime: { ...(input.subagentRuntime ?? input.admission!.subagentRuntime!) } }),
+    ...(settings.locale === undefined ? {} : { locale: { value: settings.locale, source: input.admission?.sources?.locale ?? "defaults", capture: input.admission?.sourceCaptures?.fields.locale ?? "admission" } }),
     ...(input.modules === undefined ? {} : { modules: structuredClone(input.modules) }),
     ...(input.admission?.store === undefined ? {} : { profileStore: { ...input.admission.store } }),
     ...(input.admission?.deployment === undefined ? {} : { deployment: {
@@ -256,11 +265,8 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function resolvePolicyEffort(settings: DsmmSettings, selectedPreset: string | undefined, flash: boolean): "off" | "low" | "high" | "max" {
-  const presets = flash ? settings.deepseekFlashMaxReasoningPresets : settings.deepseekV4ProMaxReasoningPresets;
-  return isDsmmRoleId(selectedPreset) && presets.includes(selectedPreset)
-    ? "max"
-    : flash ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
+function resolvePolicyEffort(settings: DsmmSettings, _selectedPreset: string | undefined, flash: boolean): "off" | "low" | "high" {
+  return flash ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
 }
 
 function resolveCalibration(input: {
@@ -292,22 +298,22 @@ function resolveCalibration(input: {
 export function readOnlySettings(settings: DsmmSettings): DsmmSettings {
   return {
     modules: { deepwork: { enabled: settings.modules.deepwork.enabled } },
+    ...(settings.locale === undefined ? {} : { locale: settings.locale }),
     modeName: settings.modeName,
     defaultActive: settings.defaultActive,
     promptOrder: settings.promptOrder,
     deepseekV4ProCalibration: settings.deepseekV4ProCalibration,
     deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort,
-    deepseekV4ProMaxReasoningPresets: [...settings.deepseekV4ProMaxReasoningPresets],
     deepseekFlashCalibration: settings.deepseekFlashCalibration,
     deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort,
-    deepseekFlashMaxReasoningPresets: [...settings.deepseekFlashMaxReasoningPresets],
     skills: { ...settings.skills },
     roles: { ...settings.roles },
     roleRouting: Object.fromEntries(Object.entries(settings.roleRouting).map(([role, policy]) => [role, {
       ...(policy.primary === undefined ? {} : { primary: { ...policy.primary } }),
       ...(policy.fallbackRoutes === undefined ? {} : { fallbackRoutes: policy.fallbackRoutes.map((route) => ({ ...route })) }),
       ...(policy.strategy === undefined ? {} : { strategy: policy.strategy }),
-      ...(policy.rateLimit === undefined ? {} : { rateLimit: { ...policy.rateLimit } })
+      ...(policy.rateLimit === undefined ? {} : { rateLimit: { ...policy.rateLimit } }),
+      ...(policy.levels === undefined ? {} : { levels: structuredClone(policy.levels) })
     }])),
     runtimePolicy: { strategy: settings.runtimePolicy.strategy, rateLimit: { ...settings.runtimePolicy.rateLimit } },
     presets: { ...settings.presets, ...(settings.presets.root === undefined ? {} : { root: "<configured>" }) },

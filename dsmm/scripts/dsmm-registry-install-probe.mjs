@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { isSource020, pluginTitleForVersion, COMPILED_NAMES_020 } from "./release-contract.mjs";
+import { isSource020, isSource021, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, PUBLIC_RUNTIME_EXPORTS_021 } from "./release-contract.mjs";
 
 export const PACKAGE_NAME = "@dsmm/dsmm";
 export const DSH_VERSION = "0.2.0-rc.2";
@@ -45,6 +45,7 @@ export const COMPILED_FILES_015 = Object.freeze([
 
 export function compiledFilesForVersion(version) {
   requireFact(validVersion(version), "INVALID_COMPILED_POLICY_VERSION");
+  if (isSource021(version)) return [...new Set([...COMPILED_FILES_015, ...COMPILED_NAMES_021.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
   if (isSource020(version)) return [...new Set([...COMPILED_FILES_015, ...COMPILED_NAMES_020.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
   const [major, minor, patch] = version.split(".").map(Number);
   return major > 0 || minor > 1 || (minor === 1 && patch >= 5) ? [...COMPILED_FILES_015] : [...COMPILED_FILES];
@@ -78,6 +79,7 @@ export function requiresDeepworkMetadata(version) {
 }
 
 export function publicExportsForVersion(version) {
+  if (isSource021(version)) return { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS, ...PUBLIC_RUNTIME_EXPORTS_021 };
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS } : { ...PUBLIC_EXPORTS };
 }
 

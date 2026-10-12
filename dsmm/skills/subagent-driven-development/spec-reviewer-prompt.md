@@ -15,7 +15,7 @@ Assignment content (not a tool-call schema; send through a permitted callable na
 
     Supply the goal, acceptance criteria, current diff or committed range including
     new files, relevant verification evidence, and global constraints. Add only the
-    context needed to understand dependencies, interfaces, and approved rulings.
+    context needed to understand dependencies, interfaces, and current constraints.
     No fixed field order is required.
 
     Compare the actual code and new files to the criteria. Identify missing behavior,
@@ -23,6 +23,11 @@ Assignment content (not a tool-call schema; send through a permitted callable na
     references and technical impact. Allow minimal evidence-based equivalent
     implementations that preserve the approved goal, constraints, permissions, and
     acceptance criteria.
+
+    Evaluate final valid requirements and committed contracts, not intermediate
+    behavior or decision history. Tests cover functionality and external interfaces,
+    not descriptive-text locks, decision counterexamples, or removed-component
+    absence. Update tests with requirements and delete removed components' tests.
 
     Report concrete findings and supporting evidence. Do not rely on an implementer
     status or acknowledgement, and do not require a fixed first-line verdict or

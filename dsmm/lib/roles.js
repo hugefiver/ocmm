@@ -1,7 +1,5 @@
 import { DSMM_SKILL_NAMES } from "./skills.js";
 import { buildRolePersona, SOURCE_ROLE_CATALOG } from "./prompt-content.js";
-import { roleProviderName } from "./role-providers.js";
-import { allowedRoleChildren } from "./role-policy.js";
 export const DSMM_ROLE_IDS = [
     "dsmm-orchestrator", "dsmm-planner", "dsmm-plan-critic", "dsmm-builder",
     "dsmm-reviewer", "dsmm-oracle", "dsmm-oracle-2nd", "dsmm-creative",
@@ -22,6 +20,11 @@ export const DSMM_ROLES = SOURCE_ROLE_CATALOG.map((row) => ({
 const defaultEnabledRoleIds = DSMM_ROLES.filter((role) => role.enabledByDefault).map((role) => role.id);
 export function isDsmmRoleId(value) {
     return typeof value === "string" && DSMM_ROLE_IDS.includes(value);
+}
+export function roleProviderName(role) { return `dsmm-role-${role.slice("dsmm-".length)}`; }
+export function allowedRoleChildren(role, child = false) {
+    const definition = DSMM_ROLES.find(row => row.id === role);
+    return child && role === "dsmm-builder" ? definition.childBuilderAllowedChildren ?? [] : definition.allowedChildren;
 }
 /** Root exposure is separate from whether a role is enabled for delegation. */
 export function isRootRole(role) {
@@ -48,8 +51,8 @@ Resolve discoverable facts by inspection. Use ask_user_question only for user-ow
 Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
 
 When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.`;
-/** Native definitions and YAML share this inventory; skills is an ignored positional compatibility argument. */
-export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = defaultEnabledRoleIds, roleRouting = {}) {
+/** Standing native capabilities; session routes, skills and callable delegation are admission-owned. */
+export function rolePluginRows(role, _skills = DSMM_SKILL_NAMES, _enabledRoles = defaultEnabledRoleIds, _roleRouting = {}) {
     const rows = [
         { id: "persona", name: "@deepseek-ai/dsh-persona", config: { prefix: role.persona } },
         { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions", config: { maxBytes: 65536 } },
@@ -81,39 +84,7 @@ export function rolePluginRows(role, skills = DSMM_SKILL_NAMES, enabledRoles = d
         if (role.id !== "dsmm-planner")
             rows.push({ id: "tool-todo", name: "@deepseek-ai/dsh-tool-todo", config: { allowParallelInProgress: true } });
     }
-    rows.push(...roleSubagentPluginRows(enabledRoles.filter((id) => allowedRoleChildren(role.id).includes(id)), roleRouting));
     return rows;
-}
-/** DSH's spawn provider joins the parent's preset; persona/filter give each child its own role. */
-export function roleSubagentPluginRows(enabledRoles = defaultEnabledRoleIds, roleRouting = {}) {
-    return DSMM_ROLES.filter((role) => role.id !== "dsmm-orchestrator" && enabledRoles.includes(role.id)).map((role) => ({
-        id: `subagent-${role.id}`,
-        name: "@deepseek-ai/dsh-tool-subagent",
-        config: roleSubagentConfig(role, enabledRoles.map((id) => id.replace(/-/gu, "_")), roleRouting[role.id]?.primary)
-    }));
-}
-export function roleSubagentConfig(role, availableTools = [], primary) {
-    const readOnlyTools = ["read", "glob", "grep"];
-    if (role.id === "dsmm-doc-search" || role.id === "dsmm-media-reader") {
-        readOnlyTools.push("web_search", "web_fetch");
-    }
-    // read_image is conditional on the DSH attachment store; an unknown name
-    // would make DSH's native toolFilter reject the child at startup.
-    if (role.id === "dsmm-media-reader" && availableTools.includes("read_image"))
-        readOnlyTools.push("read_image");
-    readOnlyTools.push(...allowedRoleChildren(role.id).map((id) => id.replace(/-/gu, "_")).filter((name) => availableTools.includes(name)));
-    return {
-        provider: roleProviderName(role.id),
-        ...(primary === undefined ? {} : { agentOptions: { ...primary } }),
-        toolName: role.id.replace(/-/gu, "_"),
-        // Selection remains host-owned; identity and monotonic execution fences are
-        // admitted separately from this standing composition.
-        modelSelectionSettings: false,
-        backgroundMode: "one-shot",
-        enableRunInBackground: false,
-        persona: role.persona,
-        ...(role.access === "read-only" ? { toolFilter: { allow: readOnlyTools } } : {})
-    };
 }
 export function renderPresetMetadata(role) {
     return `id: ${role.id}

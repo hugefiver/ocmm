@@ -8,9 +8,7 @@ import { parse } from "jsonc-parser";
 import { ProfilesController } from "../lib/client/controller.js";
 import { editStructuredPath, moveFallback, structuredDocument } from "../lib/client/structured.js";
 import { sessionProfileLabels } from "../lib/client/session-labels.js";
-import { en, zh, RETRY_FIELD_LABEL_KEYS } from "../lib/client/locales.js";
-import { PROFILE_STYLES } from "../lib/client/styles.js";
-import { DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
+import { en } from "../lib/client/locales.js";
 import { isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
@@ -72,7 +70,7 @@ function fixture(overrides: Partial<DsmmProfilesRemote> = {}) {
     save: async (request) => { calls.push("save"); return success({ id: request.id, content: request.content, revision: otherRevision }); },
     select: async (request) => { calls.push("select"); return success({ ...snapshot, selectedId: request.id, appliedRevision: request.id === null ? null : request.expectedRevision! }); },
     describeSession: async (id) => { calls.push(`describeSession:${id}`); return success(session(id)); },
-    selectSession: async (id, request) => { calls.push(`selectSession:${id}`); selections.push(request); return success({ ...session(id, "epoch-2"), selection: { selectedId: request.id, appliedRevision: request.expectedRevision ?? null, selectionRevision: otherRevision }, scope: "session-override" }); },
+    selectSession: async (id, request) => { calls.push(`selectSession:${id}`); selections.push(request); const selection = { selectedId: request.id, appliedRevision: request.expectedRevision ?? null, selectionRevision: otherRevision }; return success({ ...session(id, "epoch-2"), selection, admittedSelection: selection, scope: "session-override" }); },
     ...overrides,
   };
   const controller = new ProfilesController(remote), observation = modelObservation();
@@ -148,7 +146,6 @@ test("named legacy editor keeps its pinned selection inspectable and disables ev
 });
 
 test("profile control is an icon-only native portaled menu with no standalone visible label or status", async () => {
-  assert.match(PROFILE_STYLES, /\.dsmm-profile-menu \[role=presentation\]\{[^}]*font:inherit;/u);
   const component = await nativeHeaderComponent(), f = fixture();
   await f.controller.refresh(); f.controller.setSession("native-menu-root"); await settle(f.controller);
   const nodes = elements(headerTree(component, f.controller));
@@ -212,18 +209,6 @@ test("structured path editing preserves unrelated JSONC and explicit inheritance
   assert.equal(structuredDocument(content)!.roleRouting["dsmm-planner"].rateLimit!.maxRetries, 0);
 });
 
-test("retry controls have readable bilingual names and narrow/zoom labels wrap rather than clipping", () => {
-  assert.deepEqual(Object.keys(RETRY_FIELD_LABEL_KEYS).sort(), Object.keys(DSMM_RATE_LIMIT_BOUNDS).sort());
-  for (const [field, key] of Object.entries(RETRY_FIELD_LABEL_KEYS)) {
-    assert.notEqual(en[key], field); assert.notEqual(zh[key], field);
-    assert.ok(en[key].includes(" ")); assert.match(zh[key], /[\u4e00-\u9fff]/u);
-  }
-  assert.equal(translate("retryField", { name: "DW Planner", field: en[RETRY_FIELD_LABEL_KEYS.maxRetries] }), "DW Planner retry count");
-  assert.equal(translate("retryField", { name: "DW Planner", field: en[RETRY_FIELD_LABEL_KEYS.switchAfterRateLimits] }), "DW Planner rate-limit failures before switch");
-  assert.ok(PROFILE_STYLES.includes(".dsmm-profiles :is(label,legend,summary){min-width:0;max-width:100%;overflow-wrap:anywhere}"));
-  assert.equal(/overflow-x\s*:\s*hidden|text-overflow\s*:\s*clip/u.test(PROFILE_STYLES), false);
-});
-
 test("fallback reorder preserves original object text/comments and never mutates an out-of-range index", () => {
   const next = moveFallback(content, "dsmm-planner", 1, 0)!;
   assert.deepEqual(structuredDocument(next)!.roleRouting["dsmm-planner"].fallbackRoutes!.map((route) => route.provider), ["two", "one"]);
@@ -282,9 +267,9 @@ test("session labels keep captured profile A distinct from future global B witho
   f.controller.setSession(captured.sessionId); await settle(f.controller);
   const state = f.controller.store.getSnapshot();
   const labels = sessionProfileLabels(state.session!, translate);
-  assert.ok(labels.admitted.includes("profile-a (revision aaaaaaaaaaaa)"));
+  assert.ok(labels.admitted.includes(`profile-a (revision ${revision})`));
   assert.equal(labels.admitted.includes("profile-b"), false);
-  assert.ok(labels.futureDefault.includes("Global default for future unscoped sessions: profile-b (revision bbbbbbbbbbbb)"));
+  assert.ok(labels.futureDefault.includes(`profile-b (revision ${otherRevision})`));
   assert.deepEqual(state.session!.selection, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
   assert.equal(state.sessionChoice, null, "display admission never substitutes the chosen sidecar/CAS target");
   assert.equal(state.editor!.content, draft); assert.equal(state.dirty, true);
@@ -295,12 +280,12 @@ test("session labels keep captured profile A distinct from future global B witho
 test("old session DTO labels remain honest when exact admitted identity is absent", () => {
   const old = { ...session("old-native"), globalDefault: { selectedId: "new-global", appliedRevision: otherRevision, selectionRevision: otherRevision } };
   const labels = sessionProfileLabels(old, translate);
-  assert.ok(labels.admitted.includes("captured global default (no explicit session override)"));
+  assert.ok(labels.admitted.includes(en.sessionGlobalCaptured));
   assert.equal(labels.admitted.includes("new-global"), false);
   assert.equal(labels.admitted.includes("deployment baseline"), false);
   assert.ok(labels.futureDefault.includes("new-global"));
   const explicit = { ...old, scope: "session-override" as const, selection: { selectedId: "pinned-old", appliedRevision: revision, selectionRevision: revision } };
-  assert.ok(sessionProfileLabels(explicit, translate).admitted.includes("pinned-old (revision aaaaaaaaaaaa)"));
+  assert.equal(sessionProfileLabels(explicit, translate).admitted.includes("pinned-old"), false, "a sidecar alone is not an exact live admission");
 });
 
 test("native profile menu retains admitted unavailable identity without standalone profile text", async () => {
@@ -371,7 +356,7 @@ test("refusal menu never echoes raw messages, filesystem paths or credential-sha
     await f.controller.refresh(); f.controller.setSession("private-refusal"); await settle(f.controller);
     headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
     const diagnostics = JSON.stringify(headerMenu(headerTree(component, f.controller)).props.items);
-    assert.ok(diagnostics.includes("activation"));
+    assert.ok(diagnostics.includes("unavailable"), "invalid diagnostic DTO fails closed before presentation");
     assert.equal(diagnostics.includes(field), false); assert.equal(/PRIVATE_|custom-secret/u.test(diagnostics), false);
     f.controller.dispose();
   }

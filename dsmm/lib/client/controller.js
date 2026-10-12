@@ -1,4 +1,5 @@
 import { isProfileId } from "../profile-remote.js";
+import { safeIssue } from "./diagnostics.js";
 import { editStructuredPath, moveFallback } from "./structured.js";
 function modelSelectionWatermark(window) {
     let watermark = -1;
@@ -25,7 +26,7 @@ export function canReconcileSelection(snapshot) {
 export class ProfilesController {
     remote;
     current = { snapshot: null, editor: null, dirty: false, busy: null, issue: null, notice: null, pendingEditor: null,
-        catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0 };
+        catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0, validationEpoch: 0 };
     accepted = null;
     listeners = new Set();
     generation = 0;
@@ -58,6 +59,7 @@ export class ProfilesController {
         },
     };
     actions = {
+        readProfileView: () => this.store.getSnapshot(),
         refresh: () => this.refresh(), open: (id) => this.open(id), create: () => this.open(NEW_EDITOR), reload: () => this.reload(),
         editId: (id) => this.editId(id), editContent: (content) => this.editContent(content),
         save: () => this.save(), apply: () => this.apply(), reset: () => this.reset(),
@@ -349,7 +351,7 @@ export class ProfilesController {
         if (result.ok)
             return result.value;
         if (result.error.code === "dsmm-profiles/refused") {
-            throw { kind: "domain", ...result.error.details };
+            throw safeIssue(result.error.details);
         }
         if (["gateway/input-invalid", "gateway/arguments-invalid"].includes(String(result.error.code))) {
             throw { kind: "domain", code: "validation", field, message: "The native Host rejected a request field. Check the profile ID and document size before retrying." };
@@ -371,8 +373,10 @@ export class ProfilesController {
             await operation(live);
         }
         catch (error) {
-            if (live())
-                this.publish({ issue: this.issue(error) });
+            if (live()) {
+                const issue = this.issue(error);
+                this.publish({ issue, ...(busy === "save" && issue.kind === "domain" && issue.code === "validation" ? { validationEpoch: this.current.validationEpoch + 1 } : {}) });
+            }
         }
         finally {
             if (live())
@@ -488,7 +492,7 @@ export class ProfilesController {
         if (editor === null || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0)
             return;
         if (!isProfileId(editor.id)) {
-            this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null });
+            this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null, validationEpoch: this.current.validationEpoch + 1 });
             return;
         }
         await this.perform("save", async (live) => {
@@ -499,7 +503,7 @@ export class ProfilesController {
             // The accepted response proves save; applying remains a separate commit.
             const old = this.current.snapshot;
             const profiles = old.profiles.filter((item) => item.id !== document.id);
-            profiles.push({ id: document.id, revision: document.revision, ...(document.label === undefined ? {} : { label: document.label }) });
+            profiles.push({ id: document.id, revision: document.revision, ...(document.label === undefined ? {} : { label: document.label }), ...(document.warnings === undefined ? {} : { warnings: document.warnings }) });
             profiles.sort((a, b) => a.id.localeCompare(b.id));
             this.publish({ snapshot: { ...old, profiles }, notice: { key: "saved", id: document.id } });
         });
@@ -526,7 +530,7 @@ export class ProfilesController {
     }
     acceptSelection(snapshot, notice) {
         this.publish({ snapshot, notice: snapshot.selectionError === undefined ? notice : null,
-            issue: snapshot.selectionError === undefined ? null : { kind: "domain", ...snapshot.selectionError, source: "selection" } });
+            issue: snapshot.selectionError === undefined ? null : { ...safeIssue(snapshot.selectionError), source: "selection" } });
     }
 }
 //# sourceMappingURL=controller.js.map

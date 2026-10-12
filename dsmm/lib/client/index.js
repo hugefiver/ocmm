@@ -7,18 +7,63 @@ import { SessionProfiles } from "./SessionProfiles.js";
 import { DeploymentController } from "./deployment-controller.js";
 import { DeploymentPage } from "./DeploymentPage.js";
 import { DEPLOYMENT_NS, deploymentEn, deploymentZh } from "./deployment-locales.js";
+import { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
+import { ChildrenController } from "./children-controller.js";
+import { ChildrenPanel } from "./ChildrenPanel.js";
+import { CHILDREN_NS, childrenLocaleEn, childrenLocaleZh } from "./children-locales.js";
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
 export { ProfilesSection } from "./ProfilesSection.js";
 export { NS, en, zh } from "./locales.js";
 export { TYPERT_REMOTE } from "../profile-remote.js";
 export { SessionProfiles } from "./SessionProfiles.js";
 export { structuredDocument, editStructuredPath, moveFallback } from "./structured.js";
+export { ChildrenController } from "./children-controller.js";
+export { ChildrenPanel } from "./ChildrenPanel.js";
+export { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
 /** No self-dependency on a namespace that this contribution has not mounted. */
 export const inject = ["slots", "locale", "remote"];
 export async function apply(ctx) {
     await ctx.remote.$mount(TYPERT_REMOTE);
+    await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
     let deployment = null;
     let profiles = null;
+    let children = null;
+    const observeChildAdmission = () => {
+        const session = profiles?.store.getSnapshot().session;
+        if (session !== null && session !== undefined)
+            children?.observeAdmission(session.sessionId, session.admissionEpoch);
+    };
+    await ctx.inject(["remote.dsmmChildren"], childCtx => {
+        const controller = new ChildrenController(childCtx.remote.dsmmChildren);
+        children = controller;
+        childCtx.effect(() => () => { children = null; controller.dispose(); }, "dsmm: child controls");
+        childCtx.effect(() => childCtx.locale.register(CHILDREN_NS, { en: childrenLocaleEn, zh: childrenLocaleZh }), "dsmm: child locale");
+        childCtx.effect(() => {
+            const style = document.createElement("style");
+            style.dataset.dsmmChildren = "";
+            style.textContent = PROFILE_STYLES;
+            document.head.append(style);
+            return () => style.remove();
+        }, "dsmm: child styles");
+        const t = childCtx.locale.bind(CHILDREN_NS);
+        childCtx.slots.inject("conversation.view", () => childCtx.slots.register({ name: "conversation.view", id: "dsmm-children", order: 30,
+            label: () => t("title"), locale: CHILDREN_NS, inject: () => ({ hooks: { children: controller.store }, ...controller.actions }) }, ChildrenPanel));
+        void childCtx.inject(["connection"], connectionCtx => {
+            const handle = connectionCtx.connection;
+            const update = () => { const generation = handle.generation.getSnapshot(); controller.bindConnection(generation === undefined ? null : handle, generation); };
+            update();
+            connectionCtx.effect(() => handle.generation.subscribe(update));
+            connectionCtx.effect(() => () => controller.bindConnection(null), "dsmm: child connection withdrawal");
+        });
+        void childCtx.inject(["uiSession", "sessions"], sessionCtx => {
+            const source = sessionCtx.uiSession.adapter.current, nativeSessions = sessionCtx.sessions;
+            const update = () => { const id = source.getSnapshot().key; controller.bindScope(id ?? null, id === undefined ? null : nativeSessions.binding(id) ?? null); observeChildAdmission(); };
+            update();
+            sessionCtx.effect(() => source.subscribe(update));
+            sessionCtx.effect(() => () => controller.bindScope(null, null), "dsmm: child session withdrawal");
+        });
+        observeChildAdmission();
+    });
     // This core-owned graph must not depend on DW, named profiles or a session.
     await ctx.inject(["remote.dsmmConfig"], (coreCtx) => {
         const core = new DeploymentController(coreCtx.remote.dsmmConfig, "global");
@@ -64,7 +109,7 @@ export async function apply(ctx) {
     await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
         const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
         profiles = controller;
-        profileCtx.effect(() => controller.store.subscribe(() => deployment?.setSession(controller.store.getSnapshot().session)));
+        profileCtx.effect(() => controller.store.subscribe(() => { deployment?.setSession(controller.store.getSnapshot().session); observeChildAdmission(); }));
         profileCtx.effect(() => () => { profiles = null; deployment?.setSession(null); });
         profileCtx.effect(() => () => controller.dispose(), "dsmm: profile editor");
         profileCtx.effect(() => profileCtx.locale.register(NS, { en, zh }), "dsmm: profile locale");
@@ -85,7 +130,7 @@ export async function apply(ctx) {
         // fallback never replaces ordinary native/plugin leading navigation.
         profileCtx.slots.inject("conversation.header.leading", () => profileCtx.slots.register({
             name: "conversation.header.leading", priority: Number.MAX_SAFE_INTEGER, locale: NS,
-            inject: () => ({ hooks: { profiles: controller.store }, readProfileView: controller.store.getSnapshot, ...controller.actions }),
+            inject: () => ({ hooks: { profiles: controller.store }, ...controller.actions }),
         }, SessionProfiles));
         // Optional native services have their own lifetime. Do not await them or
         // make sessionless Settings depend on a Conversation/session provider.

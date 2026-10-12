@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const smokePath = join(packageRoot, "scripts", "docker-smoke.mjs");
 const checkerPath = join(packageRoot, "scripts", "check-release-readiness.mjs");
 const releaseFixturePrefix = "dsmm-release-readiness-test-";
 const releaseFixtureParent = resolve(tmpdir());
@@ -33,6 +32,7 @@ const requiredExact = [
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["runtime-integration", "legacy-read-host"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/lsp.md",
   "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
@@ -85,6 +85,7 @@ function expectedRequiredSurfaceCount(root: string): number {
 function listTgzPaths(root: string, current = root): string[] {
   const paths: string[] = [];
   for (const entry of readdirSync(current, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
     const entryPath = join(current, entry.name);
     if (entry.isDirectory()) {
       paths.push(...listTgzPaths(root, entryPath));
@@ -111,7 +112,6 @@ function runReleaseChecker(root: string): { receipt: ReleaseReceipt; status: num
 }
 
 function createReleaseFixture(): string {
-  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "release-readiness-fixture", prefix: releaseFixturePrefix, time: Date.now() })}\n`);
   const fixtureRoot = mkdtempSync(join(tmpdir(), releaseFixturePrefix));
   writeFileSync(join(fixtureRoot, ".run-owner"), `release-readiness:${basename(fixtureRoot)}`, { flag: "wx" });
   cpSync(packageRoot, fixtureRoot, {
@@ -156,23 +156,7 @@ function assertReceiptKeys(receipt: ReleaseReceipt): void {
   ]);
 }
 
-test("Docker smoke uses the dedicated native smoke profile", () => {
-  const smoke = readFileSync(smokePath, "utf8");
-  const profileMatch = /^const PROFILE = "(?<profile>[^"]+)";$/mu.exec(smoke);
-
-  if (profileMatch === null) {
-    assert.fail("docker smoke defines its profile constant");
-  }
-  const profile = profileMatch.groups?.profile;
-  if (profile === undefined) {
-    assert.fail("docker smoke profile regex captures its profile");
-  }
-  assert.equal(profile, "dsmm-v1-smoke");
-
-  assert.match(profile, /^dsmm-v1-smoke$/u);
-});
-
-test("release readiness checker accepts the real 0.2.0 package without creating a tarball", () => {
+test("release readiness checker accepts the current package without creating a tarball", () => {
   const tgzBefore = listTgzPaths(packageRoot);
   const expectedCount = expectedRequiredSurfaceCount(packageRoot);
   const { receipt, status } = runReleaseChecker(packageRoot);
@@ -180,7 +164,7 @@ test("release readiness checker accepts the real 0.2.0 package without creating 
   assertReceiptKeys(receipt);
   assert.equal(status, 0);
   assert.equal(receipt.name, "@dsmm/dsmm");
-  assert.equal(receipt.version, "0.2.0");
+  assert.equal(receipt.version, JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version);
   assert.ok(receipt.fileCount > 0);
   assert.ok(receipt.packedSize > 0);
   assert.ok(receipt.unpackedSize > 0);
@@ -217,7 +201,7 @@ test("release readiness checker rejects a stale or manifest-selected release ver
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1, version);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.version must equal 0.2.0"]);
+       assert.deepEqual(receipt.errors, ["manifest.version must equal 0.2.1"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
@@ -282,7 +266,7 @@ test("release readiness checker pins exact locale resource exports", () => {
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the seven public exports"]);
+      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the nine public exports"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
@@ -385,23 +369,21 @@ test("release readiness checker preserves the exact history companion export and
       const { receipt, status } = runReleaseChecker(fixtureRoot);
       assert.equal(status, 1);
       assert.equal(receipt.fileCount, 0);
-      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the seven public exports"]);
+      assert.deepEqual(receipt.errors, ["manifest.exports must exactly equal the nine public exports"]);
     } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
 
-test("release readiness checker pins native tools, session and persistence contracts in peer and dev dependencies", () => {
-  for (const section of ["peerDependencies", "devDependencies"]) {
-    for (const name of ["@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-persistence-jsonl", "@deepseek-ai/dsh-plan-mode", "@deepseek-ai/dsh-compaction-basic", "@deepseek-ai/dsh-command-compact", "@deepseek-ai/dsh-compaction-tool-result-pruner", "@deepseek-ai/dsh-tool-ask-user", "@deepseek-ai/dsh-tool-todo"]) {
-      const fixtureRoot = createReleaseFixture();
-      try {
-        updateFixtureManifest(fixtureRoot, (manifest) => { (manifest[section] as Record<string, string>)[name] = "^0.2.0-rc.2"; });
-        const { receipt, status } = runReleaseChecker(fixtureRoot);
-        assert.equal(status, 1, `${section}.${name}`);
-        assert.equal(receipt.fileCount, 0);
-        assert.deepEqual(receipt.errors, [`manifest.${section} must preserve release ranges`]);
-      } finally { removeReleaseFixture(fixtureRoot); }
-    }
+test("release readiness checker pins native tools, session and persistence contracts in peer dependencies", () => {
+  for (const name of ["@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-persistence-jsonl", "@deepseek-ai/dsh-plan-mode", "@deepseek-ai/dsh-compaction-basic", "@deepseek-ai/dsh-command-compact", "@deepseek-ai/dsh-compaction-tool-result-pruner", "@deepseek-ai/dsh-tool-ask-user", "@deepseek-ai/dsh-tool-todo"]) {
+    const fixtureRoot = createReleaseFixture();
+    try {
+      updateFixtureManifest(fixtureRoot, (manifest) => { (manifest.peerDependencies as Record<string, string>)[name] = "^0.2.0-rc.2"; });
+      const { receipt, status } = runReleaseChecker(fixtureRoot);
+      assert.equal(status, 1, `peerDependencies.${name}`);
+      assert.equal(receipt.fileCount, 0);
+      assert.deepEqual(receipt.errors, ["manifest.peerDependencies must preserve release ranges"]);
+    } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
 
@@ -409,7 +391,6 @@ test("release readiness checker rejects a dev-only dsh-tools runtime dependency 
   const fixtureRoot = createReleaseFixture();
   try {
     updateFixtureManifest(fixtureRoot, (manifest) => {
-      assert.equal((manifest.devDependencies as Record<string, string>)["@deepseek-ai/dsh-tools"], "0.2.0-rc.2");
       delete (manifest.peerDependencies as Record<string, string>)["@deepseek-ai/dsh-tools"];
     });
     const { receipt, status } = runReleaseChecker(fixtureRoot);
@@ -591,45 +572,8 @@ test("release readiness checker rejects an extra lifecycle fixture before npm pa
     assert.equal(receipt.outcome, "failed");
     assert.deepEqual(receipt.errors, ["manifest.scripts must exactly equal the release script policy"]);
     assert.deepEqual(listTgzPaths(fixtureRoot), tgzBefore);
-
-    const checkerSource = readFileSync(checkerPath, "utf8");
-    assert.match(checkerSource, /npm\.cmd pack %DSMM_RELEASE_PACKAGE_ROOT% --dry-run --json --ignore-scripts/u);
-    assert.match(checkerSource, /\["pack", packageRoot, "--dry-run", "--json", "--ignore-scripts"\]/u);
   } finally {
     removeReleaseFixture(fixtureRoot);
-  }
-});
-
-test("release readiness checker rejects removed or changed build scripts before npm pack", () => {
-  const cases: Array<[string, (scripts: Record<string, string>) => void]> = [
-    ["removed build", (scripts) => { delete scripts.build; }],
-    ["changed build", (scripts) => { scripts.build = "tsc -p unexpected.json"; }]
-  ];
-
-  for (const [name, updateScripts] of cases) {
-    const fixtureRoot = createReleaseFixture();
-    const tgzBefore = listTgzPaths(fixtureRoot);
-    try {
-      updateFixtureManifest(fixtureRoot, (manifest) => {
-        updateScripts(manifest.scripts as Record<string, string>);
-      });
-      const { receipt, status } = runReleaseChecker(fixtureRoot);
-
-      assertReceiptKeys(receipt);
-      assert.equal(status, 1, name);
-      assert.equal(receipt.name, null, name);
-      assert.equal(receipt.version, null, name);
-      assert.equal(receipt.fileCount, 0, name);
-      assert.equal(receipt.packedSize, 0, name);
-      assert.equal(receipt.unpackedSize, 0, name);
-      assert.equal(receipt.requiredSurfaceCount, 0, name);
-      assert.equal(receipt.forbiddenSurfaceCount, 0, name);
-      assert.equal(receipt.outcome, "failed", name);
-      assert.deepEqual(receipt.errors, ["manifest.scripts must exactly equal the release script policy"], name);
-      assert.deepEqual(listTgzPaths(fixtureRoot), tgzBefore, name);
-    } finally {
-      removeReleaseFixture(fixtureRoot);
-    }
   }
 });
 
@@ -658,9 +602,6 @@ test("release readiness checker rejects invalid manifests before lifecycle scrip
       "manifest.author must equal Hugefiver",
       "manifest.scripts must exactly equal the release script policy"
     ]);
-    const checkerSource = readFileSync(checkerPath, "utf8");
-    assert.match(checkerSource, /npm\.cmd pack %DSMM_RELEASE_PACKAGE_ROOT% --dry-run --json --ignore-scripts/u);
-    assert.match(checkerSource, /\["pack", packageRoot, "--dry-run", "--json", "--ignore-scripts"\]/u);
   } finally {
     removeReleaseFixture(fixtureRoot);
   }

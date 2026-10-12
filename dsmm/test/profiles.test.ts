@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DSMM_ROLE_IDS } from "../lib/roles.js";
-import { DsmmProfileError, MAX_PROFILE_BYTES, mergeProfileConfig, parseProfileDocument, profileErrorInfo, resolveProfileSettings, validateProfileId } from "../lib/profiles.js";
+import { DsmmProfileError, MAX_PROFILE_BYTES, mergeProfileConfig, parseProfileDocument, profileErrorInfo, resolveProfileSettings, validateProfileDocument, validateProfileId } from "../lib/profiles.js";
 import type { DsmmPluginConfig } from "../lib/settings.js";
 import { resolveRoleRuntimePolicy } from "../lib/settings.js";
 import { DSMM_RATE_LIMIT_BOUNDS } from "../lib/routing-policy.js";
@@ -31,11 +30,11 @@ test("JSONC input must round-trip through UTF-8, while paired Unicode and JSON e
   assert.equal(parseProfileDocument(unicode).label, "中文 😀");
   const escaped = content({}, { label: "\uD800" });
   assert.ok(escaped.includes("\\ud800"), "a JSON escape is UTF-8 representable without changing the file bytes");
-  assert.equal(parseProfileDocument(escaped).label, "\uD800");
+  validation(() => parseProfileDocument(escaped));
 });
 
 test("profile schema rejects unknown, restart-scoped, executable and credential-bearing families", () => {
-  for (const key of ["roles", "skills", "modeName", "promptOrder", "section", "presets", "lsp", "sessionPersistence", "provider", "apiKey", "credentials", "env", "headers", "import", "profiles", "activeProfile"]) {
+  for (const key of ["skills", "modeName", "promptOrder", "section", "presets", "lsp", "sessionPersistence", "provider", "apiKey", "credentials", "env", "headers", "import", "profiles", "activeProfile"]) {
     validation(() => parseProfileDocument(content({ [key]: {} })));
   }
   validation(() => parseProfileDocument(content({}, { other: "secret-value-not-echoed" })));
@@ -49,7 +48,7 @@ test("profile parser rejects duplicate/unsafe keys, wrong versions, IDs, labels 
   validation(() => parseProfileDocument('{"version":1,"id":"focus","settings":{"defaultActive":true,"defaultActive":false}}'));
   validation(() => parseProfileDocument('{"version":1,"id":"focus","settings":{"__proto__":{}}}'));
   validation(() => parseProfileDocument(content({}, { version: 2 })));
-  validation(() => parseProfileDocument(content({}, { label: "" })));
+  assert.equal(validateProfileDocument(content({}, { label: "" })).diagnostics[0]?.code, "blank-label");
   validation(() => parseProfileDocument(content({}, { settings: null })));
   validation(() => parseProfileDocument(content(), "another"));
   validation(() => parseProfileDocument("{broken"));
@@ -101,8 +100,8 @@ test("profiles validate every supported nested enum, type, finite bound, role an
 test("all allowed runtime families round-trip through the existing resolver", () => {
   const document = parseProfileDocument(content({
     defaultActive: true,
-    deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "low", deepseekV4ProMaxReasoningPresets: [],
-    deepseekFlashCalibration: "off", deepseekFlashDefaultReasoningEffort: "off", deepseekFlashMaxReasoningPresets: [...DSMM_ROLE_IDS],
+    deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "low",
+    deepseekFlashCalibration: "off", deepseekFlashDefaultReasoningEffort: "off",
     roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review", reasoningEffort: "max" }, fallbackRoutes: [] } },
     workflow: { policy: "risk-based", strictGates: false, reviewCap: 0, finalReviewPolicy: "off" },
     guards: { scope: "always", shellCommandSafety: false, gitWriteGuard: "deny", toolOutputTruncation: { enabled: false, maxInlineBytes: 512 }, questionLabelHelper: { enabled: false, maxLabelChars: 20 }, planFormatValidation: false, todoDisciplineHelper: false },
@@ -113,7 +112,7 @@ test("all allowed runtime families round-trip through the existing resolver", ()
   assert.equal(settings.guards.toolOutputTruncation.enabled, false);
   assert.equal(settings.runtimeRecovery.maxFallbackAttempts, 0);
   assert.equal(settings.runtimeRecovery.fallbackRoutes[0]?.reasoningEffort, "xhigh");
-  assert.deepEqual(settings.deepseekV4ProMaxReasoningPresets, []);
+  assert.equal(settings.deepseekV4ProDefaultReasoningEffort, "low");
 });
 
 test("overlay merge preserves false, explicit empty arrays, nested baseline and absent fallback inheritance", () => {

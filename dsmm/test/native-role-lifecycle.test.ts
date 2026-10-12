@@ -88,7 +88,7 @@ test("native blank preset rebind refreshes actual tool realm while planner remai
     assert.equal(denied.isError, true);
     const utility = await tools.execute({ agent: root, name: "dsmm_code_search", callId: ToolCallId("rebound-planner-utility"), arguments: { description: "Read-only utility proof", prompt: "Return a useful local result" }, signal: new AbortController().signal });
     assert.equal(utility.isError, false); assert.match(JSON.stringify(utility), /fixture complete/);
-    const illegal = await tools.execute({ agent: root, name: "dsmm_quick", callId: ToolCallId("rebound-planner-quick"), arguments: { description: "Forbidden quick", prompt: "No write permission" }, signal: new AbortController().signal });
+    const illegal = await tools.execute({ agent: root, name: "dsmm_category", callId: ToolCallId("rebound-planner-quick"), arguments: { category: "dsmm-quick", description: "Forbidden quick", prompt: "No write permission" }, signal: new AbortController().signal });
     assert.equal(illegal.isError, true);
   } finally { await f.dispose(); }
 });
@@ -98,7 +98,7 @@ test("native one-shot background jobs deliver useful output, enforce owner cance
   try {
     const parent = await f.create(), foreign = await f.create();
     const tools = parent.ctx.get("tools")!, jobs = f.ctx.get("jobs")!;
-    const start = () => tools.execute({ agent: parent, name: "dsmm_coding", callId: ToolCallId("native-background"), arguments: { description: "Owned native background", prompt: "Return useful background result", run_in_background: true }, signal: new AbortController().signal });
+    const start = () => tools.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("native-background"), arguments: { category: "dsmm-coding", description: "Owned native background", prompt: "Return useful background result", run_in_background: true }, signal: new AbortController().signal });
     const first = await start(); assert.equal(first.isError, false);
     const id = (first.value as { jobId: string }).jobId as Parameters<typeof jobs.get>[0];
     assert.equal((await jobs.wait(id, 5000, parent.id)).status, "completed");
@@ -131,19 +131,19 @@ test("native default depth and unknown filters refuse before publication; foregr
     try {
       await deep.result;
       const child = deep.localAgent!;
-      const overDepth = await child.ctx.get("tools")!.execute({ agent: child, name: "dsmm_coding", callId: ToolCallId("native-depth-default"), arguments: { description: "Legitimate but too deep", prompt: "Native default 1 applies" }, signal: new AbortController().signal });
+      const overDepth = await child.ctx.get("tools")!.execute({ agent: child, name: "dsmm_category", callId: ToolCallId("native-depth-default"), arguments: { category: "dsmm-coding", description: "Legitimate but too deep", prompt: "Native default 1 applies" }, signal: new AbortController().signal });
       assert.equal(overDepth.isError, true); assert.match(JSON.stringify(overDepth), /depth/i);
       assert.equal(f.agents.list().length, 2);
     } finally { await deep.dispose(); }
     f.adapter.failModels.add("typed-error");
-    const fail = await parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_coding", callId: ToolCallId("typed-child-failure"), arguments: { description: "Typed failure proof", prompt: "Fail inside mock model" }, signal: new AbortController().signal });
+    const fail = await parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-failure"), arguments: { category: "dsmm-coding", description: "Typed failure proof", prompt: "Fail inside mock model" }, signal: new AbortController().signal });
     assert.equal(fail.isError, true); assert.match(JSON.stringify(fail), /ERROR|subagent error/);
     f.adapter.failModels.clear();
     let entered!: () => void;
     const started = new Promise<void>((done) => { entered = done; });
     f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
     const abort = new AbortController();
-    const pending = parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_coding", callId: ToolCallId("typed-child-abort"), arguments: { description: "Owned abort proof", prompt: "Wait for abort" }, signal: abort.signal });
+    const pending = parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-abort"), arguments: { category: "dsmm-coding", description: "Owned abort proof", prompt: "Wait for abort" }, signal: abort.signal });
     await started; abort.abort();
     const cancelled = await pending; assert.equal(cancelled.isError, true); assert.match(JSON.stringify(cancelled), /ABORTED|abort|cancel/i);
     assert.deepEqual(f.agents.list(), [parent]);
@@ -158,13 +158,13 @@ test("native continuable capacity is per-parent and builtin controls continue us
     const started = new Promise<void>((done) => { entered = done; });
     f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
     const invoke = (agent: typeof parent, name: string, args: unknown) => agent.ctx.get("tools")!.execute({ agent, name, arguments: args, callId: ToolCallId(name), signal: new AbortController().signal });
-    const first = await invoke(parent, "dsmm_coding", { description: "Durable child proof", prompt: "Wait for continuation" });
+    const first = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Durable child proof", prompt: "Wait for continuation" });
     assert.equal(first.isError, false);
     const id = (first.value as { subagentId: string }).subagentId as typeof parent.id;
     const child = f.agents.get(id)!; await started;
-    const overflow = await invoke(parent, "dsmm_coding", { description: "Capacity refusal", prompt: "Must not publish" });
+    const overflow = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Capacity refusal", prompt: "Must not publish" });
     assert.equal(overflow.isError, true); assert.match(JSON.stringify(overflow), /capacity|maxActive|limit|active.*subagent/i);
-    const independent = await invoke(other, "dsmm_coding", { description: "Independent parent pool", prompt: "No cross-parent starvation" });
+    const independent = await invoke(other, "dsmm_category", { category: "dsmm-coding", description: "Independent parent pool", prompt: "No cross-parent starvation" });
     assert.equal(independent.isError, false);
     const sent = await invoke(parent, "send_message", { agent_id: id, message: "SAME_CHILD_CONTINUATION_INPUT" }); assert.equal(sent.isError, false);
     const foreignInterrupt = await invoke(other, "interrupt_agent", { agent_id: id }); assert.equal(foreignInterrupt.isError, true);

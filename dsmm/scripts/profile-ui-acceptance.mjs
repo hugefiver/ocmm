@@ -11,7 +11,7 @@ import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 import { sessionProfileChecksForVersion, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof, validateStartupProfileProof } from "./profile-ui-harness-native.mjs";
 import { runFrozenNativePickerAcceptance } from "./native-picker-harness.mjs";
 import { requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { isSource020, nativePickerCheckForVersion, startupProfileContract } from "./release-contract.mjs";
+import { isSource020, isSource021, nativePickerCheckForVersion, startupProfileContract } from "./release-contract.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -88,6 +88,11 @@ export async function removeOwnedUiRoot(runRoot, token) {
 
 /** Frozen installed-artifact, native-client component acceptance; not login E2E. */
 export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot, profilePackage, env, workspace, ownedRoot, nativeStorage }) {
+  const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  if (isSource021(manifest.version)) {
+    const { runStable021Acceptance } = await import("./profile-ui-harness-stable021.mjs");
+    return runStable021Acceptance({ artifact, sha256, dshManifest, packageRoot, profilePackage, env, workspace, ownedRoot, nativeStorage });
+  }
   assert.ok(isAbsolute(packageRoot) && isAbsolute(dshManifest) && isAbsolute(profilePackage), "acceptance requires exact installed artifact and native manifests");
   packageRoot = await realpath(packageRoot);
   assert.equal(createHash("sha256").update(await readFile(artifact)).digest("hex"), sha256, "frozen artifact hash changed before UI acceptance");

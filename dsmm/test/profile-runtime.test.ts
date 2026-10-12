@@ -250,10 +250,10 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
     await runFixtureTurn(restored);
     assert.equal(headerRoutes(restored).at(-1)?.model, "native-default", "cold profile admission still leaves the ordinary root model native-owned");
     assert.equal(cold.admission(restored as unknown as DshAgent).appliedRevision, b.revision);
-    const restoredChild = await fixture.create({ origin: "subagent", agentPreset: "dsmm-orchestrator" }, undefined, { seed: persistedChild });
-    await runFixtureTurn(restoredChild);
-    assert.equal(headerRoutes(restoredChild).at(-1)?.model, "review-b", "the cold unowned role child has no live alias preflight and resolves the currently selected B primary");
-    assert.equal(cold.admission(restoredChild as unknown as DshAgent).appliedRevision, b.revision);
+    const requests = fixture.adapter.calls.length;
+    await assert.rejects(fixture.create({ origin: "subagent", agentPreset: "dsmm-orchestrator" }, undefined, { seed: persistedChild }),
+      "cold child admission requires its exact live direct parent and original evidence");
+    assert.equal(fixture.adapter.calls.length, requests, "an unowned child cannot consume the current root's policy or issue a request");
   } finally { await fixture.dispose(); rmSync(profileDir, { recursive: true, force: true }); }
 });
 
@@ -316,5 +316,27 @@ test("native role alias preflights exact parent-profile route before child creat
       assert.equal(accepted.descriptor.provider, "dsmm-role-reviewer");
       await run.dispose();
     } finally { remove(); }
+  } finally { await fixture.dispose(); }
+});
+
+test("native named-profile levels validate exact effort without changing the root model or committing an invalid selection", async () => {
+  const fixture = await nativeRoutingFixture();
+  try {
+    const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
+    const root = await fixture.create();
+    const options = structuredClone(root.options);
+    const good = await runtime.save({ id: "level-good", expectedRevision: null, content: profile("level-good", { roleRouting: {
+      "dsmm-reviewer": { levels: { low: { reasoningEffort: "low" }, high: { provider: "fixture", model: "review-high", reasoningEffort: "high" } } }
+    } }) });
+    const selected = await runtime.select({ id: good.id, expectedRevision: good.revision, expectedSelectionRevision: "absent" });
+    assert.equal(selected.selectedId, good.id);
+    assert.deepEqual(root.options, options); assert.equal(fixture.adapter.calls.length, 0, "catalog validation sends no sacrificial request");
+    fixture.adapter.unsupportedMaxModels.add("review-no-max");
+    const bad = await runtime.save({ id: "level-bad", expectedRevision: null, content: profile("level-bad", { roleRouting: {
+      "dsmm-reviewer": { levels: { max: { provider: "fixture", model: "review-no-max", reasoningEffort: "max" } } }
+    } }) });
+    await assert.rejects(runtime.select({ id: bad.id, expectedRevision: bad.revision, expectedSelectionRevision: selected.selectionRevision }),
+      { code: "activation", field: "settings.roleRouting.dsmm-reviewer.levels.max" });
+    assert.equal((await runtime.describe()).selectedId, good.id); assert.deepEqual(root.options, options);
   } finally { await fixture.dispose(); }
 });

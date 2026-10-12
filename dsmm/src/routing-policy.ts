@@ -89,6 +89,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const resolvedRoleRuntimePolicies = new WeakMap<DsmmSettings, Map<DsmmRoleId | undefined, DsmmResolvedRoleRuntimePolicy>>();
 
+/** Install a preflighted invocation only on this child's immutable settings identity. */
+export function captureRoleRuntimePolicy(settings: DsmmSettings, role: DsmmRoleId, policy: DsmmResolvedRoleRuntimePolicy): void {
+  let policies = resolvedRoleRuntimePolicies.get(settings);
+  if (policies === undefined) { policies = new Map(); resolvedRoleRuntimePolicies.set(settings, policies); }
+  policies.set(role, policy);
+}
+
 /** Resolve once per immutable settings admission; omission and explicit [] remain distinct. */
 export function resolveRoleRuntimePolicy(settings: DsmmSettings, role?: DsmmRoleId): DsmmResolvedRoleRuntimePolicy {
   let policies = resolvedRoleRuntimePolicies.get(settings);

@@ -12,12 +12,14 @@ const maintenance = await import(new URL("../scripts/sync-source-assets.mjs", im
 const adaptation = await import(new URL("../scripts/source-adaptations.mjs", import.meta.url).href);
 const checks = await import(new URL("../scripts/check-source-assets.mjs", import.meta.url).href);
 const frontend = await import(new URL("../scripts/materialize-frontend.mjs", import.meta.url).href);
+const inputs = await import(new URL("../scripts/source-inputs.mjs", import.meta.url).href);
 
 test("every source file's adapted result equals its artifact and native loaded body/resource", async () => {
   const expected: Map<string, Buffer> = maintenance.sourceOutputs();
   for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(root, artifact)), bytes, artifact);
   const manifest = JSON.parse(readFileSync(join(root, "prompts/source/manifest.json"), "utf8"));
-  assert.equal(manifest.sourceBaseline, "89ca14b");
+  assert.deepEqual(manifest.sourceProvenance, inputs.loadSourceInputs().provenance);
+  assert.equal(manifest.sourceRef, manifest.sourceProvenance.rootBaselineCommit);
   assert.deepEqual(manifest.roles.map((row: { id: string }) => row.id), DSMM_ROLE_IDS);
   assert.equal(new Set(manifest.roles.map((row: { sourceId: string }) => row.sourceId)).size, DSMM_ROLES.length);
   assert.deepEqual(Object.keys(manifest.skills), DSMM_SKILL_NAMES);

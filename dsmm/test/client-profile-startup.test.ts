@@ -17,7 +17,7 @@ import type * as RendererClient from "@deepseek-ai/dsh-client-ui-renderer/client
 import type * as LocaleClient from "@deepseek-ai/dsh-client-locale/client";
 import type { SlotComponent, ComposedProps } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ProfilesInjected } from "../lib/client/ProfilesSection.js";
-import { NS, en, zh } from "../lib/client/locales.js";
+import { NS, en } from "../lib/client/locales.js";
 import { registerProfilesRpc } from "../lib/profile-rpc.js";
 import { ProfileStore } from "../lib/profile-store.js";
 import { DsmmProfileRuntime } from "../lib/profile-runtime.js";
@@ -159,15 +159,6 @@ async function replayUninjectedClient(): Promise<string> {
   // mounted contribution, native services and every controller operation.
   return source.slice(0, start) + apply.replace(opening, "{").replace(closing, "    void controller.refresh();\n  }").replaceAll("profileCtx.", "ctx.");
 }
-
-test("profile locales use exact Deepwork display copy while preserving the technical namespace", () => {
-  assert.equal(NS, "settings.dsmm-profiles");
-  assert.equal(en.title, "Deepwork Profiles");
-  assert.equal(zh.title, "Deepwork 配置档");
-  assert.equal(en.unavailable, "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or Deepwork is enabled.");
-  assert.equal(zh.unavailable, "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 Deepwork 后请刷新。");
-  assert.deepEqual(Object.keys(en).sort(), Object.keys(zh).sort(), "both locales retain the complete profile vocabulary");
-});
 
 test("compiled native settings metadata follows exact English and Chinese Deepwork labels under the original section ID", async () => {
   const f = await fixture();

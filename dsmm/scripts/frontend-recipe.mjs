@@ -12,8 +12,7 @@ const styles = ["taste-skill", "gpt-tasteskill", "minimalist-skill", "brutalist-
 const data = ["charts", "colors", "icons", "landing", "products", "react-performance", "styles", "typography", "ui-reasoning", "ux-guidelines", "web-interface", "google-fonts", "app-interface"];
 const stacks = ["astro", "flutter", "html-tailwind", "jetpack-compose", "nextjs", "nuxt-ui", "nuxtjs", "react-native", "react", "shadcn", "svelte", "swiftui", "vue", "threejs", "angular", "laravel"];
 
-export function frontendRecipe(root = packageRoot) {
-  const index = readFileSync(join(root, "skills/frontend/references/design/_INDEX.md"), "utf8");
+export function frontendRecipe(root = packageRoot, index = readFileSync(join(root, "skills/frontend/references/design/_INDEX.md"), "utf8")) {
   const begin = index.indexOf("## Layer B — Design Systems"), end = index.indexOf("### Mood-based shortcuts", begin);
   if (begin < 0 || end < 0) throw new Error("frontend source index anchor drift: Layer B brand table");
   const brands = [...index.slice(begin, end).matchAll(/^\| `([\w.-]+)\.md` \|/gmu)].map((match) => match[1]);

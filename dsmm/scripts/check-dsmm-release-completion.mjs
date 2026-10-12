@@ -8,6 +8,7 @@ import {
   validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory, registryVerificationFailure,
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
+import { isReviewedSource } from "./release-contract.mjs";
 
 export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
 const REPOSITORY = "hugefiver/ocmm";
@@ -125,7 +126,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   let freshInstall;
   try { freshInstall = await installProbe(identity); }
   catch (error) {
-    if (!["0.1.8", "0.1.9", "0.2.0"].includes(identity.version)) throw error;
+    if (!["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
   }
   const receipt = {
@@ -138,7 +139,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   };
   try { return validateVerificationReceipt(receipt, identity); }
   catch (error) {
-    if (!["0.1.8", "0.1.9", "0.2.0"].includes(identity.version)) throw error;
+    if (!["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
   }
 }
@@ -404,7 +405,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     const context = JSON.parse(readFileSync(join(owned, "context.json"), "utf8"));
     const identity = validateArtifactDirectory(owned, context);
     const jobs = validateRunEvidence(run, workflow, jobsResponse.jobs, identity, expected);
-    if (identity.version === "0.2.0") for (const artifact of [acceptedArtifact, proofArtifact]) {
+    if (isReviewedSource(identity.version)) for (const artifact of [acceptedArtifact, proofArtifact]) {
       requireCondition(artifact.workflow_run.head_sha === identity.controlSha && artifact.workflow_run.head_branch === identity.tag, "run artifact source/control identity differs");
     }
     requireCondition(await peelRemoteTag(identity.tag, request) === identity.releaseSha, "immutable release tag changed");
@@ -548,7 +549,7 @@ export async function main(args = process.argv.slice(2)) {
     options = parseCompletionArguments(args);
     if (options.mode === "verify") {
       const identity = readArtifactIdentity(join(resolve(options["artifact-dir"]), "identity.json"));
-      if (identity.version === "0.2.0") validateArtifactDirectory(resolve(options["artifact-dir"]), JSON.parse(readFileSync(join(resolve(options["artifact-dir"]), "context.json"), "utf8")));
+      if (isReviewedSource(identity.version)) validateArtifactDirectory(resolve(options["artifact-dir"]), JSON.parse(readFileSync(join(resolve(options["artifact-dir"]), "context.json"), "utf8")));
       receipt = await verifyPublishedArtifact(identity);
     } else {
       const expected = { runId: options["run-id"], runAttempt: options["run-attempt"], controlSha: options["control-sha"] };

@@ -38,6 +38,11 @@ export const PROFILE_STYLES = `
 .dsmm-profiles .dsmm-issue{padding:12px;border-left:4px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .dsmm-profiles .dsmm-issue p+p{margin-top:8px}
 .dsmm-profiles .dsmm-status{min-height:22px}
+.dsmm-profiles .dsmm-zone{min-width:0;display:flex;flex-direction:column;gap:12px;padding-top:16px;border-top:1px solid var(--dsw-alias-border-l4)}
+.dsmm-profiles .dsmm-profile-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.dsmm-profiles .dsmm-profile-list li{min-width:0;display:flex;flex-direction:column;gap:4px}
+.dsmm-profiles :is(.dsmm-warning,.dsmm-diagnostic,.dsmm-availability){min-width:0;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.dsmm-profiles .dsmm-warning{border-left:4px solid var(--dsw-alias-state-warn-primary);padding:8px 12px;color:var(--dsw-alias-label-primary)}
 .dsmm-deployment{gap:8px}
 .dsmm-deployment .dsmm-deployment-card{min-width:0;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md)}
 .dsmm-deployment .dsmm-deployment-card>summary{padding:8px 12px;font-weight:500;line-height:22px;min-height:32px;box-sizing:border-box}
@@ -54,5 +59,10 @@ export const PROFILE_STYLES = `
 .dsmm-deployment pre{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--ds-font-family-code)}
 .dsmm-deployment .dsmm-deployment-state{display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;border-top:1px solid var(--dsw-alias-border-l4)}
 .dsmm-deployment .dsmm-deployment-state dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.dsmm-children .dsmm-child-composer{min-width:0;display:flex;flex-direction:column;gap:12px}
+.dsmm-children .dsmm-child-meta{margin:0;display:flex;flex-direction:column;gap:4px;min-width:0}
+.dsmm-children .dsmm-child-meta dt{font-weight:500;overflow-wrap:anywhere}
+.dsmm-children .dsmm-child-meta dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.dsmm-children textarea.dsmm-child-message{font-family:var(--dsw-font-family);white-space:pre-wrap;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){.dsmm-profiles *{transition:none!important;animation:none!important}}
 `;

@@ -10,13 +10,13 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 
 1. **Diverge first.** Produce 3 to 5 genuinely different directions before picking one. Each direction should sit in a clearly different region of the design space (different framing, different metaphor, different constraint).
 2. **Name the dimension.** For each direction, state the axis it explores ("conservative / aggressive", "literal / metaphorical", "compressed / expansive"). This forces real diversity instead of three rewrites of the same idea.
-3. **Stress-test the familiar one.** Before committing to a direction, write a one-paragraph failure case for the most obvious direction. Kill any direction that survives only because nobody challenged it.
+3. **Stress-test the familiar one.** Before committing to a direction, check its strongest plausible failure case privately. Surface any current risk, not the discarded sketches or decision counterexamples.
 
 ## EMBRACE AMBIGUITY
 
 - The user often does not know what they want until they see options. Do not ask "what tone do you want?"; show them three tones.
-- Ambiguity is signal, not noise. Write down the ambiguities you noticed and which direction each one points to.
-- Wrong-answer-first: when stuck, write the obviously-wrong version. The right version usually lives next door.
+- Ambiguity is signal, not noise. Surface unresolved preferences or constraints when they materially affect the requested deliverable.
+- Wrong-answer-first: when stuck, explore the obviously-wrong version privately. Do not retain it in the delivered artifact.
 
 ## NOVELTY + COHERENCE
 
@@ -27,8 +27,10 @@ Shell snippets and command examples in prompts or skills are illustrative, not e
 ## DELIVERABLE
 
 - 3 to 5 named directions with one-paragraph descriptions each.
-- Your recommendation, with the reasoning (what the recommendation buys, what it costs).
+- Your recommendation with its current properties, constraints, and material risks, not the selection process or assumption rationale/cost.
 - The artifact for the recommended direction.
+
+Alternatives are deliverables when the caller requests concept exploration; they are not a development history to append to the final product artifact. Product specs/plans describe final product requirements only, with separate plans for changed requirements. Other coordination uses conversation or task-owned temporary plans outside `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
 ## ANTI-PATTERNS (blocking)
 

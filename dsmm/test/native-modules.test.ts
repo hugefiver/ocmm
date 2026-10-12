@@ -12,7 +12,7 @@ import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import type { StreamChunk } from "@deepseek-ai/dsh-llm";
-import type { DshAgent } from "../lib/dsh-types.js";
+import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSnapshot } from "../lib/deployment-config.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DsmmModuleState } from "../lib/modules.js";
@@ -20,6 +20,8 @@ import type { DeploymentEditorSnapshot } from "../lib/profile-types.js";
 import { at } from "../lib/client/deployment-data.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+
+type DshAgent = Omit<PackageDshAgent, "ctx">;
 
 const require = createRequire(import.meta.url);
 const filesystem = createRequire(require.resolve("@deepseek-ai/dsh-skill-filesystem"));

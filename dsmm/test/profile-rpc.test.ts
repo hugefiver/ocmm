@@ -537,3 +537,27 @@ test("genuine native Remote refuses unpaired UTF16 without changing bytes or adm
     }
   } finally { await f.dispose(); }
 });
+
+test("genuine native codecs retain saved and immutable selection warnings and exact safe diagnostics", async () => {
+  const f = await fixture();
+  try {
+    const raw = '\uFEFF{ // retained\n"version":1,"id":"blank","label":"  ","settings":{"locale":"zh-Hant"},}\n';
+    const save = await f.remote.dsmmProfiles.save({ id: "blank", content: raw, expectedRevision: null });
+    assert.ok(save.ok); assert.equal(save.value.content, raw); assert.equal(save.value.warnings?.[0]?.code, "blank-label");
+    const read = await f.remote.dsmmProfiles.read("blank"); assert.ok(read.ok); assert.deepEqual(read.value.warnings, save.value.warnings);
+    const selected = await f.remote.dsmmProfiles.select({ id: "blank", expectedRevision: save.value.revision, expectedSelectionRevision: "absent" });
+    assert.ok(selected.ok); assert.equal(selected.value.selectedWarnings?.[0]?.code, "blank-label");
+    assert.equal(selected.value.profiles[0]?.error, undefined);
+    const refreshed = await f.remote.dsmmProfiles.describe(); assert.ok(refreshed.ok); assert.deepEqual(refreshed.value.selectedWarnings, selected.value.selectedWarnings);
+    for (const settings of [{ deepseekFlashMaxReasoningPresets: [] }, { guards: { "private/key=SECRET": "SECRET_VALUE" } }]) {
+      const content = JSON.stringify({ version: 1, id: "blank", settings });
+      const response = await f.remote.dsmmProfiles.save({ id: "blank", content, expectedRevision: save.value.revision });
+      assert.equal(response.ok, false);
+      if (response.ok || response.error.code !== "dsmm-profiles/refused") assert.fail("Expected structured refusal");
+      const info = response.error.details;
+      assert.ok(info.location); assert.ok(info.reason);
+      assert.equal(JSON.stringify(info).includes("SECRET"), false);
+      assert.equal((await f.runtime.read("blank")).revision, save.value.revision);
+    }
+  } finally { await f.dispose(); }
+});

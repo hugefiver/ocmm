@@ -1,4 +1,6 @@
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimitPolicy, normalizeRoutingStrategy } from "./routing-policy.js";
+import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
+import { diagnostic, isSafeDiagnosticField, PROFILE_DIAGNOSTIC_REASONS } from "./profile-diagnostics.js";
 const errorCodes = new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled"]);
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
@@ -63,6 +65,8 @@ function role(value) {
 function object(value, required, optional = []) {
     if (value === null || typeof value !== "object" || Array.isArray(value))
         fail("object");
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some(property => !Object.hasOwn(property, "value") || !property.enumerable))
+        fail("object");
     const result = value;
     if (Object.keys(result).some((key) => !required.includes(key) && !optional.includes(key))
         || required.some((key) => !Object.hasOwn(result, key)))
@@ -72,16 +76,78 @@ function object(value, required, optional = []) {
 function optional(value, key, parse) {
     return Object.hasOwn(value, key) ? { [key]: parse(value[key]) } : {};
 }
-function errorInfo(value) {
-    const item = object(value, ["code", "message"], ["field"]);
+export function parseProfileErrorInfo(value) {
+    const item = object(value, ["code", "message"], ["field", "reason", "location"]);
     const code = text(item.code, "code");
     if (!errorCodes.has(code))
         fail("code");
-    return { code: code, message: text(item.message, "message", 4096), ...optional(item, "field", (input) => text(input, "field", 256)) };
+    const reason = item.reason === undefined ? undefined : text(item.reason, "reason", 64);
+    if (reason !== undefined && (!Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, reason) || reason === "blank-label"))
+        fail("reason");
+    const field = item.field === undefined ? undefined : diagnosticField(item.field);
+    return { code: code, message: reason === undefined ? text(item.message, "message", 4096) : `${field ?? "document"}: ${diagnostic(reason, field ?? "document").reason}`,
+        ...(field === undefined ? {} : { field }), ...(reason === undefined ? {} : { reason: reason }), ...optional(item, "location", diagnosticPosition) };
+}
+const errorInfo = parseProfileErrorInfo;
+function diagnosticField(value) { if (!isSafeDiagnosticField(value))
+    fail("field"); return value; }
+function diagnosticPosition(value) {
+    const item = object(value, ["offset", "length", "line", "column"]);
+    const result = { offset: integer(item.offset, "offset", 128 * 1024), length: integer(item.length, "length", 128 * 1024), line: integer(item.line, "line", 128 * 1024 + 1), column: integer(item.column, "column", 128 * 1024 + 1) };
+    if (result.line < 1 || result.column < 1 || result.offset + result.length > 128 * 1024)
+        fail("location");
+    return result;
+}
+export function parseProfileDiagnostic(value) {
+    const row = object(value, ["severity", "code", "field", "reason"], ["location"]);
+    if (typeof row.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row.code))
+        fail("diagnostic code");
+    const result = diagnostic(row.code, diagnosticField(row.field));
+    if (row.severity !== result.severity || row.reason !== result.reason)
+        fail("diagnostic severity/reason");
+    return { ...result, ...optional(row, "location", diagnosticPosition) };
+}
+function warnings(value) {
+    if (!Array.isArray(value) || value.length > 1)
+        fail("warnings");
+    return value.map(value => {
+        const result = parseProfileDiagnostic(value);
+        if (result.severity !== "warning" || result.code !== "blank-label" || result.field !== "label")
+            fail("warning");
+        return result;
+    });
+}
+export function parseRoleAvailability(value) {
+    const row = object(value, ["id", "required", "startupAvailable", "deploymentEnabled", "admitted", "source", "capture"], ["requiredReason", "namedEnabled", "reason"]);
+    if (typeof row.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row.source) || typeof row.capture !== "string" || !["startup", "deployment", "named-session"].includes(row.capture))
+        fail("role source/capture");
+    if (row.reason !== undefined && (typeof row.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row.reason)))
+        fail("role reason");
+    if (row.requiredReason !== undefined && (typeof row.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row.requiredReason)))
+        fail("requiredReason");
+    return { id: role(row.id), required: boolean(row.required, "required"), startupAvailable: boolean(row.startupAvailable, "startupAvailable"), deploymentEnabled: boolean(row.deploymentEnabled, "deploymentEnabled"), admitted: boolean(row.admitted, "admitted"), source: row.source, capture: row.capture,
+        ...optional(row, "namedEnabled", value => boolean(value, "namedEnabled")), ...(row.reason === undefined ? {} : { reason: row.reason }), ...(row.requiredReason === undefined ? {} : { requiredReason: row.requiredReason }) };
+}
+function roleAvailabilityList(value) {
+    if (!Array.isArray(value) || value.length > 22)
+        fail("roles");
+    const result = value.map(parseRoleAvailability);
+    if (new Set(result.map(role => role.id)).size !== result.length)
+        fail("roles");
+    return result;
+}
+export function parseSubagentRuntimeAdmissionView(value) {
+    const row = object(value, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
+    if (typeof row.binding !== "string" || !["stock", "dsmm", "unavailable"].includes(row.binding) || row.reason !== undefined && (typeof row.reason !== "string" || !["explicit-composition-required", "duplicate-provider", "authority-not-ready"].includes(row.reason)))
+        fail("subagentRuntime");
+    const ready = boolean(row.deliveryFenceReady, "deliveryFenceReady");
+    if (ready && (row.binding !== "dsmm" || row.reason !== undefined))
+        fail("subagentRuntime readiness");
+    return { binding: row.binding, deliveryFenceReady: ready, restartRequired: boolean(row.restartRequired, "restartRequired"), ...(row.reason === undefined ? {} : { reason: row.reason }) };
 }
 function readResult(value) {
-    const item = object(value, ["id", "revision", "content"], ["label"]);
-    return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)) };
+    const item = object(value, ["id", "revision", "content"], ["label", "warnings"]);
+    return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)), ...optional(item, "warnings", warnings) };
 }
 function content(value) {
     const result = text(value, "content", 128 * 1024);
@@ -90,24 +156,25 @@ function content(value) {
     return result;
 }
 function snapshot(value) {
-    const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction"]);
+    const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings"]);
     if (!Array.isArray(item.profiles) || item.profiles.length > 128)
         fail("profiles");
     return {
         profiles: item.profiles.map((input) => {
-            const row = object(input, ["id", "revision"], ["label", "error"]);
-            return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input) => text(input, "label", 120)), ...optional(row, "error", errorInfo) };
+            const row = object(input, ["id", "revision"], ["label", "error", "warnings"]);
+            return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input) => text(input, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
         }),
         selectedId: item.selectedId === null ? null : id(item.selectedId),
         appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision),
         selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
         ...optional(item, "selectionError", errorInfo),
+        ...optional(item, "selectedWarnings", warnings),
         ...optional(item, "roles", (input) => {
             if (!Array.isArray(input) || input.length > 22)
                 fail("roles");
             const result = input.map((value) => {
-                const row = object(value, ["id", "label", "enabled"], ["runtimePolicy"]);
-                return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "runtimePolicy", (input) => {
+                const row = object(value, ["id", "label", "enabled"], ["runtimePolicy", "availability"]);
+                return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "availability", parseRoleAvailability), ...optional(row, "runtimePolicy", (input) => {
                         const policy = object(input, [], ["strategy", "rateLimit"]);
                         return { ...optional(policy, "strategy", normalizeRoutingStrategy), ...optional(policy, "rateLimit", normalizeRateLimitOverrides) };
                     }) };
@@ -117,7 +184,7 @@ function snapshot(value) {
             return result;
         }),
         ...optional(item, "editorDefaults", runtimePolicy),
-        ...optional(item, "origin", (input) => { if (!["central", "legacy", "explicit"].includes(String(input)))
+        ...optional(item, "origin", (input) => { if (typeof input !== "string" || !["central", "legacy", "explicit"].includes(input))
             fail("origin"); return input; }),
         ...optional(item, "readOnly", (input) => boolean(input, "readOnly")),
         ...optional(item, "writeRestriction", (input) => text(input, "writeRestriction", 1024)),
@@ -151,12 +218,54 @@ function modelRoute(value) {
         fail("route");
     return { provider, model, ...optional(route, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
 }
+function initialRoleRoute(value) {
+    const row = object(value, ["status"], ["source", "route", "reason"]);
+    if (row.status === "known") {
+        object(row, ["status", "source", "route"]);
+        if (row.source !== "invocation-capture")
+            fail("initialRoute source");
+        return { status: "known", source: "invocation-capture", route: modelRoute(row.route) };
+    }
+    object(row, ["status", "reason"]);
+    if (row.status !== "unknown" || row.reason !== "missing-invocation-capture")
+        fail("initialRoute reason");
+    return { status: "unknown", reason: "missing-invocation-capture" };
+}
+function liveRoleRoute(value) {
+    const row = object(value, ["status"], ["source", "route", "reason"]);
+    if (row.status === "known") {
+        object(row, ["status", "source", "route"]);
+        if (row.source !== "own-native-request-header")
+            fail("liveRoute source");
+        return { status: "known", source: "own-native-request-header", route: modelRoute(row.route) };
+    }
+    object(row, ["status", "reason"]);
+    if (row.status !== "unknown" || typeof row.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row.reason))
+        fail("liveRoute reason");
+    return { status: "unknown", reason: row.reason };
+}
+export function parseDsmmRoleRouteComparison(value) {
+    const row = object(jsonData(value), ["childId", "initialRoute", "liveRoute"]);
+    return { childId: sessionId(row.childId), initialRoute: initialRoleRoute(row.initialRoute), liveRoute: liveRoleRoute(row.liveRoute) };
+}
+export function parseDsmmInvocationView(value) {
+    const row = object(jsonData(value), ["role", "label", "level", "routeSource", "mode"], ["route", "runId", "childId", "jobId", "routeComparison"]);
+    if (typeof row.level !== "string" || !["normal", "low", "high", "max"].includes(row.level) || !DSMM_ROUTE_SOURCES.includes(row.routeSource) || typeof row.mode !== "string" || !["one-shot", "continuable"].includes(row.mode))
+        fail("invocation");
+    const target = role(row.role);
+    if (target === "dsmm-orchestrator")
+        fail("invocation target");
+    const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : undefined;
+    if (routeComparison !== undefined && (!Object.hasOwn(row, "childId") || routeComparison.childId !== row.childId))
+        fail("invocation routeComparison childId");
+    return { role: target, label: text(row.label, "label", 120), level: row.level, routeSource: row.routeSource, mode: row.mode, ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...(routeComparison === undefined ? {} : { routeComparison }) };
+}
 function selectionState(value) {
     const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
     return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
 }
 function sessionSnapshot(value) {
-    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration"]);
+    const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime"]);
     if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope))
         fail("scope");
     return {
@@ -172,6 +281,9 @@ function sessionSnapshot(value) {
         ...optional(item, "profileModel", modelRoute),
         ...optional(item, "modules", moduleStates),
         ...optional(item, "configuration", admissionView),
+        ...optional(item, "warnings", warnings),
+        ...optional(item, "roles", roleAvailabilityList),
+        ...optional(item, "subagentRuntime", parseSubagentRuntimeAdmissionView),
         ...optional(item, "deepwork", (input) => {
             const mode = object(input, ["active", "explicit", "locked", "revision"]);
             return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
@@ -201,7 +313,7 @@ function modeSelectRequest(value) {
     return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: revision(item.expectedModeRevision), expectedAdmissionEpoch: revision(item.expectedAdmissionEpoch) };
 }
 function codec(symbol, parse) {
-    return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse }) };
+    return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: value => parse(jsonData(value)) }) };
 }
 function descriptor(method, result, parameter) {
     return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === undefined ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
@@ -215,8 +327,19 @@ function jsonData(value, depth = 0, active = new Set()) {
         return value;
     if (typeof value !== "object" || value === null || active.has(value))
         fail("JSON value");
-    if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+    if (Array.isArray(value) ? Object.getPrototypeOf(value) !== Array.prototype : Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
         fail("JSON object");
+    if (Object.getOwnPropertySymbols(value).length)
+        fail("JSON symbols");
+    const properties = Object.getOwnPropertyDescriptors(value);
+    for (const [key, property] of Object.entries(properties)) {
+        if (Array.isArray(value) && key === "length")
+            continue;
+        if (!Object.hasOwn(property, "value") || !property.enumerable || Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key))
+            fail("JSON property");
+    }
+    if (Array.isArray(value) && Object.keys(value).length !== value.length)
+        fail("JSON array holes");
     active.add(value);
     const result = Array.isArray(value) ? value.map((child) => jsonData(child, depth + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child]) => {
         if (["__proto__", "prototype", "constructor"].includes(key))
@@ -311,9 +434,9 @@ function editorSnapshot(value) {
 }
 function schemaNode(value) {
     const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
-    if (!["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(String(row.type)))
+    if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type))
         fail("schema type");
-    const node = { type: String(row.type) };
+    const node = { type: row.type };
     if (row.fields !== undefined)
         node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields))).map(([key, child]) => [key, schemaNode(child)]));
     if (row.inner !== undefined)
@@ -378,7 +501,7 @@ function moduleStates(value) {
         if (descriptor.id !== "deepwork" || descriptor.label !== "Deepwork" || descriptor.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown")
             fail("module descriptor");
         const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-        if (!["defaults", "global"].includes(String(desired.source)) || !["current-global", "admission", "startup"].includes(String(desired.capture))
+        if (typeof desired.source !== "string" || !["defaults", "global"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
             || ![null, "global-disabled", "restart-required"].includes(next.reason)
             || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason))
             fail("module state");

@@ -8,24 +8,24 @@ description: Use when an implemented change benefits from independent review bef
 This is a full OCMM source adaptation for DSH 0.2.0-rc.2, not an OpenCode or Codex runtime. Source product names in transcript formats, examples, paths and attribution remain descriptive; they are not a host switch.
 
 - Load this skill through the native skill tool only when its trigger matches. Resolve every relative reference/script/asset from the directory resourceBase returned with this skill, not from the project cwd or an OCMM checkout. Use available read/glob/grep to inspect resources; use write/edit and the active bash or pwsh only within the actual role and host permissions.
-- External documentation uses actual web_search/web_fetch or an available documentation service. Context7, GitHub MCP, browser, image and LSP tools are optional catalog capabilities, not bundled calls. Use a real available equivalent or report unavailable evidence; never invent an MCP, Task, todo or compression API.
-- Source role names are logical assignments: code-search/explore maps to dsmm-code-search, and other canonical roles/categories map to dsmm-<name>. Dispatch only through the actual role-specific native subagent tool in the current catalog, within the caller's effective policy, depth and authority. No generated file, metadata row or template proves callability. A missing permitted role is a blocker for a required formal stage, not permission to invent it or bypass planning.
-- Templates describe assignment content, not a callable argument schema. Native continuation, background, message/interrupt and result handling are used only when actually exposed and supported; do not send task_id, subagent_type or guessed timeout fields. Otherwise perform permitted direct work or return the dependency to the stage owner.
-- Use a concise response or an authorized project plan for tracking when no native tracking tool is exposed. Compression is unavailable unless a real tool is exposed; do not simulate it. Role responsibilities, explicit-off common/skill visibility, and the terminal delegation contract override broader examples in a resource.
+- External documentation uses actual web_search/web_fetch or an available documentation service. Context7, GitHub MCP, browser, image and LSP tools are optional catalog capabilities, not bundled calls. Use a real available equivalent or report unavailable evidence; never invent an MCP, Task, todo or compression API. Native read uses file_path, not OpenCode filePath; inspect every actual schema before calling it. Use read_image only when exposed and the actual route supports its image result.
+- Source role names are logical assignments: code-search/explore maps to role ID dsmm-code-search, and other canonical roles/categories map to dsmm-<name>. Use this Agent's observed admitted inventory: per-role topology has individual role tools (for example dsmm_plan_critic) plus dsmm_category; parameterized topology has dsmm_role and dsmm_category with their actual role/category enums. Never derive callability from generated files, names or templates. Both layouts preserve target, caller, read-only, inherited tool and depth ceilings; a missing required formal role returns to the stage owner, not a planning bypass.
+- Templates describe assignment content, not callable schemas. Actual delegation takes description/prompt, an exposed level, a deployment-authorized exposed route, and an exposed run_in_background only. Omitted/normal retains the default; low/high/max must be configured at roleRouting.<id>.levels as a complete route or exact supported effort, never synthetic suffix roles or fixed max effort. A complete invocation route needs paired provider/model and cannot silently fall back; effort-only needs exact native preflight. Level/layout never change permissions or verification rigor. Reviewer/Oracle independence requires different observed native routes, not names.
+- One-shot defaults foreground; permitted one-shot background is native-job-owned. A managed admitted continuable configuration defaults background; explicit run_in_background:false creates a non-reusable one-shot. Use only exposed job_output/job_list/job_kill or send_message/interrupt_agent and returned identities. Existing continuable children can receive nearest-step running messages, idle next turns or same-ID cold continuation; receipts mean inbox acceptance, not completion. Exposed native child-to-parent reporting retains exact-sender/adjacency semantics, not new parent-to-child authority. Settled one-shots never revive; reuse never reselects role/level/route or copies a parent's newer policy into the original child capture. Do not send OpenCode task_id/subagent_type/background/resume/retry or guessed control fields.
+- Host observations alone establish lifecycle controls. Managed delivery requires explicit startup composition: disable the stock subagents row, bind the unique PUBLIC DSMM SubagentRuntime subclass and restart; never hot-replace/drain stock or add a shadow runtime. When actually wired and authorized, a user foreground handoff transfers the existing same run to native jobs without a second start; native user queue/steer follows its operator/connection/session/epoch gate. Do not announce unconnected tools/RPCs. Background enablement, capacity, ownership, depth, cancellation and provider support always gate execution. Legacy conservative evidence may permit useful proven capabilities under the same durable child ID; missing evidence denies that capability with a reason, not all legacy children and not an inheritance of current parent policy.
+- When exposed, native todo_write replaces the owning Agent's whole list of content/status items; its schema and allowParallelInProgress policy govern updates. Otherwise use concise session coordination or an authorized plan. ask_user_question is conditional on exposure; otherwise ask in conversation. Native host compaction is not OCMM compress, and no model-facing compression call is assumed. A read-only planner returns complete Markdown; an authorized coordinator persists it, never the planner through shell or a proxy. Role responsibilities, explicit-off common/skill visibility, and the terminal delegation contract override broader examples in a resource.
+- Follow the current user's explicit output-language request, otherwise this Agent's immutable captured DSMM locale when supplied, then applicable host/user language guidance or the current request/context. Supported configured locales are en/zh-Hans/zh-Hant/ja/ko/de/fr/es/pt-BR/ru; omission inherits, not an English default. Preserve code, identifiers, paths, commands, protocol fields and exact quotes, and pass explicit language instructions in child assignments. This resource imports no Root session preference, promises neither internal reasoning language nor UI translation, and never changes host/project locale. A later parent Apply does not rewrite a child's captured locale.
 - Installation, package-manager bootstrap, downloads, authentication/login, credential/profile access, Git writes and destructive actions require explicit authorization for the exact action. Reference commands are not automatic operations. Worktree consent does not authorize dependency installation or later branch deletion. Read before changing an existing file; preserve unrelated user work. Never silently restore/reset a working tree to repair a failed cleanup.
 - Browser/debug QA uses run-owned isolated state, no imported credentials or browser profile, and only already available software unless separately authorized. Keep commands in the active shell dialect. Report unverified surfaces honestly.
 
-<!-- v1 fork of superpowers/requesting-code-review.
-     Upstream: obra/superpowers v6.3.0.
-     Adjustments: review is risk- and evidence-driven rather than unconditional;
-     requests carry the current change, goals, criteria, evidence, and constraints
-     without fixed packet fields, receipts, or verdict formats.
-     Reviewer-seat discipline remains: reviewers do not spawn additional review
-     seats. See docs/v1-maintenance.md for sync rules. -->
+<!-- Local fork of obra/superpowers/requesting-code-review v6.3.0.
+     Risk/evidence-driven implementation review of current changes and contracts.
+     Reviewers don't spawn additional review seats.
+     Source and maintenance contract: docs/v1-maintenance.md. -->
 
 # Requesting Code Review
 
-Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the work product and decision context, not the session transcript.
+Request independent code review when it provides useful evidence about an implemented change. Give the reviewer the current work product, requirements, constraints, and evidence, not a decision history or session transcript.
 
 **Core principle:** Review current implemented code against the approved outcome. Reviewer and Oracle profiles are not research, ideation, architecture-design, root-cause debugging, plan review, or implementation workers.
 
@@ -49,23 +49,23 @@ Provide the reviewer, in whatever order is clearest:
 - acceptance criteria;
 - the current working-tree diff or committed range, including newly created files;
 - relevant verification evidence and any intentionally unverified item;
-- global constraints, permissions, and material approved rulings;
+- current global constraints and permissions;
 - focused dependency/interface or risk context needed to evaluate the change.
 
 Use the actual current diff or range rather than a prose-only summary. If output is large or sensitive, provide a safe reviewable artifact or focused slices plus a complete file manifest, without omitting changes material to the criteria.
 
 Do not require a fixed packet schema, first-line verdict, receipt, or transcript. Do not paste accumulated conversation history. Do not tell the reviewer what conclusion to reach or add open-ended directions unrelated to the change.
 
-The reviewer evaluates supplied evidence and may request missing evidence. They should not rerun expensive checks without a reason, and they do not dispatch other reviewers, workers, or evidence-gathering subagents.
+The reviewer evaluates supplied evidence by material relevance and requests missing or affected coverage, not blanket reruns for unrelated code, dependency, or environment changes. The orchestrator coordinates consolidated global/heavy checks; reviewers do not duplicate them or dispatch other reviewers, workers, or evidence-gathering subagents. Required safety, release, pre-commit, and user checks remain binding.
 
 ## Reviewer Selection
 
 Select only the lanes that add useful independent evidence. Available profiles do not cause automatic fan-out.
 
 - `reviewer` is the primary-model or primary-lane self-review profile.
-- Oracle slots are external-model cross-check choices in configured priority order: `oracle`, `oracle-2nd`, then later configured slots.
+- Oracle roles are cross-check choices in order: dsmm-oracle, then dsmm-oracle-2nd only when enabled, permitted and useful. Verify different actual native routes before claiming external-model independence; this inventory supplies no later slots.
 - Later Oracle slots indicate selection order, not greater capability.
-- Logical tiers are `low`, unsuffixed `normal`, `high`, and `max`, subject to actual configuration and model support.
+- Keep one canonical native role identity. Omitted/normal preserves its default route; low/high/max can be selected only when listed in the actual target's configured roleRouting levels and exposed schema. Levels are complete routes or exact supported effort-only choices, never suffix tools or guaranteed model effort. Arbitrary route overrides need deployment opt-in, exposed parameters and exact preflight. All levels retain review rigor and authority ceilings.
 - Explicit user model configuration and effective routing policy remain authoritative.
 
 Typical choices:
@@ -75,6 +75,8 @@ Typical choices:
 - Additional lanes: only for an explicit evidence need, not because profiles happen to exist.
 
 Review roles inspect implementation; they do not approve plans or decide unapproved product scope.
+
+Review against final valid requirements and committed contracts, not uncommitted intermediate behavior. Documents, code/comments, tests, and commit messages state only the concise final design and behavior. Tests must protect functionality and external interfaces, not lock descriptive documentation, commit messages, package information, or non-contractual error/log wording through strings, regex, snapshots, or parsed content. Don't require decision-counterexample or removed-component absence tests. Changed requirements update tests; removed components lose their dedicated tests. API, security, data, permission, and irreversible-operation authorization still applies.
 
 ## Interpret the Result
 
@@ -100,4 +102,4 @@ Review does not require a commit. A working-tree diff plus new files is valid re
 
 Git writes require authorization for the specific operation. A clear user request can authorize that exact operation without re-asking, but implement/fix does not mean commit, and commit does not mean push, tag, rebase, or release. Authorization never expands to a different operation or repository.
 
-See template at: `requesting-code-review/code-reviewer.md`
+See template at: `./code-reviewer.md`

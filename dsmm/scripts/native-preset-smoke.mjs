@@ -3,7 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { isSource020, pluginTitleForVersion, PRESET_NAMES_020, ROLE_TOOLS_020 } from "./release-contract.mjs";
+import { isReviewedSource, isSource021, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion } from "./release-contract.mjs";
+import { inspectStableBootstrap, inspectStableExports } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-final-native-preset-acceptance";
 export const inject = ["appReady", "appExit", "agents", "llm", "subagents"];
@@ -72,13 +73,18 @@ export async function apply(ctx, config) {
 
   async function audit() {
     const version = config.nativeOnly ? null : JSON.parse(readFileSync(join(config.packageRoot, "package.json"), "utf8")).version;
-    const roleTools = isSource020(version) ? ROLE_TOOLS_020 : ROLE_TOOLS;
+    const roleTools = isReviewedSource(version) ? roleToolsForVersion(version) : ROLE_TOOLS;
     const report = { outcome: "FAILED", template: config.template, postAppReady: true, presetRegistryPresent: false,
       model: { kind: "deterministic-test-only-adapter", externalModelCalls: false, calls }, uiAuthentication: "NOT_EXERCISED" };
     const handles = [];
     let childListener;
     try {
       report.persistence = inspectPersistence();
+      if (isSource021(version)) {
+        report.sourceContract = "0.2.1";
+        report.bootstrap = inspectStableBootstrap(ctx, { template: config.template });
+        report.publicExports = await inspectStableExports(config.packageRoot, join(ctx.get("profileContext").dir, "package.json"));
+      }
       const registry = ctx.get("agentPresets");
       report.presetRegistryPresent = registry !== undefined;
       if (config.template === "web") {
@@ -121,8 +127,8 @@ export async function apply(ctx, config) {
         const title = pluginTitleForVersion(version);
         assert.deepEqual(meta?.title, { en: title, zh: title });
         const presetNames = installed.DSMM_ROLES.map(({ id, name }) => ({ id, name }));
-        assert.equal(presetNames.length, isSource020(version) ? 22 : 12);
-        if (isSource020(version)) assert.deepEqual(presetNames, PRESET_NAMES_020);
+        assert.equal(presetNames.length, isReviewedSource(version) ? 22 : 12);
+        if (isReviewedSource(version)) assert.deepEqual(presetNames, presetNamesForVersion(version));
         assert.ok(presetNames.every(({ name }) => name.startsWith("DW ")));
         const rootPresetNames = (report.presets ?? []).filter(({ id }) => id.startsWith("dsmm-")).map(({ id, name }) => ({ id, name }));
         for (const preset of rootPresetNames) assert.deepEqual(preset, presetNames.find(({ id }) => id === preset.id));
@@ -192,7 +198,7 @@ export async function apply(ctx, config) {
       const subagents = ctx.get("subagents");
       for (const tool of roleTools) assert.ok(subagents.getProvider(`dsmm-role-${tool.slice(5).replace(/_/gu, "-")}`), `enabled native provider ${tool}`);
       assert.equal(subagents.getProvider("dsmm-role-builder"), undefined);
-      if (isSource020(version)) {
+      if (isReviewedSource(version)) {
         assert.equal(subagents.getProvider("dsmm-role-cross-cutting"), undefined);
         report.delegation = { roleTools: [...roleTools], disabledBuilderAbsent: true, disabledCrossCuttingAbsent: true };
       }
@@ -239,7 +245,10 @@ export async function apply(ctx, config) {
       report.failure = error.message;
     } finally {
       if (typeof childListener === "function") childListener();
-      for (const handle of handles.reverse()) await handle.dispose();
+      for (const handle of handles.reverse()) {
+        if (isSource021(version)) await ctx.get("dsmmRuntimeIntegration").revokeBeforeDispose(handle.agent, () => handle.dispose());
+        else await handle.dispose();
+      }
     }
     return report;
   }

@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CORE_CHECKS_020, validateCoreProof } from "./release-contract.mjs";
+import { CORE_CHECKS_020, isReviewedSource, isSource021, validateCoreProof } from "./release-contract.mjs";
+import { inspectStableBootstrap } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-native-core-020-acceptance";
 export const inject = ["appReady", "appExit", "agents", "loader", "typertGateway", "connection", "settings"];
@@ -36,7 +37,7 @@ export function apply(ctx, config) {
     }
     stage = "native-core-package-identity";
     const manifest = JSON.parse(readFileSync(join(config.packageRoot, "package.json"), "utf8"));
-    assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(manifest.version, "0.2.0");
+    assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(isReviewedSource(manifest.version), true);
     stage = "native-core-describe-startup";
     const before = await invoke("describeSettings"), global = await invoke("describe");
     assert.equal(before.startup.modules.deepwork.enabled, false); assert.equal(before.desired.modules.deepwork.enabled, false);
@@ -47,6 +48,7 @@ export function apply(ctx, config) {
     stage = "native-core-loader-namespace";
     assert.equal(before.namespace, entry.options.id);
     assert.equal(before.entryId, entry.id);
+    const bootstrap = isSource021(manifest.version) ? inspectStableBootstrap(ctx, { requireDeliveryFence: false }) : undefined;
     stage = "native-core-loader-and-profile";
     const form = ctx.get("settings").describe().find(({ ns }) => ns === before.namespace);
     assert.ok(form && Number.isSafeInteger(form.revision));
@@ -72,7 +74,7 @@ export function apply(ctx, config) {
     stage = "native-core-agent-create";
     const nativeRequire = createRequire(config.dshManifest);
     const { SessionId } = await import(pathToFileURL(nativeRequire.resolve("@deepseek-ai/dsh-session")).href);
-    const handle = await ctx.get("agents").create({ sessionId: SessionId("dsmm-core-cold-off-020"), meta: { cwd: config.workspace } });
+    const handle = await ctx.get("agents").create({ sessionId: SessionId(`dsmm-core-cold-off-${manifest.version}`), meta: { cwd: config.workspace } });
     try {
       stage = "native-core-agent-ceiling";
       const runtime = ctx.get("dsmmProfileRuntime");
@@ -86,6 +88,7 @@ export function apply(ctx, config) {
     }
     stage = "native-core-proof";
     const proof = { outcome: "COMPLETED", artifactSha256: config.sha256, packageVersion: manifest.version,
+      ...(isSource021(manifest.version) ? { sourceContract: "0.2.1", bootstrap } : {}),
       installedPackage: manifest.name, postAppReady: true, externalModelCalls: false, productionAuthenticationModified: false,
       clientSha256: createHash("sha256").update(readFileSync(join(config.packageRoot, "lib", "client.js"))).digest("hex"),
       checks: Object.fromEntries(CORE_CHECKS_020.map((key) => [key, true])) };

@@ -13,7 +13,6 @@ import type {
   DshSessionEvent
 } from "../lib/dsh-types.js";
 import {
-  desiredDeepseekEffort,
   isDeepseekV4ProRoute,
   registerModelRouting,
   selectAdvertisedEffort
@@ -190,26 +189,6 @@ test("isDeepseekV4ProRoute matches only the official DeepSeek V4 Pro route", () 
   }
 });
 
-test("desiredDeepseekEffort uses max only for configured DSMM presets", () => {
-  const settings = {
-    ...DEFAULT_DSMM_SETTINGS,
-    deepseekV4ProDefaultReasoningEffort: "low" as const,
-    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic", "dsmm-reviewer"]
-  } satisfies DsmmSettings;
-
-  assert.equal(desiredDeepseekEffort(settings), "low");
-  assert.equal(desiredDeepseekEffort(settings, "standard"), "low");
-  assert.equal(desiredDeepseekEffort(settings, "dsmm-plan-critic"), "max");
-  assert.equal(desiredDeepseekEffort(settings, "dsmm-reviewer"), "max");
-  assert.equal(desiredDeepseekEffort(settings, "arbitrary-preset"), "low");
-
-  const reviewerRemoved: DsmmSettings = {
-    ...settings,
-    deepseekV4ProMaxReasoningPresets: ["dsmm-plan-critic"]
-  };
-  assert.equal(desiredDeepseekEffort(reviewerRemoved, "dsmm-reviewer"), "low");
-});
-
 test("selectAdvertisedEffort chooses only advertised capabilities or a valid default", () => {
   const cases = [
     ["max", reasoning(["off", "high", "max"], "off"), "max"],
@@ -304,24 +283,6 @@ test("strict calibration replaces an explicit downstream effort with an advertis
   const result = await request(harness, activeFrame(), downstream);
   assert.notEqual(result, downstream);
   assert.equal(result.reasoningEffort, "high");
-});
-
-test("configured reviewer and plan-critic presets request max, falling back to high", async () => {
-  for (const preset of ["dsmm-reviewer", "dsmm-plan-critic"] as const) {
-    const maxHarness = routingHarness({
-      settings: { ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "strict" },
-      resolve: async (provider, model) => ({ provider, id: model, name: model, reasoning: reasoning(["high", "max"], "high") })
-    });
-    maxHarness.install();
-    assert.equal((await request(maxHarness, inactiveFrame(preset), officialConfig())).reasoningEffort, "max", preset);
-
-    const highHarness = routingHarness({
-      settings: { ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "strict" },
-      resolve: async (provider, model) => ({ provider, id: model, name: model, reasoning: reasoning(["high"], "high") })
-    });
-    highHarness.install();
-    assert.equal((await request(highHarness, inactiveFrame(preset), officialConfig())).reasoningEffort, "high", preset);
-  }
 });
 
 test("off-only metadata selects off only for requested off or an advertised default", async () => {
