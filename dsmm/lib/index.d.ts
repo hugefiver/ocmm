@@ -39,6 +39,8 @@ export type { DsmmModuleState } from "./modules.js";
 export type { DsmmProfileRuntimeStore, DsmmProfileRuntimeOptions } from "./profile-runtime.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export type { DsmmHostStartupOptions } from "./runtime-integration.js";
+export { DsmmNativeLlmRuntime } from "./llm-runtime.js";
+export type { DsmmLlmAdmission, DsmmLlmCallConfig, DsmmLlmHostOwner, DsmmLlmGeneration, DsmmJson } from "./host-llm.js";
 /** Experimental Host collaborators are programmatic only; serialized settings cannot authenticate them. */
 export declare function createDsmmHostPlugin(startup: DsmmHostStartupOptions): {
     name: string;

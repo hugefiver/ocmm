@@ -4,14 +4,12 @@ import { fileURLToPath } from "node:url";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const source = new URL("../src/", import.meta.url).href;
-const compiled = new URL("../lib/", import.meta.url).href;
 
 // Exercise current source through native SDK modules without emitting shared lib/.
 registerHooks({
   resolve(specifier, context, next) {
     if (context.parentURL !== undefined && specifier.startsWith(".")) {
-      let url = new URL(specifier, context.parentURL).href;
-      if (url.startsWith(compiled)) url = source + url.slice(compiled.length);
+      const url = new URL(specifier, context.parentURL).href;
       if (url.startsWith(source) && url.endsWith(".js")) {
         const input = `${url.slice(0, -3)}.ts`;
         if (existsSync(fileURLToPath(input))) return { url: input, shortCircuit: true };

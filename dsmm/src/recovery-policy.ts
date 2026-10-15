@@ -1,5 +1,8 @@
+import { isDeepStrictEqual } from "node:util";
 import type { DshLlmFailure, DshSessionEvent } from "./dsh-types.js";
 import type { DsmmRecoveryRoute, DsmmRuntimeRecoverySettings } from "./settings.js";
+import { normalizeModelRouteJson } from "./route-json.js";
+import { modelRouteFromHeader } from "./role-llm.js";
 
 export type RecoveryFailureDecision =
   | { kind: "retryable"; matchedBy: "status" | "code" }
@@ -138,10 +141,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
-
 function isNormalizedNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "" && value === value.trim();
 }
@@ -160,12 +159,11 @@ function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly str
 }
 
 function readRoute(value: unknown): DsmmRecoveryRoute | undefined {
-  if (!isRecord(value) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.model)) return undefined;
-  return { provider: value.provider, model: value.model, ...(isNonEmptyString(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
+  try { return normalizeModelRouteJson(value, false, true); } catch { return undefined; }
 }
 
 function sameRoute(left: DsmmRecoveryRoute, right: DsmmRecoveryRoute): boolean {
-  return left.provider === right.provider && left.model === right.model;
+  return isDeepStrictEqual(readRoute(left), readRoute(right));
 }
 
 function appendUniqueRoute(routes: DsmmRecoveryRoute[], route: DsmmRecoveryRoute): void {
@@ -205,7 +203,13 @@ function readHeaderRoute(event: unknown): DsmmRecoveryRoute | undefined {
   const data = eventData(event);
   if (!isRecord(data) || typeof data.reason !== "string" || !REQUEST_HEADER_REASONS.has(data.reason)) return undefined;
   if (!isRecord(data.header) || !isRecord(data.header.config)) return undefined;
-  return readRoute(data.header.config);
+  try {
+    const provider = data.header.config.provider;
+    if (typeof provider !== "string") return undefined;
+    // Decode native envelopes with valid grammar, then retain the exact durable identity.
+    const route = modelRouteFromHeader({ ...data.header, config: { ...data.header.config, provider: provider.trim() } });
+    return readRoute({ ...route, provider });
+  } catch { return undefined; }
 }
 
 function endsTargetScope(event: unknown): boolean {

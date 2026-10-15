@@ -65,19 +65,32 @@ test("each role overrides inherited strategy and retry fields independently", ()
   assert.ok(Object.isFrozen(reviewer.fallbackRoutes));
 });
 
-test("ordered candidates are copied and provider/model deduplicated including primary", () => {
+test("ordered candidates are copied and deduplicated by complete JSON value including primary", () => {
   const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": {
     primary: { provider: "p", model: "m", reasoningEffort: "low" },
     fallbackRoutes: [
+      { reasoningEffort: "low", model: "m", provider: "p" },
       { provider: "p", model: "m", reasoningEffort: "high" },
       { provider: "q", model: "n", reasoningEffort: "high" },
+      { reasoningEffort: "high", model: "n", provider: "q" },
       { provider: "q", model: "n", reasoningEffort: "low" },
-      { provider: "r", model: "o" }
+      { provider: "r", model: "o" },
+      { provider: "r", model: "o", parameters: { flag: false, value: null } },
+      { parameters: { value: null, flag: false }, model: "o", provider: "r" },
+      { provider: "r", model: "o", parameters: { flag: true, value: null } }
     ]
   } } });
   const policy = resolveRoleRuntimePolicy(settings, "dsmm-reviewer");
-  assert.deepEqual(policy.fallbackRoutes, [{ provider: "q", model: "n", reasoningEffort: "high" }, { provider: "r", model: "o" }]);
+  assert.deepEqual(policy.fallbackRoutes, [
+    { provider: "p", model: "m", reasoningEffort: "high" },
+    { provider: "q", model: "n", reasoningEffort: "high" },
+    { provider: "q", model: "n", reasoningEffort: "low" },
+    { provider: "r", model: "o" },
+    { provider: "r", model: "o", parameters: { flag: false, value: null } },
+    { provider: "r", model: "o", parameters: { flag: true, value: null } }
+  ]);
   assert.notEqual(policy.primary, settings.roleRouting["dsmm-reviewer"]!.primary);
+  assert.notEqual(policy.fallbackRoutes[0], settings.roleRouting["dsmm-reviewer"]!.fallbackRoutes![1]);
   assert.ok(Object.isFrozen(policy.primary));
   assert.ok(Object.isFrozen(policy.fallbackRoutes[0]));
 });
@@ -153,9 +166,19 @@ const DEFAULT_RUNTIME_RECOVERY_SETTINGS = {
     prompt: "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work."
   }
 };
+const DEFAULT_PERMISSION_CONTROL_SETTINGS = {
+  enabled: true,
+  outsideReads: "inherit",
+  webSearch: { enabled: true, rule: "inherit" },
+  webFetch: { enabled: true, rule: "inherit" },
+  rules: [],
+  nativeCommands: { enabled: false, entries: [] }
+};
 
 test("default settings keep deepwork opt-in and calibration automatic", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
+    permissionControl: DEFAULT_PERMISSION_CONTROL_SETTINGS,
+    modelParameters: { passthrough: true },
     modules: { deepwork: { enabled: true } },
     modeName: "deepwork",
     defaultActive: false,
@@ -169,7 +192,8 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     roleRouting: {},
     runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
-      materialize: false
+      materialize: false,
+      plannerRootEnabled: false
     },
     subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
@@ -205,6 +229,8 @@ test("current Loader config installs without legacy settings registration or sys
 
 test("resolveConfig overlays plugin config on defaults", () => {
   assert.deepEqual(resolveConfig({ modeName: "dw", promptOrder: 60, deepseekV4ProCalibration: "off" }), {
+    permissionControl: DEFAULT_PERMISSION_CONTROL_SETTINGS,
+    modelParameters: { passthrough: true },
     modules: { deepwork: { enabled: true } },
     modeName: "dw",
     defaultActive: false,
@@ -218,7 +244,8 @@ test("resolveConfig overlays plugin config on defaults", () => {
     roleRouting: {},
     runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
-      materialize: false
+      materialize: false,
+      plannerRootEnabled: false
     },
     subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
@@ -314,8 +341,6 @@ test("resolveConfig normalizes runtime recovery settings", () => {
       fallbackRoutes: [
         { provider: " primary ", model: " primary-model " },
         { provider: "primary", model: "primary-model" },
-        { provider: " ", model: "discard" },
-        { provider: "discard", model: " " },
         { provider: " secondary ", model: " fallback-model " }
       ],
       maxFallbackAttempts: 99,
@@ -328,6 +353,7 @@ test("resolveConfig normalizes runtime recovery settings", () => {
     retryOnStatusCodes: [429, 503],
     retryOnCodes: ["etimedout", "econnreset"],
     fallbackRoutes: [
+      { provider: "primary", model: "primary-model" },
       { provider: "primary", model: "primary-model" },
       { provider: "secondary", model: "fallback-model" }
     ],
@@ -438,9 +464,10 @@ test("resolveConfig supports preset materialization settings", () => {
 
   assert.deepEqual(settings.presets, {
     materialize: true,
+    plannerRootEnabled: false,
     root: "/tmp/dsmm-presets"
   });
-  assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true });
+  assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true, plannerRootEnabled: false });
 });
 
 test("restart-scoped Config is the only deployment input, even on a legacy-shaped host", () => {

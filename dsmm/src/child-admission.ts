@@ -94,6 +94,14 @@ export function createChildAdmissionBinding(options: ChildAdmissionBindingOption
     acquireParentTicket: parent => profileTicket(delivery.acquireParentTicket(exact(parent))),
     resolveChildEvidence: async (ticket, id, signal) => resolve(nativeTicket(ticket), id, signal),
     prepareParentAdmission: (parent, epoch, next) => delivery.prepareParentAdmission(exact(parent), epoch, next),
+    assertCoreParentAdmission: (parent, requestedOwner, expected) => {
+      if (requestedOwner !== owner) unauthorized();
+      delivery.assertCoreParentAdmission(exact(parent), owner, expected);
+    },
+    prepareCoreParentAdmission: (parent, requestedOwner, expected, next) => {
+      if (requestedOwner !== owner) unauthorized();
+      delivery.prepareCoreParentAdmission(exact(parent), owner, expected, next);
+    },
     publishParentAdmission: (parent, epoch, next, install) => delivery.publishParentAdmission(exact(parent), epoch, next, install),
     // Revocation may run during registry removal: use the exact object, never look up a replacement by ID.
     revokeParent: (parent, reason) => {

@@ -1,4 +1,4 @@
-import { Context } from "@deepseek-ai/cordis";
+import { Context, symbols } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-agent-preset-registry";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import { registerDeepworkCommand, registerDsmmStatusCommand } from "./commands.js";
@@ -29,10 +29,16 @@ import { DsmmDeploymentConfig } from "./deployment-config.js";
 import type { DsmmDeploymentSnapshot } from "./settings.js";
 import { agentForScope } from "./native-scope.js";
 import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
-import { projectDeepworkModule } from "./modules.js";
-import { classifyDsmmAgent, integrateSubagentRuntime, managedAgentContext, publicProfileRuntime, registerRoleControlContribution, registerRuntimeGuidance, runtimeAdmissionView } from "./runtime-integration.js";
+import { projectDsmmModules } from "./modules.js";
+import { scopeLifetime } from "./delivery-authority.js";
+import { admittedAgentContext, classifyDsmmAgent, integrateSubagentRuntime, managedAgentContext, publicProfileRuntime, registerRoleControlContribution, registerRuntimeGuidance, runtimeAdmissionView } from "./runtime-integration.js";
 import type { DsmmHostStartupOptions } from "./runtime-integration.js";
 import { LegacyReadUnavailable } from "./legacy-read-contracts.js";
+import type { DsmmCoreLlmOwner } from "./role-llm-runtime.js";
+import type { DsmmLlmAdmission } from "./host-llm.js";
+import { createCorePermissionAuthority } from "./core-permission-authority.js";
+import { nativeStandingFullAccess } from "./permission-native-access.js";
+import { installCorePermissions } from "./core-permissions.js";
 
 export const name = "dsmm";
 export const inject = ["profileContext", "agents"] as const;
@@ -79,6 +85,8 @@ export type { DsmmProfileRuntimeStore, DsmmProfileRuntimeOptions } from "./profi
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 
 export type { DsmmHostStartupOptions } from "./runtime-integration.js";
+export { DsmmNativeLlmRuntime } from "./llm-runtime.js";
+export type { DsmmLlmAdmission, DsmmLlmCallConfig, DsmmLlmHostOwner, DsmmLlmGeneration, DsmmJson } from "./host-llm.js";
 
 /** Experimental Host collaborators are programmatic only; serialized settings cannot authenticate them. */
 export function createDsmmHostPlugin(startup: DsmmHostStartupOptions) {
@@ -92,7 +100,7 @@ export function createDsmmHostPlugin(startup: DsmmHostStartupOptions) {
 }
 
 export function apply(ctx: DshContext, config: Config = {}, hostStartup: DsmmHostStartupOptions = {}): void | Promise<void> {
-  if (!(ctx instanceof Context)) {
+  if (!Context.is(ctx)) {
     if (hostStartup.experimentalLegacyRead !== undefined) throw new DsmmProfileError("unavailable", "Legacy read requires a real cold native Host.");
     return applyConfigured(ctx, config, undefined, undefined, hostStartup);
   }
@@ -104,7 +112,7 @@ export function apply(ctx: DshContext, config: Config = {}, hostStartup: DsmmHos
 function applyConfigured(ctx: DshContext, config: Config, deployment?: DsmmDeploymentConfig, startup?: DsmmDeploymentSnapshot, hostStartup: DsmmHostStartupOptions = {}): void | Promise<void> {
   // Volatile desired saves retain live realms. An ordinary Loader remount must
   // not replace already-admitted Agent policy/skill realms, including busy Agents.
-  if (ctx instanceof Context && ctx.fiber.entry !== undefined) {
+  if (Context.is(ctx) && ctx.fiber.entry !== undefined) {
     const native: Context = ctx;
     const owner = ctx.fiber.entry;
     native.on("loader/patch-context", (entry, next) => {
@@ -121,7 +129,7 @@ function applyConfigured(ctx: DshContext, config: Config, deployment?: DsmmDeplo
       || storage.compression !== undefined && !["zstd", "none"].includes(storage.compression)) {
       throw new Error("Deepwork sessionPersistence must preserve an explicit absolute native root and compression");
     }
-    if (!(ctx instanceof Context)) throw new Error("Deepwork sessionPersistence requires a native Cordis Context");
+    if (!Context.is(ctx)) throw new Error("Deepwork sessionPersistence requires a native Cordis Context");
     const native: Context = ctx;
     if (native.get("sessionPersistence") !== undefined) throw new Error("Disable the exact existing JSONL entry at startup before enabling Deepwork sessionPersistence; live replacement is refused");
     const fiber = native.plugin(DsmmSessionPersistence, storage);
@@ -131,7 +139,16 @@ function applyConfigured(ctx: DshContext, config: Config, deployment?: DsmmDeplo
 }
 
 function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeploymentConfig, startup?: DsmmDeploymentSnapshot, hostStartup: DsmmHostStartupOptions = {}): void | Promise<void> {
-  const native = ctx instanceof Context ? ctx : undefined;
+  const native = Context.is(ctx) ? ctx : undefined;
+  const lifetime = new AbortController();
+  if (native !== undefined) scopeLifetime(native, "dsmm: revoke Core startup and admission", () => lifetime.abort());
+  let permissionOwner: object | undefined;
+  const getMountedPermission = (): boolean | null => {
+    if (native === undefined || lifetime.signal.aborted) return null;
+    const current = native.get("dsmmPermissionController");
+    if (current === undefined || (Reflect.get(current, symbols.original) ?? current) !== permissionOwner) return null;
+    return current?.rules.status().mounted ?? null;
+  };
   let rootAdmissionsInitialized = false;
   const completedRootAdmissions = new WeakSet<DshAgent>();
   let rolePolicy: DsmmRolePolicy;
@@ -175,12 +192,18 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
   };
   getBoundSettings.moduleStates = (agent) => {
     requireProfileAdmission(agent);
-    return runtime?.getSettings.moduleStates?.(agent) ?? [projectDeepworkModule(getSettings(), startup, getBoundSettings.admission!(agent))];
+    return runtime?.getSettings.moduleStates?.(agent) ?? projectDsmmModules(getSettings(), startup, getBoundSettings.admission!(agent), false, getMountedPermission);
   };
   getBoundSettings.subagentRuntime = () => native === undefined
     ? { binding: "unavailable", deliveryFenceReady: false, restartRequired: true, reason: "explicit-composition-required" }
     : runtimeAdmissionView(native);
   rolePolicy = new DsmmRolePolicy(ctx, getBoundSettings, controller);
+  const assertDwDelivery = (agent: DshAgent) => {
+    if (rolePolicy.identity(agent).role === undefined) return;
+    const integration = native?.get("dsmmRuntimeIntegration");
+    if (integration === undefined || !integration.runtime.authority.view().deliveryFenceReady) throw new DsmmProfileError("unavailable", "Deepwork execution requires its live delivery fence.");
+    return integration.bridge.authority.acquireParentTicket(agent);
+  };
   const getSettings = registerSettings(ctx, config, {
     ...(startup === undefined ? {} : { resolved: startup.settings }),
     install(readyCtx, getReadySettings) {
@@ -189,7 +212,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
       if (deployment !== undefined) {
         readyCtx.provide?.("dsmmDeploymentConfig", deployment);
         readyCtx.inject?.(["typert"], (rpcCtx) => {
-          registerConfigRpc(rpcCtx as unknown as Context, deployment, getReadySettings(), () => runtime, startup?.sources);
+          registerConfigRpc(rpcCtx as unknown as Context, deployment, getReadySettings(), () => runtime, startup?.sources, getMountedPermission);
         });
       }
       const install = (installCtx: DshContext, settingsGetter: DsmmSettingsGetter): void => {
@@ -226,8 +249,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
         const hostCtx = profileCtx as Context;
         profileCtx = managedAgentContext(hostCtx, controlledParent);
         if (startupMounted) {
-          await registerLspRuntime(profileCtx as Context, getReadySettings().lsp, getBoundSettings);
-          await registerNativeSubagentControls(profileCtx as Context);
+          await registerLspRuntime(profileCtx as Context, { ...getReadySettings().lsp, enabled: false }, getBoundSettings);
         }
         // Standing definitions must exist before initialize audits retained
         // Agents. A missing optional registry still installs later from this
@@ -235,13 +257,16 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
         const presets = registerRolePresets(profileCtx, getReadySettings);
         if (profileCtx.get?.("agentPresets") !== undefined) await presets;
         const integration = await integrateSubagentRuntime(hostCtx, getReadySettings(), rolePolicy, () => runtime, hostStartup);
+        lifetime.signal.throwIfAborted();
         if (hostStartup.experimentalLegacyRead !== undefined && integration === undefined) throw new DsmmProfileError("unavailable", "Legacy read requires the explicit cold DSMM runtime composition.");
         if (startupMounted && hostCtx.get("subagents") !== undefined) {
           // The actual registry exists now. Alias registration is synchronous and
           // does not wait on a policy-ready provider, avoiding a startup cycle.
           registerRoleProviders({ get: hostCtx.get.bind(hostCtx), effect: callback => hostCtx.effect(() => callback() ?? (() => {})) }, getBoundSettings, getReadySettings, rolePolicy);
         }
+        const retainedChildren = profileCtx.get!<import("./dsh-types.js").DshAgentsRegistry>("agents")!.list().filter(agent => agent.session.header?.origin === "subagent");
         const manager = await createProfileRuntime(profileCtx, getReadySettings(), { modeController: controller,
+          getMountedPermission, deferRetainedChildren: integration !== undefined,
           ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }),
           ...(integration === undefined ? {} : { childAuthority: integration.bridge.authority, childAuthorityOwner: integration.owner,
             childAdmission: integration.bridge.childAdmission, childCapturePersistence: hostCtx.get("sessionPersistence") === undefined ? "resident" as const : "durable" as const }),
@@ -254,7 +279,7 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
           },
           onAdmissionGuardsInstalled: async (initializing) => {
             runtime = initializing;
-            await integration?.ready();
+            integration?.onAdmissionGuardsInstalled();
             // Native descendants are filtered from their direct parent's actual
             // admission, including a preselected named profile, not startup mode.
             for (const root of hostCtx.agents.roots()) {
@@ -275,15 +300,40 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
               && (profileCtx.get?.("subagents") as Context["subagents"] | undefined)?.getProvider("spawn")?.prepareContinuable !== undefined
           } });
         runtime = manager;
-        if (integration?.legacyRead !== undefined) for (const agent of profileCtx.get!<import("./dsh-types.js").DshAgentsRegistry>("agents")!.list()) await integration.afterChildAdmission(agent as import("@deepseek-ai/dsh-agent").Agent);
-        install(profileCtx, getBoundSettings);
-        if (startupMounted && integration !== undefined) await registerHeadlessRoleTools(profileCtx, controller, getBoundSettings, rolePolicy, integration);
-        registerRuntimeGuidance(profileCtx, getBoundSettings, rolePolicy);
+        lifetime.signal.throwIfAborted();
+        // Retained controlled children enroll only after their awaited admission
+        // in the Core-dependent continuation; ordinary Core startup stays independent.
+        const admittedCtx = admittedAgentContext(profileCtx, manager);
+        install(admittedCtx, getBoundSettings);
+        registerRuntimeGuidance(admittedCtx, getBoundSettings, rolePolicy);
         const published = publicProfileRuntime(manager, hostCtx, integration?.legacyRead === undefined ? undefined : integration);
         profileCtx.provide?.("dsmmProfileRuntime", published);
         if (integration !== undefined) {
           hostCtx.provide("dsmmRuntimeIntegration", integration);
-          hostCtx.inject(["typert"], scope => integration.registerControls(scope));
+          hostCtx.inject(["dsmmCoreLlmOwner"], async continuationCtx => {
+            const continuation = new AbortController();
+            scopeLifetime(continuationCtx, "dsmm: cancel DW startup continuation", () => continuation.abort());
+            return integration.continueStartup(async signal => {
+              const visited = new Set<DshAgent>();
+              const admit = async (agent: DshAgent): Promise<void> => {
+                signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+                if (visited.has(agent)) return;
+                visited.add(agent);
+                const parent = hostCtx.agents.list().find(parent => parent !== agent && hostCtx.agents.isOwnedBy(agent.id! as import("@deepseek-ai/dsh-session").SessionId, parent));
+                if (parent !== undefined) await admit(parent as unknown as DshAgent);
+                if (parent !== undefined && classifyDsmmAgent(agent as import("@deepseek-ai/dsh-agent").Agent) === "native" && !controlledParent(parent as unknown as DshAgent)) return;
+                await manager.completeAdmission(agent, signal, startup);
+                await integration.afterChildAdmission(agent as import("@deepseek-ai/dsh-agent").Agent, signal);
+              };
+              for (const agent of retainedChildren) if (hostCtx.agents.get(agent.id! as import("@deepseek-ai/dsh-session").SessionId) === agent) await admit(agent);
+              signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+              await registerNativeSubagentControls(profileCtx as Context);
+              signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+              await registerHeadlessRoleTools(admittedAgentContext(profileCtx, manager), controller, getBoundSettings, rolePolicy, integration);
+              signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+              hostCtx.inject(["typert"], scope => integration.registerControls(scope));
+            }, AbortSignal.any([lifetime.signal, continuation.signal]));
+          });
         } else registerRoleControlContribution(hostCtx);
         profileCtx.inject?.(["typert"], (rpcCtx) => {
           new DsmmProfilesHost(rpcCtx as unknown as Context, published);
@@ -291,10 +341,11 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
       };
       if (readyCtx.inject !== undefined) {
         profileInitialization = new Promise<void>((resolve, reject) => {
-          readyCtx.inject!(["profileContext"], async (profileCtx) => {
+          const fiber = readyCtx.inject!(["profileContext"], async (profileCtx) => {
             try { await installProfiles(profileCtx); resolve(); }
             catch (error) { reject(error); }
-          });
+          }) as Context["fiber"];
+          scopeLifetime(fiber.ctx, "dsmm: cancel Core profile initialization", () => reject(new DsmmProfileError("unavailable", "Core profile initialization was disposed.")));
         });
       }
       else throw new Error("dsmm native profiles require asynchronous profileContext injection");
@@ -312,11 +363,88 @@ function applyRuntime(ctx: DshContext, config: Config, deployment?: DsmmDeployme
     }, { prepend: true, global: true });
     ctx.on?.("agent/request", async (frame, next) => {
       rolePolicy.assertModuleAdmission(frame.agent);
+      assertDwDelivery(frame.agent);
       return next();
     }, { prepend: true, global: true });
+    ctx.on?.("tools/execute", async (exec, next) => {
+      if (exec.agent === undefined) return next();
+      return rolePolicy.duringToolExecution(exec, next);
+    }, { global: true });
   }
   registerSafetyGuards(ctx, controller, getBoundSettings, ctx.get === undefined ? undefined : rolePolicy);
-  return profileInitialization;
+  if (native === undefined) return profileInitialization;
+  native.inject(["tools"], scope => {
+    managedAgentContext(scope, controlledParent).on!("tools/pre-execute", (exec, next) => rolePolicy.beforeToolDecision(async () => {
+      if (exec.agent !== undefined && !nativeStandingFullAccess(scope, exec.agent)) {
+        rolePolicy.assertModuleAdmission(exec.agent as unknown as DshAgent);
+        assertDwDelivery(exec.agent as unknown as DshAgent);
+      }
+      return next();
+    }), { prepend: true, global: true });
+    managedAgentContext(scope, controlledParent).get!<import("@deepseek-ai/dsh-tools").ToolRuntime>("tools")!.guard(exec => {
+      rolePolicy.assertToolExecution(exec);
+    });
+  });
+  if (deployment !== undefined) {
+    const permissions = createCorePermissionAuthority(native, { getSettings: getBoundSettings, rolePolicy, signal: lifetime.signal });
+    native.inject(["tools"], scope => {
+      const installed = installCorePermissions(scope, deployment, permissions.authority, permissions.assertWritable);
+      const identity = Reflect.get(installed, symbols.original) ?? installed;
+      scopeLifetime(scope, "dsmm: release mounted permission projection", () => { if (permissionOwner === identity) permissionOwner = undefined; }, () => { permissionOwner = identity; });
+    });
+  }
+  return Promise.resolve(profileInitialization).then(() => {
+    lifetime.signal.throwIfAborted();
+    const owner: DsmmCoreLlmOwner = { async admit(frame) {
+      const agent = frame.agent as unknown as DshAgent;
+      frame.signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+      if (frame.agent.session.header.origin === "subagent" && classifyDsmmAgent(frame.agent) === "native") {
+        const registry = native.agents;
+        const parents = registry.list().filter(parent => parent !== frame.agent && registry.isOwnedBy(frame.agent.id, parent));
+        if (registry.get(frame.agent.id) !== frame.agent || parents.length !== 1
+          || frame.agent.session.header.parentSession !== parents[0].id) throw new DsmmProfileError("not-owned", "The native child lost its physical owner.");
+        if (!controlledParent(parents[0] as unknown as DshAgent)) return undefined;
+      }
+      rolePolicy.assertModuleAdmission(agent);
+      const admission = getBoundSettings.admission!(agent);
+      const permissions = native.get("dsmmPermissionController");
+      const full = nativeStandingFullAccess(native, frame.agent);
+      if (!full && admission.settings.permissionControl.enabled && permissions === undefined) throw new DsmmProfileError("unavailable", "Core permission authority is not ready.");
+      if (!full) await permissions?.rules.refresh();
+      frame.signal.throwIfAborted(); lifetime.signal.throwIfAborted();
+      const permissionIdentity = permissions === undefined ? undefined : Reflect.get(permissions, symbols.original) ?? permissions;
+      const permissionRevision = full ? undefined : permissions?.rules.getPolicy().revision;
+      const permissionSignal = full ? undefined : permissions?.rules.signal;
+      const bindPermission = (captured: DsmmLlmAdmission): DsmmLlmAdmission => {
+        if (full) return captured;
+        const signal = AbortSignal.any([captured.signal, ...permissionSignal === undefined ? [] : [permissionSignal]]);
+        const assertCurrent = (): void => {
+          signal.throwIfAborted(); captured.assertCurrent();
+          const current = native.get("dsmmPermissionController");
+          if ((current === undefined ? undefined : Reflect.get(current, symbols.original) ?? current) !== permissionIdentity
+            || current?.rules.getPolicy().revision !== permissionRevision
+            || current?.rules.signal !== permissionSignal) throw new DsmmProfileError("not-owned", "LLM permission revision changed.");
+        };
+        assertCurrent();
+        return Object.freeze({ ...captured, signal, assertCurrent });
+      };
+      if (rolePolicy.identity(agent).role !== undefined) {
+        const integration = native.get("dsmmRuntimeIntegration");
+        if (integration?.runtime.authority.view().deliveryFenceReady !== true) throw new DsmmProfileError("unavailable", "Deepwork requests require the live delivery fence.");
+        const admitted = await integration.admitLlmRequest(frame.agent, frame.signal);
+        if (admitted === undefined) throw new DsmmProfileError("not-owned", "Deepwork request lost its role admission.");
+        return bindPermission(admitted);
+      }
+      const signal = AbortSignal.any([frame.signal, lifetime.signal]);
+      const assertCurrent = (): void => {
+        signal.throwIfAborted(); rolePolicy.assertModuleAdmission(agent);
+        if (native.get("dsmmCoreLlmOwner") !== owner || getBoundSettings.admission!(agent) !== admission) throw new DsmmProfileError("not-owned", "Core LLM admission changed.");
+      };
+      assertCurrent();
+      return bindPermission(Object.freeze({ agent: frame.agent, admission, capture: admission, epoch: admission.epoch, signal, assertCurrent }));
+    } };
+    native.provide("dsmmCoreLlmOwner", owner);
+  });
 }
 
 // Cordis Loader introspects this object's Config/inject; a bare function loses

@@ -97,9 +97,9 @@ export function rolePluginRows(role: DsmmRoleDefinition, _skills: readonly DsmmS
   const rows: RolePluginRow[] = [
     { id: "persona", name: "@deepseek-ai/dsh-persona", config: { prefix: role.persona } },
     { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions", config: { maxBytes: 65536 } },
-    { id: "tool-fs", name: "@deepseek-ai/dsh-tool-fs" },
-    { id: "tool-fs-search", name: "@deepseek-ai/dsh-tool-fs-search", config: { sampleOverCapGlobResults: false } },
-    { id: "tool-web", name: "@deepseek-ai/dsh-tool-web", config: { fetch: true } },
+    { id: "tool-fs", name: "@dsmm/dsmm/permission-fs" },
+    { id: "tool-fs-search", name: "@dsmm/dsmm/permission-fs-search", config: { sampleOverCapGlobResults: false } },
+    { id: "tool-web", name: "@dsmm/dsmm/permission-web", config: { fetch: true } },
     { id: "skill-filesystem", name: "@deepseek-ai/dsh-skill-filesystem" },
     { id: "tool-skill", name: "@deepseek-ai/dsh-tool-skill" }
   ];

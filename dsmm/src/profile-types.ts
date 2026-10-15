@@ -65,8 +65,11 @@ export interface DeploymentSchemaNode {
   required?: boolean;
   keys?: readonly string[];
   nonempty?: boolean;
+  additionalProperties?: "json";
 }
 export interface DeploymentAdmissionView {
+  /** Captured execution semantics, not proof of a ready raw executor. */
+  modelParameterPolicy?: import("./model-parameter-policy.js").ResolvedModelParameterPolicy;
   /** Host-redacted read-only view, never raw editor input or actual runtime settings. */
   settings: Record<string, unknown>;
   sources: Record<string, string>;

@@ -126,7 +126,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   let freshInstall;
   try { freshInstall = await installProbe(identity); }
   catch (error) {
-    if (!["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version)) throw error;
+    if (!["0.1.8", "0.1.9"].includes(identity.version) && !isReviewedSource(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
   }
   const receipt = {
@@ -139,7 +139,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   };
   try { return validateVerificationReceipt(receipt, identity); }
   catch (error) {
-    if (!["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version)) throw error;
+    if (!["0.1.8", "0.1.9"].includes(identity.version) && !isReviewedSource(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
   }
 }

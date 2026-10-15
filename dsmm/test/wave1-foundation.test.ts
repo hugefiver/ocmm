@@ -4,26 +4,27 @@ import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, renameSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DSMM_CONFIG_SCHEMA, DSMM_LOCALES, DSMM_NATIVE_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, resolveConfig, resolveDeployment, validateSparseConfig } from "../lib/settings.js";
-import { DsmmConfigValidationError, diagnostic, diagnosticSourcePath, fieldLocation, inspectJsonDocument } from "../lib/profile-diagnostics.js";
-import { parseGlobalConfig } from "../lib/deployment-config.js";
-import { parseProfileDocument, profileErrorInfo, requiredDeepworkRoles, resolveProfileSettings, validateProfileDocument } from "../lib/profiles.js";
-import { ProfileStore } from "../lib/profile-store.js";
-import { DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "../lib/child-capture.js";
-import type { ChildAdmissionCapture } from "../lib/child-capture.js";
-import { parseChildAdmissionEvidenceView } from "../lib/child-evidence.js";
-import { parseDsmmInvocationView, parseProfileDiagnostic, parseRoleAvailability, parseSubagentRuntimeAdmissionView, TYPERT_REMOTE } from "../lib/profile-remote.js";
-import type { DshAgent, DshContext } from "../lib/dsh-types.js";
-import type { DsmmProfileAdmission } from "../lib/settings.js";
-import type { DsmmChildAdmissionAuthority, ParentAdmissionTicket } from "../lib/child-admission-contract.js";
+import { DSMM_CONFIG_SCHEMA, DSMM_LOCALES, DSMM_NATIVE_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, resolveConfig, resolveDeployment, validateSparseConfig } from "../src/settings.js";
+import { DsmmConfigValidationError, diagnostic, diagnosticSourcePath, fieldLocation, inspectJsonDocument } from "../src/profile-diagnostics.js";
+import { parseGlobalConfig } from "../src/deployment-config.js";
+import { parseProfileDocument, profileErrorInfo, requiredDeepworkRoles, resolveProfileSettings, validateProfileDocument } from "../src/profiles.js";
+import { ProfileStore } from "../src/profile-store.js";
+import { DsmmProfileRuntime } from "../src/profile-runtime.js";
+import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "../src/child-capture.js";
+import type { ChildAdmissionCapture } from "../src/child-capture.js";
+import { parseChildAdmissionEvidenceView } from "../src/child-evidence.js";
+import { parseDsmmInvocationView, parseProfileDiagnostic, parseRoleAvailability, parseSubagentRuntimeAdmissionView, TYPERT_REMOTE } from "../src/profile-remote.js";
+import type { DshAgent, DshContext } from "../src/dsh-types.js";
+import type { DsmmProfileAdmission } from "../src/settings.js";
+import type { DsmmChildAdmissionAuthority, ParentAdmissionTicket } from "../src/child-admission-contract.js";
 
 const raw = (settings: unknown, label?: string) => JSON.stringify({ version: 1, id: "focus", ...(label === undefined ? {} : { label }), settings });
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 function capture(child = "child/opaque", parent = "parent/opaque", epoch = "a".repeat(64)): ChildAdmissionCapture {
   const settings = resolveConfig({ locale: "ja", guards: { gitWriteGuard: "deny" }, roleRouting: { "dsmm-reviewer": { levels: { low: { reasoningEffort: "low" } } } } });
-  return { version: 1, childSessionId: child, parentSessionId: parent, role: "dsmm-reviewer", profilePin: null, originalAdmissionEpoch: epoch,
-    invocation: { level: "low", initialRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" }, routeSource: "level" },
+  return { version: 2, modelParameterPolicy: { mode: "passthrough" }, childSessionId: child, parentSessionId: parent, role: "dsmm-reviewer", profilePin: null, originalAdmissionEpoch: epoch,
+    invocation: { level: "low", initialRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" },
+      requestedRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" }, effortSource: "dsmm-config", routeSource: "level" },
     runtimePolicyCapture: { modules: settings.modules, roleRouting: settings.roleRouting, runtimePolicy: settings.runtimePolicy, workflow: settings.workflow,
       guards: settings.guards, runtimeRecovery: settings.runtimeRecovery, defaultActive: settings.defaultActive, skills: settings.skills,
       deepseekV4ProCalibration: settings.deepseekV4ProCalibration, deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort,
@@ -41,7 +42,7 @@ test("levels use a strict effort/complete-route union; normal is not a configura
   assert.deepEqual(resolveConfig(DSMM_CONFIG_SCHEMA(input)).roleRouting, input.roleRouting);
   const native = DSMM_NATIVE_CONFIG_SCHEMA(input).roleRouting as unknown as { get(): unknown };
   assert.deepEqual(native.get(), input.roleRouting, "native transport uses public volatile refs, not resolved settings");
-  for (const levels of [{ normal: { reasoningEffort: "high" } }, { low: {} }, { low: { provider: "p" } }, { low: { model: "m" } }, { low: { reasoningEffort: "" } }, { max: { provider: "p", model: "m", secret: true } }]) {
+  for (const levels of [{ normal: { reasoningEffort: "high" } }, { low: {} }, { low: { provider: "p" } }, { low: { model: "m" } }, { low: { reasoningEffort: "" } }, { max: { provider: "p", model: "m", apiKey: "unsafe" } }]) {
     assert.throws(() => validateSparseConfig({ roleRouting: { "dsmm-reviewer": { levels } } }));
     assert.throws(() => parseProfileDocument(raw({ roleRouting: { "dsmm-reviewer": { levels } } })));
   }
@@ -210,7 +211,7 @@ test("invocation projections are strict observed metadata, not permission-bearin
 test("missing Host authority refuses role-policy Apply and cold child admission without committing or borrowing parent settings", async () => {
   const f = runtimeFixture();
   try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {} }); await runtime.initialize();
+    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig({ defaultActive: true }), f.store, { validateCandidate() {} }); await runtime.initialize();
     const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
     const old = runtime.admission(root);
     const saved = await runtime.save({ id: "focus", content: raw({ roles: { "dsmm-builder": false } }), expectedRevision: null });
@@ -268,7 +269,7 @@ test("a delegating child's original capture, role validation and authority regis
       childAdmission: { async prepare(agent, parent, ticket) { events.push("prepare"); const original = capture(agent.id!, parent.id!, ticket.parentEpoch); return { creation: true, evidence: original, admission: admissionFromChildCapture(original, resolveConfig()) }; }, validateRole(agent, _parent, prepared) { events.push("role"); assert.equal(states.has(agent), false); assert.equal(prepared.admission.settings.guards.gitWriteGuard, "deny"); assert.throws(() => runtime.getSettings(agent)); } } });
     await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
     const child = f.agent("child", "subagent"); f.roots.push(child); f.owners.set(child, root); await f.created.listener!({ agent: child });
-    assert.deepEqual(events, ["root-role", "register:root", "prepare", "role", "register:child"]);
+    assert.deepEqual(events, ["root-role", "root-role", "register:root", "prepare", "role", "register:child"]);
     assert.ok(await f.store.readChildAdmission("child", "root")); assert.equal(runtime.admission(child), states.get(child));
     assert.equal(authority.acquireParentTicket(child).admission.settings.guards.gitWriteGuard, "deny");
   } finally { f.cleanup(); }
@@ -331,7 +332,7 @@ test("installed guards admit an existing hierarchy parent-first and retained dir
       } }
     });
     let runtime = makeRuntime(); await runtime.initialize();
-    assert.deepEqual(events, ["guards-ready", "root-role", "register:root", "prepare:child:via:root", "role:child:retained:false", "register:child", "prepare:grand:via:child", "role:grand:retained:false", "register:grand"]);
+    assert.deepEqual(events, ["guards-ready", "root-role", "root-role", "register:root", "prepare:child:via:root", "role:child:retained:false", "register:child", "prepare:grand:via:child", "role:grand:retained:false", "register:grand"]);
     const originalChild = runtime.admission(child), originalGrand = runtime.admission(grand);
     assert.notEqual(runtime.admission(root).epoch, originalChild.epoch);
     await assert.rejects(runtime.resolveOriginalChildEvidence(authority.acquireParentTicket(root), "grand", signal), { code: "not-owned" });

@@ -11,6 +11,7 @@ import { capturedOriginalRoleInvocation, duringRoleInvocation, invocationAgentOp
 import { childOwnedSessionEvents } from "./session-scope.js";
 import { agentForScope, nativeAgentContext, scopeParentOf } from "./native-scope.js";
 import { roleRouteRuntimeState } from "./role-routing.js";
+import { modelRouteFromCall } from "./role-llm.js";
 const hostControls = ["send_message", "interrupt_agent", "exit_plan_mode", "ask_user_question", "todo_write", "job_output", "job_list", "job_kill"];
 // Agent-owned policy realms survive a bundle reinstall; do not register another
 // identity prompt/tools layer on the same retained live Agent.
@@ -60,8 +61,12 @@ function latestOwnRoleRoute(child) {
             || config.reasoningEffort !== undefined && typeof config.reasoningEffort !== "string") {
             return { status: "unknown", reason: "invalid-own-request-header" };
         }
-        return { status: "known", source: "own-native-request-header", route: Object.freeze({ provider: config.provider, model: config.model,
-                ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }) }) };
+        try {
+            return { status: "known", source: "own-native-request-header", route: Object.freeze(modelRouteFromCall({ ...config, provider: config.provider, model: config.model })) };
+        }
+        catch {
+            return { status: "unknown", reason: "invalid-own-request-header" };
+        }
     }
     return { status: "unknown", reason: "no-own-request-header" };
 }
@@ -111,7 +116,7 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
             level: { type: "string", enum: ["normal", "low", "high", "max"] },
             ...(settings.subagents.allowRouteOverride ? { route: { oneOf: [
                         { type: "object", additionalProperties: false, properties: { reasoningEffort: { type: "string", required: true } } },
-                        { type: "object", additionalProperties: false, properties: { provider: { type: "string", required: true }, model: { type: "string", required: true }, reasoningEffort: { type: "string" } } }
+                        { type: "object", additionalProperties: true, properties: { provider: { type: "string", required: true }, model: { type: "string", required: true }, reasoningEffort: { type: "string" } } }
                     ] } } : {}),
             ...(background ? { run_in_background: { type: "boolean" } } : {}) },
         output: { schema: { type: "json" }, render(_args, value) {

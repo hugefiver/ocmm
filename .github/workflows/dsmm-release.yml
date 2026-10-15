@@ -121,6 +121,15 @@ jobs:
         if: steps.context.outputs.mode == 'future'
         working-directory: control
         run: node dsmm/scripts/extract-runtime-sdk.mjs --image "$DSMM_RUNTIME_IMAGE" --destination "$RUNNER_TEMP/dsmm-source-sdk"
+      - name: Prepare verified published legacy source fixture
+        if: steps.context.outputs.mode == 'future'
+        working-directory: control
+        run: |
+          test -d "$RUNNER_TEMP"
+          test ! -e "$RUNNER_TEMP/dsmm-source-legacy"
+          mkdir -m 700 "$RUNNER_TEMP/dsmm-source-legacy"
+          node dsmm/test/published-legacy-artifact-fixture.mjs download-artifact "$RUNNER_TEMP/dsmm-source-legacy/dsmm-0.2.0.tgz"
+          printf '%s\n' "DSMM_TEST_LEGACY_ARTIFACT=$RUNNER_TEMP/dsmm-source-legacy/dsmm-0.2.0.tgz" >> "$GITHUB_ENV"
       - name: Configure existing source-test Rust toolchain
         if: steps.context.outputs.mode == 'future'
         working-directory: control
@@ -183,6 +192,22 @@ jobs:
           go install "golang.org/x/tools/gopls@${GOPLS_VERSION}"
           test "$("$GOBIN/gopls" version)" = "golang.org/x/tools/gopls ${GOPLS_VERSION}"
           printf '%s\n' "$GOBIN" >> "$GITHUB_PATH"
+      - name: Install frozen future source dependencies
+        if: steps.context.outputs.mode == 'future'
+        working-directory: control
+        env:
+          HOME: ${{ runner.temp }}/dsmm-source-pwsh/home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/config
+          XDG_CACHE_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/cache
+          XDG_DATA_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/data
+          XDG_STATE_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/state
+        run: pnpm install --frozen-lockfile
+      - name: Prepare fixed genuine cold-profile application seed once
+        if: steps.context.outputs.mode == 'future'
+        working-directory: control
+        run: |
+          node dsmm/test/prepare-cold-profile-genuine-seed.mjs --destination "$RUNNER_TEMP/dsmm-source-genuine-seed"
+          printf '%s\n' "DSMM_COLD_PROFILE_GENUINE_SEED=$RUNNER_TEMP/dsmm-source-genuine-seed" >> "$GITHUB_ENV"
       - name: Verify future source with pnpm
         if: steps.context.outputs.mode == 'future'
         working-directory: control
@@ -193,14 +218,13 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/data
           XDG_STATE_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/state
         run: |
-          pnpm install --frozen-lockfile
           pnpm run typecheck
           pnpm test
           pnpm run build
           node dsmm/scripts/materialize-frontend.mjs --sync
           pnpm --dir dsmm run typecheck
           pnpm --dir dsmm run typecheck:test
-          pnpm --dir dsmm test --test-concurrency=1
+          pnpm --dir dsmm test
           pnpm --dir dsmm run build
           node dsmm/scripts/generate-role-assets.mjs
           pnpm --dir dsmm run check:source

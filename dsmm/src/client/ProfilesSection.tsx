@@ -118,8 +118,8 @@ export function ProfilesSection(props: ProfilesSectionProps) {
         {state.catalog?.failures.map((failure) => <p className="dsmm-hint" key={failure.id}>{t("catalogFailure", { name: failure.name, id: failure.id })}</p>)}
         <Button type="button" variant="outline" disabled={state.catalogBusy} onClick={() => { void props.refreshCatalog(); }}>{t(state.catalogBusy ? "catalogRefreshing" : "catalogRefresh")}</Button>
       </div>
-      <StructuredEditor key={state.editorEpoch} state={state} actions={props} disabled={editorDisabled} t={t} />
-      <details ref={advancedRef} key={state.editorEpoch} className="dsmm-advanced"><summary>{t("advanced")}</summary><div className="dsmm-field">
+      <StructuredEditor key={`structured:${state.editorEpoch}`} state={state} actions={props} disabled={editorDisabled} t={t} />
+      <details ref={advancedRef} key={`advanced:${state.editorEpoch}`} className="dsmm-advanced"><summary>{t("advanced")}</summary><div className="dsmm-field">
         <label htmlFor={`${prefix}-content`}>{t("configuration")}</label>
         <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} readOnly={readOnly} disabled={disabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
         <p id={`${prefix}-content-hint`} className="dsmm-hint">{t("configurationHint")}</p>

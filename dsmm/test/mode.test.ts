@@ -6,6 +6,10 @@ import { apply } from "../lib/index.js";
 import { registerDeepworkPrompt } from "../lib/mode.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
+import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
+import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
+import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
+import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
 function fixture(settings = DEFAULT_DSMM_SETTINGS) {
   const sections: DshSystemPromptSection[] = [], agents: DshAgent[] = [];
@@ -25,9 +29,41 @@ test("native scope is required; ordinary on and role default on contribute commo
   assert.equal(f.render(), ""); assert.equal(f.render({ session: session() }), "");
   assert.match(f.render({ session: session(true), options: { provider: "deepseek-official", model: "deepseek-v4-pro" } }), /DeepSeek V4 Pro calibration/);
   const role = f.render({ session: session(undefined, "dsmm-reviewer"), options: { provider: "deepseek-official", model: "deepseek-v4-pro" } });
-  assert.match(role, /DEEPWORK MODE ENABLED!/); assert.match(role, /effectiveDesiredReasoningEffort: max/);
+  assert.match(role, /DEEPWORK MODE ENABLED!/);
   assert.equal(f.render({ session: session(false, "dsmm-reviewer") }), "");
   assert.equal(f.render({ session: session(undefined, "standard") }), "");
+});
+
+test("active ordinary and standing role roots retain native model and observed effort ownership under strict calibration", async () => {
+  const configured = { provider: "fixture", model: "configured-role-model", reasoningEffort: "max" };
+  const route = { provider: "deepseek-official", model: "deepseek-v4-pro" };
+  const f = await nativeRoutingFixture({ defaultActive: true, deepseekV4ProCalibration: "strict", roleRouting: {
+    "dsmm-orchestrator": { primary: configured }, "dsmm-reviewer": { primary: configured }
+  } });
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    for (const preset of ["standard", "dsmm-reviewer"]) {
+      const selection: ModelSelectionRef = { current: { ...route, reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
+      const agent = await f.create({ agentPreset: preset }, selection);
+      const admission = runtime.admission(agent as unknown as DshAgent);
+      const before = f.adapter.calls.length;
+      await runFixtureTurn(agent);
+      for (const effort of ["max", undefined]) {
+        const selected = await agent.ctx.llm.resolveCallConfig({ ...route,
+          ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) });
+        selection.current = { provider: selected.provider, model: selected.model,
+          ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }) };
+        agent.session.append("model/selection", selection.current);
+        await runFixtureTurn(agent);
+        assert.deepEqual(selection.assembled, selection.current);
+      }
+      const expected = ["low", "max", "high"].map(reasoningEffort => ({ ...route, reasoningEffort }));
+      assert.deepEqual(headerRoutes(agent), expected);
+      assert.deepEqual(f.adapter.calls.slice(before).map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), expected);
+      assert.equal(runtime.admission(agent as unknown as DshAgent), admission);
+      assert.deepEqual(admission.settings.roleRouting[preset === "standard" ? "dsmm-orchestrator" : "dsmm-reviewer"]?.primary, configured);
+    }
+  } finally { await f.dispose(); }
 });
 
 test("calibration follows committed header; malformed headers never fall back to stale options", () => {

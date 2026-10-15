@@ -54,6 +54,9 @@ export declare class DsmmDeliveryAuthority<A extends DeliveryAdmission = Deliver
     resolveChildEvidence(ticket: ParentAdmissionTicket<A>, childId: SessionId, signal: AbortSignal): Promise<E>;
     assertDelivery(ticket: ParentAdmissionTicket<A>, childId: SessionId, evidence: E): void;
     prepareParentAdmission(parent: Agent, expectedEpoch: string, nextAdmission: A): void;
+    /** Core configuration uses the same exact parent state without acquiring delivery capability. */
+    assertCoreParentAdmission(parent: Agent, owner: object, expected: A): void;
+    prepareCoreParentAdmission(parent: Agent, owner: object, expected: A, nextAdmission: A): void;
     /** Trusted successful-commit callback: install MUST be synchronous and nonthrowing. */
     publishParentAdmission(parent: Agent, expectedEpoch: string, nextAdmission: A, install: () => void): void;
     revokeParent(parent: Agent, _reason: string): void;

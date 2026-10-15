@@ -37,7 +37,7 @@ import { Remote, RemoteError, TypertRemoteService, remoteErrorOf } from "@deepse
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { parseProfileErrorInfo, TYPERT_HOST } from "./profile-remote.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
-import { projectDeepworkModule } from "./modules.js";
+import { projectDsmmModules } from "./modules.js";
 import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
 import { readOnlySettings, readOnlySettingSources } from "./status.js";
 /** Business service addressed only by native Typert Gateway invocations. */
@@ -230,13 +230,15 @@ let DsmmConfigHost = (() => {
         startup;
         runtime;
         startupSources;
+        getMountedPermission;
         lifetime = new AbortController();
-        constructor(ctx, backend, startup, runtime, startupSources) {
+        constructor(ctx, backend, startup, runtime, startupSources, getMountedPermission) {
             super(ctx, "dsmmConfig");
             this.backend = backend;
             this.startup = startup;
             this.runtime = runtime;
             this.startupSources = startupSources;
+            this.getMountedPermission = getMountedPermission;
             ctx.effect(() => () => this.lifetime.abort());
         }
         captureReadAuthority() {
@@ -269,7 +271,7 @@ let DsmmConfigHost = (() => {
                     startup: { ...readOnlySettings(this.startup) }, defaults: DEFAULT_DSMM_SETTINGS,
                     ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
                     schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
-                    modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
+                    modules: projectDsmmModules(this.startup, desired, undefined, true, this.getMountedPermission) };
             }
             catch (error) {
                 throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
@@ -293,7 +295,7 @@ let DsmmConfigHost = (() => {
                     throw new DsmmProfileError("unavailable", "The startup module capture is unavailable.");
                 const desired = await this.backend.readDesired();
                 assertAuthority();
-                return [projectDeepworkModule(this.startup, desired, undefined, true)];
+                return projectDsmmModules(this.startup, desired, undefined, true, this.getMountedPermission);
             }
             catch (error) {
                 throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error)));
@@ -330,8 +332,8 @@ export function registerProfilesRpc(ctx, backend, deployment) {
     return service;
 }
 /** Core-owned injection; works without any DW or profile business service. */
-export function registerConfigRpc(ctx, deployment, startup, runtime, startupSources) {
-    const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources);
+export function registerConfigRpc(ctx, deployment, startup, runtime, startupSources, getMountedPermission) {
+    const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources, getMountedPermission);
     ctx.typert.register(TYPERT_HOST);
     return service;
 }

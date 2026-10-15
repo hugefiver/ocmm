@@ -45,7 +45,7 @@ function fixture() {
 async function compiledNativePage(remote: DsmmConfigRemote) {
   const require = createRequire(import.meta.url);
   let factory!: (require: (id: string) => unknown) => { apply(ctx: Context): Promise<void> };
-  const realm = createContext({ window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } }, TextEncoder, TextDecoder, structuredClone });
+  const realm = createContext({ window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } }, TextEncoder, TextDecoder, structuredClone, AbortController, AbortSignal });
   runInContext(await readFile(new URL("../lib/client.js", import.meta.url), "utf8"), realm);
   const module = factory(id => {
     if (id === "react") return { ...require(id), useEffect() {}, useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };

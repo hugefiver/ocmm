@@ -8,10 +8,15 @@ import type { DsmmDeploymentSnapshot, DsmmPluginConfig } from "./settings.js";
 import { DsmmProfileError } from "./profiles.js";
 import { resolve } from "node:path";
 import { diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
+import { parseHostNativeCommands } from "./permission-native-command.js";
 
 export type DeploymentPathEdit = { op: "set"; path: string[]; value: unknown } | { op: "unset"; path: string[] };
 export interface GlobalConfigSaveRequest { expectedRevision: string; edits: DeploymentPathEdit[] }
 export interface GlobalConfigSnapshot { config: DsmmPluginConfig; revision: string }
+export interface DeploymentWriteCoordinator {
+  global(request: GlobalConfigSaveRequest, config: DsmmPluginConfig, assertAuthority: () => void,
+    write: (config: DsmmPluginConfig) => Promise<GlobalConfigSnapshot>): Promise<GlobalConfigSnapshot>;
+}
 
 function configurationError(): never { throw new DsmmProfileError("validation", "Deepwork deployment configuration is invalid; restore valid plain JSON before saving or admitting a new session."); }
 
@@ -21,7 +26,11 @@ export function parseGlobalConfig(content: string | null): DsmmPluginConfig {
   const issue = inspected.diagnostics[0];
   if (issue !== undefined) throw new DsmmProfileError("validation", `${issue.field}: ${issue.reason}`, issue.field, issue.code, issue.location);
   if (inspected.tree?.type !== "object") configurationError();
-  try { return validateSparseConfig(JSON.parse(content), true); } catch (error) {
+  try {
+    const config = validateSparseConfig(JSON.parse(content), true);
+    if (config.permissionControl?.nativeCommands !== undefined) parseHostNativeCommands(config.permissionControl.nativeCommands);
+    return config;
+  } catch (error) {
     if (error instanceof DsmmConfigValidationError) throw new DsmmProfileError("validation", error.message, error.diagnostic.field, error.diagnostic.code, fieldLocation(content, inspected.tree, error.diagnostic.field, diagnosticSourcePath(error)));
     return configurationError();
   }
@@ -50,7 +59,9 @@ export function editGlobalConfig(config: DsmmPluginConfig, edits: DeploymentPath
     else Reflect.deleteProperty(node, key);
     result = validateSparseConfig(result, true) as Record<string, unknown>;
   }
-  return result as DsmmPluginConfig;
+  const configResult = result as DsmmPluginConfig;
+  if (configResult.permissionControl?.nativeCommands !== undefined) parseHostNativeCommands(configResult.permissionControl.nativeCommands);
+  return configResult;
 }
 
 function hash(input: unknown): string { return createHash("sha256").update(JSON.stringify(input)).digest("hex"); }
@@ -79,22 +90,37 @@ function sources(global: DsmmPluginConfig, profile: DsmmPluginConfig, settings: 
 
 /** One native entry's desired reader and one fixed global base; no scheduler or mirror. */
 export class DsmmDeploymentConfig {
+  private writeCoordinator?: DeploymentWriteCoordinator;
   readonly home: string;
   readonly store: FixedConfigFileStore;
   readonly entryId: string;
   readonly hostProfileKey: string;
+  get nativeEntry(): Context["fiber"]["entry"] | undefined { return Context.is(this.ctx) ? this.ctx.fiber.entry : undefined; }
+  coordinateWrites(coordinator: DeploymentWriteCoordinator): () => void {
+    if (this.writeCoordinator !== undefined) throw new DsmmProfileError("conflict", "Deployment writes already have an owner.");
+    this.writeCoordinator = coordinator;
+    return () => { if (this.writeCoordinator === coordinator) this.writeCoordinator = undefined; };
+  }
+  /** Synchronous source identity for permission dispatch fences; no form revision or process identity. */
+  permissionSource() {
+    const profile = this.profile(), file = this.store.read(), global = parseGlobalConfig(file.content);
+    const settings = resolveDeployment(global, profile.config);
+    return freezeSettings({ revision: hash([this.hostProfileKey, file.revision, profile.revision, profile.config]),
+      globalRevision: file.revision, nativeRevision: profile.revision, global, profile: profile.config,
+      policy: { ...settings.permissionControl, nativeCommands: parseHostNativeCommands(settings.permissionControl.nativeCommands) } });
+  }
   constructor(private readonly ctx: DshContext, private readonly config: DsmmPluginConfig) {
     const profile = ctx.get?.<{ home?: string; dir?: string }>("profileContext");
     this.home = resolveDshHome(profile?.home);
     this.store = new FixedConfigFileStore(this.home);
-    const entry = ctx instanceof Context ? ctx.fiber.entry : undefined;
+    const entry = Context.is(ctx) ? ctx.fiber.entry : undefined;
     this.entryId = entry?.id ?? "trusted-direct";
     const identity = profile?.dir === undefined ? "trusted-direct" : resolve(profile.dir);
     this.hostProfileKey = hash([process.platform === "win32" ? identity.toLowerCase() : identity, this.entryId]);
   }
 
   private profile(): { config: DsmmPluginConfig; revision: string } {
-    const entry = this.ctx instanceof Context ? this.ctx.fiber.entry : undefined;
+    const entry = Context.is(this.ctx) ? this.ctx.fiber.entry : undefined;
     const raw: unknown = entry === undefined ? Object.fromEntries(Object.entries(this.config).flatMap(([key, parsed]) => {
       const value = parsed !== null && typeof parsed === "object" && "get" in parsed && typeof parsed.get === "function" ? parsed.get() : parsed;
       return value === undefined ? [] : [[key, value]];
@@ -107,7 +133,9 @@ export class DsmmDeploymentConfig {
         const value = parsed !== null && typeof parsed === "object" && "get" in parsed && typeof parsed.get === "function" ? parsed.get() : parsed;
         snapshot[key] = presentValue(value, Reflect.get(presence, key));
       }
-      return { config: validateSparseConfig(snapshot), revision: hash(presence) };
+      const config = validateSparseConfig(snapshot);
+      if (config.permissionControl?.nativeCommands !== undefined) parseHostNativeCommands(config.permissionControl.nativeCommands);
+      return { config, revision: hash(presence) };
     } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; return configurationError(); }
   }
 
@@ -120,7 +148,7 @@ export class DsmmDeploymentConfig {
     const global = await this.readGlobal();
     let settings;
     try { settings = resolveDeployment(global.config, profile.config); } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; return configurationError(); }
-    const entry = this.ctx instanceof Context ? this.ctx.fiber.entry : undefined;
+    const entry = Context.is(this.ctx) ? this.ctx.fiber.entry : undefined;
     const descriptor = entry === undefined ? undefined : this.ctx.get?.<{ describe(options?: { redactSecrets: boolean }): Array<{ ns: string; revision: number; base?: unknown; user?: unknown }> }>("settings")?.describe({ redactSecrets: true }).find((row) => row.ns === entry.options.id);
     if (this.profile().revision !== profile.revision || this.store.read().revision !== global.revision) throw new DsmmProfileError("conflict", "Deployment sources changed while projecting native state; refresh before retrying.");
     return freezeSettings({ settings, global: global.config, profile: profile.config, globalRevision: global.revision, nativeRevision: profile.revision,
@@ -135,7 +163,13 @@ export class DsmmDeploymentConfig {
     if (current.revision !== request.expectedRevision) throw new DsmmProfileError("conflict", "The global base changed; refresh before saving.");
     const config = editGlobalConfig(current.config, request.edits);
     try { resolveDeployment(config, this.profile().config); } catch (error) { if (error instanceof DsmmConfigValidationError) throw error; configurationError(); }
-    const saved = await this.store.save(`${JSON.stringify(config, null, 2)}\n`, request.expectedRevision, assertAuthority);
-    return { config, revision: saved.revision };
+    const write = async (candidate: DsmmPluginConfig): Promise<GlobalConfigSnapshot> => {
+      const validated = validateSparseConfig(candidate, true);
+      resolveDeployment(validated, this.profile().config);
+      assertAuthority();
+      const saved = await this.store.save(`${JSON.stringify(validated, null, 2)}\n`, request.expectedRevision, assertAuthority);
+      return { config: validated, revision: saved.revision };
+    };
+    return this.writeCoordinator === undefined ? write(config) : this.writeCoordinator.global(request, config, assertAuthority, write);
   }
 }

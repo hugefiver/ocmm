@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before } from "node:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +10,7 @@ export function useIsolatedDshEnvironment(): void {
   let original: Record<string, string | undefined>;
   const owner = "dsmm-test-environment";
   before(() => {
-    appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: owner, time: Date.now() })}\n`);
+    assert.ok(existsSync(tmpdir()), "the temporary parent must exist");
     root = mkdtempSync(join(tmpdir(), "dsmm-test-environment-"));
     writeFileSync(join(root, ".run-owner"), owner, { flag: "wx" });
     original = { DSH_HOME: process.env.DSH_HOME, DSH_AGENTS_HOME: process.env.DSH_AGENTS_HOME };

@@ -1,8 +1,9 @@
 import { getNodeValue } from "jsonc-parser";
 import { DSMM_ROLE_IDS } from "./roles.js";
-import { DSMM_LOCALES, resolveConfig, normalizeLevelOverride } from "./settings.js";
+import { copyJson, DSMM_LOCALES, resolveConfig, normalizeLevelOverride } from "./settings.js";
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy } from "./routing-policy.js";
 import { DEPRECATED_DSMM_FIELDS, diagnostic, diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
+import { normalizeModelRouteJson } from "./route-json.js";
 export const MAX_PROFILE_BYTES = 128 * 1024;
 export const MAX_PROFILE_COUNT = 128;
 export const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
@@ -38,7 +39,7 @@ export function validateProfileRevision(revision, field = "expectedRevision") {
     if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision))
         invalid(field, "must be a SHA256 file revision");
 }
-const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
+const OVERLAY_FIELDS = ["modelParameters", "defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
 export function parseProfileDocument(content, expectedId) {
     const result = validateProfileDocument(content, expectedId);
     const error = result.diagnostics.find(item => item.severity === "error");
@@ -90,9 +91,21 @@ export function profileDocumentWarnings(document) {
     return document?.label !== undefined && document.label.trim() === "" ? [diagnostic("blank-label", "label")] : [];
 }
 export function validateProfileOverlay(input) {
-    const overlay = record(input, "settings");
+    let plain;
+    try {
+        plain = copyJson(input);
+    }
+    catch {
+        invalid("settings", "must be plain JSON");
+    }
+    const overlay = record(plain, "settings");
     keys(overlay, OVERLAY_FIELDS, "settings");
     optional(overlay, "defaultActive", bool, "settings");
+    optional(overlay, "modelParameters", (value, field) => {
+        const parameters = record(value, field);
+        keys(parameters, ["passthrough"], field);
+        optional(parameters, "passthrough", bool, field);
+    }, "settings");
     for (const prefix of ["deepseekV4Pro", "deepseekFlash"]) {
         optional(overlay, `${prefix}Calibration`, (value, field) => enumeration(value, ["off", "auto", "strict"], field), "settings");
         optional(overlay, `${prefix}DefaultReasoningEffort`, (value, field) => enumeration(value, ["off", "low", "high"], field), "settings");
@@ -120,7 +133,7 @@ export function validateProfileOverlay(input) {
             invalid(`settings.roles.${role}`, "is required", "required-role");
 }
 export function mergeProfileConfig(baseline, overlay) {
-    return mergeRecords(baseline, overlay);
+    return mergeRecords(copyJson(baseline), copyJson(overlay));
 }
 export function resolveProfileSettings(baseline, overlay) {
     const ceiling = resolveConfig(baseline);
@@ -210,15 +223,12 @@ function array(value, field, maximum, validator) {
     value.forEach((item, index) => validator(item, `${field}[${index}]`));
 }
 function route(value, field) {
-    const item = record(value, field);
-    keys(item, ["provider", "model", "reasoningEffort"], field);
-    string(item.provider, `${field}.provider`, 128);
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(item.provider))
-        invalid(`${field}.provider`, "must reference a native provider ID, not a URL, credential or path");
-    string(item.model, `${field}.model`, 512);
-    if (item.model.includes("://"))
-        invalid(`${field}.model`, "must reference a native model ID, not a credential-bearing URL");
-    optional(item, "reasoningEffort", (effort, path) => string(effort, path, 64), field);
+    try {
+        normalizeModelRouteJson(value);
+    }
+    catch {
+        invalid(field, "must be a valid model route", "invalid-route");
+    }
 }
 function routeList(value, field) {
     array(value, field, 32, route);

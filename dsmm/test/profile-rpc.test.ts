@@ -4,9 +4,10 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createContext, runInContext } from "node:vm";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import * as Cordis from "@deepseek-ai/cordis";
 import { Context } from "@deepseek-ai/cordis";
+import { AgentRegistry } from "@deepseek-ai/dsh-agent";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import type { ClientRemote } from "@deepseek-ai/dsh-api-gateway/client";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
@@ -118,16 +119,20 @@ async function savedPair(f: Awaited<ReturnType<typeof fixture>>) {
 async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durable = false): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "dsmm-production-rpc-"));
   const ctx = new Context();
+  const startupOrder: string[] = [];
+  const initialize = DsmmProfileRuntime.prototype.initialize;
+  const initialization = mock.method(DsmmProfileRuntime.prototype, "initialize", function (this: DsmmProfileRuntime) {
+    startupOrder.push("profiles-start");
+    return initialize.call(this);
+  });
   try {
     const registry = ctx.plugin(TypertRegistry);
     const gateway = ctx.plugin(TypertGatewayService, {});
-    await Promise.all([registry.await(), gateway.await()]);
+    await Promise.all([registry.await(), gateway.await(), ctx.plugin(AgentRegistry).await()]);
     ctx.provide("profileContext", { home: join(root, "home"), dir: root, startedBundles: [] });
     const storage = { root: join(root, "native-session-logs"), compression: "none" as const };
-    const startupOrder: string[] = [];
     ctx.on("internal/status", (fiber) => {
       if (fiber.runtime?.callback === DsmmSessionPersistence && fiber.state === 2) startupOrder.push("storage-ready");
-      if (fiber.runtime?.callback.name === "installProfiles" && fiber.state === 1) startupOrder.push("profiles-start");
     });
     // Only the declaration boundary is bridged: the production apply and its
     // internal profileContext/typert injection callbacks execute unchanged.
@@ -148,13 +153,21 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
       }
       return false;
     };
-    const rpcFibers = [...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers])
-      .filter((fiber) => ownedByEntry(fiber) && Object.hasOwn(fiber.inject, "typert"));
-    assert.equal(rpcFibers.length, 2, "core config and profile RPC own independent native Typert injections");
-    // Parent startup alone can pass while a nested injection has failed. Await
-    // the actual RPC child so an accidentally returned Service is observable.
+    // Await entry-owned Typert children before reading services: failed effects
+    // can withdraw their service while the parent remains ACTIVE.
+    for (const fiber of [...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers])
+      .filter((fiber) => ownedByEntry(fiber) && Object.hasOwn(fiber.inject, "typert"))) await fiber.await();
+    const rpcFibers = ["dsmmConfig", "dsmmProfiles"].map((name) => {
+      const service = ctx.get(name);
+      assert.ok(service);
+      const original = Reflect.get(service, Cordis.symbols.original) ?? service;
+      const fiber: Context["fiber"] = original.ctx.fiber;
+      assert.ok(ownedByEntry(fiber), "each RPC service must belong to the production entry");
+      assert.ok(Object.hasOwn(fiber.inject, "typert"));
+      return fiber;
+    });
+    assert.equal(new Set(rpcFibers.map((fiber) => fiber.uid)).size, 2, "core config and profile RPC own independent native Typert injections");
     for (const fiber of rpcFibers) {
-      await fiber.await();
       assert.equal(fiber.state, 2, "each native RPC injection must remain ACTIVE");
     }
     assert.ok(ctx.get("dsmmProfileRuntime"));
@@ -194,9 +207,14 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     await entry.dispose();
     assert.equal(ctx.get("dsmmProfileRuntime"), undefined);
     assert.equal(ctx.get("dsmmProfiles"), undefined);
+    assert.equal(ctx.get("dsmmConfig"), undefined);
     assert.equal(ctx.typert.local.get("dsmmProfiles/describe"), undefined);
     assert.equal(ctx.typert.local.hasSeen("dsmmProfiles/describe"), true);
+    assert.equal(ctx.typert.local.get("dsmmConfig/describe"), undefined);
+    assert.equal(ctx.typert.local.hasSeen("dsmmConfig/describe"), true);
     await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }),
+      (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
+    await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmConfig", method: "describe", args: {} }),
       (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
     if (durable) {
       assert.equal(ctx.get("sessionPersistence"), undefined, "the configured companion is owned by the production entry");
@@ -208,21 +226,24 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
         await reader.close();
       } finally { await cold.fiber.dispose(); }
     }
-  } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
+  } finally { initialization.mock.restore(); await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
 }
 
 async function verifyProductionStorageInitializationFailure(plugin: typeof dsmmPlugin): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "dsmm-production-storage-failure-"));
   const ctx = new Context();
+  let profilesStarted = false;
+  const initialize = DsmmProfileRuntime.prototype.initialize;
+  const initialization = mock.method(DsmmProfileRuntime.prototype, "initialize", function (this: DsmmProfileRuntime) {
+    profilesStarted = true;
+    return initialize.call(this);
+  });
   try {
     const storageRoot = join(root, "not-a-directory");
     await writeFile(storageRoot, "retain native initialization refusal", "utf8");
     await ctx.plugin(TypertRegistry).await();
+    await ctx.plugin(AgentRegistry).await();
     ctx.provide("profileContext", { home: join(root, "home"), dir: root, startedBundles: [] });
-    let profilesStarted = false;
-    ctx.on("internal/plugin", (fiber) => {
-      if (fiber.runtime?.callback.name === "installProfiles") profilesStarted = true;
-    });
     const entry = ctx.plugin({
       name: "production-storage-failure", Config: plugin.Config, inject: [...plugin.inject],
       apply(ready: Context, config: Parameters<typeof plugin.apply>[1]) { return plugin.apply(ready as unknown as DshContext, config); },
@@ -236,15 +257,15 @@ async function verifyProductionStorageInitializationFailure(plugin: typeof dsmmP
     assert.equal(ctx.typert.local.hasSeen("dsmmProfiles/describe"), false);
     await assert.rejects(access(join(root, "dsmm-profiles")), { code: "ENOENT" });
     assert.equal(await readFile(storageRoot, "utf8"), "retain native initialization refusal");
-  } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
+  } finally { initialization.mock.restore(); await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
 }
 
 async function replayUnawaitedStorageIndex(): Promise<typeof dsmmPlugin> {
   const index = new URL("../lib/index.js", import.meta.url);
   const compiled = await readFile(index, "utf8");
-  const awaited = "return fiber.await().then(() => applyRuntime(ctx, config, deployment, startup));";
+  const awaited = "return fiber.await().then(() => applyRuntime(ctx, config, deployment, startup, hostStartup));";
   assert.ok(compiled.includes(awaited), "replay must alter the production storage-ready barrier only");
-  const old = compiled.replace(awaited, "return applyRuntime(ctx, config, deployment, startup);")
+  const old = compiled.replace(awaited, "return applyRuntime(ctx, config, deployment, startup, hostStartup);")
     .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   const replay = await import(`data:text/javascript;base64,${Buffer.from(old).toString("base64")}`) as { default: typeof dsmmPlugin };
@@ -254,9 +275,9 @@ async function replayUnawaitedStorageIndex(): Promise<typeof dsmmPlugin> {
 async function replayReturnedServiceIndex(): Promise<typeof dsmmPlugin> {
   const index = new URL("../lib/index.js", import.meta.url);
   const compiled = await readFile(index, "utf8");
-  const fixed = /profileCtx\.inject\?\.\(\["typert"\], \(rpcCtx\) => \{\s*new DsmmProfilesHost\(rpcCtx, manager\);\s*\}\);/u;
+  const fixed = /profileCtx\.inject\?\.\(\["typert"\], \(rpcCtx\) => \{\s*new DsmmProfilesHost\(rpcCtx, published\);\s*\}\);/u;
   assert.ok(fixed.test(compiled), "replay must replace exactly the production Typert callback, not a fixture");
-  const old = compiled.replace(fixed, 'profileCtx.inject?.(["typert"], (rpcCtx) => new DsmmProfilesHost(rpcCtx, manager));')
+  const old = compiled.replace(fixed, 'profileCtx.inject?.(["typert"], (rpcCtx) => new DsmmProfilesHost(rpcCtx, published));')
     .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
     .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
   // Read-only in-memory replay preserves every other production module and
@@ -288,8 +309,7 @@ test("strict codecs reject authority, path, malformed revision, and unsupported 
 
 test("production native DSMM profile injection owns a live RPC child and withdraws service/codecs", async () => {
   await verifyProductionProfileInjection(dsmmPlugin);
-  // RED replay: the same production lifecycle assertions reject the old bare
-  // returned-Service callback with native Cordis's exact Invalid effect error.
+  // The lifecycle assertions reject returning a Service as a native effect.
   await assert.rejects(verifyProductionProfileInjection(await replayReturnedServiceIndex()), /Invalid effect/u);
 });
 
@@ -309,6 +329,7 @@ test("production startup refuses a preexisting incompatible native JSONL backend
   const ctx = new Context();
   try {
     await ctx.plugin(TypertRegistry).await();
+    await ctx.plugin(AgentRegistry).await();
     const native = ctx.plugin(JsonlSessionPersistence, { root: join(root, "original-native-logs"), compression: "none" });
     await native.await();
     const before = ctx.sessionPersistence;

@@ -23,7 +23,7 @@ Model selection, authentication, permissions, session ownership, and package loa
 | Twelve role presets | Native definitions plus role-specific delegation composition, including builder, creative, reviewer, oracle, and oracle-2nd. | redesigned for DSH |
 | Per-role model/effort and DeepSeek calibration | Explicit `roleRouting`, fixed native child options, direct-role request policy, exact configured efforts, and compatible legacy calibration. | redesigned for DSH |
 | Safety guards | Native pre/post tool policies; host approval/cancellation remain authoritative. | redesigned for DSH |
-| LSP/MCP | Optional external ocmm-lsp with nine tools including atomic format; debugging/DAP is a separate on-demand skill. | optional/manual |
+| LSP/MCP | Implementation, interfaces and original config retained, but DSMM automatic MCP mounting stays off even with `lsp.enabled:true`; LSP settings UI is hidden. DSH's own LSP and independently configured MCP are unaffected. | not enabled in this version |
 | Runtime fallback | Host-first, opt-in role/global ordered chains with exact efforts, cancellation, duplicate, and step fences. | redesigned for DSH |
 | Idle continuation | Separately enabled, bounded steering from durable unfinished work. | redesigned for DSH |
 | Subagent interruption recovery | Native durable child/session control and explicit continuation; no guessed task IDs, synthesized parent messages, or independent automatic retry dispatcher. | redesigned for DSH |
@@ -46,7 +46,7 @@ The role set includes `dsmm-orchestrator`, `dsmm-planner`, `dsmm-plan-critic`, `
 4. Move DSMM settings into the `id: dsmm` profile patch's `config` object and restart; do not copy old settings.yaml into the new home.
 5. Use `workflow.policy: risk-based` for the current workflow. Explicit legacy controls remain supported; inspect normalized status instead of assuming omitted and explicit defaults are equivalent.
 6. Inspect native roles and role-specific tools; do not configure removed `roots/includeUserRoot` or count exported template directories as discovery.
-7. Enable optional LSP/MCP only with a usable external ocmm-lsp executable; recovery stays disabled unless explicitly configured.
+7. Don't use `lsp.enabled:true` or the retained historical manual patch as a DSMM activation entry in this version. Existing release checks still independently validate the retained LSP interface; see [LSP boundary](lsp.md). Recovery stays disabled unless explicitly configured.
 8. Validate the packed profile and the real specified model's read/write/tool-result round-trip before changing your default workflow.
 
 Model IDs belong to their native provider routes: `deepseek-account/deepseek-flash` and a custom `hoo/deepseek-v4.1-flash` are distinct routes. Configure custom routes through DSH's pi-ai adapter, using credential references rather than literal keys. Provider SDK identity alone is not wire-protocol proof. For the inspected Anthropic gateway, terminal `/v1` must be removed from its source SDK baseURL to retain the same native request path; adaptive thinking compatibility and exact high/max declarations preserve effort. This rule is not a global URL rewrite for other protocols.

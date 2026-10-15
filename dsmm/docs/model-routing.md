@@ -1,6 +1,6 @@
 # Model routing
 
-This describes built source routing. The published `@dsmm/dsmm@0.2.0` version doesn't imply that uncommitted routing interfaces are present in its artifact. Providers, accounts and credentials remain native DSH configuration, never named-profile contents.
+Providers, accounts and credentials remain native DSH configuration, never named-profile contents.
 
 ## Native roots and child defaults
 
@@ -25,13 +25,51 @@ Every ordinary top-level Agent keeps the native model tab's assembled provider/m
 }
 ```
 
-These identifiers are placeholders for native-resolvable routes. Exact effort strings are native adapter IDs, not OpenCode variants. Unsupported `max` refuses rather than degrading to `high`. A catalog row is advisory; native resolution can accept an unlisted route without proving account/network health.
+These identifiers are placeholders for resolvable routes. The native model picker and non-DSMM requests retain the owning adapter's effort validation. DSMM routes owned by the explicit raw Host composition below accept any valid effort string without changing advertised model metadata or claiming account/network health.
+
+## Host-owned raw routes
+
+`modelParameters.passthrough` is an ordinary Core setting, defaulting to `true`, resolved through global, explicit native profile and named/session overlays. It is independent of Deepwork enablement and does not prove that a raw executor is installed. Save and both Apply actions preserve the original JSON; each admitted Agent keeps its immutable policy.
+
+With passthrough **ON**, applicable DSMM routes retain valid effort strings and opaque JSON through the declared raw owner. With **OFF**, opaque/custom parameters remain stored but are not sent, and neither configured `reasoningEffort` nor `reasoning_effort` overrides native defaults. SDK-standard `temperature`, `maxTokens` and `stop` retain native handling, including explicit native refusal of an unsupported option. Independent native model/effort selections remain native-owned under either policy. OFF does not force a replacement effort or erase configuration.
+
+`createDsmmLlmColdStartup` is an explicit Host startup composition exported by `@dsmm/dsmm`. Install its `prepare` callback through public `dsh-app-boot.boot` before Loader entries mount. Include its patches in `profileContext.overlays` **before** `readProfilePatches`, exclude its provider names from the stock `llm-pi-ai` row, and preserve the original AgentLoop configuration, including configured Agents. The factory installs the DSMM-aware runtime before constructing the single official AgentLoop. `assertReady()` refuses incomplete composition; a model name or profile flag cannot enable raw request authority.
+
+The provider owner requires explicit finite model declarations, an `openai-completions` endpoint, its own settings namespace and a Host-owned request-time credential resolver. Other provider owners, native catalog metadata, model discovery and native picker validation remain separate. Responses and other APIs are not supported by this raw owner. Credentials are not profile parameters; the resolver receives the named reference and cancellation signal and must not introduce an ambient fallback.
+
+Cold Core composition can consume `configuredModelParameterPolicy(settings)` without waiting for Deepwork. Requests with an immutable Agent admission use `resolvedModelParameterPolicy(admission)`; a child must never substitute the current parent or Host setting. Both helpers return policy data, not authorization. Provider generations recheck their live Host service identity across preparation and credential waits and immediately before payload submission.
+
+Future-default Apply and idle current-session Apply preserve valid route JSON without querying model metadata, requiring a live LLM owner, or sending a completion. Provider/model existence and supported execution are checked at actual role invocation or request preparation. Root-role, preset, ownership and CAS checks remain Apply requirements. Real requests additionally require exact Agent/role admission, the child's original capture and current direct-parent delivery authority. Cold continuation preserves that original full route rather than copying a later parent profile.
+
+```jsonc
+{
+  "roleRouting": {
+    "dsmm-doc-search": {
+      "primary": {
+        "provider": "apai", "model": "gpt-6.1-sol", "reasoningEffort": "medium",
+        "temperature": 0, "full": false, "count": 0, "optional_value": null,
+        "customParameters": { "rows": [false, 0, null, [], {}] }
+      },
+      "fallbackRoutes": [
+        { "provider": "apai", "model": "gpt-5.6-terra", "reasoningEffort": "high", "fallback_kind": "terra" },
+        { "provider": "apai", "model": "gpt-5.6-luna", "reasoningEffort": "high", "fallback_kind": "luna" }
+      ]
+    }
+  }
+}
+```
+
+Additional route properties are bounded plain JSON. Their original names, values and presence are preserved, including an ordinary user property named `customParameters`. Standard `reasoningEffort` maps to `reasoning_effort` for this API. Its raw alias is also accepted, but both cannot appear together. The same exclusivity applies to `maxTokens`, `max_tokens`, `max_completion_tokens` and `max_output_tokens`. A raw token field must match the declared API/model token field and satisfy the native context budget; conflicts refuse before HTTP rather than silently rewriting the value or selecting a fallback. Host messages, tools, authentication, endpoint, headers, signals, callbacks and authority fields cannot be supplied as route parameters. Host attribution headers remain authoritative.
+
+Every fallback owns its full parameter set; primary-only properties never flow into a fallback. Full JSON value identity distinguishes parameter-only changes even at the same provider/model, while object key order does not. Native request headers persist the complete call configuration and must actually flush before dispatch. A persistence or admission failure cannot fall through to stock dispatch.
+
+The native Root model-selection API remains its separate three-field contract. Profile Apply and the optional native model-selection action are independent operations; failure of the latter does not undo a successful profile admission.
 
 ## Invocation selection
 
 Calls default to `level:"normal"`, meaning primary or inherited routing. There is no `levels.normal` setting. `low`, `high` and `max` must be configured for that exact target; an unconfigured requested level refuses before a model request. Orchestrator isn't a child delegation target and doesn't accept level configuration. Levels don't synthesize suffixed personas or change workflow ownership.
 
-A level override is either `{reasoningEffort}` or a complete `{provider, model, reasoningEffort?}` route. Effort-only selection keeps the resolved model and applies the exact effort to candidate preparation. A complete route replaces model and effort together; omitted effort isn't borrowed from the old route. Native host options are then honored, and an admitted invocation `route` has final override precedence.
+A level override is either `{reasoningEffort}` or a complete route with `provider`, `model` and optional effort/JSON parameters. Effort-only selection keeps the resolved model and applies the exact effort to candidate preparation. A complete route replaces the route parameters together; omitted effort isn't borrowed from the old route. Native host options are then honored, and an admitted invocation `route` has final override precedence.
 
 Model-facing `route` is absent by default. Explicit deployment `subagents.allowRouteOverride:true` makes it available with the same effort-only/complete-route grammar; a named overlay can't grant this permission. A complete invocation route fixes initial preparation to that route and removes fallback routes. Effort-only overrides retain configured candidates with the requested effort. All paths still require native preflight and role/depth/filter admission. `modelSelectionSettings:false` remains in native child options.
 
@@ -49,9 +87,11 @@ Child preparation selects the primary or first resolvable configured candidate i
 
 `startup-lock` keeps the admitted route across turns and bounded positively no-output-safe `RATE_LIMIT` retries. `rate-limit-fallback` may advance the ordered chain after the configured threshold, within finite switch/delay limits. Counters and locks aren't shared between roles or sessions; duplicate errors don't count twice, success resets consecutive counts, and exhausted chains don't wrap.
 
-Only exact first-request `NO_ADAPTER` or adapter-proven `UNKNOWN_MODEL`, before accepted output/tool fragments, can advance a remaining startup candidate. Generic, transport, authorization, quota, payment, context and cancelled failures don't authorize model hopping. Partial text, reasoning or tool output forbids automatic retry, including same-route retry. Ordinary roots remain on their native route. See [runtime recovery](runtime-recovery.md).
+Only provider absence established through the public registration directory, or adapter-proven `UNKNOWN_MODEL`, can advance a remaining startup candidate before accepted output/tool fragments. A generic `NO_ADAPTER` from preparation, middleware or an unready registered adapter is not absence proof. Transport, authorization, quota, payment, context and cancelled failures don't authorize model hopping. Partial text, reasoning or tool output forbids automatic retry, including same-route retry. Ordinary roots remain on their native route. See [runtime recovery](runtime-recovery.md).
 
 Existing Agents use immutable admitted policy, not a later draft or desired deployment. Idle session Apply creates a new root epoch for future children; old children keep original captures. Cold continuation doesn't reconstruct original settings from the current parent or a role label. Profile storage, native persistence and ownership are separate authorities; see [profiles](profiles.md#storage-and-lifetime) and [compatibility](compatibility.md).
+
+New child captures write payload version **2**, including the original requested route, effective initial route, effort provenance and resolved parameter policy. The outer envelope/checksum and `.children/v1` storage namespace are unchanged. V1 and v2 readers validate separate strict shapes; malformed, unknown-version or identity-mismatched captures cannot fall back to legacy recovery. Existing v1 files are read without migration or rewrite. They retain captured effort/calibration/default inputs under internal `legacy-native-v1` semantics, independent of the current ON/OFF setting, and use historical native validation rather than raw passthrough. This internal discriminator is not a third user setting. Old binaries cannot read v2; downgrade recovery of new captures is not guaranteed.
 
 ## Observed route versus declared route
 
@@ -61,6 +101,6 @@ The child report compares initial route from real `invocation-capture` with live
 
 Child-only calibration recognizes `deepseek-official/deepseek-v4-pro` and `deepseek-official/deepseek-flash` or `deepseek-account/deepseek-flash`. The Flash model ID is `deepseek-flash`, not a guessed alias. Other providers aren't calibrated by matching model text alone.
 
-Each route family retains independent Calibration (`off`, `auto`, `strict`) and DefaultReasoningEffort (`off`, `low`, `high`) settings. Auto preserves explicit effort; strict uses supported policy effort, but neither overwrites an admitted explicit role/child effort. No effort is invented without native reasoning metadata. Ordinary root effort stays native-owned. The retired `deepseekV4ProMaxReasoningPresets` and `deepseekFlashMaxReasoningPresets` fields reject with `deprecated-field`; explicitly configure levels instead, without automatic migration.
+Each route family retains independent Calibration (`off`, `auto`, `strict`) and DefaultReasoningEffort (`off`, `low`, `high`) settings. Auto preserves explicit effort; strict uses supported policy effort, but neither overwrites an admitted explicit role/child effort. No effort is invented without native reasoning metadata. Ordinary root effort stays native-owned. Parameter passthrough OFF does not run DSMM effort calibration; historical v1 recovery retains its original calibration behavior. The retired `deepseekV4ProMaxReasoningPresets` and `deepseekFlashMaxReasoningPresets` fields reject with `deprecated-field`; explicitly configure levels instead, without automatic migration.
 
 *Author's note: For an operator assigning child models; configure exact resources and verify the child's own request route rather than treating role names as model proof.*

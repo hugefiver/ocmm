@@ -11,6 +11,11 @@ import { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
 import { ChildrenController } from "./children-controller.js";
 import { ChildrenPanel } from "./ChildrenPanel.js";
 import { CHILDREN_NS, childrenLocaleEn, childrenLocaleZh } from "./children-locales.js";
+import { PERMISSION_REMOTE } from "../permission-remote.js";
+import { permissionClient } from "./permission-client.js";
+import { PermissionController } from "./permission-controller.js";
+import { PermissionsPanel } from "./PermissionsPanel.js";
+import { PERMISSIONS_NS, permissionEn, permissionZh } from "./permission-locales.js";
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
 export { ProfilesSection } from "./ProfilesSection.js";
 export { NS, en, zh } from "./locales.js";
@@ -25,6 +30,50 @@ export const inject = ["slots", "locale", "remote"];
 export async function apply(ctx) {
     await ctx.remote.$mount(TYPERT_REMOTE);
     await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
+    await ctx.remote.$mount(PERMISSION_REMOTE);
+    const permissions = new PermissionController();
+    ctx.effect(() => () => permissions.dispose(), "dsmm: permission controls");
+    ctx.effect(() => ctx.locale.register(PERMISSIONS_NS, { en: permissionEn, zh: permissionZh }), "dsmm: permission locale");
+    ctx.effect(() => {
+        const style = document.createElement("style");
+        style.dataset.dsmmPermissions = "";
+        style.textContent = PROFILE_STYLES;
+        document.head.append(style);
+        return () => style.remove();
+    }, "dsmm: permission styles");
+    const permissionInject = () => ({ controller: permissions }), permissionT = ctx.locale.bind(PERMISSIONS_NS);
+    ctx.slots.inject("settings.section", () => ctx.slots.register({ name: "settings.section", id: "dsmm-permissions", order: 35,
+        label: () => permissionT("title"), locale: PERMISSIONS_NS, inject: permissionInject }, PermissionsPanel));
+    ctx.slots.inject("conversation.view", () => ctx.slots.register({ name: "conversation.view", id: "dsmm-permissions", order: 35,
+        label: () => permissionT("title"), locale: PERMISSIONS_NS, inject: permissionInject }, PermissionsPanel));
+    void ctx.inject(["connection"], connectionCtx => {
+        const handle = connectionCtx.connection, invoke = permissionClient(handle);
+        const update = () => { const generation = handle.generation.getSnapshot(); permissions.bindConnection(generation === undefined ? null : invoke, generation); };
+        update();
+        connectionCtx.effect(() => handle.generation.subscribe(update));
+        connectionCtx.effect(() => () => permissions.bindConnection(null), "dsmm: permission connection withdrawal");
+    });
+    void ctx.inject(["uiSession", "sessions"], sessionCtx => {
+        const source = sessionCtx.uiSession.adapter.current, sessions = sessionCtx.sessions;
+        let observed, stop;
+        const update = () => {
+            const id = source.getSnapshot().key, binding = id === undefined ? undefined : sessions.binding(id);
+            if (binding !== observed) {
+                stop?.();
+                observed = binding;
+                stop = binding?.session.subscribe(update);
+            }
+            const snapshot = binding?.session.getSnapshot(), catalog = sessions.list.getSnapshot(), summary = id === undefined ? undefined : catalog.byId[id];
+            const child = snapshot?.subagent != null || summary?.origin === "subagent" || summary?.parentId !== undefined;
+            const root = id !== undefined && binding?.sessionId === id && snapshot?.sessionId === id && snapshot.openState === "open" && !snapshot.removed
+                && catalog.ids.includes(id) && summary !== undefined && !child;
+            permissions.bindScope(id ?? null, binding ?? null, child ? "child" : root ? "root" : "unknown");
+        };
+        update();
+        sessionCtx.effect(() => source.subscribe(update));
+        sessionCtx.effect(() => sessions.list.subscribe(update));
+        sessionCtx.effect(() => () => { stop?.(); permissions.bindScope(null, null, "unknown"); }, "dsmm: permission native session withdrawal");
+    });
     let deployment = null;
     let profiles = null;
     let children = null;

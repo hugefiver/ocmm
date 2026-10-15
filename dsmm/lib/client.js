@@ -8,11 +8,11 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
+var __copyProps = (to, from2, except, desc) => {
+  if (from2 && typeof from2 === "object" || typeof from2 === "function") {
+    for (let key of __getOwnPropNames(from2))
       if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+        __defProp(to, key, { get: () => from2[key], enumerable: !(desc = __getOwnPropDesc(from2, key)) || desc.enumerable });
   }
   return to;
 };
@@ -39,6 +39,147 @@ __export(index_exports, {
   zh: () => zh
 });
 module.exports = __toCommonJS(index_exports);
+
+// src/route-json.ts
+var MAX_ROUTE_BYTES = 128 * 1024;
+var hostFields = new Set([
+  "provider",
+  "model",
+  "messages",
+  "tools",
+  "toolHistory",
+  "system",
+  "input",
+  "agent",
+  "agentId",
+  "role",
+  "roleId",
+  "session",
+  "sessionId",
+  "signal",
+  "permission",
+  "permissions",
+  "auth",
+  "authorization",
+  "apiKey",
+  "apiKeyEnv",
+  "credentials",
+  "headers",
+  "endpoint",
+  "apiEndpoint",
+  "baseURL",
+  "url",
+  "fetch",
+  "onPayload",
+  "callbacks",
+  "stream",
+  "stream_options",
+  "tool_choice",
+  "parallel_tool_calls",
+  "functions",
+  "function_call",
+  "timeout",
+  "timeoutMs",
+  "transport",
+  "transformHeaders",
+  "onResponse",
+  "context",
+  "systemPromptUpdate",
+  "toolUpdate",
+  "adapterDefaults",
+  "readOnly",
+  "toolFilter",
+  "authorityCeiling",
+  "guards",
+  "roleRouting",
+  "runtimePolicy",
+  "runtimePolicyCapture",
+  "subagents",
+  "allowRouteOverride",
+  "maxDepth",
+  "toolTopology",
+  "profilePin",
+  "originalAdmissionEpoch",
+  "admissionEpoch",
+  "childSessionId",
+  "parentSessionId"
+].map(parameterKey));
+var aliases = [
+  ["reasoningEffort", "reasoning_effort"],
+  ["maxTokens", "max_tokens", "max_completion_tokens", "max_output_tokens"]
+];
+function parameterKey(key) {
+  return key.toLowerCase().replace(/[-_]/gu, "");
+}
+function fail() {
+  throw new TypeError("Model routes must contain bounded plain JSON and valid route fields");
+}
+var routeFields = /* @__PURE__ */ new Set(["provider", "model", "temperature", "stop", ...aliases.flat()]);
+function validateModelRouteFieldName(key) {
+  if (["__proto__", "prototype", "constructor"].includes(key)) fail();
+  if (routeFields.has(key)) return;
+  if (hostFields.has(parameterKey(key)) || [...routeFields].some((field) => parameterKey(field) === parameterKey(key))) fail();
+}
+function copyRouteJson(input) {
+  const active = /* @__PURE__ */ new Set();
+  const copy = (value, depth2) => {
+    if (depth2 > 32) fail();
+    if (value === null || typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(value)) !== value) fail();
+      return value;
+    }
+    if (typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0)) return value;
+    if (typeof value !== "object" || value === null || active.has(value)) fail();
+    const prototype = Object.getPrototypeOf(value);
+    if (Array.isArray(value) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) fail();
+    if (Object.getOwnPropertySymbols(value).length) fail();
+    active.add(value);
+    const result2 = Array.isArray(value) ? [] : {};
+    for (const [key, descriptor4] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(key)) !== key || ["__proto__", "prototype", "constructor"].includes(key) || !Object.hasOwn(descriptor4, "value") || !descriptor4.enumerable) fail();
+      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail();
+      Reflect.set(result2, key, copy(descriptor4.value, depth2 + 1));
+    }
+    if (Array.isArray(value) && Object.keys(result2).length !== value.length) fail();
+    active.delete(value);
+    return result2;
+  };
+  const result = copy(input, 0);
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_ROUTE_BYTES) fail();
+  return result;
+}
+function boundedText(value, max) {
+  if (typeof value !== "string" || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) fail();
+}
+function normalizeModelRouteJson(input, sparse = false, allowIdentityWhitespace = false) {
+  const route3 = copyRouteJson(input);
+  if (route3 === null || typeof route3 !== "object" || Array.isArray(route3)) fail();
+  const row = route3;
+  if (!sparse && (!Object.hasOwn(row, "provider") || !Object.hasOwn(row, "model"))) fail();
+  for (const key of Object.keys(row)) {
+    validateModelRouteFieldName(key);
+    const value = row[key];
+    if (key === "provider") {
+      boundedText(value, 128);
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(allowIdentityWhitespace ? value.trim() : value)) fail();
+    } else if (key === "model") {
+      boundedText(value, 512);
+      if (value.includes("://")) fail();
+    } else if (key === "reasoningEffort" || key === "reasoning_effort") {
+      boundedText(value, 64);
+    } else if (key === "temperature") {
+      if (typeof value !== "number") fail();
+    } else if (aliases[1].includes(key)) {
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) fail();
+    } else if (key === "stop") {
+      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) fail();
+    }
+  }
+  for (const group of aliases) if (group.filter((key) => Object.hasOwn(row, key)).length > 1) fail();
+  return row;
+}
 
 // src/routing-policy.ts
 var DEFAULT_DSMM_RATE_LIMIT_POLICY = Object.freeze({
@@ -87,18 +228,42 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/modules.ts
+var DSMM_MODULE_DESCRIPTORS = Object.freeze([
+  Object.freeze({ id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }),
+  Object.freeze({ id: "permission-control", label: "Permission control", key: "permissionControl.enabled" })
+]);
+
+// src/model-parameter-policy.ts
+var passthrough = Object.freeze({ mode: "passthrough" });
+var nativeDefaults = Object.freeze({ mode: "native-defaults" });
+var legacy = Object.freeze({ mode: "legacy-native-v1" });
+function parseModelParameterPolicy(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !("mode" in value)) throw new TypeError("Invalid model parameter policy");
+  switch (value.mode) {
+    case "passthrough":
+      return passthrough;
+    case "native-defaults":
+      return nativeDefaults;
+    case "legacy-native-v1":
+      return legacy;
+    default:
+      throw new TypeError("Invalid model parameter policy");
+  }
+}
+
 // src/profile-types.ts
 var DSMM_ROUTE_SOURCES = ["inherited", "primary", "level", "invocation-route"];
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
-function createScanner(text3, ignoreTrivia = false) {
-  const len = text3.length;
+function createScanner(text5, ignoreTrivia = false) {
+  const len = text5.length;
   let pos = 0, value = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
   function scanHexDigits(count, exact) {
     let digits = 0;
     let value2 = 0;
     while (digits < count || !exact) {
-      let ch = text3.charCodeAt(pos);
+      let ch = text5.charCodeAt(pos);
       if (ch >= 48 && ch <= 57) {
         value2 = value2 * 16 + ch - 48;
       } else if (ch >= 65 && ch <= 70) {
@@ -125,35 +290,35 @@ function createScanner(text3, ignoreTrivia = false) {
   }
   function scanNumber() {
     let start = pos;
-    if (text3.charCodeAt(pos) === 48) {
+    if (text5.charCodeAt(pos) === 48) {
       pos++;
     } else {
       pos++;
-      while (pos < text3.length && isDigit(text3.charCodeAt(pos))) {
+      while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
         pos++;
       }
     }
-    if (pos < text3.length && text3.charCodeAt(pos) === 46) {
+    if (pos < text5.length && text5.charCodeAt(pos) === 46) {
       pos++;
-      if (pos < text3.length && isDigit(text3.charCodeAt(pos))) {
+      if (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
         pos++;
-        while (pos < text3.length && isDigit(text3.charCodeAt(pos))) {
+        while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
           pos++;
         }
       } else {
         scanError = 3;
-        return text3.substring(start, pos);
+        return text5.substring(start, pos);
       }
     }
     let end = pos;
-    if (pos < text3.length && (text3.charCodeAt(pos) === 69 || text3.charCodeAt(pos) === 101)) {
+    if (pos < text5.length && (text5.charCodeAt(pos) === 69 || text5.charCodeAt(pos) === 101)) {
       pos++;
-      if (pos < text3.length && text3.charCodeAt(pos) === 43 || text3.charCodeAt(pos) === 45) {
+      if (pos < text5.length && text5.charCodeAt(pos) === 43 || text5.charCodeAt(pos) === 45) {
         pos++;
       }
-      if (pos < text3.length && isDigit(text3.charCodeAt(pos))) {
+      if (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
         pos++;
-        while (pos < text3.length && isDigit(text3.charCodeAt(pos))) {
+        while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
           pos++;
         }
         end = pos;
@@ -161,30 +326,30 @@ function createScanner(text3, ignoreTrivia = false) {
         scanError = 3;
       }
     }
-    return text3.substring(start, end);
+    return text5.substring(start, end);
   }
   function scanString() {
     let result = "", start = pos;
     while (true) {
       if (pos >= len) {
-        result += text3.substring(start, pos);
+        result += text5.substring(start, pos);
         scanError = 2;
         break;
       }
-      const ch = text3.charCodeAt(pos);
+      const ch = text5.charCodeAt(pos);
       if (ch === 34) {
-        result += text3.substring(start, pos);
+        result += text5.substring(start, pos);
         pos++;
         break;
       }
       if (ch === 92) {
-        result += text3.substring(start, pos);
+        result += text5.substring(start, pos);
         pos++;
         if (pos >= len) {
           scanError = 2;
           break;
         }
-        const ch2 = text3.charCodeAt(pos++);
+        const ch2 = text5.charCodeAt(pos++);
         switch (ch2) {
           case 34:
             result += '"';
@@ -226,7 +391,7 @@ function createScanner(text3, ignoreTrivia = false) {
       }
       if (ch >= 0 && ch <= 31) {
         if (isLineBreak(ch)) {
-          result += text3.substring(start, pos);
+          result += text5.substring(start, pos);
           scanError = 2;
           break;
         } else {
@@ -247,19 +412,19 @@ function createScanner(text3, ignoreTrivia = false) {
       tokenOffset = len;
       return token = 17;
     }
-    let code = text3.charCodeAt(pos);
+    let code = text5.charCodeAt(pos);
     if (isWhiteSpace(code)) {
       do {
         pos++;
         value += String.fromCharCode(code);
-        code = text3.charCodeAt(pos);
+        code = text5.charCodeAt(pos);
       } while (isWhiteSpace(code));
       return token = 15;
     }
     if (isLineBreak(code)) {
       pos++;
       value += String.fromCharCode(code);
-      if (code === 13 && text3.charCodeAt(pos) === 10) {
+      if (code === 13 && text5.charCodeAt(pos) === 10) {
         pos++;
         value += "\n";
       }
@@ -295,31 +460,31 @@ function createScanner(text3, ignoreTrivia = false) {
       // comments
       case 47:
         const start = pos - 1;
-        if (text3.charCodeAt(pos + 1) === 47) {
+        if (text5.charCodeAt(pos + 1) === 47) {
           pos += 2;
           while (pos < len) {
-            if (isLineBreak(text3.charCodeAt(pos))) {
+            if (isLineBreak(text5.charCodeAt(pos))) {
               break;
             }
             pos++;
           }
-          value = text3.substring(start, pos);
+          value = text5.substring(start, pos);
           return token = 12;
         }
-        if (text3.charCodeAt(pos + 1) === 42) {
+        if (text5.charCodeAt(pos + 1) === 42) {
           pos += 2;
           const safeLength = len - 1;
           let commentClosed = false;
           while (pos < safeLength) {
-            const ch = text3.charCodeAt(pos);
-            if (ch === 42 && text3.charCodeAt(pos + 1) === 47) {
+            const ch = text5.charCodeAt(pos);
+            if (ch === 42 && text5.charCodeAt(pos + 1) === 47) {
               pos += 2;
               commentClosed = true;
               break;
             }
             pos++;
             if (isLineBreak(ch)) {
-              if (ch === 13 && text3.charCodeAt(pos) === 10) {
+              if (ch === 13 && text5.charCodeAt(pos) === 10) {
                 pos++;
               }
               lineNumber++;
@@ -330,7 +495,7 @@ function createScanner(text3, ignoreTrivia = false) {
             pos++;
             scanError = 1;
           }
-          value = text3.substring(start, pos);
+          value = text5.substring(start, pos);
           return token = 13;
         }
         value += String.fromCharCode(code);
@@ -340,7 +505,7 @@ function createScanner(text3, ignoreTrivia = false) {
       case 45:
         value += String.fromCharCode(code);
         pos++;
-        if (pos === len || !isDigit(text3.charCodeAt(pos))) {
+        if (pos === len || !isDigit(text5.charCodeAt(pos))) {
           return token = 16;
         }
       // found a minus, followed by a number so
@@ -362,10 +527,10 @@ function createScanner(text3, ignoreTrivia = false) {
       default:
         while (pos < len && isUnknownContentCharacter(code)) {
           pos++;
-          code = text3.charCodeAt(pos);
+          code = text5.charCodeAt(pos);
         }
         if (tokenOffset !== pos) {
-          value = text3.substring(tokenOffset, pos);
+          value = text5.substring(tokenOffset, pos);
           switch (value) {
             case "true":
               return token = 8;
@@ -610,9 +775,9 @@ function format(documentText, range, options) {
     return token;
   }
   const editOperations = [];
-  function addEdit(text3, startOffset, endOffset) {
-    if (!hasError && (!range || startOffset < rangeEnd && endOffset > rangeStart) && documentText.substring(startOffset, endOffset) !== text3) {
-      editOperations.push({ offset: startOffset, length: endOffset - startOffset, content: text3 });
+  function addEdit(text5, startOffset, endOffset) {
+    if (!hasError && (!range || startOffset < rangeEnd && endOffset > rangeStart) && documentText.substring(startOffset, endOffset) !== text5) {
+      editOperations.push({ offset: startOffset, length: endOffset - startOffset, content: text5 });
     }
   }
   let firstToken = scanNext();
@@ -760,11 +925,11 @@ function computeIndentLevel(content2, options) {
   }
   return Math.floor(nChars / tabSize);
 }
-function getEOL(options, text3) {
-  for (let i = 0; i < text3.length; i++) {
-    const ch = text3.charAt(i);
+function getEOL(options, text5) {
+  for (let i = 0; i < text5.length; i++) {
+    const ch = text5.charAt(i);
     if (ch === "\r") {
-      if (i + 1 < text3.length && text3.charAt(i + 1) === "\n") {
+      if (i + 1 < text5.length && text5.charAt(i + 1) === "\n") {
         return "\r\n";
       }
       return "\r";
@@ -774,8 +939,8 @@ function getEOL(options, text3) {
   }
   return options && options.eol || "\n";
 }
-function isEOL(text3, offset) {
-  return "\r\n".indexOf(text3.charAt(offset)) !== -1;
+function isEOL(text5, offset) {
+  return "\r\n".indexOf(text5.charAt(offset)) !== -1;
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/parser.js
@@ -785,7 +950,7 @@ var ParseOptions;
     allowTrailingComma: false
   };
 })(ParseOptions || (ParseOptions = {}));
-function parse(text3, errors = [], options = ParseOptions.DEFAULT) {
+function parse(text5, errors = [], options = ParseOptions.DEFAULT) {
   let currentProperty = null;
   let currentParent = [];
   const previousParents = [];
@@ -825,10 +990,10 @@ function parse(text3, errors = [], options = ParseOptions.DEFAULT) {
       errors.push({ error, offset, length });
     }
   };
-  visit(text3, visitor, options);
+  visit(text5, visitor, options);
   return currentParent[0];
 }
-function parseTree(text3, errors = [], options = ParseOptions.DEFAULT) {
+function parseTree(text5, errors = [], options = ParseOptions.DEFAULT) {
   let currentParent = { type: "array", offset: -1, length: -1, children: [], parent: void 0 };
   function ensurePropertyComplete(endOffset) {
     if (currentParent.type === "property") {
@@ -879,7 +1044,7 @@ function parseTree(text3, errors = [], options = ParseOptions.DEFAULT) {
       errors.push({ error, offset, length });
     }
   };
-  visit(text3, visitor, options);
+  visit(text5, visitor, options);
   const result = currentParent.children[0];
   if (result) {
     delete result.parent;
@@ -917,8 +1082,8 @@ function findNodeAtLocation(root, path) {
   }
   return node;
 }
-function visit(text3, visitor, options = ParseOptions.DEFAULT) {
-  const _scanner = createScanner(text3, false);
+function visit(text5, visitor, options = ParseOptions.DEFAULT) {
+  const _scanner = createScanner(text5, false);
   const _jsonPath = [];
   let suppressedCallbacks = 0;
   function toNoArgVisit(visitFunction) {
@@ -1244,10 +1409,10 @@ function getNodeType(value) {
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/edit.js
-function setProperty(text3, originalPath, value, options) {
+function setProperty(text5, originalPath, value, options) {
   const path = originalPath.slice();
   const errors = [];
-  const root = parseTree(text3, errors);
+  const root = parseTree(text5, errors);
   let parent = void 0;
   let lastSegment = void 0;
   while (path.length > 0) {
@@ -1267,7 +1432,7 @@ function setProperty(text3, originalPath, value, options) {
     if (value === void 0) {
       throw new Error("Can not delete in empty document");
     }
-    return withFormatting(text3, { offset: root ? root.offset : 0, length: root ? root.length : 0, content: JSON.stringify(value) }, options);
+    return withFormatting(text5, { offset: root ? root.offset : 0, length: root ? root.length : 0, content: JSON.stringify(value) }, options);
   } else if (parent.type === "object" && typeof lastSegment === "string" && Array.isArray(parent.children)) {
     const existing = findNodeAtLocation(parent, [lastSegment]);
     if (existing !== void 0) {
@@ -1288,9 +1453,9 @@ function setProperty(text3, originalPath, value, options) {
             removeEnd = next.offset;
           }
         }
-        return withFormatting(text3, { offset: removeBegin, length: removeEnd - removeBegin, content: "" }, options);
+        return withFormatting(text5, { offset: removeBegin, length: removeEnd - removeBegin, content: "" }, options);
       } else {
-        return withFormatting(text3, { offset: existing.offset, length: existing.length, content: JSON.stringify(value) }, options);
+        return withFormatting(text5, { offset: existing.offset, length: existing.length, content: JSON.stringify(value) }, options);
       }
     } else {
       if (value === void 0) {
@@ -1307,7 +1472,7 @@ function setProperty(text3, originalPath, value, options) {
       } else {
         edit = { offset: parent.offset + 1, length: 0, content: newProperty + "," };
       }
-      return withFormatting(text3, edit, options);
+      return withFormatting(text5, edit, options);
     }
   } else if (parent.type === "array" && typeof lastSegment === "number" && Array.isArray(parent.children)) {
     const insertIndex = lastSegment;
@@ -1320,7 +1485,7 @@ function setProperty(text3, originalPath, value, options) {
         const previous = parent.children[parent.children.length - 1];
         edit = { offset: previous.offset + previous.length, length: 0, content: "," + newProperty };
       }
-      return withFormatting(text3, edit, options);
+      return withFormatting(text5, edit, options);
     } else if (value === void 0 && parent.children.length >= 0) {
       const removalIndex = lastSegment;
       const toRemove = parent.children[removalIndex];
@@ -1335,7 +1500,7 @@ function setProperty(text3, originalPath, value, options) {
       } else {
         edit = { offset: toRemove.offset, length: parent.children[removalIndex + 1].offset - toRemove.offset, content: "" };
       }
-      return withFormatting(text3, edit, options);
+      return withFormatting(text5, edit, options);
     } else if (value !== void 0) {
       let edit;
       const newProperty = `${JSON.stringify(value)}`;
@@ -1349,7 +1514,7 @@ function setProperty(text3, originalPath, value, options) {
         const previous = parent.children[index - 1];
         edit = { offset: previous.offset + previous.length, length: 0, content: "," + newProperty };
       }
-      return withFormatting(text3, edit, options);
+      return withFormatting(text5, edit, options);
     } else {
       throw new Error(`Can not ${value === void 0 ? "remove" : options.isArrayInsertion ? "insert" : "modify"} Array index ${insertIndex} as length is not sufficient`);
     }
@@ -1357,11 +1522,11 @@ function setProperty(text3, originalPath, value, options) {
     throw new Error(`Can not add ${typeof lastSegment !== "number" ? "index" : "property"} to parent of type ${parent.type}`);
   }
 }
-function withFormatting(text3, edit, options) {
+function withFormatting(text5, edit, options) {
   if (!options.formattingOptions) {
     return [edit];
   }
-  let newText = applyEdit(text3, edit);
+  let newText = applyEdit(text5, edit);
   let begin = edit.offset;
   let end = edit.offset + edit.content.length;
   if (edit.length === 0 || edit.content.length === 0) {
@@ -1380,11 +1545,11 @@ function withFormatting(text3, edit, options) {
     end = Math.max(end, edit2.offset + edit2.length);
     end += edit2.content.length - edit2.length;
   }
-  const editLength = text3.length - (newText.length - end) - begin;
+  const editLength = text5.length - (newText.length - end) - begin;
   return [{ offset: begin, length: editLength, content: newText.substring(begin, end) }];
 }
-function applyEdit(text3, edit) {
-  return text3.substring(0, edit.offset) + edit.content + text3.substring(edit.offset + edit.length);
+function applyEdit(text5, edit) {
+  return text5.substring(0, edit.offset) + edit.content + text5.substring(edit.offset + edit.length);
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js
@@ -1440,10 +1605,10 @@ var ParseErrorCode;
   ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
   ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
 })(ParseErrorCode || (ParseErrorCode = {}));
-function modify(text3, path, value, options) {
-  return setProperty(text3, path, value, options);
+function modify(text5, path, value, options) {
+  return setProperty(text5, path, value, options);
 }
-function applyEdits(text3, edits) {
+function applyEdits(text5, edits) {
   let sortedEdits = edits.slice(0).sort((a, b) => {
     const diff = a.offset - b.offset;
     if (diff === 0) {
@@ -1451,17 +1616,1036 @@ function applyEdits(text3, edits) {
     }
     return diff;
   });
-  let lastModifiedOffset = text3.length;
+  let lastModifiedOffset = text5.length;
   for (let i = sortedEdits.length - 1; i >= 0; i--) {
     let e = sortedEdits[i];
     if (e.offset + e.length <= lastModifiedOffset) {
-      text3 = applyEdit(text3, e);
+      text5 = applyEdit(text5, e);
     } else {
       throw new Error("Overlapping edit");
     }
     lastModifiedOffset = e.offset;
   }
-  return text3;
+  return text5;
+}
+
+// ../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.5/node_modules/@deepseek-ai/cosmokit/lib/index.js
+function isNullable(value) {
+  return value === null || value === void 0;
+}
+function isPlainObject(data) {
+  return data && typeof data === "object" && !Array.isArray(data);
+}
+function filterKeys(object4, filter) {
+  return Object.fromEntries(Object.entries(object4).filter(([key, value]) => filter(key, value)));
+}
+function mapValues(object4, transform) {
+  return Object.fromEntries(Object.entries(object4).map(([key, value]) => [key, transform(value, key)]));
+}
+function pick(source, keys, forced) {
+  if (!keys) return { ...source };
+  const result = {};
+  for (const key of keys) if (forced || source[key] !== void 0) result[key] = source[key];
+  return result;
+}
+var write = Symbol.for("cosmokit.volatile.write");
+function snapshot(value, ancestors = /* @__PURE__ */ new Set()) {
+  if (typeof value === "function") throw new TypeError("volatile config cannot contain functions");
+  if (value === null || typeof value !== "object") return value;
+  if (ancestors.has(value)) throw new TypeError("volatile config cannot contain cycles");
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return Object.freeze(value.map((item) => snapshot(item, ancestors)));
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new TypeError("volatile config objects must be plain objects or arrays");
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item, ancestors)])));
+  } finally {
+    ancestors.delete(value);
+  }
+}
+function createVolatile(value) {
+  let current = snapshot(value);
+  return Object.freeze({
+    get: () => current,
+    [write]: (value2) => {
+      current = value2;
+    }
+  });
+}
+function isVolatile(value) {
+  return typeof value === "object" && value !== null && write in value;
+}
+function is(type, value) {
+  if (arguments.length === 1) return (value2) => is(type, value2);
+  return type in globalThis && value instanceof globalThis[type] || Object.prototype.toString.call(value).slice(8, -1) === type;
+}
+function isArrayBufferLike(value) {
+  return is("ArrayBuffer", value) || is("SharedArrayBuffer", value);
+}
+function isArrayBufferSource(value) {
+  return isArrayBufferLike(value) || ArrayBuffer.isView(value);
+}
+var Binary;
+(function(Binary2) {
+  Binary2.is = isArrayBufferLike;
+  Binary2.isSource = isArrayBufferSource;
+  function fromSource(source) {
+    if (ArrayBuffer.isView(source)) return source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
+    else return source;
+  }
+  Binary2.fromSource = fromSource;
+  function toBase64(source) {
+    source = fromSource(source);
+    if (typeof Buffer !== "undefined") return Buffer.from(source).toString("base64");
+    let binary = "";
+    const bytes = new Uint8Array(source);
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+  Binary2.toBase64 = toBase64;
+  function fromBase64(source) {
+    if (typeof Buffer !== "undefined") return fromSource(Buffer.from(source, "base64"));
+    return Uint8Array.from(atob(source), (c) => c.charCodeAt(0));
+  }
+  Binary2.fromBase64 = fromBase64;
+  function toHex(source) {
+    source = fromSource(source);
+    if (typeof Buffer !== "undefined") return Buffer.from(source).toString("hex");
+    return Array.from(new Uint8Array(source), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  Binary2.toHex = toHex;
+  function fromHex(source) {
+    if (typeof Buffer !== "undefined") return fromSource(Buffer.from(source, "hex"));
+    const hex = source.length % 2 === 0 ? source : source.slice(0, source.length - 1);
+    const buffer = [];
+    for (let i = 0; i < hex.length; i += 2) buffer.push(parseInt(`${hex[i]}${hex[i + 1]}`, 16));
+    return Uint8Array.from(buffer).buffer;
+  }
+  Binary2.fromHex = fromHex;
+})(Binary || (Binary = {}));
+var base64ToArrayBuffer = Binary.fromBase64;
+var arrayBufferToBase64 = Binary.toBase64;
+var hexToArrayBuffer = Binary.fromHex;
+var arrayBufferToHex = Binary.toHex;
+function clone(source, refs = /* @__PURE__ */ new Map()) {
+  if (!source || typeof source !== "object") return source;
+  if (is("Date", source)) return new Date(source.valueOf());
+  if (is("RegExp", source)) return new RegExp(source.source, source.flags);
+  if (isArrayBufferLike(source)) return source.slice(0);
+  if (ArrayBuffer.isView(source)) return source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
+  const cached = refs.get(source);
+  if (cached) return cached;
+  if (Array.isArray(source)) {
+    const result2 = [];
+    refs.set(source, result2);
+    source.forEach((value, index) => {
+      result2[index] = Reflect.apply(clone, null, [value, refs]);
+    });
+    return result2;
+  }
+  const result = Object.create(Object.getPrototypeOf(source));
+  refs.set(source, result);
+  for (const key of Reflect.ownKeys(source)) {
+    const descriptor4 = { ...Reflect.getOwnPropertyDescriptor(source, key) };
+    if ("value" in descriptor4) descriptor4.value = Reflect.apply(clone, null, [descriptor4.value, refs]);
+    Reflect.defineProperty(result, key, descriptor4);
+  }
+  return result;
+}
+function deepEqual(a, b, strict) {
+  const ancestors = /* @__PURE__ */ new Set();
+  function compare(a2, b2) {
+    if (a2 === b2) return true;
+    if (isVolatile(a2) || isVolatile(b2)) return isVolatile(a2) && isVolatile(b2);
+    if (!strict && isNullable(a2) && isNullable(b2)) return true;
+    if (typeof a2 !== typeof b2 || typeof a2 !== "object" || !a2 || !b2) return false;
+    if (ancestors.has(a2)) return false;
+    function check(test, then) {
+      return test(a2) ? test(b2) ? then(a2, b2) : false : test(b2) ? false : void 0;
+    }
+    ancestors.add(a2);
+    try {
+      return check(Array.isArray, (a3, b3) => {
+        if (a3.length !== b3.length) return false;
+        for (let index = 0; index < a3.length; index++) if (!compare(a3[index], b3[index])) return false;
+        return true;
+      }) ?? check(is("Date"), (a3, b3) => a3.valueOf() === b3.valueOf()) ?? check(is("URL"), (a3, b3) => a3.href === b3.href) ?? check(is("RegExp"), (a3, b3) => a3.source === b3.source && a3.flags === b3.flags) ?? check(isArrayBufferLike, (a3, b3) => {
+        if (a3.byteLength !== b3.byteLength) return false;
+        const viewA = new Uint8Array(a3);
+        const viewB = new Uint8Array(b3);
+        for (let i = 0; i < viewA.length; i++) if (viewA[i] !== viewB[i]) return false;
+        return true;
+      }) ?? ((!strict || [a2, b2].every((value) => Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) && Object.keys({
+        ...a2,
+        ...b2
+      }).every((key) => compare(a2[key], b2[key])));
+    } finally {
+      ancestors.delete(a2);
+    }
+  }
+  return compare(a, b);
+}
+var Time;
+(function(Time2) {
+  Time2.millisecond = 1;
+  Time2.second = 1e3;
+  Time2.minute = Time2.second * 60;
+  Time2.hour = Time2.minute * 60;
+  Time2.day = Time2.hour * 24;
+  Time2.week = Time2.day * 7;
+  let timezoneOffset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
+  function setTimezoneOffset(offset) {
+    timezoneOffset = offset;
+  }
+  Time2.setTimezoneOffset = setTimezoneOffset;
+  function getTimezoneOffset() {
+    return timezoneOffset;
+  }
+  Time2.getTimezoneOffset = getTimezoneOffset;
+  function getDateNumber(date2 = /* @__PURE__ */ new Date(), offset) {
+    if (typeof date2 === "number") date2 = new Date(date2);
+    if (offset === void 0) offset = timezoneOffset;
+    return Math.floor((date2.valueOf() / Time2.minute - offset) / 1440);
+  }
+  Time2.getDateNumber = getDateNumber;
+  function fromDateNumber(value, offset) {
+    const date2 = new Date(value * Time2.day);
+    if (offset === void 0) offset = timezoneOffset;
+    return new Date(+date2 + offset * Time2.minute);
+  }
+  Time2.fromDateNumber = fromDateNumber;
+  const numeric = /\d+(?:\.\d+)?/.source;
+  const timeRegExp = new RegExp(`^${[
+    "w(?:eek(?:s)?)?",
+    "d(?:ay(?:s)?)?",
+    "h(?:our(?:s)?)?",
+    "m(?:in(?:ute)?(?:s)?)?",
+    "s(?:ec(?:ond)?(?:s)?)?"
+  ].map((unit) => `(${numeric}${unit})?`).join("")}$`);
+  function parseTime(source) {
+    const capture = timeRegExp.exec(source);
+    if (!capture) return 0;
+    return (parseFloat(capture[1]) * Time2.week || 0) + (parseFloat(capture[2]) * Time2.day || 0) + (parseFloat(capture[3]) * Time2.hour || 0) + (parseFloat(capture[4]) * Time2.minute || 0) + (parseFloat(capture[5]) * Time2.second || 0);
+  }
+  Time2.parseTime = parseTime;
+  function parseDate(date2) {
+    const parsed = parseTime(date2);
+    if (parsed) date2 = Date.now() + parsed;
+    else if (/^\d{1,2}(:\d{1,2}){1,2}$/.test(date2)) date2 = `${(/* @__PURE__ */ new Date()).toLocaleDateString()}-${date2}`;
+    else if (/^\d{1,2}-\d{1,2}-\d{1,2}(:\d{1,2}){1,2}$/.test(date2)) date2 = `${(/* @__PURE__ */ new Date()).getFullYear()}-${date2}`;
+    return date2 ? new Date(date2) : /* @__PURE__ */ new Date();
+  }
+  Time2.parseDate = parseDate;
+  function format2(ms) {
+    const abs = Math.abs(ms);
+    if (abs >= Time2.day - Time2.hour / 2) return Math.round(ms / Time2.day) + "d";
+    else if (abs >= Time2.hour - Time2.minute / 2) return Math.round(ms / Time2.hour) + "h";
+    else if (abs >= Time2.minute - Time2.second / 2) return Math.round(ms / Time2.minute) + "m";
+    else if (abs >= Time2.second) return Math.round(ms / Time2.second) + "s";
+    return ms + "ms";
+  }
+  Time2.format = format2;
+  function toDigits(source, length = 2) {
+    return source.toString().padStart(length, "0");
+  }
+  Time2.toDigits = toDigits;
+  function template(template2, time = /* @__PURE__ */ new Date()) {
+    return template2.replace("yyyy", time.getFullYear().toString()).replace("yy", time.getFullYear().toString().slice(2)).replace("MM", toDigits(time.getMonth() + 1)).replace("dd", toDigits(time.getDate())).replace("hh", toDigits(time.getHours())).replace("mm", toDigits(time.getMinutes())).replace("ss", toDigits(time.getSeconds())).replace("SSS", toDigits(time.getMilliseconds(), 3));
+  }
+  Time2.template = template;
+})(Time || (Time = {}));
+
+// ../node_modules/.pnpm/@deepseek-ai+schemastery@3.18.4/node_modules/@deepseek-ai/schemastery/lib/index.mjs
+var kSchema = Symbol.for("schemastery");
+var kValidationError = Symbol.for("ValidationError");
+globalThis.__schemastery_index__ ??= 0;
+globalThis.__schemastery_refs__ = void 0;
+var ValidationError = class extends TypeError {
+  options;
+  name = "ValidationError";
+  constructor(message, options) {
+    let prefix = "$";
+    for (const segment of options.path || []) if (typeof segment === "string") prefix += "." + segment;
+    else if (typeof segment === "number") prefix += "[" + segment + "]";
+    else if (typeof segment === "symbol") prefix += `[Symbol(${segment.toString()})]`;
+    if (prefix.startsWith(".")) prefix = prefix.slice(1);
+    super((prefix === "$" ? "" : `${prefix} `) + message);
+    this.options = options;
+  }
+  static is(error) {
+    return !!error?.[kValidationError];
+  }
+};
+Object.defineProperty(ValidationError.prototype, kValidationError, { value: true });
+var Schema = function(options) {
+  const schema = function(data, options2 = {}) {
+    return Schema.resolve(data, schema, options2)[0];
+  };
+  if (options.refs) {
+    const refs = mapValues(options.refs, (options2) => new Schema(options2));
+    const getRef = (uid) => refs[uid];
+    for (const key in refs) {
+      const options2 = refs[key];
+      options2.sKey = getRef(options2.sKey);
+      options2.inner = getRef(options2.inner);
+      options2.list = options2.list && options2.list.map(getRef);
+      options2.dict = options2.dict && mapValues(options2.dict, getRef);
+    }
+    return refs[options.uid];
+  }
+  Object.assign(schema, options);
+  if (typeof schema.callback === "string") try {
+    schema.callback = new Function("return " + schema.callback)();
+  } catch {
+  }
+  Object.defineProperty(schema, "uid", { value: globalThis.__schemastery_index__++ });
+  Object.setPrototypeOf(schema, Schema.prototype);
+  schema.meta ||= {};
+  schema.toString = schema.toString.bind(schema);
+  return schema;
+};
+Schema.prototype = Object.create(Function.prototype);
+Schema.prototype[kSchema] = true;
+Object.defineProperty(Schema.prototype, "~standard", { get() {
+  return {
+    version: 1,
+    vendor: "schemastery",
+    validate: (value) => {
+      try {
+        return { value: Schema.resolve(value, this, {})[0] };
+      } catch (error) {
+        if (ValidationError.is(error)) return { issues: [{
+          message: error.message,
+          path: error.options.path
+        }] };
+        throw error;
+      }
+    }
+  };
+} });
+Schema.ValidationError = ValidationError;
+Schema.prototype.toJSON = function toJSON() {
+  if (globalThis.__schemastery_refs__) {
+    globalThis.__schemastery_refs__[this.uid] ??= JSON.parse(JSON.stringify({ ...this }));
+    return this.uid;
+  }
+  globalThis.__schemastery_refs__ = { [this.uid]: { ...this } };
+  globalThis.__schemastery_refs__[this.uid] = JSON.parse(JSON.stringify({ ...this }));
+  const result = {
+    uid: this.uid,
+    refs: globalThis.__schemastery_refs__
+  };
+  globalThis.__schemastery_refs__ = void 0;
+  return result;
+};
+Schema.prototype.set = function set(key, value) {
+  this.dict[key] = value;
+  return this;
+};
+Schema.prototype.push = function push(value) {
+  this.list.push(value);
+  return this;
+};
+function mergeDesc(original, messages) {
+  const result = typeof original === "string" ? { "": original } : { ...original };
+  for (const locale in messages) {
+    const value = messages[locale];
+    if (value?.$description || value?.$desc) result[locale] = value.$description || value.$desc;
+    else if (typeof value === "string") result[locale] = value;
+  }
+  return result;
+}
+function getInner(value) {
+  return value?.$value ?? value?.$inner;
+}
+function extractKeys(data) {
+  return filterKeys(data ?? {}, (key) => !key.startsWith("$"));
+}
+Schema.prototype.i18n = function i18n(messages) {
+  const schema = Schema(this);
+  const desc = mergeDesc(schema.meta.description, messages);
+  if (Object.keys(desc).length) schema.meta.description = desc;
+  if (schema.dict) schema.dict = mapValues(schema.dict, (inner, key) => {
+    return inner.i18n(mapValues(messages, (data) => getInner(data)?.[key] ?? data?.[key]));
+  });
+  if (schema.list) schema.list = schema.list.map((inner, index) => {
+    return inner.i18n(mapValues(messages, (data = {}) => {
+      if (Array.isArray(getInner(data))) return getInner(data)[index];
+      if (Array.isArray(data)) return data[index];
+      return extractKeys(data);
+    }));
+  });
+  if (schema.inner) schema.inner = schema.inner.i18n(mapValues(messages, (data) => {
+    if (getInner(data)) return getInner(data);
+    return extractKeys(data);
+  }));
+  if (schema.sKey) schema.sKey = schema.sKey.i18n(mapValues(messages, (data) => data?.$key));
+  return schema;
+};
+Schema.prototype.extra = function extra(key, value) {
+  const schema = Schema(this);
+  schema.meta = {
+    ...schema.meta,
+    [key]: value
+  };
+  return schema;
+};
+for (const key of [
+  "required",
+  "disabled",
+  "collapse",
+  "hidden",
+  "loose"
+]) Object.assign(Schema.prototype, { [key](value = true) {
+  const schema = Schema(this);
+  schema.meta = {
+    ...schema.meta,
+    [key]: value
+  };
+  return schema;
+} });
+Schema.prototype.deprecated = function deprecated() {
+  const schema = Schema(this);
+  schema.meta.badges ||= [];
+  schema.meta.badges.push({
+    text: "deprecated",
+    type: "danger"
+  });
+  return schema;
+};
+Schema.prototype.experimental = function experimental() {
+  const schema = Schema(this);
+  schema.meta.badges ||= [];
+  schema.meta.badges.push({
+    text: "experimental",
+    type: "warning"
+  });
+  return schema;
+};
+Schema.prototype.pattern = function pattern(regexp) {
+  const schema = Schema(this);
+  const pattern2 = pick(regexp, ["source", "flags"]);
+  schema.meta = {
+    ...schema.meta,
+    pattern: pattern2
+  };
+  return schema;
+};
+Schema.prototype.simplify = function simplify(value) {
+  if (isVolatile(value)) value = value.get();
+  if (deepEqual(value, this.meta.default, this.type === "dict")) return null;
+  if (isNullable(value)) return value;
+  if (this.type === "object" || this.type === "dict") {
+    const result = {};
+    for (const key in value) {
+      const item = (this.type === "object" ? this.dict[key] : this.inner)?.simplify(value[key]);
+      if (this.type === "dict" || !isNullable(item)) result[key] = item;
+    }
+    if (deepEqual(result, this.meta.default, this.type === "dict")) return null;
+    return result;
+  } else if (this.type === "array" || this.type === "tuple") {
+    const result = [];
+    value.forEach((value2, index) => {
+      const schema = this.type === "array" ? this.inner : this.list[index];
+      const item = schema ? schema.simplify(value2) : value2;
+      result.push(item);
+    });
+    return result;
+  } else if (this.type === "intersect") {
+    const result = {};
+    for (const item of this.list) Object.assign(result, item.simplify(value));
+    return result;
+  } else if (this.type === "union") for (const schema of this.list) try {
+    Schema.resolve(value, schema, {});
+    return schema.simplify(value);
+  } catch {
+  }
+  return value;
+};
+Schema.prototype.toString = function toString(inline) {
+  return formatters[this.type]?.(this, inline) ?? `Schema<${this.type}>`;
+};
+Schema.prototype.role = function role(role, extra2) {
+  const schema = Schema(this);
+  schema.meta = {
+    ...schema.meta,
+    role,
+    extra: extra2
+  };
+  return schema;
+};
+for (const key of [
+  "default",
+  "link",
+  "comment",
+  "description",
+  "max",
+  "min",
+  "step"
+]) Object.assign(Schema.prototype, { [key](value) {
+  const schema = Schema(this);
+  schema.meta = {
+    ...schema.meta,
+    [key]: value
+  };
+  return schema;
+} });
+Schema.prototype.volatile = function volatile() {
+  if (this.meta.volatile) throw new TypeError("volatile schema is already wrapped");
+  return this.extra("volatile", true);
+};
+var resolvers = {};
+var checkedVolatile = Symbol("checked-volatile-schema");
+function validateVolatileSchema(schema, path = [], blocked = false, seen = /* @__PURE__ */ new Map()) {
+  const states = seen.get(schema) ?? /* @__PURE__ */ new Set();
+  if (states.has(blocked)) return;
+  states.add(blocked);
+  seen.set(schema, states);
+  if (schema.meta?.volatile && blocked) throw new ValidationError("volatile fields require a fixed object path without an enclosing volatile field", { path });
+  const nested = blocked || !!schema.meta?.volatile;
+  if (schema.dict) for (const [key, child2] of Object.entries(schema.dict)) validateVolatileSchema(child2, [...path, key], nested, seen);
+  if (schema.sKey) validateVolatileSchema(schema.sKey, [...path, "<key>"], true, seen);
+  if (schema.inner && (schema.type !== "lazy" || schema.inner[kSchema])) validateVolatileSchema(schema.inner, [...path, "*"], true, seen);
+  if (schema.list) for (let index = 0; index < schema.list.length; index++) validateVolatileSchema(schema.list[index], [...path, String(index)], true, seen);
+}
+Schema.extend = function extend(type, resolve2) {
+  resolvers[type] = resolve2;
+};
+Schema.resolve = function resolve(data, schema, options = {}, strict = false) {
+  if (!schema) return [data];
+  if (!options[checkedVolatile]) {
+    validateVolatileSchema(schema, options.path);
+    options = {
+      ...options,
+      [checkedVolatile]: true
+    };
+  }
+  if (schema.meta?.volatile) {
+    const inner = Schema(schema);
+    inner.meta = {
+      ...schema.meta,
+      volatile: false
+    };
+    const [value, adapted] = Schema.resolve(data, inner, options, strict);
+    try {
+      return [createVolatile(value), adapted];
+    } catch (error) {
+      throw new ValidationError(error instanceof Error ? error.message : String(error), options);
+    }
+  }
+  if (options.ignore?.(data, schema)) return [data];
+  if (isNullable(data) && schema.type !== "lazy") {
+    if (schema.meta.required) throw new ValidationError(`missing required value`, options);
+    let current = schema;
+    let fallback = schema.meta.default;
+    while (current?.type === "intersect" && isNullable(fallback)) {
+      current = current.list[0];
+      fallback = current?.meta.default;
+    }
+    if (isNullable(fallback)) return [data];
+    data = clone(fallback);
+  }
+  const callback = resolvers[schema.type];
+  if (!callback) throw new ValidationError(`unsupported type "${schema.type}"`, options);
+  try {
+    return callback(data, schema, options, strict);
+  } catch (error) {
+    if (!schema.meta.loose) throw error;
+    return [schema.meta.default];
+  }
+};
+Schema.from = function from(source) {
+  if (isNullable(source)) return Schema.any();
+  else if ([
+    "string",
+    "number",
+    "boolean"
+  ].includes(typeof source)) return Schema.const(source).required();
+  else if (source[kSchema]) return source;
+  else if (typeof source === "function") switch (source) {
+    case String:
+      return Schema.string().required();
+    case Number:
+      return Schema.number().required();
+    case Boolean:
+      return Schema.boolean().required();
+    case Function:
+      return Schema.function().required();
+    default:
+      return Schema.is(source).required();
+  }
+  else throw new TypeError(`cannot infer schema from ${source}`);
+};
+Schema.lazy = function lazy(builder) {
+  const toJSON2 = () => {
+    if (!schema.inner[kSchema]) {
+      schema.inner = schema.builder();
+      schema.inner.meta = {
+        ...schema.meta,
+        ...schema.inner.meta
+      };
+    }
+    return schema.inner.toJSON();
+  };
+  const schema = new Schema({
+    type: "lazy",
+    builder,
+    inner: { toJSON: toJSON2 }
+  });
+  return schema;
+};
+Schema.natural = function natural() {
+  return Schema.number().step(1).min(0);
+};
+Schema.percent = function percent() {
+  return Schema.number().step(0.01).min(0).max(1).role("slider");
+};
+Schema.date = function date() {
+  return Schema.union([Schema.is(Date), Schema.transform(Schema.string().role("datetime"), (value, options) => {
+    const date2 = new Date(value);
+    if (isNaN(+date2)) throw new ValidationError(`invalid date "${value}"`, options);
+    return date2;
+  }, true)]);
+};
+Schema.regExp = function regExp(flag = "") {
+  return Schema.union([Schema.is(RegExp), Schema.transform(Schema.string().role("regexp", { flag }), (value, options) => {
+    try {
+      return new RegExp(value, flag);
+    } catch (e) {
+      throw new ValidationError(e.message, options);
+    }
+  }, true)]);
+};
+Schema.arrayBuffer = function arrayBuffer(encoding) {
+  return Schema.union([
+    Schema.is(ArrayBuffer),
+    Schema.is(SharedArrayBuffer),
+    Schema.transform(Schema.any(), (value, options) => {
+      if (Binary.isSource(value)) return Binary.fromSource(value);
+      throw new ValidationError(`expected ArrayBufferSource but got ${value}`, options);
+    }, true),
+    ...encoding ? [Schema.transform(Schema.string(), (value, options) => {
+      try {
+        return encoding === "base64" ? Binary.fromBase64(value) : Binary.fromHex(value);
+      } catch (e) {
+        throw new ValidationError(e.message, options);
+      }
+    }, true)] : []
+  ]);
+};
+Schema.extend("lazy", (data, schema, options, strict) => {
+  if (!schema.inner[kSchema]) {
+    schema.inner = schema.builder();
+    schema.inner.meta = {
+      ...schema.meta,
+      ...schema.inner.meta
+    };
+    validateVolatileSchema(schema.inner, options.path, true);
+  }
+  return Schema.resolve(data, schema.inner, options, strict);
+});
+Schema.extend("any", (data) => {
+  return [data];
+});
+Schema.extend("never", (data, _, options) => {
+  throw new ValidationError(`expected nullable but got ${data}`, options);
+});
+Schema.extend("const", (data, { value }, options) => {
+  if (deepEqual(data, value)) return [value];
+  throw new ValidationError(`expected ${value} but got ${data}`, options);
+});
+function checkWithinRange(data, meta, description, options, skipMin = false) {
+  const { max = Infinity, min = -Infinity } = meta;
+  if (data > max) throw new ValidationError(`expected ${description} <= ${max} but got ${data}`, options);
+  if (data < min && !skipMin) throw new ValidationError(`expected ${description} >= ${min} but got ${data}`, options);
+}
+Schema.extend("string", (data, { meta }, options) => {
+  if (typeof data !== "string") throw new ValidationError(`expected string but got ${data}`, options);
+  if (meta.pattern) {
+    const regexp = new RegExp(meta.pattern.source, meta.pattern.flags);
+    if (!regexp.test(data)) throw new ValidationError(`expect string to match regexp ${regexp}`, options);
+  }
+  checkWithinRange(data.length, meta, "string length", options);
+  return [data];
+});
+function decimalShift(data, digits) {
+  const str = data.toString();
+  if (str.includes("e")) return data * Math.pow(10, digits);
+  const index = str.indexOf(".");
+  if (index === -1) return data * Math.pow(10, digits);
+  const frac = str.slice(index + 1);
+  const integer3 = str.slice(0, index);
+  if (frac.length <= digits) return +(integer3 + frac.padEnd(digits, "0"));
+  return +(integer3 + frac.slice(0, digits) + "." + frac.slice(digits));
+}
+function isMultipleOf(data, min, step) {
+  step = Math.abs(step);
+  if (!/^\d+\.\d+$/.test(step.toString())) return (data - min) % step === 0;
+  const index = step.toString().indexOf(".");
+  const digits = step.toString().slice(index + 1).length;
+  return Math.abs(decimalShift(data, digits) - decimalShift(min, digits)) % decimalShift(step, digits) === 0;
+}
+Schema.extend("number", (data, { meta }, options) => {
+  if (typeof data !== "number") throw new ValidationError(`expected number but got ${data}`, options);
+  checkWithinRange(data, meta, "number", options);
+  const { step } = meta;
+  if (step && !isMultipleOf(data, meta.min ?? 0, step)) throw new ValidationError(`expected number multiple of ${step} but got ${data}`, options);
+  return [data];
+});
+Schema.extend("boolean", (data, _, options) => {
+  if (typeof data === "boolean") return [data];
+  throw new ValidationError(`expected boolean but got ${data}`, options);
+});
+Schema.extend("bitset", (data, { bits, meta }, options) => {
+  let value = 0, keys = [];
+  if (typeof data === "number") {
+    value = data;
+    for (const key in bits) if (data & bits[key]) keys.push(key);
+  } else if (Array.isArray(data)) {
+    keys = data;
+    for (const key of keys) {
+      if (typeof key !== "string") throw new ValidationError(`expected string but got ${key}`, options);
+      if (key in bits) value |= bits[key];
+    }
+  } else throw new ValidationError(`expected number or array but got ${data}`, options);
+  if (value === meta.default) return [value];
+  return [value, keys];
+});
+Schema.extend("function", (data, _, options) => {
+  if (typeof data === "function") return [data];
+  throw new ValidationError(`expected function but got ${data}`, options);
+});
+Schema.extend("is", (data, { constructor }, options) => {
+  if (typeof constructor === "function") {
+    if (data instanceof constructor) return [data];
+    throw new ValidationError(`expected ${constructor.name} but got ${data}`, options);
+  } else {
+    if (isNullable(data)) throw new ValidationError(`expected ${constructor} but got ${data}`, options);
+    let prototype = Object.getPrototypeOf(data);
+    while (prototype) {
+      if (prototype.constructor?.name === constructor) return [data];
+      prototype = Object.getPrototypeOf(prototype);
+    }
+    throw new ValidationError(`expected ${constructor} but got ${data}`, options);
+  }
+});
+function property(data, key, schema, options) {
+  try {
+    const [value, adapted] = Schema.resolve(data[key], schema, {
+      ...options,
+      path: [...options.path || [], key]
+    });
+    if (adapted !== void 0) data[key] = adapted;
+    return value;
+  } catch (e) {
+    if (!options?.autofix) throw e;
+    delete data[key];
+    return schema.meta.volatile ? createVolatile(schema.meta.default) : schema.meta.default;
+  }
+}
+Schema.extend("array", (data, { inner, meta }, options) => {
+  if (!Array.isArray(data)) throw new ValidationError(`expected array but got ${data}`, options);
+  checkWithinRange(data.length, meta, "array length", options, !isNullable(inner.meta.default));
+  return [data.map((_, index) => property(data, index, inner, options))];
+});
+Schema.extend("dict", (data, { inner, sKey }, options, strict) => {
+  if (!isPlainObject(data)) throw new ValidationError(`expected object but got ${data}`, options);
+  const result = {};
+  for (const key in data) {
+    let rKey;
+    try {
+      rKey = Schema.resolve(key, sKey, options)[0];
+    } catch (error) {
+      if (strict) continue;
+      throw error;
+    }
+    result[rKey] = property(data, key, inner, options);
+    data[rKey] = data[key];
+    if (key !== rKey) delete data[key];
+  }
+  return [result];
+});
+Schema.extend("tuple", (data, { list }, options, strict) => {
+  if (!Array.isArray(data)) throw new ValidationError(`expected array but got ${data}`, options);
+  const result = list.map((inner, index) => property(data, index, inner, options));
+  if (strict) return [result];
+  result.push(...data.slice(list.length));
+  return [result];
+});
+function merge(result, data) {
+  for (const key in data) {
+    if (key in result) continue;
+    result[key] = data[key];
+  }
+}
+Schema.extend("object", (data, { dict }, options, strict) => {
+  if (!isPlainObject(data)) throw new ValidationError(`expected object but got ${data}`, options);
+  const result = {};
+  for (const key in dict) {
+    const value = property(data, key, dict[key], options);
+    if (!isNullable(value) || key in data) result[key] = value;
+  }
+  if (!strict) merge(result, data);
+  return [result];
+});
+Schema.extend("union", (data, { list, toString: toString2 }, options, strict) => {
+  const messages = [];
+  for (const inner of list) try {
+    return Schema.resolve(data, inner, options, strict);
+  } catch (error) {
+    messages.push(error);
+  }
+  throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
+});
+Schema.extend("intersect", (data, { list, toString: toString2 }, options, strict) => {
+  if (!list.length) return [data];
+  let result;
+  for (const inner of list) {
+    const value = Schema.resolve(data, inner, options, true)[0];
+    if (isNullable(value)) continue;
+    if (isNullable(result)) result = value;
+    else if (typeof result !== typeof value) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
+    else if (typeof value === "object") merge(result ??= {}, value);
+    else if (result !== value) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
+  }
+  if (!strict && isPlainObject(data)) merge(result, data);
+  return [result];
+});
+Schema.extend("transform", (data, { inner, callback, preserve }, options) => {
+  const [result, adapted = data] = Schema.resolve(data, inner, options, true);
+  if (preserve) return [callback(result)];
+  else return [callback(result), callback(adapted)];
+});
+var formatters = {};
+function defineMethod(name, keys, format2) {
+  formatters[name] = format2;
+  Object.assign(Schema, { [name](...args) {
+    const schema = new Schema({ type: name });
+    keys.forEach((key, index) => {
+      switch (key) {
+        case "sKey":
+          schema.sKey = args[index] ?? Schema.string();
+          break;
+        case "inner":
+          schema.inner = Schema.from(args[index]);
+          break;
+        case "list":
+          schema.list = args[index].map(Schema.from);
+          break;
+        case "dict":
+          schema.dict = mapValues(args[index], Schema.from);
+          break;
+        case "bits":
+          schema.bits = {};
+          for (const key2 in args[index]) {
+            if (typeof args[index][key2] !== "number") continue;
+            schema.bits[key2] = args[index][key2];
+          }
+          break;
+        case "callback": {
+          const callback = schema.callback = args[index];
+          callback["toJSON"] ||= () => callback.toString();
+          break;
+        }
+        case "constructor": {
+          const constructor = schema.constructor = args[index];
+          if (typeof constructor === "function") constructor["toJSON"] ||= () => constructor["name"];
+          break;
+        }
+        default:
+          schema[key] = args[index];
+      }
+    });
+    if (name === "object" || name === "dict") schema.meta.default = {};
+    else if (name === "array" || name === "tuple") schema.meta.default = [];
+    else if (name === "bitset") schema.meta.default = 0;
+    return schema;
+  } });
+}
+defineMethod("is", ["constructor"], ({ constructor }) => {
+  if (typeof constructor === "function") return constructor.name;
+  else return constructor;
+});
+defineMethod("any", [], () => "any");
+defineMethod("never", [], () => "never");
+defineMethod("const", ["value"], ({ value }) => typeof value === "string" ? JSON.stringify(value) : value);
+defineMethod("string", [], () => "string");
+defineMethod("number", [], () => "number");
+defineMethod("boolean", [], () => "boolean");
+defineMethod("bitset", ["bits"], () => "bitset");
+defineMethod("function", [], () => "function");
+defineMethod("array", ["inner"], ({ inner }) => `${inner.toString(true)}[]`);
+defineMethod("dict", ["inner", "sKey"], ({ inner, sKey }) => `{ [key: ${sKey.toString()}]: ${inner.toString()} }`);
+defineMethod("tuple", ["list"], ({ list }) => `[${list.map((inner) => inner.toString()).join(", ")}]`);
+defineMethod("object", ["dict"], ({ dict }) => {
+  if (Object.keys(dict).length === 0) return "{}";
+  return `{ ${Object.entries(dict).map(([key, inner]) => {
+    return `${key}${inner.meta.required ? "" : "?"}: ${inner.toString()}`;
+  }).join(", ")} }`;
+});
+defineMethod("union", ["list"], ({ list }, inline) => {
+  const result = list.map(({ toString: format2 }) => format2()).join(" | ");
+  return inline ? `(${result})` : result;
+});
+defineMethod("intersect", ["list"], ({ list }) => {
+  return `${list.map((inner) => inner.toString(true)).join(" & ")}`;
+});
+defineMethod("transform", [
+  "inner",
+  "callback",
+  "preserve"
+], ({ inner }, isInner) => inner.toString(isInner));
+
+// src/permission-errors.ts
+var PermissionRefusal = class extends Error {
+  constructor(code) {
+    super("The Host refused the permission operation.");
+    this.code = code;
+  }
+};
+
+// src/permission-rules.ts
+function invalid() {
+  throw new PermissionRefusal("validation");
+}
+function permissionRuleRow(value, required, optional2 = []) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) invalid();
+  const fields = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(fields, key)) || Object.values(fields).some((field) => !Object.hasOwn(field, "value") || !field.enumerable)) invalid();
+  return value;
+}
+function text(value, max = 32768) {
+  if (typeof value !== "string" || value.length === 0 || value.length > max || value.includes("\0")) invalid();
+  return value;
+}
+function permissionRevision(value) {
+  return text(value, 4096);
+}
+function integer(value) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid();
+  return value;
+}
+function ruleAction(value, inherit = false) {
+  if (typeof value !== "string" || !(inherit ? ["inherit", "allow", "ask", "deny"] : ["allow", "ask", "deny"]).includes(value)) invalid();
+  return value;
+}
+function draft(value, persisted = false) {
+  const input = permissionRuleRow(value, ["id", "action", "match", ...persisted ? ["source", "revision", "revoked"] : []]);
+  const kind = permissionRuleRow(input.match, ["kind"], ["path", "scope", "executable", "command", "workingDirectory"]).kind;
+  let match;
+  if (kind === "outside-read") {
+    const row = permissionRuleRow(input.match, ["kind", "path", "scope"]);
+    if (row.scope !== "exact" && row.scope !== "tree") invalid();
+    match = { kind, path: text(row.path), scope: row.scope };
+  } else if (kind === "shell") {
+    const row = permissionRuleRow(input.match, ["kind", "executable", "command", "workingDirectory"]);
+    match = { kind, executable: text(row.executable), command: text(row.command), workingDirectory: text(row.workingDirectory) };
+  } else if (kind === "webSearch" || kind === "webFetch") {
+    permissionRuleRow(input.match, ["kind"]);
+    match = { kind };
+  } else invalid();
+  return Object.freeze({ id: text(input.id, 256), action: ruleAction(input.action), match: Object.freeze(match) });
+}
+function parsePermissionRules(value) {
+  if (!Array.isArray(value) || value.length > 1024) invalid();
+  const ids = /* @__PURE__ */ new Set();
+  return Object.freeze(value.map((item) => {
+    const parsed = draft(item, true), row = item;
+    if (ids.has(parsed.id) || typeof row.revoked !== "boolean") invalid();
+    ids.add(parsed.id);
+    const sourceRow = permissionRuleRow(row.source, ["kind"], ["sessionId", "savedAt", "label"]);
+    let source;
+    if (sourceRow.kind === "operator") {
+      permissionRuleRow(row.source, ["kind", "sessionId", "savedAt"]);
+      source = { kind: "operator", sessionId: text(sourceRow.sessionId, 256), savedAt: integer(sourceRow.savedAt) };
+    } else if (sourceRow.kind === "user-import") {
+      permissionRuleRow(row.source, ["kind", "label"]);
+      source = { kind: "user-import", label: text(sourceRow.label, 512) };
+    } else invalid();
+    return Object.freeze({ ...parsed, source: Object.freeze(source), revision: integer(row.revision), revoked: row.revoked });
+  }));
+}
+function parsePermissionRulesSave(value) {
+  const row = permissionRuleRow(value, ["expectedRevision"], ["changes", "upsert", "revoke"]);
+  let changes;
+  if (row.changes !== void 0) {
+    const input = permissionRuleRow(row.changes, [], ["outsideReads", "webSearch", "webFetch"]);
+    const web2 = (value2) => {
+      const row2 = permissionRuleRow(value2, ["enabled", "rule"]);
+      if (typeof row2.enabled !== "boolean") invalid();
+      return Object.freeze({ enabled: row2.enabled, rule: ruleAction(row2.rule, true) });
+    };
+    changes = Object.freeze({
+      ...input.outsideReads === void 0 ? {} : { outsideReads: ruleAction(input.outsideReads, true) },
+      ...input.webSearch === void 0 ? {} : { webSearch: web2(input.webSearch) },
+      ...input.webFetch === void 0 ? {} : { webFetch: web2(input.webFetch) }
+    });
+  }
+  if (row.upsert !== void 0 && (!Array.isArray(row.upsert) || row.upsert.length > 1024) || row.revoke !== void 0 && (!Array.isArray(row.revoke) || row.revoke.length > 1024)) invalid();
+  const upsert = row.upsert?.map((item) => draft(item)), revoke = row.revoke?.map((item) => text(item, 256));
+  const ids = [...upsert?.map((item) => item.id) ?? [], ...revoke ?? []];
+  if (ids.length !== new Set(ids).size || ids.length === 0 && (changes === void 0 || Object.keys(changes).length === 0)) invalid();
+  return Object.freeze({
+    expectedRevision: permissionRevision(row.expectedRevision),
+    ...changes === void 0 ? {} : { changes },
+    ...upsert === void 0 ? {} : { upsert: Object.freeze(upsert) },
+    ...revoke === void 0 ? {} : { revoke: Object.freeze(revoke) }
+  });
+}
+
+// src/permission-settings.ts
+function parseNativeCommands(input = {}) {
+  const row = permissionRuleRow(input, [], ["enabled", "entries"]);
+  if (row.enabled !== void 0 && typeof row.enabled !== "boolean" || row.entries !== void 0 && (!Array.isArray(row.entries) || row.entries.length > 1024)) throw new PermissionRefusal("validation");
+  const text5 = (value) => {
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > 32768 || value.includes("\0")) throw new PermissionRefusal("validation");
+    return value;
+  };
+  const ids = /* @__PURE__ */ new Set();
+  const entries = (row.entries ?? []).map((value) => {
+    const entry = permissionRuleRow(value, ["id", "mode", "match", "sandboxMode"]), match = permissionRuleRow(entry.match, ["tool", "executable", "args", "workingDirectory"], ["subcommand"]);
+    const id2 = text5(entry.id), cwd = text5(match.workingDirectory);
+    if (ids.has(id2) || !["ask", "allow"].includes(entry.mode) || !["bash", "pwsh"].includes(match.tool) || !["workspace-write", "danger-full-access"].includes(entry.sandboxMode) || !/^(?:\/|[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/iu.test(cwd) || !Array.isArray(match.args)) throw new PermissionRefusal("validation");
+    ids.add(id2);
+    return Object.freeze({ id: id2, mode: entry.mode, sandboxMode: entry.sandboxMode, match: Object.freeze({
+      tool: match.tool,
+      executable: text5(match.executable),
+      ...match.subcommand === void 0 ? {} : { subcommand: text5(match.subcommand) },
+      args: Object.freeze(match.args.map(text5)),
+      workingDirectory: cwd
+    }) });
+  });
+  return Object.freeze({ enabled: row.enabled ?? false, entries: Object.freeze(entries) });
+}
+var nativeCommands = Schema.object({ enabled: Schema.boolean().default(false), entries: Schema.array(Schema.object({
+  id: Schema.string().required(),
+  mode: Schema.union(["ask", "allow"]).required(),
+  match: Schema.object({
+    tool: Schema.union(["bash", "pwsh"]).required(),
+    executable: Schema.string().required(),
+    subcommand: Schema.string(),
+    args: Schema.array(Schema.string()).required(),
+    workingDirectory: Schema.string().required()
+  }).required(),
+  sandboxMode: Schema.union(["workspace-write", "danger-full-access"]).required()
+})).default([]) });
+var webDefault = Object.freeze({ enabled: true, rule: "inherit" });
+var DEFAULT_PERMISSION_CONTROL = Object.freeze({ enabled: true, outsideReads: "inherit", webSearch: webDefault, webFetch: webDefault, rules: Object.freeze([]), nativeCommands: parseNativeCommands() });
+var action = () => Schema.union(["inherit", "allow", "ask", "deny"]).default("inherit");
+var web = () => Schema.object({ enabled: Schema.boolean().default(true), rule: action() }).default({});
+var permissionControlSchema = Schema.transform(Schema.object({
+  enabled: Schema.boolean().default(true),
+  outsideReads: action(),
+  webSearch: web(),
+  webFetch: web(),
+  nativeCommands,
+  rules: Schema.array(Schema.any()).default([])
+}), (input) => Object.freeze({ ...input, webSearch: Object.freeze(input.webSearch), webFetch: Object.freeze(input.webFetch), rules: parsePermissionRules(input.rules), nativeCommands: parseNativeCommands(input.nativeCommands) }), true);
+function resolvePermissionControl(input = {}) {
+  permissionRuleRow(input, [], ["enabled", "outsideReads", "webSearch", "webFetch", "rules", "nativeCommands"]);
+  if (Object.hasOwn(input, "nativeCommands")) parseNativeCommands(input.nativeCommands);
+  for (const web2 of [input.webSearch, input.webFetch]) if (web2 !== void 0) permissionRuleRow(web2, [], ["enabled", "rule"]);
+  const parsed = permissionControlSchema(input);
+  return Object.freeze({ ...parsed, webSearch: Object.freeze(parsed.webSearch), webFetch: Object.freeze(parsed.webFetch), rules: parsePermissionRules(parsed.rules) });
 }
 
 // src/profile-diagnostics.ts
@@ -1478,12 +2662,20 @@ var PROFILE_DIAGNOSTIC_REASONS = {
   "deployment-ceiling": "A named profile cannot enable capabilities outside its captured deployment ceiling.",
   "blank-label": "The label is blank; the profile ID is used for display."
 };
+function schemaFieldShape(schema) {
+  if (schema.type === "transform") return schemaFieldShape(schema.inner);
+  if (schema.type === "object") return Object.fromEntries(Object.entries(schema.dict ?? {}).map(([key, child2]) => [key, schemaFieldShape(child2)]));
+  if (schema.type === "array") return [schemaFieldShape(schema.inner)];
+  return null;
+}
 var roleId = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader|frontend|hard-reasoning|research|quick|coding|normal-task|complex|deep|documenting|cross-cutting)$/u;
 var skillId = /^(?:brainstorming|writing-plans|requesting-code-review|receiving-code-review|subagent-driven-development|dispatching-parallel-agents|remove-ai-slops|debugging|frontend|git-master|ast-grep|coding-agent-sessions|init-deep|using-git-worktrees)$/u;
 var route = { provider: null, model: null, reasoningEffort: null };
 var rateLimit = Object.fromEntries(Object.keys(DSMM_RATE_LIMIT_BOUNDS).map((key) => [key, null]));
 var roleRouting = { primary: route, fallbackRoutes: [route], strategy: null, rateLimit, levels: { low: route, high: route, max: route } };
 var configFields = {
+  permissionControl: schemaFieldShape(permissionControlSchema),
+  modelParameters: { passthrough: null },
   locale: null,
   modeName: null,
   section: null,
@@ -1501,7 +2693,7 @@ var configFields = {
   roles: "roles",
   roleRouting: "role-routing",
   runtimePolicy: { strategy: null, rateLimit },
-  presets: { materialize: null, root: null },
+  presets: { materialize: null, plannerRootEnabled: null, root: null },
   subagents: { toolTopology: null, allowRouteOverride: null, enableRunInBackground: null, backgroundMode: null, maxDepth: null },
   workflow: { policy: null, strictGates: null, reviewCap: null, finalReviewPolicy: null },
   guards: { scope: null, shellCommandSafety: null, gitWriteGuard: null, toolOutputTruncation: { enabled: null, maxInlineBytes: null }, planFormatValidation: null, questionLabelHelper: { enabled: null, maxLabelChars: null }, todoDisciplineHelper: null },
@@ -1568,12 +2760,12 @@ function inspectJsonDocument(content2, jsonc = true) {
     }
     if (node.type === "object") {
       const found = /* @__PURE__ */ new Set();
-      for (const property of node.children ?? []) {
-        const keyNode = property.children[0], key = String(keyNode.value), next = [...path, key];
+      for (const property2 of node.children ?? []) {
+        const keyNode = property2.children[0], key = String(keyNode.value), next = [...path, key];
         const code = ["__proto__", "constructor", "prototype"].includes(key) ? "unsafe-field" : found.has(key) ? "duplicate-field" : void 0;
         if (code !== void 0) diagnostics.push(diagnostic(code, safeDiagnosticField(next), diagnosticLocation(content2, keyNode.offset, keyNode.length)));
         found.add(key);
-        walk(property.children[1], next, depth2 + 1);
+        walk(property2.children[1], next, depth2 + 1);
       }
     } else if (node.type === "array") (node.children ?? []).forEach((child2, index) => walk(child2, [...path, index], depth2 + 1));
   };
@@ -1589,21 +2781,21 @@ var rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|or
 function isProfileId(value) {
   return typeof value === "string" && idPattern.test(value) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value);
 }
-function fail(field) {
+function fail2(field) {
   throw new TypeError(`Invalid Deepwork profile wire field: ${field}`);
 }
-function text(value, field, maximum = 1024) {
-  if (typeof value !== "string" || value.length > maximum) fail(field);
+function text2(value, field, maximum = 1024) {
+  if (typeof value !== "string" || value.length > maximum) fail2(field);
   return value;
 }
 function id(value) {
-  const result = text(value, "id", 64);
-  if (!isProfileId(result)) fail("id");
+  const result = text2(value, "id", 64);
+  if (!isProfileId(result)) fail2("id");
   return result;
 }
 function revision(value) {
-  const result = text(value, "revision", 64);
-  if (!revisionPattern.test(result)) fail("revision");
+  const result = text2(value, "revision", 64);
+  if (!revisionPattern.test(result)) fail2("revision");
   return result;
 }
 function selectionRevision(value) {
@@ -1613,31 +2805,26 @@ function isNativeSessionId(value) {
   return typeof value === "string" && value.length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(value) && new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) === value;
 }
 function sessionId(value) {
-  if (!isNativeSessionId(value)) fail("sessionId");
+  if (!isNativeSessionId(value)) fail2("sessionId");
   return value;
 }
 function boolean(value, field) {
-  if (typeof value !== "boolean") fail(field);
+  if (typeof value !== "boolean") fail2(field);
   return value;
 }
-function integer(value, field, maximum = Number.MAX_SAFE_INTEGER) {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) fail(field);
+function integer2(value, field, maximum = Number.MAX_SAFE_INTEGER) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) fail2(field);
   return value;
 }
-function routeText(value, field, maximum) {
-  const result = text(value, field, maximum);
-  if (result.trim() === "" || /[\u0000-\u001f\u007f]/u.test(result) || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(result)) !== result) fail(field);
-  return result;
-}
-function role(value) {
-  if (typeof value !== "string" || !rolePattern.test(value)) fail("role");
+function role2(value) {
+  if (typeof value !== "string" || !rolePattern.test(value)) fail2("role");
   return value;
 }
 function object(value, required, optional2 = []) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail("object");
-  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some((property) => !Object.hasOwn(property, "value") || !property.enumerable)) fail("object");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail2("object");
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some((property2) => !Object.hasOwn(property2, "value") || !property2.enumerable)) fail2("object");
   const result = value;
-  if (Object.keys(result).some((key) => !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(result, key))) fail("object keys");
+  if (Object.keys(result).some((key) => !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(result, key))) fail2("object keys");
   return result;
 }
 function optional(value, key, parse3) {
@@ -1645,14 +2832,14 @@ function optional(value, key, parse3) {
 }
 function parseProfileErrorInfo(value) {
   const item = object(value, ["code", "message"], ["field", "reason", "location"]);
-  const code = text(item.code, "code");
-  if (!errorCodes.has(code)) fail("code");
-  const reason = item.reason === void 0 ? void 0 : text(item.reason, "reason", 64);
-  if (reason !== void 0 && (!Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, reason) || reason === "blank-label")) fail("reason");
+  const code = text2(item.code, "code");
+  if (!errorCodes.has(code)) fail2("code");
+  const reason = item.reason === void 0 ? void 0 : text2(item.reason, "reason", 64);
+  if (reason !== void 0 && (!Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, reason) || reason === "blank-label")) fail2("reason");
   const field = item.field === void 0 ? void 0 : diagnosticField(item.field);
   return {
     code,
-    message: reason === void 0 ? text(item.message, "message", 4096) : `${field ?? "document"}: ${diagnostic(reason, field ?? "document").reason}`,
+    message: reason === void 0 ? text2(item.message, "message", 4096) : `${field ?? "document"}: ${diagnostic(reason, field ?? "document").reason}`,
     ...field === void 0 ? {} : { field },
     ...reason === void 0 ? {} : { reason },
     ...optional(item, "location", diagnosticPosition)
@@ -1660,37 +2847,37 @@ function parseProfileErrorInfo(value) {
 }
 var errorInfo = parseProfileErrorInfo;
 function diagnosticField(value) {
-  if (!isSafeDiagnosticField(value)) fail("field");
+  if (!isSafeDiagnosticField(value)) fail2("field");
   return value;
 }
 function diagnosticPosition(value) {
   const item = object(value, ["offset", "length", "line", "column"]);
-  const result = { offset: integer(item.offset, "offset", 128 * 1024), length: integer(item.length, "length", 128 * 1024), line: integer(item.line, "line", 128 * 1024 + 1), column: integer(item.column, "column", 128 * 1024 + 1) };
-  if (result.line < 1 || result.column < 1 || result.offset + result.length > 128 * 1024) fail("location");
+  const result = { offset: integer2(item.offset, "offset", 128 * 1024), length: integer2(item.length, "length", 128 * 1024), line: integer2(item.line, "line", 128 * 1024 + 1), column: integer2(item.column, "column", 128 * 1024 + 1) };
+  if (result.line < 1 || result.column < 1 || result.offset + result.length > 128 * 1024) fail2("location");
   return result;
 }
 function parseProfileDiagnostic(value) {
   const row = object(value, ["severity", "code", "field", "reason"], ["location"]);
-  if (typeof row.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row.code)) fail("diagnostic code");
+  if (typeof row.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row.code)) fail2("diagnostic code");
   const result = diagnostic(row.code, diagnosticField(row.field));
-  if (row.severity !== result.severity || row.reason !== result.reason) fail("diagnostic severity/reason");
+  if (row.severity !== result.severity || row.reason !== result.reason) fail2("diagnostic severity/reason");
   return { ...result, ...optional(row, "location", diagnosticPosition) };
 }
 function warnings(value) {
-  if (!Array.isArray(value) || value.length > 1) fail("warnings");
+  if (!Array.isArray(value) || value.length > 1) fail2("warnings");
   return value.map((value2) => {
     const result = parseProfileDiagnostic(value2);
-    if (result.severity !== "warning" || result.code !== "blank-label" || result.field !== "label") fail("warning");
+    if (result.severity !== "warning" || result.code !== "blank-label" || result.field !== "label") fail2("warning");
     return result;
   });
 }
 function parseRoleAvailability(value) {
   const row = object(value, ["id", "required", "startupAvailable", "deploymentEnabled", "admitted", "source", "capture"], ["requiredReason", "namedEnabled", "reason"]);
-  if (typeof row.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row.source) || typeof row.capture !== "string" || !["startup", "deployment", "named-session"].includes(row.capture)) fail("role source/capture");
-  if (row.reason !== void 0 && (typeof row.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row.reason))) fail("role reason");
-  if (row.requiredReason !== void 0 && (typeof row.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row.requiredReason))) fail("requiredReason");
+  if (typeof row.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row.source) || typeof row.capture !== "string" || !["startup", "deployment", "named-session"].includes(row.capture)) fail2("role source/capture");
+  if (row.reason !== void 0 && (typeof row.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row.reason))) fail2("role reason");
+  if (row.requiredReason !== void 0 && (typeof row.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row.requiredReason))) fail2("requiredReason");
   return {
-    id: role(row.id),
+    id: role2(row.id),
     required: boolean(row.required, "required"),
     startupAvailable: boolean(row.startupAvailable, "startupAvailable"),
     deploymentEnabled: boolean(row.deploymentEnabled, "deploymentEnabled"),
@@ -1703,34 +2890,34 @@ function parseRoleAvailability(value) {
   };
 }
 function roleAvailabilityList(value) {
-  if (!Array.isArray(value) || value.length > 22) fail("roles");
+  if (!Array.isArray(value) || value.length > 22) fail2("roles");
   const result = value.map(parseRoleAvailability);
-  if (new Set(result.map((role2) => role2.id)).size !== result.length) fail("roles");
+  if (new Set(result.map((role3) => role3.id)).size !== result.length) fail2("roles");
   return result;
 }
 function parseSubagentRuntimeAdmissionView(value) {
   const row = object(value, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
-  if (typeof row.binding !== "string" || !["stock", "dsmm", "unavailable"].includes(row.binding) || row.reason !== void 0 && (typeof row.reason !== "string" || !["explicit-composition-required", "duplicate-provider", "authority-not-ready"].includes(row.reason))) fail("subagentRuntime");
+  if (typeof row.binding !== "string" || !["stock", "dsmm", "unavailable"].includes(row.binding) || row.reason !== void 0 && (typeof row.reason !== "string" || !["explicit-composition-required", "duplicate-provider", "authority-not-ready"].includes(row.reason))) fail2("subagentRuntime");
   const ready = boolean(row.deliveryFenceReady, "deliveryFenceReady");
-  if (ready && (row.binding !== "dsmm" || row.reason !== void 0)) fail("subagentRuntime readiness");
+  if (ready && (row.binding !== "dsmm" || row.reason !== void 0)) fail2("subagentRuntime readiness");
   return { binding: row.binding, deliveryFenceReady: ready, restartRequired: boolean(row.restartRequired, "restartRequired"), ...row.reason === void 0 ? {} : { reason: row.reason } };
 }
 function readResult(value) {
   const item = object(value, ["id", "revision", "content"], ["label", "warnings"]);
-  return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)), ...optional(item, "warnings", warnings) };
+  return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text2(input, "label", 120)), ...optional(item, "warnings", warnings) };
 }
 function content(value) {
-  const result = text(value, "content", 128 * 1024);
-  if (new TextEncoder().encode(result).byteLength > 128 * 1024) fail("content");
+  const result = text2(value, "content", 128 * 1024);
+  if (new TextEncoder().encode(result).byteLength > 128 * 1024) fail2("content");
   return result;
 }
-function snapshot(value) {
+function snapshot2(value) {
   const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings"]);
-  if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail("profiles");
+  if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail2("profiles");
   return {
     profiles: item.profiles.map((input) => {
       const row = object(input, ["id", "revision"], ["label", "error", "warnings"]);
-      return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input2) => text(input2, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
+      return { id: text2(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input2) => text2(input2, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
     }),
     selectedId: item.selectedId === null ? null : id(item.selectedId),
     appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision),
@@ -1738,24 +2925,24 @@ function snapshot(value) {
     ...optional(item, "selectionError", errorInfo),
     ...optional(item, "selectedWarnings", warnings),
     ...optional(item, "roles", (input) => {
-      if (!Array.isArray(input) || input.length > 22) fail("roles");
+      if (!Array.isArray(input) || input.length > 22) fail2("roles");
       const result = input.map((value2) => {
         const row = object(value2, ["id", "label", "enabled"], ["runtimePolicy", "availability"]);
-        return { id: role(row.id), label: text(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "availability", parseRoleAvailability), ...optional(row, "runtimePolicy", (input2) => {
+        return { id: role2(row.id), label: text2(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "availability", parseRoleAvailability), ...optional(row, "runtimePolicy", (input2) => {
           const policy = object(input2, [], ["strategy", "rateLimit"]);
           return { ...optional(policy, "strategy", normalizeRoutingStrategy), ...optional(policy, "rateLimit", normalizeRateLimitOverrides) };
         }) };
       });
-      if (new Set(result.map((row) => row.id)).size !== result.length) fail("roles");
+      if (new Set(result.map((row) => row.id)).size !== result.length) fail2("roles");
       return result;
     }),
     ...optional(item, "editorDefaults", runtimePolicy),
     ...optional(item, "origin", (input) => {
-      if (typeof input !== "string" || !["central", "legacy", "explicit"].includes(input)) fail("origin");
+      if (typeof input !== "string" || !["central", "legacy", "explicit"].includes(input)) fail2("origin");
       return input;
     }),
     ...optional(item, "readOnly", (input) => boolean(input, "readOnly")),
-    ...optional(item, "writeRestriction", (input) => text(input, "writeRestriction", 1024))
+    ...optional(item, "writeRestriction", (input) => text2(input, "writeRestriction", 1024))
   };
 }
 function rateLimit2(value) {
@@ -1770,41 +2957,37 @@ function rolePolicy(value) {
   const item = object(value, ["strategy", "rateLimit", "retries", "rateLimitFailures", "switches", "totalDelayMs"], ["role", "route"]);
   return {
     ...runtimePolicy({ strategy: item.strategy, rateLimit: item.rateLimit }),
-    retries: integer(item.retries, "retries", 10),
-    rateLimitFailures: integer(item.rateLimitFailures, "rateLimitFailures"),
-    switches: integer(item.switches, "switches", 10),
-    totalDelayMs: integer(item.totalDelayMs, "totalDelayMs", 12e4),
-    ...optional(item, "role", role),
+    retries: integer2(item.retries, "retries", 10),
+    rateLimitFailures: integer2(item.rateLimitFailures, "rateLimitFailures"),
+    switches: integer2(item.switches, "switches", 10),
+    totalDelayMs: integer2(item.totalDelayMs, "totalDelayMs", 12e4),
+    ...optional(item, "role", role2),
     ...optional(item, "route", modelRoute)
   };
 }
 function modelRoute(value) {
-  const route3 = object(value, ["provider", "model"], ["reasoningEffort"]);
-  const provider = routeText(route3.provider, "provider", 128);
-  const model = routeText(route3.model, "model", 512);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://")) fail("route");
-  return { provider, model, ...optional(route3, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
+  return normalizeModelRouteJson(value);
 }
 function initialRoleRoute(value) {
   const row = object(value, ["status"], ["source", "route", "reason"]);
   if (row.status === "known") {
     object(row, ["status", "source", "route"]);
-    if (row.source !== "invocation-capture") fail("initialRoute source");
+    if (row.source !== "invocation-capture") fail2("initialRoute source");
     return { status: "known", source: "invocation-capture", route: modelRoute(row.route) };
   }
   object(row, ["status", "reason"]);
-  if (row.status !== "unknown" || row.reason !== "missing-invocation-capture") fail("initialRoute reason");
+  if (row.status !== "unknown" || row.reason !== "missing-invocation-capture") fail2("initialRoute reason");
   return { status: "unknown", reason: "missing-invocation-capture" };
 }
 function liveRoleRoute(value) {
   const row = object(value, ["status"], ["source", "route", "reason"]);
   if (row.status === "known") {
     object(row, ["status", "source", "route"]);
-    if (row.source !== "own-native-request-header") fail("liveRoute source");
+    if (row.source !== "own-native-request-header") fail2("liveRoute source");
     return { status: "known", source: "own-native-request-header", route: modelRoute(row.route) };
   }
   object(row, ["status", "reason"]);
-  if (row.status !== "unknown" || typeof row.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row.reason)) fail("liveRoute reason");
+  if (row.status !== "unknown" || typeof row.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row.reason)) fail2("liveRoute reason");
   return { status: "unknown", reason: row.reason };
 }
 function parseDsmmRoleRouteComparison(value) {
@@ -1813,12 +2996,12 @@ function parseDsmmRoleRouteComparison(value) {
 }
 function parseDsmmInvocationView(value) {
   const row = object(jsonData(value), ["role", "label", "level", "routeSource", "mode"], ["route", "runId", "childId", "jobId", "routeComparison"]);
-  if (typeof row.level !== "string" || !["normal", "low", "high", "max"].includes(row.level) || !DSMM_ROUTE_SOURCES.includes(row.routeSource) || typeof row.mode !== "string" || !["one-shot", "continuable"].includes(row.mode)) fail("invocation");
-  const target = role(row.role);
-  if (target === "dsmm-orchestrator") fail("invocation target");
+  if (typeof row.level !== "string" || !["normal", "low", "high", "max"].includes(row.level) || !DSMM_ROUTE_SOURCES.includes(row.routeSource) || typeof row.mode !== "string" || !["one-shot", "continuable"].includes(row.mode)) fail2("invocation");
+  const target = role2(row.role);
+  if (target === "dsmm-orchestrator") fail2("invocation target");
   const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : void 0;
-  if (routeComparison !== void 0 && (!Object.hasOwn(row, "childId") || routeComparison.childId !== row.childId)) fail("invocation routeComparison childId");
-  return { role: target, label: text(row.label, "label", 120), level: row.level, routeSource: row.routeSource, mode: row.mode, ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...routeComparison === void 0 ? {} : { routeComparison } };
+  if (routeComparison !== void 0 && (!Object.hasOwn(row, "childId") || routeComparison.childId !== row.childId)) fail2("invocation routeComparison childId");
+  return { role: target, label: text2(row.label, "label", 120), level: row.level, routeSource: row.routeSource, mode: row.mode, ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...routeComparison === void 0 ? {} : { routeComparison } };
 }
 function selectionState(value) {
   const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
@@ -1826,7 +3009,7 @@ function selectionState(value) {
 }
 function sessionSnapshot(value) {
   const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime"]);
-  if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
+  if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail2("scope");
   return {
     sessionId: sessionId(item.sessionId),
     globalDefault: selectionState(item.globalDefault),
@@ -1836,7 +3019,7 @@ function sessionSnapshot(value) {
     switchAllowed: boolean(item.switchAllowed, "switchAllowed"),
     ...optional(item, "admittedSelection", selectionState),
     ...optional(item, "switchUnavailableReason", (input) => {
-      if (typeof input !== "string" || !["busy", "maintenance", "disposed", "not-owned", "unavailable"].includes(input)) fail("switchUnavailableReason");
+      if (typeof input !== "string" || !["busy", "maintenance", "disposed", "not-owned", "unavailable"].includes(input)) fail2("switchUnavailableReason");
       return input;
     }),
     ...optional(item, "rolePolicy", rolePolicy),
@@ -1859,8 +3042,8 @@ function saveRequest(value) {
 function selectRequest(value) {
   const item = object(value, ["id", "expectedSelectionRevision"], ["expectedRevision"]);
   const result = { id: item.id === null ? null : id(item.id), expectedSelectionRevision: selectionRevision(item.expectedSelectionRevision), ...optional(item, "expectedRevision", revision) };
-  if (result.id !== null && result.expectedRevision === void 0) fail("expectedRevision");
-  if (result.id === null && result.expectedRevision !== void 0) fail("expectedRevision");
+  if (result.id !== null && result.expectedRevision === void 0) fail2("expectedRevision");
+  if (result.id === null && result.expectedRevision !== void 0) fail2("expectedRevision");
   return result;
 }
 function sessionSelectRequest(value) {
@@ -1879,21 +3062,21 @@ function descriptor(method, result, parameter) {
   return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === void 0 ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
 }
 function jsonData(value, depth2 = 0, active = /* @__PURE__ */ new Set()) {
-  if (depth2 > 32) fail("JSON depth");
+  if (depth2 > 32) fail2("JSON depth");
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "object" || value === null || active.has(value)) fail("JSON value");
-  if (Array.isArray(value) ? Object.getPrototypeOf(value) !== Array.prototype : Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail("JSON object");
-  if (Object.getOwnPropertySymbols(value).length) fail("JSON symbols");
+  if (typeof value !== "object" || value === null || active.has(value)) fail2("JSON value");
+  if (Array.isArray(value) ? Object.getPrototypeOf(value) !== Array.prototype : Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail2("JSON object");
+  if (Object.getOwnPropertySymbols(value).length) fail2("JSON symbols");
   const properties = Object.getOwnPropertyDescriptors(value);
-  for (const [key, property] of Object.entries(properties)) {
+  for (const [key, property2] of Object.entries(properties)) {
     if (Array.isArray(value) && key === "length") continue;
-    if (!Object.hasOwn(property, "value") || !property.enumerable || Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail("JSON property");
+    if (!Object.hasOwn(property2, "value") || !property2.enumerable || Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail2("JSON property");
   }
-  if (Array.isArray(value) && Object.keys(value).length !== value.length) fail("JSON array holes");
+  if (Array.isArray(value) && Object.keys(value).length !== value.length) fail2("JSON array holes");
   active.add(value);
   const result = Array.isArray(value) ? value.map((child2) => jsonData(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child2]) => {
-    if (["__proto__", "prototype", "constructor"].includes(key)) fail("JSON key");
+    if (["__proto__", "prototype", "constructor"].includes(key)) fail2("JSON key");
     return [key, jsonData(child2, depth2 + 1, active)];
   }));
   active.delete(value);
@@ -1905,41 +3088,43 @@ function globalSnapshot(value) {
   return { config: jsonData(row.config), revision: selectionRevision(row.revision) };
 }
 function admissionView(value) {
-  const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"]);
+  const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
   object(row.settings, [], Object.keys(row.settings));
   for (const key of ["sources", "captures"]) {
     const map = object(row[key], [], Object.keys(row[key]));
     for (const [path, value2] of Object.entries(map)) {
-      if (path.startsWith("lsp.env.")) fail("private environment field");
-      text(value2, key, 128);
+      if (path.startsWith("lsp.env.")) fail2("private environment field");
+      text2(value2, key, 128);
     }
   }
-  if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256) fail("restartRequired");
+  if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256) fail2("restartRequired");
   const named = row.named === null ? null : object(row.named, ["id", "revision"]);
   return {
+    ...optional(row, "modelParameterPolicy", (value2) => parseModelParameterPolicy(jsonData(value2))),
     settings: readOnlySettingsData(row.settings),
     sources: jsonData(row.sources),
     captures: jsonData(row.captures),
-    restartRequired: row.restartRequired.map((value2) => text(value2, "field", 256)),
+    restartRequired: row.restartRequired.map((value2) => text2(value2, "field", 256)),
     named: named === null ? null : { id: id(named.id), revision: revision(named.revision) }
   };
 }
 function readOnlySettingsData(value) {
   const settings = jsonData(value);
   const configured = (value2) => {
-    if (value2 !== "" && value2 !== "<configured>") fail("private configured value");
+    if (value2 !== "" && value2 !== "<configured>") fail2("private configured value");
   };
   if (settings.lsp !== void 0) {
     const lsp = object(settings.lsp, ["enabled", "serverName", "command", "args", "cwd", "env", "toolCallTimeoutMs", "failOnStartupError"]);
     configured(lsp.command);
     configured(lsp.cwd);
-    if (!Array.isArray(lsp.args) || lsp.args.some((value2) => value2 !== "<configured>")) fail("private arguments");
+    if (!Array.isArray(lsp.args) || lsp.args.some((value2) => value2 !== "<configured>")) fail2("private arguments");
     const env = object(lsp.env, [], Object.keys(lsp.env));
-    for (const [key, value2] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value2 !== "<redacted>") fail("private environment");
+    for (const [key, value2] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value2 !== "<redacted>") fail2("private environment");
   }
   if (settings.presets !== void 0) {
-    const presets = object(settings.presets, ["materialize"], ["root"]);
-    if (presets.root !== void 0 && presets.root !== "<configured>") fail("private directory");
+    const presets = object(settings.presets, ["materialize"], ["root", "plannerRootEnabled"]);
+    if (Object.hasOwn(presets, "plannerRootEnabled")) boolean(presets.plannerRootEnabled, "presets.plannerRootEnabled");
+    if (presets.root !== void 0 && presets.root !== "<configured>") fail2("private directory");
   }
   if (settings.runtimeRecovery !== void 0) {
     const recovery = object(settings.runtimeRecovery, ["enabled", "retryOnStatusCodes", "retryOnCodes", "fallbackRoutes", "maxFallbackAttempts", "idleContinuation"]);
@@ -1951,12 +3136,12 @@ function readOnlySettingsData(value) {
 function editorSnapshot(value) {
   const row = object(value, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources"]);
   const result = jsonData(row);
-  text(row.entryId, "entryId", 256);
-  if (row.namespace !== null) text(row.namespace, "namespace", 256);
+  text2(row.entryId, "entryId", 256);
+  if (row.namespace !== null) text2(row.namespace, "namespace", 256);
   revision(row.hostProfileKey);
   selectionRevision(row.globalRevision);
   revision(row.nativeRevision);
-  if (row.nativeFormRevision !== null) integer(row.nativeFormRevision, "nativeFormRevision");
+  if (row.nativeFormRevision !== null) integer2(row.nativeFormRevision, "nativeFormRevision");
   for (const key of ["global", "profile", "desired", "sources", "startup", "defaults", "schema"]) object(row[key], [], Object.keys(row[key]));
   if (row.nativeForm !== null) object(row.nativeForm, ["base", "user"]);
   if (row.nextRoot !== null) result.nextRoot = admissionView(row.nextRoot);
@@ -1967,55 +3152,59 @@ function editorSnapshot(value) {
     if (map === void 0) continue;
     object(map, [], Object.keys(map));
     for (const [path, value2] of Object.entries(map)) {
-      if (path.startsWith("lsp.env.")) fail("private environment field");
-      text(value2, "source", 128);
+      if (path.startsWith("lsp.env.")) fail2("private environment field");
+      text2(value2, "source", 128);
     }
   }
   result.modules = moduleStates(row.modules);
   return result;
 }
 function schemaNode(value) {
-  const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
-  if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type)) fail("schema type");
+  const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty", "additionalProperties"]);
+  if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type)) fail2("schema type");
   const node = { type: row.type };
   if (row.fields !== void 0) node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields))).map(([key, child2]) => [key, schemaNode(child2)]));
   if (row.inner !== void 0) node.inner = schemaNode(row.inner);
   if (row.alternatives !== void 0) {
-    if (!Array.isArray(row.alternatives)) fail("schema alternatives");
+    if (!Array.isArray(row.alternatives)) fail2("schema alternatives");
     node.alternatives = row.alternatives.map(schemaNode);
   }
   if (Object.hasOwn(row, "value")) {
-    if (!["string", "number", "boolean"].includes(typeof row.value)) fail("schema value");
+    if (!["string", "number", "boolean"].includes(typeof row.value)) fail2("schema value");
     node.value = row.value;
   }
   for (const key of ["min", "max", "step"]) if (row[key] !== void 0) {
-    if (typeof row[key] !== "number" || !Number.isFinite(row[key])) fail("schema bound");
+    if (typeof row[key] !== "number" || !Number.isFinite(row[key])) fail2("schema bound");
     node[key] = row[key];
   }
   if (row.required !== void 0) node.required = boolean(row.required, "schema required");
   if (row.nonempty !== void 0) {
-    if (row.type !== "string") fail("schema nonempty");
+    if (row.type !== "string") fail2("schema nonempty");
     node.nonempty = boolean(row.nonempty, "schema nonempty");
   }
+  if (Object.hasOwn(row, "additionalProperties")) {
+    if (row.type !== "object" || row.additionalProperties !== "json") fail2("schema additionalProperties");
+    node.additionalProperties = "json";
+  }
   if (row.keys !== void 0) {
-    if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64) fail("schema keys");
-    node.keys = row.keys.map((key) => text(key, "schema key", 128));
+    if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64) fail2("schema keys");
+    node.keys = row.keys.map((key) => text2(key, "schema key", 128));
   }
   return node;
 }
 function globalSaveRequest(value) {
   const row = object(value, ["expectedRevision", "edits"]);
-  if (!Array.isArray(row.edits) || row.edits.length > 128) fail("edits");
+  if (!Array.isArray(row.edits) || row.edits.length > 128) fail2("edits");
   return { expectedRevision: selectionRevision(row.expectedRevision), edits: row.edits.map((value2) => {
     const edit = object(value2, ["op", "path"], ["value"]);
-    if (!Array.isArray(edit.path) || edit.path.length < 1 || edit.path.length > 8) fail("field path");
+    if (!Array.isArray(edit.path) || edit.path.length < 1 || edit.path.length > 8) fail2("field path");
     const path = edit.path.map((part) => {
-      const key = text(part, "field", 128);
-      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key)) fail("field");
+      const key = text2(part, "field", 128);
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(key) || ["constructor", "prototype", "__proto__"].includes(key)) fail2("field");
       return key;
     });
     if (edit.op === "unset" && !Object.hasOwn(edit, "value")) return { op: "unset", path };
-    if (edit.op !== "set" || !Object.hasOwn(edit, "value")) fail("edit");
+    if (edit.op !== "set" || !Object.hasOwn(edit, "value")) fail2("edit");
     return { op: "set", path, value: jsonData(edit.value) };
   }) };
 }
@@ -2031,20 +3220,23 @@ function configDescriptor(method, parameter) {
   };
 }
 function moduleStates(value) {
-  if (!Array.isArray(value) || value.length !== 1) fail("modules");
+  if (!Array.isArray(value) || value.length !== DSMM_MODULE_DESCRIPTORS.length) fail2("modules");
+  const ids = /* @__PURE__ */ new Set();
   return value.map((value2) => {
     const row = object(value2, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
-    const descriptor3 = object(row.descriptor, ["id", "label", "key"]);
-    if (descriptor3.id !== "deepwork" || descriptor3.label !== "Deepwork" || descriptor3.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown") fail("module descriptor");
+    const descriptor4 = object(row.descriptor, ["id", "label", "key"]);
+    const known = DSMM_MODULE_DESCRIPTORS.find((known2) => known2.id === descriptor4.id);
+    if (known === void 0 || descriptor4.label !== known.label || descriptor4.key !== known.key || row.hostBundleEnabled !== "unknown" || ids.has(known.id)) fail2("module descriptor");
+    ids.add(known.id);
     const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-    if (typeof desired.source !== "string" || !["defaults", "global"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture) || ![null, "global-disabled", "restart-required"].includes(next.reason) || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason)) fail("module state");
+    if (typeof desired.source !== "string" || !["defaults", "global", "profile"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture) || ![null, "global-disabled", "restart-required"].includes(next.reason) || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason)) fail2("module state");
     return {
-      descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" },
+      descriptor: { ...known },
       hostBundleEnabled: "unknown",
       desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source, capture: desired.capture },
-      startupMounted: boolean(row.startupMounted, "startupMounted"),
+      startupMounted: row.startupMounted === null ? null : boolean(row.startupMounted, "startupMounted"),
       admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
-      nextRoot: { admitted: boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
+      nextRoot: { admitted: next.admitted === null ? null : boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
       reason: row.reason,
       pending: boolean(row.pending, "pending")
     };
@@ -2064,10 +3256,10 @@ var TYPERT_REMOTE = {
         { name: "request", wire: "request", source: "json", codec: codec("SessionModeSelectRequest", modeSelectRequest) }
       ]
     },
-    descriptor("describe", codec("ProfileSnapshot", snapshot)),
+    descriptor("describe", codec("ProfileSnapshot", snapshot2)),
     descriptor("read", codec("ProfileReadResult", readResult), { name: "id", codec: codec("ProfileId", id) }),
     descriptor("save", codec("ProfileReadResult", readResult), { name: "request", codec: codec("ProfileSaveRequest", saveRequest) }),
-    descriptor("select", codec("ProfileSnapshot", snapshot), { name: "request", codec: codec("ProfileSelectRequest", selectRequest) }),
+    descriptor("select", codec("ProfileSnapshot", snapshot2), { name: "request", codec: codec("ProfileSelectRequest", selectRequest) }),
     {
       ...descriptor("describeSession", codec("SessionProfileSnapshot", sessionSnapshot)),
       parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: codec("NativeSessionId", sessionId) }]
@@ -2169,17 +3361,17 @@ function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function route2(value) {
-  return record(value) && typeof value.provider === "string" && typeof value.model === "string" && (value.reasoningEffort === void 0 || typeof value.reasoningEffort === "string") && Object.keys(value).every((key) => ["provider", "model", "reasoningEffort"].includes(key));
+  return record(value) && typeof value.provider === "string" && typeof value.model === "string" && (value.reasoningEffort === void 0 || typeof value.reasoningEffort === "string");
 }
 function level(value) {
-  return route2(value) || record(value) && typeof value.reasoningEffort === "string" && Object.keys(value).every((key) => key === "reasoningEffort");
+  return route2(value) || record(value) && value.provider === void 0 && value.model === void 0 && typeof value.reasoningEffort === "string";
 }
 function validTree(node, depth2 = 0) {
   if (depth2 > 32) return false;
   if (node.type === "object") {
     const seen = /* @__PURE__ */ new Set();
-    for (const property of node.children ?? []) {
-      const key = property.children?.[0]?.value;
+    for (const property2 of node.children ?? []) {
+      const key = property2.children?.[0]?.value;
       if (typeof key !== "string" || seen.has(key) || ["__proto__", "prototype", "constructor"].includes(key)) return false;
       seen.add(key);
     }
@@ -2205,9 +3397,9 @@ function structuredDocument(content2) {
     if (Object.keys(runtimePolicy2).some((key) => key !== "strategy" && key !== "rateLimit")) return null;
     if (runtimePolicy2.strategy !== void 0) normalizeRoutingStrategy(runtimePolicy2.strategy);
     if (runtimePolicy2.rateLimit !== void 0) normalizeRateLimitOverrides(runtimePolicy2.rateLimit);
-    for (const [role2, raw] of Object.entries(policies)) {
+    for (const [role3, raw] of Object.entries(policies)) {
       if (!record(raw) || Object.keys(raw).some((key) => !["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"].includes(key))) return null;
-      if (raw.levels !== void 0 && (role2 === "dsmm-orchestrator" || !record(raw.levels) || Object.entries(raw.levels).some(([key, value]) => !["low", "high", "max"].includes(key) || !level(value)))) return null;
+      if (raw.levels !== void 0 && (role3 === "dsmm-orchestrator" || !record(raw.levels) || Object.entries(raw.levels).some(([key, value]) => !["low", "high", "max"].includes(key) || !level(value)))) return null;
       if (raw.primary !== void 0 && !route2(raw.primary)) return null;
       if (raw.fallbackRoutes !== void 0 && (!Array.isArray(raw.fallbackRoutes) || raw.fallbackRoutes.length > 32 || !raw.fallbackRoutes.every(route2))) return null;
       if (raw.strategy !== void 0) normalizeRoutingStrategy(raw.strategy);
@@ -2226,17 +3418,17 @@ function editStructuredPath(content2, path, value) {
     return null;
   }
 }
-function moveFallback(content2, role2, from, to) {
+function moveFallback(content2, role3, from2, to) {
   const document2 = structuredDocument(content2);
-  const chain = document2?.roleRouting[role2]?.fallbackRoutes;
-  if (chain === void 0 || from < 0 || from >= chain.length || to < 0 || to >= chain.length) return null;
-  const low = Math.min(from, to), high = Math.max(from, to);
+  const chain = document2?.roleRouting[role3]?.fallbackRoutes;
+  if (chain === void 0 || from2 < 0 || from2 >= chain.length || to < 0 || to >= chain.length) return null;
+  const low = Math.min(from2, to), high = Math.max(from2, to);
   const tree = parseTree2(content2);
   if (tree === void 0) return null;
-  const nodes = chain.map((_, index) => findNodeAtLocation2(tree, ["settings", "roleRouting", role2, "fallbackRoutes", index]));
+  const nodes = chain.map((_, index) => findNodeAtLocation2(tree, ["settings", "roleRouting", role3, "fallbackRoutes", index]));
   if (nodes.some((node) => node === void 0)) return null;
   const order = nodes.map((node) => content2.slice(node.offset, node.offset + node.length));
-  order.splice(to, 0, order.splice(from, 1)[0]);
+  order.splice(to, 0, order.splice(from2, 1)[0]);
   return applyEdits(content2, nodes.slice(low, high + 1).map((node, offset) => ({ offset: node.offset, length: node.length, content: order[low + offset] })));
 }
 
@@ -2253,8 +3445,8 @@ function modeIntentWatermark(window) {
 }
 var NEW_EDITOR = "";
 var NEW_PROFILE_CONTENT = '{\n  "version": 1,\n  "id": "new-profile",\n  "label": "New profile",\n  "settings": {\n    // Runtime overlay only. Omitted fields inherit the deployment baseline.\n    "defaultActive": true\n  }\n}\n';
-function canReconcileSelection(snapshot3) {
-  return snapshot3 !== null && (snapshot3.selectionRevision === "absent" || /^[a-f0-9]{64}$/u.test(snapshot3.selectionRevision)) && (snapshot3.selectionError === void 0 || snapshot3.selectionError.code === "conflict");
+function canReconcileSelection(snapshot4) {
+  return snapshot4 !== null && (snapshot4.selectionRevision === "absent" || /^[a-f0-9]{64}$/u.test(snapshot4.selectionRevision)) && (snapshot4.selectionError === void 0 || snapshot4.selectionError.code === "conflict");
 }
 var ProfilesController = class {
   constructor(remote) {
@@ -2328,7 +3520,7 @@ var ProfilesController = class {
     discardAndOpen: () => this.discardAndOpen(),
     cancelDiscard: () => this.publish({ pendingEditor: null }),
     editPath: (path, value) => this.editPath(path, value),
-    moveFallback: (role2, from, to) => this.editFallbackOrder(role2, from, to),
+    moveFallback: (role3, from2, to) => this.editFallbackOrder(role3, from2, to),
     editRoute: (path, provider, model) => this.editRoute(path, provider, model),
     refreshCatalog: () => this.refreshCatalog(),
     refreshSession: () => this.refreshSession(),
@@ -2339,11 +3531,11 @@ var ProfilesController = class {
     resetSession: () => this.selectSession(true),
     setDeepwork: (active) => this.setDeepwork(active),
     useSessionProfileModel: () => this.selectSession(false, { useProfileModel: true }, true),
-    setFieldInvalid: (field, invalid) => {
+    setFieldInvalid: (field, invalid2) => {
       if (this.disposed) return;
       const invalidFields = this.current.invalidFields.filter((candidate) => candidate !== field);
-      if (invalid) invalidFields.push(field);
-      if (invalidFields.join("\n") !== this.current.invalidFields.join("\n")) this.publish({ invalidFields, ...invalid ? { dirty: true } : {} });
+      if (invalid2) invalidFields.push(field);
+      if (invalidFields.join("\n") !== this.current.invalidFields.join("\n")) this.publish({ invalidFields, ...invalid2 ? { dirty: true } : {} });
     }
   };
   dispose() {
@@ -2497,10 +3689,10 @@ var ProfilesController = class {
     }
   }
   async selectSession(reset, options, modelOnly = false) {
-    const { currentSessionId: id2, session, sessionChoice, snapshot: snapshot3 } = this.current;
+    const { currentSessionId: id2, session, sessionChoice, snapshot: snapshot4 } = this.current;
     if (this.disposed || id2 === null || session === null || !session.switchAllowed || this.current.sessionBusy !== null || this.current.busy !== null || this.current.dirty || this.current.pendingEditor !== null) return;
     const selectedId = reset ? null : sessionChoice;
-    const revision2 = snapshot3?.profiles.find((profile) => profile.id === selectedId)?.revision;
+    const revision2 = snapshot4?.profiles.find((profile) => profile.id === selectedId)?.revision;
     if (!modelOnly && selectedId !== null && revision2 == null) return;
     const generation = ++this.sessionGeneration;
     const useProfileModel = !reset && options?.useProfileModel === true;
@@ -2553,7 +3745,13 @@ var ProfilesController = class {
         return;
       }
       try {
-        await this.unwrap(selector.selectModel({ sessionId: id2, ...accepted.profileModel }));
+        const { provider, model, reasoningEffort } = accepted.profileModel;
+        await this.unwrap(selector.selectModel({
+          sessionId: id2,
+          provider,
+          model,
+          ...reasoningEffort === void 0 ? {} : { reasoningEffort }
+        }));
         if (live()) this.publish(selectorLive() && modelSource === this.modelSelectionSource && this.modelSelectionSessionId === id2 ? { sessionNotice: "applied-with-model" } : { sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
       } catch {
         if (live()) this.publish({ sessionIssue: { kind: "assembly", code: selectorLive() ? "model-selection-failed" : "model-service-unavailable", source: "profile-model" } });
@@ -2609,8 +3807,8 @@ var ProfilesController = class {
   }
   async refresh() {
     await this.perform("refresh", async (live) => {
-      const snapshot3 = await this.unwrap(this.remote.describe());
-      if (live()) this.publish({ snapshot: snapshot3 });
+      const snapshot4 = await this.unwrap(this.remote.describe());
+      if (live()) this.publish({ snapshot: snapshot4 });
     });
   }
   async open(id2) {
@@ -2692,10 +3890,10 @@ var ProfilesController = class {
     }
     this.editContent(content2);
   }
-  editFallbackOrder(role2, from, to) {
+  editFallbackOrder(role3, from2, to) {
     const editor = this.current.editor;
     if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null) return;
-    const content2 = moveFallback(editor.content, role2, from, to);
+    const content2 = moveFallback(editor.content, role3, from2, to);
     if (content2 !== null) this.editContent(content2);
   }
   async save() {
@@ -2717,26 +3915,26 @@ var ProfilesController = class {
     });
   }
   async apply() {
-    const { editor, snapshot: snapshot3, dirty } = this.current;
-    if (editor?.revision == null || !canReconcileSelection(snapshot3) || dirty) return;
+    const { editor, snapshot: snapshot4, dirty } = this.current;
+    if (editor?.revision == null || !canReconcileSelection(snapshot4) || dirty) return;
     await this.perform("apply", async (live) => {
-      const accepted = await this.unwrap(this.remote.select({ id: editor.id, expectedRevision: editor.revision, expectedSelectionRevision: snapshot3.selectionRevision }));
+      const accepted = await this.unwrap(this.remote.select({ id: editor.id, expectedRevision: editor.revision, expectedSelectionRevision: snapshot4.selectionRevision }));
       if (live()) this.acceptSelection(accepted, { key: "applied", id: accepted.selectedId ?? void 0 });
     });
   }
   async reset() {
-    const snapshot3 = this.current.snapshot;
-    if (!canReconcileSelection(snapshot3)) return;
+    const snapshot4 = this.current.snapshot;
+    if (!canReconcileSelection(snapshot4)) return;
     await this.perform("reset", async (live) => {
-      const accepted = await this.unwrap(this.remote.select({ id: null, expectedSelectionRevision: snapshot3.selectionRevision }));
+      const accepted = await this.unwrap(this.remote.select({ id: null, expectedSelectionRevision: snapshot4.selectionRevision }));
       if (live()) this.acceptSelection(accepted, { key: "reset" });
     });
   }
-  acceptSelection(snapshot3, notice) {
+  acceptSelection(snapshot4, notice) {
     this.publish({
-      snapshot: snapshot3,
-      notice: snapshot3.selectionError === void 0 ? notice : null,
-      issue: snapshot3.selectionError === void 0 ? null : { ...safeIssue(snapshot3.selectionError), source: "selection" }
+      snapshot: snapshot4,
+      notice: snapshot4.selectionError === void 0 ? notice : null,
+      issue: snapshot4.selectionError === void 0 ? null : { ...safeIssue(snapshot4.selectionError), source: "selection" }
     });
   }
 };
@@ -2823,7 +4021,7 @@ var en = {
   idHint: "Use 1–64 lowercase letters, digits, hyphens or underscores. The ID cannot be changed after saving. Add an optional display label in the JSONC document.",
   configuration: "Runtime configuration (JSONC)",
   configurationHint: "Document: version 1, matching id, optional label, and settings. Runtime overlays support role routes/levels, locale, role availability, topology, workflow, guards, recovery, calibration and default effort. Retired max-preset fields are rejected, not migrated.",
-  structuralHint: "Skills, prompt content, preset installation, LSP, providers/accounts, background/depth and arbitrary route permissions remain deployment-only. Never paste credentials. JSONC and structured controls edit the same draft without normalizing unrelated bytes.",
+  structuralHint: "Skills, prompt content, preset installation, providers/accounts, background/depth and arbitrary route permissions remain deployment-only. Never paste credentials. JSONC and structured controls edit the same draft without normalizing unrelated bytes.",
   save: "Save profile",
   saving: "Saving profile…",
   apply: "Set as future default",
@@ -3052,7 +4250,7 @@ var zh = {
   idHint: "使用 1–64 个小写字母、数字、连字符或下划线。保存后不能修改 ID。可在 JSONC 文档中添加可选的显示名称 label。",
   configuration: "运行时配置（JSONC）",
   configurationHint: "文档包含 version: 1、相同 id、可选 label 和 settings。支持角色路由与调用等级、语言、角色可用性、拓扑、流程、守卫、恢复、校准与默认推理强度。已退休的最高强度预设字段会被拒绝，不自动迁移。",
-  structuralHint: "技能、提示内容、预设安装、LSP、提供商与账户、后台与深度及任意路由权限仅可在部署中配置。请勿粘贴凭证。JSONC 与结构化控件共享草稿，不规范化无关字节。",
+  structuralHint: "技能、提示内容、预设安装、提供商与账户、后台与深度及任意路由权限仅可在部署中配置。请勿粘贴凭证。JSONC 与结构化控件共享草稿，不规范化无关字节。",
   save: "保存配置档",
   saving: "正在保存配置档…",
   apply: "设为未来默认",
@@ -3211,12 +4409,12 @@ var RETRY_FIELD_LABEL_KEYS = {
 };
 
 // src/client/ProfilesSection.tsx
-var import_react3 = require("react");
-var import_dsh_client_ui_primitives3 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react4 = require("react");
+var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/client/StructuredEditor.tsx
-var import_react = require("react");
-var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react2 = require("react");
+var import_dsh_client_ui_primitives2 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/profile-locale.ts
 var DSMM_LOCALES = ["en", "zh-Hans", "zh-Hant", "ja", "ko", "de", "fr", "es", "pt-BR", "ru"];
@@ -3242,26 +4440,131 @@ function RoleAvailability({ value, t }) {
   ] });
 }
 
-// src/client/StructuredEditor.tsx
+// src/client/EditableChoice.tsx
+var import_react = require("react");
+var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime3 = require("react/jsx-runtime");
-var MANUAL = "__dsmm_manual__";
-function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, actions, t }) {
-  const [draft, setDraft] = (0, import_react.useState)(value === void 0 ? "" : String(value));
-  const [invalid, setInvalid] = (0, import_react.useState)(false);
+function EditableChoice({ id: id2, label: label2, value, options, disabled, placeholder, onChange, onSelect }) {
+  const input = (0, import_react.useRef)(null);
+  const [open, setOpen] = (0, import_react.useState)(false);
+  const [activeId, setActiveId] = (0, import_react.useState)(null);
+  const distinct = new Map(options.map((option) => [option.id, option]));
+  if (value !== "" && !distinct.has(value)) distinct.set(value, { id: value, name: value });
+  const choices = [...distinct.values()];
+  const activeIndex = choices.findIndex((option) => option.id === activeId);
+  const visible = open && !disabled && choices.length > 0;
+  const close = () => {
+    setOpen(false);
+    setActiveId(null);
+  };
+  const choose = (next) => {
+    if (next !== value) (onSelect ?? onChange)(next);
+    close();
+  };
+  (0, import_react.useEffect)(() => {
+    if (disabled) close();
+  }, [disabled]);
+  (0, import_react.useEffect)(() => {
+    if (activeId !== null && activeIndex < 0) setActiveId(null);
+  }, [activeId, activeIndex]);
+  (0, import_react.useEffect)(() => {
+    if (visible && activeIndex >= 0) document.getElementById(`${id2}-choice-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [id2, visible, activeIndex]);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-choice", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      import_dsh_client_ui_primitives.Input,
+      {
+        ref: input,
+        id: id2,
+        className: "dsmm-input",
+        role: "combobox",
+        "aria-autocomplete": "list",
+        "aria-expanded": visible,
+        "aria-controls": visible ? `${id2}-choices` : void 0,
+        "aria-activedescendant": visible && activeIndex >= 0 ? `${id2}-choice-${activeIndex}` : void 0,
+        value,
+        disabled,
+        placeholder,
+        autoComplete: "off",
+        onBlur: close,
+        onChange: (event) => {
+          onChange(event.currentTarget.value);
+          setOpen(true);
+          setActiveId(null);
+        },
+        onKeyDown: (event) => {
+          if (event.nativeEvent.isComposing) return;
+          if ((event.key === "ArrowDown" || event.key === "ArrowUp") && choices.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(true);
+            const next = event.key === "ArrowDown" ? !visible || activeIndex < 0 ? 0 : (activeIndex + 1) % choices.length : !visible || activeIndex < 0 ? choices.length - 1 : (activeIndex - 1 + choices.length) % choices.length;
+            setActiveId(choices[next].id);
+          } else if (visible && (event.key === "Escape" || event.key === "Enter")) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.key === "Enter" && activeIndex >= 0) choose(choices[activeIndex].id);
+            else close();
+          }
+        }
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      import_dsh_client_ui_primitives.Button,
+      {
+        type: "button",
+        size: "sm",
+        variant: "toolbar",
+        tabIndex: -1,
+        className: "dsmm-choice-toggle",
+        "aria-label": label2,
+        "aria-haspopup": "listbox",
+        "aria-expanded": visible,
+        disabled: disabled || choices.length === 0,
+        icon: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.IconChevronDownOutlineRegular, {}),
+        onMouseDown: (event) => event.preventDefault(),
+        onClick: () => {
+          input.current?.focus();
+          setOpen(!visible);
+          setActiveId(null);
+        }
+      }
+    ),
+    visible && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ul", { className: "dsmm-choice-list", id: `${id2}-choices`, role: "listbox", "aria-label": label2, children: choices.map((option, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      "li",
+      {
+        id: `${id2}-choice-${index}`,
+        role: "option",
+        "data-value": option.id,
+        "aria-selected": option.id === activeId,
+        onMouseDown: (event) => event.preventDefault(),
+        onClick: () => choose(option.id),
+        children: option.name === option.id ? option.id : `${option.name} (${option.id})`
+      },
+      option.id
+    )) })
+  ] });
+}
+
+// src/client/StructuredEditor.tsx
+var import_jsx_runtime4 = require("react/jsx-runtime");
+function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, actions: actions2, t }) {
+  const [draft2, setDraft] = (0, import_react2.useState)(value === void 0 ? "" : String(value));
+  const [invalid2, setInvalid] = (0, import_react2.useState)(false);
   const [min, max] = DSMM_RATE_LIMIT_BOUNDS[field];
   const key = path.join(".");
-  (0, import_react.useEffect)(() => {
+  (0, import_react2.useEffect)(() => {
     setDraft(value === void 0 ? "" : String(value));
     setInvalid(false);
   }, [value]);
-  (0, import_react.useEffect)(() => {
-    actions.setFieldInvalid(key, invalid);
-    return () => actions.setFieldInvalid(key, false);
-  }, [actions.setFieldInvalid, key, invalid]);
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: id2, children: t("retryField", { name, field: t(RETRY_FIELD_LABEL_KEYS[field]) }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-      import_dsh_client_ui_primitives.Input,
+  (0, import_react2.useEffect)(() => {
+    actions2.setFieldInvalid(key, invalid2);
+    return () => actions2.setFieldInvalid(key, false);
+  }, [actions2.setFieldInvalid, key, invalid2]);
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: id2, children: t("retryField", { name, field: t(RETRY_FIELD_LABEL_KEYS[field]) }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      import_dsh_client_ui_primitives2.Input,
       {
         id: id2,
         "data-dsmm-policy-field": field,
@@ -3272,251 +4575,254 @@ function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, a
         max,
         step: 1,
         disabled,
-        value: draft,
+        value: draft2,
         placeholder: inherited === void 0 ? t("unknownDefault") : t("inheritNumber", { value: inherited }),
-        "aria-invalid": invalid || void 0,
-        "aria-describedby": `${id2}-hint${invalid ? ` ${id2}-invalid` : ""}`,
+        "aria-invalid": invalid2 || void 0,
+        "aria-describedby": `${id2}-hint${invalid2 ? ` ${id2}-invalid` : ""}`,
         onChange: (event) => {
           const input = event.currentTarget;
           setDraft(input.value);
           const valid = input.validity.valid && (input.value === "" || Number.isSafeInteger(input.valueAsNumber));
           setInvalid(!valid);
-          actions.setFieldInvalid(key, !valid);
-          if (valid) actions.editPath(path, input.value === "" ? void 0 : input.valueAsNumber);
+          actions2.setFieldInvalid(key, !valid);
+          if (valid) actions2.editPath(path, input.value === "" ? void 0 : input.valueAsNumber);
         }
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("retryBounds", { min, max, value: inherited ?? t("unknownDefault") }) }),
-    invalid && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { id: `${id2}-invalid`, children: t("invalidNumber") })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("retryBounds", { min, max, value: inherited ?? t("unknownDefault") }) }),
+    invalid2 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${id2}-invalid`, children: t("invalidNumber") })
   ] });
 }
 function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t }) {
-  const prefix = (0, import_react.useId)();
+  const prefix = (0, import_react2.useId)();
   const providers = catalog?.groups ?? [];
   const group = providers.find((candidate) => candidate.id === value.provider);
   const model = group?.models.find((candidate) => candidate.id === value.model);
   const efforts = model?.reasoning?.efforts ?? [];
-  const providerListed = group !== void 0;
-  const modelListed = model !== void 0;
-  const [manualProvider, setManualProvider] = (0, import_react.useState)(!providerListed);
-  const [manualModel, setManualModel] = (0, import_react.useState)(!modelListed);
   const updateModel = (provider, modelId) => {
     editRoute(path, provider, modelId);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-route-fields", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-provider`, children: t("routeProvider", { name }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-provider`, disabled, value: manualProvider || !providerListed ? MANUAL : value.provider, onChange: (event) => {
-        setManualProvider(event.currentTarget.value === MANUAL);
-        setManualModel(true);
-        updateModel(event.currentTarget.value === MANUAL ? "" : event.currentTarget.value, "");
-      }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: MANUAL, children: providerListed ? t("manual") : t("manualValue", { value: value.provider || t("unset") }) }),
-        providers.map((provider) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("option", { value: provider.id, children: [
-          provider.name,
-          " (",
-          provider.id,
-          ")"
-        ] }, provider.id))
-      ] }),
-      (manualProvider || !providerListed) && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Input, { "aria-label": t("manualProvider", { name }), className: "dsmm-input", value: value.provider, disabled, onChange: (event) => updateModel(event.currentTarget.value, value.model) })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-route-fields", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-provider`, children: t("routeProvider", { name }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        EditableChoice,
+        {
+          id: `${prefix}-provider`,
+          label: t("routeProvider", { name }),
+          value: value.provider,
+          options: providers,
+          disabled,
+          onChange: (provider) => updateModel(provider, value.model),
+          onSelect: (provider) => updateModel(provider, "")
+        }
+      )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-model`, children: t("routeModel", { name }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-model`, disabled, value: manualModel || !modelListed ? MANUAL : value.model, onChange: (event) => {
-        setManualModel(event.currentTarget.value === MANUAL);
-        updateModel(value.provider, event.currentTarget.value === MANUAL ? "" : event.currentTarget.value);
-      }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: MANUAL, children: modelListed ? t("manual") : t("manualValue", { value: value.model || t("unset") }) }),
-        group?.models.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("option", { value: candidate.id, children: [
-          candidate.name,
-          " (",
-          candidate.id,
-          ")"
-        ] }, candidate.id))
-      ] }),
-      (manualModel || !modelListed) && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Input, { "aria-label": t("manualModel", { name }), className: "dsmm-input", value: value.model, disabled, onChange: (event) => updateModel(value.provider, event.currentTarget.value) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-model`, children: t("routeModel", { name }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        EditableChoice,
+        {
+          id: `${prefix}-model`,
+          label: t("routeModel", { name }),
+          value: value.model,
+          options: group?.models ?? [],
+          disabled,
+          onChange: (modelId) => updateModel(value.provider, modelId)
+        }
+      )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-effort`, children: t("routeEffort", { name }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-effort`, disabled, value: value.reasoningEffort ?? "", onChange: (event) => edit([...path, "reasoningEffort"], event.currentTarget.value || void 0), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("effortDefault") }),
-        value.reasoningEffort !== void 0 && !efforts.some((effort) => effort.id === value.reasoningEffort) && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: value.reasoningEffort, children: t("manualValue", { value: value.reasoningEffort }) }),
-        efforts.map((effort) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("option", { value: effort.id, children: [
-          effort.name,
-          " (",
-          effort.id,
-          ")"
-        ] }, effort.id))
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Input, { "aria-label": t("manualEffort", { name }), className: "dsmm-input", value: value.reasoningEffort ?? "", disabled, placeholder: t("effortDefault"), onChange: (event) => edit([...path, "reasoningEffort"], event.currentTarget.value || void 0) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-effort`, children: t("routeEffort", { name }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        EditableChoice,
+        {
+          id: `${prefix}-effort`,
+          label: t("routeEffort", { name }),
+          value: value.reasoningEffort ?? "",
+          options: efforts,
+          disabled,
+          placeholder: t("effortDefault"),
+          onChange: (effort) => edit([...path, "reasoningEffort"], effort || void 0)
+        }
+      )
     ] })
   ] });
 }
-function PolicyFields({ value, inherited, path, name, disabled, actions, t }) {
-  const prefix = (0, import_react.useId)();
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-policy-fields", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-strategy`, children: t("strategy", { name }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-strategy`, disabled, value: value.strategy ?? "", onChange: (event) => actions.editPath([...path, "strategy"], event.currentTarget.value || void 0), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("inheritStrategy", { value: inherited?.strategy ?? t("unknownDefault") }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "startup-lock", children: t("startupLock") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "rate-limit-fallback", children: t("rateFallback") })
+function PolicyFields({ value, inherited, path, name, disabled, actions: actions2, t }) {
+  const prefix = (0, import_react2.useId)();
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-policy-fields", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-strategy`, children: t("strategy", { name }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-strategy`, disabled, value: value.strategy ?? "", onChange: (event) => actions2.editPath([...path, "strategy"], event.currentTarget.value || void 0), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inheritStrategy", { value: inherited?.strategy ?? t("unknownDefault") }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "startup-lock", children: t("startupLock") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "rate-limit-fallback", children: t("rateFallback") })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("strategyHint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "dsmm-route-fields", children: Object.keys(DSMM_RATE_LIMIT_BOUNDS).map((field) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RetryNumber, { id: `${prefix}-${field}`, t, name, field, value: value.rateLimit?.[field], inherited: inherited?.rateLimit[field], path: [...path, "rateLimit", field], disabled, actions }, field)) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("strategyHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dsmm-route-fields", children: Object.keys(DSMM_RATE_LIMIT_BOUNDS).map((field) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RetryNumber, { id: `${prefix}-${field}`, t, name, field, value: value.rateLimit?.[field], inherited: inherited?.rateLimit[field], path: [...path, "rateLimit", field], disabled, actions: actions2 }, field)) })
   ] });
 }
-function LevelFields({ level: level2, value, path, catalog, disabled, actions, t }) {
-  const prefix = (0, import_react.useId)();
+function LevelFields({ level: level2, value, path, catalog, disabled, actions: actions2, t }) {
+  const prefix = (0, import_react2.useId)();
   const mode = value === void 0 ? "inherit" : value.provider === void 0 ? "effort" : "route";
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("fieldset", { "data-dsmm-level": level2, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("legend", { children: t("levelName", { level: level2 }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-mode`, children: t("levelMode", { level: level2 }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-mode`, value: mode, disabled, onChange: (event) => actions.editPath(
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { "data-dsmm-level": level2, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t("levelName", { level: level2 }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-mode`, children: t("levelMode", { level: level2 }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-mode`, value: mode, disabled, onChange: (event) => actions2.editPath(
         path,
         event.currentTarget.value === "inherit" ? void 0 : event.currentTarget.value === "effort" ? { reasoningEffort: "" } : { provider: "", model: "" }
       ), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "inherit", children: t("levelUnconfigured") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "effort", children: t("levelEffortOnly") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "route", children: t("levelFullRoute") })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "inherit", children: t("levelUnconfigured") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "effort", children: t("levelEffortOnly") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "route", children: t("levelFullRoute") })
       ] })
     ] }),
-    mode === "effort" && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-effort`, children: t("routeEffort", { name: level2 }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Input, { id: `${prefix}-effort`, className: "dsmm-input", value: value?.reasoningEffort ?? "", disabled, onChange: (event) => actions.editPath([...path, "reasoningEffort"], event.currentTarget.value) })
+    mode === "effort" && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-effort`, children: t("routeEffort", { name: level2 }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        EditableChoice,
+        {
+          id: `${prefix}-effort`,
+          label: t("routeEffort", { name: level2 }),
+          value: value?.reasoningEffort ?? "",
+          options: [],
+          disabled,
+          onChange: (effort) => actions2.editPath([...path, "reasoningEffort"], effort)
+        }
+      )
     ] }),
-    value?.provider !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RouteFields, { value, path, name: t("levelName", { level: level2 }), catalog, disabled, edit: actions.editPath, editRoute: actions.editRoute, t })
+    value?.provider !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { value, path, name: t("levelName", { level: level2 }), catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute, t })
   ] });
 }
-function StructuredEditor({ state, actions, disabled, t }) {
-  const prefix = (0, import_react.useId)();
-  const [selectedRole, setSelectedRole] = (0, import_react.useState)("dsmm-orchestrator");
+function StructuredEditor({ state, actions: actions2, disabled, t }) {
+  const prefix = (0, import_react2.useId)();
+  const [selectedRole, setSelectedRole] = (0, import_react2.useState)("dsmm-orchestrator");
   const document2 = state.editor === null ? null : structuredDocument(state.editor.content);
-  if (document2 === null) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", "data-dsmm-structured-invalid": true, children: t("rawInvalid") });
+  if (document2 === null) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", "data-dsmm-structured-invalid": true, children: t("rawInvalid") });
   const roles = state.snapshot?.roles ?? [];
-  const role2 = roles.find((candidate) => candidate.id === selectedRole) ?? roles[0];
-  const policy = role2 === void 0 ? void 0 : document2.roleRouting[role2.id] ?? {};
+  const role3 = roles.find((candidate) => candidate.id === selectedRole) ?? roles[0];
+  const policy = role3 === void 0 ? void 0 : document2.roleRouting[role3.id] ?? {};
   const baseline = state.snapshot?.editorDefaults;
   let inherited;
   try {
     if (baseline !== void 0) {
       const profileDefaults = { strategy: document2.runtimePolicy.strategy ?? baseline.strategy, rateLimit: normalizeRateLimitPolicy(document2.runtimePolicy.rateLimit, baseline.rateLimit) };
-      inherited = { strategy: role2?.runtimePolicy?.strategy ?? profileDefaults.strategy, rateLimit: normalizeRateLimitPolicy(role2?.runtimePolicy?.rateLimit, profileDefaults.rateLimit) };
+      inherited = { strategy: role3?.runtimePolicy?.strategy ?? profileDefaults.strategy, rateLimit: normalizeRateLimitPolicy(role3?.runtimePolicy?.rateLimit, profileDefaults.rateLimit) };
     }
   } catch {
   }
-  const rolePath = ["settings", "roleRouting", role2?.id ?? ""];
-  const availability2 = roleAvailability(role2?.availability);
+  const rolePath = ["settings", "roleRouting", role3?.id ?? ""];
+  const availability2 = roleAvailability(role3?.availability);
   const namedRoles = document2.settings.roles;
   const topology = document2.settings.subagents?.toolTopology;
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-structured", "data-dsmm-structured": true, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-label`, children: t("profileLabel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Input, { id: `${prefix}-label`, className: "dsmm-input", value: document2.label ?? "", disabled, onChange: (event) => actions.editPath(["label"], event.currentTarget.value) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Button, { type: "button", variant: "outline", disabled: disabled || document2.label === void 0, onClick: () => actions.editPath(["label"], void 0), children: t("omitLabel") })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-structured", "data-dsmm-structured": true, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-label`, children: t("profileLabel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Input, { id: `${prefix}-label`, className: "dsmm-input", value: document2.label ?? "", disabled, onChange: (event) => actions2.editPath(["label"], event.currentTarget.value) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || document2.label === void 0, onClick: () => actions2.editPath(["label"], void 0), children: t("omitLabel") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-locale`, children: t("businessLocale") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-locale`, value: String(document2.settings.locale ?? ""), disabled, "aria-describedby": `${prefix}-locale-hint`, onChange: (event) => actions.editPath(["settings", "locale"], event.currentTarget.value || void 0), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("inheritLocale") }),
-        typeof document2.settings.locale === "string" && !DSMM_LOCALES.includes(document2.settings.locale) && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: document2.settings.locale, children: t("unsupportedLocale") }),
-        DSMM_LOCALES.map((locale) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: locale, children: locale }, locale))
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-locale`, children: t("businessLocale") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-locale`, value: String(document2.settings.locale ?? ""), disabled, "aria-describedby": `${prefix}-locale-hint`, onChange: (event) => actions2.editPath(["settings", "locale"], event.currentTarget.value || void 0), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inheritLocale") }),
+        typeof document2.settings.locale === "string" && !DSMM_LOCALES.includes(document2.settings.locale) && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: document2.settings.locale, children: t("unsupportedLocale") }),
+        DSMM_LOCALES.map((locale) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: locale, children: locale }, locale))
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { id: `${prefix}-locale-hint`, className: "dsmm-hint", children: t("localeHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${prefix}-locale-hint`, className: "dsmm-hint", children: t("localeHint") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-topology`, children: t("toolTopology") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-topology`, value: topology ?? "", disabled, "aria-describedby": `${prefix}-topology-hint`, onChange: (event) => actions.editPath(["settings", "subagents", "toolTopology"], event.currentTarget.value || void 0), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("inherit") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "per-role", children: "per-role" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "parameterized", children: "parameterized" })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-topology`, children: t("toolTopology") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-topology`, value: topology ?? "", disabled, "aria-describedby": `${prefix}-topology-hint`, onChange: (event) => actions2.editPath(["settings", "subagents", "toolTopology"], event.currentTarget.value || void 0), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inherit") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "per-role", children: "per-role" }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "parameterized", children: "parameterized" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { id: `${prefix}-topology-hint`, className: "dsmm-hint", children: t("topologyHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${prefix}-topology-hint`, className: "dsmm-hint", children: t("topologyHint") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-active`, children: t("defaultActive") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-active`, disabled, value: document2.settings.defaultActive === void 0 ? "" : String(document2.settings.defaultActive), onChange: (event) => actions.editPath(["settings", "defaultActive"], event.currentTarget.value === "" ? void 0 : event.currentTarget.value === "true"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("inherit") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "true", children: t("enabled") }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "false", children: t("disabled") })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-active`, children: t("defaultActive") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-active`, disabled, value: document2.settings.defaultActive === void 0 ? "" : String(document2.settings.defaultActive), onChange: (event) => actions2.editPath(["settings", "defaultActive"], event.currentTarget.value === "" ? void 0 : event.currentTarget.value === "true"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inherit") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "true", children: t("enabled") }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "false", children: t("disabled") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("activeHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("activeHint") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("fieldset", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("legend", { children: t("profileDefaults") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PolicyFields, { t, value: document2.runtimePolicy, inherited: baseline, path: ["settings", "runtimePolicy"], name: t("profileDefaults"), disabled, actions })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t("profileDefaults") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PolicyFields, { t, value: document2.runtimePolicy, inherited: baseline, path: ["settings", "runtimePolicy"], name: t("profileDefaults"), disabled, actions: actions2 })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-role`, children: t("roleSelect") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-role`, disabled: disabled || roles.length === 0 || state.invalidFields.length > 0, value: role2?.id ?? "", onChange: (event) => setSelectedRole(event.currentTarget.value), children: [
-        roles.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("rolesUnavailable") }),
-        roles.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("option", { value: candidate.id, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-role`, children: t("roleSelect") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-role`, disabled: disabled || roles.length === 0 || state.invalidFields.length > 0, value: role3?.id ?? "", onChange: (event) => setSelectedRole(event.currentTarget.value), children: [
+        roles.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("rolesUnavailable") }),
+        roles.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("option", { value: candidate.id, children: [
           candidate.label,
           candidate.enabled ? "" : ` — ${t("roleDisabled")}`
         ] }, candidate.id))
       ] })
     ] }),
-    role2 !== void 0 && policy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("fieldset", { "data-dsmm-role": role2.id, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("legend", { children: role2.label }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RoleAvailability, { value: role2.availability, t }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-role-enabled`, children: t("namedRole", { name: role2.label }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-role-enabled`, value: namedRoles?.[role2.id] === void 0 ? "" : String(namedRoles[role2.id]), disabled, "aria-describedby": `${prefix}-role-hint`, onChange: (event) => actions.editPath(["settings", "roles", role2.id], event.currentTarget.value === "" ? void 0 : event.currentTarget.value === "true"), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: t("inherit") }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "true", disabled: availability2 === void 0 || !availability2.startupAvailable || !availability2.deploymentEnabled || availability2.reason === "module-off", children: t("enabled") }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "false", disabled: availability2 === void 0 || availability2.required, children: t("disabled") })
+    role3 !== void 0 && policy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { "data-dsmm-role": role3.id, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: role3.label }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RoleAvailability, { value: role3.availability, t }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-role-enabled`, children: t("namedRole", { name: role3.label }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-role-enabled`, value: namedRoles?.[role3.id] === void 0 ? "" : String(namedRoles[role3.id]), disabled, "aria-describedby": `${prefix}-role-hint`, onChange: (event) => actions2.editPath(["settings", "roles", role3.id], event.currentTarget.value === "" ? void 0 : event.currentTarget.value === "true"), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inherit") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "true", disabled: availability2 === void 0 || !availability2.startupAvailable || !availability2.deploymentEnabled || availability2.reason === "module-off", children: t("enabled") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "false", disabled: availability2 === void 0 || availability2.required, children: t("disabled") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { id: `${prefix}-role-hint`, className: "dsmm-hint", children: t("namedRoleHint") })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${prefix}-role-hint`, className: "dsmm-hint", children: t("namedRoleHint") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PolicyFields, { t, value: policy, inherited, path: rolePath, name: role2.label, disabled, actions }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-primary-mode`, children: t("primaryMode", { name: role2.label }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-primary-mode`, disabled, value: policy.primary === void 0 ? "inherit" : "explicit", onChange: (event) => actions.editPath([...rolePath, "primary"], event.currentTarget.value === "inherit" ? void 0 : { provider: "", model: "" }), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "inherit", children: t("inheritRoute") }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "explicit", children: t("configuredRoute") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PolicyFields, { t, value: policy, inherited, path: rolePath, name: role3.label, disabled, actions: actions2 }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-primary-mode`, children: t("primaryMode", { name: role3.label }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-primary-mode`, disabled, value: policy.primary === void 0 ? "inherit" : "explicit", onChange: (event) => actions2.editPath([...rolePath, "primary"], event.currentTarget.value === "inherit" ? void 0 : { provider: "", model: "" }), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "inherit", children: t("inheritRoute") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "explicit", children: t("configuredRoute") })
         ] })
       ] }),
-      policy.primary !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RouteFields, { t, value: policy.primary, path: [...rolePath, "primary"], name: t("primaryName", { name: role2.label }), catalog: state.catalog, disabled, edit: actions.editPath, editRoute: actions.editRoute }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("effortChangeHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("normalLevel") }),
-      role2.id === "dsmm-orchestrator" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("orchestratorLevels") }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("levelsHint") }),
-        ["low", "high", "max"].map((level2) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LevelFields, { level: level2, value: policy.levels?.[level2], path: [...rolePath, "levels", level2], catalog: state.catalog, disabled, actions, t }, level2))
+      policy.primary !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { t, value: policy.primary, path: [...rolePath, "primary"], name: t("primaryName", { name: role3.label }), catalog: state.catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("effortChangeHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("normalLevel") }),
+      role3.id === "dsmm-orchestrator" ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("orchestratorLevels") }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("levelsHint") }),
+        ["low", "high", "max"].map((level2) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(LevelFields, { level: level2, value: policy.levels?.[level2], path: [...rolePath, "levels", level2], catalog: state.catalog, disabled, actions: actions2, t }, level2))
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: `${prefix}-fallback-mode`, children: t("fallbackMode", { name: role2.label }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { id: `${prefix}-fallback-mode`, disabled, value: policy.fallbackRoutes === void 0 ? "inherit" : "explicit", onChange: (event) => actions.editPath([...rolePath, "fallbackRoutes"], event.currentTarget.value === "inherit" ? void 0 : []), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "inherit", children: t("inheritChain") }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "explicit", children: t("configuredChain") })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-fallback-mode`, children: t("fallbackMode", { name: role3.label }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-fallback-mode`, disabled, value: policy.fallbackRoutes === void 0 ? "inherit" : "explicit", onChange: (event) => actions2.editPath([...rolePath, "fallbackRoutes"], event.currentTarget.value === "inherit" ? void 0 : []), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "inherit", children: t("inheritChain") }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "explicit", children: t("configuredChain") })
         ] })
       ] }),
-      policy.fallbackRoutes?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "dsmm-hint", children: t("emptyChain") }),
+      policy.fallbackRoutes?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("emptyChain") }),
       policy.fallbackRoutes?.map((candidate, index) => {
-        const name = t("fallbackName", { name: role2.label, index: index + 1 });
-        return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("fieldset", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("legend", { children: name }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RouteFields, { t, value: candidate, path: [...rolePath, "fallbackRoutes", index], name, catalog: state.catalog, disabled, edit: actions.editPath, editRoute: actions.editRoute }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Button, { type: "button", variant: "outline", disabled: disabled || index === 0, onClick: () => actions.moveFallback(role2.id, index, index - 1), children: t("moveUp", { name }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Button, { type: "button", variant: "outline", disabled: disabled || index === policy.fallbackRoutes.length - 1, onClick: () => actions.moveFallback(role2.id, index, index + 1), children: t("moveDown", { name }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Button, { type: "button", variant: "outline", disabled, onClick: () => actions.editPath([...rolePath, "fallbackRoutes", index], void 0), children: t("removeFallback", { name }) })
+        const name = t("fallbackName", { name: role3.label, index: index + 1 });
+        return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: name }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { t, value: candidate, path: [...rolePath, "fallbackRoutes", index], name, catalog: state.catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || index === 0, onClick: () => actions2.moveFallback(role3.id, index, index - 1), children: t("moveUp", { name }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || index === policy.fallbackRoutes.length - 1, onClick: () => actions2.moveFallback(role3.id, index, index + 1), children: t("moveDown", { name }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled, onClick: () => actions2.editPath([...rolePath, "fallbackRoutes", index], void 0), children: t("removeFallback", { name }) })
           ] })
         ] }, index);
       }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives.Button, { type: "button", variant: "outline", disabled: disabled || (policy.fallbackRoutes?.length ?? 0) >= 32, onClick: () => {
-        if (policy.fallbackRoutes === void 0) actions.editPath([...rolePath, "fallbackRoutes"], [{ provider: "", model: "" }]);
-        else actions.editPath([...rolePath, "fallbackRoutes", policy.fallbackRoutes.length], { provider: "", model: "" });
-      }, children: t("addFallback", { name: role2.label }) })
-    ] }, role2.id)
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || (policy.fallbackRoutes?.length ?? 0) >= 32, onClick: () => {
+        if (policy.fallbackRoutes === void 0) actions2.editPath([...rolePath, "fallbackRoutes"], [{ provider: "", model: "" }]);
+        else actions2.editPath([...rolePath, "fallbackRoutes", policy.fallbackRoutes.length], { provider: "", model: "" });
+      }, children: t("addFallback", { name: role3.label }) })
+    ] }, role3.id)
   ] });
 }
 
 // src/client/SessionProfiles.tsx
-var import_react2 = require("react");
-var import_dsh_client_ui_primitives2 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react3 = require("react");
+var import_dsh_client_ui_primitives3 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/client/session-labels.ts
 function sessionProfileLabels(session, t) {
@@ -3530,20 +4836,20 @@ function sessionProfileLabels(session, t) {
 }
 
 // src/client/SessionProfiles.tsx
-var import_jsx_runtime4 = require("react/jsx-runtime");
+var import_jsx_runtime5 = require("react/jsx-runtime");
 var MENU_ISSUE_CODES = /* @__PURE__ */ new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled", "model-unconfigured", "model-choice-changed", "model-service-unavailable", "model-observation-unavailable", "model-selection-failed"]);
 function menuIssue(issue) {
   const code = MENU_ISSUE_CODES.has(issue.code) ? issue.code : issue.kind === "transport" ? "transport" : "unavailable";
   const field = issue.field;
   return { code, ...isSafeDiagnosticField(field) ? { field } : {} };
 }
-function SessionScope({ state, actions, t, compact = false }) {
-  const prefix = (0, import_react2.useId)();
+function SessionScope({ state, actions: actions2, t, compact = false }) {
+  const prefix = (0, import_react3.useId)();
   const session = state.session;
   const labels = session === null ? null : sessionProfileLabels(session, t);
   const selected = state.snapshot?.profiles.find((profile) => profile.id === state.sessionChoice);
   const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy !== null || state.dirty;
-  const current = () => actions.readProfileView().currentSessionId === state.currentSessionId;
+  const current = () => actions2.readProfileView().currentSessionId === state.currentSessionId;
   const allowed = session !== null && session.switchAllowed && /^[a-f0-9]{64}$|^absent$/u.test(session.selection.selectionRevision);
   const status = state.sessionNotice === null ? "" : t(state.sessionNotice === "mode-on" ? "headerModeOn" : state.sessionNotice === "mode-off" ? "headerModeOff" : state.sessionNotice === "applied-with-model" ? "sessionAppliedWithModel" : state.sessionNotice === "applied" ? "sessionApplied" : "sessionResetDone");
   let binding = session?.subagentRuntime;
@@ -3552,72 +4858,72 @@ function SessionScope({ state, actions, t, compact = false }) {
   } catch {
     binding = void 0;
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-session-scope", "aria-busy": state.sessionBusy !== null, "data-dsmm-session-scope": true, children: [
-    !compact && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h3", { children: t("sessionScope") }),
-    state.currentSessionId === null ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("noSession") }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
-      labels !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { "data-dsmm-session-state": true, children: labels.admitted }),
-      labels !== null && !compact && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", "data-dsmm-session-future-default": true, children: labels.futureDefault }),
-      session === null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("sessionUnavailable") }),
-      session?.warnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("admissionWarnings") }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ProfileWarnings, { warnings: session.warnings, t })
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-session-scope", "aria-busy": state.sessionBusy !== null, "data-dsmm-session-scope": true, children: [
+    !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { children: t("sessionScope") }),
+    state.currentSessionId === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("noSession") }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
+      labels !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-session-state": true, children: labels.admitted }),
+      labels !== null && !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", "data-dsmm-session-future-default": true, children: labels.futureDefault }),
+      session === null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionUnavailable") }),
+      session?.warnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("admissionWarnings") }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ProfileWarnings, { warnings: session.warnings, t })
       ] }) : null,
-      session !== null && !session.switchAllowed && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("sessionBusy", { reason: session.switchUnavailableReason ?? "unavailable" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-choice`, children: t("sessionSelect") }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-choice`, value: state.sessionChoice ?? "", disabled: disabled || !allowed, onChange: (event) => {
-          if (current()) actions.chooseSessionProfile(event.currentTarget.value || null);
+      session !== null && !session.switchAllowed && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionBusy", { reason: session.switchUnavailableReason ?? "unavailable" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("label", { htmlFor: `${prefix}-choice`, children: t("sessionSelect") }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("select", { id: `${prefix}-choice`, value: state.sessionChoice ?? "", disabled: disabled || !allowed, onChange: (event) => {
+          if (current()) actions2.chooseSessionProfile(event.currentTarget.value || null);
         }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("sessionBaseline") }),
-          state.sessionChoice !== null && selected === void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: state.sessionChoice, children: state.sessionChoice }),
-          state.snapshot?.profiles.map((profile) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("option", { value: profile.id, disabled: profile.revision === null || profile.error !== void 0, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: "", children: t("sessionBaseline") }),
+          state.sessionChoice !== null && selected === void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: state.sessionChoice, children: state.sessionChoice }),
+          state.snapshot?.profiles.map((profile) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("option", { value: profile.id, disabled: profile.revision === null || profile.error !== void 0, children: [
             profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id,
             profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""
           ] }, profile.id))
         ] })
       ] }),
-      !compact && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("sessionModelHint") }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || !allowed || session?.profileModel === void 0, onClick: () => {
-          if (current()) void actions.useSessionProfileModel();
+      !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionModelHint") }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !allowed || session?.profileModel === void 0, onClick: () => {
+          if (current()) void actions2.useSessionProfileModel();
         }, children: t("headerUseCurrentModel") }),
-        session !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-availability", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: binding === void 0 ? t("bindingUnknown") : t("bindingState", { binding: binding.binding, ready: t(binding.deliveryFenceReady ? "enabled" : "disabled"), restart: t(binding.restartRequired ? "enabled" : "disabled") }) }),
-          binding?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: t("bindingReason", { reason: binding.reason }) })
+        session !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: binding === void 0 ? t("bindingUnknown") : t("bindingState", { binding: binding.binding, ready: t(binding.deliveryFenceReady ? "enabled" : "disabled"), restart: t(binding.restartRequired ? "enabled" : "disabled") }) }),
+          binding?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("bindingReason", { reason: binding.reason }) })
         ] }),
-        session?.roles !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("details", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("summary", { children: t("admittedRoles") }),
-          session.roles.map((role2) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-availability", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { children: role2.id }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RoleAvailability, { value: role2, t })
-          ] }, role2.id))
+        session?.roles !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { children: t("admittedRoles") }),
+          session.roles.map((role3) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: role3.id }),
+            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RoleAvailability, { value: role3, t })
+          ] }, role3.id))
         ] })
       ] }),
-      state.dirty && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("sessionDirty") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || !allowed || state.sessionChoice !== null && selected?.revision == null, onClick: () => {
-          if (current()) void actions.applySession();
+      state.dirty && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionDirty") }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !allowed || state.sessionChoice !== null && selected?.revision == null, onClick: () => {
+          if (current()) void actions2.applySession();
         }, children: t(state.sessionBusy === "apply" ? "sessionApplying" : "sessionApply") }),
-        !compact && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || !allowed, onClick: () => {
-          if (current()) void actions.resetSession();
+        !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !allowed, onClick: () => {
+          if (current()) void actions2.resetSession();
         }, children: t(state.sessionBusy === "reset" ? "sessionResetting" : "sessionReset") }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: state.sessionBusy !== null || state.busy !== null || state.pendingEditor !== null, onClick: () => {
-          if (current()) void actions.refreshSession();
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: state.sessionBusy !== null || state.busy !== null || state.pendingEditor !== null, onClick: () => {
+          if (current()) void actions2.refreshSession();
         }, children: t("sessionRefresh") })
       ] }),
-      !compact && session?.rolePolicy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { "data-dsmm-session-policy": true, children: t("roleState", { route: session.rolePolicy.route === void 0 ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === void 0 ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs }) })
+      !compact && session?.rolePolicy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-session-policy": true, children: t("roleState", { route: session.rolePolicy.route === void 0 ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === void 0 ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs }) })
     ] }),
-    state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { role: "alert", children: state.sessionIssue.source === "profile-model" ? t(state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed") : state.sessionIssue.code === "conflict" ? t("sessionConflict") : ["busy", "maintenance", "disposed", "not-owned"].includes(state.sessionIssue.code) ? t("sessionBusy", { reason: state.sessionIssue.code }) : t(state.sessionIssue.code === "validation" ? "validation" : "sessionUnavailable") }),
-    state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IssueDetails, { issue: state.sessionIssue, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", "aria-atomic": "true", children: state.sessionBusy === "read" ? t("reading") : status })
+    state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "alert", children: state.sessionIssue.source === "profile-model" ? t(state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed") : state.sessionIssue.code === "conflict" ? t("sessionConflict") : ["busy", "maintenance", "disposed", "not-owned"].includes(state.sessionIssue.code) ? t("sessionBusy", { reason: state.sessionIssue.code }) : t(state.sessionIssue.code === "validation" ? "validation" : "sessionUnavailable") }),
+    state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IssueDetails, { issue: state.sessionIssue, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", "aria-atomic": "true", children: state.sessionBusy === "read" ? t("reading") : status })
   ] });
 }
 function SessionProfiles(props) {
-  const prefix = (0, import_react2.useId)();
-  const state = props.useProfiles((snapshot3) => snapshot3);
+  const prefix = (0, import_react3.useId)();
+  const state = props.useProfiles((snapshot4) => snapshot4);
   const id2 = state.currentSessionId;
-  const [openFor, setOpenFor] = (0, import_react2.useState)(void 0);
-  (0, import_react2.useEffect)(() => {
+  const [openFor, setOpenFor] = (0, import_react3.useState)(void 0);
+  (0, import_react3.useEffect)(() => {
     setOpenFor(void 0);
   }, [id2]);
   if (props.sessionId !== void 0 && props.sessionId !== id2) return null;
@@ -3660,9 +4966,9 @@ function SessionProfiles(props) {
   for (const profile of profiles) entries.push({ id: profile.id, label: (profile.label?.trim() ? profile.label : profile.id) + (profile.error === void 0 && profile.revision !== null ? "" : ` — ${t("headerSavedUnavailable")}`) + (profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""), disabled: disabled || profile.revision === null || profile.error !== void 0 });
   entries.push({ type: "separator", id: "@model-separator" }, { id: "@use-model", label: t("headerUseCurrentModel"), disabled: disabled || session?.profileModel === void 0 });
   const open = openFor === id2;
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-header-profiles", "data-dsmm-header-profile": true, "aria-busy": committing, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-      import_dsh_client_ui_primitives2.Menu,
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-header-profiles", "data-dsmm-header-profile": true, "aria-busy": committing, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+      import_dsh_client_ui_primitives3.Menu,
       {
         open,
         autoFocus: true,
@@ -3673,7 +4979,7 @@ function SessionProfiles(props) {
         items: entries,
         selectedId: current,
         footer: [{ id: "@refresh", label: t("headerCompactRefresh"), disabled: committing || state.busy !== null }],
-        anchor: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", size: "sm", variant: "toolbar", className: "dsmm-profile-trigger", icon: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.IconBranchOutlineRegular, {}), "aria-label": t("headerProfileLabel"), "aria-haspopup": "menu", "aria-expanded": open, "aria-describedby": `${prefix}-feedback`, onClick: () => setOpenFor(open ? void 0 : id2) }),
+        anchor: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", size: "sm", variant: "toolbar", className: "dsmm-profile-trigger", icon: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.IconBranchOutlineRegular, {}), "aria-label": t("headerProfileLabel"), "aria-haspopup": "menu", "aria-expanded": open, "aria-describedby": `${prefix}-feedback`, onClick: () => setOpenFor(open ? void 0 : id2) }),
         onClose: () => setOpenFor(void 0),
         onSelect: (value) => {
           if (props.readProfileView().currentSessionId !== id2) return;
@@ -3698,7 +5004,7 @@ function SessionProfiles(props) {
         }
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { className: "dsmm-profile-announcement", id: `${prefix}-feedback`, role: state.sessionIssue === null ? "status" : "alert", "aria-live": "polite", "aria-atomic": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "dsmm-profile-announcement", id: `${prefix}-feedback`, role: state.sessionIssue === null ? "status" : "alert", "aria-live": "polite", "aria-atomic": "true", children: [
       feedback || currentLabel,
       diagnostic2 === null ? "" : ` ${diagnosticText} ${retryHint}`
     ] })
@@ -3706,7 +5012,7 @@ function SessionProfiles(props) {
 }
 
 // src/client/ProfilesSection.tsx
-var import_jsx_runtime5 = require("react/jsx-runtime");
+var import_jsx_runtime6 = require("react/jsx-runtime");
 function issueKey(issue) {
   if (issue.source === "selection") return issue.code === "conflict" ? "selectionConflict" : "appliedInvalid";
   if (issue.kind === "assembly") return "unavailable";
@@ -3715,26 +5021,26 @@ function issueKey(issue) {
 }
 function ProfilesSection(props) {
   const { t } = props;
-  const state = props.useProfiles((snapshot4) => snapshot4);
-  const prefix = (0, import_react3.useId)();
-  const selectRef = (0, import_react3.useRef)(null);
-  const inputRef = (0, import_react3.useRef)(null);
-  const editorRef = (0, import_react3.useRef)(null);
-  const advancedRef = (0, import_react3.useRef)(null);
-  const handledValidation = (0, import_react3.useRef)(0);
-  const cancelRef = (0, import_react3.useRef)(null);
-  const hadConfirmation = (0, import_react3.useRef)(false);
+  const state = props.useProfiles((snapshot5) => snapshot5);
+  const prefix = (0, import_react4.useId)();
+  const selectRef = (0, import_react4.useRef)(null);
+  const inputRef = (0, import_react4.useRef)(null);
+  const editorRef = (0, import_react4.useRef)(null);
+  const advancedRef = (0, import_react4.useRef)(null);
+  const handledValidation = (0, import_react4.useRef)(0);
+  const cancelRef = (0, import_react4.useRef)(null);
+  const hadConfirmation = (0, import_react4.useRef)(false);
   const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy === "apply" || state.sessionBusy === "reset";
-  const snapshot3 = state.snapshot;
+  const snapshot4 = state.snapshot;
   const editor = state.editor;
-  const readOnly = snapshot3?.readOnly === true;
+  const readOnly = snapshot4?.readOnly === true;
   const editorDisabled = disabled || readOnly;
-  const reconcilable = canReconcileSelection(snapshot3);
-  const selectionConflict = reconcilable && snapshot3?.selectionError?.code === "conflict";
-  const invalid = state.issue?.kind === "domain" && state.issue.code === "validation";
-  const idInvalid = invalid && state.issue?.field === "id" && state.issue.location === void 0 && editor?.revision === null && !editorDisabled;
+  const reconcilable = canReconcileSelection(snapshot4);
+  const selectionConflict = reconcilable && snapshot4?.selectionError?.code === "conflict";
+  const invalid2 = state.issue?.kind === "domain" && state.issue.code === "validation";
+  const idInvalid = invalid2 && state.issue?.field === "id" && state.issue.location === void 0 && editor?.revision === null && !editorDisabled;
   const rawInvalid = editor !== null && structuredDocument(editor.content) === null;
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     if (state.pendingEditor !== null) {
       cancelRef.current?.focus();
       hadConfirmation.current = true;
@@ -3743,7 +5049,7 @@ function ProfilesSection(props) {
       hadConfirmation.current = false;
     }
   }, [state.pendingEditor]);
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     if (state.busy === null && state.validationEpoch > handledValidation.current && state.issue?.kind === "domain" && state.issue.code === "validation") {
       handledValidation.current = state.validationEpoch;
       if (state.issue.location === void 0 && state.issue.field === "id" && inputRef.current !== null && !inputRef.current.disabled && !inputRef.current.readOnly) inputRef.current.focus();
@@ -3758,140 +5064,140 @@ function ProfilesSection(props) {
       }
     }
   }, [state.issue, state.busy, state.validationEpoch]);
-  const applied = editor?.revision != null && editor.id === snapshot3?.selectedId && editor.revision === snapshot3?.appliedRevision;
-  let selection = t(snapshot3 === null ? "unavailable" : "baseline");
-  if (snapshot3?.selectionError !== void 0 && !selectionConflict) selection = t("appliedInvalid");
-  else if (snapshot3?.selectedId !== null && snapshot3?.selectedId !== void 0) selection = t("appliedProfile", { id: snapshot3.selectedId, revision: snapshot3.appliedRevision ?? "—" });
+  const applied = editor?.revision != null && editor.id === snapshot4?.selectedId && editor.revision === snapshot4?.appliedRevision;
+  let selection = t(snapshot4 === null ? "unavailable" : "baseline");
+  if (snapshot4?.selectionError !== void 0 && !selectionConflict) selection = t("appliedInvalid");
+  else if (snapshot4?.selectedId !== null && snapshot4?.selectedId !== void 0) selection = t("appliedProfile", { id: snapshot4.selectedId, revision: snapshot4.appliedRevision ?? "—" });
   const notice = state.notice === null ? "" : t(state.notice.key === "reset" ? "resetDone" : state.notice.key, { id: state.notice.id });
   const warnings2 = editor === null ? [] : draftWarnings(editor.content);
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: "dsmm-profiles", "aria-labelledby": `${prefix}-title`, "aria-busy": state.busy !== null, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { id: `${prefix}-title`, children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("description") }),
-    snapshot3?.origin !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t(snapshot3.origin === "legacy" ? "legacyOrigin" : snapshot3.origin === "central" ? "centralOrigin" : "explicitOrigin") }),
-    readOnly && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "status", className: "dsmm-hint", children: t("readOnlyOrigin") }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-browse`, "data-dsmm-zone": "browse", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { id: `${prefix}-browse`, children: t("browseZone") }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: editorDisabled || snapshot3 === null, onClick: () => {
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-profiles", "aria-labelledby": `${prefix}-title`, "aria-busy": state.busy !== null, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { id: `${prefix}-title`, children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("description") }),
+    snapshot4?.origin !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t(snapshot4.origin === "legacy" ? "legacyOrigin" : snapshot4.origin === "central" ? "centralOrigin" : "explicitOrigin") }),
+    readOnly && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { role: "status", className: "dsmm-hint", children: t("readOnlyOrigin") }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-browse`, "data-dsmm-zone": "browse", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { id: `${prefix}-browse`, children: t("browseZone") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: editorDisabled || snapshot4 === null, onClick: () => {
           void props.create();
         }, children: t("new") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled, onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled, onClick: () => {
           void props.refresh();
         }, children: t(state.busy === "refresh" ? "refreshing" : "refresh") })
       ] }),
-      snapshot3 !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("label", { htmlFor: `${prefix}-select`, children: t("editorSelect") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("select", { ref: selectRef, id: `${prefix}-select`, disabled, value: editor?.revision == null ? "" : editor.id, onChange: (event) => {
+      snapshot4 !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `${prefix}-select`, children: t("editorSelect") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("select", { ref: selectRef, id: `${prefix}-select`, disabled, value: editor?.revision == null ? "" : editor.id, onChange: (event) => {
           if (event.currentTarget.value) void props.open(event.currentTarget.value);
         }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: "", children: t(editor?.revision === null ? "newDraft" : "choose") }),
-          snapshot3.profiles.map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("option", { value: profile.id, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { value: "", children: t(editor?.revision === null ? "newDraft" : "choose") }),
+          snapshot4.profiles.map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("option", { value: profile.id, children: [
             profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id,
             profile.error === void 0 ? "" : ` — ${t("invalidProfile", { id: profile.id })}`,
             profile.warnings?.length ? ` — ${t("warningProfile")}` : ""
           ] }, `${index}:${profile.id}`))
         ] }),
-        snapshot3.profiles.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("empty") })
+        snapshot4.profiles.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("empty") })
       ] }),
-      snapshot3 !== null && snapshot3.profiles.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "dsmm-profile-list", "aria-label": t("savedInventory"), children: snapshot3.profiles.map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("li", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: profile.revision ?? "—" }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ProfileWarnings, { warnings: profile.warnings, t }),
-        profile.error !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IssueDetails, { issue: profile.error, t })
+      snapshot4 !== null && snapshot4.profiles.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { className: "dsmm-profile-list", "aria-label": t("savedInventory"), children: snapshot4.profiles.map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: profile.revision ?? "—" }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: profile.warnings, t }),
+        profile.error !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IssueDetails, { issue: profile.error, t })
       ] }, `${index}:${profile.id}`)) }),
-      state.pendingEditor !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-confirm", role: "group", "aria-labelledby": `${prefix}-confirm`, onKeyDown: (event) => {
+      state.pendingEditor !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-confirm", role: "group", "aria-labelledby": `${prefix}-confirm`, onKeyDown: (event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           props.cancelDiscard();
         }
       }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { id: `${prefix}-confirm`, children: t("discardPrompt") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-confirm`, children: t("discardPrompt") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", onClick: () => {
             void props.discardAndOpen();
           }, children: t("discard") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { ref: cancelRef, type: "button", variant: "primary", onClick: props.cancelDiscard, children: t("cancel") })
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { ref: cancelRef, type: "button", variant: "primary", onClick: props.cancelDiscard, children: t("cancel") })
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-edit`, "data-dsmm-zone": "edit", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { id: `${prefix}-edit`, children: t("editZone") }),
-      editor === null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("noEditor") }),
-      editor !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-editor", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-editor-state": true, children: t(state.dirty ? "dirty" : applied ? "savedApplied" : "savedNotApplied") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: editor.revision ?? "—" }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "primary", disabled: editorDisabled || !state.dirty || snapshot3 === null || state.invalidFields.length > 0, onClick: () => {
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-edit`, "data-dsmm-zone": "edit", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { id: `${prefix}-edit`, children: t("editZone") }),
+      editor === null && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("noEditor") }),
+      editor !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-editor", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { "data-dsmm-editor-state": true, children: t(state.dirty ? "dirty" : applied ? "savedApplied" : "savedNotApplied") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: editor.revision ?? "—" }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", disabled: editorDisabled || !state.dirty || snapshot4 === null || state.invalidFields.length > 0, onClick: () => {
             void props.save();
           }, children: t(state.busy === "save" ? "saving" : "save") }),
-          editor.revision !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled, onClick: () => {
+          editor.revision !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled, onClick: () => {
             void props.reload();
           }, children: t("reload") })
         ] }),
-        warnings2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("draftWarnings") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ProfileWarnings, { warnings: warnings2, t })
+        warnings2.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("draftWarnings") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: warnings2, t })
         ] }),
-        editor.warnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("savedWarnings") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ProfileWarnings, { warnings: editor.warnings, t })
+        editor.warnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("savedWarnings") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: editor.warnings, t })
         ] }) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-field", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("label", { htmlFor: `${prefix}-id`, children: t("profileId") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Input, { ref: inputRef, id: `${prefix}-id`, className: "dsmm-input", value: editor.id, disabled: editorDisabled || editor.revision !== null, "aria-invalid": idInvalid || void 0, "aria-describedby": `${prefix}-id-hint${idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editId(event.currentTarget.value) }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { id: `${prefix}-id-hint`, className: "dsmm-hint", children: t("idHint") })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `${prefix}-id`, children: t("profileId") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Input, { ref: inputRef, id: `${prefix}-id`, className: "dsmm-input", value: editor.id, disabled: editorDisabled || editor.revision !== null, "aria-invalid": idInvalid || void 0, "aria-describedby": `${prefix}-id-hint${idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editId(event.currentTarget.value) }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-id-hint`, className: "dsmm-hint", children: t("idHint") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-catalog", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { children: t("catalogTitle") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("catalogHint") }),
-          state.catalogUnavailable && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("catalogUnavailable") }),
-          state.catalog?.failures.map((failure) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("catalogFailure", { name: failure.name, id: failure.id }) }, failure.id)),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: state.catalogBusy, onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-catalog", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { children: t("catalogTitle") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogHint") }),
+          state.catalogUnavailable && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogUnavailable") }),
+          state.catalog?.failures.map((failure) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogFailure", { name: failure.name, id: failure.id }) }, failure.id)),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.catalogBusy, onClick: () => {
             void props.refreshCatalog();
           }, children: t(state.catalogBusy ? "catalogRefreshing" : "catalogRefresh") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(StructuredEditor, { state, actions: props, disabled: editorDisabled, t }, state.editorEpoch),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { ref: advancedRef, className: "dsmm-advanced", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { children: t("advanced") }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-field", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("label", { htmlFor: `${prefix}-content`, children: t("configuration") }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("textarea", { ref: editorRef, id: `${prefix}-content`, rows: 12, spellCheck: false, value: editor.content, readOnly, disabled, "aria-invalid": rawInvalid || invalid && !idInvalid || void 0, "aria-describedby": `${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editContent(event.currentTarget.value) }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { id: `${prefix}-content-hint`, className: "dsmm-hint", children: t("configurationHint") }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { id: `${prefix}-structural-hint`, className: "dsmm-hint", children: t("structuralHint") })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(StructuredEditor, { state, actions: props, disabled: editorDisabled, t }, `structured:${state.editorEpoch}`),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { ref: advancedRef, className: "dsmm-advanced", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("summary", { children: t("advanced") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `${prefix}-content`, children: t("configuration") }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("textarea", { ref: editorRef, id: `${prefix}-content`, rows: 12, spellCheck: false, value: editor.content, readOnly, disabled, "aria-invalid": rawInvalid || invalid2 && !idInvalid || void 0, "aria-describedby": `${prefix}-content-hint ${prefix}-structural-hint${invalid2 && !idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editContent(event.currentTarget.value) }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-content-hint`, className: "dsmm-hint", children: t("configurationHint") }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-structural-hint`, className: "dsmm-hint", children: t("structuralHint") })
           ] })
-        ] }, state.editorEpoch)
+        ] }, `advanced:${state.editorEpoch}`)
       ] }),
-      state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-issue", id: `${prefix}-issue`, role: "alert", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t(issueKey(state.issue)) }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IssueDetails, { issue: state.issue, t })
+      state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-issue", id: `${prefix}-issue`, role: "alert", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(issueKey(state.issue)) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IssueDetails, { issue: state.issue, t })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-global`, "data-dsmm-zone": "future-default", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { id: `${prefix}-global`, children: t("globalScope") }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("newSessions") }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-selection": true, children: selection }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("futurePin", { revision: snapshot3?.selectionRevision ?? "—" }) }),
-      snapshot3?.selectedWarnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("futureWarnings") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ProfileWarnings, { warnings: snapshot3.selectedWarnings, t })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-global`, "data-dsmm-zone": "future-default", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { id: `${prefix}-global`, children: t("globalScope") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("newSessions") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { "data-dsmm-selection": true, children: selection }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("futurePin", { revision: snapshot4?.selectionRevision ?? "—" }) }),
+      snapshot4?.selectedWarnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("futureWarnings") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: snapshot4.selectedWarnings, t })
       ] }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("savedOnlyHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { id: `${prefix}-global-action`, className: "dsmm-hint", children: t("globalActionHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "primary", "aria-describedby": `${prefix}-global-action`, disabled: editorDisabled || state.dirty || editor?.revision == null || !reconcilable || applied && !selectionConflict, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedOnlyHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-global-action`, className: "dsmm-hint", children: t("globalActionHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", "aria-describedby": `${prefix}-global-action`, disabled: editorDisabled || state.dirty || editor?.revision == null || !reconcilable || applied && !selectionConflict, onClick: () => {
           void props.apply();
         }, children: t(state.busy === "apply" ? "applying" : "apply") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: editorDisabled || !reconcilable || snapshot3?.selectedId === null && !selectionConflict, onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: editorDisabled || !reconcilable || snapshot4?.selectedId === null && !selectionConflict, onClick: () => {
           void props.reset();
         }, children: t(state.busy === "reset" ? "resetting" : "reset") })
       ] }),
-      snapshot3?.selectionError !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-issue", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t(selectionConflict ? "selectionConflict" : "retry") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IssueDetails, { issue: snapshot3.selectionError, t })
+      snapshot4?.selectionError !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-issue", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(selectionConflict ? "selectionConflict" : "retry") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IssueDetails, { issue: snapshot4.selectionError, t })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("section", { className: "dsmm-zone", "aria-label": t("sessionScope"), "data-dsmm-zone": "current-session", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SessionScope, { state, actions: props, t }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", "aria-atomic": "true", children: state.busy === "refresh" && snapshot3 === null ? t("loading") : state.busy === "read" ? t("reading") : notice })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("section", { className: "dsmm-zone", "aria-label": t("sessionScope"), "data-dsmm-zone": "current-session", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(SessionScope, { state, actions: props, t }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", "aria-atomic": "true", children: state.busy === "refresh" && snapshot4 === null ? t("loading") : state.busy === "read" ? t("reading") : notice })
   ] });
 }
 
@@ -3924,12 +5230,22 @@ var PROFILE_STYLES = `
 .dsmm-profiles button{max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:36px;height:auto}
 .dsmm-profiles .dsmm-input{width:100%;min-width:0;box-sizing:border-box;border-color:var(--dsw-alias-label-secondary)}
 .dsmm-profiles .dsmm-input input{width:100%;min-width:0;font:inherit;color:inherit}
+.dsmm-profiles .dsmm-choice{position:relative;min-width:0}
+.dsmm-profiles .dsmm-choice .dsmm-input input{padding-right:32px}
+.dsmm-profiles .dsmm-choice .dsmm-choice-toggle{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:28px;height:28px;min-height:28px;padding:4px}
+.dsmm-profiles .dsmm-choice-list{position:absolute;z-index:1;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+.dsmm-profiles .dsmm-choice-list [role=option]{padding:8px 10px;min-width:0;overflow-wrap:anywhere;cursor:pointer}
+.dsmm-profiles .dsmm-choice-list [role=option]:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsmm-profiles .dsmm-choice-list [aria-selected=true]{background:var(--dsw-alias-interactive-bg-active);outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}
 .dsmm-profiles select,.dsmm-profiles textarea{box-sizing:border-box;min-width:0;max-width:100%;font:inherit;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-md)}
 .dsmm-profiles select{width:240px;height:32px;padding:0 10px;text-overflow:ellipsis}
 .dsmm-profiles textarea{width:100%;padding:12px;font-family:var(--ds-font-family-code);resize:vertical;overflow:auto;white-space:pre;}
 .dsmm-profiles select:hover:not(:disabled),.dsmm-profiles textarea:hover:not(:disabled){border-color:var(--dsw-alias-label-primary)}
 .dsmm-profiles select:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}
 .dsmm-profiles :is(select,textarea,button):focus-visible,.dsmm-profiles .dsmm-input:has(input:focus-visible){outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.dsmm-profiles input[type=checkbox]:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.dsmm-permissions label.dsmm-actions{min-height:32px}
+.dsmm-permissions input[type=checkbox]{accent-color:var(--dsw-alias-state-business-primary)}
 .dsmm-profiles :is(select,textarea):disabled{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-module-platform);cursor:not-allowed}
 .dsmm-profiles .dsmm-editor,.dsmm-profiles .dsmm-confirm{min-width:0;display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform)}
 .dsmm-profiles .dsmm-issue{padding:12px;border-left:4px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
@@ -3983,10 +5299,10 @@ function mergeLayer(base, override) {
     Object.hasOwn(override, key) ? mergeLayer(base[key], override[key]) : base[key]
   ]));
 }
-function parseAdvanced(text3) {
-  if (text3.trim() === "") return void 0;
+function parseAdvanced(text5) {
+  if (text5.trim() === "") return void 0;
   const errors = [];
-  const root = parseTree2(text3, errors, { disallowComments: true, allowTrailingComma: false });
+  const root = parseTree2(text5, errors, { disallowComments: true, allowTrailingComma: false });
   const unique = (node) => {
     if (node.type === "object") {
       const keys = node.children.map((child2) => child2.children[0].value);
@@ -3995,7 +5311,7 @@ function parseAdvanced(text3) {
     return (node.children ?? []).every(unique);
   };
   if (root === void 0 || errors.length || !unique(root)) throw new Error("Invalid JSON");
-  return JSON.parse(text3);
+  return JSON.parse(text5);
 }
 function editLayer(base, path, value) {
   const next = structuredClone(base);
@@ -4009,23 +5325,43 @@ function editLayer(base, path, value) {
   else node[key] = structuredClone(value);
   return next;
 }
-function layerDiff(base, draft, prefix = []) {
-  return [.../* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(draft)])].flatMap((key) => {
-    const path = [...prefix, key], before = base[key], after = draft[key];
+function layerDiff(base, draft2, prefix = []) {
+  return [.../* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(draft2)])].flatMap((key) => {
+    const path = [...prefix, key], before = base[key], after = draft2[key];
     if (equal(before, after)) return [];
-    if (!Object.hasOwn(draft, key)) return [{ op: "unset", path }];
+    if (!Object.hasOwn(draft2, key)) return [{ op: "unset", path }];
     if (record2(before) && record2(after)) return layerDiff(before, after, path);
     return [{ op: "set", path, value: after }];
   });
 }
 function validateEditorValue(value, schema, sparse = false) {
+  if (schema.type === "transform") return schema.inner !== void 0 && validateEditorValue(value, schema.inner, sparse);
+  if (schema.type === "any") {
+    try {
+      copyRouteJson(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   if (schema.type === "union") return schema.alternatives?.some((node) => validateEditorValue(value, node, sparse)) === true;
   if (schema.type === "const") return value === schema.value;
+  if (schema.type === "object" && schema.additionalProperties === "json") {
+    try {
+      if (schema.fields?.provider?.type === "string" && schema.fields.model?.type === "string") {
+        normalizeModelRouteJson(value, sparse, true);
+        return true;
+      }
+      copyRouteJson(value);
+    } catch {
+      return false;
+    }
+  }
   if (schema.type === "object" || schema.type === "dict") return record2(value) && (sparse || schema.type !== "object" || Object.entries(schema.fields ?? {}).every(([key, node]) => !node.required || Object.hasOwn(value, key))) && Object.entries(value).every(([key, child2]) => {
     if (["__proto__", "prototype", "constructor"].includes(key)) return false;
     if (schema.keys !== void 0 && !schema.keys.includes(key)) return false;
-    const node = schema.type === "dict" ? schema.inner : schema.fields?.[key];
-    return node !== void 0 && validateEditorValue(child2, node, sparse);
+    const node = schema.type === "dict" ? schema.inner : schema.fields !== void 0 && Object.hasOwn(schema.fields, key) ? schema.fields[key] : void 0;
+    return node !== void 0 ? validateEditorValue(child2, node, sparse) : schema.type === "object" && schema.additionalProperties === "json";
   });
   if (schema.type === "array") return Array.isArray(value) && (schema.max === void 0 || value.length <= schema.max) && schema.inner !== void 0 && value.every((child2) => validateEditorValue(child2, schema.inner));
   if (schema.type === "string" && schema.nonempty) return typeof value === "string" && value.trim() !== "";
@@ -4035,21 +5371,25 @@ function validateEditorValue(value, schema, sparse = false) {
 function enumValues(schema) {
   return schema.type === "union" && schema.alternatives?.every((node) => node.type === "const") ? schema.alternatives.map((node) => node.value) : null;
 }
-function inspectorPaths(snapshot3, admitted) {
+function visibleDeploymentPath(path) {
+  return path[0] !== "lsp" && (path[0] !== "permissionControl" || path.length === 1 || path.length === 2 && path[1] === "enabled");
+}
+function inspectorPaths(snapshot4, admitted) {
   const paths = /* @__PURE__ */ new Set([
-    ...Object.keys(snapshot3.sources),
-    ...Object.keys(snapshot3.startupSources ?? {}),
-    ...Object.keys(snapshot3.nextRoot?.sources ?? {}),
-    ...Object.keys(snapshot3.nextRoot?.captures ?? {}),
+    ...Object.keys(snapshot4.sources),
+    ...Object.keys(snapshot4.startupSources ?? {}),
+    ...Object.keys(snapshot4.nextRoot?.sources ?? {}),
+    ...Object.keys(snapshot4.nextRoot?.captures ?? {}),
     ...Object.keys(admitted?.sources ?? {}),
     ...Object.keys(admitted?.captures ?? {})
   ]);
   const visit2 = (value, path) => {
-    if (record2(value) && Object.keys(value).length && path.join(".") !== "lsp.env") for (const [key, child2] of Object.entries(value)) visit2(child2, [...path, key]);
+    if (!visibleDeploymentPath(path)) return;
+    if (record2(value) && Object.keys(value).length) for (const [key, child2] of Object.entries(value)) visit2(child2, [...path, key]);
     else if (path.length) paths.add(path.join("."));
   };
-  for (const value of [snapshot3.desired, snapshot3.startup, snapshot3.nextRoot?.settings, admitted?.settings]) if (value !== void 0) visit2(value, []);
-  return [...paths].sort();
+  for (const value of [snapshot4.desired, snapshot4.startup, snapshot4.nextRoot?.settings, admitted?.settings]) if (value !== void 0) visit2(value, []);
+  return [...paths].filter((path) => visibleDeploymentPath(path.split("."))).sort();
 }
 
 // src/client/deployment-controller.ts
@@ -4124,20 +5464,20 @@ var DeploymentController = class _DeploymentController {
   attachForm(form) {
     this.form = form;
   }
-  setInvalid(path, invalid) {
-    if (this.invalid.has(path) === invalid) return;
-    if (invalid) this.invalid.add(path);
+  setInvalid(path, invalid2) {
+    if (this.invalid.has(path) === invalid2) return;
+    if (invalid2) this.invalid.add(path);
     else this.invalid.delete(path);
     this.publish({ dirty: this.invalid.size > 0 || !equal(this.baseline, this.state.draft), saved: false });
   }
-  canWriteProfile(snapshot3 = this.state.snapshot) {
+  canWriteProfile(snapshot4 = this.state.snapshot) {
     const native = this.form?.state;
-    return this.currentConnection() && snapshot3 !== null && this.rowNamespace !== null && this.rowNamespace === snapshot3.namespace && native?.status === "ready" && native.mode === "host" && native.writable && native.revision === snapshot3.nativeFormRevision && snapshot3.nativeForm !== null && equal(native.base ?? null, snapshot3.nativeForm.base) && equal(native.user ?? null, snapshot3.nativeForm.user);
+    return this.currentConnection() && snapshot4 !== null && this.rowNamespace !== null && this.rowNamespace === snapshot4.namespace && native?.status === "ready" && native.mode === "host" && native.writable && native.revision === snapshot4.nativeFormRevision && snapshot4.nativeForm !== null && equal(native.base ?? null, snapshot4.nativeForm.base) && equal(native.user ?? null, snapshot4.nativeForm.user);
   }
   edit(path, value) {
     if (this.state.busy || this.disposed || this.state.snapshot === null || !this.currentConnection() || this.state.issue === "not-owned" || this.layer === "profile" && !this.canWriteProfile()) return;
-    const draft = editLayer(this.state.draft, path, value);
-    this.publish({ draft, dirty: this.invalid.size > 0 || !equal(this.baseline, draft), issue: null, saved: false });
+    const draft2 = editLayer(this.state.draft, path, value);
+    this.publish({ draft: draft2, dirty: this.invalid.size > 0 || !equal(this.baseline, draft2), issue: null, saved: false });
   }
   async refresh(discard = false) {
     if (this.disposed || this.state.busy) return;
@@ -4146,18 +5486,18 @@ var DeploymentController = class _DeploymentController {
     this.publish({ busy: true, saved: false });
     try {
       if (this.connection !== null && connection === void 0) throw new Refusal("transport");
-      const snapshot3 = await unwrap(this.remote.describeSettings());
+      const snapshot4 = await unwrap(this.remote.describeSettings());
       if (this.disposed || generation !== this.generation) return;
       const old = this.state.snapshot;
-      if (old !== null && (old.entryId !== snapshot3.entryId || old.hostProfileKey !== snapshot3.hostProfileKey)) throw new Refusal("unavailable");
+      if (old !== null && (old.entryId !== snapshot4.entryId || old.hostProfileKey !== snapshot4.hostProfileKey)) throw new Refusal("unavailable");
       if (this.state.dirty && !discard) {
-        const stale = !this.currentConnection() || (this.layer === "global" ? old?.globalRevision !== snapshot3.globalRevision : old?.nativeRevision !== snapshot3.nativeRevision || old?.globalRevision !== snapshot3.globalRevision);
+        const stale = !this.currentConnection() || (this.layer === "global" ? old?.globalRevision !== snapshot4.globalRevision : old?.nativeRevision !== snapshot4.nativeRevision || old?.globalRevision !== snapshot4.globalRevision);
         this.publish({ issue: stale ? "conflict" : null });
       } else {
         this.invalid.clear();
         this.connectionBaseline = connection;
-        this.baseline = this.layer === "global" ? snapshot3.global : record2(snapshot3.nativeForm?.user) ? snapshot3.nativeForm.user : {};
-        this.publish({ snapshot: snapshot3, draft: structuredClone(this.baseline), dirty: false, issue: null });
+        this.baseline = this.layer === "global" ? snapshot4.global : record2(snapshot4.nativeForm?.user) ? snapshot4.nativeForm.user : {};
+        this.publish({ snapshot: snapshot4, draft: structuredClone(this.baseline), dirty: false, issue: null });
       }
     } catch (error) {
       if (!this.disposed && generation === this.generation) this.publish({ issue: error instanceof Refusal ? error.code : "transport" });
@@ -4166,10 +5506,10 @@ var DeploymentController = class _DeploymentController {
     }
   }
   async save() {
-    const { snapshot: snapshot3, draft, dirty, busy, issue } = this.state;
-    if (this.disposed || snapshot3 === null || !dirty || busy || issue !== null || !this.currentConnection() || this.invalid.size > 0 || this.layer === "profile" && !this.canWriteProfile()) return;
-    const schema = this.layer === "global" ? snapshot3.schema : { ...snapshot3.schema, fields: Object.fromEntries(Object.entries(snapshot3.schema.fields ?? {}).filter(([key]) => key !== "modules")) };
-    const editable = { ...draft };
+    const { snapshot: snapshot4, draft: draft2, dirty, busy, issue } = this.state;
+    if (this.disposed || snapshot4 === null || !dirty || busy || issue !== null || !this.currentConnection() || this.invalid.size > 0 || this.layer === "profile" && !this.canWriteProfile()) return;
+    const schema = this.layer === "global" ? snapshot4.schema : { ...snapshot4.schema, fields: Object.fromEntries(Object.entries(snapshot4.schema.fields ?? {}).filter(([key]) => key !== "modules")) };
+    const editable = { ...draft2 };
     if (this.layer === "profile") {
       if (!equal(editable.sessionPersistence, this.baseline.sessionPersistence)) {
         this.publish({ issue: "validation" });
@@ -4177,15 +5517,15 @@ var DeploymentController = class _DeploymentController {
       }
       delete editable.sessionPersistence;
     }
-    const lower = this.layer === "global" ? snapshot3.defaults : mergeLayer(mergeLayer(snapshot3.defaults, snapshot3.global), snapshot3.nativeForm?.base ?? {});
+    const lower = this.layer === "global" ? snapshot4.defaults : mergeLayer(mergeLayer(snapshot4.defaults, snapshot4.global), snapshot4.nativeForm?.base ?? {});
     const candidate = mergeLayer(lower, editable);
-    const merged = this.layer === "global" ? mergeLayer(candidate, snapshot3.profile) : candidate;
+    const merged = this.layer === "global" ? mergeLayer(candidate, snapshot4.profile) : candidate;
     delete merged.sessionPersistence;
-    if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, snapshot3.schema)) {
+    if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, snapshot4.schema)) {
       this.publish({ issue: "validation" });
       return;
     }
-    const edits = layerDiff(this.baseline, draft);
+    const edits = layerDiff(this.baseline, draft2);
     if (edits.length > 128) {
       this.publish({ issue: "validation" });
       return;
@@ -4195,15 +5535,15 @@ var DeploymentController = class _DeploymentController {
     try {
       const current = await unwrap(this.remote.describeSettings());
       if (this.disposed || generation !== this.generation) return;
-      if (current.entryId !== snapshot3.entryId || current.hostProfileKey !== snapshot3.hostProfileKey || current.globalRevision !== snapshot3.globalRevision) throw new Refusal("conflict");
-      if (this.layer === "global") await unwrap(this.remote.save({ expectedRevision: snapshot3.globalRevision, edits }));
+      if (current.entryId !== snapshot4.entryId || current.hostProfileKey !== snapshot4.hostProfileKey || current.globalRevision !== snapshot4.globalRevision) throw new Refusal("conflict");
+      if (this.layer === "global") await unwrap(this.remote.save({ expectedRevision: snapshot4.globalRevision, edits }));
       else {
-        if (current.nativeRevision !== snapshot3.nativeRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
+        if (current.nativeRevision !== snapshot4.nativeRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
         const form = this.form;
-        if (!await form.mutate(edits, snapshot3.nativeFormRevision)) throw new Refusal("conflict");
+        if (!await form.mutate(edits, snapshot4.nativeFormRevision)) throw new Refusal("conflict");
       }
       if (this.disposed || generation !== this.generation) return;
-      this.baseline = structuredClone(draft);
+      this.baseline = structuredClone(draft2);
       this.publish({ dirty: false, saved: true, issue: null });
       try {
         const next = await unwrap(this.remote.describeSettings());
@@ -4220,8 +5560,8 @@ var DeploymentController = class _DeploymentController {
 };
 
 // src/client/DeploymentPage.tsx
-var import_react4 = require("react");
-var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react5 = require("react");
+var import_dsh_client_ui_primitives5 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/client/deployment-locales.ts
 var DEPLOYMENT_NS = "plugins.dsmm";
@@ -4237,7 +5577,11 @@ var deploymentEn = {
   unavailableForm: "No verified writable form. Open this entry’s bundle or row config to edit profile overrides.",
   ceiling: "Deepwork master is Global-only; profiles and session modes cannot lift its captured ceiling.",
   hostUnknown: "Host bundle status: unknown (separate switch).",
-  boundaries: "New roots capture saved settings within startup capabilities. Save does not restart or reload LSP; startup-only changes require a separate Host restart, which may cancel sessions.",
+  boundaries: "New roots capture saved settings within startup capabilities. Save does not restart the Host; startup-only changes require a separate Host restart, which may cancel sessions.",
+  core: "Core",
+  coreHint: "Core-owned desired settings. Model-parameter passthrough is ordinary config, not a subplugin. The permission-control enabled flag is startup-pinned. Save does not change current-session admission; inspect desired, startup and admitted values below. Unavailable admission stays unknown.",
+  modelParametersHint: "Default On. Off retains saved custom/opaque model parameters without forwarding them, and DSMM reasoningEffort / reasoning_effort aliases use native defaults. Standard SDK parameters and explicit native root choices remain intact. Raw JSON and exact effort values remain editable; saving desired settings does not verify provider transport readiness.",
+  permissionControlHint: "Permission-control module desired switch (default On), captured at startup. Global/native Save does not remove current protections or prove runtime coverage. Rules and exact Root approvals use the separate Permission control page; a restart remains independent.",
   saveGlobal: "Save Global config",
   saveProfile: "Save profile overrides",
   saving: "Saving…",
@@ -4292,7 +5636,11 @@ var deploymentZh = {
   unavailableForm: "没有已核验的可写表单。请打开此实例的 bundle 或条目配置以编辑覆盖。",
   ceiling: "Deepwork 总开关仅全局可改；配置和会话模式不能突破已捕获上限。",
   hostUnknown: "宿主整包状态：未知（独立开关）。",
-  boundaries: "新根会话在启动能力内采用已保存设置。保存不重启或重载 LSP；仅启动时生效的更改需另行重启宿主，可能取消会话。",
+  boundaries: "新根会话在启动能力内采用已保存设置。保存不重启宿主；仅启动时生效的更改需另行重启宿主，可能取消会话。",
+  core: "Core 核心配置",
+  coreHint: "Core 所有的 desired 意图配置。模型参数透传为普通配置，非子插件；权限控制 enabled 仅启动时捕获。保存不改变当前会话准入；下方可检查意图、启动与准入值，不可用的准入仍为未知。",
+  modelParametersHint: "默认开启。关闭后仍保存 custom／opaque 模型参数但不发送；DSMM reasoningEffort／reasoning_effort 两种别名采用原生默认值。标准 SDK 参数与根会话原生显式选择保留。仍可编辑原始 JSON 和精确 effort 值；保存意图不代表提供商传输已就绪。",
+  permissionControlHint: "权限控制子模块 desired 开关（默认开启），仅启动时捕获。Global／native 保存不移除当前保护，也不证明运行时覆盖。规则及精确 Root 批准在独立“权限控制”页处理；重启仍为独立操作。",
   saveGlobal: "保存全局配置",
   saveProfile: "保存当前配置覆盖",
   saving: "正在保存…",
@@ -4336,6 +5684,9 @@ var deploymentZh = {
   namedIndependent: "设置中的 Deepwork Profiles 是独立的具名 JSONC 运行时资源编辑器。在此保存不会应用具名配置或选择其模型。"
 };
 var deploymentFieldLabels = {
+  modelParameters: ["Model parameters", "模型参数"],
+  passthrough: ["Model parameter passthrough", "模型参数透传"],
+  permissionControl: ["Permission-control module", "权限控制子模块"],
   modules: ["Modules", "子模块"],
   skills: ["Skills", "技能"],
   roles: ["Agent roles", "Agent 角色"],
@@ -4361,6 +5712,7 @@ var deploymentFieldLabels = {
   enabled: ["Enabled", "启用"],
   materialize: ["Materialize presets", "物化预设"],
   scope: ["Guard scope", "保护范围"],
+  plannerRootEnabled: ["Planner main-chat preset (restart required)", "Planner 主聊天预设（需重启）"],
   shellCommandSafety: ["Shell command safety", "Shell 命令安全"],
   gitWriteGuard: ["Git write policy", "Git 写入策略"],
   toolOutputTruncation: ["Tool output truncation", "工具输出截断"],
@@ -4402,7 +5754,7 @@ var deploymentFieldLabels = {
 };
 
 // src/client/DeploymentPage.tsx
-var import_jsx_runtime6 = require("react/jsx-runtime");
+var import_jsx_runtime7 = require("react/jsx-runtime");
 function label(path, t) {
   const key = path.at(-1);
   const item = deploymentFieldLabels[key];
@@ -4411,37 +5763,37 @@ function label(path, t) {
 function displayValue(value, t) {
   if (value === void 0) return t("unknown");
   if (typeof value === "boolean") return t(value ? "on" : "off");
-  const text3 = JSON.stringify(value);
-  return text3.length > 120 ? `${text3.slice(0, 120)}…` : text3;
+  const text5 = JSON.stringify(value);
+  return text5.length > 120 ? `${text5.slice(0, 120)}…` : text5;
 }
 function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }) {
-  const id2 = (0, import_react4.useId)(), name = path.join(".");
+  const id2 = (0, import_react5.useId)(), name = path.join(".");
   const serialized = value === void 0 ? "" : JSON.stringify(value, null, 2);
-  const [text3, setText] = (0, import_react4.useState)(serialized);
-  const [invalid, setLocalInvalid] = (0, import_react4.useState)(false);
-  (0, import_react4.useEffect)(() => {
+  const [text5, setText] = (0, import_react5.useState)(serialized);
+  const [invalid2, setLocalInvalid] = (0, import_react5.useState)(false);
+  (0, import_react5.useEffect)(() => {
     setText(serialized);
     setLocalInvalid(false);
     setInvalid(name, false);
   }, [serialized, reset]);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-group", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-group", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
       label(path, t),
       " · ",
       t("advanced"),
       " ",
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: name })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: name })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { htmlFor: id2, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("label", { htmlFor: id2, children: [
         label(path, t),
         " · ",
         t("advanced"),
         " ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: name })
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: name })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("advancedHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("textarea", { id: id2, rows: 6, maxLength: 32768, value: text3, disabled, "aria-invalid": invalid, "aria-describedby": `${id2}-hint ${id2}-error`, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("advancedHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("textarea", { id: id2, rows: 6, maxLength: 32768, value: text5, disabled, "aria-invalid": invalid2, "aria-describedby": `${id2}-hint ${id2}-error`, onChange: (event) => {
         const next = event.currentTarget.value;
         setText(next);
         let parsed, valid = true;
@@ -4456,96 +5808,99 @@ function AdvancedField({ schema, path, value, inherited, upper, reset, disabled,
         setInvalid(name, !valid);
         if (valid) onChange(parsed);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${id2}-error`, className: "dsmm-hint", children: invalid ? t("invalid") : "" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${id2}-error`, className: "dsmm-hint", children: invalid2 ? t("invalid") : "" }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
           t("advanced"),
           " · schema"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("pre", { children: JSON.stringify(schema, null, 2) })
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("pre", { children: JSON.stringify(schema, null, 2) })
       ] })
     ] })
   ] });
 }
-function ScalarField({ schema, path, controller, disabled, inherited, invalid, t }) {
-  const state = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  const value = at(state.draft, path), name = path.join("."), id2 = (0, import_react4.useId)();
-  const [text3, setText] = (0, import_react4.useState)(String(value ?? inherited ?? ""));
-  const [bad, setBad] = (0, import_react4.useState)(false);
-  (0, import_react4.useEffect)(() => {
+function ScalarField({ schema, path, controller, disabled, inherited, invalid: invalid2, t }) {
+  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  const value = at(state.draft, path), name = path.join("."), id2 = (0, import_react5.useId)();
+  const [text5, setText] = (0, import_react5.useState)(String(value ?? inherited ?? ""));
+  const [bad, setBad] = (0, import_react5.useState)(false);
+  (0, import_react5.useEffect)(() => {
     setText(String(value ?? inherited ?? ""));
     setBad(false);
-    invalid(name, false);
+    invalid2(name, false);
   }, [value, inherited, state.snapshot]);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { htmlFor: id2, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("label", { htmlFor: id2, children: [
       label(path, t),
       " ",
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: name })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: name })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Input, { className: "dsmm-input", id: id2, type: "text", inputMode: schema.type === "number" ? "decimal" : void 0, value: text3, disabled, "aria-invalid": bad, "aria-describedby": `${id2}-error`, onChange: (event) => {
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Input, { className: "dsmm-input", id: id2, type: "text", inputMode: schema.type === "number" ? "decimal" : void 0, value: text5, disabled, "aria-invalid": bad, "aria-describedby": `${id2}-error`, onChange: (event) => {
         const raw = event.currentTarget.value;
         setText(raw);
         const candidate = schema.type === "number" ? Number(raw) : raw;
         const valid = (schema.type !== "number" || raw.trim() !== "") && validateEditorValue(candidate, schema);
         setBad(!valid);
-        invalid(name, !valid);
+        invalid2(name, !valid);
         if (valid) controller.edit(path, candidate);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: disabled || value === void 0 && !bad, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: disabled || value === void 0 && !bad, onClick: () => {
         setText(String(inherited ?? ""));
         setBad(false);
-        invalid(name, false);
+        invalid2(name, false);
         controller.edit(path, void 0);
       }, children: t("inherit") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { id: `${id2}-error`, className: "dsmm-hint", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { id: `${id2}-error`, className: "dsmm-hint", children: [
       bad ? t("invalid") : "",
       schema.type === "number" && (schema.min !== void 0 || schema.max !== void 0) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""
     ] })
   ] });
 }
-function Field({ schema, path, controller, invalid, t }) {
-  const state = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), snapshot3 = state.snapshot;
-  const id2 = (0, import_react4.useId)(), name = path.join("."), explicit = at(state.draft, path);
-  const inherited = controller.layer === "global" ? at(snapshot3.defaults, path) : at(mergeLayer(mergeLayer(snapshot3.defaults, snapshot3.global), snapshot3.nativeForm?.base ?? {}), path);
+function Field({ schema, path, controller, invalid: invalid2, t }) {
+  if (schema.type === "transform" && schema.inner !== void 0) schema = schema.inner;
+  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), snapshot4 = state.snapshot;
+  const id2 = (0, import_react5.useId)(), name = path.join("."), explicit = at(state.draft, path);
+  const inherited = controller.layer === "global" ? at(snapshot4.defaults, path) : at(mergeLayer(mergeLayer(snapshot4.defaults, snapshot4.global), snapshot4.nativeForm?.base ?? {}), path);
   const disabled = state.busy || state.issue === "not-owned" || state.issue === "unavailable" || state.issue === "transport" || controller.layer === "profile" && !controller.canWriteProfile();
   const choices = enumValues(schema);
-  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting" && path[0] !== "lsp") return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-group", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+  const hint = name === "modelParameters.passthrough" ? "modelParametersHint" : name === "permissionControl.enabled" ? "permissionControlHint" : null;
+  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting") return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-group", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
       label(path, t),
       " ",
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: name })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: name })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { children: Object.entries(schema.fields).map(([key, node]) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Field, { schema: node, path: [...path, key], controller, invalid, t }, key)) })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { children: Object.entries(schema.fields).filter(([key]) => visibleDeploymentPath([...path, key])).map(([key, node]) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Field, { schema: node, path: [...path, key], controller, invalid: invalid2, t }, key)) })
   ] });
-  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(AdvancedField, { schema, path, value: explicit, inherited, upper: controller.layer === "global" ? at(snapshot3.profile, path) : void 0, reset: snapshot3, disabled, t, onChange: (value) => controller.edit(path, value), setInvalid: invalid });
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field dsmm-deployment-field", children: [
-    schema.type === "boolean" || choices !== null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { htmlFor: id2, children: [
+  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(AdvancedField, { schema, path, value: explicit, inherited, upper: controller.layer === "global" ? at(snapshot4.profile, path) : void 0, reset: snapshot4, disabled, t, onChange: (value) => controller.edit(path, value), setInvalid: invalid2 });
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field dsmm-deployment-field", children: [
+    schema.type === "boolean" || choices !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("label", { htmlFor: id2, children: [
         label(path, t),
         " ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: name })
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: name })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("select", { id: id2, disabled, value: explicit === void 0 ? "inherit" : JSON.stringify(explicit), onChange: (event) => controller.edit(path, event.currentTarget.value === "inherit" ? void 0 : JSON.parse(event.currentTarget.value)), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("option", { value: "inherit", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: id2, disabled, "aria-describedby": hint === null ? void 0 : `${id2}-hint`, value: explicit === void 0 ? "inherit" : JSON.stringify(explicit), onChange: (event) => controller.edit(path, event.currentTarget.value === "inherit" ? void 0 : JSON.parse(event.currentTarget.value)), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("option", { value: "inherit", children: [
           t("inherit"),
           " · ",
           displayValue(inherited, t)
         ] }),
-        (choices ?? [true, false]).map((choice2) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { value: JSON.stringify(choice2), children: displayValue(choice2, t) }, String(choice2)))
+        (choices ?? [true, false]).map((choice2) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: JSON.stringify(choice2), children: displayValue(choice2, t) }, String(choice2)))
       ] })
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ScalarField, { schema, path, controller, disabled, inherited, invalid, t }),
-    (explicit !== void 0 || controller.layer === "profile" && at(snapshot3.nativeForm?.base, path) !== void 0) && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { className: "dsmm-hint", children: [
-      explicit === void 0 ? "" : equal(explicit, at(snapshot3.defaults, path)) ? t("defaultPin") : t("explicit"),
-      controller.layer === "profile" && at(snapshot3.nativeForm?.base, path) !== void 0 ? `${explicit === void 0 ? "" : " · "}${t("hostPin")}` : ""
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ScalarField, { schema, path, controller, disabled, inherited, invalid: invalid2, t }),
+    hint !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${id2}-hint`, className: "dsmm-hint", children: t(hint) }),
+    (explicit !== void 0 || controller.layer === "profile" && at(snapshot4.nativeForm?.base, path) !== void 0) && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { className: "dsmm-hint", children: [
+      explicit === void 0 ? "" : equal(explicit, at(snapshot4.defaults, path)) ? t("defaultPin") : t("explicit"),
+      controller.layer === "profile" && at(snapshot4.nativeForm?.base, path) !== void 0 ? `${explicit === void 0 ? "" : " · "}${t("hostPin")}` : ""
     ] })
   ] });
 }
 function Layer({ controller, t }) {
-  const state = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  const [invalid, setInvalid] = (0, import_react4.useState)(/* @__PURE__ */ new Set());
+  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  const [invalid2, setInvalid] = (0, import_react5.useState)(/* @__PURE__ */ new Set());
   const updateInvalid = (path, bad) => {
     controller.setInvalid(path, bad);
     setInvalid((previous) => {
@@ -4557,120 +5912,130 @@ function Layer({ controller, t }) {
     });
   };
   const title = controller.layer === "global" ? "global" : "profile";
-  const disabled = state.busy || state.snapshot === null || state.issue !== null || invalid.size > 0 || controller.layer === "profile" && !controller.canWriteProfile();
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+  const disabled = state.busy || state.snapshot === null || state.issue !== null || invalid2.size > 0 || controller.layer === "profile" && !controller.canWriteProfile();
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
         t(title),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { role: "status", "aria-live": "polite", className: "dsmm-hint", children: state.busy ? t("saving") : state.dirty ? t("dirty") : state.saved ? t("saved") : "" })
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { role: "status", "aria-live": "polite", className: "dsmm-hint", children: state.busy ? t("saving") : state.dirty ? t("dirty") : state.saved ? t("saved") : "" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("fieldset", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("legend", { children: t(title) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t(title === "global" ? "globalHint" : "profileHint") }),
-        state.snapshot !== null && Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => controller.layer === "global" || key !== "modules").sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Field, { schema, path: [key], controller, invalid: updateInvalid, t }, key)),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", disabled: disabled || !state.dirty, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("fieldset", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("legend", { children: t(title) }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(title === "global" ? "globalHint" : "profileHint") }),
+        state.snapshot !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-group", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("summary", { children: t("core") }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("coreHint") }),
+              Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => key === "modelParameters" || key === "permissionControl").map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Field, { schema, path: [key], controller, invalid: updateInvalid, t }, key))
+            ] })
+          ] }),
+          Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => visibleDeploymentPath([key]) && key !== "modelParameters" && key !== "permissionControl" && (controller.layer === "global" || key !== "modules")).sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Field, { schema, path: [key], controller, invalid: updateInvalid, t }, key))
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-actions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "primary", disabled: disabled || !state.dirty, onClick: () => {
             void controller.save();
           }, children: t(state.busy ? "saving" : title === "global" ? "saveGlobal" : "saveProfile") }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => {
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => {
             void controller.refresh();
           }, children: t("refresh") }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null, onClick: () => {
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null, onClick: () => {
             setInvalid(/* @__PURE__ */ new Set());
             void controller.refresh(true);
           }, children: t("discard") })
         ] })
       ] })
     ] }),
-    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
-    invalid.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }),
-    controller.layer === "profile" && !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
+    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
+    invalid2.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }),
+    controller.layer === "profile" && !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
   ] });
 }
 function NativeProfileLayer({ namespace, forms, remote, form, core, t }) {
-  const shared = (0, import_react4.useMemo)(() => forms.get(namespace), [forms, namespace]);
-  const snapshot3 = (0, import_react4.useSyncExternalStore)((listener) => shared.subscribe(listener), () => shared.getSnapshot());
-  const controller = (0, import_react4.useMemo)(() => core.forProfile(namespace), [core, remote, namespace]);
-  const state = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  const coreState = (0, import_react4.useSyncExternalStore)(core.subscribe, core.getSnapshot);
-  controller.attachForm(form ?? { state: snapshot3, mutate: (ops, revision2) => shared.mutate(ops, revision2) });
-  (0, import_react4.useEffect)(() => {
+  const shared = (0, import_react5.useMemo)(() => forms.get(namespace), [forms, namespace]);
+  const snapshot4 = (0, import_react5.useSyncExternalStore)((listener) => shared.subscribe(listener), () => shared.getSnapshot());
+  const controller = (0, import_react5.useMemo)(() => core.forProfile(namespace), [core, remote, namespace]);
+  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  const coreState = (0, import_react5.useSyncExternalStore)(core.subscribe, core.getSnapshot);
+  controller.attachForm(form ?? { state: snapshot4, mutate: (ops, revision2) => shared.mutate(ops, revision2) });
+  (0, import_react5.useEffect)(() => {
     void controller.refresh();
     return () => controller.dispose();
   }, [controller]);
-  (0, import_react4.useEffect)(() => {
+  (0, import_react5.useEffect)(() => {
     if (state.saved) void core.refresh();
   }, [state.saved, core]);
-  (0, import_react4.useEffect)(() => {
+  (0, import_react5.useEffect)(() => {
     if (controller.getSnapshot().snapshot !== null) void controller.refresh();
-  }, [coreState.snapshot?.globalRevision, snapshot3.revision, controller]);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Layer, { controller, t });
+  }, [coreState.snapshot?.globalRevision, snapshot4.revision, controller]);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Layer, { controller, t });
 }
 function StateInspector({ controller, session, t }) {
-  const { snapshot: snapshot3, dirty, issue } = (0, import_react4.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  if (snapshot3 === null) return null;
+  const { snapshot: snapshot4, dirty, issue } = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  if (snapshot4 === null) return null;
   const admitted = session?.configuration ?? null;
+  const restartRequired = (snapshot4.nextRoot?.restartRequired ?? []).filter((path) => visibleDeploymentPath(path.split(".")));
   const source = (value2) => t(value2 === "profile" ? "profileSource" : value2 === "global" ? "globalSource" : value2 === "defaults" ? "defaultsSource" : value2 === "named-session" ? "namedSource" : value2 === "startup" ? "startupSource" : value2 === "deployment" ? "deploymentCapture" : value2 === "mixed" ? "mixedSource" : "unknown");
   const value = (layer, path) => layer === void 0 ? t("unknown") : at(layer, path.split(".")) === void 0 ? t("absent") : displayValue(at(layer, path.split(".")), t);
   const metadata = (layer, path, entry) => layer !== void 0 && at(layer, path.split(".")) === void 0 && entry === void 0 ? t("absent") : source(entry);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-card", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-card", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
       t("state"),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "dsmm-hint", children: (snapshot3.nextRoot?.restartRequired.length ?? 0) > 0 ? t("pending") : dirty || issue !== null ? t("inspectorStale") : "" })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "dsmm-hint", children: restartRequired.length > 0 ? t("pending") : dirty || issue !== null ? t("inspectorStale") : "" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { role: "status", "aria-live": "polite", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : `${t("namedSource")}: ${admitted.named?.id ?? "—"}` }),
-      session !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { role: "status", "aria-live": "polite", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : `${t("namedSource")}: ${admitted.named?.id ?? "—"}` }),
+      session !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
         t("session"),
         ": ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: session.sessionId }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: session.sessionId }),
         " · ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: session.admissionEpoch }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: session.admissionEpoch }),
         " · ",
         session.scope
       ] }),
-      (dirty || issue !== null) && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("inspectorStale") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { className: "dsmm-hint", children: [
+      (dirty || issue !== null) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("inspectorStale") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { className: "dsmm-hint", children: [
         "Global CAS: ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: snapshot3.globalRevision }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: snapshot4.globalRevision }),
         " · native CAS: ",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: snapshot3.nativeRevision }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: snapshot4.nativeRevision }),
         " · Host form: ",
-        snapshot3.nativeFormRevision ?? "—"
+        snapshot4.nativeFormRevision ?? "—"
       ] }),
-      inspectorPaths(snapshot3, admitted).map((path) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dl", { className: "dsmm-deployment-state", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("dt", { children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("code", { children: path }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dd", { children: [
+      inspectorPaths(snapshot4, admitted).map((path) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dl", { className: "dsmm-deployment-state", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("code", { children: path }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
           t("globalSource"),
           ": ",
-          at(snapshot3.global, path.split(".")) === void 0 ? t("absent") : t("globalSource")
+          at(snapshot4.global, path.split(".")) === void 0 ? t("absent") : t("globalSource")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dd", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
           t("desired"),
           ": ",
-          value(snapshot3.desired, path),
+          value(snapshot4.desired, path),
           " · ",
-          metadata(snapshot3.desired, path, snapshot3.sources[path])
+          metadata(snapshot4.desired, path, snapshot4.sources[path])
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dd", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
           t("startup"),
           ": ",
-          value(snapshot3.startup, path),
+          value(snapshot4.startup, path),
           " · ",
-          metadata(snapshot3.startup, path, snapshot3.startupSources?.[path]),
+          metadata(snapshot4.startup, path, snapshot4.startupSources?.[path]),
           " / ",
-          at(snapshot3.startup, path.split(".")) === void 0 ? t("absent") : t("startupSource")
+          at(snapshot4.startup, path.split(".")) === void 0 ? t("absent") : t("startupSource")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dd", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
           t("next"),
           ": ",
-          value(snapshot3.nextRoot?.settings, path),
+          value(snapshot4.nextRoot?.settings, path),
           " · ",
-          metadata(snapshot3.nextRoot?.settings, path, snapshot3.nextRoot?.sources[path]),
+          metadata(snapshot4.nextRoot?.settings, path, snapshot4.nextRoot?.sources[path]),
           " / ",
-          metadata(snapshot3.nextRoot?.settings, path, snapshot3.nextRoot?.captures[path])
+          metadata(snapshot4.nextRoot?.settings, path, snapshot4.nextRoot?.captures[path])
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("dd", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
           t("session"),
           ": ",
           value(admitted?.settings, path),
@@ -4680,74 +6045,77 @@ function StateInspector({ controller, session, t }) {
           metadata(admitted?.settings, path, admitted?.captures[path])
         ] })
       ] }, path)),
-      (snapshot3.nextRoot?.restartRequired.length ?? 0) > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { children: [
+      restartRequired.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
         t("pending"),
         ": ",
-        snapshot3.nextRoot.restartRequired.join(", ")
+        restartRequired.join(", ")
       ] })
     ] })
   ] });
 }
 function DeploymentPage(props) {
-  const state = (0, import_react4.useSyncExternalStore)(props.core.subscribe, props.core.getSnapshot);
-  (0, import_react4.useEffect)(() => {
+  const state = (0, import_react5.useSyncExternalStore)(props.core.subscribe, props.core.getSnapshot);
+  (0, import_react5.useEffect)(() => {
     if (props.view === "page") void props.core.refresh();
   }, [props.core, props.view]);
-  if (props.view === "summary") return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: props.t("summary") });
-  const { t } = props, snapshot3 = state.snapshot, module2 = snapshot3?.modules[0];
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("description") }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("boundaries") }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
-        t("module"),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "dsmm-hint", children: module2?.pending ? t("pending") : module2 === void 0 ? t("unknown") : t(module2.desired.enabled ? "on" : "off") })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("hostUnknown") }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { children: [
-          t("desired"),
-          ": ",
-          module2 === void 0 ? t("unknown") : t(module2.desired.enabled ? "on" : "off"),
-          " · ",
-          module2?.desired.source ?? "—"
+  if (props.view === "summary") return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: props.t("summary") });
+  const { t } = props, snapshot4 = state.snapshot;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("description") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("boundaries") }),
+    snapshot4?.modules.map((module2) => {
+      const admitted = state.session?.modules?.find((value) => value.descriptor.id === module2.descriptor.id)?.admitted;
+      return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
+          module2.descriptor.label,
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "dsmm-hint", children: module2.pending ? t("pending") : t(module2.desired.enabled ? "on" : "off") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { children: [
-          t("startup"),
-          ": ",
-          module2 === void 0 ? t("unknown") : t(module2.startupMounted ? "on" : "off"),
-          " · ",
-          t("next"),
-          ": ",
-          module2 === void 0 ? t("unknown") : t(module2.nextRoot.admitted ? "on" : "off")
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { children: [
-          t("session"),
-          ": ",
-          state.session?.modules?.[0]?.admitted == null ? t("unknown") : t(state.session.modules[0].admitted ? "on" : "off")
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("ceiling") })
-      ] })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Layer, { controller: props.core, t }),
-    props.profilePage && props.forms !== void 0 && snapshot3?.namespace !== null && snapshot3?.namespace !== void 0 && (props.rowNamespace === void 0 || props.rowNamespace === snapshot3.namespace) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(NativeProfileLayer, { namespace: snapshot3.namespace, forms: props.forms, remote: props.remote, form: props.form, core: props.core, t }, `${snapshot3.hostProfileKey}:${snapshot3.entryId}`) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "dsmm-deployment-card", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("summary", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("hostUnknown") }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+            t("desired"),
+            ": ",
+            t(module2.desired.enabled ? "on" : "off"),
+            " · ",
+            module2.desired.source
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+            t("startup"),
+            ": ",
+            module2.startupMounted == null ? t("unknown") : t(module2.startupMounted ? "on" : "off"),
+            " · ",
+            t("next"),
+            ": ",
+            module2.nextRoot.admitted == null ? t("unknown") : t(module2.nextRoot.admitted ? "on" : "off")
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+            t("session"),
+            ": ",
+            admitted == null ? t("unknown") : t(admitted ? "on" : "off")
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(module2.descriptor.id === "deepwork" ? "ceiling" : "permissionControlHint") })
+        ] })
+      ] }, module2.descriptor.id);
+    }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Layer, { controller: props.core, t }),
+    props.profilePage && props.forms !== void 0 && snapshot4?.namespace !== null && snapshot4?.namespace !== void 0 && (props.rowNamespace === void 0 || props.rowNamespace === snapshot4.namespace) ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(NativeProfileLayer, { namespace: snapshot4.namespace, forms: props.forms, remote: props.remote, form: props.form, core: props.core, t }, `${snapshot4.hostProfileKey}:${snapshot4.entryId}`) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "dsmm-deployment-card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("summary", { children: [
           t("profile"),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "dsmm-hint", children: t("profileUnavailable") })
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "dsmm-hint", children: t("profileUnavailable") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("profileHint") }) })
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("profileHint") }) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(StateInspector, { controller: props.core, session: state.session, t })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(StateInspector, { controller: props.core, session: state.session, t })
   ] });
 }
 
 // src/child-evidence.ts
 var CHILD_EVIDENCE_FIELDS = ["lineage", "role", "route", "profile-pin", "admission-epoch", "invocation-level", "runtime-policy", "modules", "roles", "read-only", "tool-filter", "route-override", "max-depth", "locale", "tool-topology", "guards", "git-write", "shell", "delegation", "active-intent", "max-tokens", "output-schema"];
 function object2(value, required, optional2 = []) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some((property) => !Object.hasOwn(property, "value") || !property.enumerable)) throw new TypeError("Invalid child evidence object");
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some((property2) => !Object.hasOwn(property2, "value") || !property2.enumerable)) throw new TypeError("Invalid child evidence object");
   const row = value;
   if (required.some((key) => !Object.hasOwn(row, key)) || Object.keys(row).some((key) => !required.includes(key) && !optional2.includes(key))) throw new TypeError("Invalid child evidence fields");
   return row;
@@ -4757,7 +6125,7 @@ function epoch(value) {
   return value;
 }
 function array(value, maximum) {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > maximum || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== value.length || Object.entries(Object.getOwnPropertyDescriptors(value)).some(([key, property]) => key !== "length" && (!/^(0|[1-9][0-9]*)$/u.test(key) || !Object.hasOwn(property, "value") || !property.enumerable))) throw new TypeError("Invalid child evidence array");
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > maximum || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== value.length || Object.entries(Object.getOwnPropertyDescriptors(value)).some(([key, property2]) => key !== "length" && (!/^(0|[1-9][0-9]*)$/u.test(key) || !Object.hasOwn(property2, "value") || !property2.enumerable))) throw new TypeError("Invalid child evidence array");
   return value;
 }
 function parseChildAdmissionEvidenceView(input) {
@@ -4798,65 +6166,65 @@ var ROLE_CONTROL_ERROR_CODES = ["validation", "not-owned", "unavailable", "cance
 var ROLE_CONTROL_ERROR_FIELDS = ["sessionId", "parentSessionId", "childSessionId", "toolCallId", "runId", "expectedAdmissionEpoch", "request", "content", "clientTimeZone"];
 
 // src/role-control-remote.ts
-function fail2() {
+function fail3() {
   throw new TypeError("Invalid Deepwork child control DTO.");
 }
 function json(value, depth2 = 0, active = /* @__PURE__ */ new Set()) {
-  if (depth2 > 24) fail2();
+  if (depth2 > 24) fail3();
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "object" || value === null || active.has(value)) fail2();
+  if (typeof value !== "object" || value === null || active.has(value)) fail3();
   const isArray = Array.isArray(value);
-  if (Object.getPrototypeOf(value) !== (isArray ? Array.prototype : Object.prototype) && (isArray || Object.getPrototypeOf(value) !== null)) fail2();
-  if (Object.getOwnPropertySymbols(value).length) fail2();
-  for (const [key, property] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+  if (Object.getPrototypeOf(value) !== (isArray ? Array.prototype : Object.prototype) && (isArray || Object.getPrototypeOf(value) !== null)) fail3();
+  if (Object.getOwnPropertySymbols(value).length) fail3();
+  for (const [key, property2] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
     if (isArray && key === "length") continue;
-    if (!Object.hasOwn(property, "value") || !property.enumerable || ["__proto__", "prototype", "constructor"].includes(key) || isArray && !/^(0|[1-9][0-9]*)$/u.test(key)) fail2();
+    if (!Object.hasOwn(property2, "value") || !property2.enumerable || ["__proto__", "prototype", "constructor"].includes(key) || isArray && !/^(0|[1-9][0-9]*)$/u.test(key)) fail3();
   }
-  if (isArray && Object.keys(value).length !== value.length) fail2();
+  if (isArray && Object.keys(value).length !== value.length) fail3();
   active.add(value);
   const result = isArray ? value.map((child2) => json(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child2]) => [key, json(child2, depth2 + 1, active)]));
   active.delete(value);
   return result;
 }
 function object3(value, required, optional2 = []) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) fail2();
+  if (typeof value !== "object" || value === null || Array.isArray(value)) fail3();
   const row = value;
-  if (required.some((key) => !Object.hasOwn(row, key)) || Object.keys(row).some((key) => !required.includes(key) && !optional2.includes(key))) fail2();
+  if (required.some((key) => !Object.hasOwn(row, key)) || Object.keys(row).some((key) => !required.includes(key) && !optional2.includes(key))) fail3();
   return row;
 }
 function choice(value, choices) {
-  if (!choices.includes(value)) fail2();
+  if (!choices.includes(value)) fail3();
   return value;
 }
-function text2(value, max) {
-  if (typeof value !== "string" || value.length > max || /[\u0000-\u001f\u007f]/u.test(value) || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) !== value) fail2();
+function text3(value, max) {
+  if (typeof value !== "string" || value.length > max || /[\u0000-\u001f\u007f]/u.test(value) || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) !== value) fail3();
   return value;
 }
 function identity(value) {
-  if (!isNativeSessionId(value)) fail2();
+  if (!isNativeSessionId(value)) fail3();
   return value;
 }
 function epoch2(value) {
-  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) fail2();
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) fail3();
   return value;
 }
 function array2(value, max = 4096) {
-  if (!Array.isArray(value) || value.length > max) fail2();
+  if (!Array.isArray(value) || value.length > max) fail3();
   return value;
 }
 function bool(value) {
-  if (typeof value !== "boolean") fail2();
+  if (typeof value !== "boolean") fail3();
   return value;
 }
 function depth(value) {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 4096) fail2();
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 4096) fail3();
   return value;
 }
 function availability(value) {
   const row = object3(value, ["enabled"], ["reason"]);
   if (row.enabled === true && !Object.hasOwn(row, "reason")) return { enabled: true };
-  if (row.enabled !== false) fail2();
+  if (row.enabled !== false) fail3();
   return { enabled: false, reason: choice(row.reason, ROLE_CONTROL_DISABLED_REASONS) };
 }
 function capabilities(value) {
@@ -4867,7 +6235,7 @@ function run(value) {
   const row = object3(value, ["sessionId", "toolCallId", "state", "background"], ["invocation"]);
   const state = choice(row.state, ["starting", "running", "background", "settled", "cancelled"]);
   const invocation = Object.hasOwn(row, "invocation") ? parseDsmmInvocationView(row.invocation) : void 0;
-  if (state === "starting" && invocation !== void 0 || invocation !== void 0 && (invocation.mode !== "one-shot" || invocation.runId === void 0) || ["running", "background", "settled"].includes(state) && invocation === void 0) fail2();
+  if (state === "starting" && invocation !== void 0 || invocation !== void 0 && (invocation.mode !== "one-shot" || invocation.runId === void 0) || ["running", "background", "settled"].includes(state) && invocation === void 0) fail3();
   return { sessionId: identity(row.sessionId), toolCallId: identity(row.toolCallId), state, background: availability(row.background), ...invocation === void 0 ? {} : { invocation } };
 }
 function child(value) {
@@ -4876,14 +6244,14 @@ function child(value) {
   const mode = choice(row.mode, ["one-shot", "continuable", "unknown"]);
   const prompt = availability(controls.prompt), interrupt = availability(controls.interrupt);
   const readonly = bool(row.readonly);
-  if (readonly !== (!prompt.enabled && !interrupt.enabled) || mode !== "continuable" && (prompt.enabled || interrupt.enabled)) fail2();
+  if (readonly !== (!prompt.enabled && !interrupt.enabled) || mode !== "continuable" && (prompt.enabled || interrupt.enabled)) fail3();
   const invocation = Object.hasOwn(row, "invocation") ? parseDsmmInvocationView(row.invocation) : void 0;
   const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : void 0;
   const evidence = Object.hasOwn(row, "evidence") ? parseChildAdmissionEvidenceView(row.evidence) : void 0;
   const id2 = identity(row.id);
-  if (invocation !== void 0 && (invocation.childId !== id2 || invocation.mode !== mode)) fail2();
-  if (routeComparison !== void 0 && routeComparison.childId !== id2) fail2();
-  if (evidence?.mode === "legacy-conservative" && invocation !== void 0) fail2();
+  if (invocation !== void 0 && (invocation.childId !== id2 || invocation.mode !== mode)) fail3();
+  if (routeComparison !== void 0 && routeComparison.childId !== id2) fail3();
+  if (evidence?.mode === "legacy-conservative" && invocation !== void 0) fail3();
   return {
     id: id2,
     parentSessionId: identity(row.parentSessionId),
@@ -4891,16 +6259,16 @@ function child(value) {
     activity: choice(row.activity, ["running", "inactive"]),
     readonly,
     controls: { prompt, interrupt },
-    ...Object.hasOwn(row, "label") ? { label: text2(row.label, 120) } : {},
+    ...Object.hasOwn(row, "label") ? { label: text3(row.label, 120) } : {},
     ...invocation === void 0 ? {} : { invocation },
     ...routeComparison === void 0 ? {} : { routeComparison },
     ...evidence === void 0 ? {} : { evidence }
   };
 }
-function snapshot2(value) {
+function snapshot3(value) {
   const row = object3(value, ["sessionId", "admissionEpoch", "runs", "children", "capabilities"]);
   const sessionId2 = identity(row.sessionId), admissionEpoch = epoch2(row.admissionEpoch), runs = array2(row.runs).map(run), children = array2(row.children).map(child);
-  if (runs.some((run2) => run2.sessionId !== sessionId2) || children.some((child2) => child2.parentSessionId !== sessionId2 || child2.evidence !== void 0 && child2.evidence.parentAdmissionEpoch !== admissionEpoch)) fail2();
+  if (runs.some((run2) => run2.sessionId !== sessionId2) || children.some((child2) => child2.parentSessionId !== sessionId2 || child2.evidence !== void 0 && child2.evidence.parentAdmissionEpoch !== admissionEpoch)) fail3();
   return { sessionId: sessionId2, admissionEpoch, runs, children, capabilities: capabilities(row.capabilities) };
 }
 function descendants(value) {
@@ -4911,17 +6279,17 @@ function descendants(value) {
     if (entry.kind === "child") {
       object3(entry, ["kind", "depth", "child", "hasChildren"]);
       const projected = child(entry.child);
-      if (entry.depth !== 1 && (projected.controls.prompt.enabled || projected.controls.interrupt.enabled)) fail2();
+      if (entry.depth !== 1 && (projected.controls.prompt.enabled || projected.controls.interrupt.enabled)) fail3();
       return { kind: "child", depth: depth(entry.depth), child: projected, hasChildren: bool(entry.hasChildren) };
     }
     object3(entry, ["kind", "depth", "id", "parentSessionId", "reason"]);
-    if (entry.kind !== "diagnostic") fail2();
+    if (entry.kind !== "diagnostic") fail3();
     return { kind: "diagnostic", depth: depth(entry.depth), id: identity(entry.id), parentSessionId: identity(entry.parentSessionId), reason: choice(entry.reason, ["corrupt", "unsupported", "unavailable"]) };
   });
   for (const entry of entries) {
     const parent = entry.kind === "child" ? entry.child.parentSessionId : entry.parentSessionId;
-    if (entry.depth === 1 !== (parent === sessionId2)) fail2();
-    if (entry.kind === "child" && entry.child.evidence !== void 0 && entry.child.evidence.parentAdmissionEpoch !== admissionEpoch) fail2();
+    if (entry.depth === 1 !== (parent === sessionId2)) fail3();
+    if (entry.kind === "child" && entry.child.evidence !== void 0 && entry.child.evidence.parentAdmissionEpoch !== admissionEpoch) fail3();
   }
   return { sessionId: sessionId2, admissionEpoch, descendants: entries };
 }
@@ -4932,29 +6300,29 @@ function backgroundRequest(value) {
 function transition(value) {
   const row = object3(value, ["status", "runId"], ["jobId"]);
   const status = choice(row.status, ["background", "already-background", "already-settled", "cancelled"]);
-  if (["background", "already-background"].includes(status) !== Object.hasOwn(row, "jobId")) fail2();
+  if (["background", "already-background"].includes(status) !== Object.hasOwn(row, "jobId")) fail3();
   return { status, runId: identity(row.runId), ...Object.hasOwn(row, "jobId") ? { jobId: identity(row.jobId) } : {} };
 }
 function promptRequest(value) {
   const row = object3(value, ["requestId", "parentSessionId", "childSessionId", "mode", "delivery", "content"], ["clientTimeZone"]);
-  if (row.mode !== "continuable") fail2();
+  if (row.mode !== "continuable") fail3();
   const content2 = array2(row.content, Number.MAX_SAFE_INTEGER).map((value2) => {
     const part = object3(value2, ["type"], ["text", "mediaType", "data", "name"]);
     if (part.type === "text") {
       object3(part, ["type", "text"]);
-      if (typeof part.text !== "string") fail2();
+      if (typeof part.text !== "string") fail3();
       return { type: "text", text: part.text };
     }
     object3(part, ["type", "mediaType", "data"], ["name"]);
-    if (part.type !== "image" || typeof part.data !== "string") fail2();
+    if (part.type !== "image" || typeof part.data !== "string") fail3();
     return {
       type: "image",
       mediaType: choice(part.mediaType, ["image/png", "image/jpeg", "image/webp", "image/gif"]),
       data: part.data,
-      ...Object.hasOwn(part, "name") ? { name: text2(part.name, 256) } : {}
+      ...Object.hasOwn(part, "name") ? { name: text3(part.name, 256) } : {}
     };
   });
-  if (content2.length === 0) fail2();
+  if (content2.length === 0) fail3();
   return {
     requestId: identity(row.requestId),
     parentSessionId: identity(row.parentSessionId),
@@ -4962,12 +6330,12 @@ function promptRequest(value) {
     mode: "continuable",
     delivery: choice(row.delivery, ["queue", "steer"]),
     content: content2,
-    ...Object.hasOwn(row, "clientTimeZone") ? { clientTimeZone: text2(row.clientTimeZone, 128) } : {}
+    ...Object.hasOwn(row, "clientTimeZone") ? { clientTimeZone: text3(row.clientTimeZone, 128) } : {}
   };
 }
 function interruptRequest(value) {
   const row = object3(value, ["parentSessionId", "childSessionId", "mode"]);
-  if (row.mode !== "continuable") fail2();
+  if (row.mode !== "continuable") fail3();
   return { parentSessionId: identity(row.parentSessionId), childSessionId: identity(row.childSessionId), mode: "continuable" };
 }
 function promptReceipt(value) {
@@ -4976,7 +6344,7 @@ function promptReceipt(value) {
 }
 function interruptReceipt(value) {
   const row = object3(value, ["accepted"]);
-  if (row.accepted !== true) fail2();
+  if (row.accepted !== true) fail3();
   return { accepted: true };
 }
 function errorInfo2(value) {
@@ -4988,7 +6356,7 @@ function errorInfo2(value) {
   };
 }
 var parseRoleControlErrorInfo = (value) => errorInfo2(json(value));
-var parseChildSessionSnapshot = (value) => snapshot2(json(value));
+var parseChildSessionSnapshot = (value) => snapshot3(json(value));
 var parseRoleControlDescendants = (value) => descendants(json(value));
 var parseRoleControlPromptRequest = (value) => promptRequest(json(value));
 function codec2(symbol, parse3) {
@@ -5009,7 +6377,7 @@ function descriptor2(method, result, request) {
   };
 }
 var ROLE_CONTROL_REMOTE = { package: "@dsmm/dsmm-children", descriptors: [
-  descriptor2("describe", codec2("ChildSessionSnapshot", snapshot2)),
+  descriptor2("describe", codec2("ChildSessionSnapshot", snapshot3)),
   descriptor2("descendants", codec2("RoleControlDescendantsSnapshot", descendants)),
   descriptor2("background", codec2("BackgroundTransitionResult", transition), codec2("RoleControlBackgroundRequest", backgroundRequest)),
   descriptor2("prompt", codec2("SubagentPromptReceipt", promptReceipt), codec2("SubagentPromptRequest", promptRequest)),
@@ -5068,12 +6436,12 @@ var ChildrenController = class {
     background: (generation, call, run2) => this.background(generation, call, run2),
     prompt: (generation, child2) => this.prompt(generation, child2),
     interrupt: (generation, child2) => this.interrupt(generation, child2),
-    editText: (generation, child2, text3) => this.editDraft(generation, child2, { text: text3 }),
+    editText: (generation, child2, text5) => this.editDraft(generation, child2, { text: text5 }),
     setDelivery: (generation, child2, delivery) => this.editDraft(generation, child2, { delivery }),
     addImages: (generation, child2, files) => this.addImages(generation, child2, files),
     removeImage: (generation, child2, image) => {
-      const draft = this.draft(child2);
-      if (!draft.imageBusy) this.editDraft(generation, child2, { images: draft.images.filter((part) => part !== image) });
+      const draft2 = this.draft(child2);
+      if (!draft2.imageBusy) this.editDraft(generation, child2, { images: draft2.images.filter((part) => part !== image) });
     },
     acknowledgeUnknown: (generation, child2) => {
       if (this.available(generation)) this.editDraft(generation, child2, { uncertain: false });
@@ -5115,10 +6483,10 @@ var ChildrenController = class {
   }
   fence(preserveDrafts, sessionId2 = this.current.sessionId) {
     const drafts = /* @__PURE__ */ new Map();
-    if (preserveDrafts) for (const [id2, draft] of this.current.drafts) drafts.set(id2, {
-      ...draft,
+    if (preserveDrafts) for (const [id2, draft2] of this.current.drafts) drafts.set(id2, {
+      ...draft2,
       imageBusy: false,
-      uncertain: draft.uncertain || this.current.pending.get(childActionKey(id2)) === "prompt"
+      uncertain: draft2.uncertain || this.current.pending.get(childActionKey(id2)) === "prompt"
     });
     this.publish({
       sessionId: sessionId2,
@@ -5175,15 +6543,15 @@ var ChildrenController = class {
       throw new ControlFailure({ kind: "transport", code: "unavailable", unknown: true });
     }
     try {
-      const codec3 = ROLE_CONTROL_REMOTE.descriptors.find((row) => row.method === method).result;
-      if (codec3.mode !== "strict") throw new TypeError("Child result requires a strict codec.");
-      return codec3.create().parse(result.value);
+      const codec4 = ROLE_CONTROL_REMOTE.descriptors.find((row) => row.method === method).result;
+      if (codec4.mode !== "strict") throw new TypeError("Child result requires a strict codec.");
+      return codec4.create().parse(result.value);
     } catch {
       throw new ControlFailure({ kind: "protocol", code: "unavailable", unknown: true });
     }
   }
   async refresh(generation) {
-    if (!this.live(generation) || this.current.reading || this.current.pending.size > 0 || [...this.current.drafts.values()].some((draft) => draft.imageBusy)) return;
+    if (!this.live(generation) || this.current.reading || this.current.pending.size > 0 || [...this.current.drafts.values()].some((draft2) => draft2.imageBusy)) return;
     const id2 = this.current.sessionId;
     this.publish({ reading: true, issue: null, descendantIssue: null, fresh: false });
     const [description, descendants2] = await Promise.allSettled([this.unwrap("describe", () => this.remote.describe(id2)), this.unwrap("descendants", () => this.remote.descendants(id2))]);
@@ -5192,12 +6560,12 @@ var ChildrenController = class {
       this.publish({ reading: false, issue: this.issue(description.reason), descendants: null });
       return;
     }
-    const snapshot3 = parseChildSessionSnapshot(description.value);
-    if (snapshot3.sessionId !== id2) {
+    const snapshot4 = parseChildSessionSnapshot(description.value);
+    if (snapshot4.sessionId !== id2) {
       this.publish({ reading: false, issue: { kind: "protocol", code: "not-owned" }, descendants: null });
       return;
     }
-    if (this.observedAdmission !== null && snapshot3.admissionEpoch !== this.observedAdmission) {
+    if (this.observedAdmission !== null && snapshot4.admissionEpoch !== this.observedAdmission) {
       this.publish({ reading: false, issue: { kind: "protocol", code: "conflict" }, descendants: null });
       return;
     }
@@ -5205,12 +6573,12 @@ var ChildrenController = class {
     if (descendants2.status === "rejected") descendantIssue = this.issue(descendants2.reason);
     else {
       tree = parseRoleControlDescendants(descendants2.value);
-      if (tree.sessionId !== id2 || tree.admissionEpoch !== snapshot3.admissionEpoch) {
+      if (tree.sessionId !== id2 || tree.admissionEpoch !== snapshot4.admissionEpoch) {
         tree = null;
         descendantIssue = { kind: "protocol", code: "conflict" };
       }
     }
-    this.publish({ snapshot: snapshot3, descendants: tree, descendantIssue, fresh: true, reading: false, generation: generation + 1 });
+    this.publish({ snapshot: snapshot4, descendants: tree, descendantIssue, fresh: true, reading: false, generation: generation + 1 });
   }
   begin(key, kind) {
     const pending = new Map(this.current.pending), issues = new Map(this.current.issues), outcomes = new Map(this.current.outcomes);
@@ -5235,12 +6603,12 @@ var ChildrenController = class {
     this.publish({ outcomes });
   }
   async background(generation, toolCallId, runId) {
-    const key = runActionKey(toolCallId, runId), snapshot3 = this.current.snapshot;
-    const run2 = snapshot3?.runs.find((row) => row.toolCallId === toolCallId && row.invocation?.runId === runId);
-    if (!this.available(generation) || this.current.pending.has(key) || this.current.outcomes.get(key)?.kind === "background" || run2?.state !== "running" || !enabled(run2.background) || !enabled(snapshot3?.capabilities.background)) return;
+    const key = runActionKey(toolCallId, runId), snapshot4 = this.current.snapshot;
+    const run2 = snapshot4?.runs.find((row) => row.toolCallId === toolCallId && row.invocation?.runId === runId);
+    if (!this.available(generation) || this.current.pending.has(key) || this.current.outcomes.get(key)?.kind === "background" || run2?.state !== "running" || !enabled(run2.background) || !enabled(snapshot4?.capabilities.background)) return;
     this.begin(key, "background");
     try {
-      const receipt = await this.unwrap("background", () => this.remote.background(snapshot3.sessionId, { sessionId: snapshot3.sessionId, toolCallId, runId, expectedAdmissionEpoch: snapshot3.admissionEpoch }));
+      const receipt = await this.unwrap("background", () => this.remote.background(snapshot4.sessionId, { sessionId: snapshot4.sessionId, toolCallId, runId, expectedAdmissionEpoch: snapshot4.admissionEpoch }));
       if (!this.live(generation)) return;
       if (receipt.runId !== runId) throw new ControlFailure({ kind: "protocol", code: "conflict", unknown: true });
       this.accepted(key, { kind: "background", receipt });
@@ -5250,13 +6618,13 @@ var ChildrenController = class {
       if (this.live(generation)) this.finish(key);
     }
   }
-  canControl(generation, id2, action) {
+  canControl(generation, id2, action2) {
     const child2 = this.child(id2);
-    return this.available(generation) && !this.current.pending.has(childActionKey(id2)) && child2?.mode === "continuable" && !child2.readonly && enabled(child2.controls[action]) && enabled(this.current.snapshot?.capabilities[action]);
+    return this.available(generation) && !this.current.pending.has(childActionKey(id2)) && child2?.mode === "continuable" && !child2.readonly && enabled(child2.controls[action2]) && enabled(this.current.snapshot?.capabilities[action2]);
   }
   async prompt(generation, id2) {
-    const draft = this.draft(id2), key = childActionKey(id2);
-    if (!this.canControl(generation, id2, "prompt") || draft.uncertain || draft.imageBusy || draft.text.trim() === "" && draft.images.length === 0 || draft.images.length > 0 && !enabled(this.current.snapshot?.capabilities.images)) return;
+    const draft2 = this.draft(id2), key = childActionKey(id2);
+    if (!this.canControl(generation, id2, "prompt") || draft2.uncertain || draft2.imageBusy || draft2.text.trim() === "" && draft2.images.length === 0 || draft2.images.length > 0 && !enabled(this.current.snapshot?.capabilities.images)) return;
     this.begin(key, "prompt");
     try {
       let clientTimeZone;
@@ -5271,8 +6639,8 @@ var ChildrenController = class {
           parentSessionId: this.current.sessionId,
           childSessionId: id2,
           mode: "continuable",
-          delivery: draft.delivery,
-          content: [...draft.text === "" ? [] : [{ type: "text", text: draft.text }], ...draft.images],
+          delivery: draft2.delivery,
+          content: [...draft2.text === "" ? [] : [{ type: "text", text: draft2.text }], ...draft2.images],
           ...clientTimeZone === void 0 ? {} : { clientTimeZone }
         });
       } catch {
@@ -5282,7 +6650,7 @@ var ChildrenController = class {
       if (!this.live(generation)) return;
       this.accepted(key, { kind: "prompt", receipt });
       const drafts = new Map(this.current.drafts);
-      drafts.set(id2, { ...draft, text: "", images: [], uncertain: false });
+      drafts.set(id2, { ...draft2, text: "", images: [], uncertain: false });
       this.publish({ drafts });
     } catch (error) {
       if (this.live(generation)) {
@@ -5341,57 +6709,57 @@ var ChildrenController = class {
 };
 
 // src/client/ChildrenPanel.tsx
-var import_react5 = require("react");
-var import_dsh_client_ui_primitives5 = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_jsx_runtime7 = require("react/jsx-runtime");
+var import_react6 = require("react");
+var import_dsh_client_ui_primitives6 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_jsx_runtime8 = require("react/jsx-runtime");
 function ControlAvailability({ value, label: label2, t }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-availability", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-availability", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t(label2),
       ": ",
       t(value?.enabled === true ? "enabled" : "disabled")
     ] }),
-    value?.enabled !== true && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(`reason:${value?.reason ?? "unavailable"}`) })
+    value?.enabled !== true && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t(`reason:${value?.reason ?? "unavailable"}`) })
   ] });
 }
-function routeText2(route3) {
+function routeText(route3) {
   return `${route3.provider}/${route3.model}${route3.reasoningEffort === void 0 ? "" : ` (${route3.reasoningEffort})`}`;
 }
 function RouteComparisonDetails({ value, t }) {
   const initial = value?.initialRoute, live = value?.liveRoute;
   const liveReasons = { "no-own-request-header": "routeNoOwnHeader", "invalid-own-request-header": "routeInvalidOwnHeader", "not-observed": "routeNotObserved" };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-availability", children: [
-    value === void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("comparisonUnobserved") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("initialRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: initial?.status === "known" ? routeText2(initial.route) : t("routeUnknown") }),
-      initial?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("initialRouteSource") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-availability", children: [
+    value === void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("comparisonUnobserved") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("initialRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: initial?.status === "known" ? routeText(initial.route) : t("routeUnknown") }),
+      initial?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("initialRouteSource") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dd", { children: [
           t("routeCaptureSource"),
           " · ",
           initial.source
         ] })
-      ] }) : initial !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("initialRouteReason") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
+      ] }) : initial !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("initialRouteReason") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dd", { children: [
           t("routeMissingCapture"),
           " · ",
           initial.reason
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("liveRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: live?.status === "known" ? routeText2(live.route) : t("routeUnknown") }),
-      live?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("liveRouteSource") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("liveRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: live?.status === "known" ? routeText(live.route) : t("routeUnknown") }),
+      live?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("liveRouteSource") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dd", { children: [
           t("routeOwnHeaderSource"),
           " · ",
           live.source
         ] })
-      ] }) : live !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("liveRouteReason") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
+      ] }) : live !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("liveRouteReason") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dd", { children: [
           t(liveReasons[live.reason]),
           " · ",
           live.reason
@@ -5401,70 +6769,70 @@ function RouteComparisonDetails({ value, t }) {
   ] });
 }
 function InvocationDetails({ value, t, showComparison = true }) {
-  if (value === void 0) return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("invocationUnavailable") });
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    showComparison && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(RouteComparisonDetails, { value: value.routeComparison, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("role") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("dd", { children: [
+  if (value === void 0) return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("invocationUnavailable") });
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    showComparison && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RouteComparisonDetails, { value: value.routeComparison, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("role") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("dd", { children: [
         value.label,
         " · ",
         value.role
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("level") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.level }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("mode") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.mode }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("reportedRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.route === void 0 ? t("routeUnreported") : routeText2(value.route) }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("routeSource") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.routeSource }),
-      value.runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("runId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.runId })
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("level") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.level }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("mode") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.mode }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("reportedRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.route === void 0 ? t("routeUnreported") : routeText(value.route) }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("routeSource") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.routeSource }),
+      value.runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("runId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.runId })
       ] }),
-      value.childId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("childId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.childId })
+      value.childId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("childId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.childId })
       ] }),
-      value.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dt", { children: t("jobId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("dd", { children: value.jobId })
+      value.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dt", { children: t("jobId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("dd", { children: value.jobId })
       ] })
     ] })
   ] });
 }
 function EvidenceDetails({ value, t }) {
-  if (value === void 0) return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("evidenceMissing") });
-  const codes = { "missing-evidence": "missingEvidence", "not-persisted": "notPersisted", unverified: "unverified", "parent-denied": "parentDenied" };
+  if (value === void 0) return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("evidenceMissing") });
+  const codes2 = { "missing-evidence": "missingEvidence", "not-persisted": "notPersisted", unverified: "unverified", "parent-denied": "parentDenied" };
   const effects = { "capability-denied": "capabilityDenied", "native-default": "nativeDefault", "display-only": "displayOnly" };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-availability", "aria-label": t("evidence"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t(value.mode === "captured" ? "captured" : "legacy") }),
-    value.originalAdmissionEpoch !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-availability", "aria-label": t("evidence"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t(value.mode === "captured" ? "captured" : "legacy") }),
+    value.originalAdmissionEpoch !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("originalEpoch"),
       ": ",
       value.originalAdmissionEpoch
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("epoch"),
       ": ",
       value.parentAdmissionEpoch
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("proven"),
       ": ",
       value.provenFields.length ? value.provenFields.join(", ") : t("noneProven")
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("limitations") }),
-    value.limitations.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("noLimitations") }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "dsmm-profile-list", children: value.limitations.map((item, index) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("li", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("limitations") }),
+    value.limitations.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("noLimitations") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "dsmm-profile-list", children: value.limitations.map((item, index) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
         item.field,
         " · ",
         item.code,
         " · ",
-        t(codes[item.code])
+        t(codes2[item.code])
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
         item.effect,
         " · ",
         t(effects[item.effect])
@@ -5474,252 +6842,252 @@ function EvidenceDetails({ value, t }) {
 }
 function Issue({ value, t }) {
   if (!value) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-issue", role: "alert", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t(value.unknown ? "unknownAction" : "error", { code: value.code }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-issue", role: "alert", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t(value.unknown ? "unknownAction" : "error", { code: value.code }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       value.code,
       value.field === void 0 ? "" : ` · ${t("field")}: ${value.field}`
     ] }),
-    value.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t(`reason:${value.reason}`) })
+    value.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t(`reason:${value.reason}`) })
   ] });
 }
 function Outcome({ value, t }) {
   if (!value) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dsmm-availability", role: "status", "aria-live": "polite", children: value.kind === "prompt" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("promptAccepted", { id: value.receipt.messageId }) }) : value.kind === "interrupt" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("interruptAccepted") }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("backgroundReceipt", { status: value.receipt.status, id: value.receipt.runId }) }),
-    value.receipt.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dsmm-availability", role: "status", "aria-live": "polite", children: value.kind === "prompt" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("promptAccepted", { id: value.receipt.messageId }) }) : value.kind === "interrupt" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("interruptAccepted") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("backgroundReceipt", { status: value.receipt.status, id: value.receipt.runId }) }),
+    value.receipt.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("jobId"),
       ": ",
       value.receipt.jobId
     ] })
   ] }) });
 }
-function ChildComposer({ child: child2, state, actions, t }) {
-  const prefix = (0, import_react5.useId)(), picker = (0, import_react5.useRef)(null), generation = state.generation, key = childActionKey(child2.id);
-  const draft = state.drafts.get(child2.id) ?? EMPTY_CHILD_DRAFT;
+function ChildComposer({ child: child2, state, actions: actions2, t }) {
+  const prefix = (0, import_react6.useId)(), picker = (0, import_react6.useRef)(null), generation = state.generation, key = childActionKey(child2.id);
+  const draft2 = state.drafts.get(child2.id) ?? EMPTY_CHILD_DRAFT;
   const pending = state.pending.has(key), available = state.fresh && !state.reading && !pending;
   const canPrompt = available && enabled(state.snapshot?.capabilities.prompt) && enabled(child2.controls.prompt) && !child2.readonly && child2.mode === "continuable";
-  const canImages = canPrompt && enabled(state.snapshot?.capabilities.images) && !draft.imageBusy;
-  const submit = canPrompt && !draft.uncertain && !draft.imageBusy && (draft.text.trim() !== "" || draft.images.length > 0) && (draft.images.length === 0 || enabled(state.snapshot?.capabilities.images));
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("form", { className: "dsmm-child-composer", "aria-label": t("prompt"), onSubmit: (event) => {
+  const canImages = canPrompt && enabled(state.snapshot?.capabilities.images) && !draft2.imageBusy;
+  const submit = canPrompt && !draft2.uncertain && !draft2.imageBusy && (draft2.text.trim() !== "" || draft2.images.length > 0) && (draft2.images.length === 0 || enabled(state.snapshot?.capabilities.images));
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("form", { className: "dsmm-child-composer", "aria-label": t("prompt"), onSubmit: (event) => {
     event.preventDefault();
-    if (submit) void actions.prompt(generation, child2.id);
+    if (submit) void actions2.prompt(generation, child2.id);
   }, children: [
-    !state.fresh && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "stale") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${prefix}-message`, children: t("text") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    !state.fresh && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "stale") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: `${prefix}-message`, children: t("text") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         "textarea",
         {
           id: `${prefix}-message`,
           className: "dsmm-child-message",
           rows: 4,
-          value: draft.text,
+          value: draft2.text,
           disabled: pending,
-          "aria-describedby": `${prefix}-delivery-hint${draft.uncertain ? ` ${prefix}-unknown` : ""}`,
-          onChange: (event) => actions.editText(generation, child2.id, event.currentTarget.value)
+          "aria-describedby": `${prefix}-delivery-hint${draft2.uncertain ? ` ${prefix}-unknown` : ""}`,
+          onChange: (event) => actions2.editText(generation, child2.id, event.currentTarget.value)
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${prefix}-delivery`, children: t("delivery") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: `${prefix}-delivery`, value: draft.delivery, disabled: !canPrompt, "aria-describedby": `${prefix}-delivery-hint`, onChange: (event) => {
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: `${prefix}-delivery`, children: t("delivery") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("select", { id: `${prefix}-delivery`, value: draft2.delivery, disabled: !canPrompt, "aria-describedby": `${prefix}-delivery-hint`, onChange: (event) => {
         const value = event.currentTarget.value;
-        if (value === "queue" || value === "steer") actions.setDelivery(generation, child2.id, value);
+        if (value === "queue" || value === "steer") actions2.setDelivery(generation, child2.id, value);
       }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "queue", children: t("queue") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "steer", children: t("steer") })
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "queue", children: t("queue") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "steer", children: t("steer") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${prefix}-delivery-hint`, className: "dsmm-hint", children: t("deliveryHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { id: `${prefix}-delivery-hint`, className: "dsmm-hint", children: t("deliveryHint") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${prefix}-images-hint`, className: "dsmm-hint", children: t("imagesHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("input", { ref: picker, hidden: true, type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, disabled: !canImages, "aria-label": t("images"), onChange: (event) => {
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { id: `${prefix}-images-hint`, className: "dsmm-hint", children: t("imagesHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("input", { ref: picker, hidden: true, type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, disabled: !canImages, "aria-label": t("images"), onChange: (event) => {
         const files = Array.from(event.currentTarget.files ?? []);
         event.currentTarget.value = "";
-        if (canImages) void actions.addImages(generation, child2.id, files);
+        if (canImages) void actions2.addImages(generation, child2.id, files);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: !canImages, "aria-describedby": `${prefix}-images-hint`, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: !canImages, "aria-describedby": `${prefix}-images-hint`, onClick: () => {
         if (canImages) picker.current?.click();
       }, children: t("images") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: state.snapshot?.capabilities.images, label: "imageAvailability", t }),
-      draft.images.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "dsmm-profile-list", children: draft.images.map((image, index) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("li", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: state.snapshot?.capabilities.images, label: "imageAvailability", t }),
+      draft2.images.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "dsmm-profile-list", children: draft2.images.map((image, index) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
           image.name ?? image.mediaType,
           " · ",
           image.mediaType
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: pending || draft.imageBusy, onClick: () => actions.removeImage(generation, child2.id, image), "aria-label": `${t("removeImage")}: ${image.name ?? image.mediaType}`, children: t("removeImage") })
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: pending || draft2.imageBusy, onClick: () => actions2.removeImage(generation, child2.id, image), "aria-label": `${t("removeImage")}: ${image.name ?? image.mediaType}`, children: t("removeImage") })
       ] }, index)) })
     ] }),
-    draft.uncertain && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-warning", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${prefix}-unknown`, children: t("unknown") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: !state.fresh || state.reading || pending, onClick: () => actions.acknowledgeUnknown(generation, child2.id), children: t("acknowledge") })
+    draft2.uncertain && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-warning", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { id: `${prefix}-unknown`, children: t("unknown") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: !state.fresh || state.reading || pending, onClick: () => actions2.acknowledgeUnknown(generation, child2.id), children: t("acknowledge") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: !enabled(state.snapshot?.capabilities.prompt) ? state.snapshot?.capabilities.prompt : child2.controls.prompt, label: "promptAvailability", t }),
-    draft.text.trim() === "" && draft.images.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("emptyMessage") }),
-    draft.images.length > 0 && !enabled(state.snapshot?.capabilities.images) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("deniedImages") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "submit", variant: "primary", disabled: !submit, children: t("send") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-        import_dsh_client_ui_primitives5.Button,
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: !enabled(state.snapshot?.capabilities.prompt) ? state.snapshot?.capabilities.prompt : child2.controls.prompt, label: "promptAvailability", t }),
+    draft2.text.trim() === "" && draft2.images.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("emptyMessage") }),
+    draft2.images.length > 0 && !enabled(state.snapshot?.capabilities.images) && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("deniedImages") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "submit", variant: "primary", disabled: !submit, children: t("send") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        import_dsh_client_ui_primitives6.Button,
         {
           type: "button",
           variant: "outline",
           disabled: !available || !enabled(state.snapshot?.capabilities.interrupt) || !enabled(child2.controls.interrupt) || child2.readonly || child2.mode !== "continuable",
-          onClick: () => void actions.interrupt(generation, child2.id),
+          onClick: () => void actions2.interrupt(generation, child2.id),
           children: t("interrupt")
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: pending ? t("pending") : draft.imageBusy ? t("imageReading") : "" })
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: pending ? t("pending") : draft2.imageBusy ? t("imageReading") : "" })
   ] });
 }
-function ChildDetails({ child: child2, state, actions, t, inspection = false }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("fieldset", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("legend", { children: child2.label?.trim() ? child2.label : child2.id }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+function ChildDetails({ child: child2, state, actions: actions2, t, inspection = false }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("fieldset", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("legend", { children: child2.label?.trim() ? child2.label : child2.id }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("childId"),
       ": ",
       child2.id
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("parentId"),
       ": ",
       child2.parentSessionId
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("mode"),
       ": ",
       child2.mode
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("activity"),
       ": ",
       child2.activity
     ] }),
-    (inspection || child2.readonly) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("readonly") }),
-    child2.mode === "one-shot" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("oneShot") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(RouteComparisonDetails, { value: child2.routeComparison, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(InvocationDetails, { value: child2.invocation, t, showComparison: false }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(EvidenceDetails, { value: child2.evidence, t }),
-    (!inspection || !child2.controls.prompt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: child2.controls.prompt, label: "promptAvailability", t }),
-    (!inspection || !child2.controls.interrupt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: child2.controls.interrupt, label: "interruptAvailability", t }),
-    !inspection && child2.mode === "continuable" && !child2.readonly && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ChildComposer, { child: child2, state, actions, t }),
-    !inspection && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Issue, { value: state.issues.get(childActionKey(child2.id)), t }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Outcome, { value: state.outcomes.get(childActionKey(child2.id)), t })
+    (inspection || child2.readonly) && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("readonly") }),
+    child2.mode === "one-shot" && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("oneShot") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RouteComparisonDetails, { value: child2.routeComparison, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(InvocationDetails, { value: child2.invocation, t, showComparison: false }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(EvidenceDetails, { value: child2.evidence, t }),
+    (!inspection || !child2.controls.prompt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: child2.controls.prompt, label: "promptAvailability", t }),
+    (!inspection || !child2.controls.interrupt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: child2.controls.interrupt, label: "interruptAvailability", t }),
+    !inspection && child2.mode === "continuable" && !child2.readonly && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ChildComposer, { child: child2, state, actions: actions2, t }),
+    !inspection && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Issue, { value: state.issues.get(childActionKey(child2.id)), t }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Outcome, { value: state.outcomes.get(childActionKey(child2.id)), t })
     ] })
   ] });
 }
 function ChildrenPanel(props) {
-  const state = props.useChildren((snapshot3) => snapshot3), { t } = props, generation = state.generation;
-  if (props.sessionId === void 0 || props.sessionId !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-profiles dsmm-children", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h2", { children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t(state.sessionId === null ? "noSession" : "foreign") })
+  const state = props.useChildren((snapshot4) => snapshot4), { t } = props, generation = state.generation;
+  if (props.sessionId === void 0 || props.sessionId !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-profiles dsmm-children", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t(state.sessionId === null ? "noSession" : "foreign") })
   ] });
   const data = state.snapshot;
-  const refreshingDisabled = state.reading || state.pending.size > 0 || [...state.drafts.values()].some((draft) => draft.imageBusy);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-profiles dsmm-children", "aria-label": t("title"), "aria-busy": state.reading, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h2", { children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("description") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+  const refreshingDisabled = state.reading || state.pending.size > 0 || [...state.drafts.values()].some((draft2) => draft2.imageBusy);
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-profiles dsmm-children", "aria-label": t("title"), "aria-busy": state.reading, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("description") }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
       t("session"),
       ": ",
       state.sessionId
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: refreshingDisabled, onClick: () => void props.refresh(generation), children: t("refresh") }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.reading ? t("reading") : state.pending.size > 0 ? t("pending") : !state.fresh ? t(data === null ? "unavailable" : "stale") : "" }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Issue, { value: state.issue, t }),
-    data !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: refreshingDisabled, onClick: () => void props.refresh(generation), children: t("refresh") }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.reading ? t("reading") : state.pending.size > 0 ? t("pending") : !state.fresh ? t(data === null ? "unavailable" : "stale") : "" }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Issue, { value: state.issue, t }),
+    data !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
         t("epoch"),
         ": ",
         data.admissionEpoch
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-availability", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-availability", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
           t("runtime"),
           ": ",
           data.capabilities.runtime.binding
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
           t("fence"),
           ": ",
           t(data.capabilities.runtime.deliveryFenceReady ? "yes" : "no")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
           t("restart"),
           ": ",
           t(data.capabilities.runtime.restartRequired ? "yes" : "no")
         ] }),
-        data.capabilities.runtime.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t(data.capabilities.runtime.reason === "explicit-composition-required" ? "composition" : data.capabilities.runtime.reason === "duplicate-provider" ? "duplicate" : "authority") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: data.capabilities.background, label: "backgroundAvailability", t }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: data.capabilities.prompt, label: "promptAvailability", t }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: data.capabilities.interrupt, label: "interruptAvailability", t })
+        data.capabilities.runtime.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t(data.capabilities.runtime.reason === "explicit-composition-required" ? "composition" : data.capabilities.runtime.reason === "duplicate-provider" ? "duplicate" : "authority") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: data.capabilities.background, label: "backgroundAvailability", t }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: data.capabilities.prompt, label: "promptAvailability", t }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: data.capabilities.interrupt, label: "interruptAvailability", t })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-zone", "aria-label": t("runs"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { children: t("runs") }),
-        data.runs.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("emptyRuns") }) : data.runs.map((run2) => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-zone", "aria-label": t("runs"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { children: t("runs") }),
+        data.runs.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("emptyRuns") }) : data.runs.map((run2) => {
           const runId = run2.invocation?.runId, key = runId === void 0 ? null : runActionKey(run2.toolCallId, runId);
           const disabled = !state.fresh || state.reading || run2.state !== "running" || !enabled(run2.background) || !enabled(data.capabilities.background) || key === null || state.pending.has(key) || state.outcomes.get(key)?.kind === "background";
-          return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("fieldset", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("legend", { children: run2.invocation?.label ?? t(run2.state === "starting" ? "starting" : "invocationUnavailable") }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+          return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("fieldset", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("legend", { children: run2.invocation?.label ?? t(run2.state === "starting" ? "starting" : "invocationUnavailable") }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
               t("toolCallId"),
               ": ",
               run2.toolCallId
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
               t("runState"),
               ": ",
               run2.state
             ] }),
-            run2.invocation !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(InvocationDetails, { value: run2.invocation, t }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ControlAvailability, { value: run2.background, label: "backgroundAvailability", t }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("backgroundHint") }),
-            runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled, onClick: () => void props.background(generation, run2.toolCallId, runId), children: t("background") }),
-            key !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.pending.has(key) ? t("pending") : "" }),
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Issue, { value: state.issues.get(key), t }),
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Outcome, { value: state.outcomes.get(key), t })
+            run2.invocation !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(InvocationDetails, { value: run2.invocation, t }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlAvailability, { value: run2.background, label: "backgroundAvailability", t }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("backgroundHint") }),
+            runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled, onClick: () => void props.background(generation, run2.toolCallId, runId), children: t("background") }),
+            key !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.pending.has(key) ? t("pending") : "" }),
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Issue, { value: state.issues.get(key), t }),
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Outcome, { value: state.outcomes.get(key), t })
             ] })
           ] }, run2.toolCallId);
         })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-zone", "aria-label": t("children"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { children: t("children") }),
-        data.children.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("emptyChildren") }) : data.children.map((child2) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ChildDetails, { child: child2, state, actions: props, t }, child2.id))
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-zone", "aria-label": t("children"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { children: t("children") }),
+        data.children.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("emptyChildren") }) : data.children.map((child2) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ChildDetails, { child: child2, state, actions: props, t }, child2.id))
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "dsmm-zone", "aria-label": t("descendants"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { children: t("descendants") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Issue, { value: state.descendantIssue, t }),
-      state.descendants === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("treeUnavailable") }) : state.descendants.descendants.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("emptyDescendants") }) : state.descendants.descendants.map((entry, index) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-availability", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "dsmm-zone", "aria-label": t("descendants"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { children: t("descendants") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Issue, { value: state.descendantIssue, t }),
+      state.descendants === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("treeUnavailable") }) : state.descendants.descendants.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("emptyDescendants") }) : state.descendants.descendants.map((entry, index) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-availability", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
           t("depth"),
           ": ",
           entry.depth
         ] }),
-        entry.kind === "diagnostic" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-issue", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("diagnostic", { reason: entry.reason }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+        entry.kind === "diagnostic" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-issue", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { children: t("diagnostic", { reason: entry.reason }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
             t("childId"),
             ": ",
             entry.id
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
             t("parentId"),
             ": ",
             entry.parentSessionId
           ] })
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { children: [
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { children: [
             t("subtree"),
             ": ",
             t(entry.hasChildren ? "yes" : "no")
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(ChildDetails, { child: entry.child, state, actions: props, t, inspection: true })
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ChildDetails, { child: entry.child, state, actions: props, t, inspection: true })
         ] })
       ] }, index))
     ] })
@@ -5965,11 +7333,847 @@ var childDisabledCopy = {
 var childrenLocaleEn = { ...childrenEn, ...Object.fromEntries(Object.entries(childDisabledCopy).map(([reason, copy]) => [`reason:${reason}`, copy[0]])) };
 var childrenLocaleZh = { ...childrenZh, ...Object.fromEntries(Object.entries(childDisabledCopy).map(([reason, copy]) => [`reason:${reason}`, copy[1]])) };
 
+// src/permission-remote.ts
+function fail4() {
+  throw new TypeError("Invalid permission DTO.");
+}
+function text4(value, max = 512) {
+  if (typeof value !== "string" || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) fail4();
+  return value;
+}
+function parsePermissionSessionId(value) {
+  return text4(value, 256);
+}
+function parseRuntime(value) {
+  const runtime = permissionRuleRow(value, ["savedRevision", "runtimeRevision", "state", "mounted", "restartRequired"]);
+  if (!["synced", "updating", "unsynced"].includes(runtime.state) || typeof runtime.mounted !== "boolean" || typeof runtime.restartRequired !== "boolean") fail4();
+  return { savedRevision: permissionRevision(runtime.savedRevision), runtimeRevision: permissionRevision(runtime.runtimeRevision), state: runtime.state, mounted: runtime.mounted, restartRequired: runtime.restartRequired };
+}
+function parseCapabilities(value) {
+  const input = permissionRuleRow(value, ["limits", "runtime", "tools"]);
+  const limits = permissionRuleRow(input.limits, ["outsideReads", "finalInode", "scopedMemory", "webFetch", "webSearchDestinations", "proxyAddressBinding", "shellSockets", "providerAuthMcp"]);
+  if (limits.outsideReads !== "tool-call-boundary" || limits.finalInode !== false || limits.scopedMemory !== "not-provided-by-native-rules" || limits.webFetch !== "native-public-only" || limits.webSearchDestinations !== "unsupported" || limits.proxyAddressBinding !== "native-proxy-dependent" || limits.shellSockets !== "native-executor-dependent" || limits.providerAuthMcp !== "not-covered") fail4();
+  if (!Array.isArray(input.tools) || input.tools.length > 1024) fail4();
+  const tools = [];
+  const names = /* @__PURE__ */ new Set();
+  for (const value2 of input.tools) {
+    const tool = permissionRuleRow(value2, ["name", "kind", "approval", "scopedMemory"]), name = text4(tool.name);
+    if (!["read", "glob", "grep", "shell", "webSearch", "webFetch"].includes(tool.kind) || tool.approval !== "native-once" || tool.scopedMemory !== false || names.has(name)) fail4();
+    names.add(name);
+    tools.push({ name, kind: tool.kind, approval: "native-once", scopedMemory: false });
+  }
+  return { limits: {
+    outsideReads: "tool-call-boundary",
+    finalInode: false,
+    scopedMemory: "not-provided-by-native-rules",
+    webFetch: "native-public-only",
+    webSearchDestinations: "unsupported",
+    proxyAddressBinding: "native-proxy-dependent",
+    shellSockets: "native-executor-dependent",
+    providerAuthMcp: "not-covered"
+  }, runtime: parseRuntime(input.runtime), tools };
+}
+function parsePermissionRulesResult(value) {
+  const input = permissionRuleRow(value, ["snapshot", "runtime"], ["capabilities"]), snapshot4 = permissionRuleRow(input.snapshot, ["revision", "policy"]);
+  return {
+    snapshot: { revision: permissionRevision(snapshot4.revision), policy: resolvePermissionControl(snapshot4.policy) },
+    runtime: parseRuntime(input.runtime),
+    ...Object.hasOwn(input, "capabilities") ? { capabilities: parseCapabilities(input.capabilities) } : {}
+  };
+}
+var codec3 = (name, parse3) => ({ mode: "strict", typeSymbol: `@dsmm/dsmm#${name}`, create: () => ({ parse: parse3 }) });
+function descriptor3(method, result, request) {
+  return {
+    id: `@dsmm/dsmm-permissions#dsmmPermissions/${method}`,
+    service: "dsmmPermissions",
+    namespace: "dsmmPermissions",
+    method,
+    invocation: { kind: "direct" },
+    parameters: [
+      { name: "sessionId", wire: "sessionId", source: "json", codec: codec3("PermissionSessionId", parsePermissionSessionId) },
+      ...request === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: request }]
+    ],
+    result
+  };
+}
+var PERMISSION_REMOTE = { package: "@dsmm/dsmm-permissions", descriptors: [
+  descriptor3("describeRules", codec3("PermissionRulesResult", parsePermissionRulesResult)),
+  descriptor3("saveRules", codec3("PermissionRulesResult", parsePermissionRulesResult), codec3("PermissionRulesSaveRequest", parsePermissionRulesSave))
+] };
+var PERMISSION_HOST = { package: PERMISSION_REMOTE.package, face: "host", schemas: [], model: { services: [], events: [], objects: [] }, invocations: PERMISSION_REMOTE.descriptors };
+
+// src/client/permission-client.ts
+var PermissionClientError = class extends Error {
+  constructor(code) {
+    super("Permission operation unavailable.");
+    this.code = code;
+  }
+};
+var codes = /* @__PURE__ */ new Set(["not-owned", "stale", "cancelled", "unavailable", "validation", "not-found", "scope-unavailable", "replayed", "denied"]);
+function permissionClient(connection) {
+  return async (method, args, signal) => {
+    const descriptor4 = PERMISSION_REMOTE.descriptors.find((item) => item.method === method);
+    const payload = {};
+    descriptor4.parameters.forEach((parameter, index) => {
+      payload[parameter.wire] = args[index];
+    });
+    let result;
+    try {
+      result = await connection.rpc.call("/api", `dsmmPermissions/${method}`, { args: payload }, signal);
+    } catch {
+      throw new PermissionClientError(signal.aborted ? "cancelled" : "transport");
+    }
+    if (!result.ok) {
+      const code = Reflect.get(result.error.details, "code");
+      throw new PermissionClientError(result.error.code === "dsmm-permissions/refused" && codes.has(code) ? code : "unavailable");
+    }
+    signal.throwIfAborted();
+    try {
+      if (descriptor4.result.mode !== "strict") throw new Error("Strict permission codec required.");
+      return descriptor4.result.create().parse(result.value);
+    } catch {
+      throw new PermissionClientError("protocol");
+    }
+  };
+}
+
+// src/client/permission-controller.ts
+var draftOf = (policy) => ({ outsideReads: policy.outsideReads, webSearch: { ...policy.webSearch }, webFetch: { ...policy.webFetch }, upsert: [], revoke: [], editor: null });
+var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function permissionChanges(view) {
+  const { base, draft: draft2 } = view;
+  if (base === null || draft2 === null) return null;
+  const changes = Object.fromEntries(["outsideReads", "webSearch", "webFetch"].filter((key) => !same(base.policy[key], draft2[key])).map((key) => [key, draft2[key]]));
+  if (Object.keys(changes).length === 0 && draft2.upsert.length === 0 && draft2.revoke.length === 0) return null;
+  return { expectedRevision: base.revision, ...Object.keys(changes).length ? { changes } : {}, ...draft2.upsert.length ? { upsert: draft2.upsert } : {}, ...draft2.revoke.length ? { revoke: draft2.revoke } : {} };
+}
+var empty = () => ({
+  generation: 0,
+  sessionId: null,
+  scope: "unknown",
+  connected: false,
+  reading: false,
+  busy: null,
+  rules: null,
+  base: null,
+  draft: null,
+  rulesIssue: null,
+  dirty: false,
+  notice: null
+});
+var PermissionController = class {
+  state = empty();
+  listeners = /* @__PURE__ */ new Set();
+  invoke = null;
+  connection;
+  owner = null;
+  request = new AbortController();
+  requestSequence = 0;
+  timer;
+  watchers = 0;
+  disposed = false;
+  store = { getSnapshot: () => this.state, subscribe: (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  } };
+  publish(patch) {
+    if (this.disposed) return;
+    this.state = { ...this.state, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+  cancel() {
+    this.request.abort();
+    this.request = new AbortController();
+    this.requestSequence++;
+    clearTimeout(this.timer);
+  }
+  fence(preserve) {
+    this.cancel();
+    this.publish({
+      generation: this.state.generation + 1,
+      reading: false,
+      busy: null,
+      notice: null,
+      rules: null,
+      rulesIssue: null,
+      ...preserve ? {} : { base: null, draft: null, dirty: false }
+    });
+  }
+  bindConnection(invoke, generation) {
+    if (this.disposed || this.invoke === invoke && this.connection === generation) return;
+    this.invoke = invoke;
+    this.connection = generation;
+    this.fence(true);
+    this.publish({ connected: invoke !== null });
+    this.schedule(true);
+  }
+  bindScope(sessionId2, owner, scope) {
+    if (this.disposed || this.state.sessionId === sessionId2 && this.owner === owner && this.state.scope === scope) return;
+    const preserve = sessionId2 === this.state.sessionId;
+    this.owner = owner;
+    this.fence(preserve);
+    this.publish({ sessionId: sessionId2, scope });
+    this.schedule(true);
+  }
+  watch() {
+    this.watchers++;
+    if (this.watchers === 1) this.schedule(true);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.watchers--;
+      if (this.watchers === 0) this.fence(true);
+    };
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.fence(false);
+    this.disposed = true;
+    this.listeners.clear();
+    this.invoke = null;
+    this.owner = null;
+  }
+  live(generation) {
+    return !this.disposed && generation === this.state.generation && this.owner !== null && this.invoke !== null && this.state.scope === "root" && this.state.sessionId !== null;
+  }
+  schedule(immediate = false) {
+    clearTimeout(this.timer);
+    if (this.watchers === 0 || !this.live(this.state.generation)) return;
+    this.timer = setTimeout(() => {
+      void this.refresh(this.state.generation);
+    }, immediate ? 0 : 1e3);
+    this.timer.unref?.();
+  }
+  issue(error) {
+    return error instanceof PermissionClientError ? error.code : "transport";
+  }
+  synchronized() {
+    const value = this.state.rules;
+    return value !== null && value.runtime.state === "synced" && value.runtime.savedRevision === value.snapshot.revision && value.runtime.runtimeRevision === value.snapshot.revision;
+  }
+  canSave(generation) {
+    return this.live(generation) && this.state.rulesIssue === null && this.synchronized() && !this.state.reading && this.state.busy === null && this.state.dirty && this.state.draft?.editor === null;
+  }
+  async refresh(generation, discard = false) {
+    if (!this.live(generation) || this.state.reading || this.state.busy !== null) return;
+    const sequence = ++this.requestSequence, signal = this.request.signal, id2 = this.state.sessionId;
+    this.publish({ reading: true });
+    const [rules] = await Promise.allSettled([this.invoke("describeRules", [id2], signal)]);
+    if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
+    if (rules.status === "rejected") {
+      this.publish({ rules: null, rulesIssue: this.issue(rules.reason), reading: false });
+    } else {
+      const value = rules.value;
+      const retain = this.state.dirty && !discard;
+      this.publish({
+        rules: value,
+        rulesIssue: retain && this.state.base?.revision !== value.snapshot.revision ? "stale" : null,
+        reading: false,
+        ...retain ? {} : { base: value.snapshot, draft: draftOf(value.snapshot.policy), dirty: false }
+      });
+    }
+    this.schedule();
+  }
+  edit(generation, patch) {
+    if (this.disposed || generation !== this.state.generation || this.state.draft === null || this.state.busy !== null) return;
+    const draft2 = { ...this.state.draft, ...patch };
+    this.publish({ draft: draft2, notice: null });
+    this.publish({ dirty: draft2.editor !== null || permissionChanges(this.state) !== null });
+  }
+  stageRule(generation) {
+    const draft2 = this.state.draft, editor = draft2?.editor;
+    if (editor == null || !editor.id || editor.id.length > 256 || editor.id.includes("\0")) return;
+    const match = editor.match;
+    if (match.kind === "outside-read" && !match.path || match.kind === "shell" && (!match.executable || !match.command || !match.workingDirectory)) return;
+    this.edit(generation, { upsert: [...draft2.upsert.filter((row) => row.id !== editor.id), structuredClone(editor)], revoke: draft2.revoke.filter((id2) => id2 !== editor.id), editor: null });
+  }
+  stageRevoke(generation, id2) {
+    const draft2 = this.state.draft;
+    if (draft2 === null || !this.state.base?.policy.rules.some((rule) => rule.id === id2)) return;
+    this.edit(generation, { upsert: draft2.upsert.filter((row) => row.id !== id2), revoke: [.../* @__PURE__ */ new Set([...draft2.revoke, id2])], editor: draft2.editor?.id === id2 ? null : draft2.editor });
+  }
+  begin(busy) {
+    this.cancel();
+    this.publish({ busy, notice: null });
+    return { signal: this.request.signal, id: this.state.sessionId };
+  }
+  async save(generation) {
+    const request = permissionChanges(this.state);
+    if (!this.canSave(generation) || request === null) return;
+    const current = this.begin("save");
+    try {
+      const result = await this.invoke("saveRules", [current.id, request], current.signal);
+      if (this.live(generation)) this.publish({ rules: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" });
+    } catch (error) {
+      if (this.live(generation)) this.publish({ rules: null, rulesIssue: this.issue(error) });
+    } finally {
+      if (this.live(generation)) {
+        this.publish({ busy: null });
+        this.schedule();
+      }
+    }
+  }
+};
+
+// src/client/PermissionsPanel.tsx
+var import_react7 = require("react");
+var import_dsh_client_ui_primitives7 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_jsx_runtime9 = require("react/jsx-runtime");
+var actions = ["inherit", "allow", "ask", "deny"];
+var kinds = ["outside-read", "shell", "webSearch", "webFetch"];
+var ruleDraft = (rule) => ({ id: rule.id, action: rule.action, match: structuredClone(rule.match) });
+var newMatch = (kind) => kind === "outside-read" ? { kind, path: "", scope: "exact" } : kind === "shell" ? { kind, executable: "", command: "", workingDirectory: "" } : { kind };
+function Issue2({ value, t }) {
+  return value === null ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { className: "dsmm-issue", role: "alert", children: [
+    t(`issue:${value}`),
+    " ",
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: value })
+  ] });
+}
+function RootState({ state, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+      t("root"),
+      ": ",
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: state.sessionId ?? "—" })
+    ] }),
+    state.scope !== "root" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t(state.scope === "child" ? "child" : "noRoot") }),
+    !state.connected && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("unknown") })
+  ] });
+}
+function ActionSelect({ id: id2, value, inherit = true, onChange, disabled, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("select", { id: id2, value, disabled, onChange: (event) => {
+    const choice2 = actions.find((value2) => value2 === event.currentTarget.value);
+    if (choice2 !== void 0) onChange(choice2);
+  }, children: actions.filter((value2) => inherit || value2 !== "inherit").map((value2) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: value2, children: t(value2 === "inherit" ? "inherit" : `action:${value2}`) }, value2)) });
+}
+function RuleEditor({ controller, state, t }) {
+  const id2 = (0, import_react7.useId)(), editor = state.draft?.editor;
+  if (editor == null) return null;
+  const disabled = state.busy !== null, change = (value) => controller.edit(state.generation, { editor: value });
+  const field = (key, label2) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-${key}`, children: t(label2) }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Input, { className: "dsmm-input", id: `${id2}-${key}`, required: true, maxLength: 32768, disabled, value: key in editor.match ? String(Reflect.get(editor.match, key)) : "", onChange: (event) => change({ ...editor, match: { ...editor.match, [key]: event.currentTarget.value } }) })
+  ] });
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("form", { className: "dsmm-structured", "aria-label": t("editor"), onSubmit: (event) => {
+    event.preventDefault();
+    controller.stageRule(state.generation);
+  }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-id`, children: t("id") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Input, { className: "dsmm-input", id: `${id2}-id`, required: true, maxLength: 256, value: editor.id, disabled, onChange: (event) => change({ ...editor, id: event.currentTarget.value }) })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-action`, children: t("action") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-action`, value: editor.action, disabled, inherit: false, t, onChange: (action2) => {
+        if (action2 !== "inherit") change({ ...editor, action: action2 });
+      } })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-kind`, children: t("match") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("select", { id: `${id2}-kind`, value: editor.match.kind, disabled, onChange: (event) => {
+        const kind = kinds.find((value) => value === event.currentTarget.value);
+        if (kind !== void 0) change({ ...editor, match: newMatch(kind) });
+      }, children: kinds.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: kind, children: t(`kind:${kind}`) }, kind)) })
+    ] }),
+    editor.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      field("path", "path"),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-path-scope`, children: t("pathScope") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("select", { id: `${id2}-path-scope`, value: editor.match.scope, disabled, onChange: (event) => {
+          const scope = event.currentTarget.value;
+          if (editor.match.kind === "outside-read" && (scope === "exact" || scope === "tree")) change({ ...editor, match: { ...editor.match, scope } });
+        }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "exact", children: t("exact") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "tree", children: t("tree") })
+        ] })
+      ] })
+    ] }),
+    editor.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      field("executable", "executable"),
+      field("command", "command"),
+      field("workingDirectory", "cwd")
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "submit", variant: "outline", disabled, children: t("stage") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { editor: null }), children: t("cancel") })
+    ] })
+  ] });
+}
+function RuleRecords({ controller, state, t }) {
+  const records = state.rules?.snapshot.policy.rules ?? state.base?.policy.rules;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-structured", children: [
+    records?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("noRules") }),
+    records?.map((rule) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("fieldset", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("legend", { children: rule.id }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+        t(rule.revoked ? "revoked" : "active"),
+        " · ",
+        t(`action:${rule.action}`)
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("match") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t(`kind:${rule.match.kind}`) }),
+        rule.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("path") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
+            rule.match.path,
+            " · ",
+            t(rule.match.scope)
+          ] })
+        ] }),
+        rule.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("executable") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: rule.match.executable }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("command") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: rule.match.command }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("cwd") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: rule.match.workingDirectory })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("recordVersion") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: rule.revision }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("source") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
+          t(rule.source.kind === "operator" ? "operator" : "imported"),
+          " · ",
+          rule.source.kind === "operator" ? rule.source.sessionId : rule.source.label
+        ] }),
+        rule.source.kind === "operator" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("savedAt") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: String(rule.source.savedAt) })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: state.busy !== null || state.draft === null, onClick: () => controller.edit(state.generation, { editor: ruleDraft(rule) }), children: t("editRule") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: state.busy !== null || state.draft === null || rule.revoked || state.draft.revoke.includes(rule.id), onClick: () => controller.stageRevoke(state.generation, rule.id), children: t("stageRevoke") })
+      ] })
+    ] }, rule.id))
+  ] });
+}
+function PermissionCoverage({ state, t }) {
+  const value = state.rules?.capabilities;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-structured", "aria-label": t("coverageTitle"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("coverageTitle") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("coverage") }),
+    value === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("coverageUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("coverageRuntime") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
+          t(value.runtime.state),
+          " · ",
+          t("mounted"),
+          ": ",
+          t(value.runtime.mounted ? "on" : "off")
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("coverageRevision") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: value.runtime.runtimeRevision }) })
+      ] }),
+      value.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("restart") }),
+      value.tools.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("coverageEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "dsmm-profile-list", children: value.tools.map((tool) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolName") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: tool.name }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolKind") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: tool.kind }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolApproval") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("nativeOnce") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("notProvided") })
+      ] }) }, tool.name)) }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("finalInode") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:finalInode") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:scopedMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("webFetch") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:webFetch") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("searchDestinations") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:webSearchDestinations") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("proxyBinding") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:proxyAddressBinding") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("shellSockets") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:shellSockets") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("providerAuthMcp") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:providerAuthMcp") })
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("pathEvidence") })
+  ] });
+}
+function PermissionRulesEditor({ controller, state, t }) {
+  const id2 = (0, import_react7.useId)(), draft2 = state.draft, disabled = state.busy !== null, value = state.rules;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-zone", "aria-label": t("rules"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("rules") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("rulesHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("networkLimit") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("matchHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Issue2, { value: state.rulesIssue, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("base") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: state.base?.revision ?? t("unknown") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("savedRevision") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: value?.runtime.savedRevision ?? t("unknown") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("runtimeRevision") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: value?.runtime.runtimeRevision ?? t("unknown") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("runtime") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: value === null ? t("unknown") : t(value.runtime.state) }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("mounted") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: value === null ? t("unknown") : t(value.runtime.mounted ? "on" : "off") })
+    ] }),
+    value?.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("restart") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PermissionCoverage, { state, t }),
+    draft2 !== null && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-outside`, children: t("outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-outside`, value: draft2.outsideReads, disabled, t, onChange: (outsideReads) => controller.edit(state.generation, { outsideReads }) })
+      ] }),
+      ["webSearch", "webFetch"].map((key) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("fieldset", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("legend", { children: t(key) }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("label", { className: "dsmm-actions", htmlFor: `${id2}-${key}-enabled`, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("input", { type: "checkbox", id: `${id2}-${key}-enabled`, checked: draft2[key].enabled, disabled, onChange: (event) => controller.edit(state.generation, { [key]: { ...draft2[key], enabled: event.currentTarget.checked } }) }),
+          t("enabled")
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-${key}-rule`, children: t("rule") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-${key}-rule`, value: draft2[key].rule, disabled, t, onChange: (rule) => controller.edit(state.generation, { [key]: { ...draft2[key], rule } }) })
+        ] })
+      ] }, key)),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: disabled || draft2.editor !== null, onClick: () => controller.edit(state.generation, { editor: { id: "", action: "ask", match: newMatch("outside-read") } }), children: t("newRule") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RuleEditor, { controller, state, t }),
+      (draft2.upsert.length > 0 || draft2.revoke.length > 0) && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-structured", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("staged") }),
+        draft2.upsert.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+            row.id,
+            " · ",
+            t(`kind:${row.match.kind}`),
+            " · ",
+            t(`action:${row.action}`)
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { upsert: draft2.upsert.filter((rule) => rule.id !== row.id) }), children: [
+            t("unstage"),
+            ": ",
+            row.id
+          ] })
+        ] }, row.id)),
+        draft2.revoke.map((ruleId) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+            t("stageRevoke"),
+            ": ",
+            ruleId
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { revoke: draft2.revoke.filter((id3) => id3 !== ruleId) }), children: [
+            t("unstage"),
+            ": ",
+            ruleId
+          ] })
+        ] }, ruleId))
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RuleRecords, { state, controller, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "primary", disabled: !controller.canSave(state.generation), onClick: () => void controller.save(state.generation), children: t("save") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: state.scope !== "root" || !state.connected || state.reading || disabled, onClick: () => void controller.refresh(state.generation, true), children: t("discard") })
+    ] }),
+    state.dirty && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("dirty") })
+  ] });
+}
+function PermissionsPanel({ controller, t, sessionId: sessionId2 }) {
+  const state = (0, import_react7.useSyncExternalStore)(controller.store.subscribe, controller.store.getSnapshot);
+  (0, import_react7.useEffect)(() => controller.watch(), [controller]);
+  if (sessionId2 !== void 0 && sessionId2 !== state.sessionId) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-profiles dsmm-children dsmm-permissions", "data-dsmm-permissions": true, "aria-label": t("title"), "aria-busy": state.reading || state.busy !== null, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RootState, { state, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("nativeApproval") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.busy !== null ? t("busy") : state.notice === null ? "" : t(state.notice) }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PermissionRulesEditor, { controller, state, t })
+  ] });
+}
+
+// src/client/permission-locales.ts
+var PERMISSIONS_NS = "settings.dsmm-permissions";
+var permissionEn = {
+  title: "Permission control",
+  rules: "Global permission rules",
+  nativeApproval: "Command approval uses the native prompt. Configure exact nativeCommands in deployment settings; ordinary Allow is once only.",
+  root: "Selected native Root session",
+  noRoot: "Select a trusted Root session in native session navigation. No Root is inferred from task or model text.",
+  child: "This is a child session. Select its Root in native session navigation to edit Global rules.",
+  unknown: "Unavailable / unknown",
+  reading: "Reading…",
+  busy: "Operation pending…",
+  executable: "Native Shell registration identity (exact)",
+  command: "Full command (exact)",
+  cwd: "Working directory (exact)",
+  id: "Rule ID",
+  action: "Rule action",
+  match: "Match kind",
+  outsideReads: "Outside-workspace reads",
+  webSearch: "Web search",
+  webFetch: "Web fetch",
+  enabled: "Enabled",
+  rule: "Coarse rule",
+  inherit: "Inherit native policy",
+  "action:allow": "Allow",
+  "action:ask": "Ask",
+  "action:deny": "Deny",
+  "kind:outside-read": "Outside-workspace read",
+  "kind:shell": "Shell operation",
+  "kind:webSearch": "Web search",
+  "kind:webFetch": "Web fetch",
+  path: "Canonical path",
+  pathScope: "Path match",
+  exact: "Exact path",
+  tree: "Path and descendants",
+  networkLimit: "SDK network boundary: allowing public web fetch does not allow private-network destinations. These web policies are not an all-shell or socket firewall.",
+  rulesHint: "Rules Save writes Global policy. Native overrides are not cleared automatically; a refusal keeps this draft. Enabled is startup-pinned and edited separately in deployment settings. Command enhancement and its exact entries are configured there too.",
+  matchHint: "Rules match actual canonical paths (exact/tree), the native Shell registration identity plus full command/cwd, or web kind. Rule Allow only satisfies that rule; it does not grant external writes. Different IDs add records until explicitly revoked.",
+  source: "Actual source",
+  recordVersion: "Record version",
+  savedAt: "Saved at",
+  operator: "Verified Host operator",
+  imported: "User import",
+  active: "Active record",
+  revoked: "Revoked record",
+  base: "Draft CAS source",
+  savedRevision: "Saved source",
+  runtimeRevision: "Runtime source",
+  runtime: "Runtime synchronization",
+  synced: "Synced",
+  updating: "Updating",
+  unsynced: "Unsynced — rules saves locked",
+  mounted: "Startup mounted",
+  on: "On",
+  off: "Off",
+  restart: "Independent restart required",
+  coverageTitle: "Observed trusted tool coverage",
+  coverage: "Last observed for this Root from trusted registrations and the native rule consumer, separately from source synchronization. Saved, synced, mounted or a matching tool name does not prove coverage. Listed registrations do not prove executor readiness, network reachability or final-body ownership.",
+  coverageUnavailable: "Coverage unavailable / unknown. No trusted live observation was returned.",
+  coverageEmpty: "No trusted tool registrations observed for this Root.",
+  coverageRuntime: "Observed consumer state",
+  coverageRevision: "Observed consumer runtime source",
+  toolName: "Observed tool name",
+  toolKind: "Trusted registration kind",
+  toolApproval: "Approval boundary",
+  nativeOnce: "Native prompt — once only",
+  toolMemory: "Scoped approval memory",
+  notProvided: "Not provided",
+  finalInode: "Final-inode / full filesystem guarantee",
+  searchDestinations: "Web search destination rules",
+  proxyBinding: "Proxy / address binding",
+  shellSockets: "Shell / socket isolation",
+  providerAuthMcp: "Provider authentication / MCP",
+  "limit:outsideReads": "Tool-call boundary only; no complete filesystem confinement.",
+  "limit:finalInode": "Not guaranteed.",
+  "limit:scopedMemory": "Not provided by native rules.",
+  "limit:webFetch": "Native public-address checks remain authoritative; private-network access is not granted.",
+  "limit:webSearchDestinations": "Unsupported.",
+  "limit:proxyAddressBinding": "Depends on the native proxy; no stronger address-binding guarantee.",
+  "limit:shellSockets": "Depends on the native executor; no all-Shell or socket firewall.",
+  "limit:providerAuthMcp": "Not covered by these rules.",
+  pathEvidence: "Path evidence: read uses its actual scoped native FS. Glob/grep's production rg executor coLocation remains unproven; trusted registration is not shared-path proof. Shell read interpretation and path checks depend on explicit native executor evidence. No final-inode, full-filesystem or socket guarantee.",
+  newRule: "Add exact-match rule",
+  editRule: "Edit rule",
+  stage: "Stage rule",
+  cancel: "Cancel rule edit",
+  stageRevoke: "Stage revocation",
+  unstage: "Remove staged change",
+  editor: "Rule draft",
+  staged: "Staged changes — not saved",
+  noRules: "No persisted rule records.",
+  save: "Save Global rules",
+  discard: "Discard draft and reload",
+  dirty: "Unsaved rules draft",
+  saved: "Host accepted Global rules. Check runtime synchronization below.",
+  "issue:not-owned": "Root/operator/readonly authority refused. Select the intended Root and refresh.",
+  "issue:stale": "Source conflict. Draft retained. Review, then explicitly discard and reload.",
+  "issue:cancelled": "Operation cancelled; refresh actual saved state.",
+  "issue:unavailable": "Service or runtime unavailable. Draft retained; saved and runtime state may differ.",
+  "issue:validation": "Host refused the rule. Draft retained; check exact fields and native overrides.",
+  "issue:not-found": "The rule no longer exists.",
+  "issue:scope-unavailable": "The requested operation is unavailable.",
+  "issue:replayed": "The operation is no longer current.",
+  "issue:denied": "Current Root policy denied this operation. No local bypass is available.",
+  "issue:transport": "Connection lost or outcome unconfirmed. Draft retained; refresh actual saved/runtime state.",
+  "issue:protocol": "Untrusted or mismatched service response. Refresh or reconnect."
+};
+var permissionZh = {
+  title: "权限控制",
+  rules: "全局权限规则",
+  nativeApproval: "命令批准使用原生提示。精确 nativeCommands 在部署设置配置；普通 Allow 仅批准本次。",
+  root: "当前原生 Root 会话",
+  noRoot: "请在原生会话导航中选择可信 Root 会话；不从任务或模型文本推断 Root。",
+  child: "当前为 child 会话；编辑全局规则请在原生导航选择其 Root。",
+  unknown: "不可用／未知",
+  reading: "正在读取…",
+  busy: "操作处理中…",
+  executable: "原生 Shell 注册身份（精确匹配）",
+  command: "完整命令（精确匹配）",
+  cwd: "工作目录（精确匹配）",
+  id: "规则 ID",
+  action: "规则动作",
+  match: "匹配类型",
+  outsideReads: "工作区外读取",
+  webSearch: "网页搜索",
+  webFetch: "网页抓取",
+  enabled: "启用",
+  rule: "粗粒度规则",
+  inherit: "继承原生策略",
+  "action:allow": "允许",
+  "action:ask": "询问",
+  "action:deny": "拒绝",
+  "kind:outside-read": "工作区外读取",
+  "kind:shell": "Shell 操作",
+  "kind:webSearch": "网页搜索",
+  "kind:webFetch": "网页抓取",
+  path: "规范路径",
+  pathScope: "路径匹配",
+  exact: "精确路径",
+  tree: "此路径及子树",
+  networkLimit: "SDK 网络边界：允许 public web fetch 不代表放行私网目标；这些网页策略不是全部 Shell 或 socket 的防火墙。",
+  rulesHint: "规则保存仅写 Global 策略，不会自动清除 native 覆盖；拒绝时保留草稿。enabled 仅启动时捕获，另在部署设置编辑；命令增强及精确条目也在部署设置配置。",
+  matchHint: "规则匹配实际规范路径、原生 Shell 注册身份＋完整命令＋工作目录，或网页类型。规则 Allow 仅满足该规则，不授予外部写。不同 ID 添加记录，保留至显式撤销。",
+  source: "实际来源",
+  recordVersion: "记录版本",
+  savedAt: "保存时间",
+  operator: "宿主已核验 operator",
+  imported: "用户导入",
+  active: "有效记录",
+  revoked: "已撤销记录",
+  base: "草稿 CAS 来源",
+  savedRevision: "已保存来源",
+  runtimeRevision: "运行时来源",
+  runtime: "运行时同步",
+  synced: "已同步",
+  updating: "同步中",
+  unsynced: "未同步——规则保存已锁定",
+  mounted: "启动时已挂载",
+  on: "开启",
+  off: "关闭",
+  restart: "需要另行重启",
+  coverageTitle: "已观测的可信工具覆盖",
+  coverage: "此 Root 最近一次可信注册及原生规则 consumer 观测，与来源同步分开。已保存、已同步、已挂载或工具同名均不证明覆盖；所列注册不证明执行器就绪、网络可达或最终 body 归属。",
+  coverageUnavailable: "覆盖不可用／未知：未返回可信的实时观测。",
+  coverageEmpty: "未观测到此 Root 的可信工具注册。",
+  coverageRuntime: "已观测 consumer 状态",
+  coverageRevision: "已观测 consumer 运行时来源",
+  toolName: "已观测工具名称",
+  toolKind: "可信注册类型",
+  toolApproval: "批准边界",
+  nativeOnce: "原生提示——仅本次",
+  toolMemory: "作用域批准记忆",
+  notProvided: "不提供",
+  finalInode: "最终 inode／完整文件系统保证",
+  searchDestinations: "网页搜索目标规则",
+  proxyBinding: "代理／地址绑定",
+  shellSockets: "Shell／socket 隔离",
+  providerAuthMcp: "Provider 认证／MCP",
+  "limit:outsideReads": "仅工具调用边界，不是完整文件系统隔离。",
+  "limit:finalInode": "不保证。",
+  "limit:scopedMemory": "原生规则不提供。",
+  "limit:webFetch": "仍以原生 public-address 检查为准，不授予私网访问。",
+  "limit:webSearchDestinations": "不支持。",
+  "limit:proxyAddressBinding": "依赖原生代理，不提供更强的地址绑定保证。",
+  "limit:shellSockets": "依赖原生执行器，不是全部 Shell 或 socket 的防火墙。",
+  "limit:providerAuthMcp": "不在这些规则覆盖范围。",
+  pathEvidence: "路径证据：read 使用其实际 scope 的原生 FS。glob／grep 的生产 rg 执行器 coLocation 仍未证明；可信注册不等于共享路径证据。Shell 读取解析及路径检查依赖明确的原生执行器证据。不保证最终 inode、完整文件系统或 socket 隔离。",
+  newRule: "添加精确匹配规则",
+  editRule: "编辑规则",
+  stage: "暂存规则",
+  cancel: "取消规则编辑",
+  stageRevoke: "暂存撤销",
+  unstage: "移除暂存更改",
+  editor: "规则草稿",
+  staged: "暂存更改——尚未保存",
+  noRules: "尚无持久化规则记录。",
+  save: "保存全局规则",
+  discard: "丢弃草稿并重载",
+  dirty: "规则草稿未保存",
+  saved: "宿主已接受全局规则，请核对运行时同步状态。",
+  "issue:not-owned": "Root／operator／只读权限拒绝，请选择目标 Root 后刷新。",
+  "issue:stale": "来源冲突，草稿保留；核对后显式丢弃并重载。",
+  "issue:cancelled": "操作已取消，请刷新实际保存状态。",
+  "issue:unavailable": "服务或运行时不可用，草稿保留；已保存与运行时可能不同。",
+  "issue:validation": "宿主拒绝规则，草稿保留；请核对精确字段与原生覆盖。",
+  "issue:not-found": "规则已不存在。",
+  "issue:scope-unavailable": "所请求的操作不可用。",
+  "issue:replayed": "操作已不再有效。",
+  "issue:denied": "当前 Root 策略拒绝操作，没有本地绕过入口。",
+  "issue:transport": "连接中断或结果未确认，草稿保留；请刷新实际保存／运行时状态。",
+  "issue:protocol": "服务响应不可信或不匹配，请刷新或重连。"
+};
+
 // src/client/index.ts
 var inject = ["slots", "locale", "remote"];
 async function apply(ctx) {
   await ctx.remote.$mount(TYPERT_REMOTE);
   await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
+  await ctx.remote.$mount(PERMISSION_REMOTE);
+  const permissions = new PermissionController();
+  ctx.effect(() => () => permissions.dispose(), "dsmm: permission controls");
+  ctx.effect(() => ctx.locale.register(PERMISSIONS_NS, { en: permissionEn, zh: permissionZh }), "dsmm: permission locale");
+  ctx.effect(() => {
+    const style = document.createElement("style");
+    style.dataset.dsmmPermissions = "";
+    style.textContent = PROFILE_STYLES;
+    document.head.append(style);
+    return () => style.remove();
+  }, "dsmm: permission styles");
+  const permissionInject = () => ({ controller: permissions }), permissionT = ctx.locale.bind(PERMISSIONS_NS);
+  ctx.slots.inject("settings.section", () => ctx.slots.register({
+    name: "settings.section",
+    id: "dsmm-permissions",
+    order: 35,
+    label: () => permissionT("title"),
+    locale: PERMISSIONS_NS,
+    inject: permissionInject
+  }, PermissionsPanel));
+  ctx.slots.inject("conversation.view", () => ctx.slots.register({
+    name: "conversation.view",
+    id: "dsmm-permissions",
+    order: 35,
+    label: () => permissionT("title"),
+    locale: PERMISSIONS_NS,
+    inject: permissionInject
+  }, PermissionsPanel));
+  void ctx.inject(["connection"], (connectionCtx) => {
+    const handle = connectionCtx.connection, invoke = permissionClient(handle);
+    const update = () => {
+      const generation = handle.generation.getSnapshot();
+      permissions.bindConnection(generation === void 0 ? null : invoke, generation);
+    };
+    update();
+    connectionCtx.effect(() => handle.generation.subscribe(update));
+    connectionCtx.effect(() => () => permissions.bindConnection(null), "dsmm: permission connection withdrawal");
+  });
+  void ctx.inject(["uiSession", "sessions"], (sessionCtx) => {
+    const source = sessionCtx.uiSession.adapter.current, sessions = sessionCtx.sessions;
+    let observed, stop;
+    const update = () => {
+      const id2 = source.getSnapshot().key, binding = id2 === void 0 ? void 0 : sessions.binding(id2);
+      if (binding !== observed) {
+        stop?.();
+        observed = binding;
+        stop = binding?.session.subscribe(update);
+      }
+      const snapshot4 = binding?.session.getSnapshot(), catalog = sessions.list.getSnapshot(), summary = id2 === void 0 ? void 0 : catalog.byId[id2];
+      const child2 = snapshot4?.subagent != null || summary?.origin === "subagent" || summary?.parentId !== void 0;
+      const root = id2 !== void 0 && binding?.sessionId === id2 && snapshot4?.sessionId === id2 && snapshot4.openState === "open" && !snapshot4.removed && catalog.ids.includes(id2) && summary !== void 0 && !child2;
+      permissions.bindScope(id2 ?? null, binding ?? null, child2 ? "child" : root ? "root" : "unknown");
+    };
+    update();
+    sessionCtx.effect(() => source.subscribe(update));
+    sessionCtx.effect(() => sessions.list.subscribe(update));
+    sessionCtx.effect(() => () => {
+      stop?.();
+      permissions.bindScope(null, null, "unknown");
+    }, "dsmm: permission native session withdrawal");
+  });
   let deployment = null;
   let profiles = null;
   let children = null;

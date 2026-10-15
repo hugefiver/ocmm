@@ -6,7 +6,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { COMPOSITION_ID, nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
-import { digest, inspectStableBootstrap, inspectStableExports, inspectStableProfileStorage, stableCompositionBundle, stableNativeStorage, STABLE_UI_CHECKS } from "./stable-native-acceptance.mjs";
+import { digest, inspectStableBootstrap, inspectStableExports, inspectStableProfileStorage, stableCompositionBundle, stableNativeProofIdentity, stableNativeStorage } from "./stable-native-acceptance.mjs";
+import { isSource022, stableUiChecksForVersion } from "./release-contract.mjs";
+import { prepareNativeReadonly022 } from "./native-preset-smoke.mjs";
 
 export const name = "dsmm-stable021-native-browser-acceptance";
 export const inject = ["appReady", "appExit", "agents", "llm", "dsmmProfileRuntime", "dsmmRuntimeIntegration", "typertGateway", "connection", "loader", "sessionPersistence"];
@@ -80,19 +82,22 @@ export function apply(ctx, config) {
   ctx.effect(() => () => { disposed = true; clearTimeout(watchdog); if (typeof onReady === "function") onReady(); });
 }
 
-export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifest, packageRoot, profilePackage, env, workspace, evidenceRoot, nativeStorage }) {
+export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceContract, dshManifest, packageRoot, profilePackage, env, workspace, evidenceRoot, nativeStorage }) {
+  const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  const proofIdentity = stableNativeProofIdentity(manifest, { sourceContract });
+  const checks = stableUiChecksForVersion(proofIdentity.packageVersion);
   const sdk = createRequire(dshManifest), load = id => import(pathToFileURL(sdk.resolve(id)).href);
   const [{ LlmAdapter, ReasoningEffortId, ToolCallId }, { SessionId }] = await Promise.all([load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session")]);
   assert.ok(isAbsolute(env.DSMM_ACCEPTANCE_TOOLS_MANIFEST) && isAbsolute(env.DSMM_BROWSER_EXECUTABLE));
   const { chromium } = createRequire(env.DSMM_ACCEPTANCE_TOOLS_MANIFEST)("playwright");
-  const report = { outcome: "FAILED", kind: "native-client-stable-first-021", sourceContract: "0.2.1", packageVersion: "0.2.1", artifactSha256: sha256,
+  const report = { outcome: "FAILED", ...proofIdentity, artifactSha256: sha256,
     installedRoot: packageRoot, postAppReady: true, stage: "native-bootstrap", checks: {}, viewport: { width: 1280, height: 900 }, screenshots: [],
     authentication: { realWebOrDesktopLogin: "NOT_EXERCISED", signedIn: false, copiedBrowserState: false, productionAuthenticationModified: false },
     model: { kind: "deterministic-test-only-adapter", externalModelCalls: false }, nativeCalls: [], nativeStreams: [], pageErrors: [], externalRequests: [],
     cleanup: { browserContextClosed: false, nativeAgentsDisposed: false, errors: [] } };
   const handles = [], modelCalls = [];
   let streamGate, releaseStream, pendingForeground;
-  let browser, context, page, server, bridge;
+  let browser, context, page, server, bridge, readonlyProof, readonlyListener;
   class LocalAdapter extends LlmAdapter {
     async listModels(provider) { return ["native-root", "reviewer-original"].map(id => ({ provider, id, name: id })); }
     async resolveModel(provider, model) { return { provider, id: model, name: model, inputModalities: ["text"], reasoning: {
@@ -110,7 +115,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifes
   try {
     assert.equal(digest(await readFile(artifact)), sha256);
     report.bootstrap = inspectStableBootstrap(ctx);
-    report.publicExports = await inspectStableExports(packageRoot, profilePackage);
+    report.publicExports = await inspectStableExports(packageRoot, profilePackage, { sourceContract: proofIdentity.sourceContract });
     const runtime = ctx.get("dsmmProfileRuntime"), gateway = ctx.get("typertGateway"), peer = ctx.get("connection").operator;
     assert.ok(peer?.ctx); assert.equal(ctx.get("dsmmProfiles").backend, runtime);
     assert.equal(ctx.get("profileContext").dir, dirname(profilePackage));
@@ -131,11 +136,32 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifes
     const previous = await runtime.describe();
     if (previous.selectedId !== null) await runtime.select({ id: null, expectedSelectionRevision: previous.selectionRevision });
     const parent = await createRoot(), parentAdmission = runtime.admission(parent);
+    let readonlyDenied, readonlyFailure;
+    if (isSource022(proofIdentity.packageVersion)) {
+      readonlyProof = await prepareNativeReadonly022({ ctx, parent, workspace, label: "stable-ui", sdk, toolsFor: agent => agent.ctx.get("tools"), ToolCallId });
+      report.readonlyExecution = readonlyProof.proof;
+      readonlyListener = ctx.on("agent/request", async ({ agent }, next) => {
+        if (readonlyDenied === undefined && agent.session.header.origin === "subagent" && ctx.get("agents").isOwnedBy(agent.id, parent)) {
+          try {
+            readonlyDenied = await readonlyProof.verify(agent, { captured: true });
+            for (const name of ["dsmm_reviewer", "dsmm_builder"]) {
+              assert.equal(agent.ctx.get("tools").get(name, agent), undefined);
+              const result = await agent.ctx.get("tools").execute({ agent, name, arguments: { description: "Forbidden nested role request", prompt: "Reply complete" },
+                callId: ToolCallId(randomUUID()), signal: new AbortController().signal });
+              assert.equal(result.isError, true);
+            }
+          } catch (error) { readonlyFailure = error; throw error; }
+        }
+        return next();
+      }, { global: true, prepend: true });
+    }
     const started = await parent.ctx.tools.execute({ agent: parent, name: "dsmm_reviewer", arguments: { description: "Stable native captured reviewer", prompt: "inspect the owned acceptance fixture" },
       callId: ToolCallId(randomUUID()), signal: new AbortController().signal });
     assert.equal(started.isError, false, JSON.stringify(started)); assert.equal(started.value.kind, "continuable");
     const child = ctx.get("agents").get(started.value.subagentId); assert.ok(child);
     await child.whenIdle();
+    if (readonlyFailure !== undefined) throw readonlyFailure;
+    readonlyListener?.(); readonlyListener = undefined;
     assert.equal(ctx.get("agents").isOwnedBy(child.id, parent), true);
     const originalChildAdmission = runtime.admission(child), capturePath = join(profileStorage.stateDir, ".children", "v1", `${digest(child.id)}.json`);
     const captureBefore = await readFile(capturePath), captured = JSON.parse(captureBefore);
@@ -143,11 +169,14 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifes
     assert.equal(captured.capture.childSessionId, child.id); assert.equal(captured.capture.parentSessionId, parent.id);
     assert.equal(captured.revision, digest(JSON.stringify(captured.capture)));
     assert.equal(child.options.model, "reviewer-original");
-    const readonlyDenied = [];
-    for (const name of ["write", "edit", "bash", "pwsh"]) {
-      assert.equal(child.ctx.tools.schemas(child).some(tool => tool.name === name), false);
-      const denial = await child.ctx.tools.execute({ agent: child, name, arguments: {}, callId: ToolCallId(randomUUID()), signal: new AbortController().signal });
-      assert.equal(denial.isError, true); readonlyDenied.push(name);
+    if (isSource022(proofIdentity.packageVersion)) assert.deepEqual(readonlyDenied, ["write", "edit", "bash", "pwsh"]);
+    else {
+      readonlyDenied = [];
+      for (const name of ["write", "edit", "bash", "pwsh"]) {
+        assert.equal(child.ctx.tools.schemas(child).some(tool => tool.name === name), false);
+        const denial = await child.ctx.tools.execute({ agent: child, name, arguments: {}, callId: ToolCallId(randomUUID()), signal: new AbortController().signal });
+        assert.equal(denial.isError, true); readonlyDenied.push(name);
+      }
     }
     report.native = { rootId: parent.id, childId: child.id, rootModel: parent.options.model, readonlyDenied, originalChildEpoch: originalChildAdmission.epoch, model: child.options.model,
       originalCaptureSha256: digest(captureBefore), directNativeOwnership: true };
@@ -293,8 +322,8 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifes
     assert.equal(await eventsDigest(), eventsBefore); assert.equal(modelCalls.length, safetyCalls); assert.deepEqual(await readFile(capturePath), captureBefore);
     report.safety = { claimedOperatorPeerRefused: true, foreignParentRefused: true, beforeInboxCancellation: true,
       childEventsBeforeSha256: eventsBefore, childEventsAfterSha256: await eventsDigest(), nativeModelCallsBefore: safetyCalls, nativeModelCallsAfter: modelCalls.length };
-    assert.deepEqual(Object.keys(report.checks).sort(), [...STABLE_UI_CHECKS].sort());
-    for (const check of STABLE_UI_CHECKS) assert.equal(report.checks[check], true);
+    assert.deepEqual(Object.keys(report.checks).sort(), [...checks].sort());
+    for (const check of checks) assert.equal(report.checks[check], true);
     for (const endpoint of ["dsmmProfiles/save", "dsmmProfiles/select", "dsmmProfiles/selectSession", "dsmmChildren/prompt"]) assert.ok(report.nativeCalls.some(row => row.endpoint === endpoint && row.result === "accepted"));
     for (const endpoint of ["$events", "session/follow", "session/control"]) assert.ok(report.nativeStreams.some(row => row.endpoint === endpoint && row.result === "accepted" && row.frames > 0));
     assert.deepEqual(report.pageErrors, []); assert.deepEqual(report.externalRequests, []); assert.deepEqual(server.errors, []);
@@ -302,6 +331,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, dshManifes
     report.stage = "complete"; report.outcome = "COMPLETED";
   } catch (error) { report.failure = error.message; }
   finally {
+    readonlyListener?.(); readonlyProof?.close();
     releaseStream?.();
     if (pendingForeground) {
       try { await pendingForeground; } catch (error) { report.cleanup.errors.push(error.message); }

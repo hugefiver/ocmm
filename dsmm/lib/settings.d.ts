@@ -6,6 +6,8 @@ import type { DsmmSkillName } from "./skills.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
 import type { DeploymentSchemaNode } from "./profile-types.js";
 import type { DsmmLocale } from "./profile-locale.js";
+import type { ModelRouteJson } from "./route-json.js";
+import type { PermissionControlSchemaInput, PermissionControlSettings } from "./permission-settings.js";
 export { DSMM_LOCALES } from "./profile-locale.js";
 export type { DsmmLocale } from "./profile-locale.js";
 export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig, DsmmRuntimePolicySettings } from "./routing-policy.js";
@@ -36,6 +38,8 @@ export interface DsmmWorkflowSettings {
 }
 export interface DsmmPresetSettings {
     materialize: boolean;
+    /** Startup-pinned root exposure only; workflow Planner delegation stays enabled. */
+    plannerRootEnabled: boolean;
     root?: string;
 }
 export interface DsmmSubagentSettings {
@@ -61,13 +65,8 @@ export interface DsmmGuardSettings {
     };
     todoDisciplineHelper: boolean;
 }
-export interface DsmmModelRoute {
-    provider: string;
-    model: string;
-    reasoningEffort?: string;
-}
-export interface DsmmRecoveryRoute extends DsmmModelRoute {
-}
+export type DsmmModelRoute = ModelRouteJson;
+export type DsmmRecoveryRoute = DsmmModelRoute;
 export interface DsmmRoleRoutingConfig {
     levels?: Partial<Record<Exclude<DsmmInvocationLevel, "normal">, DsmmLevelOverride>>;
     primary?: DsmmModelRoute;
@@ -93,10 +92,15 @@ type DsmmGuardConfig = Partial<Omit<DsmmGuardSettings, "toolOutputTruncation" | 
     questionLabelHelper?: Partial<DsmmGuardSettings["questionLabelHelper"]>;
 };
 type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fallbackRoutes" | "idleContinuation">> & {
-    fallbackRoutes?: Array<Partial<DsmmRecoveryRoute>>;
+    fallbackRoutes?: DsmmRecoveryRoute[];
     idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 export interface DsmmPluginConfig {
+    /** Deployment-only; the mounted permission owner retains its cold-start policy. */
+    permissionControl?: PermissionControlSchemaInput;
+    modelParameters?: {
+        passthrough?: boolean;
+    };
     locale?: DsmmLocale;
     /** Only global deployment input; native/legacy profile transport rejects it. */
     modules?: {
@@ -129,6 +133,10 @@ export interface DsmmPluginConfig {
     lsp?: Partial<DsmmLspSettings>;
 }
 export interface DsmmSettings {
+    permissionControl: PermissionControlSettings;
+    modelParameters: {
+        passthrough: boolean;
+    };
     locale?: DsmmLocale;
     modules: {
         deepwork: {
@@ -243,6 +251,8 @@ export declare function validateLocale(value: unknown, field?: string): asserts 
 export declare function normalizeLevelOverride(value: unknown, field?: string): DsmmLevelOverride;
 export declare function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting;
 export declare function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean;
+/** Native standing-root availability is independent of child role enablement. */
+export declare function isRootRoleEnabled(settings: DsmmSettings, id: DsmmRoleId): boolean;
 export declare function resolveGuardSettings(config: DsmmPluginConfig["guards"]): DsmmGuardSettings;
 export declare function registerSettings(ctx: DshContext, config?: DsmmPluginConfig, options?: RegisterSettingsOptions): () => DsmmSettings;
 //# sourceMappingURL=settings.d.ts.map

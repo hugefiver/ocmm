@@ -3,6 +3,9 @@ import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { validatePlanMutation } from "./plan-validation.js";
 import { classifyKnownGitWrite, classifyShellDialectViolation } from "./shell-command.js";
 import { resolveAdmittedDsmmRole } from "./role-policy.js";
+import { Context } from "@deepseek-ai/cordis";
+import { nativeStandingFullAccess } from "./permission-native-access.js";
+import { DsmmProfileError } from "./profiles.js";
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 const STRUCTURED_TODO_PATTERN = /^\[[^\]]+\]\s+\[[^\]]+\]\s+to\s+.+\s+-\s+expect\s+.+/u;
 function asRecord(value) {
@@ -198,9 +201,11 @@ function todoDisciplineDecision(exec, settings) {
         reason: `${DSMM_GUARD_PREFIX} todo content must use "[WHERE] [HOW] to [WHY] - expect [RESULT]": ${malformed.content}`
     };
 }
-export function decidePreToolExecution(exec, settings, controller) {
+export function decidePreToolExecution(exec, settings, controller, nativeFullAccess = false) {
     if (!isSafetyScopeActive(exec, settings, controller))
         return undefined;
+    if (nativeFullAccess)
+        return settings.guards.gitWriteGuard === "deny" ? gitWriteDecision(exec, settings) : undefined;
     if (settings.guards.shellCommandSafety) {
         const shell = shellSafetyDecision(exec);
         if (shell !== undefined)
@@ -242,18 +247,31 @@ export function decidePostToolExecution(exec, result, decision, settings, contro
     };
 }
 export function registerSafetyGuards(ctx, controller, getSettings, rolePolicy) {
+    const truncationLimits = new WeakMap();
     const tools = ctx.get?.("tools");
     if (rolePolicy !== undefined && tools !== undefined) {
-        const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent, execution.name, tools));
+        const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent, execution.name, tools, execution));
         ctx.effect?.(() => guard);
     }
     ctx.on?.("tools/pre-execute", async (exec, next) => {
-        // Role authority precedes optional workflow helpers in every tool realm;
-        // turning common/guards off cannot grant a read-only role a mutation.
-        const denied = exec.agent === undefined ? undefined : rolePolicy?.toolDenial(exec.agent, exec.name);
+        const execution = exec;
+        const full = Context.is(ctx) && nativeStandingFullAccess(ctx, exec.agent);
+        rolePolicy?.captureToolExecution(execution, full);
+        const denied = exec.agent === undefined ? undefined : full ? rolePolicy?.toolBlacklistDenial(exec.agent, exec.name, execution) : rolePolicy?.preToolDenial(exec.agent, exec.name, undefined, execution);
         if (denied !== undefined)
             return { kind: "deny", reason: denied };
-        const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
+        let settings;
+        try {
+            settings = getSettings(exec.agent);
+        }
+        catch (error) {
+            if (full && error instanceof DsmmProfileError && !["disposed", "not-owned", "cancelled"].includes(error.code))
+                return next();
+            throw error;
+        }
+        const decision = decidePreToolExecution(exec, settings, controller, full);
+        if (!full && settings.modules.deepwork.enabled && settings.guards.toolOutputTruncation.enabled && isSafetyScopeActive(exec, settings, controller))
+            truncationLimits.set(exec, settings.guards.toolOutputTruncation.maxInlineBytes);
         if (decision === undefined)
             return next();
         if (decision.kind === "deny")
@@ -262,9 +280,12 @@ export function registerSafetyGuards(ctx, controller, getSettings, rolePolicy) {
         return downstream.kind === "allow" ? decision : downstream;
     }, { prepend: true });
     ctx.on?.("tools/post-execute", async (exec, result, next) => {
-        const settings = getSettings(exec.agent);
         const decision = await next();
-        return decidePostToolExecution(exec, result, decision, settings, controller);
+        const limit = truncationLimits.get(exec);
+        if (limit === undefined || result.isError || decision.kind !== "accept" || "value" in decision)
+            return decision;
+        const text = allText(decision.content ?? result.content);
+        return text === undefined || utf8Bytes(text) <= limit ? decision : { ...decision, content: [{ type: "text", text: truncateTextMiddle(text, limit, exec.name) }] };
     }, { prepend: true });
 }
 //# sourceMappingURL=guards.js.map

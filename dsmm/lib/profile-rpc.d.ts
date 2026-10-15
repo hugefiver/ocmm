@@ -3,7 +3,7 @@ import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSnapshot, SessionModeSelectRequest, SessionProfileSelectRequest, SessionProfileSnapshot } from "./profile-types.js";
 import type { DshAgent } from "./dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
-import type { DsmmModuleState } from "./modules.js";
+import type { DsmmModuleState, DsmmMountedPermissionGetter } from "./modules.js";
 import type { DsmmSettings } from "./settings.js";
 import type { DeploymentEditorSnapshot } from "./profile-types.js";
 import type { DsmmProfileRuntime } from "./profile-runtime.js";
@@ -39,8 +39,9 @@ export declare class DsmmConfigHost extends TypertRemoteService {
     private readonly startup?;
     private readonly runtime?;
     private readonly startupSources?;
+    private readonly getMountedPermission?;
     private readonly lifetime;
-    constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined, runtime?: (() => DsmmProfileRuntime | undefined) | undefined, startupSources?: Record<string, string> | undefined);
+    constructor(ctx: Context, backend: DsmmDeploymentConfig, startup?: DsmmSettings | undefined, runtime?: (() => DsmmProfileRuntime | undefined) | undefined, startupSources?: Record<string, string> | undefined, getMountedPermission?: DsmmMountedPermissionGetter | undefined);
     private captureReadAuthority;
     describeSettings(): Promise<DeploymentEditorSnapshot>;
     describe(): Promise<GlobalConfigSnapshot>;
@@ -56,5 +57,5 @@ declare module "@deepseek-ai/cordis" {
 /** The caller supplies the owned injection fiber; withdrawal stays native. */
 export declare function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, deployment?: DsmmDeploymentConfig): DsmmProfilesHost;
 /** Core-owned injection; works without any DW or profile business service. */
-export declare function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>): DsmmConfigHost;
+export declare function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>, getMountedPermission?: DsmmMountedPermissionGetter): DsmmConfigHost;
 //# sourceMappingURL=profile-rpc.d.ts.map

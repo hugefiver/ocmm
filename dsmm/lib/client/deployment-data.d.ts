@@ -11,6 +11,7 @@ export declare function editLayer(base: Record<string, unknown>, path: readonly 
 export declare function layerDiff(base: Record<string, unknown>, draft: Record<string, unknown>, prefix?: string[]): DeploymentPathEdit[];
 export declare function validateEditorValue(value: unknown, schema: DeploymentSchemaNode, sparse?: boolean): boolean;
 export declare function enumValues(schema: DeploymentSchemaNode): Array<string | number | boolean> | null;
-/** Only Host-projected inspector layers, never raw sparse editor input. */
+export declare function visibleDeploymentPath(path: readonly string[]): boolean;
+/** Only visible Host-projected inspector layers, never raw sparse editor input. */
 export declare function inspectorPaths(snapshot: DeploymentEditorSnapshot, admitted: DeploymentAdmissionView | null): string[];
 //# sourceMappingURL=deployment-data.d.ts.map

@@ -426,17 +426,21 @@ test("registerSafetyGuards wires tools/post-execute and delegates before truncat
   const listeners: Record<string, (...args: any[]) => unknown> = {};
   const settings = { ...DEFAULT_DSMM_SETTINGS, guards: { ...DEFAULT_DSMM_SETTINGS.guards, toolOutputTruncation: { enabled: true, maxInlineBytes: 90 } } };
   let delegated = false;
+  let settingsAvailable = true;
   registerSafetyGuards({
     on(event, listener, options) {
       listeners[event] = listener;
       assert.deepEqual(options, { prepend: true });
     }
-  }, controller(), () => settings);
+  }, controller(), () => { assert.equal(settingsAvailable, true); return settings; });
 
   assert.equal(typeof listeners["tools/post-execute"], "function");
   const postExecute = listeners["tools/post-execute"] as (execution: DshToolExecution, result: DshToolExecutionResult, next: () => Promise<DshPostToolDecision>) => Promise<DshPostToolDecision>;
+  const execution = exec("bash", { command: "yes" });
+  await listeners["tools/pre-execute"](execution, async () => ({ kind: "allow" }));
+  settingsAvailable = false;
   const decision = await postExecute(
-    exec("bash", { command: "yes" }),
+    execution,
     { isError: false, content: [{ type: "text", text: "x".repeat(140) }] },
     async () => {
       delegated = true;

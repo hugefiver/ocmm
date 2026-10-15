@@ -1,6 +1,7 @@
 /** Browser-safe route policy grammar shared by settings, profiles and native UI. */
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute, DsmmResolvedRoleRuntimePolicy, DsmmSettings } from "./settings.js";
+import { canonicalModelRouteJson } from "./route-json.js";
 export type DsmmRoutingStrategy = "startup-lock" | "rate-limit-fallback";
 
 export interface DsmmRateLimitPolicy {
@@ -108,10 +109,10 @@ export function resolveRoleRuntimePolicy(settings: DsmmSettings, role?: DsmmRole
   const configured = role === undefined ? undefined : settings.roleRouting[role];
   const defaults = settings.runtimePolicy;
   const primary = configured?.primary === undefined ? undefined : Object.freeze({ ...configured.primary });
-  const seen = new Set<string>(primary === undefined ? [] : [JSON.stringify([primary.provider, primary.model])]);
+  const seen = new Set<string>(primary === undefined ? [] : [canonicalModelRouteJson(primary)]);
   const fallbacks: Readonly<DsmmModelRoute>[] = [];
   for (const route of configured?.fallbackRoutes ?? settings.runtimeRecovery.fallbackRoutes) {
-    const identity = JSON.stringify([route.provider, route.model]);
+    const identity = canonicalModelRouteJson(route);
     if (seen.has(identity)) continue;
     seen.add(identity);
     fallbacks.push(Object.freeze({ ...route }));

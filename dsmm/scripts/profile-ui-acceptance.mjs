@@ -11,7 +11,7 @@ import { nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 import { sessionProfileChecksForVersion, proofDigest, requiresSessionProfileProof, runNativeRouteScenarios, runNativeModelSelectionScenario, validateSessionProfileProof, validateStartupProfileProof } from "./profile-ui-harness-native.mjs";
 import { runFrozenNativePickerAcceptance } from "./native-picker-harness.mjs";
 import { requiresNativePickerProof, requiresSessionModeProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { isSource020, isSource021, nativePickerCheckForVersion, startupProfileContract } from "./release-contract.mjs";
+import { isSource020, isStableNativeSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, startupProfileContract } from "./release-contract.mjs";
 
 const PROFILE_ID = "browser-native";
 export const NATIVE_STREAM_ENDPOINTS = Object.freeze(["$events", "session/control"]);
@@ -89,9 +89,10 @@ export async function removeOwnedUiRoot(runRoot, token) {
 /** Frozen installed-artifact, native-client component acceptance; not login E2E. */
 export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot, profilePackage, env, workspace, ownedRoot, nativeStorage }) {
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  if (isSource021(manifest.version)) {
-    const { runStable021Acceptance } = await import("./profile-ui-harness-stable021.mjs");
-    return runStable021Acceptance({ artifact, sha256, dshManifest, packageRoot, profilePackage, env, workspace, ownedRoot, nativeStorage });
+  assertReviewedReleaseVersion(manifest.version);
+  if (isStableNativeSource(manifest.version)) {
+    const { runStableNativeAcceptance } = await import("./profile-ui-harness-stable021.mjs");
+    return runStableNativeAcceptance({ artifact, sha256, sourceContract: manifest.version, dshManifest, packageRoot, profilePackage, env, workspace, ownedRoot, nativeStorage });
   }
   assert.ok(isAbsolute(packageRoot) && isAbsolute(dshManifest) && isAbsolute(profilePackage), "acceptance requires exact installed artifact and native manifests");
   packageRoot = await realpath(packageRoot);
@@ -154,6 +155,7 @@ export async function runAcceptance({ artifact, sha256, dshManifest, packageRoot
 /** Place an owned regular lock before a second real DSH Loader is launched. */
 export async function runStartupLockContention(options) {
   const contract = startupProfileContract(options.version, { sourceContract: options.sourceContract });
+  assert.ok(!contract.startsWith("stable-native-first-"), "stable native sources require their own startup acceptance producer");
   return contract === "central-read-lock-free-020" ? runReadLockFreeStartup(options) : runHistoricalStartupLockContention(options);
 }
 

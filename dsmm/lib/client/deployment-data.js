@@ -1,4 +1,5 @@
 import { parseTree } from "jsonc-parser";
+import { copyRouteJson, normalizeModelRouteJson } from "../route-json.js";
 export function record(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -65,18 +66,41 @@ export function layerDiff(base, draft, prefix = []) {
     });
 }
 export function validateEditorValue(value, schema, sparse = false) {
+    if (schema.type === "transform")
+        return schema.inner !== undefined && validateEditorValue(value, schema.inner, sparse);
+    if (schema.type === "any") {
+        try {
+            copyRouteJson(value);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
     if (schema.type === "union")
         return schema.alternatives?.some(node => validateEditorValue(value, node, sparse)) === true;
     if (schema.type === "const")
         return value === schema.value;
+    if (schema.type === "object" && schema.additionalProperties === "json") {
+        try {
+            if (schema.fields?.provider?.type === "string" && schema.fields.model?.type === "string") {
+                normalizeModelRouteJson(value, sparse, true);
+                return true;
+            }
+            copyRouteJson(value);
+        }
+        catch {
+            return false;
+        }
+    }
     if (schema.type === "object" || schema.type === "dict")
         return record(value) && (sparse || schema.type !== "object" || Object.entries(schema.fields ?? {}).every(([key, node]) => !node.required || Object.hasOwn(value, key))) && Object.entries(value).every(([key, child]) => {
             if (["__proto__", "prototype", "constructor"].includes(key))
                 return false;
             if (schema.keys !== undefined && !schema.keys.includes(key))
                 return false;
-            const node = schema.type === "dict" ? schema.inner : schema.fields?.[key];
-            return node !== undefined && validateEditorValue(child, node, sparse);
+            const node = schema.type === "dict" ? schema.inner : schema.fields !== undefined && Object.hasOwn(schema.fields, key) ? schema.fields[key] : undefined;
+            return node !== undefined ? validateEditorValue(child, node, sparse) : schema.type === "object" && schema.additionalProperties === "json";
         });
     if (schema.type === "array")
         return Array.isArray(value) && (schema.max === undefined || value.length <= schema.max) && schema.inner !== undefined && value.every(child => validateEditorValue(child, schema.inner));
@@ -90,12 +114,17 @@ export function enumValues(schema) {
     return schema.type === "union" && schema.alternatives?.every(node => node.type === "const")
         ? schema.alternatives.map(node => node.value) : null;
 }
-/** Only Host-projected inspector layers, never raw sparse editor input. */
+export function visibleDeploymentPath(path) {
+    return path[0] !== "lsp" && (path[0] !== "permissionControl" || path.length === 1 || path.length === 2 && path[1] === "enabled");
+}
+/** Only visible Host-projected inspector layers, never raw sparse editor input. */
 export function inspectorPaths(snapshot, admitted) {
     const paths = new Set([...Object.keys(snapshot.sources), ...Object.keys(snapshot.startupSources ?? {}), ...Object.keys(snapshot.nextRoot?.sources ?? {}),
         ...Object.keys(snapshot.nextRoot?.captures ?? {}), ...Object.keys(admitted?.sources ?? {}), ...Object.keys(admitted?.captures ?? {})]);
     const visit = (value, path) => {
-        if (record(value) && Object.keys(value).length && path.join(".") !== "lsp.env")
+        if (!visibleDeploymentPath(path))
+            return;
+        if (record(value) && Object.keys(value).length)
             for (const [key, child] of Object.entries(value))
                 visit(child, [...path, key]);
         else if (path.length)
@@ -104,6 +133,6 @@ export function inspectorPaths(snapshot, admitted) {
     for (const value of [snapshot.desired, snapshot.startup, snapshot.nextRoot?.settings, admitted?.settings])
         if (value !== undefined)
             visit(value, []);
-    return [...paths].sort();
+    return [...paths].filter(path => visibleDeploymentPath(path.split("."))).sort();
 }
 //# sourceMappingURL=deployment-data.js.map

@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { runInThisContext } from "node:vm";
 import { build } from "esbuild";
-import { isValidElement } from "react";
+import { cloneElement, createElement, isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { DeploymentController as Controller } from "../src/client/deployment-controller.js";
 import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
 import type { DsmmConfigRemote } from "../src/profile-remote.js";
-import type { DeploymentEditorSnapshot } from "../src/profile-types.js";
-import { deploymentEditorSchema, mergeConfigLayers, resolveConfig, resolveDeployment, validateSparseConfig } from "../lib/settings.js";
+import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../src/profile-types.js";
+import { deploymentEditorSchema, mergeConfigLayers, resolveConfig, resolveDeployment, validateSparseConfig } from "../src/settings.js";
 
 // Compile the client under test in memory; never overwrite the shared lib build.
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -23,8 +24,8 @@ const compiled = await build({
 const require = createRequire(import.meta.url);
 const module = { exports: {} as { DeploymentController: typeof Controller; DeploymentPage(props: DeploymentPageProps): unknown } };
 runInThisContext(`(function(require, module, exports) { ${compiled.outputFiles[0].text}\n})`)((id: string) => {
-  if (id === "react") return { ...require(id), useEffect() {}, useId: () => "advanced-validation", useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
-  if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button() {}, Input() {} };
+  if (id === "react") return { ...require(id), useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "advanced-validation", useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
+  if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: (props: Record<string, unknown>) => createElement("button", props), Input: (props: Record<string, unknown>) => createElement("input", props) };
   return require(id);
 }, module, module.exports);
 const { DeploymentController, DeploymentPage } = module.exports;
@@ -55,6 +56,17 @@ function renderComponent(node: ReactElement<Record<string, unknown>>): unknown {
   assert.equal(typeof node.type, "function");
   return (node.type as (props: unknown) => unknown)(node.props);
 }
+// Execute production components and their event handlers without a DOM renderer.
+function renderTree(tree: unknown): unknown {
+  if (Array.isArray(tree)) return tree.map(renderTree);
+  if (!isValidElement<Record<string, unknown>>(tree)) return tree;
+  if (typeof tree.type === "function") return renderTree(renderComponent(tree));
+  return cloneElement(tree, { children: renderTree(tree.props.children) });
+}
+function text(tree: unknown): string {
+  if (Array.isArray(tree)) return tree.map(text).join(" ");
+  return isValidElement<Record<string, unknown>>(tree) ? text(tree.props.children) : typeof tree === "string" || typeof tree === "number" ? String(tree) : "";
+}
 function advancedInput(controller: Controller, remote: DsmmConfigRemote) {
   const props: DeploymentPageProps = { core: controller, remote, view: "page", t: key => key };
   const layer = elements(DeploymentPage(props)).find(node => typeof node.type === "function" && node.type.name === "Layer")!;
@@ -63,6 +75,70 @@ function advancedInput(controller: Controller, remote: DsmmConfigRemote) {
   const input = elements(renderComponent(advanced)).find(node => node.type === "textarea")!;
   return (value: string) => (input.props.onChange as (event: unknown) => void)({ currentTarget: { value } });
 }
+
+test("Core passthrough field handlers save explicit false, same-default true and inheritance without rewriting opaque routes", async () => {
+  const routing = { "dsmm-reviewer": { primary: { provider: "fixture", model: "manual-unlisted", reasoning_effort: "future-effort", opaque: { nested: [1, null, "unchanged"] } } } };
+  for (const choice of ["false", "true", "inherit"]) {
+    const initial = choice === "inherit" ? { modelParameters: { passthrough: false }, roleRouting: routing } : { roleRouting: routing };
+    const f = fixture(initial, {});
+    try {
+      await f.controller.refresh();
+      const tree = renderTree(DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key }));
+      const group = elements(tree).find(node => node.type === "div" && node.props.className === "dsmm-field dsmm-deployment-field" && text(node).includes("modelParameters.passthrough"));
+      assert.ok(group);
+      const select = elements(group).find(node => node.type === "select")!;
+      (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: choice } });
+      await f.controller.save();
+      assert.equal(f.controller.getSnapshot().saved, true);
+      assert.deepEqual(f.controller.getSnapshot().draft.roleRouting, routing);
+      assert.deepEqual(f.writes, [{ expectedRevision: "g0", edits: choice === "inherit"
+        ? [{ op: "unset", path: ["modelParameters", "passthrough"] }]
+        : [{ op: "set", path: ["modelParameters"], value: { passthrough: choice === "true" } }] }]);
+    } finally { f.controller.dispose(); }
+  }
+});
+
+test("advanced route editing accepts opaque JSON and either effort alias with passthrough off, but refuses unsafe route fields", async () => {
+  for (const alias of ["reasoningEffort", "reasoning_effort"]) {
+    const f = fixture({ modelParameters: { passthrough: false } }, {});
+    try {
+      await f.controller.refresh();
+      const routing = { "dsmm-reviewer": { primary: { provider: "fixture", model: "manual", [alias]: "exact-unlisted", temperature: 0.3, maxTokens: 123, stop: [], customParameters: { nested: [null, true, 1] } } } };
+      advancedInput(f.controller, f.remote)(JSON.stringify(routing)); await f.controller.save();
+      assert.equal(f.controller.getSnapshot().saved, true);
+      assert.deepEqual(f.writes[0].edits, [{ op: "set", path: ["roleRouting"], value: routing }]);
+      assert.deepEqual(f.controller.getSnapshot().draft.modelParameters, { passthrough: false });
+    } finally { f.controller.dispose(); }
+  }
+  for (const extra of [{ headers: {} }, { reasoningEffort: "a", reasoning_effort: "b" }, { opaque: JSON.parse('{"__proto__":true}') }]) {
+    const f = fixture({ modelParameters: { passthrough: false } }, {});
+    try {
+      await f.controller.refresh(); advancedInput(f.controller, f.remote)(JSON.stringify({ "dsmm-reviewer": { primary: { provider: "fixture", model: "manual", ...extra } } }));
+      await f.controller.save(); assert.equal(f.writes.length, 0); assert.equal(f.controller.getSnapshot().dirty, true);
+    } finally { f.controller.dispose(); }
+  }
+});
+
+test("Core permission enabled field uses ordinary Global/native Save and preserves independent rule policy", async () => {
+  const policy = { enabled: true, outsideReads: "deny", webFetch: { enabled: false, rule: "ask" }, rules: [] };
+  for (const native of [false, true]) {
+    const f = fixture(native ? {} : { permissionControl: policy }, native ? { permissionControl: policy } : {});
+    const c = native ? new DeploymentController(f.remote, "profile", "dsmm") : f.controller, mutations: unknown[] = [];
+    if (native) { f.snapshot.nativeForm = { base: {}, user: f.snapshot.profile }; c.attachForm({ state: { status: "ready", mode: "host", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } }); }
+    try {
+      await c.refresh();
+      const tree = renderTree(DeploymentPage({ core: c, remote: f.remote, view: "page", t: key => key }));
+      const group = elements(tree).find(node => node.type === "div" && node.props.className === "dsmm-field dsmm-deployment-field" && text(node).includes("permissionControl.enabled"));
+      assert.ok(group);
+      const select = elements(group).find(node => node.type === "select")!;
+      (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: "false" } }); await c.save();
+      assert.equal(c.getSnapshot().saved, true); assert.deepEqual(c.getSnapshot().draft.permissionControl, { ...policy, enabled: false });
+      const edits = [{ op: "set", path: ["permissionControl", "enabled"], value: false }];
+      if (native) { assert.deepEqual(mutations, [edits]); assert.deepEqual(f.writes, []); }
+      else assert.deepEqual(f.writes, [{ expectedRevision: "g0", edits }]);
+    } finally { c.dispose(); if (native) f.controller.dispose(); }
+  }
+});
 
 test("Global save accepts either sparse primary member completed by the unchanged native profile", async () => {
   for (const [globalPrimary, nativePrimary] of [[{ provider: "fixture" }, { model: "review" }], [{ model: "review" }, { provider: "fixture" }]] as const) {
@@ -125,7 +201,7 @@ test("Global advanced inheritance removes only the explicit layer without materi
 
 test("Native precedence cannot conceal malformed sparse editor grammar", async () => {
   const native = { roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review" } } } };
-  for (const primary of [{ provider: "  " }, { model: 42 }, { unexpected: "route" }]) {
+  for (const primary of [{ provider: "  " }, { model: 42 }, { headers: "route" }]) {
     for (const advanced of [false, true]) {
       const f = fixture({}, native);
       try {
@@ -166,4 +242,99 @@ test("Profile advanced fields inherit global and native base members but persist
     assert.deepEqual(c.getSnapshot().draft, { roleRouting: { "dsmm-reviewer": { primary: { model: "changed" } } } });
     assert.equal(f.writes.length, 0);
   } finally { c.dispose(); f.controller.dispose(); }
+});
+
+test("native Global and profile controls omit LSP while unrelated UI saves preserve enabled input", async () => {
+  const stored = { enabled: true, serverName: "retained-server", command: "retained-command", args: ["retained-argument"] };
+  const f = fixture({ lsp: stored, defaultActive: true }, { lsp: stored, defaultActive: true }, {});
+  f.snapshot.nativeForm = { base: {}, user: structuredClone(f.snapshot.profile) };
+  const nativeState = { status: "ready" as const, mode: "host" as const, writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile };
+  const mutations: unknown[] = [];
+  const form = { state: nativeState, mutate: async (ops: unknown, revision?: number) => { assert.equal(revision, 0); mutations.push(ops); return true; } };
+  const profile = new DeploymentController(f.remote, "profile", "dsmm");
+  profile.attachForm(form);
+  f.controller.forProfile = () => profile;
+  const forms = { get: () => ({ getSnapshot: () => nativeState, subscribe: () => () => {}, mutate: form.mutate }) } as unknown as NonNullable<DeploymentPageProps["forms"]>;
+  const render = () => renderTree(DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key, profilePage: true, forms, form }));
+  try {
+    await f.controller.refresh(); await profile.refresh();
+    for (const [layer, save] of [["global", "saveGlobal"], ["profile", "saveProfile"]]) {
+      let tree = render();
+      const section = elements(tree).find(node => node.props["data-dsmm-layer"] === layer)!;
+      assert.ok(section, "the production page renders both native configuration layers");
+      const paths = elements(section).filter(node => node.type === "code").map(text);
+      assert.equal(paths.some(path => path === "lsp" || path.startsWith("lsp.")), false);
+      assert.ok(paths.includes("modules.deepwork.enabled") === (layer === "global"));
+      assert.ok(paths.includes("workflow.reviewCap"));
+      assert.ok(paths.includes("roleRouting"));
+      const field = elements(section).find(node => node.props.className === "dsmm-field dsmm-deployment-field" && elements(node).some(child => child.type === "code" && text(child) === "defaultActive"))!;
+      const select = elements(field).find(node => node.type === "select")!;
+      assert.equal(select.props.disabled, false);
+      (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: "false" } });
+      tree = render();
+      const updated = elements(tree).find(node => node.props["data-dsmm-layer"] === layer)!;
+      const button = elements(updated).find(node => node.type === "button" && text(node) === save)!;
+      assert.equal(button.props.disabled, false);
+      (button.props.onClick as () => void)();
+      const controller = layer === "global" ? f.controller : profile;
+      for (let round = 0; round < 100 && controller.getSnapshot().busy; round++) await setImmediate();
+      assert.equal(controller.getSnapshot().saved, true);
+      assert.deepEqual(controller.getSnapshot().draft.lsp, stored);
+    }
+    assert.deepEqual(f.writes, [{ expectedRevision: "g0", edits: [{ op: "set", path: ["defaultActive"], value: false }] }]);
+    assert.deepEqual(mutations, [[{ op: "set", path: ["defaultActive"], value: false }]]);
+    assert.deepEqual(f.snapshot.global.lsp, stored);
+    assert.deepEqual((f.snapshot.nativeForm.user as Record<string, unknown>).lsp, stored);
+  } finally { profile.dispose(); f.controller.dispose(); }
+});
+
+test("rendered inspector hides LSP configuration, provenance and restart state across all projected layers", async () => {
+  const f = fixture({ lsp: { enabled: true } }, {});
+  const admission: DeploymentAdmissionView = {
+    settings: { lsp: { enabled: true, env: { entries: 2 } }, workflow: { reviewCap: 7 } },
+    sources: { lsp: "deployment", "lsp.enabled": "named-session", "lsp.env": "mixed", "workflow.reviewCap": "named-session" },
+    captures: { "lsp.command": "startup", "lsp.env": "mixed", "workflow.reviewCap": "named-session" },
+    restartRequired: ["lsp", "lsp.command"], named: null,
+  };
+  f.snapshot.sources = { "lsp.enabled": "global", "lsp.env": "mixed", "workflow.reviewCap": "defaults" };
+  f.snapshot.startupSources = { "lsp.serverName": "startup" };
+  f.snapshot.nextRoot = admission;
+  const session: SessionProfileSnapshot = {
+    sessionId: "owned-inspector-root", admissionEpoch: "owned-inspector-epoch", scope: "deployment-baseline", switchAllowed: true,
+    globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" },
+    selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, configuration: admission,
+  };
+  const before = structuredClone(f.snapshot);
+  const inspector = () => {
+    const page = DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key });
+    const component = elements(page).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
+    return renderTree(component);
+  };
+  try {
+    await f.controller.refresh();
+    for (const state of [null, session]) {
+      f.controller.setSession(state);
+      const tree = inspector(), nodes = elements(tree);
+      const paths = nodes.filter(node => node.type === "dt").map(text);
+      assert.equal(paths.some(path => path === "lsp" || path.startsWith("lsp.")), false);
+      assert.ok(paths.includes("workflow.reviewCap"));
+      assert.ok(paths.includes("modules.deepwork.enabled"));
+      assert.deepEqual(paths, [...paths].sort());
+      assert.equal(nodes.some(node => node.type === "p" && text(node).includes("pending")), false);
+      const summary = nodes.find(node => node.type === "summary")!;
+      assert.equal(text(summary).includes("pending"), false, "LSP-only restart information must not create an unexplained pending status");
+      if (state !== null) assert.ok(text(tree).includes(state.sessionId));
+    }
+    f.snapshot.nextRoot = { ...admission, restartRequired: ["lsp.enabled", "permissions"] };
+    await f.controller.refresh();
+    const pending = elements(inspector()).find(node => node.type === "p" && text(node).includes("pending"));
+    assert.ok(pending);
+    assert.ok(text(pending).includes("permissions"));
+    assert.equal(text(pending).includes("lsp"), false);
+    assert.deepEqual(f.snapshot.global, before.global);
+    assert.deepEqual(f.snapshot.schema, before.schema);
+    assert.deepEqual(f.snapshot.desired, before.desired);
+    assert.deepEqual(f.snapshot.startup, before.startup);
+    assert.deepEqual(session.configuration, admission);
+  } finally { f.controller.dispose(); }
 });

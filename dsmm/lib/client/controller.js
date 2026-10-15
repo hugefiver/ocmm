@@ -312,7 +312,9 @@ export class ProfilesController {
             try {
                 // The accepted DTO and current native view have the same validated ID;
                 // native strict codecs remain authoritative for its branded wire type.
-                await this.unwrap(selector.selectModel({ sessionId: id, ...accepted.profileModel }));
+                const { provider, model, reasoningEffort } = accepted.profileModel;
+                await this.unwrap(selector.selectModel({ sessionId: id, provider, model,
+                    ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }));
                 // Never echo the returned model locally: native projections own the
                 // actual picker, and a later native Models-tab selection must win.
                 if (live())

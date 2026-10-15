@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, unlink } from "node:fs/promises";
+import { setImmediate } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -55,8 +56,9 @@ class MemoryCredentials extends CredentialProvider {
 }
 class UsefulAdapter extends LlmAdapter {
   calls = [];
+  modelCalls = 0;
   beforeStream;
-  async resolveModel(provider, model) { return { provider, id: model, name: model, inputModalities: ["text"],
+  async resolveModel(provider, model) { this.modelCalls++; return { provider, id: model, name: model, inputModalities: ["text"],
     reasoning: { efforts: ["low", "high"].map(id => ({ id: ReasoningEffortId(id), name: id })), defaultEffort: ReasoningEffortId("high") } }; }
   async *stream(options) {
     this.calls.push(options); await this.beforeStream?.(options); options.signal?.throwIfAborted();
@@ -108,14 +110,14 @@ async function host({ binding = "dsmm", off = false, active = !off, lateSpawn = 
   await ctx.plugin(ExactQuery).await(); let connectionFiber;
   if (withConnection) { connectionFiber = ctx.plugin(Connection, {}); await connectionFiber.await(); }
   await ctx.plugin(Persistence, { root: join(root, "sessions"), compression: "none" }).await();
-  let subagentFiber;
+   let subagentFiber, spawnFiber;
   if (binding !== "unavailable" && !loaderStartup) {
     subagentFiber = ctx.plugin(binding === "dsmm" ? Startup : SubagentRuntime, { maxDepth: 3, maxActiveSubagents: 8 });
     await subagentFiber.await();
   }
   await ctx.plugin(AgentLoop, {}).await();
   if (binding !== "unavailable" && !lateSpawn && !loaderStartup) {
-    await ctx.plugin(Spawn, { providerName: opaqueSpawn ? "backing-spawn" : "spawn" }).await();
+    spawnFiber = ctx.plugin(Spawn, { providerName: opaqueSpawn ? "backing-spawn" : "spawn" }); await spawnFiber.await();
     if (opaqueSpawn) {
       const concrete = ctx.subagents.getProvider("backing-spawn");
       ctx.subagents.registerProvider({ ...concrete, name: "spawn", prepareContinuable: concrete.prepareContinuable.bind(concrete), async start(request) {
@@ -226,8 +228,8 @@ async function host({ binding = "dsmm", off = false, active = !off, lateSpawn = 
     return { sessionId: parent.id, id, expectedRevision: saved.revision, expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch };
   };
   setupComplete = true;
-  return { ctx, root, bodies, adapter, opaque, legacyOwner, unpublished, retained, retainedRun, get mainFiber() { return mainFiber; }, get subagentFiber() { return subagentFiber; }, loader, create, execute, runtime, invoke, named, complete,
-    async spawn() { await ctx.plugin(Spawn, { providerName: "spawn" }).await(); },
+  return { ctx, root, bodies, adapter, opaque, legacyOwner, unpublished, retained, retainedRun, get mainFiber() { return mainFiber; }, get subagentFiber() { return subagentFiber; }, get spawnFiber() { return spawnFiber; }, loader, create, execute, runtime, invoke, named, complete,
+    async spawn() { spawnFiber = ctx.plugin(Spawn, { providerName: "spawn" }); await spawnFiber.await(); },
     async replaceConnection() {
       await connectionFiber.dispose(); connectionFiber = ctx.plugin(Connection, {}); await connectionFiber.await();
       for (const registration of ctx.registry.values()) for (const fiber of registration.fibers) if ("connection" in fiber.inject) await fiber.await();
@@ -236,15 +238,35 @@ async function host({ binding = "dsmm", off = false, active = !off, lateSpawn = 
   } finally { if (!setupComplete) await dispose(); }
 }
 
-test("package MAIN waits for actual spawn and publishes completed Host admission, not a mount receipt", { timeout: 15000 }, async () => {
-  const f = await host({ lateSpawn: true });
+test("package MAIN publishes completed Core admission before spawn while DW delivery remains fenced", { timeout: 15000 }, async () => {
+  const f = await host({ lateSpawn: true, active: false });
   try {
     const native = exact(f.ctx.subagents);
     assert.ok(native instanceof DsmmSubagentRuntime);
     assert.equal(native.authority.view().deliveryFenceReady, false);
-    assert.equal(f.ctx.get("dsmmProfileRuntime"), undefined);
+    await Promise.race([f.complete(), new Promise((_, reject) => setTimeout(() => reject(new Error("Core boot waited for DW spawn")), 1000))]);
+    assert.ok(f.ctx.get("dsmmProfileRuntime"));
+    assert.ok(f.ctx.get("dsmmCoreLlmOwner"));
+    const core = await f.create(), before = f.runtime().admission(core);
+    assert.throws(() => native.authority.acquireParentTicket(core), { code: "UNAUTHORIZED" });
+    assert.equal((await f.execute(f.unpublished, "read")).isError, true);
+    assert.equal(f.bodies.read, 0, "the already registered tool body stays behind the DW fence");
+    const request = await f.named(core, { locale: "en", roleRouting: { "dsmm-orchestrator": { primary: { provider: "missing", model: "future", reasoningEffort: "future" } } } });
+    const calls = f.adapter.calls.length;
+    const models = f.adapter.modelCalls;
+    const result = await f.invoke("dsmmProfiles", "selectSession", { sessionId: core.id, request });
+    assert.equal(result.admissionEpoch, f.runtime().admission(core).epoch);
+    assert.notEqual(f.runtime().admission(core), before);
+    assert.equal((await f.runtime().getSession(core)).admittedSelection.selectedId, request.id);
+    assert.equal(f.adapter.calls.length, calls);
+    assert.equal(f.adapter.modelCalls, models);
+    assert.throws(() => native.authority.acquireParentTicket(core), { code: "UNAUTHORIZED" });
     await assert.rejects(native.sendMessage(f.unpublished, SessionId(randomUUID()), [{ type: "text", text: "not admitted yet" }], { signal: new AbortController().signal }), error => error.code === "UNAUTHORIZED");
-    await f.spawn(); await f.complete();
+    await f.spawn(); await f.ctx.dsmmRuntimeIntegration.ready();
+    assert.equal(native.authority.acquireParentTicket(core).admission, f.runtime().admission(core));
+    const ticket = native.authority.acquireParentTicket(core);
+    await f.runtime().selectSession(await f.named(core, { locale: "ja" }), core);
+    assert.equal(ticket.signal.aborted, true);
     assert.equal(native.authority.view().deliveryFenceReady, true);
     const parent = await f.create(), admission = f.runtime().admission(parent);
     assert.equal(native.authority.acquireParentTicket(parent).admission, admission);
@@ -252,6 +274,110 @@ test("package MAIN waits for actual spawn and publishes completed Host admission
     assert.ok(f.ctx.typert.local.get("dsmmChildren/describe"));
     assert.ok(f.ctx.typert.local.get("subagents/prompt"));
   } finally { await f.dispose(); }
+});
+
+for (const failure of ["cancel", "draft-conflict", "owner-revoked"]) test(`Core-only CurrentApply preserves its exact admission and durable choice after ${failure} while spawn is absent`, { timeout: 15000 }, async () => {
+  const f = await host({ lateSpawn: true, active: false });
+  let lock;
+  try {
+    await f.complete();
+    const parent = await f.create(), admission = f.runtime().admission(parent);
+    const request = await f.named(parent, { locale: "en" });
+    const store = ProfileStore.fromCentral(join(f.root, "home"), join(f.root, "profile"), "trusted-direct");
+    const choice = await store.loadSessionSelection(parent.id);
+    lock = join(store.profileDir, ".lock");
+    await writeFile(lock, "owned pending CoreApply fixture", { flag: "wx" });
+    const caller = new AbortController();
+    const pending = f.invoke("dsmmProfiles", "selectSession", { sessionId: parent.id, request }, caller.signal);
+    const refused = assert.rejects(pending);
+    await setImmediate();
+    if (failure === "cancel") caller.abort();
+    if (failure === "draft-conflict") await writeFile(join(store.profileDir, `${request.id}.jsonc`), JSON.stringify({ version: 1, id: request.id, settings: { locale: "ja" } }));
+    if (failure === "owner-revoked") f.ctx.dsmmRuntimeIntegration.runtime.authority.revokeOwner(f.ctx.dsmmRuntimeIntegration.owner, "owned-test-revocation");
+    await unlink(lock); lock = undefined;
+    await refused;
+    assert.equal(f.runtime().admission(parent), admission);
+    assert.deepEqual(await store.loadSessionSelection(parent.id), choice);
+    assert.equal(f.adapter.calls.length, 0); assert.equal(f.adapter.modelCalls, 0);
+    assert.throws(() => f.ctx.dsmmRuntimeIntegration.runtime.authority.acquireParentTicket(parent), { code: "UNAUTHORIZED" });
+  } finally { if (lock !== undefined) await unlink(lock); await f.dispose(); }
+});
+
+test("DW startup continuation disposal settles before spawn and cannot publish late role tools or a Core owner", { timeout: 15000 }, async () => {
+  const f = await host({ lateSpawn: true, active: false });
+  try {
+    await f.complete();
+    const integration = f.ctx.dsmmRuntimeIntegration;
+    const refused = assert.rejects(integration.ready());
+    await f.mainFiber.dispose(); await refused;
+    await f.spawn();
+    assert.equal(integration.runtime.authority.view().deliveryFenceReady, false);
+    assert.equal(f.ctx.get("dsmmCoreLlmOwner"), undefined);
+    assert.equal(f.ctx.get("dsmmProfileRuntime"), undefined);
+    assert.equal(f.adapter.calls.length, 0);
+  } finally { await f.dispose(); }
+});
+
+test("native read decision survives unrelated DW delivery retirement while the next call remains predecision-fenced", { timeout: 15000 }, async () => {
+  const f = await host(), entered = gate(), release = gate();
+  let pending;
+  try {
+    const parent = await f.create();
+    f.ctx.on("tools/execute", async (exec, next) => {
+      if (exec.agent === parent && exec.name === "read") { entered.release(); await release.promise; }
+      return next();
+    }, { global: true });
+    const definition = parent.ctx.tools.get("read", parent);
+    assert.ok(definition);
+    pending = f.execute(parent, "read");
+    await Promise.race([entered.promise, pending.then(result => { throw new Error(`Read settled before native dispatch: ${JSON.stringify(result)}`); })]);
+    await f.spawnFiber.dispose();
+    assert.equal(f.ctx.dsmmRuntimeIntegration.runtime.authority.view().deliveryFenceReady, false);
+    assert.equal(parent.ctx.tools.get("read", parent), definition);
+    release.release();
+    const result = await pending;
+    assert.equal(result.isError, false); assert.equal(result.value, "real useful body under the package MAIN");
+    assert.equal(f.bodies.read, 1);
+    assert.equal((await f.execute(parent, "read")).isError, true); assert.equal(f.bodies.read, 1);
+  } finally { release.release(); if (pending !== undefined) await Promise.allSettled([pending]); await f.dispose(); }
+});
+
+test("native caller cancellation after the decision prevents the registered read body from entering", { timeout: 15000 }, async () => {
+  const f = await host(), entered = gate(), release = gate(), caller = new AbortController();
+  let pending;
+  try {
+    const parent = await f.create();
+    f.ctx.on("tools/execute", async (exec, next) => {
+      if (exec.agent === parent && exec.name === "read") { entered.release(); await release.promise; }
+      return next();
+    }, { global: true });
+    pending = f.execute(parent, "read", {}, caller);
+    await Promise.race([entered.promise, pending.then(result => { throw new Error(`Read settled before native dispatch: ${JSON.stringify(result)}`); })]);
+    caller.abort(); release.release();
+    assert.equal((await pending).isError, true); assert.equal(f.bodies.read, 0);
+  } finally { release.release(); if (pending !== undefined) await Promise.allSettled([pending]); await f.dispose(); }
+});
+
+test("DW tool initialization enrolls a concurrently entered Root only after its existing awaited admission completes", { timeout: 15000 }, async () => {
+  const f = await host({ lateSpawn: true }), entered = gate(), release = gate();
+  let pending, handle;
+  try {
+    await f.complete();
+    const id = SessionId(randomUUID());
+    f.ctx.on("agent/created", async ({ agent }) => { if (agent.id === id) { entered.release(); await release.promise; } }, { global: true, prepend: true });
+    pending = f.ctx.agents.create({ sessionId: id, meta: { cwd: f.root }, agentOptions: { provider: "fixture", model: "native-root" } });
+    pending.then(value => { handle = value; }, () => {});
+    await entered.promise;
+    assert.throws(() => f.runtime().admission(f.ctx.agents.get(id)), { code: "activation" });
+    await f.spawn(); await f.ctx.dsmmRuntimeIntegration.ready();
+    release.release(); handle = await pending;
+    assert.equal(f.ctx.dsmmRuntimeIntegration.runtime.authority.acquireParentTicket(handle.agent).admission, f.runtime().admission(handle.agent));
+    assert.ok(handle.agent.ctx.tools.get("dsmm_reviewer", handle.agent));
+  } finally {
+    release.release();
+    if (pending !== undefined) await Promise.allSettled([pending]);
+    await handle?.dispose(); await f.dispose();
+  }
 });
 
 test("MAIN captured child executes useful read, denies write/shell, preserves original epoch/route and uses native model/Gateway delivery", { timeout: 20000 }, async () => {

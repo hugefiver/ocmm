@@ -1,3 +1,4 @@
+import { canonicalModelRouteJson } from "./route-json.js";
 export const DEFAULT_DSMM_RATE_LIMIT_POLICY = Object.freeze({
     maxRetries: 3,
     initialDelayMs: 500,
@@ -79,10 +80,10 @@ export function resolveRoleRuntimePolicy(settings, role) {
     const configured = role === undefined ? undefined : settings.roleRouting[role];
     const defaults = settings.runtimePolicy;
     const primary = configured?.primary === undefined ? undefined : Object.freeze({ ...configured.primary });
-    const seen = new Set(primary === undefined ? [] : [JSON.stringify([primary.provider, primary.model])]);
+    const seen = new Set(primary === undefined ? [] : [canonicalModelRouteJson(primary)]);
     const fallbacks = [];
     for (const route of configured?.fallbackRoutes ?? settings.runtimeRecovery.fallbackRoutes) {
-        const identity = JSON.stringify([route.provider, route.model]);
+        const identity = canonicalModelRouteJson(route);
         if (seen.has(identity))
             continue;
         seen.add(identity);

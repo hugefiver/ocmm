@@ -48,14 +48,14 @@ export interface DshAgentCreatedFrame {
     source: "startup" | "resume" | "clear" | "compact";
     signal?: AbortSignal;
 }
-export interface DshLlmCallConfig {
+export type DshLlmCallConfig = {
     provider: string;
     model: string;
     reasoningEffort?: string;
     temperature?: number;
     maxTokens?: number;
-    stop?: unknown;
-}
+    stop?: string[];
+};
 export interface DshLlmFailure {
     readonly message: string;
     readonly code: string;
@@ -83,6 +83,9 @@ export interface DshResolvedModelInfo {
 export interface DshLlmRuntime {
     resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<DshResolvedModelInfo>;
     resolveCallConfig?(config: DshLlmCallConfig, signal?: AbortSignal): Promise<DshLlmCallConfig>;
+    listProviders?(): readonly {
+        id: string;
+    }[];
 }
 export interface AgentRequestFrame {
     agent: DshAgent;

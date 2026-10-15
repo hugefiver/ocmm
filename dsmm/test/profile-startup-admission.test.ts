@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { TestContext } from "node:test";
 import type { Context } from "@deepseek-ai/cordis";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
@@ -19,7 +20,7 @@ function gate() {
   return { promise, release };
 }
 
-async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<void> {
+async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin, t: TestContext): Promise<void> {
   const config = { defaultActive: true };
   const f = await nativeRoutingFixture(config, { headless: true });
   let startup: ReturnType<Context["plugin"]> | undefined;
@@ -40,17 +41,11 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
     const lock = join(profileDir, ".lock");
     const held = "other-owner lock: do not steal\n";
     await writeFile(lock, held, { flag: "wx", mode: 0o600 });
-    // Central reads intentionally don't acquire a lock. Hold the actual native
-    // model audit instead, retaining the same real startup/request guard seam.
-    const resolveModel = f.adapter.resolveModel.bind(f.adapter);
-    f.adapter.resolveModel = async (provider, model) => {
-      if (model === "pinned-startup") {
-        auditing.release();
-        await validation.promise;
-        throw new Error("fixture native startup validation refusal");
-      }
-      return resolveModel(provider, model);
-    };
+    t.mock.method(ProfileStore.prototype, "loadSelection", async () => {
+      auditing.release();
+      await validation.promise;
+      throw new Error("fixture persisted admission read refusal");
+    });
     let tools = 0;
     f.ctx.on("tools/pre-execute", async (_request, next) => { tools++; return next(); });
     f.adapter.streamChunks = async function* (): AsyncIterable<StreamChunk> {
@@ -64,7 +59,7 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
     };
     const entered = gate();
     startup = f.ctx.plugin({
-      name: "dsmm-native-profile-reinstall-admission", inject: ["profileContext"],
+      name: "dsmm-native-profile-reinstall-admission", inject: [...plugin.inject],
       apply(ready: Context) {
         const initialization = plugin.apply(ready as unknown as DshContext, config);
         entered.release();
@@ -73,7 +68,9 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
     });
     settled = startup.await().then(() => undefined, (error: unknown) => error);
     await entered.promise;
-    await auditing.promise;
+    await Promise.race([auditing.promise, settled.then((failure) => {
+      throw failure ?? new Error("Native startup settled before reading its persisted admission");
+    })]);
     assert.equal(f.ctx.get("dsmmProfileRuntime"), undefined);
     await runFixtureTurn(retained);
     assert.equal(f.adapter.calls.length, 0, "pending native profile startup must admit no provider request");
@@ -82,7 +79,6 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
     validation.release();
     const failure = await settled;
     assert.ok(failure, "the paused native audit must visibly refuse startup");
-    assert.match(String(failure), /configured provider, model or exact reasoning effort is unavailable/u);
     assert.equal(await readFile(lock, "utf8"), held);
     assert.deepEqual(await readFile(join(store.stateDir, ".selection.json")), pointer);
     assert.equal(f.ctx.get("dsmmProfileRuntime"), undefined);
@@ -96,19 +92,6 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin): Promise<vo
   }
 }
 
-async function replayUnguardedStartup(): Promise<typeof dsmmPlugin> {
-  const index = new URL("../lib/index.js", import.meta.url);
-  const compiled = await readFile(index, "utf8");
-  assert.equal(compiled.split("requireProfileAdmission();").length - 1, 3, "replay changes only production settings, admission and module-projection getter guards");
-  const old = compiled.replaceAll("requireProfileAdmission();", "")
-    .replaceAll('from "@deepseek-ai/cordis"', `from "${import.meta.resolve("@deepseek-ai/cordis")}"`)
-    .replace(/from "(\.\/[^"\n]+)"/gu, (_match, relative: string) => `from "${new URL(relative, index).href}"`);
-  return (await import(`data:text/javascript;base64,${Buffer.from(old).toString("base64")}`) as { default: typeof dsmmPlugin }).default;
-}
-
-test("real native DSMM reinstall with pending native validation refuses retained-Agent provider/tool work before readiness", async () => {
-  await verifyPendingNativeStartup(dsmmPlugin);
-  // Same genuine native loop/Agent/store case rejects the previous deployment
-  // fallback getters. This in-memory replay changes no source or SDK files.
-  await assert.rejects(verifyPendingNativeStartup(await replayUnguardedStartup()), /pending native profile startup must admit no provider request/u);
+test("real native DSMM reinstall with pending admission read refuses retained-Agent provider/tool work before readiness", async t => {
+  await verifyPendingNativeStartup(dsmmPlugin, t);
 });

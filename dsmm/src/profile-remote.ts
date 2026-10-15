@@ -6,11 +6,14 @@ import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute } from "./settings.js";
 import type { GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
 import type { DsmmModuleState } from "./modules.js";
+import { DSMM_MODULE_DESCRIPTORS } from "./modules.js";
 import type { DeploymentEditorSnapshot, DeploymentAdmissionView } from "./profile-types.js";
+import { parseModelParameterPolicy } from "./model-parameter-policy.js";
 import type { DsmmRoleAvailabilityState, ProfileDiagnostic, ProfileDiagnosticLocation, SubagentRuntimeAdmissionView } from "./profile-types.js";
 import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
 import type { DsmmInvocationView, DsmmInitialRoleRoute, DsmmLiveRoleRoute, DsmmRoleRouteComparison } from "./profile-types.js";
 import { diagnostic, isSafeDiagnosticField, PROFILE_DIAGNOSTIC_REASONS } from "./profile-diagnostics.js";
+import { normalizeModelRouteJson } from "./route-json.js";
 
 export interface DsmmConfigRemote {
   describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
@@ -97,12 +100,6 @@ function boolean(value: unknown, field: string): boolean {
 function integer(value: unknown, field: string, maximum = Number.MAX_SAFE_INTEGER): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) fail(field);
   return value;
-}
-function routeText(value: unknown, field: string, maximum: number): string {
-  const result = text(value, field, maximum);
-  if (result.trim() === "" || /[\u0000-\u001f\u007f]/u.test(result)
-    || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(result)) !== result) fail(field);
-  return result;
 }
 function role(value: unknown): DsmmRoleId {
   if (typeof value !== "string" || !rolePattern.test(value)) fail("role");
@@ -234,11 +231,7 @@ function rolePolicy(value: unknown): DsmmRoleRuntimeState {
   };
 }
 function modelRoute(value: unknown): DsmmModelRoute {
-  const route = object(value, ["provider", "model"], ["reasoningEffort"]);
-  const provider = routeText(route.provider, "provider", 128);
-  const model = routeText(route.model, "model", 512);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://")) fail("route");
-  return { provider, model, ...optional(route, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
+  return normalizeModelRouteJson(value);
 }
 function initialRoleRoute(value: unknown): DsmmInitialRoleRoute {
   const row = object(value, ["status"], ["source", "route", "reason"]);
@@ -357,7 +350,7 @@ function globalSnapshot(value: unknown): GlobalConfigSnapshot {
   return { config: jsonData(row.config) as GlobalConfigSnapshot["config"], revision: selectionRevision(row.revision) };
 }
 function admissionView(value: unknown): DeploymentAdmissionView {
-  const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"]);
+  const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
   object(row.settings, [], Object.keys(row.settings as object));
   for (const key of ["sources", "captures"] as const) {
     const map = object(row[key], [], Object.keys(row[key] as object));
@@ -365,7 +358,7 @@ function admissionView(value: unknown): DeploymentAdmissionView {
   }
   if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256) fail("restartRequired");
   const named = row.named === null ? null : object(row.named, ["id", "revision"]);
-  return { settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources) as Record<string, string>,
+  return { ...optional(row, "modelParameterPolicy", value => parseModelParameterPolicy(jsonData(value))), settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources) as Record<string, string>,
     captures: jsonData(row.captures) as Record<string, string>, restartRequired: row.restartRequired.map(value => text(value, "field", 256)),
     named: named === null ? null : { id: id(named.id), revision: revision(named.revision) } };
 }
@@ -380,7 +373,8 @@ function readOnlySettingsData(value: unknown): Record<string, unknown> {
     for (const [key, value] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value !== "<redacted>") fail("private environment");
   }
   if (settings.presets !== undefined) {
-    const presets = object(settings.presets, ["materialize"], ["root"]);
+    const presets = object(settings.presets, ["materialize"], ["root", "plannerRootEnabled"]);
+    if (Object.hasOwn(presets, "plannerRootEnabled")) boolean(presets.plannerRootEnabled, "presets.plannerRootEnabled");
     if (presets.root !== undefined && presets.root !== "<configured>") fail("private directory");
   }
   if (settings.runtimeRecovery !== undefined) {
@@ -409,7 +403,7 @@ function editorSnapshot(value: unknown): DeploymentEditorSnapshot {
   return result;
 }
 function schemaNode(value: unknown): DeploymentEditorSnapshot["schema"] {
-  const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
+  const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty", "additionalProperties"]);
   if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type)) fail("schema type");
   const node = { type: row.type } as DeploymentEditorSnapshot["schema"];
   if (row.fields !== undefined) node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields as object))).map(([key, child]) => [key, schemaNode(child)]));
@@ -419,6 +413,7 @@ function schemaNode(value: unknown): DeploymentEditorSnapshot["schema"] {
   for (const key of ["min", "max", "step"] as const) if (row[key] !== undefined) { if (typeof row[key] !== "number" || !Number.isFinite(row[key])) fail("schema bound"); node[key] = row[key]; }
   if (row.required !== undefined) node.required = boolean(row.required, "schema required");
   if (row.nonempty !== undefined) { if (row.type !== "string") fail("schema nonempty"); node.nonempty = boolean(row.nonempty, "schema nonempty"); }
+  if (Object.hasOwn(row, "additionalProperties")) { if (row.type !== "object" || row.additionalProperties !== "json") fail("schema additionalProperties"); node.additionalProperties = "json"; }
   if (row.keys !== undefined) { if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64) fail("schema keys"); node.keys = row.keys.map(key => text(key, "schema key", 128)); }
   return node;
 }
@@ -440,19 +435,22 @@ function configDescriptor(method: string, parameter?: TypertCodec): InvocationDe
 }
 
 function moduleStates(value: unknown): DsmmModuleState[] {
-  if (!Array.isArray(value) || value.length !== 1) fail("modules");
+  if (!Array.isArray(value) || value.length !== DSMM_MODULE_DESCRIPTORS.length) fail("modules");
+  const ids = new Set<string>();
   return value.map((value) => {
     const row = object(value, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
     const descriptor = object(row.descriptor, ["id", "label", "key"]);
-    if (descriptor.id !== "deepwork" || descriptor.label !== "Deepwork" || descriptor.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown") fail("module descriptor");
+    const known = DSMM_MODULE_DESCRIPTORS.find(known => known.id === descriptor.id);
+    if (known === undefined || descriptor.label !== known.label || descriptor.key !== known.key || row.hostBundleEnabled !== "unknown" || ids.has(known.id)) fail("module descriptor");
+    ids.add(known.id);
     const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-    if (typeof desired.source !== "string" || !["defaults", "global"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
+    if (typeof desired.source !== "string" || !["defaults", "global", "profile"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
       || ![null, "global-disabled", "restart-required"].includes(next.reason as string | null)
       || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason as string | null)) fail("module state");
-    return { descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }, hostBundleEnabled: "unknown",
-      desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source as "defaults" | "global", capture: desired.capture as DsmmModuleState["desired"]["capture"] },
-      startupMounted: boolean(row.startupMounted, "startupMounted"), admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
-      nextRoot: { admitted: boolean(next.admitted, "nextRoot.admitted"), reason: next.reason as DsmmModuleState["nextRoot"]["reason"] },
+    return { descriptor: { ...known }, hostBundleEnabled: "unknown",
+      desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source as DsmmModuleState["desired"]["source"], capture: desired.capture as DsmmModuleState["desired"]["capture"] },
+      startupMounted: row.startupMounted === null ? null : boolean(row.startupMounted, "startupMounted"), admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
+      nextRoot: { admitted: next.admitted === null ? null : boolean(next.admitted, "nextRoot.admitted"), reason: next.reason as DsmmModuleState["nextRoot"]["reason"] },
       reason: row.reason as DsmmModuleState["reason"], pending: boolean(row.pending, "pending") };
   });
 }

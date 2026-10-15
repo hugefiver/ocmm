@@ -37,7 +37,7 @@ for (const [scenario, requirement] of [
   ["child-ask-unsupported", "real parent and child turns cannot substitute for supported native child caller lifetime before approval"],
   ["child-ask-idle", "an idle child cannot receive approval merely because its parent has a real open turn"],
   ["child-ask-never", "never-ask composition cannot silently allow actual child approval"],
-  ["full-params", "the real full parent pipeline sees exact mapped path and all read parameters"],
+  ["full-params", "the real full parent pipeline sees the mapped file identity and all read parameters"],
   ["deny-parent", "later parent native denial is not bypassed by the child guard"],
   ["deny-child", "later child native denial prevents the parent body"],
   ["post-parent", "normal parent post denial survives actual operation completion"],

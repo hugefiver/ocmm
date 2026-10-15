@@ -83,3 +83,21 @@ test("package-independent resource layout preserves meaningful fixtures and refu
     rmSync(temporary, { recursive: true });
   }
 });
+
+test("source checks reject newline conversion of verbatim resources and licenses without rewriting them", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "dsmm-source-bytes-"));
+  try {
+    maintenance.syncSourceAssets({ root: temporary });
+    for (const artifact of ["skills/coding-agent-sessions/scripts/agent_sessions/pi_family.py", "skills/ast-grep/LICENSE"]) {
+      const target = join(temporary, artifact), original = readFileSync(target);
+      const text = original.toString("utf8");
+      const converted = Buffer.from(text.includes("\r\n") ? text.replaceAll("\r\n", "\n") : text.replaceAll("\n", "\r\n"));
+      assert.notDeepEqual(converted, original);
+      writeFileSync(target, converted);
+      assert.deepEqual(maintenance.syncSourceAssets({ root: temporary, check: true }).differences, [artifact]);
+      assert.deepEqual(readFileSync(target), converted);
+      maintenance.syncSourceAssets({ root: temporary });
+      assert.deepEqual(readFileSync(target), original);
+    }
+  } finally { rmSync(temporary, { recursive: true }); }
+});

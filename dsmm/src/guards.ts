@@ -8,8 +8,12 @@ import type { ShellDialect, ShellDialectViolation } from "./shell-command.js";
 import type { DeepworkModeController } from "./state.js";
 import { resolveAdmittedDsmmRole } from "./role-policy.js";
 import type { DsmmRolePolicy } from "./role-policy.js";
-import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
+import type { ToolExecution, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshAgent } from "./dsh-types.js";
+import { Context } from "@deepseek-ai/cordis";
+import type { Agent } from "@deepseek-ai/dsh-agent";
+import { nativeStandingFullAccess } from "./permission-native-access.js";
+import { DsmmProfileError } from "./profiles.js";
 
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 
@@ -215,8 +219,9 @@ function todoDisciplineDecision(exec: DshToolExecution, settings: DsmmSettings):
   };
 }
 
-export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSettings, controller: DeepworkModeController): DshPreToolDecision | undefined {
+export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSettings, controller: DeepworkModeController, nativeFullAccess = false): DshPreToolDecision | undefined {
   if (!isSafetyScopeActive(exec, settings, controller)) return undefined;
+  if (nativeFullAccess) return settings.guards.gitWriteGuard === "deny" ? gitWriteDecision(exec, settings) : undefined;
 
   if (settings.guards.shellCommandSafety) {
     const shell = shellSafetyDecision(exec);
@@ -265,17 +270,23 @@ export function decidePostToolExecution(
 }
 
 export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, rolePolicy?: DsmmRolePolicy): void {
+  const truncationLimits = new WeakMap<object, number>();
   const tools = ctx.get?.<ToolRuntime>("tools");
   if (rolePolicy !== undefined && tools !== undefined) {
-    const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent as unknown as DshAgent, execution.name, tools));
+    const guard = tools.guard((execution) => execution.agent === undefined ? undefined : rolePolicy.toolDenial(execution.agent as unknown as DshAgent, execution.name, tools, execution));
     ctx.effect?.(() => guard);
   }
   ctx.on?.("tools/pre-execute", async (exec: DshToolExecution, next: () => Promise<DshPreToolDecision>) => {
-    // Role authority precedes optional workflow helpers in every tool realm;
-    // turning common/guards off cannot grant a read-only role a mutation.
-    const denied = exec.agent === undefined ? undefined : rolePolicy?.toolDenial(exec.agent, exec.name);
+    const execution = exec as unknown as Readonly<ToolExecution>;
+    const full = Context.is(ctx) && nativeStandingFullAccess(ctx, exec.agent as Agent | undefined);
+    rolePolicy?.captureToolExecution(execution, full);
+    const denied = exec.agent === undefined ? undefined : full ? rolePolicy?.toolBlacklistDenial(exec.agent, exec.name, execution) : rolePolicy?.preToolDenial(exec.agent, exec.name, undefined, execution);
     if (denied !== undefined) return { kind: "deny", reason: denied };
-    const decision = decidePreToolExecution(exec, getSettings(exec.agent), controller);
+    let settings: DsmmSettings;
+    try { settings = getSettings(exec.agent); }
+    catch (error) { if (full && error instanceof DsmmProfileError && !["disposed", "not-owned", "cancelled"].includes(error.code)) return next(); throw error; }
+    const decision = decidePreToolExecution(exec, settings, controller, full);
+    if (!full && settings.modules.deepwork.enabled && settings.guards.toolOutputTruncation.enabled && isSafetyScopeActive(exec, settings, controller)) truncationLimits.set(exec, settings.guards.toolOutputTruncation.maxInlineBytes);
     if (decision === undefined) return next();
     if (decision.kind === "deny") return decision;
 
@@ -284,8 +295,10 @@ export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeCo
   }, { prepend: true });
 
   ctx.on?.("tools/post-execute", async (exec: DshToolExecution, result: DshToolExecutionResult, next: () => Promise<DshPostToolDecision>) => {
-    const settings = getSettings(exec.agent);
     const decision = await next();
-    return decidePostToolExecution(exec, result, decision, settings, controller);
+    const limit = truncationLimits.get(exec);
+    if (limit === undefined || result.isError || decision.kind !== "accept" || "value" in decision) return decision;
+    const text = allText(decision.content ?? result.content);
+    return text === undefined || utf8Bytes(text) <= limit ? decision : { ...decision, content: [{ type: "text", text: truncateTextMiddle(text, limit, exec.name) }] };
   }, { prepend: true });
 }

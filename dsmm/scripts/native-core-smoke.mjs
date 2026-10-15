@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CORE_CHECKS_020, isReviewedSource, isSource021, validateCoreProof } from "./release-contract.mjs";
+import { CORE_CHECKS_020, isReviewedSource, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
 import { inspectStableBootstrap } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-native-core-020-acceptance";
@@ -48,7 +48,7 @@ export function apply(ctx, config) {
     stage = "native-core-loader-namespace";
     assert.equal(before.namespace, entry.options.id);
     assert.equal(before.entryId, entry.id);
-    const bootstrap = isSource021(manifest.version) ? inspectStableBootstrap(ctx, { requireDeliveryFence: false }) : undefined;
+    const bootstrap = isStableNativeSource(manifest.version) ? inspectStableBootstrap(ctx, { requireDeliveryFence: false }) : undefined;
     stage = "native-core-loader-and-profile";
     const form = ctx.get("settings").describe().find(({ ns }) => ns === before.namespace);
     assert.ok(form && Number.isSafeInteger(form.revision));
@@ -88,7 +88,7 @@ export function apply(ctx, config) {
     }
     stage = "native-core-proof";
     const proof = { outcome: "COMPLETED", artifactSha256: config.sha256, packageVersion: manifest.version,
-      ...(isSource021(manifest.version) ? { sourceContract: "0.2.1", bootstrap } : {}),
+      ...(isStableNativeSource(manifest.version) ? { sourceContract: manifest.version, bootstrap } : {}),
       installedPackage: manifest.name, postAppReady: true, externalModelCalls: false, productionAuthenticationModified: false,
       clientSha256: createHash("sha256").update(readFileSync(join(config.packageRoot, "lib", "client.js"))).digest("hex"),
       checks: Object.fromEntries(CORE_CHECKS_020.map((key) => [key, true])) };

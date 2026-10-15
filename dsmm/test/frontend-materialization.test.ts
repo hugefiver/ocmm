@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -43,7 +43,7 @@ test("fixed frontend mapping covers source names, real Python dependencies, orig
 test("authored frontend rules authorize capabilities and use the actual resource script only in the approved project/output domain", () => {
   const directory = fixture();
   try {
-    const resourceBase = join(directory, "skills/frontend");
+    const resourceBase = realpathSync.native(join(directory, "skills/frontend"));
     const entry = readFileSync(join(resourceBase, "SKILL.md"), "utf8");
     const router = readFileSync(join(resourceBase, "references/design/README.md"), "utf8");
     const tooling = readFileSync(join(resourceBase, "references/design/react-dev-tooling-skill.md"), "utf8");
@@ -56,8 +56,9 @@ test("authored frontend rules authorize capabilities and use the actual resource
     assert.match(parser, /add_argument\("--persist"/u);
     assert.match(parser, /add_argument\("--output-dir", "-o"/u);
     assert.match(readFileSync(join(resourceBase, "references/ui-ux-db/scripts/design_system.py"), "utf8"), /base_dir = Path\(output_dir\) if output_dir else Path\.cwd\(\)/u);
-    const project = join(directory, "target-project"), output = join(project, "approved-output");
-    mkdirSync(project);
+    const projectPath = join(directory, "target-project");
+    mkdirSync(projectPath);
+    const project = realpathSync.native(projectPath), output = join(project, "approved-output");
     const capture = join(directory, "capture-cli.mjs");
     writeFileSync(capture, "console.log(JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));\n");
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -169,16 +170,11 @@ test("actual tarball ships every ignored resource and native skill resourceBase 
     // Supply existing declared SDK peers, never install a package or create a
     // source-checkout dependency in the distribution itself.
     const pinnedEntry = process.env.DSMM_TEST_DSH_ENTRY;
-    if (pinnedEntry !== undefined) {
-      assert.equal(JSON.parse(readFileSync(pinnedEntry, "utf8")).version, "0.2.0-rc.2");
-      symlinkSync(join(dirname(pinnedEntry), "node_modules"), join(staged, "node_modules"), "junction");
-    } else {
-      const peers = createRequire(import.meta.url);
-      mkdirSync(join(staged, "node_modules/@deepseek-ai"), { recursive: true });
-      for (const name of ["cordis", "dsh-agent-preset-registry"]) {
-        const installed = dirname(peers.resolve(`@deepseek-ai/${name}/package.json`));
-        symlinkSync(installed, join(staged, "node_modules/@deepseek-ai", name), "junction");
-      }
+    const peers = createRequire(pinnedEntry === undefined ? import.meta.url : realpathSync.native(pinnedEntry));
+    mkdirSync(join(staged, "node_modules/@deepseek-ai"), { recursive: true });
+    for (const name of ["cordis", "dsh-agent-preset-registry"]) {
+      const installed = dirname(peers.resolve(`@deepseek-ai/${name}/package.json`));
+      symlinkSync(installed, join(staged, "node_modules/@deepseek-ai", name), "junction");
     }
     const module = await import(pathToFileURL(join(staged, "lib/skills.js")).href);
     const loaded = await module.readBundledSkill("frontend", new AbortController().signal);

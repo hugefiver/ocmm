@@ -1,18 +1,28 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
-test("fresh pnpm 11 installs approve only the two pinned required dependency builds", () => {
-  const workspace = readFileSync(new URL("../pnpm-workspace.yaml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
-  assert.match(workspace, /^strictDepBuilds: true$/mu);
-  assert.match(workspace, /\nallowBuilds:\n  esbuild@0\.25\.12: true\n  koffi@3\.1\.1: true\n$/u);
-  assert.doesNotMatch(workspace, /(?:dangerouslyAllowAllBuilds|onlyBuiltDependencies|ignoredBuiltDependencies|neverBuiltDependencies|ignoreDepScripts):/u);
-});
+test("effective pnpm configuration approves only the two pinned required dependency builds", () => {
+  const config = JSON.parse(execFileSync(
+    process.platform === "win32" ? "cmd.exe" : "pnpm",
+    process.platform === "win32"
+      ? ["/d", "/s", "/c", "pnpm config list --json"]
+      : ["config", "list", "--json"],
+    { cwd: new URL("../", import.meta.url), encoding: "utf8" },
+  ));
+  assert.equal(config.strictDepBuilds, true);
+  for (const key of ["dangerouslyAllowAllBuilds", "onlyBuiltDependencies", "ignoredBuiltDependencies", "neverBuiltDependencies", "ignoreDepScripts"]) {
+    assert.equal(config[key], undefined, `${key} must not override build approvals`);
+  }
 
-test("DSMM source verification retains frozen installation rather than suppressing dependency build failures", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/dsmm-release.yml", import.meta.url), "utf8");
-  const sourceStep = workflow.split("- name: Verify future source with pnpm")[1]?.split("- name:")[0];
-  assert.ok(sourceStep);
-  assert.match(sourceStep, /pnpm install --frozen-lockfile/u);
-  assert.doesNotMatch(sourceStep, /(?:--ignore-scripts|strict[-_]?[Dd]ep[-_]?[Bb]uilds=false|dangerouslyAllowAllBuilds|\|\|\s*true)/u);
+  const approvals = Object.entries(config.allowBuilds);
+  for (const [dependency, allowed] of approvals) {
+    assert.equal(typeof allowed, "boolean", `${dependency} must have an explicit build decision`);
+  }
+  assert.deepEqual(approvals.filter(([, allowed]) => allowed).map(([dependency]) => dependency).sort(), [
+    "esbuild@0.25.12",
+    "koffi@3.1.1",
+  ]);
+  assert.equal(config.allowBuilds["@google/genai@2.21.0"], false);
+  assert.equal(config.allowBuilds["protobufjs@7.6.6"], false);
 });

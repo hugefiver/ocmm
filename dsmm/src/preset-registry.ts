@@ -1,11 +1,15 @@
 import type { DshContext } from "./dsh-types.js";
-import { getTraceable } from "@deepseek-ai/cordis";
+import { Context as NativeContext, getTraceable } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
-import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole, rolePluginRows } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, rolePluginRows } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
 import type { DsmmSettings } from "./settings.js";
-import { allowedRoleChildren, readonlyRoleTool, roleFromToolName } from "./role-policy.js";
+import { isRootRoleEnabled } from "./settings.js";
+import { allowedRoleChildren, readonlyRoleTool, roleFromToolName, READONLY_ROLE_DENIED_TOOLS } from "./role-policy.js";
+import type { PreToolDecision, ToolExecution } from "@deepseek-ai/dsh-tools";
+import { nativeStandingFullAccess } from "./permission-native-access.js";
+import { scopeParentOf } from "./native-scope.js";
 
 interface NativePresetRegistry {
   register(definition: {
@@ -20,8 +24,8 @@ interface NativePresetRegistry {
 }
 
 interface NativeScopedTools {
+  get(name: string, scope?: object): unknown;
   restrict(filter: { deny: string[] }): () => void;
-  guard(callback: (execution: { name: string; agent?: NativeAgent }) => string | undefined): () => void;
 }
 
 interface NativeAgent {
@@ -41,7 +45,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
     if (registry === undefined) throw new Error("dsmm requires the native DSH agentPresets registry");
     const settings = getSettings();
     const enabled = DSMM_ROLE_IDS.filter((id) => settings.modules.deepwork.enabled && settings.roles[id]);
-    const active = DSMM_ROLES.filter((role) => isRootRole(role) && enabled.includes(role.id));
+    const active = DSMM_ROLES.filter((role) => isRootRoleEnabled(settings, role.id));
     const disposers: Array<() => Promise<void>> = [];
     try {
       for (const role of active) {
@@ -59,15 +63,21 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
       // A direct selection of a read-only preset must be restricted at the Agent
       // scope: preset-local fs registrations cannot be filtered within their own layer.
       // Blank Agents can switch presets without another agent/created event.
-      const states = new WeakMap<NativeAgent, { role: string | undefined; disposeRestriction?: () => void; disposeGuard?: () => void; pending?: boolean }>();
+      const states = new WeakMap<NativeAgent, { role: string | undefined; disposeRestriction?: () => void; pending?: boolean }>();
       const restrictedAgents = new Set<NativeAgent>();
+      const denial = (agent: NativeAgent, name: string): string | undefined => {
+        const role = registry.composedPreset(agent.ctx);
+        if (!isReadonlyRole(role)) return undefined;
+        const target = roleFromToolName(name);
+        return target === undefined ? readonlyRoleTool(name, settings) ? undefined : "dsmm read-only role does not permit this tool"
+          : allowedRoleChildren(role).includes(target) && settings.roles[target] ? undefined : "dsmm read-only role does not permit this delegation";
+      };
       const reconcile = (agent: NativeAgent): void => {
         const selected = registry.composedPreset(agent.ctx);
         const previous = states.get(agent);
         if (previous !== undefined && previous.role === selected && (previous.pending || !isReadonlyRole(selected) || previous.disposeRestriction !== undefined)) return;
         states.set(agent, { role: selected, pending: true });
         previous?.disposeRestriction?.();
-        previous?.disposeGuard?.();
         restrictedAgents.delete(agent);
         if (!isReadonlyRole(selected)) {
           states.set(agent, { role: selected });
@@ -81,28 +91,30 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
           : agent.ctx.get?.<NativeScopedTools>("tools")
             ?? (agent.ctx.get === undefined ? agent.ctx.tools : undefined);
         try {
-          if (tools?.restrict === undefined || tools.guard === undefined) throw new Error(`dsmm read-only role requires DSH tools guard/restrict: ${selected}`);
-          const disposeGuard = tools.guard((execution) => {
-            if (execution.agent !== agent || !isReadonlyRole(registry.composedPreset(agent.ctx))) return undefined;
-            const role = registry.composedPreset(agent.ctx) as DsmmRoleId;
-            const target = roleFromToolName(execution.name);
-            return target === undefined ? readonlyRoleTool(execution.name, settings) ? undefined : "dsmm read-only role does not permit this tool"
-              : allowedRoleChildren(role).includes(target) && settings.roles[target] ? undefined : "dsmm read-only role does not permit this delegation";
-          });
-          states.set(agent, { role: selected, disposeGuard, pending: true });
+          if (tools?.restrict === undefined) throw new Error(`dsmm read-only role requires DSH tools restrict: ${selected}`);
           restrictedAgents.add(agent);
-          const disposeRestriction = tools.restrict({ deny: ["write", "edit"] });
-          states.set(agent, { role: selected, disposeGuard, disposeRestriction });
+          // Only inherited tools are maskable; own-layer tools remain subject to runtime denial.
+          const inheritedScope = scopeParentOf(agent);
+          const disposeRestriction = tools.restrict({ deny: READONLY_ROLE_DENIED_TOOLS.filter(name => tools.get(name, inheritedScope) !== undefined) });
+          states.set(agent, { role: selected, disposeRestriction });
         } catch (error) {
-          if (states.get(agent)?.disposeGuard === undefined) states.delete(agent);
-          else states.set(agent, { role: selected, disposeGuard: states.get(agent)?.disposeGuard });
+          states.set(agent, { role: selected });
+          restrictedAgents.delete(agent);
           throw error;
         }
       };
-      const onCreated = readyCtx.on?.("agent/created", ({ agent }: { agent: NativeAgent }) => reconcile(agent), { global: true });
       const agents = readyCtx.get?.<NativeAgentRegistry>("agents")
         ?? (readyCtx as DshContext & { agents?: NativeAgentRegistry }).agents;
       if (agents === undefined) throw new Error("dsmm native preset restriction requires DSH Agent registry");
+      const onPreExecute = readyCtx.on?.("tools/pre-execute", async (execution: Readonly<ToolExecution>, next: () => Promise<PreToolDecision>) => {
+        const agent = execution.agent;
+        if (agent === undefined || agents.get(agent.id) !== agent) return next();
+        const full = NativeContext.is(readyCtx) && nativeStandingFullAccess(readyCtx, agent);
+        if (full && !(READONLY_ROLE_DENIED_TOOLS as readonly string[]).includes(execution.name)) return next();
+        const reason = denial(agent, execution.name);
+        return reason === undefined ? next() : { kind: "deny", reason };
+      }, { global: true, prepend: true });
+      const onCreated = readyCtx.on?.("agent/created", ({ agent }: { agent: NativeAgent }) => reconcile(agent), { global: true });
       const onToolChange = readyCtx.on?.("tools/change", () => {
         for (const agent of agents.list()) reconcile(agent);
       }, { global: true });
@@ -112,19 +124,18 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
       }, { global: true });
       const onDisposed = readyCtx.on?.("agent/disposed", ({ agent }: { agent: NativeAgent }) => {
         states.get(agent)?.disposeRestriction?.();
-        states.get(agent)?.disposeGuard?.();
         states.delete(agent);
         restrictedAgents.delete(agent);
       }, { global: true });
 
       readyCtx.effect?.(() => () => {
         if (typeof onCreated === "function") onCreated();
+        if (typeof onPreExecute === "function") onPreExecute();
         if (typeof onToolChange === "function") onToolChange();
         if (typeof onSelection === "function") onSelection();
         if (typeof onDisposed === "function") onDisposed();
         for (const agent of restrictedAgents) {
           states.get(agent)?.disposeRestriction?.();
-          states.get(agent)?.disposeGuard?.();
         }
         restrictedAgents.clear();
         for (const dispose of disposers.reverse()) void dispose();

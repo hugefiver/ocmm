@@ -155,15 +155,18 @@ test("an auxiliary manual native route retains its policy-authorized fallback un
     rateLimit: { initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0, maxRetries: 1, switchAfterRateLimits: 1, maxSwitches: 1 } } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.createAuxiliary("dsmm-reviewer", selection); await nativeSelect(agent, selection, manual);
+    const agent = await fixture.createAuxiliary("dsmm-reviewer", selection);
+    await runFixtureTurn(agent);
+    assert.deepEqual(headerRoutes(agent), [primary]);
+    await nativeSelect(agent, selection, manual);
     fixture.adapter.beforeStream = async (call) => { if (call.model === manual.model) throw new LlmError("manual-route rate limit", "RATE_LIMIT", { status: 429 }); };
     await runFixtureTurn(agent); await runFixtureTurn(agent);
-    assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [manual.model, backup.model, backup.model]);
-    assert.deepEqual(headerRoutes(agent), [manual, backup]);
+    assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model, manual.model, backup.model, backup.model]);
+    assert.deepEqual(headerRoutes(agent), [primary, manual, backup]);
     fixture.adapter.beforeStream = undefined;
     await nativeSelect(agent, selection, manual); await runFixtureTurn(agent);
-    assert.deepEqual(headerRoutes(agent), [manual, backup, manual]);
-    assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [manual.model, backup.model, backup.model, manual.model]);
+    assert.deepEqual(headerRoutes(agent), [primary, manual, backup, manual]);
+    assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [primary.model, manual.model, backup.model, backup.model, manual.model]);
   } finally { await fixture.dispose(); }
 });
 

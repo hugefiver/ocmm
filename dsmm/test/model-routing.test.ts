@@ -330,7 +330,7 @@ test("model routing changes only reasoningEffort and preserves downstream values
   const messages = [{ role: "user", content: "secret request body: do-not-log" }];
   const tools = [{ name: "tool" }];
   const signalMetadata = { credential: "credential-do-not-log" };
-  const stop = { marker: "stop" };
+  const stop = ["stop"];
   const unknownNestedOption = { nested: true };
   const downstream = officialConfig({
     reasoningEffort: "off",

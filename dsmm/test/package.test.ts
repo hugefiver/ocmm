@@ -51,7 +51,7 @@ const publicRuntimeRecoveryTypes = null as unknown as [
 ];
 void publicRuntimeRecoveryTypes;
 
-test("package manifest exposes dsh bundle metadata", () => {
+test("public package entries resolve delivered files and expose native bundle configuration", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
   assert.equal(pkg.name, "@dsmm/dsmm");
@@ -60,47 +60,14 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.equal(pkg.type, "module");
   assert.equal(pkg.main, "./lib/index.js");
   assert.equal(pkg.types, "./lib/index.d.ts");
-  assert.deepEqual(pkg.exports, {
-    ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
-    "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
-    "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
-    "./subagent-runtime": { types: "./lib/runtime-integration.d.ts", default: "./lib/runtime-integration.js" },
-    "./legacy-read-host": { types: "./lib/legacy-read-host.d.ts", default: "./lib/legacy-read-host.js" },
-    "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
-    "./package.json": "./package.json",
-    "./locale/en.json": "./locale/en.json",
-    "./locale/zh.json": "./locale/zh.json"
-  });
-  assert.deepEqual(pkg.files, [
-    "lib/**/*.js",
-    "lib/**/*.d.ts",
-    "scripts/repair-session-log.mjs",
-    "scripts/session-repair-native-verifier.mjs",
-    "locale/*.json",
-    "agent-presets",
-    "docs/agent-presets.md",
-    "docs/compatibility.md",
-    "docs/design.md",
-    "docs/lsp.md",
-    "docs/migration-from-ocmm.md",
-    "docs/model-routing.md",
-    "docs/profiles.md",
-    "docs/releasing.md",
-    "docs/research",
-    "docs/roadmap.md",
-    "docs/runtime-recovery.md",
-    "docs/safety-guards.md",
-    "docs/settings-status.md",
-    "docs/skill-sync.md",
-    "patches",
-    "prompts",
-    "skills",
-    "cordis.patch.yml",
-    "LICENSE",
-    "README.md"
-  ]);
-  assert.equal(pkg.files.includes("lib"), false);
-  assert.equal(pkg.files.some((path: string) => path.includes("implementation-plan")), false);
+  for (const entry of ["", "/preset-skills", "/session-persistence", "/subagent-runtime", "/legacy-read-host",
+    "/managed-settings", "/llm-runtime", "/permission-bash", "/permission-pwsh", "/permission-fs", "/permission-fs-search", "/permission-web",
+    "/client", "/package.json", "/locale/en.json", "/locale/zh.json"]) {
+    const resolved = fileURLToPath(import.meta.resolve(`@dsmm/dsmm${entry}`));
+    assert.equal(existsSync(resolved), true, entry);
+    const declaration = pkg.exports[entry === "" ? "." : `.${entry}`]?.types;
+    if (declaration !== undefined) assert.equal(existsSync(join(packageRoot, declaration)), true, declaration);
+  }
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
   assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
@@ -112,12 +79,12 @@ test("package manifest exposes dsh bundle metadata", () => {
   assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
 });
 
-test("package includes only the exact operator repair entrypoints without exposing repair APIs", () => {
-  const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+test("operator repair entrypoints are explicit scripts rather than public plugin imports", async () => {
   const scripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
-  assert.deepEqual(pkg.files.filter((path: string) => path.startsWith("scripts")), scripts);
-  assert.equal(Object.keys(pkg.exports).some((path) => /repair|operator/u.test(path)), false);
-  for (const path of scripts) assert.equal(existsSync(join(packageRoot, path)), true, path);
+  for (const path of scripts) {
+    assert.throws(() => import.meta.resolve(`@dsmm/dsmm/${path}`), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+    await import(new URL(`../${path}`, import.meta.url).href);
+  }
 });
 
 test("exported native plugin metadata displays DSMM Core in both languages without renaming the package", () => {

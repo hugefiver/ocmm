@@ -41,7 +41,7 @@ interface ParentState<A extends DeliveryAdmission> {
   readonly lifetime: AbortController;
   readonly usedEpochs: Set<string>;
   publishing: boolean;
-  prepared?: { expectedEpoch: string; admission: A; controller: AbortController };
+  prepared?: { expectedEpoch: string; expected: A; admission: A; controller: AbortController };
   detachResidency?: () => void;
 }
 
@@ -199,6 +199,7 @@ export class DsmmDeliveryAuthority<A extends DeliveryAdmission = DeliveryAdmissi
 
   assertTicket(ticket: ParentAdmissionTicket<A>): void {
     ticket.signal.throwIfAborted();
+    if (!this.view().deliveryFenceReady) unauthorized();
     const state = this.current(ticket.parent);
     if (this.tickets.get(ticket) !== state || state.owner !== ticket.owner || state.admission !== ticket.admission
       || state.admission.epoch !== ticket.parentEpoch) unauthorized();
@@ -224,14 +225,28 @@ export class DsmmDeliveryAuthority<A extends DeliveryAdmission = DeliveryAdmissi
     if (!this.view().deliveryFenceReady) unauthorized();
     const state = this.current(parent);
     if (state.admission.epoch !== expectedEpoch || nextAdmission.epoch.length === 0 || state.usedEpochs.has(nextAdmission.epoch)) unauthorized();
-    state.prepared = { expectedEpoch, admission: nextAdmission, controller: new AbortController() };
+    state.prepared = { expectedEpoch, expected: state.admission, admission: nextAdmission, controller: new AbortController() };
+  }
+
+  /** Core configuration uses the same exact parent state without acquiring delivery capability. */
+  assertCoreParentAdmission(parent: Agent, owner: object, expected: A): void {
+    const state = this.current(parent);
+    if (state.owner !== owner || state.admission !== expected || state.admission.epoch !== expected.epoch
+      || parent.session.header.origin === "subagent" || !this.ctx.agents.roots().includes(parent)) unauthorized();
+  }
+
+  prepareCoreParentAdmission(parent: Agent, owner: object, expected: A, nextAdmission: A): void {
+    this.assertCoreParentAdmission(parent, owner, expected);
+    const state = this.current(parent);
+    if (nextAdmission.epoch.length === 0 || state.usedEpochs.has(nextAdmission.epoch)) unauthorized();
+    state.prepared = { expectedEpoch: expected.epoch, expected, admission: nextAdmission, controller: new AbortController() };
   }
 
   /** Trusted successful-commit callback: install MUST be synchronous and nonthrowing. */
   publishParentAdmission(parent: Agent, expectedEpoch: string, nextAdmission: A, install: () => void): void {
     const state = this.current(parent);
     const prepared = state.prepared;
-    if (state.admission.epoch !== expectedEpoch || prepared?.expectedEpoch !== expectedEpoch || prepared.admission !== nextAdmission) unauthorized();
+    if (state.admission.epoch !== expectedEpoch || prepared?.expectedEpoch !== expectedEpoch || prepared.expected !== state.admission || prepared.admission !== nextAdmission) unauthorized();
     const previous = state.epoch;
     state.publishing = true;
     try {

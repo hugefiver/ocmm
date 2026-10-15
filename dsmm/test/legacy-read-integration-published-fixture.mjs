@@ -1,17 +1,11 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { downloadPublishedLegacyArtifact } from "./published-legacy-artifact-fixture.mjs";
 
 const [phase, root] = process.argv.slice(2);
 if (phase === "download-artifact") {
-  // Published input for the isolated two-process fixture, not a workstation installation.
-  const response = await fetch("https://registry.npmjs.org/@dsmm/dsmm/-/dsmm-0.2.0.tgz");
-  assert.equal(response.ok, true);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "8aa093408b7831defdbe780e73a82c05ee75a270aada3e5700d1f1f6cf815a4c");
-  await writeFile(root, bytes, { flag: "wx" });
-  console.log(JSON.stringify({ downloaded: true, bytes: bytes.length }));
+  console.log(JSON.stringify(await downloadPublishedLegacyArtifact(root)));
 } else if (phase === "resume") {
   const { fixture } = await import("./legacy-read-integration-fixture.mjs");
   const records = JSON.parse(await readFile(join(root, "children.json"), "utf8")), rows = [];

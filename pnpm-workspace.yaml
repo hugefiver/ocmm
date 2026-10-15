@@ -7,3 +7,5 @@ strictDepBuilds: true
 allowBuilds:
   esbuild@0.25.12: true
   koffi@3.1.1: true
+  '@google/genai@2.21.0': false
+  protobufjs@7.6.6: false

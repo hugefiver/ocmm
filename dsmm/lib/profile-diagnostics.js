@@ -1,5 +1,6 @@
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import { DSMM_RATE_LIMIT_BOUNDS } from "./routing-policy.js";
+import { permissionControlSchema } from "./permission-settings.js";
 export const PROFILE_DIAGNOSTIC_REASONS = {
     "invalid-jsonc": "Use one valid document with supported JSON syntax.",
     "duplicate-field": "Remove the duplicate field.",
@@ -14,6 +15,15 @@ export const PROFILE_DIAGNOSTIC_REASONS = {
     "blank-label": "The label is blank; the profile ID is used for display."
 };
 export const DEPRECATED_DSMM_FIELDS = ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets"];
+function schemaFieldShape(schema) {
+    if (schema.type === "transform")
+        return schemaFieldShape(schema.inner);
+    if (schema.type === "object")
+        return Object.fromEntries(Object.entries(schema.dict ?? {}).map(([key, child]) => [key, schemaFieldShape(child)]));
+    if (schema.type === "array")
+        return [schemaFieldShape(schema.inner)];
+    return null;
+}
 // Closed wire grammar: dynamic role/skill names are declared identifiers, not arbitrary object keys.
 const roleId = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader|frontend|hard-reasoning|research|quick|coding|normal-task|complex|deep|documenting|cross-cutting)$/u;
 const skillId = /^(?:brainstorming|writing-plans|requesting-code-review|receiving-code-review|subagent-driven-development|dispatching-parallel-agents|remove-ai-slops|debugging|frontend|git-master|ast-grep|coding-agent-sessions|init-deep|using-git-worktrees)$/u;
@@ -21,12 +31,14 @@ const route = { provider: null, model: null, reasoningEffort: null };
 const rateLimit = Object.fromEntries(Object.keys(DSMM_RATE_LIMIT_BOUNDS).map(key => [key, null]));
 const roleRouting = { primary: route, fallbackRoutes: [route], strategy: null, rateLimit, levels: { low: route, high: route, max: route } };
 const configFields = {
+    permissionControl: schemaFieldShape(permissionControlSchema),
+    modelParameters: { passthrough: null },
     locale: null, modeName: null, section: null, defaultActive: null, promptOrder: null,
     deepseekV4ProCalibration: null, deepseekV4ProDefaultReasoningEffort: null, deepseekFlashCalibration: null, deepseekFlashDefaultReasoningEffort: null,
     deepseekV4ProMaxReasoningPresets: null, deepseekFlashMaxReasoningPresets: null,
     modules: { deepwork: { enabled: null } }, sessionPersistence: { root: null, compression: null },
     skills: "skills", roles: "roles", roleRouting: "role-routing", runtimePolicy: { strategy: null, rateLimit },
-    presets: { materialize: null, root: null }, subagents: { toolTopology: null, allowRouteOverride: null, enableRunInBackground: null, backgroundMode: null, maxDepth: null },
+    presets: { materialize: null, plannerRootEnabled: null, root: null }, subagents: { toolTopology: null, allowRouteOverride: null, enableRunInBackground: null, backgroundMode: null, maxDepth: null },
     workflow: { policy: null, strictGates: null, reviewCap: null, finalReviewPolicy: null },
     guards: { scope: null, shellCommandSafety: null, gitWriteGuard: null, toolOutputTruncation: { enabled: null, maxInlineBytes: null }, planFormatValidation: null, questionLabelHelper: { enabled: null, maxLabelChars: null }, todoDisciplineHelper: null },
     runtimeRecovery: { enabled: null, retryOnStatusCodes: [null], retryOnCodes: [null], fallbackRoutes: [route], maxFallbackAttempts: null, idleContinuation: { enabled: null, maxContinuations: null, prompt: null } },

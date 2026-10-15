@@ -14,7 +14,7 @@ import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshAgent as PackageDshAgent, DshContext, DshSkillCandidate, DshSkillProvider, DshSkillRegistry } from "../lib/dsh-types.js";
 import { registerSafetyGuards } from "../lib/guards.js";
 import { resolveManagedPresetRoot } from "../lib/preset-materializer.js";
-import { DSMM_ROLE_IDS } from "../lib/roles.js";
+import { DSMM_ROLE_IDS, DSMM_ROLES } from "../lib/roles.js";
 import { resolveConfig } from "../lib/settings.js";
 import { DSMM_SKILL_NAMES, bundledSkillMetadata, readBundledSkill, registerBundledSkills } from "../lib/skills.js";
 import { DeepworkModeController } from "../lib/state.js";
@@ -25,6 +25,16 @@ type DshAgent = Omit<PackageDshAgent, "ctx">;
 const noRoles = Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, false]));
 const native = () => nativeRoutingFixture({ roles: noRoles }, { nativePresets: true, spawn: false });
 const adapterAgent = (agent: import("@deepseek-ai/dsh-agent").Agent): DshAgent => agent;
+
+async function contractHostServices(ctx: Context): Promise<void> {
+  const denied = async (): Promise<never> => { throw new Error("fixture forbids filesystem/network/process operations"); };
+  ctx.provide("web", { search: denied, fetch: denied });
+  if (ctx.get("fs") === undefined) ctx.provide("fs", { readFile: denied, writeFile: denied, edit: denied, stat: denied });
+  ctx.provide("subprocess", { spawn: denied });
+  ctx.provide("shell", { execute: denied });
+  ctx.provide("shellEnv", { resolve: denied });
+  ctx.provide("jobs", { start: denied, list: () => [], attachController: () => () => {}, events: { subscribe: () => () => {} } });
+}
 
 test("mounting DSMM after an ordinary root registers enabled startup presets before auditing and binding it", async () => {
   let retained: import("@deepseek-ai/dsh-agent").Agent | undefined;
@@ -55,7 +65,9 @@ test("mounting DSMM after an ordinary root registers enabled startup presets bef
     assert.ok(retained); assert.equal(f.agents.get(retained.id), retained);
     assert.equal(runtime.getSettings(adapterAgent(retained)).roles["dsmm-orchestrator"], true);
     assert.equal(runtime.admission(adapterAgent(retained)).deployment, runtime.admission().deployment, "retained roots share the validated frozen startup snapshot");
-    for (const id of ["dsmm-orchestrator", "dsmm-planner", "dsmm-builder"]) {
+    assert.equal(runtime.getSettings(adapterAgent(retained)).roles["dsmm-planner"], true);
+    assert.deepEqual((await f.ctx.agentPresets.list()).filter(preset => preset.id.startsWith("dsmm-")).map(preset => preset.id), ["dsmm-orchestrator", "dsmm-builder"]);
+    for (const id of ["dsmm-orchestrator", "dsmm-builder"]) {
       assert.equal((await f.ctx.agentPresets.resolve(id)).broken, undefined);
     }
     await runFixtureTurn(retained);
@@ -115,7 +127,8 @@ test("A regression: ordinary active native request never assembles bundled skill
 });
 
 test("actual isolated prompt realm has no Host service and preserves literal/order/Agent-local mode semantics", async () => {
-  const f = await nativeRoutingFixture({ section: "Native {{literal}} section" }, { isolatedPrompt: true });
+  const section = "Native {{literal}} section";
+  const f = await nativeRoutingFixture({ section }, { isolatedPrompt: true });
   try {
     assert.equal(f.host.get("systemPrompt"), undefined);
     const a = await f.create(), b = await f.create();
@@ -126,38 +139,52 @@ test("actual isolated prompt realm has no Host service and preserves literal/ord
       const before = await runtime.getSession(adapterAgent(a));
       return runtime.selectMode({ sessionId: a.id, active, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch }, adapterAgent(a));
     };
-    assert.doesNotMatch(await render(a), /Native/); await mode(true);
-    const prompt = await render(a); assert.equal(prompt.split("Native {{literal}} section").length - 1, 1);
-    assert.ok(prompt.indexOf("Native {{literal}} section") < prompt.indexOf("AFTER_DSMM"));
-    assert.doesNotMatch(await render(b), /Native/); assert.doesNotMatch(await render(), /Native/);
+    assert.equal((await render(a)).includes(section), false); await mode(true);
+    const prompt = await render(a); assert.equal(prompt.split(section).length - 1, 1);
+    assert.ok(prompt.includes("AFTER_DSMM")); assert.ok(prompt.indexOf(section) < prompt.indexOf("AFTER_DSMM"));
+    assert.equal((await render(b)).includes(section), false); assert.equal((await render()).includes(section), false);
     await mode(false); a.session.append("agent-preset/selected", { agentPreset: "dsmm-reviewer" });
-    assert.doesNotMatch(await render(a), /Native/, "explicit off survives later role choice");
+    assert.equal((await render(a)).includes(section), false, "explicit off survives later role choice");
   } finally { await f.dispose(); }
 });
 
 test("A regression: role persona survives but durable explicit off wins over role common", async () => {
-  const f = await native();
+  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, nativeFs: true, spawn: false, beforeDsmm: contractHostServices });
   try {
     const agent = await f.create({ agentPreset: "dsmm-planner" });
     assert.equal(scopeOf(agent.ctx), agent); assert.notEqual(scopeParentOf(agent), agent);
+    const skills = agent.ctx.get("skills")!, tools = agent.ctx.get("tools")!;
+    const view = { scope: agent, cwd: agent.session.header.cwd };
     const render = () => f.ctx.systemPrompt.assemble({ scope: agent }).then(renderPrompt);
-    assert.match(await render(), /ROLE_PERSONA_SENTINEL/); assert.match(await render(), /DEEPWORK MODE ENABLED!/);
+    const persona = DSMM_ROLES.find((role) => role.id === "dsmm-planner")!.persona;
+    assert.ok((await render()).includes(persona)); assert.match(await render(), /DEEPWORK MODE ENABLED!/);
     assert.doesNotMatch(await render(), /# Brainstorming|# Writing Plans|<dsmm-skill/);
-    assert.deepEqual((await f.ctx.skills.list({ scope: agent })).map((skill) => skill.name).sort(), [...DSMM_SKILL_NAMES].sort());
-    assert.match((await f.ctx.skills.get("writing-plans", { scope: agent }))?.content ?? "", /# Writing Plans/);
+    assert.deepEqual((await skills.list(view)).map((skill) => skill.name).sort(), [...DSMM_SKILL_NAMES].sort());
+    assert.match((await skills.get("writing-plans", view))?.content ?? "", /# Writing Plans/);
     const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
     const before = await runtime.getSession(adapterAgent(agent));
     const disabled = await runtime.selectMode({ sessionId: agent.id, active: false, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch }, adapterAgent(agent));
     assert.equal(disabled.deepwork!.active, false); assert.equal(disabled.deepwork!.locked, false);
-    assert.match(await render(), /ROLE_PERSONA_SENTINEL/); assert.doesNotMatch(await render(), /DEEPWORK MODE ENABLED!|# Brainstorming/);
-    assert.equal(await f.ctx.skills.get("brainstorming", { scope: agent }), undefined);
-    const denied = await f.tools.execute({ callId: ToolCallId("role-off-deny"), name: "write", arguments: {}, agent, signal: new AbortController().signal });
+    assert.ok((await render()).includes(persona)); assert.doesNotMatch(await render(), /DEEPWORK MODE ENABLED!|# Brainstorming/);
+    assert.equal(await skills.get("brainstorming", view), undefined);
+    const sentinel = join(f.profileDir, "planner-off-write-sentinel.txt");
+    const writeArgs = { file_path: sentinel, content: "native authorized write control\n" };
+    assert.equal(existsSync(sentinel), false);
+    assert.equal(tools.get("write", agent), undefined, "off retains the planner's scoped write restriction");
+    const denied = await tools.execute({ callId: ToolCallId("role-off-deny"), name: "write", arguments: writeArgs, agent, signal: new AbortController().signal });
     assert.equal(denied.isError, true, "off never removes persona's read-only restriction");
+    assert.equal(existsSync(sentinel), false, "a rejected planner write must not create the file");
+    const writer = await f.create({ agentPreset: "standard" });
+    const writableTools = writer.ctx.get("tools")!;
+    assert.ok(writableTools.get("write", writer));
+    const allowed = await writableTools.execute({ callId: ToolCallId("role-off-write-control"), name: "write", arguments: writeArgs, agent: writer, signal: new AbortController().signal });
+    assert.equal(allowed.isError, false, "the same arguments succeed through an authorized native write tool");
+    assert.equal(readFileSync(sentinel, "utf8"), writeArgs.content);
   } finally { await f.dispose(); }
 });
 
 test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; blank rebind disposes old providers", async () => {
-  const f = await native();
+  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, nativeFs: true, spawn: false, beforeDsmm: contractHostServices });
   try {
     const a = await f.create({ agentPreset: "standard", cwd: f.profileDir }), b = await f.create({ agentPreset: "standard", cwd: join(f.profileDir, "other") });
     assert.equal(scopeParentOf(a), scopeParentOf(b)); assert.notEqual(scopeOf(a.ctx), scopeOf(b.ctx));
@@ -174,7 +201,8 @@ test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; b
     let changes = 0; const stop = f.ctx.on("skills/change", () => { changes++; });
     for (const preset of ["dsmm-planner", "standard", "dsmm-planner", "standard"]) {
       await f.ctx.agentPresets.select(b, preset);
-      const catalog = await f.ctx.skills.list({ scope: b, cwd: b.session.header.cwd });
+      const skills = f.ctx.agentPresets.serviceFor(b, "skills") ?? b.ctx.get("skills")!;
+      const catalog = await skills.list({ scope: b, cwd: b.session.header.cwd });
       assert.equal(catalog.length, preset === "standard" ? 0 : DSMM_SKILL_NAMES.length);
     }
     const quiet = changes; await f.ctx.skills.list({ scope: a }); await f.ctx.skills.list({ scope: b });
@@ -186,15 +214,21 @@ test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; b
 });
 
 test("native skill tool consumes metadata catalog and loads a body only at invocation", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true });
+  const f = await providerFixture();
   const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-tool-skill"));
   try {
     const fiber = f.ctx.plugin(sdk("@deepseek-ai/dsh-tool-skill")); await fiber.await();
-    const agent = await f.create({ agentPreset: "standard" });
+    const agent = f.agent;
+    assert.equal((await f.ctx.skills.list(f.view)).length, DSMM_SKILL_NAMES.length);
     const prompt = renderPrompt(await f.ctx.systemPrompt.assemble({ scope: agent }));
     assert.doesNotMatch(prompt, /# Brainstorming|<dsmm-skill/);
+    await runFixtureTurn(agent); assert.equal(f.reads(), 0, "native catalog assembly never loads skill bodies");
     const result = await f.tools.execute({ callId: ToolCallId("native-skill-load"), name: "skill", arguments: { name: "brainstorming" }, agent, signal: new AbortController().signal });
-    assert.equal(result.isError, false); assert.match(JSON.stringify(result.content), /# Brainstorming/);
+    assert.equal(result.isError, false);
+    assert.equal(f.reads(), 1, "invocation loads the selected skill body only");
+    const registration = await f.ctx.skills.get("brainstorming", f.view); assert.ok(registration);
+    assert.deepEqual(result.value, { name: registration.name, provider: registration.provider, resourceBase: registration.resourceBase, content: registration.content });
+    assert.ok(result.content.some((block) => block.type === "text" && block.text.includes('<skill_content name="brainstorming">')));
     for (const name of ["debugging", "ast-grep", "coding-agent-sessions"] as const) {
       const loaded = await f.tools.execute({ callId: ToolCallId(`native-skill-load-${name}`), name: "skill", arguments: { name }, agent, signal: new AbortController().signal });
       assert.equal(loaded.isError, false, name);
@@ -283,7 +317,7 @@ test("ancestor project winner add/remove/add beats Agent rank600; policy and res
 });
 
 test("preset-layer cwd-specific winner affects only its session; invocation-disabled project cannot use bundled fallback", async () => {
-  const f = await nativeRoutingFixture({ roles: noRoles, defaultActive: true }, { nativePresets: true, spawn: false });
+  const f = await nativeRoutingFixture({ roles: { ...noRoles, "dsmm-orchestrator": true }, defaultActive: true }, { nativePresets: true, spawn: false, beforeDsmm: contractHostServices });
   const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-tool-skill"));
   try {
     await f.ctx.plugin(sdk("@deepseek-ai/dsh-tool-skill")).await();
@@ -312,17 +346,23 @@ test("preset-layer cwd-specific winner affects only its session; invocation-disa
 });
 
 test("native Loader owns sparse volatile desired; admitted realms survive saves and ordinary remounts remain refused", async () => {
-  const f = await native();
+  const roles = { ...noRoles, "dsmm-orchestrator": true };
+  const f = await nativeRoutingFixture({ roles }, { nativePresets: true, spawn: false, beforeDsmm: contractHostServices });
   try {
     assert.ok(f.dsmmEntryId); assert.equal((f.deploymentConfig() as { defaultActive: { get(): unknown } }).defaultActive.get(), undefined);
-    await f.reloadDeployment({ roles: noRoles, defaultActive: true, promptOrder: 73 });
+    await f.reloadDeployment({ roles, defaultActive: true, promptOrder: 73 });
     assert.equal((f.deploymentConfig() as { promptOrder: { get(): unknown } }).promptOrder.get(), 73);
     const a = await f.create({ agentPreset: "standard" });
     const runtime = f.ctx.get("dsmmProfileRuntime") as import("../lib/profile-runtime.js").DsmmProfileRuntime;
     const before = await runtime.getSession(adapterAgent(a));
     const barrier = gate(), busy = a.runMaintenance(() => barrier.promise);
     try {
-      await assert.rejects(f.reloadDeployment({ roles: noRoles, defaultActive: false }), /requires restart/);
+      await f.saveDeployment({ roles, defaultActive: false, promptOrder: 74 });
+      assert.equal((f.deploymentConfig() as { promptOrder: { get(): unknown } }).promptOrder.get(), 74);
+      assert.equal(f.agents.get(a.id), a, "desired saves retain the admitted native Agent");
+      assert.equal(runtime.getSettings(adapterAgent(a)).defaultActive, true);
+      assert.equal((await runtime.getSession(adapterAgent(a))).admissionEpoch, before.admissionEpoch);
+      await assert.rejects(f.reloadDeployment({ roles, defaultActive: false }), /requires restart/);
       assert.equal(runtime.getSettings(adapterAgent(a)).defaultActive, true);
       assert.equal((await runtime.getSession(adapterAgent(a))).admissionEpoch, before.admissionEpoch);
       assert.equal((await f.ctx.skills.list({ scope: a })).length, DSMM_SKILL_NAMES.length);

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,14 +6,14 @@ import { spawnSync } from "node:child_process";
 import { childFixture, accepted } from "./child-admission-native-fixture.mjs";
 import { parseChildAdmissionEvidenceView } from "../src/child-evidence.ts";
 import { projectChildAdmissionEvidence } from "../src/child-admission.ts";
+import { verifyPublishedLegacyArtifact } from "./published-legacy-artifact-fixture.mjs";
 
 const [phase, root, artifact] = process.argv.slice(2);
 assert.ok(root);
 await mkdir(root, { recursive: true });
 let oldPackage;
 if (phase === "old-create") {
-  const bytes = await readFile(artifact);
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "8aa093408b7831defdbe780e73a82c05ee75a270aada3e5700d1f1f6cf815a4c");
+  await verifyPublishedLegacyArtifact(artifact);
   const extracted = join(root, "published");
   await mkdir(extracted);
   const extraction = spawnSync("tar", ["-xf", artifact, "-C", extracted], { encoding: "utf8" });
@@ -63,7 +62,8 @@ try {
       const originalPrefix = child.session.ownEvents().slice(0, row.ownEvents.length);
       assert.deepEqual(originalPrefix, row.ownEvents, "Native continuation only appends; old records are not rewritten");
       const read = await f.execute(child, "read");
-      if (row.role === "reviewer" || row.originalEpoch !== undefined) { assert.equal(read.isError, false); assert.equal(read.value, "useful permitted read"); }
+      if (row.originalEpoch !== undefined) { assert.equal(read.isError, false); assert.equal(read.value, "useful permitted read"); }
+      else { assert.equal(read.isError, true); assert.equal(f.bodies.read, 0, "Captureless history alone cannot authorize an unleased native read"); }
       for (const name of ["write", "pwsh"]) {
         const result = await f.execute(child, name, name === "pwsh" ? { command: "git push origin task-counter-only" } : {});
         if (row.originalEpoch === undefined || name === "pwsh" || row.role === "reviewer") assert.equal(result.isError, true);

@@ -1,5 +1,7 @@
 import type { DsmmInvocationLevel, DsmmLocale, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings, DsmmToolTopology } from "./settings.js";
-import { copyJson, DEFAULT_DSMM_SETTINGS, freezeSettings, resolveConfig, validateSparseConfig } from "./settings.js";
+import { copyJson, freezeSettings, resolveConfig, validateSparseConfig } from "./settings.js";
+import { parseModelParameterPolicy } from "./model-parameter-policy.js";
+import type { ResolvedModelParameterPolicy } from "./model-parameter-policy.js";
 import { validateProfileOverlay } from "./profiles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
@@ -10,6 +12,7 @@ export { CHILD_EVIDENCE_FIELDS, parseChildAdmissionEvidenceView } from "./child-
 export type { ChildAdmissionEvidenceView, ChildAdmissionLimitation, ChildEvidenceField } from "./child-evidence.js";
 import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
 import type { DsmmRouteSource } from "./profile-types.js";
+import { normalizeModelRouteJson } from "./route-json.js";
 export { DSMM_ROUTE_SOURCES } from "./profile-types.js";
 export type { DsmmRouteSource } from "./profile-types.js";
 export interface ChildToolFilter { allow?: string[]; deny?: string[] }
@@ -23,8 +26,7 @@ export interface ChildAuthorityCeiling {
 export type ChildRuntimePolicyCapture = Pick<DsmmSettings, "modules" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "defaultActive" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort" | "skills"> & {
   subagents: Pick<DsmmSettings["subagents"], "enableRunInBackground" | "backgroundMode">;
 };
-export interface ChildAdmissionCapture {
-  version: 1;
+interface ChildAdmissionCaptureBase {
   childSessionId: string;
   parentSessionId: string;
   role: DsmmRoleId;
@@ -36,6 +38,18 @@ export interface ChildAdmissionCapture {
   locale?: DsmmLocale;
   toolTopology: DsmmToolTopology;
 }
+export interface ChildAdmissionCaptureV1 extends ChildAdmissionCaptureBase {
+  version: 1;
+}
+export interface ChildAdmissionCaptureV2 extends ChildAdmissionCaptureBase {
+  version: 2;
+  modelParameterPolicy: ResolvedModelParameterPolicy;
+  invocation: ChildAdmissionCaptureBase["invocation"] & {
+    requestedRoute: DsmmModelRoute;
+    effortSource: "native" | "dsmm-config";
+  };
+}
+export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2;
 /** Trusted native folds only; never synthesized from the current parent's settings. */
 export interface LegacyChildEvidence {
   version: 1;
@@ -74,6 +88,9 @@ function role(value: unknown): void { if (!(DSMM_ROLE_IDS as readonly unknown[])
 function boolean(value: unknown): void { if (typeof value !== "boolean") fail(); }
 function integer(value: unknown): void { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) fail(); }
 function route(value: unknown): void {
+  normalizeModelRouteJson(value);
+}
+function legacyRoute(value: unknown): void {
   const row = object(value, ["provider", "model"], ["reasoningEffort"]);
   text(row.provider, 128); text(row.model, 512);
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(row.provider) || row.model.includes("://")) fail();
@@ -99,7 +116,7 @@ function limitations(value: unknown): void {
 export function parseLegacyChildEvidence(input: unknown): LegacyChildEvidence {
   const row = object(copyJson(input), ["version", "mode", "childSessionId", "parentSessionId", "role", "route", "depth", "provenFields", "limitations"], ["toolFilter", "active"]);
   if (row.version !== 1 || row.mode !== "legacy-conservative") fail();
-  text(row.childSessionId, 256); text(row.parentSessionId, 256); role(row.role); route(row.route); integer(row.depth);
+  text(row.childSessionId, 256); text(row.parentSessionId, 256); role(row.role); legacyRoute(row.route); integer(row.depth);
   if (row.childSessionId === row.parentSessionId) fail();
   if (Object.hasOwn(row, "toolFilter")) filter(row.toolFilter);
   if (Object.hasOwn(row, "active")) boolean(row.active);
@@ -110,8 +127,11 @@ export function parseLegacyChildEvidence(input: unknown): LegacyChildEvidence {
   return freezeSettings(row) as unknown as LegacyChildEvidence;
 }
 export function parseChildAdmissionCapture(input: unknown): ChildAdmissionCapture {
-  const row = object(copyJson(input), ["version", "childSessionId", "parentSessionId", "role", "profilePin", "originalAdmissionEpoch", "invocation", "runtimePolicyCapture", "authorityCeiling", "toolTopology"], ["locale"]);
-  if (row.version !== 1) fail();
+  const plain = copyJson(input);
+  const version = (plain as { version?: unknown } | null)?.version;
+  if (version !== 1 && version !== 2) fail();
+  const row = object(plain, ["version", "childSessionId", "parentSessionId", "role", "profilePin", "originalAdmissionEpoch", "invocation", "runtimePolicyCapture", "authorityCeiling", "toolTopology", ...version === 2 ? ["modelParameterPolicy"] : []], ["locale"]);
+  if (version === 2) parseModelParameterPolicy(row.modelParameterPolicy);
   text(row.childSessionId, 256); text(row.parentSessionId, 256); role(row.role); epoch(row.originalAdmissionEpoch);
   if (row.childSessionId === row.parentSessionId) fail();
   if (row.profilePin !== null) {
@@ -119,15 +139,20 @@ export function parseChildAdmissionCapture(input: unknown): ChildAdmissionCaptur
     if (typeof pin.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(pin.id) || /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(pin.id)) fail();
     epoch(pin.revision);
   }
-  const invocation = object(row.invocation, ["level", "initialRoute", "routeSource"]);
+  const invocation = object(row.invocation, ["level", "initialRoute", "routeSource", ...version === 2 ? ["requestedRoute", "effortSource"] : []]);
   if (typeof invocation.level !== "string" || !["normal", "low", "high", "max"].includes(invocation.level) || !(DSMM_ROUTE_SOURCES as readonly unknown[]).includes(invocation.routeSource)) fail();
-  route(invocation.initialRoute);
+  (version === 1 ? legacyRoute : route)(invocation.initialRoute);
+  if (version === 2) {
+    route(invocation.requestedRoute);
+    if (invocation.effortSource !== "native" && invocation.effortSource !== "dsmm-config") fail();
+  }
   const policyKeys = ["modules", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "defaultActive", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "skills", "subagents"];
   const policy = object(row.runtimePolicyCapture, policyKeys);
+  if (version === 1) validateLegacyRoutes(policy);
   const { modules, skills, subagents, ...overlay } = policy;
   validateProfileOverlay(overlay);
   object(modules, ["deepwork"]); boolean(object((modules as Record<string, unknown>).deepwork, ["enabled"]).enabled);
-  const skillMap = object(skills, Object.keys(DEFAULT_DSMM_SETTINGS.skills));
+  const skillMap = object(skills, CAPTURE_SKILLS);
   Object.values(skillMap).forEach(boolean);
   const background = object(subagents, ["enableRunInBackground", "backgroundMode"]);
   boolean(background.enableRunInBackground);
@@ -139,8 +164,34 @@ export function parseChildAdmissionCapture(input: unknown): ChildAdmissionCaptur
   if (!(ceiling.roles as unknown[]).includes(row.role) || !(modules as { deepwork: { enabled: boolean } }).deepwork.enabled) fail();
   if (typeof row.toolTopology !== "string" || !["per-role", "parameterized"].includes(row.toolTopology)) fail();
   validateSparseConfig({ ...policy, ...(Object.hasOwn(row, "locale") ? { locale: row.locale } : {}), subagents: { ...background, toolTopology: row.toolTopology, allowRouteOverride: ceiling.allowRouteOverride, maxDepth: ceiling.maxDepth } }, true);
-  for (const key of ["modules", "runtimePolicy", "workflow", "guards", "runtimeRecovery"] as const) completeResolvedObject(policy[key], DEFAULT_DSMM_SETTINGS[key]);
+  for (const key of ["modules", "runtimePolicy", "workflow", "guards", "runtimeRecovery"] as const) completeResolvedObject(policy[key], CAPTURE_POLICY_SHAPE[key]);
   return freezeSettings(row) as unknown as ChildAdmissionCapture;
+}
+
+// Persisted protocol completeness is independent of current configuration defaults.
+const CAPTURE_SKILLS = ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops", "debugging", "frontend", "git-master", "ast-grep", "coding-agent-sessions", "init-deep", "using-git-worktrees"];
+const CAPTURE_POLICY_SHAPE = {
+  modules: { deepwork: { enabled: null } },
+  runtimePolicy: { strategy: null, rateLimit: { maxRetries: null, initialDelayMs: null, maxDelayMs: null, maxTotalDelayMs: null, switchAfterRateLimits: null, maxSwitches: null } },
+  workflow: { policy: null, strictGates: null, reviewCap: null, finalReviewPolicy: null },
+  guards: { scope: null, shellCommandSafety: null, gitWriteGuard: null, toolOutputTruncation: { enabled: null, maxInlineBytes: null }, planFormatValidation: null, questionLabelHelper: { enabled: null, maxLabelChars: null }, todoDisciplineHelper: null },
+  runtimeRecovery: { enabled: null, retryOnStatusCodes: null, retryOnCodes: null, fallbackRoutes: null, maxFallbackAttempts: null, idleContinuation: { enabled: null, maxContinuations: null, prompt: null } },
+};
+function validateLegacyRoutes(policy: Record<string, unknown>): void {
+  const routing = object(policy.roleRouting, [], DSMM_ROLE_IDS);
+  for (const value of Object.values(routing)) {
+    const row = object(value, [], ["primary", "fallbackRoutes", "levels", "strategy", "rateLimit"]);
+    if (row.primary !== undefined) legacyRoute(row.primary);
+    if (row.fallbackRoutes !== undefined) { if (!Array.isArray(row.fallbackRoutes)) fail(); row.fallbackRoutes.forEach(legacyRoute); }
+    if (row.levels !== undefined) for (const level of Object.values(object(row.levels, [], ["low", "high", "max"]))) {
+      const entry = object(level, [], ["provider", "model", "reasoningEffort"]);
+      if (Object.hasOwn(entry, "provider") || Object.hasOwn(entry, "model")) legacyRoute(entry);
+      else { object(entry, ["reasoningEffort"]); text(entry.reasoningEffort, 64); }
+    }
+  }
+  const recovery = policy.runtimeRecovery as { fallbackRoutes?: unknown };
+  if (!Array.isArray(recovery?.fallbackRoutes)) fail();
+  recovery.fallbackRoutes.forEach(legacyRoute);
 }
 
 function completeResolvedObject(input: unknown, template: unknown): void {
@@ -154,6 +205,7 @@ export function admissionFromChildCapture(input: ChildAdmissionCapture, nativeSu
   const capture = parseChildAdmissionCapture(input);
   const { locale: _locale, ...substrate } = nativeSubstrate;
   const settings = resolveConfig({ ...substrate, ...capture.runtimePolicyCapture,
+    modelParameters: { passthrough: capture.version === 1 || capture.modelParameterPolicy.mode !== "native-defaults" },
     roles: Object.fromEntries(DSMM_ROLE_IDS.map(role => [role, capture.authorityCeiling.roles.includes(role)])),
     ...(capture.locale === undefined ? {} : { locale: capture.locale }), subagents: { ...capture.runtimePolicyCapture.subagents,
       toolTopology: capture.toolTopology, allowRouteOverride: capture.authorityCeiling.allowRouteOverride, maxDepth: capture.authorityCeiling.maxDepth } });

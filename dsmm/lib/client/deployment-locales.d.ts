@@ -12,6 +12,10 @@ export declare const deploymentEn: {
     ceiling: string;
     hostUnknown: string;
     boundaries: string;
+    core: string;
+    coreHint: string;
+    modelParametersHint: string;
+    permissionControlHint: string;
     saveGlobal: string;
     saveProfile: string;
     saving: string;

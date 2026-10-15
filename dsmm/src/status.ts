@@ -297,6 +297,8 @@ function resolveCalibration(input: {
 /** Read-only diagnostics only; never use this copy as configuration input. */
 export function readOnlySettings(settings: DsmmSettings): DsmmSettings {
   return {
+    permissionControl: structuredClone(settings.permissionControl),
+    modelParameters: { ...settings.modelParameters },
     modules: { deepwork: { enabled: settings.modules.deepwork.enabled } },
     ...(settings.locale === undefined ? {} : { locale: settings.locale }),
     modeName: settings.modeName,

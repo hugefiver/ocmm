@@ -4,7 +4,9 @@ import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { isDsmmRoleId } from "./roles.js";
 import { freezeSettings, normalizeLevelOverride } from "./settings.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
-import { selectInitialModelRoute } from "./role-routing.js";
+import { selectInitialModelRouteChoice, sameExactModelRoute } from "./role-routing.js";
+import { modelRouteFromCall, modelRouteToCall, projectModelRouteParameters, withRouteEffort } from "./role-llm.js";
+import { configuredModelParameterPolicy, resolvedModelParameterPolicy } from "./model-parameter-policy.js";
 const scoped = new AsyncLocalStorage();
 const captured = new WeakMap();
 const originalCaptures = new WeakMap();
@@ -40,10 +42,12 @@ export async function resolveRoleInvocation(parent, target, settings, signal, op
         throw new Error("DSMM role delegation requires an inherited provider/model");
     let route = { provider: inherited.provider, model: inherited.model, ...(inherited.reasoningEffort === undefined ? {} : { reasoningEffort: inherited.reasoningEffort }) };
     let source = "inherited";
+    let effortSource = "native";
     const policy = resolveRoleRuntimePolicy(settings, target);
     if (policy.primary !== undefined) {
         route = { ...policy.primary };
         source = "primary";
+        effortSource = "dsmm-config";
     }
     let exactEffort = false;
     let fixed = false;
@@ -53,11 +57,12 @@ export async function resolveRoleInvocation(parent, target, settings, signal, op
         if (override.provider !== undefined)
             route = { ...override };
         else {
-            route = { ...route, reasoningEffort: override.reasoningEffort };
+            route = withRouteEffort(route, override.reasoningEffort);
             candidateEffort = override.reasoningEffort;
         }
         exactEffort = override.reasoningEffort !== undefined;
         source = nextSource;
+        effortSource = "dsmm-config";
     };
     if (level !== "normal") {
         const override = settings.roleRouting[target]?.levels?.[level];
@@ -71,27 +76,54 @@ export async function resolveRoleInvocation(parent, target, settings, signal, op
             ...(nativeOptions.reasoningEffort === undefined ? {} : { reasoningEffort: nativeOptions.reasoningEffort }) };
         fixed = true;
         candidateEffort = undefined;
+        effortSource = "native";
     }
     else if (nativeOptions?.reasoningEffort !== undefined) {
-        route = { ...route, reasoningEffort: nativeOptions.reasoningEffort };
+        route = withRouteEffort(route, nativeOptions.reasoningEffort);
         candidateEffort = nativeOptions.reasoningEffort;
+        effortSource = "native";
     }
     if (options.route !== undefined) {
         apply(options.route, "invocation-route");
         fixed = options.route.provider !== undefined;
     }
-    const initialFallbacks = policy.fallbackRoutes.map(fallback => ({ ...fallback, ...(candidateEffort === undefined ? {} : { reasoningEffort: candidateEffort }) }));
+    const initialFallbacks = policy.fallbackRoutes.map(fallback => candidateEffort === undefined ? { ...fallback } : withRouteEffort(fallback, candidateEffort));
     const initialCandidates = [route, ...fixed ? [] : initialFallbacks];
     const llm = parent.ctx.get("llm");
     if (llm === undefined)
         throw new Error("DSMM invocation requires the parent's native LLM service");
-    const selected = await selectInitialModelRoute(llm, initialCandidates, signal);
+    const admission = parent.ctx.get("dsmmProfileRuntime")?.admission(parent);
+    const modelParameterPolicy = capturedRoleInvocation(parent)?.modelParameterPolicy
+        ?? (admission === undefined ? configuredModelParameterPolicy(settings) : resolvedModelParameterPolicy(admission));
+    const project = (candidate, source) => modelRouteFromCall(projectModelRouteParameters(candidate, source, modelParameterPolicy.mode !== "native-defaults"));
+    const projected = initialCandidates.map((candidate, index) => project(candidate, index === 0 || candidateEffort !== undefined ? effortSource : "dsmm-config"));
+    const rawResolver = modelParameterPolicy.mode === "passthrough" ? parent.ctx.get("dsmmLlmRoutes") : undefined;
+    const selected = await selectInitialModelRouteChoice(llm, projected, signal, rawResolver === undefined ? undefined : {
+        async resolveRoute(candidate, signal) {
+            const checked = await rawResolver.resolveRoute(candidate, signal);
+            const index = projected.findIndex(route => sameExactModelRoute(route, candidate));
+            if ((index === 0 || candidateEffort !== undefined) && effortSource === "native") {
+                const { customParameters: _parameters, ...native } = modelRouteToCall(candidate);
+                if (llm.resolveCallConfig === undefined)
+                    throw new Error("Native model intent requires native metadata preparation");
+                await llm.resolveCallConfig(native, signal);
+            }
+            return checked;
+        },
+    });
+    const selectedIndex = projected.findIndex(candidate => sameExactModelRoute(candidate, selected.requestedRoute));
+    if (selectedIndex < 0)
+        throw new Error("DSMM selected route has no original candidate");
     signal.throwIfAborted();
     const fallbackRoutes = options.route?.provider !== undefined ? [] : level === "normal" && options.route === undefined ? policy.fallbackRoutes : initialFallbacks;
-    const candidates = [route, ...fallbackRoutes];
+    const effectiveFallbacks = fallbackRoutes.map(candidate => project(candidate, candidateEffort !== undefined ? effortSource : "dsmm-config"));
+    const candidates = [project(route, effortSource), ...effectiveFallbacks];
+    const selectedSource = selectedIndex === 0 || candidateEffort !== undefined ? effortSource : "dsmm-config";
     return freezeSettings({ target, ...(options.level === undefined ? {} : { requestedLevel: options.level }), effectiveLevel: level,
-        routeSource: source, initialRoute: selected, candidates, exactEffort,
-        policy: { ...policy, primary: route, fallbackRoutes } });
+        routeSource: source, initialRoute: project(selected.route, selectedSource), selectedCandidate: selected.requestedRoute, requestedRoute: initialCandidates[selectedIndex], candidates, exactEffort,
+        effortSource: selectedSource, modelParameterPolicy,
+        requestedPolicy: { ...policy, primary: route, fallbackRoutes },
+        policy: { ...policy, primary: project(route, effortSource), fallbackRoutes: effectiveFallbacks } });
 }
 export function invocationAgentOptions(invocation, options) {
     const route = invocation.initialRoute;

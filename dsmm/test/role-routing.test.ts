@@ -55,7 +55,7 @@ test("new explicit role routes reject malformed route pairs, effort names and ro
   }
 });
 
-test("normalization trims routes and deduplicates provider/model identity without multiplying effort retries", () => {
+test("normalization trims provider/model while preserving exact efforts and ordered fallback entries", () => {
   const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": {
     primary: { provider: " fixture ", model: " review-primary ", reasoningEffort: " max " },
     fallbackRoutes: [
@@ -65,8 +65,8 @@ test("normalization trims routes and deduplicates provider/model identity withou
     ]
   } } });
   assert.deepEqual(settings.roleRouting["dsmm-reviewer"], {
-    primary,
-    fallbackRoutes: [{ ...fallback, reasoningEffort: "max" }, { provider: "fixture", model: "second-fallback" }]
+    primary: { ...primary, reasoningEffort: " max " },
+    fallbackRoutes: [{ ...fallback, reasoningEffort: " max " }, fallback, { provider: "fixture", model: "second-fallback" }]
   });
 });
 
@@ -106,11 +106,11 @@ test("resolved and status role policies deeply detach primary, fallback arrays a
   assert.equal(input.roleRouting["dsmm-reviewer"].primary.provider, "fixture");
 });
 
-test("optional global recovery effort is preserved while legacy incomplete route normalization remains compatible", () => {
+test("global recovery configuration preserves exact efforts and rejects incomplete routes", () => {
   const settings = resolveConfig({ runtimeRecovery: { fallbackRoutes: [
-    { provider: " fixture ", model: " review-fallback ", reasoningEffort: "max" },
-    { provider: "fixture", model: "review-fallback", reasoningEffort: "high" },
-    { provider: "", model: "ignored" }
+    { provider: " fixture ", model: " review-fallback ", reasoningEffort: " max " },
+    { provider: "fixture", model: "review-fallback", reasoningEffort: "high" }
   ] } });
-  assert.deepEqual(settings.runtimeRecovery.fallbackRoutes, [{ ...fallback, reasoningEffort: "max" }]);
+  assert.deepEqual(settings.runtimeRecovery.fallbackRoutes, [{ ...fallback, reasoningEffort: " max " }, fallback]);
+  assert.throws(() => resolveConfig({ runtimeRecovery: { fallbackRoutes: [{ provider: "", model: "ignored" }] } }));
 });

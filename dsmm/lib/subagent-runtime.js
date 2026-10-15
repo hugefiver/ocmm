@@ -9,6 +9,7 @@ export class DsmmSubagentRuntime extends SubagentRuntime {
     waiters = new Set();
     lifetime = new AbortController();
     requiredProviders = ["spawn"];
+    continuablePreflight;
     constructor(ctx, config, hostClassifier) {
         if (ctx.get("subagents") !== undefined) {
             throw new SubagentError("Explicit DSMM startup composition must exclude the stock subagents row; restart with one provider.", "DUPLICATE_PROVIDER");
@@ -37,6 +38,19 @@ export class DsmmSubagentRuntime extends SubagentRuntime {
         const dispose = super.registerProvider(provider);
         this.wakeWaiters();
         return dispose;
+    }
+    /** Host entry route preparation before native normalization loses caller option provenance. */
+    configureContinuablePreflight(preflight, signal) {
+        signal.throwIfAborted();
+        if (this.continuablePreflight !== undefined)
+            throw new SubagentError("Continuable routing already has a Host owner", "UNAUTHORIZED");
+        this.continuablePreflight = preflight;
+        signal.addEventListener("abort", () => { if (this.continuablePreflight === preflight)
+            this.continuablePreflight = undefined; }, { once: true });
+    }
+    startContinuable(spec) {
+        const start = request => super.startContinuable(request);
+        return this.continuablePreflight === undefined ? start(spec) : this.continuablePreflight(spec, start);
     }
     /** Fulfillment proves this exact registry contains the provider, not just a mounted plugin. */
     waitForProvider(name, signal) {

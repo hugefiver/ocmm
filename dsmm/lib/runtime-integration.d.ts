@@ -1,8 +1,7 @@
 import { Context } from "@deepseek-ai/cordis";
-import type { Agent } from "@deepseek-ai/dsh-agent";
+import type { Agent, AgentRegistry } from "@deepseek-ai/dsh-agent";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
-import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { ChildAdmissionCompletion } from "./child-admission-contract.js";
 import type { ChildAdmissionEvidence } from "./child-capture.js";
 import type { DshAgent, DshContext } from "./dsh-types.js";
@@ -15,10 +14,12 @@ import { RoleRunRegistry } from "./role-runs.js";
 import type { DsmmRoleRunCapture } from "./role-subagents.js";
 import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import { DsmmSubagentRuntime } from "./subagent-runtime.js";
-/** Native headers and own descriptors establish origin; absence from a DSMM registry never does. */
+/** An unestablished child is never a native-identity proof for delivery or resumed work. */
 export declare function classifyDsmmAgent(agent: Agent): "dsmm" | "native";
 /** Limit DSMM's observers/guards to its own children without altering the native service or factories. */
 export declare function managedAgentContext(ctx: Context, controlledParent: (agent: DshAgent) => boolean): DshContext;
+/** Enrollment consumes A's completed admissions while native creation retains its original serial owner. */
+export declare function admittedAgentContext(ctx: DshContext, runtime: DsmmProfileRuntime): DshContext;
 export declare function runtimeAdmissionView(ctx: Context): SubagentRuntimeAdmissionView;
 /** Capability projection only. Admission objects and A's CAS/maintenance methods remain untouched. */
 export declare function publicProfileRuntime(runtime: DsmmProfileRuntime, ctx: Context, integration?: {
@@ -35,6 +36,11 @@ export interface DsmmHostStartupOptions {
 interface NativeDeliveryEvidence {
     readonly parent: Agent;
     readonly childId: SessionId;
+    readonly registry: AgentRegistry;
+    readonly resident: Agent | undefined;
+    readonly residency: object;
+    readonly provider: string;
+    readonly mode: "continuable" | "one-shot";
 }
 export declare function integrateSubagentRuntime(ctx: Context, settings: DsmmSettings, policy: DsmmRolePolicy, getRuntime: () => DsmmProfileRuntime | undefined, startup?: DsmmHostStartupOptions): Promise<{
     bridge: {
@@ -60,7 +66,7 @@ export declare function integrateSubagentRuntime(ctx: Context, settings: DsmmSet
             dispose(nativeDrain: () => Promise<void>): Promise<void>;
         };
         legacyCapabilities: LegacyCapabilityCollaborators;
-        classifyLegacyTool: (name: string, tools: ToolRuntime, child: Agent) => import("./legacy-child-policy.js").LegacyToolCapability | undefined;
+        classifyLegacyTool: (name: string, tools: import("@deepseek-ai/dsh-tools").ToolRuntime, child: Agent) => import("./legacy-child-policy.js").LegacyToolCapability | undefined;
         view(): import("./legacy-read-integration.js").LegacyReadIntegrationView;
         attachChild(parent: Agent, child: Agent, signal: AbortSignal): Promise<LegacyReadIntegrationChild>;
         publishCheckedGeneration(): void;
@@ -70,9 +76,12 @@ export declare function integrateSubagentRuntime(ctx: Context, settings: DsmmSet
         whenChildRetired(child: Agent): Promise<void>;
         dispose(nativeDrain: () => Promise<void>): Promise<void>;
     } | undefined;
+    admitLlmRequest(agent: Agent, signal: AbortSignal): Promise<import("./host-llm.js").DsmmLlmAdmission | undefined>;
     afterChildAdmission(agent: Agent, signal?: AbortSignal): Promise<void>;
     changeConfiguration(reason: string, mutate: () => void | Promise<void>): Promise<void>;
     dispose(nativeDrain: () => Promise<void>): Promise<void>;
+    onAdmissionGuardsInstalled(): void;
+    continueStartup(complete: (signal: AbortSignal) => Promise<void>, callerSignal?: AbortSignal): Promise<void>;
     ready(): Promise<void>;
     revokeBeforeDispose(agent: Agent, dispose: () => void | Promise<void>): Promise<void>;
     registerControls(scope: Context): void;

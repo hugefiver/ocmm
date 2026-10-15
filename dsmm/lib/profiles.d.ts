@@ -6,7 +6,7 @@ export declare const MAX_PROFILE_BYTES: number;
 export declare const MAX_PROFILE_COUNT = 128;
 export declare const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
 export declare const MAX_PROFILE_REVISIONS = 1024;
-export type DsmmProfileOverlay = Pick<DsmmPluginConfig, "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "roles" | "locale" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort"> & {
+export type DsmmProfileOverlay = Pick<DsmmPluginConfig, "modelParameters" | "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "roles" | "locale" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort"> & {
     subagents?: Pick<NonNullable<DsmmPluginConfig["subagents"]>, "toolTopology">;
 };
 export interface DsmmProfileDocument {

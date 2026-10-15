@@ -9,6 +9,9 @@ import { isCurrentRecoveryStep } from "./recovery-policy.js";
 import type { DeepseekDefaultReasoningEffort, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 import { capturedRoleInvocation } from "./role-invocation.js";
+import { modelRouteFromCall } from "./role-llm.js";
+import type { DsmmLlmRouteResolver } from "./role-llm.js";
+import { configuredModelParameterPolicy, resolvedModelParameterPolicy } from "./model-parameter-policy.js";
 
 export type DeepseekReasoningEffort = DeepseekDefaultReasoningEffort | "max";
 export type DeepseekModelRoute = "v4-pro" | "flash";
@@ -70,6 +73,8 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
         let downstream = await next();
         if (frame.signal.aborted) return downstream;
         const settings = getSettings(frame.agent);
+        const admission = getSettings.admission?.(frame.agent);
+        const parameterPolicy = admission === undefined ? configuredModelParameterPolicy(settings) : resolvedModelParameterPolicy(admission);
         if (!settings.modules.deepwork.enabled) return downstream;
         const ordinaryRoot = frame.agent.session.header?.origin !== "subagent";
         const admitted = takeAdmittedRecoveryRoute(frame);
@@ -92,8 +97,9 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
           const captured = assembledSelections.get(frame.agent);
           const manual = captured?.signal === frame.signal ? captured.intent : undefined;
           if (ordinaryRoot) {
-            const selected = { provider: downstream.provider, model: downstream.model,
-              ...(downstream.reasoningEffort === undefined ? {} : { reasoningEffort: downstream.reasoningEffort }) };
+            if (manual !== undefined && lock?.manualSelectionSeq !== manual.seq
+              && !nativeModelSelectionWasAccepted(frame.agent, manual)) downstream = applyModelRoute(downstream, manual.route);
+            const selected = modelRouteFromCall(downstream);
             if (lock === undefined || !sameExactModelRoute(lock.route, selected) || lock.manualSelectionSeq !== manual?.seq) {
               const generation = (lock?.generation ?? -1) + 1;
               lock = pinRoleRoute(frame.agent, identity, selected, [selected]);
@@ -104,14 +110,14 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
             return downstream;
           }
           if (manual !== undefined && lock?.manualSelectionSeq !== manual.seq
-            && (sameExactModelRoute(downstream, manual.route) || nativeModelSelectionWasAccepted(frame.agent, manual))) {
+            && (sameModelRoute(downstream, manual.route) && downstream.reasoningEffort === manual.route.reasoningEffort || nativeModelSelectionWasAccepted(frame.agent, manual))) {
             const llm = frame.agent.ctx?.get?.<DshLlmRuntime>("llm")
               ?? (readyCtx.get !== undefined ? readyCtx.get<DshLlmRuntime>("llm") : readyCtx.llm);
             if (llm?.resolveCallConfig === undefined) throw new Error("dsmm explicit model selection requires the native LLM service");
             await llm.resolveCallConfig(applyModelRoute(downstream, manual.route), frame.signal);
             frame.signal.throwIfAborted();
             const generation = (lock?.generation ?? -1) + 1;
-            lock = pinRoleRoute(frame.agent, identity, manual.route, [manual.route, ...fallbacks]);
+            lock = pinRoleRoute(frame.agent, identity, manual.route, [manual.route, ...fallbacks], { preserveCandidates: parameterPolicy.mode === "native-defaults" });
             lock.manualSelectionSeq = manual.seq;
             lock.generation = generation;
             lockedAgents.add(frame.agent);
@@ -123,25 +129,27 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
           }
           if (admitted !== undefined) return applyModelRoute(downstream, admitted);
           const accepted = persistedRoleRoute(frame, liveAlias ? undefined : primary, fallbacks, identity);
-          if (lock !== undefined && accepted !== undefined && !sameModelRoute(accepted, lock.route)) {
+          if (lock !== undefined && accepted !== undefined && !sameExactModelRoute(accepted, lock.route)) {
             // An explicit already-committed native route change remains host-owned;
             // DSMM's pending current-frame route still has precedence above.
             lock.route = { ...accepted };
+            lock.candidateIndex = lock.candidates.findIndex(candidate => sameExactModelRoute(candidate, accepted));
             lock.generation += 1;
             lock.startupSettled = true;
             lock.retries = 0;
             lock.rateLimits = 0;
           }
           if (lock === undefined) {
-            const inherited = { provider: downstream.provider, model: downstream.model,
-              ...(downstream.reasoningEffort === undefined ? {} : { reasoningEffort: downstream.reasoningEffort }) };
+            const inherited = modelRouteFromCall(downstream);
             const candidates = invocation?.candidates ?? orderedModelRoutes([liveAlias ? inherited : primary ?? inherited, ...fallbacks]);
             const persisted = accepted;
             const llm = frame.agent.ctx?.get?.<DshLlmRuntime>("llm")
               ?? (readyCtx.get !== undefined ? readyCtx.get<DshLlmRuntime>("llm") : readyCtx.llm);
-            const selected = persisted ?? invocation?.initialRoute ?? (exactPolicy ? await selectInitialModelRoute(llm ?? {} as DshLlmRuntime, candidates, frame.signal) : inherited);
+            const selected = persisted ?? invocation?.initialRoute ?? (exactPolicy ? await selectInitialModelRoute(llm ?? {} as DshLlmRuntime, candidates, frame.signal,
+              parameterPolicy.mode === "passthrough" ? readyCtx.get?.<DsmmLlmRouteResolver>("dsmmLlmRoutes") : undefined) : inherited);
             frame.signal.throwIfAborted();
-            lock = pinRoleRoute(frame.agent, identity, selected, candidates);
+            lock = pinRoleRoute(frame.agent, identity, selected, candidates, { preserveCandidates: parameterPolicy.mode === "native-defaults",
+              initialCandidate: persisted ?? invocation?.selectedCandidate });
             if (persisted !== undefined) lock.startupSettled = true;
             lockedAgents.add(frame.agent);
           }
@@ -152,6 +160,7 @@ export function registerModelRouting(ctx: DshContext, controller: DeepworkModeCo
         }
         // Ordinary roots belong to the native model tab, including its exact effort.
         if (ordinaryRoot) return downstream;
+        if (parameterPolicy.mode === "native-defaults") return downstream;
         // Named fallback efforts are native policy IDs, never legacy calibration inputs.
         if (fallbacks.some((fallback) => fallback.reasoningEffort !== undefined
           && sameModelRoute(fallback, downstream) && fallback.reasoningEffort === downstream.reasoningEffort)) return downstream;

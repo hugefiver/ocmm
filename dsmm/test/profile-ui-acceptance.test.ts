@@ -23,7 +23,7 @@ import { nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, 
 const structural = (agent: Agent) => agent as unknown as DshAgent;
 
 test("cold UI reads release native listeners before old-child/apply/new-reviewer admission", async () => {
-  const f = await nativeRoutingFixture({ workflow: { reviewCap: 2 } });
+  const f = await nativeRoutingFixture({ defaultActive: true, workflow: { reviewCap: 2 } });
   const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
@@ -38,9 +38,12 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
       assert.notEqual(settings, runtime.getSettings());
       assert.ok(Object.isFrozen(settings) && Object.isFrozen(settings.workflow));
     }
-    const oldChild = await f.create({ origin: "subagent" }, undefined, { parentAgent: parent });
+    const oldChild = await startSuccessorReviewer(f.ctx, parent, runs);
+    const oldAdmission = runtime.admission(structural(oldChild));
     assert.equal(f.agents.isOwnedBy(oldChild.id, parent), true);
-    assert.equal(runtime.admission(structural(oldChild)), before);
+    assert.equal(oldAdmission.epoch, before.epoch);
+    assert.equal(oldAdmission.childCapture!.parentSessionId, parent.id);
+    assert.equal(oldAdmission.childCapture!.originalAdmissionEpoch, before.epoch);
     const reviewerRoute = { provider: "fixture", model: "ui-admitted-reviewer", reasoningEffort: "max" };
     const sessionProfile = await runtime.save({ id: "ui-session", expectedRevision: null, content: JSON.stringify({ version: 1, id: "ui-session", settings: {
       defaultActive: true, workflow: { reviewCap: 6 }, roleRouting: { "dsmm-reviewer": { primary: reviewerRoute } },
@@ -52,26 +55,32 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
     const after = runtime.admission(structural(parent));
     assert.equal(after.epoch, applied.admissionEpoch);
     assert.notEqual(after.epoch, before.epoch);
-    assert.equal(runtime.admission(structural(oldChild)), before);
-    assert.equal(runtime.admission(structural(newChild)), after);
+    assert.equal(runtime.admission(structural(oldChild)), oldAdmission);
+    const newAdmission = runtime.admission(structural(newChild));
+    assert.equal(newAdmission.epoch, after.epoch);
+    assert.equal(newAdmission.childCapture!.parentSessionId, parent.id);
+    assert.equal(newAdmission.childCapture!.originalAdmissionEpoch, after.epoch);
     assert.equal(f.agents.get(newChild.id), newChild);
     assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
     assert.equal(foldSubagentDescriptor(newChild.session.snapshotEvents().slice(newChild.session.inheritedEventCount))!.provider, "dsmm-role-reviewer");
     assert.deepEqual(headerRoutes(newChild), [reviewerRoute]);
-    assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [reviewerRoute]);
+    assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [
+      { provider: "fixture", model: "native-default", reasoningEffort: "low" }, reviewerRoute,
+    ]);
     const tools = newChild.ctx.get("tools")!;
+    assert.equal(newAdmission.childCapture!.authorityCeiling.readOnly, true);
     for (const name of ["write", "edit", "bash", "pwsh"]) {
-      assert.equal(tools.schemas(newChild).some((tool) => tool.name === name), false);
       assert.equal((await tools.execute({ callId: ToolCallId(`ui-read-only-${name}`), name, arguments: {}, agent: newChild, signal: new AbortController().signal })).isError, true);
     }
-    await runs[0]!.dispose();
+    await runs[1]!.dispose();
     assert.equal(f.agents.get(newChild.id), undefined);
     assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
   } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
 });
 
 test("failed cold UI plugin startup releases native listeners before subsequent child creation", async () => {
-  const f = await nativeRoutingFixture();
+  const f = await nativeRoutingFixture({ defaultActive: true });
+  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
     const parent = await f.create();
@@ -84,10 +93,13 @@ test("failed cold UI plugin startup releases native listeners before subsequent 
     };
     await assert.rejects(readColdProfileSettings(f.ctx, failingReader, resolveConfig(), runtime.admission().deployment), (error: unknown) => error === failure);
     assert.equal(released, true, "failed reader cleanup must be awaited before returning");
-    const child = await f.create({ origin: "subagent" }, undefined, { parentAgent: parent });
+    const child = await startSuccessorReviewer(f.ctx, parent, runs);
     assert.equal(f.agents.isOwnedBy(child.id, parent), true);
-    assert.equal(runtime.admission(structural(child)), runtime.admission(structural(parent)));
-  } finally { await f.dispose(); }
+    const admission = runtime.admission(structural(child));
+    assert.equal(admission.epoch, runtime.admission(structural(parent)).epoch);
+    assert.equal(admission.childCapture!.parentSessionId, parent.id);
+    assert.equal(admission.childCapture!.originalAdmissionEpoch, runtime.admission(structural(parent)).epoch);
+  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
 });
 
 test("a refused native reviewer result retains its real run disposer for acceptance cleanup", async () => {

@@ -15,16 +15,22 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
         };
     }
 }
+type ContinuableStart = SubagentRuntime["startContinuable"];
+type ContinuablePreflight = (spec: Parameters<ContinuableStart>[0], start: ContinuableStart) => ReturnType<ContinuableStart>;
 /** Explicit startup replacement for the stock row, in the SAME Host service scope. */
 export declare class DsmmSubagentRuntime<A extends DeliveryAdmission = DeliveryAdmission, E = unknown> extends SubagentRuntime {
     readonly authority: DsmmDeliveryAuthority<A, E>;
     private readonly waiters;
     private readonly lifetime;
     private requiredProviders;
+    private continuablePreflight?;
     constructor(ctx: Context, config: ConstructorParameters<typeof SubagentRuntime>[1], hostClassifier?: DeliveryParentClassifier);
     /** Host composition may select spawn/fork names before enabling the policy. */
     requireProviders(names: readonly string[]): void;
     registerProvider(provider: SubagentProvider): () => void;
+    /** Host entry route preparation before native normalization loses caller option provenance. */
+    configureContinuablePreflight(preflight: ContinuablePreflight, signal: AbortSignal): void;
+    startContinuable(spec: Parameters<ContinuableStart>[0]): ReturnType<ContinuableStart>;
     /** Fulfillment proves this exact registry contains the provider, not just a mounted plugin. */
     waitForProvider(name: string, signal?: AbortSignal): Promise<SubagentProvider>;
     /** Policy explicitly enabled AND every required provider actually registered. */

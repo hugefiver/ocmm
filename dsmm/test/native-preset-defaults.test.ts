@@ -59,7 +59,7 @@ declare module "@deepseek-ai/cordis" {
 }
 
 test("first real DW compositions expose scoped native compact/plan/interaction without automatic model calls; planner stays read-only and quick keeps native write access", async () => {
-  const f = await nativeRoutingFixture({}, { nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
+  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true } }, { nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
     const denied = async (): Promise<never> => { throw new Error("fixture forbids external web/shell/subprocess work"); };
     ctx.provide("web", { search: denied, fetch: denied });
     ctx.provide("subprocess", { spawn: denied });

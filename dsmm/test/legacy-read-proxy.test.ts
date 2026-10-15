@@ -16,7 +16,7 @@ for (const [scenario, requirement] of [
   ["lineage-filter", "wrong direct lineage or original read filter cannot acquire an operation lease"],
   ["transport-fidelity", "bounded failure fidelity restores the final actual result without claiming intermediate raw-reason transparency"],
   ["content-contexts", "parent content is projected before child post policy and both native contexts survive without duplication"],
-  ["alias", "different child/parent cwd and symlink alias resolve to the same canonical native target"],
+  ["alias", "different child/parent cwd and symlink alias read the same native file identity and bytes"],
   ["concurrency", "concurrent independent calls each execute exactly one native body"],
   ["after-next-caller-abort", "caller abort selected before project keeps native ABORTED content rather than parent success content"],
 ] as const) test(requirement, () => runLegacyReadScenario(scenario));

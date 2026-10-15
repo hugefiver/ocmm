@@ -25,7 +25,7 @@ export const UI_CHECKS_015 = Object.freeze([
 ]);
 export function sessionProfileChecksForVersion(version, options = {}) {
   const contract = startupProfileContract(version, options);
-  assert.notEqual(contract, "stable-native-first-021", "021 requires the stable native acceptance producer");
+  assert.ok(!contract.startsWith("stable-native-first-"), "stable native sources require their own acceptance producer");
   return contract === "central-read-lock-free-020"
     ? UI_CHECKS_015.map((check) => check === "startupProfileLockContention" ? "startupProfileReadLockFreeWriteExclusion" : check)
     : [...UI_CHECKS_015];
@@ -47,7 +47,7 @@ export const inject = ["loader", "appExit"];
 /** Independent native observer; never supplies or replaces the DSMM runtime. */
 export function apply(ctx, config) {
   const contract = startupProfileContract(config.version, { sourceContract: config.sourceContract });
-  assert.notEqual(contract, "stable-native-first-021", "021 requires its own startup acceptance producer");
+  assert.ok(!contract.startsWith("stable-native-first-"), "stable native sources require their own startup acceptance producer");
   if (contract === "central-read-lock-free-020" && config.scenario === "stable-selection") return observeReadLockFreeStartup(ctx, config);
   const startedAt = performance.now();
   let finished = false;
@@ -283,7 +283,7 @@ function validateRefusedStartup(contention) {
 
 export function validateStartupProfileProof(proof, { version, sourceContract, artifactSha256, installedRoot, profileStorage, ownedHome }) {
   const contract = startupProfileContract(version, { sourceContract });
-  assert.notEqual(contract, "stable-native-first-021", "021 is not the 020 startup proof grammar");
+  assert.ok(!contract.startsWith("stable-native-first-"), "stable native sources do not use the 020 startup proof grammar");
   if (contract === "historical-read-lock") {
     validateRefusedStartup(proof);
     return { contract };
@@ -357,7 +357,7 @@ export function validateStartupProfileProof(proof, { version, sourceContract, ar
 
 /** Check observed attempts, disk digests and native snapshots; check booleans are not proof. */
 export function validateSessionProfileProof(proof, { artifactSha256, installedRoot, version, sourceContract, profileStorage, ownedHome }) {
-  assert.notEqual(startupProfileContract(version, { sourceContract }), "stable-native-first-021", "021 is not historical session-profile proof grammar");
+  assert.ok(!startupProfileContract(version, { sourceContract }).startsWith("stable-native-first-"), "stable native sources do not use historical session-profile proof grammar");
   const nativeOwnedRoot = requiresNativePickerProof(version);
   const schemaVersion = nativeOwnedRoot ? 2 : 1;
   assert.equal(proof?.schemaVersion, schemaVersion, "successor proof schema missing or differs from trusted version");
@@ -568,6 +568,7 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
   const subagent = roleScope === "child" ? await load("@deepseek-ai/dsh-subagent") : undefined;
   const installedManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   assert.equal(installedManifest.name, "@dsmm/dsmm");
+  const unavailableCode = installedManifest.version === "0.2.2" ? "UNKNOWN_MODEL" : "NO_ADAPTER";
   const runtime = ctx.get("dsmmProfileRuntime");
   const { resolveRoleRuntimePolicy } = await import(pathToFileURL(join(packageRoot, "lib", "settings.js")).href);
   const agents = ctx.get("agents");
@@ -600,9 +601,9 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
       }
       if (partialText || partialTool || name === "startup-rate-limit" || (name === "rate-limit-rollover" && options.model !== "threshold-second")
         || (name.startsWith("profile-") && options.model === name)) {
-        throw new LlmError("deterministic acceptance failure", name.startsWith("unavailable") ? "NO_ADAPTER" : "RATE_LIMIT", { status: name.startsWith("unavailable") ? 503 : 429 });
+        throw new LlmError("deterministic acceptance failure", name.startsWith("unavailable") ? unavailableCode : "RATE_LIMIT", { status: name.startsWith("unavailable") ? 503 : 429 });
       }
-      if ((name === "unavailable-first" && count === 1) || (name === "unavailable-later" && count === 2)) throw new LlmError("deterministic missing adapter", "NO_ADAPTER", { status: 503 });
+      if ((name === "unavailable-first" && count === 1) || (name === "unavailable-later" && count === 2)) throw new LlmError("deterministic unavailable model", unavailableCode, { status: 503 });
       yield { type: "block-start", index: 0, blockType: "text" };
       yield { type: "text-delta", index: 0, text: "native strategy fixture complete" };
       yield { type: "block-end", index: 0, block: { type: "text", text: "native strategy fixture complete" } };
@@ -649,21 +650,40 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
       const existing = (await runtime.describe()).profiles.find(({ id }) => id === profileId);
       const saved = await runtime.save({ id: profileId, expectedRevision: existing?.revision ?? null, content: `${JSON.stringify({ version: 1, id: profileId, settings }, null, 2)}\n` });
       await runtime.select({ id: profileId, expectedRevision: saved.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
-      const handle = await agents.create({ sessionId: SessionId(`dsmm-successor-${name}`), meta: { cwd: workspace, agentPreset: role, ...(roleScope === "child" ? { origin: "subagent" } : {}) },
-        agentOptions: { provider: "dsmm-strategy-fixture", model: "native-inherited", reasoningEffort: ReasoningEffortId("low") } });
-      handles.push(handle);
-      const agent = handle.agent;
+      let agent;
       if (roleScope === "child") {
+        const parentHandle = await agents.create({ sessionId: SessionId(`dsmm-successor-${name}-parent`), meta: { cwd: workspace, agentPreset: "dsmm-orchestrator" },
+          agentOptions: { provider: "dsmm-strategy-fixture", model: "native-inherited", reasoningEffort: ReasoningEffortId("low") } });
+        handles.push(parentHandle);
+        const parent = parentHandle.agent;
+        const removeCreated = ctx.on("agent/created", ({ agent: child }) => {
+          if (agents.isOwnedBy(child.id, parent)) active = { name, agent: child, calls: [], live: [], toolExecutions: [], downstreamAlwaysCalls: 0 };
+        }, { global: true });
+        try {
+          const run = await ctx.get("subagents").start(`dsmm-role-${role.slice("dsmm-".length)}`, {
+            parent, prompt: [{ type: "text", text: "Complete the owned native strategy fixture" }], signal: new AbortController().signal,
+          });
+          handles.push(run);
+          agent = run.localAgent;
+          assert.ok(agent && active?.agent === agent, "native run must publish its exact observed local child");
+          assert.equal(agents.get(agent.id), agent);
+          assert.equal(agents.isOwnedBy(agent.id, parent), true);
+          assert.equal(agent.session.header.parentSession, parent.id);
+        } finally { removeCreated(); }
         assert.equal(agent.session.header.origin, "subagent");
-        agent.session.append("subagent/descriptor", subagent.snapshotSubagentDescriptor({ mode: "one-shot", provider: `dsmm-role-${role.slice("dsmm-".length)}` }));
+      } else {
+        const handle = await agents.create({ sessionId: SessionId(`dsmm-successor-${name}`), meta: { cwd: workspace, agentPreset: role },
+          agentOptions: { provider: "dsmm-strategy-fixture", model: "native-inherited", reasoningEffort: ReasoningEffortId("low") } });
+        handles.push(handle);
+        agent = handle.agent;
+        active = { name, agent, calls: [], live: [], toolExecutions: [], downstreamAlwaysCalls: 0 };
       }
-      active = { name, agent, calls: [], live: [], toolExecutions: [], downstreamAlwaysCalls: 0 };
       const turns = ["startup-primary-lock", "startup-first-available", "unavailable-later"].includes(name) ? 2 : 1;
       for (let turn = 0; turn < turns; turn += 1) {
         let timedOut = false;
         const watchdog = setTimeout(() => { timedOut = true; agent.cancel({ kind: "hook", reason: "Owned acceptance scenario exceeded its finite native loop budget" }); }, 5_000);
         try {
-          agent.followup(createUserMessage({ content: [{ type: "text", text: "Complete the owned native strategy fixture" }], source: { kind: "user" } }));
+          if (roleScope !== "child" || turn > 0) agent.followup(createUserMessage({ content: [{ type: "text", text: "Complete the owned native strategy fixture" }], source: { kind: "user" } }));
           await agent.whenIdle();
           assert.equal(timedOut, false, "native policy loop exceeded its finite acceptance budget");
         } finally { clearTimeout(watchdog); }

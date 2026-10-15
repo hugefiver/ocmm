@@ -138,12 +138,3 @@ test("example LSP MCP patch matches renderer output", () => {
 
   assert.equal(readFileSync(patchPath, "utf8"), renderLspMcpPatch({ enabled: true }));
 });
-
-test("LSP docs name every model-facing dsh MCP tool", () => {
-  const docs = readFileSync(join(packageRoot, "docs", "lsp.md"), "utf8");
-
-  for (const tool of DSMM_LSP_TOOL_NAMES) assert.match(docs, new RegExp(publicLspToolName(tool), "u"));
-  assert.match(docs, /disabled by default/iu);
-  assert.match(docs, /default `cordis\.patch\.yml`/iu);
-  assert.match(docs, /@deepseek-ai\/dsh-mcp-client/u);
-});

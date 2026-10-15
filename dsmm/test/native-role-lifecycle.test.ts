@@ -76,7 +76,7 @@ test("real native root Builder owns formal planning; native plan review returns 
 });
 
 test("native blank preset rebind refreshes actual tool realm while planner remains read-only and permitted utilities remain callable", async () => {
-  const f = await nativeRoutingFixture({ subagents: { maxDepth: 3 } }, { nativePresets: true, nativeFs: true, nativeJobs: true, beforeDsmm: presetHostServices });
+  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true }, subagents: { maxDepth: 3 } }, { nativePresets: true, nativeFs: true, nativeJobs: true, beforeDsmm: presetHostServices });
   try {
     const root = await f.create({ agentPreset: "dsmm-builder", cwd: f.profileDir });
     const presets = f.ctx.get("agentPresets")!;

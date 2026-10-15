@@ -1,6 +1,9 @@
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRateLimitPolicy, normalizeRoutingStrategy } from "./routing-policy.js";
+import { DSMM_MODULE_DESCRIPTORS } from "./modules.js";
+import { parseModelParameterPolicy } from "./model-parameter-policy.js";
 import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
 import { diagnostic, isSafeDiagnosticField, PROFILE_DIAGNOSTIC_REASONS } from "./profile-diagnostics.js";
+import { normalizeModelRouteJson } from "./route-json.js";
 const errorCodes = new Set(["validation", "conflict", "not-found", "lock-timeout", "unsafe-path", "io", "activation", "corrupt-selection", "limit", "busy", "maintenance", "disposed", "not-owned", "unavailable", "cancelled"]);
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
@@ -49,13 +52,6 @@ function integer(value, field, maximum = Number.MAX_SAFE_INTEGER) {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum)
         fail(field);
     return value;
-}
-function routeText(value, field, maximum) {
-    const result = text(value, field, maximum);
-    if (result.trim() === "" || /[\u0000-\u001f\u007f]/u.test(result)
-        || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(result)) !== result)
-        fail(field);
-    return result;
 }
 function role(value) {
     if (typeof value !== "string" || !rolePattern.test(value))
@@ -211,12 +207,7 @@ function rolePolicy(value) {
     };
 }
 function modelRoute(value) {
-    const route = object(value, ["provider", "model"], ["reasoningEffort"]);
-    const provider = routeText(route.provider, "provider", 128);
-    const model = routeText(route.model, "model", 512);
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(provider) || model.includes("://"))
-        fail("route");
-    return { provider, model, ...optional(route, "reasoningEffort", (input) => routeText(input, "reasoningEffort", 64)) };
+    return normalizeModelRouteJson(value);
 }
 function initialRoleRoute(value) {
     const row = object(value, ["status"], ["source", "route", "reason"]);
@@ -355,7 +346,7 @@ function globalSnapshot(value) {
     return { config: jsonData(row.config), revision: selectionRevision(row.revision) };
 }
 function admissionView(value) {
-    const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"]);
+    const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
     object(row.settings, [], Object.keys(row.settings));
     for (const key of ["sources", "captures"]) {
         const map = object(row[key], [], Object.keys(row[key]));
@@ -368,7 +359,7 @@ function admissionView(value) {
     if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256)
         fail("restartRequired");
     const named = row.named === null ? null : object(row.named, ["id", "revision"]);
-    return { settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources),
+    return { ...optional(row, "modelParameterPolicy", value => parseModelParameterPolicy(jsonData(value))), settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources),
         captures: jsonData(row.captures), restartRequired: row.restartRequired.map(value => text(value, "field", 256)),
         named: named === null ? null : { id: id(named.id), revision: revision(named.revision) } };
 }
@@ -388,7 +379,9 @@ function readOnlySettingsData(value) {
                 fail("private environment");
     }
     if (settings.presets !== undefined) {
-        const presets = object(settings.presets, ["materialize"], ["root"]);
+        const presets = object(settings.presets, ["materialize"], ["root", "plannerRootEnabled"]);
+        if (Object.hasOwn(presets, "plannerRootEnabled"))
+            boolean(presets.plannerRootEnabled, "presets.plannerRootEnabled");
         if (presets.root !== undefined && presets.root !== "<configured>")
             fail("private directory");
     }
@@ -433,7 +426,7 @@ function editorSnapshot(value) {
     return result;
 }
 function schemaNode(value) {
-    const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty"]);
+    const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty", "additionalProperties"]);
     if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type))
         fail("schema type");
     const node = { type: row.type };
@@ -464,6 +457,11 @@ function schemaNode(value) {
             fail("schema nonempty");
         node.nonempty = boolean(row.nonempty, "schema nonempty");
     }
+    if (Object.hasOwn(row, "additionalProperties")) {
+        if (row.type !== "object" || row.additionalProperties !== "json")
+            fail("schema additionalProperties");
+        node.additionalProperties = "json";
+    }
     if (row.keys !== undefined) {
         if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64)
             fail("schema keys");
@@ -493,22 +491,25 @@ function configDescriptor(method, parameter) {
         parameters: parameter === undefined ? [] : [{ name: "request", wire: "request", source: "json", codec: parameter }], result: codec("GlobalConfigSnapshot", globalSnapshot) };
 }
 function moduleStates(value) {
-    if (!Array.isArray(value) || value.length !== 1)
+    if (!Array.isArray(value) || value.length !== DSMM_MODULE_DESCRIPTORS.length)
         fail("modules");
+    const ids = new Set();
     return value.map((value) => {
         const row = object(value, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
         const descriptor = object(row.descriptor, ["id", "label", "key"]);
-        if (descriptor.id !== "deepwork" || descriptor.label !== "Deepwork" || descriptor.key !== "modules.deepwork.enabled" || row.hostBundleEnabled !== "unknown")
+        const known = DSMM_MODULE_DESCRIPTORS.find(known => known.id === descriptor.id);
+        if (known === undefined || descriptor.label !== known.label || descriptor.key !== known.key || row.hostBundleEnabled !== "unknown" || ids.has(known.id))
             fail("module descriptor");
+        ids.add(known.id);
         const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-        if (typeof desired.source !== "string" || !["defaults", "global"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
+        if (typeof desired.source !== "string" || !["defaults", "global", "profile"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture)
             || ![null, "global-disabled", "restart-required"].includes(next.reason)
             || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason))
             fail("module state");
-        return { descriptor: { id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }, hostBundleEnabled: "unknown",
+        return { descriptor: { ...known }, hostBundleEnabled: "unknown",
             desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source, capture: desired.capture },
-            startupMounted: boolean(row.startupMounted, "startupMounted"), admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
-            nextRoot: { admitted: boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
+            startupMounted: row.startupMounted === null ? null : boolean(row.startupMounted, "startupMounted"), admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
+            nextRoot: { admitted: next.admitted === null ? null : boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
             reason: row.reason, pending: boolean(row.pending, "pending") };
     });
 }

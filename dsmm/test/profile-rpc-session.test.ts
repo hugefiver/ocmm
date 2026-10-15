@@ -26,6 +26,7 @@ import type { DsmmProfilesRemote } from "../lib/profile-remote.js";
 import { setImmediate } from "node:timers/promises";
 import { DsmmDeploymentConfig } from "../lib/deployment-config.js";
 import type { GlobalConfigSnapshot } from "../lib/deployment-config.js";
+import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 
 const require = createRequire(import.meta.url);
 const nativeRequire = createRequire(require.resolve("@deepseek-ai/dsh-client-connection/package.json"));
@@ -91,6 +92,34 @@ function refused(code: string) {
     const remote = remoteErrorOf(error);
     return remote?.code === "dsmm-profiles/refused" && remote.details.code === code;
   };
+}
+
+async function ownedFixture(defaultActive = false) {
+  const native = await nativeRoutingFixture({ defaultActive }, { headless: true, persistence: true });
+  try {
+    const ctx = native.ctx;
+    await Promise.all([ctx.plugin(TypertRegistry).await(), ctx.plugin(TypertGatewayService, {}).await()]);
+    await ctx.plugin(MemoryCredentials).await();
+    await ctx.plugin(NativeConnection).await();
+    const runtime = ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const store = ProfileStore.fromCentral(native.home, native.profileDir, native.dsmmEntryId ?? "trusted-direct");
+    const runs: Array<{ dispose(): void | Promise<void> }> = [];
+    const invoke = <T>(method: string, args: Record<string, unknown>): Promise<T> => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args }) as Promise<T>;
+    return { ctx, runtime, store, gateway: ctx.typertGateway, invoke,
+      createRoot: () => native.create({ agentPreset: "standard" }),
+      createUnownedChild: () => native.create({ origin: "subagent" }),
+      async createChild(parent: Agent) {
+        const run = await native.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "Owned local profile RPC fixture" }], signal: new AbortController().signal });
+        runs.push(run);
+        assert.equal((await run.result).stopReason, "completed");
+        assert.ok(run.localAgent);
+        assert.equal(ctx.agents.isOwnedBy(run.localAgent.id, parent), true);
+        assert.ok(await store.readChildAdmission(run.localAgent.id, parent.id));
+        return run.localAgent;
+      },
+      async dispose() { try { for (const run of runs.reverse()) await run.dispose(); } finally { await native.dispose(); } }
+    };
+  } catch (error) { await native.dispose(); throw error; }
 }
 
 function selectRequest(snapshot: SessionProfileSnapshot, id: string | null, revision?: string): SessionProfileSelectRequest {
@@ -187,9 +216,9 @@ test("strict additive mode codecs reject unknown fields and retain old optional 
 });
 
 test("native mode RPC changes only the owned root, preserves profile epoch/global and rejects stale mode intent", async () => {
-  const f = await fixture();
+  const f = await ownedFixture();
   try {
-    const a = await f.createRoot("mode-rpc-a"), b = await f.createRoot("mode-rpc-b");
+    const a = await f.createRoot(), b = await f.createRoot();
     const before = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: a.id });
     const other = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: b.id });
     const global = await f.runtime.describe();
@@ -198,13 +227,14 @@ test("native mode RPC changes only the owned root, preserves profile epoch/globa
     assert.equal(selected.deepwork!.active, true); assert.equal(selected.deepwork!.explicit, true);
     assert.equal(selected.admissionEpoch, before.admissionEpoch); assert.deepEqual(selected.selection, before.selection);
     assert.notEqual(selected.deepwork!.revision, before.deepwork!.revision);
-    assert.deepEqual(await f.runtime.describe(), global); assert.deepEqual(await f.runtime.getSession(b), other);
+    assert.deepEqual(await f.runtime.describe(), global); assert.deepEqual(await f.runtime.getSession(b as unknown as DshAgent), other);
     await assert.rejects(f.invoke("selectMode", { sessionId: a.id, request }), refused("conflict"));
     const operator = f.ctx.connection.operator;
     const wrongPeer = { id: operator.id, ctx: new Context(), async dispose() {} };
     await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: a.id, request: modeRequest(selected, false) }, peer: wrongPeer }), refused("not-owned"));
     await assert.rejects(f.invoke("selectMode", { sessionId: b.id, request: modeRequest(selected, false) }), refused("validation"));
-    const child = await f.createRoot("mode-rpc-child", "subagent");
+    await assert.rejects(f.createUnownedChild(), { code: "not-owned" });
+    const child = await f.createChild(a);
     await assert.rejects(f.invoke("selectMode", { sessionId: child.id, request: { ...modeRequest(selected, false), sessionId: child.id } }), refused("not-owned"));
     const off = await f.invoke<SessionProfileSnapshot>("selectMode", { sessionId: a.id, request: modeRequest(selected, false) });
     assert.equal(off.deepwork!.active, false); assert.equal(off.deepwork!.explicit, true);
@@ -352,8 +382,10 @@ test("additive session descriptors are strict and carry no caller-supplied autho
   assert.deepEqual(result.create().parse({ ...snapshot, rolePolicy: policy }), { ...snapshot, rolePolicy: policy });
   assert.deepEqual(result.create().parse({ ...snapshot, profileModel: policy.route }), { ...snapshot, profileModel: policy.route });
   assert.deepEqual(result.create().parse({ ...snapshot, profileModel: { provider: "manual-provider", model: "manual/model" } }), { ...snapshot, profileModel: { provider: "manual-provider", model: "manual/model" } });
+  const parameterizedRoute = { provider: "fixture", model: "model", temperature: 0.4, top_p: 0.9 };
+  assert.deepEqual(result.create().parse({ ...snapshot, profileModel: parameterizedRoute }), { ...snapshot, profileModel: parameterizedRoute });
   for (const invalid of [
-    null, { provider: "fixture", model: "model", auth: "hidden" }, { provider: "fixture", model: "model", nextModelRoute: {} },
+    null, { provider: "fixture", model: "model", auth: "hidden" }, { provider: "fixture", model: "model", authorityCeiling: {} },
     { provider: "https://private", model: "model" }, { provider: "fixture", model: "https://private" },
     { provider: "p".repeat(129), model: "model" }, { provider: "fixture", model: "m".repeat(513) },
     { provider: "fixture", model: "model", reasoningEffort: "e".repeat(65) }, { provider: "fixture", model: "model", reasoningEffort: "" },
@@ -471,17 +503,15 @@ test("a Gateway fallback operator is not native Connection authority; global API
 });
 
 test("scoped native RPC rejects subagent origin and exact runtime-owned children", async () => {
-  const f = await fixture();
+  const f = await ownedFixture(true);
   try {
-    const root = await f.createRoot("ordinary-owner");
-    const origin = await f.createRoot("origin-child", "subagent");
+    const root = await f.createRoot();
+    await assert.rejects(f.createUnownedChild(), { code: "not-owned" });
+    const origin = await f.createChild(root);
+    assert.equal(origin.session.header.origin, "subagent");
     await assert.rejects(f.invoke("describeSession", { sessionId: origin.id }), refused("not-owned"));
-    const session = Session.create(SessionId("runtime-owned-child"));
-    const child = { id: session.id, session, ctx: f.ctx, status: "idle" } as unknown as Agent;
-    const detach = f.ctx.agents.enter(child, root as unknown as Agent);
-    await f.ctx.agents.announce(child, "startup");
-    try { await assert.rejects(f.invoke("describeSession", { sessionId: child.id }), refused("not-owned")); }
-    finally { detach(); }
+    const child = await f.createChild(root);
+    await assert.rejects(f.invoke("describeSession", { sessionId: child.id }), refused("not-owned"));
     assert.equal((await f.store.loadSessionSelection(origin.id!)).admissionEpoch, null);
     assert.equal((await f.store.loadSessionSelection(child.id)).admissionEpoch, null);
   } finally { await f.dispose(); }

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { isSource020, isSource021, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, PUBLIC_RUNTIME_EXPORTS_021 } from "./release-contract.mjs";
+import { isSource020, isSource022, isStableNativeSource, isReviewedReleaseVersion, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COLD_PROFILE_SCRIPTS_022, publicRuntimeExportsForVersion } from "./release-contract.mjs";
 
 export const PACKAGE_NAME = "@dsmm/dsmm";
 export const DSH_VERSION = "0.2.0-rc.2";
@@ -45,7 +45,7 @@ export const COMPILED_FILES_015 = Object.freeze([
 
 export function compiledFilesForVersion(version) {
   requireFact(validVersion(version), "INVALID_COMPILED_POLICY_VERSION");
-  if (isSource021(version)) return [...new Set([...COMPILED_FILES_015, ...COMPILED_NAMES_021.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
+  if (isStableNativeSource(version)) return [...new Set([...COMPILED_FILES_015, ...(isSource022(version) ? COMPILED_NAMES_022 : COMPILED_NAMES_021).flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
   if (isSource020(version)) return [...new Set([...COMPILED_FILES_015, ...COMPILED_NAMES_020.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
   const [major, minor, patch] = version.split(".").map(Number);
   return major > 0 || minor > 1 || (minor === 1 && patch >= 5) ? [...COMPILED_FILES_015] : [...COMPILED_FILES];
@@ -67,7 +67,7 @@ function exactKeys(value, keys) {
 }
 function validVersion(version) {
   return typeof version === "string" && STABLE_VERSION.test(version)
-    && version.split(".").every((part) => Number.isSafeInteger(Number(part)));
+    && version.split(".").every((part) => Number.isSafeInteger(Number(part))) && isReviewedReleaseVersion(version);
 }
 
 export function requiresDeepworkMetadata(version) {
@@ -79,12 +79,13 @@ export function requiresDeepworkMetadata(version) {
 }
 
 export function publicExportsForVersion(version) {
-  if (isSource021(version)) return { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS, ...PUBLIC_RUNTIME_EXPORTS_021 };
+  if (isStableNativeSource(version)) return { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS, ...publicRuntimeExportsForVersion(version) };
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...LOCALE_EXPORTS } : { ...PUBLIC_EXPORTS };
 }
 
 export function requiredChecksForVersion(version) {
-  return requiresDeepworkMetadata(version) ? [...REQUIRED_CHECKS, "localeResources", "nativePluginMetadata"] : [...REQUIRED_CHECKS];
+  const checks = requiresDeepworkMetadata(version) ? [...REQUIRED_CHECKS, "localeResources", "nativePluginMetadata"] : [...REQUIRED_CHECKS];
+  return isSource022(version) ? [...checks, "coldMigrationResources"] : checks;
 }
 
 export function validateLocaleResources(resources, version) {
@@ -337,6 +338,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
   }
   const compiledFiles = {};
   for (const path of compiledFilesForVersion(version)) compiledFiles[path] = verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
+  if (isSource022(version)) for (const path of COLD_PROFILE_SCRIPTS_022) verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
   const resources = new Map([...expected].filter(([path]) => path.startsWith("locale/")).map(([path, entry]) => [path, entry.bytes]));
   validateLocaleResources(resources, version);
   if (requiresDeepworkMetadata(version)) {
@@ -535,6 +537,7 @@ export async function runInstallProbe(options, runtime = {}) {
         receipt.exports = installed.exports;
         receipt.compiledFiles = installed.compiledFiles;
         for (const check of ["profileOwnedResolution", "publicExports", "compiledProfileClient", "installedBytes"]) receipt.checks[check] = true;
+        if (isSource022(options.version)) receipt.checks.coldMigrationResources = true;
         if (requiresDeepworkMetadata(options.version)) {
           stage = "native-plugin-metadata";
           const code = "const {readInstalledPluginMetadata}=await import(process.argv[1]); const result=await readInstalledPluginMetadata(...process.argv.slice(2)); process.stdout.write(JSON.stringify(result));";

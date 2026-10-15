@@ -47,7 +47,7 @@ uninstalled/unverified here. Web screenshots are not Desktop acceptance.
 
 Build `dsmm` as a dsh-native subtree project that brings ocmm's deepwork workflow, role prompts, skills, model calibration, and safety conventions to DeepSeek Harness without globally enabling them for every session.
 
-The first deliverable is an MVP dsh bundle that installs into a profile, registers a `deepwork` mode through dsmm's own Host plugin, and makes the mode's behavior configurable. Later versions add full role/category coverage, guard hooks, MCP/LSP integration, model routing, and runtime recovery.
+The first deliverable is an MVP dsh bundle that installs into a profile, registers a `deepwork` mode through dsmm's own Host plugin, and makes the mode's behavior configurable. Later versions add full role/category coverage, guard hooks, model routing, and runtime recovery. DSMM-managed external LSP isn't enabled in this version: the implementation, interfaces and original configuration remain, automatic MCP mounting stays off even with `lsp.enabled:true`, and DSMM's settings UI hides LSP controls. This doesn't affect DSH's own LSP or independently configured MCP. The retained manual patch isn't a supported DSMM activation entry; no LSP delivery is scheduled here.
 
 ## Non-goals
 
@@ -245,7 +245,7 @@ Every dsmm feature should have a clear control surface:
 | workflow skills | on for MVP set | settings |
 | role presets | on when dsh agent presets available | composition config |
 | safety guards | staged, mostly off until implemented | settings |
-| MCP/LSP | off until v0.5 | composition config + settings |
+| DSMM-managed external LSP | always off in this version | original configuration retained; settings UI hidden; no activation entry |
 
 ## Docker debugging strategy
 

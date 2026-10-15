@@ -10,8 +10,8 @@ import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, Profi
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import type { DshAgent, DshAgentsRegistry } from "./dsh-types.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest, GlobalConfigSnapshot } from "./deployment-config.js";
-import { projectDeepworkModule } from "./modules.js";
-import type { DsmmModuleState } from "./modules.js";
+import { projectDsmmModules } from "./modules.js";
+import type { DsmmModuleState, DsmmMountedPermissionGetter } from "./modules.js";
 import type { DsmmSettings } from "./settings.js";
 import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
 import type { DeploymentEditorSnapshot } from "./profile-types.js";
@@ -172,7 +172,8 @@ export function assertLocalSettingsOperator(ctx: Context): void {
 export class DsmmConfigHost extends TypertRemoteService {
   private readonly lifetime = new AbortController();
   constructor(ctx: Context, private readonly backend: DsmmDeploymentConfig, private readonly startup?: DsmmSettings,
-    private readonly runtime?: () => DsmmProfileRuntime | undefined, private readonly startupSources?: Record<string, string>) {
+    private readonly runtime?: () => DsmmProfileRuntime | undefined, private readonly startupSources?: Record<string, string>,
+    private readonly getMountedPermission?: DsmmMountedPermissionGetter) {
     super(ctx, "dsmmConfig");
     ctx.effect(() => () => this.lifetime.abort());
   }
@@ -204,7 +205,7 @@ export class DsmmConfigHost extends TypertRemoteService {
         startup: { ...readOnlySettings(this.startup) }, defaults: DEFAULT_DSMM_SETTINGS as unknown as Record<string, unknown>,
         ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
         schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
-        modules: [projectDeepworkModule(this.startup, desired, undefined, true)] };
+        modules: projectDsmmModules(this.startup, desired, undefined, true, this.getMountedPermission) };
     } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
   @Remote
@@ -224,7 +225,7 @@ export class DsmmConfigHost extends TypertRemoteService {
       if (this.startup === undefined) throw new DsmmProfileError("unavailable", "The startup module capture is unavailable.");
       const desired = await this.backend.readDesired();
       assertAuthority();
-      return [projectDeepworkModule(this.startup, desired, undefined, true)];
+      return projectDsmmModules(this.startup, desired, undefined, true, this.getMountedPermission);
     } catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the deployment operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
   @Remote
@@ -255,8 +256,8 @@ export function registerProfilesRpc(ctx: Context, backend: ProfilesBackend, depl
 }
 
 /** Core-owned injection; works without any DW or profile business service. */
-export function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>): DsmmConfigHost {
-  const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources);
+export function registerConfigRpc(ctx: Context, deployment: DsmmDeploymentConfig, startup: DsmmSettings, runtime?: () => DsmmProfileRuntime | undefined, startupSources?: Record<string, string>, getMountedPermission?: DsmmMountedPermissionGetter): DsmmConfigHost {
+  const service = new DsmmConfigHost(ctx, deployment, startup, runtime, startupSources, getMountedPermission);
   ctx.typert.register(TYPERT_HOST);
   return service;
 }

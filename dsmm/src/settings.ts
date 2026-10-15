@@ -2,7 +2,7 @@ import Schema from "@deepseek-ai/schemastery";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import type { DsmmLspSettings } from "./lsp.js";
-import { DSMM_ROLES, DSMM_ROLE_IDS } from "./roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DSMM_SKILL_NAMES } from "./skills.js";
 import type { DsmmSkillName } from "./skills.js";
@@ -12,6 +12,10 @@ import type { DeploymentSchemaNode } from "./profile-types.js";
 import { DEPRECATED_DSMM_FIELDS, DsmmConfigValidationError, safeDiagnosticField } from "./profile-diagnostics.js";
 import { DSMM_LOCALES } from "./profile-locale.js";
 import type { DsmmLocale } from "./profile-locale.js";
+import { normalizeModelRouteJson, validateModelRouteFieldName } from "./route-json.js";
+import type { ModelRouteJson } from "./route-json.js";
+import { DEFAULT_PERMISSION_CONTROL, permissionControlSchema, resolvePermissionControl } from "./permission-settings.js";
+import type { PermissionControlSchemaInput, PermissionControlSettings } from "./permission-settings.js";
 
 export { DSMM_LOCALES } from "./profile-locale.js";
 export type { DsmmLocale } from "./profile-locale.js";
@@ -41,6 +45,8 @@ export interface DsmmWorkflowSettings {
 
 export interface DsmmPresetSettings {
   materialize: boolean;
+  /** Startup-pinned root exposure only; workflow Planner delegation stays enabled. */
+  plannerRootEnabled: boolean;
   root?: string;
 }
 
@@ -69,13 +75,9 @@ export interface DsmmGuardSettings {
   todoDisciplineHelper: boolean;
 }
 
-export interface DsmmModelRoute {
-  provider: string;
-  model: string;
-  reasoningEffort?: string;
-}
+export type DsmmModelRoute = ModelRouteJson;
 
-export interface DsmmRecoveryRoute extends DsmmModelRoute {}
+export type DsmmRecoveryRoute = DsmmModelRoute;
 
 export interface DsmmRoleRoutingConfig {
   levels?: Partial<Record<Exclude<DsmmInvocationLevel, "normal">, DsmmLevelOverride>>;
@@ -106,11 +108,14 @@ type DsmmGuardConfig = Partial<Omit<DsmmGuardSettings, "toolOutputTruncation" | 
 };
 
 type DsmmRuntimeRecoveryConfig = Partial<Omit<DsmmRuntimeRecoverySettings, "fallbackRoutes" | "idleContinuation">> & {
-  fallbackRoutes?: Array<Partial<DsmmRecoveryRoute>>;
+  fallbackRoutes?: DsmmRecoveryRoute[];
   idleContinuation?: Partial<DsmmRuntimeRecoverySettings["idleContinuation"]>;
 };
 
 export interface DsmmPluginConfig {
+  /** Deployment-only; the mounted permission owner retains its cold-start policy. */
+  permissionControl?: PermissionControlSchemaInput;
+  modelParameters?: { passthrough?: boolean };
   locale?: DsmmLocale;
   /** Only global deployment input; native/legacy profile transport rejects it. */
   modules?: { deepwork?: { enabled?: boolean } };
@@ -137,6 +142,8 @@ export interface DsmmPluginConfig {
 }
 
 export interface DsmmSettings {
+  permissionControl: PermissionControlSettings;
+  modelParameters: { passthrough: boolean };
   locale?: DsmmLocale;
   modules: { deepwork: { enabled: boolean } };
   modeName: string;
@@ -222,6 +229,8 @@ export interface RegisterSettingsOptions {
 }
 
 export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
+  permissionControl: DEFAULT_PERMISSION_CONTROL,
+  modelParameters: { passthrough: true },
   modules: { deepwork: { enabled: true } },
   modeName: "deepwork",
   defaultActive: false,
@@ -235,7 +244,8 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   roleRouting: {},
   runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
   presets: {
-    materialize: false
+    materialize: false,
+    plannerRootEnabled: false
   },
   subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
   workflow: {
@@ -294,11 +304,15 @@ const ROLES_SCHEMA = Schema.object(Object.fromEntries(
   DSMM_ROLE_IDS.map((id) => [id, Schema.boolean().default(DEFAULT_DSMM_SETTINGS.roles[id])])
 )) as Schema<Partial<Record<DsmmRoleId, boolean>>>;
 
-const MODEL_ROUTE_SCHEMA = Schema.object({
+const MODEL_ROUTE_FIELDS_SCHEMA = Schema.object({
   provider: Schema.string().required(),
   model: Schema.string().required(),
-  reasoningEffort: Schema.string()
+  reasoningEffort: Schema.string(),
+  temperature: Schema.number(),
+  maxTokens: Schema.number().step(1).min(1),
+  stop: Schema.array(Schema.string())
 });
+const MODEL_ROUTE_SCHEMA = Schema.transform(Schema.any(), (input: unknown) => normalizeModelRouteJson(input, true, true));
 const LEVEL_OVERRIDE_SCHEMA = Schema.union([MODEL_ROUTE_SCHEMA, Schema.object({ reasoningEffort: Schema.string().required() })]);
 const LEVELS_SCHEMA = Schema.object({ low: LEVEL_OVERRIDE_SCHEMA, high: LEVEL_OVERRIDE_SCHEMA, max: LEVEL_OVERRIDE_SCHEMA });
 const LOCALE_SCHEMA = Schema.union(DSMM_LOCALES.map(locale => Schema.const(locale)));
@@ -325,7 +339,7 @@ const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input: un
   if (Object.hasOwn(input, "locale")) validateLocale(input.locale);
   if (isRoutingRecord(input.runtimeRecovery) && Array.isArray(input.runtimeRecovery.fallbackRoutes)) {
     for (const route of input.runtimeRecovery.fallbackRoutes) {
-      if (isRoutingRecord(route)) normalizeRecoveryEffort(route);
+      normalizeExplicitRoute(route);
     }
   }
   const roleRouting = resolveRoleRouting(input.roleRouting as DsmmRoleRouting | undefined);
@@ -335,6 +349,7 @@ const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input: un
 
 const PRESETS_SCHEMA = Schema.object({
   materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
+  plannerRootEnabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.plannerRootEnabled),
   root: Schema.string()
 });
 const SUBAGENTS_SCHEMA = Schema.object({
@@ -409,11 +424,7 @@ const RUNTIME_RECOVERY_SCHEMA = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.enabled),
   retryOnStatusCodes: Schema.array(Number).default([...DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnStatusCodes]),
   retryOnCodes: Schema.array(String).default([...DEFAULT_DSMM_SETTINGS.runtimeRecovery.retryOnCodes]),
-  fallbackRoutes: Schema.array(Schema.object({
-    provider: Schema.string(),
-    model: Schema.string(),
-    reasoningEffort: Schema.string()
-  })).default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route }))),
+  fallbackRoutes: Schema.array(MODEL_ROUTE_SCHEMA).max(ROLE_FALLBACK_ROUTE_LIMIT).default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route }))),
   maxFallbackAttempts: Schema.number().default(DEFAULT_DSMM_SETTINGS.runtimeRecovery.maxFallbackAttempts),
   idleContinuation: RUNTIME_RECOVERY_IDLE_CONTINUATION_SCHEMA
 });
@@ -442,6 +453,8 @@ const LSP_SCHEMA = Schema.object({
 });
 
 const CONFIG_FIELDS_SCHEMA = Schema.object({
+  permissionControl: permissionControlSchema,
+  modelParameters: Schema.object({ passthrough: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.modelParameters.passthrough) }),
   locale: LOCALE_SCHEMA,
   sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
     root: Schema.string().required(),
@@ -472,11 +485,14 @@ const GLOBAL_FIELDS_SCHEMA = Schema.object({ ...CONFIG_FIELDS_SCHEMA.dict, modul
 
 /** Only data is transported. Defaults remain resolved by the existing authority. */
 export function deploymentEditorSchema(): DeploymentSchemaNode {
-  const project = (schema: Schema): DeploymentSchemaNode => ({
+  const project = (schema: Schema): DeploymentSchemaNode => schema === permissionControlSchema && schema.type === "transform"
+    ? project(schema.inner!) : schema === permissionControlSchema.inner!.dict!.rules
+    ? { type: "array", inner: { type: "object", fields: {}, additionalProperties: "json" } } : schema === MODEL_ROUTE_SCHEMA
+    ? { ...project(MODEL_ROUTE_FIELDS_SCHEMA), additionalProperties: "json" } : ({
     type: schema.type,
     ...(schema.dict === undefined ? {} : { fields: Object.fromEntries(Object.entries(schema.dict).filter(([key]) => key !== "sessionPersistence").map(([key, child]) => {
       const node = project(child);
-      if (schema === MODEL_ROUTE_SCHEMA) node.nonempty = true;
+      if (schema === MODEL_ROUTE_FIELDS_SCHEMA && ["provider", "model", "reasoningEffort"].includes(key)) node.nonempty = true;
       if (schema === RATE_LIMIT_CONFIG_SCHEMA) {
         const [min, max] = DSMM_RATE_LIMIT_BOUNDS[key as keyof DsmmRateLimitPolicy];
         Object.assign(node, { min, max, step: 1 });
@@ -498,6 +514,7 @@ export function deploymentEditorSchema(): DeploymentSchemaNode {
 
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
 function sparseSchema(schema: Schema): Schema {
+  if (schema === permissionControlSchema && schema.type === "transform") return sparseSchema(schema.inner!);
   const { default: _default, required: _required, ...meta } = schema.meta;
   return new Schema({ ...schema, meta,
     ...(schema.dict === undefined ? {} : { dict: Object.fromEntries(Object.entries(schema.dict).map(([key, child]) => [key, sparseSchema(child)])) }),
@@ -529,6 +546,8 @@ export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.defau
 }) as unknown as Schema<DsmmPluginConfig>;
 
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
+  permissionControl: permissionControlSchema,
+  modelParameters: Schema.object({ passthrough: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.modelParameters.passthrough) }),
   locale: LOCALE_SCHEMA,
   modules: Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean().default(true) }) }),
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
@@ -554,7 +573,11 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
   rejectDeprecatedFields(config);
   if (Object.hasOwn(config, "locale")) validateLocale(config.locale);
   if (config.subagents !== undefined) validateShape(config.subagents, SUBAGENTS_SCHEMA, ["subagents"]);
+  if (config.modelParameters !== undefined) validateShape(config.modelParameters, CONFIG_FIELDS_SCHEMA.dict!.modelParameters!, ["modelParameters"]);
+  if (config.permissionControl !== undefined) validateShape(config.permissionControl, permissionControlSchema, ["permissionControl"]);
   const settings: DsmmSettings = {
+    permissionControl: resolvePermissionControl(config.permissionControl),
+    modelParameters: { passthrough: config.modelParameters?.passthrough ?? DEFAULT_DSMM_SETTINGS.modelParameters.passthrough },
     ...(config.locale === undefined ? {} : { locale: config.locale }),
     modules: { deepwork: { enabled: config.modules?.deepwork?.enabled ?? DEFAULT_DSMM_SETTINGS.modules.deepwork.enabled } },
     modeName: normalizeModeName(config.modeName),
@@ -618,8 +641,14 @@ export function freezeSettings<T>(input: T): T {
 
 function validateShape(value: unknown, schema: Schema, path: (string | number)[] = []): void {
   const fail = (code: import("./profile-diagnostics.js").ProfileDiagnosticCode = "invalid-type"): never => { throw new DsmmConfigValidationError(code, path); };
+  if (schema === MODEL_ROUTE_SCHEMA) {
+    try { normalizeModelRouteJson(value, true, true); } catch { fail("invalid-route"); }
+    return;
+  }
   if (value === null || value === undefined) fail();
-  if (schema.type === "object") {
+  if (schema.type === "transform") {
+    validateShape(value, schema.inner!, path);
+  } else if (schema.type === "object") {
     if (typeof value !== "object" || Array.isArray(value)) fail();
     for (const [key, child] of Object.entries(value as object)) {
       const field = schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined;
@@ -678,7 +707,15 @@ export function validateDeploymentPath(path: readonly string[]): void {
   let schema: Schema = GLOBAL_FIELDS_SCHEMA;
   if (path.length === 0 || path[0] === "sessionPersistence") throw new TypeError("Not an editable deployment field");
   for (const key of path) {
-    if (schema.type === "union") schema = schema.list?.find((node) => node.type === "object") ?? schema;
+    if (schema.type === "union") schema = schema.list?.find((node) => node === MODEL_ROUTE_SCHEMA || node.type === "object") ?? schema;
+    if (schema === MODEL_ROUTE_SCHEMA) {
+      if (path.some(part => ["__proto__", "prototype", "constructor"].includes(part))) throw new DsmmConfigValidationError("invalid-route", path);
+      try { validateModelRouteFieldName(key); } catch { throw new DsmmConfigValidationError("invalid-route", path); }
+      const field = MODEL_ROUTE_FIELDS_SCHEMA.dict![key];
+      if (Object.hasOwn(MODEL_ROUTE_FIELDS_SCHEMA.dict!, key)) { schema = field; continue; }
+      return;
+    }
+    while (schema.type === "transform") schema = schema.inner!;
     const child = schema.type === "object" ? schema.dict !== undefined && Object.hasOwn(schema.dict, key) ? schema.dict[key] : undefined : schema.type === "dict" ? schema.inner : undefined;
     if (child === undefined) throw new DsmmConfigValidationError("unknown-field", path);
     schema = child;
@@ -727,7 +764,6 @@ export function validateLocale(value: unknown, field = "locale"): asserts value 
 export function normalizeLevelOverride(value: unknown, field = "route"): DsmmLevelOverride {
   try { value = copyJson(value); } catch { throw new DsmmConfigValidationError("invalid-route", field); }
   if (!isRoutingRecord(value)) throw new DsmmConfigValidationError("invalid-route", field);
-  for (const key of Object.keys(value)) if (!["provider", "model", "reasoningEffort"].includes(key)) throw new DsmmConfigValidationError("unknown-field", [...field.split("."), key]);
   if (Object.hasOwn(value, "provider") || Object.hasOwn(value, "model")) {
     try {
       const route = normalizeExplicitRoute(value);
@@ -735,12 +771,14 @@ export function normalizeLevelOverride(value: unknown, field = "route"): DsmmLev
       return route;
     } catch { throw new DsmmConfigValidationError("invalid-route", field); }
   }
+  for (const key of Object.keys(value)) if (key !== "reasoningEffort") throw new DsmmConfigValidationError("unknown-field", [...field.split("."), key]);
   if (typeof value.reasoningEffort !== "string" || value.reasoningEffort.trim() === "" || value.reasoningEffort.length > 64 || /[\u0000-\u001f\u007f]/u.test(value.reasoningEffort)) throw new DsmmConfigValidationError("invalid-route", `${field}.reasoningEffort`);
-  return { reasoningEffort: value.reasoningEffort.trim() };
+  return { reasoningEffort: value.reasoningEffort };
 }
 
 export function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRoleRouting {
   if (input === undefined) return {};
+  input = copyJson(input);
   if (!isRoutingRecord(input)) throw new TypeError("dsmm roleRouting must be an object");
   const result: DsmmRoleRouting = {};
   for (const [key, value] of Object.entries(input)) {
@@ -772,7 +810,7 @@ export function resolveRoleRouting(input: DsmmRoleRouting | undefined): DsmmRole
       for (const [index, entry] of value.fallbackRoutes.entries()) {
         let route: DsmmModelRoute;
         try { route = normalizeExplicitRoute(entry); } catch { throw new DsmmConfigValidationError("invalid-route", `roleRouting.${key}.fallbackRoutes[${index}]`); }
-        if (!policy.fallbackRoutes.some((existing) => existing.provider === route.provider && existing.model === route.model)) policy.fallbackRoutes.push(route);
+        policy.fallbackRoutes.push(route);
       }
     }
     result[key as DsmmRoleId] = policy;
@@ -785,28 +823,26 @@ function isRoutingRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeExplicitRoute(value: unknown): DsmmModelRoute {
-  if (!isRoutingRecord(value) || Object.keys(value).some((field) => !["provider", "model", "reasoningEffort"].includes(field))) {
-    throw new TypeError("dsmm explicit model route must contain provider, model and optional reasoningEffort");
-  }
-  if (typeof value.provider !== "string" || value.provider.trim() === "" || typeof value.model !== "string" || value.model.trim() === "") {
-    throw new TypeError("dsmm explicit model route requires nonempty provider and model");
-  }
-  if (Object.hasOwn(value, "reasoningEffort") && (typeof value.reasoningEffort !== "string" || value.reasoningEffort.trim() === "")) {
-    throw new TypeError("dsmm explicit model route reasoningEffort must be nonempty");
-  }
-  return {
-    provider: value.provider.trim(), model: value.model.trim(),
-    ...(typeof value.reasoningEffort === "string" ? { reasoningEffort: value.reasoningEffort.trim() } : {})
-  };
+  const route = normalizeModelRouteJson(value, false, true);
+  return { ...route, provider: route.provider.trim(), model: route.model.trim() };
 }
 
 export function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean {
   return settings.roles[role];
 }
 
+/** Native standing-root availability is independent of child role enablement. */
+export function isRootRoleEnabled(settings: DsmmSettings, id: DsmmRoleId): boolean {
+  const role = DSMM_ROLES.find(role => role.id === id)!;
+  return settings.modules.deepwork.enabled && settings.roles[id] && isRootRole(role)
+    && (id !== "dsmm-planner" || settings.presets.plannerRootEnabled);
+}
+
 function resolvePresetSettings(config: DsmmPluginConfig["presets"]): DsmmPresetSettings {
+  if (config !== undefined) validateShape(config, PRESETS_SCHEMA, ["presets"]);
   return {
     materialize: config?.materialize ?? DEFAULT_DSMM_SETTINGS.presets.materialize,
+    plannerRootEnabled: config?.plannerRootEnabled ?? DEFAULT_DSMM_SETTINGS.presets.plannerRootEnabled,
     ...(config?.root === undefined ? {} : { root: config.root })
   };
 }
@@ -883,25 +919,16 @@ function normalizeRetryCodes(input: readonly string[] | undefined, defaults: rea
   return normalized;
 }
 
-function normalizeRecoveryRoutes(input: readonly Partial<DsmmRecoveryRoute>[] | undefined, defaults: readonly DsmmRecoveryRoute[]): DsmmRecoveryRoute[] {
+function normalizeRecoveryRoutes(input: readonly DsmmRecoveryRoute[] | undefined, defaults: readonly DsmmRecoveryRoute[]): DsmmRecoveryRoute[] {
   const normalized: DsmmRecoveryRoute[] = [];
-
-  for (const route of input ?? defaults) {
-    const reasoningEffort = normalizeRecoveryEffort(route);
-    const provider = route.provider?.trim() ?? "";
-    const model = route.model?.trim() ?? "";
-    if (provider === "" || model === "" || normalized.some((candidate) => candidate.provider === provider && candidate.model === model)) continue;
-    normalized.push({ provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) });
+  const routes = copyJson(input ?? defaults);
+  if (!Array.isArray(routes) || routes.length > ROLE_FALLBACK_ROUTE_LIMIT) throw new TypeError("dsmm recovery fallbackRoutes must contain at most 32 routes");
+  for (const route of routes) {
+    const candidate = normalizeExplicitRoute(route);
+    normalized.push(candidate);
   }
 
   return normalized;
-}
-
-function normalizeRecoveryEffort(route: object): string | undefined {
-  if (!Object.hasOwn(route, "reasoningEffort")) return undefined;
-  const value = (route as { reasoningEffort: unknown }).reasoningEffort;
-  if (typeof value !== "string" || value.trim() === "") throw new TypeError("dsmm recovery route reasoningEffort must be nonempty");
-  return value.trim();
 }
 
 function normalizeBoundedInteger(value: number | undefined, defaultValue: number): number {

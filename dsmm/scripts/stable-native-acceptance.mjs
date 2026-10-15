@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { STABLE_UI_CHECKS_021 } from "./release-contract.mjs";
+import { STABLE_UI_CHECKS_021, isStableNativeSource, publicRuntimeExportsForVersion, stableUiKindForVersion, startupProfileContract } from "./release-contract.mjs";
 
 export const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export const STABLE_UI_CHECKS = STABLE_UI_CHECKS_021;
@@ -70,10 +70,16 @@ export function inspectStableBootstrap(ctx, { template = "web", requireDeliveryF
     loader: [...main, ...custom].map((entry) => ({ id: entry.id, name: entry.options.name, state: entry.fiber.state })) };
 }
 
-export async function inspectStableExports(packageRoot, profilePackage) {
+export function stableNativeProofIdentity(manifest, { sourceContract = "0.2.1" } = {}) {
+  assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(isStableNativeSource(manifest.version), true);
+  startupProfileContract(manifest.version, { sourceContract });
+  return { kind: stableUiKindForVersion(manifest.version), sourceContract: manifest.version, packageVersion: manifest.version };
+}
+
+export async function inspectStableExports(packageRoot, profilePackage, options = {}) {
   const require = createRequire(profilePackage), manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(manifest.version, "0.2.1");
-  const keys = [".", "./preset-skills", "./session-persistence", "./subagent-runtime", "./legacy-read-host", "./client", "./package.json", "./locale/en.json", "./locale/zh.json"];
+  stableNativeProofIdentity(manifest, options);
+  const keys = [".", "./preset-skills", "./session-persistence", "./client", "./package.json", "./locale/en.json", "./locale/zh.json", ...Object.keys(publicRuntimeExportsForVersion(manifest.version))];
   assert.deepEqual(Object.keys(manifest.exports).sort(), keys.sort());
   const exports = [];
   for (const key of keys) {

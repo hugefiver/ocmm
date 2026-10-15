@@ -391,7 +391,7 @@ test("reconcileRolePresets with materialize false removes known owned directorie
 
 test("materializeRolePresets writes enabled roles even when settings materialize is false", () => {
   usingFixture((root) => {
-    materializeRolePresets({ root, settings: { ...DEFAULT_DSMM_SETTINGS, presets: { materialize: false } } });
+    materializeRolePresets({ root, settings: { ...DEFAULT_DSMM_SETTINGS, presets: { ...DEFAULT_DSMM_SETTINGS.presets, materialize: false } } });
 
     assert.equal(existsSync(join(root, "dsmm-orchestrator", DSMM_MANAGED_PRESET_MARKER)), true);
   });

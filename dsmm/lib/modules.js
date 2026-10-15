@@ -1,6 +1,7 @@
 /** Static first-party inventory, not a plugin/provider installation interface. */
 export const DSMM_MODULE_DESCRIPTORS = Object.freeze([
-    Object.freeze({ id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" })
+    Object.freeze({ id: "deepwork", label: "Deepwork", key: "modules.deepwork.enabled" }),
+    Object.freeze({ id: "permission-control", label: "Permission control", key: "permissionControl.enabled" })
 ]);
 export function deepworkEnabled(settings) { return settings.modules.deepwork.enabled; }
 export function projectDeepworkModule(startup, desired, admission, currentGlobal = false) {
@@ -17,5 +18,20 @@ export function projectDeepworkModule(startup, desired, admission, currentGlobal
         reason: admitted === false && next ? "captured-off" : admitted === true ? null : reason,
         pending: enabled !== mounted || admitted !== null && admitted !== next
     };
+}
+/** Both projections share the same captured deployment/admission; module state grants no authority. */
+export function projectDsmmModules(startup, desired, admission, currentGlobal = false, getMountedPermission) {
+    const enabled = desired?.settings.permissionControl.enabled ?? startup.permissionControl.enabled;
+    const mounted = getMountedPermission?.() ?? null;
+    const admitted = admission?.settings.permissionControl.enabled ?? null;
+    const restartRequired = enabled !== startup.permissionControl.enabled;
+    const reason = restartRequired ? "restart-required" : null;
+    return [projectDeepworkModule(startup, desired, admission, currentGlobal), {
+            descriptor: { ...DSMM_MODULE_DESCRIPTORS[1] }, hostBundleEnabled: "unknown",
+            desired: { enabled, source: desired?.sources["permissionControl.enabled"] ?? "defaults",
+                capture: currentGlobal ? "current-global" : admission === undefined ? "startup" : "admission" },
+            startupMounted: mounted, admitted, nextRoot: { admitted: mounted, reason }, reason,
+            pending: restartRequired || admitted !== null && mounted !== null && admitted !== mounted
+        }];
 }
 //# sourceMappingURL=modules.js.map

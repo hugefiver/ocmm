@@ -22,6 +22,7 @@ import type { DeepworkModeController } from "./state.js";
 import { roleRouteRuntimeState } from "./role-routing.js";
 import type { DsmmInvocationView } from "./profile-types.js";
 import type { ResolvedRoleInvocation } from "./role-invocation.js";
+import { modelRouteFromCall } from "./role-llm.js";
 import type { RoleRunRegistry } from "./role-runs.js";
 
 const hostControls = ["send_message", "interrupt_agent", "exit_plan_mode", "ask_user_question", "todo_write", "job_output", "job_list", "job_kill"];
@@ -82,8 +83,8 @@ function latestOwnRoleRoute(child: DshAgent): DsmmLiveRoleRoute {
       || config.reasoningEffort !== undefined && typeof config.reasoningEffort !== "string") {
       return { status: "unknown", reason: "invalid-own-request-header" };
     }
-    return { status: "known", source: "own-native-request-header", route: Object.freeze({ provider: config.provider, model: config.model,
-      ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }) }) };
+    try { return { status: "known", source: "own-native-request-header", route: Object.freeze(modelRouteFromCall({ ...config, provider: config.provider, model: config.model })) }; }
+    catch { return { status: "unknown", reason: "invalid-own-request-header" }; }
   }
   return { status: "unknown", reason: "no-own-request-header" };
 }
@@ -146,7 +147,7 @@ function registerRoleTool(agent: DshAgent, agentCtx: Context, tools: ToolRuntime
       level: { type: "string", enum: ["normal", "low", "high", "max"] },
       ...(settings.subagents.allowRouteOverride ? { route: { oneOf: [
         { type: "object" as const, additionalProperties: false, properties: { reasoningEffort: { type: "string" as const, required: true as const } } },
-        { type: "object" as const, additionalProperties: false, properties: { provider: { type: "string" as const, required: true as const }, model: { type: "string" as const, required: true as const }, reasoningEffort: { type: "string" as const } } }
+        { type: "object" as const, additionalProperties: true, properties: { provider: { type: "string" as const, required: true as const }, model: { type: "string" as const, required: true as const }, reasoningEffort: { type: "string" as const } } }
       ] as const } } : {}),
       ...(background ? { run_in_background: { type: "boolean" as const } } : {}) },
     output: { schema: { type: "json" }, render(_args, value) {

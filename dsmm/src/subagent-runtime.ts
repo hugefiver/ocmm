@@ -21,6 +21,8 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
 }
 
 interface ReadyWaiter { check(): void }
+type ContinuableStart = SubagentRuntime["startContinuable"];
+type ContinuablePreflight = (spec: Parameters<ContinuableStart>[0], start: ContinuableStart) => ReturnType<ContinuableStart>;
 
 /** Explicit startup replacement for the stock row, in the SAME Host service scope. */
 export class DsmmSubagentRuntime<A extends DeliveryAdmission = DeliveryAdmission, E = unknown> extends SubagentRuntime {
@@ -28,6 +30,7 @@ export class DsmmSubagentRuntime<A extends DeliveryAdmission = DeliveryAdmission
   private readonly waiters = new Set<ReadyWaiter>();
   private readonly lifetime = new AbortController();
   private requiredProviders: readonly string[] = ["spawn"];
+  private continuablePreflight?: ContinuablePreflight;
 
   constructor(ctx: Context, config: ConstructorParameters<typeof SubagentRuntime>[1], hostClassifier?: DeliveryParentClassifier) {
     if (ctx.get("subagents") !== undefined) {
@@ -59,6 +62,19 @@ export class DsmmSubagentRuntime<A extends DeliveryAdmission = DeliveryAdmission
     const dispose = super.registerProvider(provider);
     this.wakeWaiters();
     return dispose;
+  }
+
+  /** Host entry route preparation before native normalization loses caller option provenance. */
+  configureContinuablePreflight(preflight: ContinuablePreflight, signal: AbortSignal): void {
+    signal.throwIfAborted();
+    if (this.continuablePreflight !== undefined) throw new SubagentError("Continuable routing already has a Host owner", "UNAUTHORIZED");
+    this.continuablePreflight = preflight;
+    signal.addEventListener("abort", () => { if (this.continuablePreflight === preflight) this.continuablePreflight = undefined; }, { once: true });
+  }
+
+  override startContinuable(spec: Parameters<ContinuableStart>[0]): ReturnType<ContinuableStart> {
+    const start: ContinuableStart = request => super.startContinuable(request);
+    return this.continuablePreflight === undefined ? start(spec) : this.continuablePreflight(spec, start);
   }
 
   /** Fulfillment proves this exact registry contains the provider, not just a mounted plugin. */

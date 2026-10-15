@@ -12,11 +12,14 @@ import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
 import { LlmRuntime, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionStore } from "@deepseek-ai/dsh-session";
 import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
+import * as nativeSpawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import DsmmPlugin, { DSMM_ROLE_IDS } from "../lib/index.js";
 import type { DsmmDeploymentConfig, DsmmPluginConfig, DsmmProfileRuntime } from "../lib/index.js";
-import { RoutingFixtureAdapter } from "./native-routing-fixture.ts";
+import SubagentRuntimePlugin from "../lib/runtime-integration.js";
+import { nativeFixturePlugin, RoutingFixtureAdapter } from "./native-routing-fixture.ts";
+import * as ManagedSettings from "../src/managed-settings.ts";
 
 const require = createRequire(import.meta.url);
 const presetSdk = createRequire(require.resolve("@deepseek-ai/dsh-agent-preset-registry"));
@@ -64,10 +67,11 @@ const { SettingsForms }: { SettingsForms: new (ctx: Context) => NativeSettings }
 const { ConfigEditor }: { ConfigEditor: new (ctx: Context) => NativeConfigEditor } = settingsSdk("@deepseek-ai/dsh-config-editor");
 const { mountRootInclude, loadProfileDirectory, readProfilePatches, composeEntries, getDshRuntimeVersion } = presetSdk("@deepseek-ai/dsh-app-boot");
 
-export function nativeConfigRun(): {
+export function nativeConfigRun(options: { managedPermissionSettings?: boolean; managedRuntime?: boolean } = {}): {
   root: string;
   home: string;
   createProfile(name: string, override?: DsmmPluginConfig): Promise<NativeConfigProfile>;
+  reopenProfile(name: string): Promise<NativeConfigProfile>;
   dispose(): Promise<void>;
 } {
   appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "native-config-run", prefix: "dsmm-native-config-", time: Date.now() })}\n`);
@@ -81,17 +85,20 @@ export function nativeConfigRun(): {
   mkdirSync(home);
   const profiles: Array<{ dispose(): Promise<void> }> = [];
 
-  async function createProfile(name: string, override: DsmmPluginConfig = {}): Promise<NativeConfigProfile> {
+  async function createProfile(name: string, override: DsmmPluginConfig = {}, reopen = false): Promise<NativeConfigProfile> {
     appendFileSync(journal, `${JSON.stringify({ probe: "create-profile", name, home })}\n`);
     const dir = join(root, name);
-    mkdirSync(dir);
-    writeFileSync(join(dir, ".run-owner"), owner, { flag: "wx" });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `dsmm-test-${name}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }), { flag: "wx" });
+    if (reopen) assert.equal(readFileSync(join(dir, ".run-owner"), "utf8"), owner);
+    else {
+      mkdirSync(dir);
+      writeFileSync(join(dir, ".run-owner"), owner, { flag: "wx" });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `dsmm-test-${name}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }), { flag: "wx" });
+    }
     const basePath = join(dir, "cordis.json");
     const patchPath = join(dir, "cordis.patch.yml");
-    writeFileSync(basePath, "[]\n", { flag: "wx" });
+    if (!reopen) writeFileSync(basePath, "[]\n", { flag: "wx" });
     const baseline = { roles: Object.fromEntries(DSMM_ROLE_IDS.map((id) => [id, false])), presets: { root: join(dir, "agent-presets") } };
-    writeFileSync(patchPath, `${JSON.stringify([
+    if (!reopen) writeFileSync(patchPath, `${JSON.stringify([
       { insert: [{ id: "dsmm", name: "cordis:fixture-dsmm", config: baseline }] },
       ...(Object.keys(override).length ? [{ id: "dsmm", config: { ...baseline, ...override } }] : [])
     ])}\n`, { flag: "wx" });
@@ -108,9 +115,19 @@ export function nativeConfigRun(): {
         ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
         ctx.plugin(LlmRuntime), ctx.plugin(SystemPrompt, {}), ctx.plugin(ToolRuntime, { mode: "native" }), ctx.plugin(SkillRegistry, {})
       ].map((fiber) => fiber.await()));
+      if (options.managedRuntime) {
+        await ctx.plugin(SubagentRuntimePlugin, {}).await();
+        const { SessionQueryEngine } = await nativeFixturePlugin("@deepseek-ai/dsh-session-query", "@deepseek-ai/dsh-subagent-spawn-in-process");
+        class ExactQuery extends SessionQueryEngine {
+          async searchSessions(): Promise<never> { throw new Error("config fixture does not offer full-text search"); }
+          async searchEvents(): Promise<never> { throw new Error("config fixture does not offer full-text search"); }
+        }
+        await ctx.plugin(ExactQuery).await();
+      }
       const adapter = new RoutingFixtureAdapter();
       ctx.llm.registerAdapter(["fixture"], adapter);
       await ctx.plugin(AgentLoop, {}).await();
+      if (options.managedRuntime) await ctx.plugin(nativeSpawn, { providerName: "spawn" }).await();
       await ctx.plugin(Loader).await();
       ctx.loader.builtins["fixture-dsmm"] = { default: DsmmPlugin };
       const include = await mountRootInclude(ctx, basePath, readProfilePatches("dsh", profileContext));
@@ -123,7 +140,8 @@ export function nativeConfigRun(): {
       assert.equal(fiber.state, 2);
       const originalUid = fiber.uid;
       await ctx.plugin(ConfigEditor).await();
-      await ctx.plugin(SettingsForms).await();
+      if (options.managedPermissionSettings) await ctx.plugin(ManagedSettings).await();
+      else await ctx.plugin(SettingsForms).await();
       const editor = ctx.get("configEditor") as NativeConfigEditor;
       const settings = ctx.get("settings") as NativeSettings;
       const deployment = ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
@@ -141,6 +159,7 @@ export function nativeConfigRun(): {
       }, { global: true });
       fiber.ctx.effect(() => () => { lifecycle.scopeDisposals++; });
       ctx.on("agent/disposed", () => { lifecycle.agentDisposals++; });
+      let disposed = false;
       const fixture = {
         ctx, adapter, dir, patchPath, entry, fiber, settings, deployment, runtime, lifecycle,
         descriptor() {
@@ -175,6 +194,8 @@ export function nativeConfigRun(): {
             { updates: 0, scopeDisposals: 0, agentDisposals: 0 });
         },
         async dispose() {
+          if (disposed) return;
+          disposed = true;
           for (const handle of [...handles].reverse()) await handle.dispose();
           await ctx.fiber.dispose();
         }
@@ -188,7 +209,7 @@ export function nativeConfigRun(): {
   }
 
   return {
-    root, home, createProfile,
+    root, home, createProfile, reopenProfile: name => createProfile(name, {}, true),
     async dispose() {
       for (const profile of [...profiles].reverse()) await profile.dispose();
       assert.equal(lstatSync(root).isSymbolicLink(), false);

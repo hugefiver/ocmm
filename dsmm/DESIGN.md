@@ -32,11 +32,17 @@ in the profile. Explicit same-default pins are visible. Native composition/base
 pins are identified separately; clearing a user override never promises to clear
 an upper host layer. Structured boolean/enum/number/string controls cover ordinary
 features, including roles and skills. Bounded, schema-described advanced groups
-cover nested routes, retry arrays and LSP configuration without arbitrary paths,
+cover nested routes and retry arrays without arbitrary paths,
 unknown modules or executable schema callbacks. No merged/default-filled object
 is ever saved. A read-only field state inspector separates desired/source,
 startup capture, next-root constraints and an exact current-session admission;
 sessionless is unknown, not active.
+
+LSP controls are hidden in DSMM's settings UI for this version. The implementation,
+interfaces and original configuration remain, but automatic MCP mounting stays off
+even with `lsp.enabled:true`. A save or independent restart doesn't enable it.
+DSH's own LSP and independently configured MCP are unaffected; the retained manual
+patch isn't a supported DSMM activation entry. See [LSP boundary](docs/lsp.md).
 
 Read-only desired/startup/admission projections redact executable configuration,
 private directories and continuation prompt text on the Host, before transport.
@@ -164,7 +170,7 @@ This matrix is the pre-implementation checklist for the new section, not documen
 | Configuration editor | Labeled native `<textarea>`; code font; visible focus ring | Prevent conflicting edits while save is pending; readable content | Explain expected overlay shape; preserve invalid/conflicting draft with actionable error |
 | Save/create/select/reset actions | Native `Button`; clear action label; keyboard activation; visible ring | Native disabled plus busy label; no width-changing replacement | Announce actual commit; error does not masquerade as success |
 | Status and diagnostics | Persistent semantic text in a stable position | Loading text and `aria-busy` where applicable | Distinguish unavailable service, empty store, conflict, validation and I/O refusal; offer relevant recovery |
-| Structured route fields | Labeled native provider/model/exact-effort selects plus explicit manual inputs; keyboard and pointer parity | Disabled while profile mutation is pending; catalog loading never replaces configured values | Advisory catalog failures and unlisted values are explained; explicit model changes clear stale effort, refresh does not |
+| Structured route fields | Separate labeled editable provider/model/exact-effort comboboxes, each one native Input with a listbox and compact dropdown affordance; keyboard and pointer parity | Disabled while profile mutation is pending; catalog loading never replaces configured values | Suggestions retain actual IDs; arbitrary typed values remain exact. Explicit model changes clear stale effort, refresh does not |
 | Ordered fallback rows | Numbered route groups and native add/remove/move buttons with route-specific names | Boundary moves disabled; preserve focus on the surviving row/action | Empty means an explicit empty chain; inherit is a separate choice; status explains draft-only changes |
 | Role/profile strategy and retry fields | Explicit startup-lock/rate-limit-fallback/inherit selects and native bounded numeric inputs | Native disabled controls during mutations; inherited effective values remain readable | Invalid raw policy disables structured mutation without normalizing content; explicit inherit removes only the changed override |
 | Advanced JSONC disclosure | Native keyboard-operable details/summary; same underlying draft as structured fields | Readable invalid draft retained during errors | Invalid JSONC refuses structured edits; unchanged comments/unrelated fields remain byte-preserved |
@@ -227,6 +233,12 @@ Descendant rows remain inspection-only even when the caller can see the subtree;
 The host primitives above are dependencies, not package-owned implementations. Package-owned patterns below are implemented and reused at least twice.
 
 The structured editor uses a reusable route field group for primary and fallback candidates and a reusable runtime-policy group for profile defaults and role overrides. Both use the host primitives and the geometry above, with borders-only fieldsets and wrapping action rows. Their selectors are advisory, and exact manual values remain editable without a catalog listing.
+
+`EditableChoice` is the shared one-input combobox for provider, model and exact effort, including fallback and invocation-level routes. Native Input and a compact native Button supply the existing surface, radius, focus treatment and dropdown affordance. The borders-only listbox uses layer-1, primary text, hover/active tokens, md radius, 4px adjacency, 8px/10px option padding and a 240px maximum scroll height. Focus remains on the input; arrows move the active suggestion, Enter chooses its ID or keeps typed text, Escape/outside blur dismisses. Suggestion labels may be friendly, but choosing stores the actual ID and typing stores the exact string. Catalog refresh never normalizes a value. Each control updates only its existing JSONC path, never reconstructs a route or changes model-parameter placement. Effort-only levels have no guessed catalog; the configured value remains a suggestion and arbitrary values remain editable.
+
+The structured draft projection retains opaque route and level parameters without interpreting them. Known-field edits and fallback moves preserve these parameters and original JSONC bytes; malformed known fields, duplicate/unsafe keys and excessive nesting still refuse structured mutation. The Host remains authoritative for parameter support, validation and Apply. Closed host enums, role IDs, permissions and actions remain fixed selectors; this pattern does not make them arbitrary string inputs.
+
+Field dependencies remain explicit: choosing another catalog provider resets that route's model and exact effort; typing a provider keeps the manual model and clears only its stale exact effort. Model changes clear that route's exact effort. Choosing an unchanged ID does not rewrite the draft; navigation, catalog refresh and unrelated instances never reset values.
 
 ## 6. Motion & Interaction
 

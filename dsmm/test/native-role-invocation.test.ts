@@ -22,6 +22,7 @@ import { capturedRoleInvocation } from "../src/role-invocation.js";
 import type { DsmmInvocationView } from "../src/profile-types.js";
 import { RoleRunRegistry } from "../src/role-runs.js";
 import { DeepworkModeController } from "../src/state.js";
+import { registerSafetyGuards } from "../src/guards.js";
 import { DSMM_ROLES } from "../src/roles.js";
 import type { DsmmSubagentRuntime } from "../src/subagent-runtime.js";
 import DsmmSessionPersistence from "../src/session-persistence.js";
@@ -177,6 +178,7 @@ async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegi
   await roleProvidersFiber.await();
   f.ctx.on("agent/request", async (frame, next) => { policy.assertModuleAdmission(frame.agent as unknown as DshAgent); return next(); }, { prepend: true, global: true });
   registerModelRouting(f.ctx as unknown as DshContext, mode, getSettings);
+  registerSafetyGuards(f.ctx as unknown as DshContext, mode, getSettings, policy);
   let disposeFault: Error | undefined;
   const runs = new RoleRunRegistry<DsmmRoleRunCapture, DsmmInvocationView>(f.ctx, {
     currentEpoch(parent, entryOwner) { const ticket = runtime.authority.acquireParentTicket(parent); assert.equal(ticket.owner, entryOwner); return ticket.parentEpoch; },
@@ -239,9 +241,15 @@ for (const topology of ["per-role", "parameterized"] as const) {
       f.publish(root, { roles: Object.fromEntries(DSMM_ROLES.map(row => [row.id, row.kind === "category" ? false : f.settings.roles[row.id]])) });
       await f.ctx.systemPrompt.assemble({ scope: root });
       f.publish(root, { roles: f.settings.roles });
-      let bodies = 0;
-      const remove = root.ctx.tools.register({ name: "dsmm_category", description: "Unadmitted replacement", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { bodies++; return "bypass"; } });
-      assert.equal((await f.invoke(root, "dsmm_category", {})).isError, true); assert.equal(bodies, 0); remove();
+      const other = await f.create();
+      const replacement = other.ctx.tools.get("dsmm_category", other)!;
+      assert.ok(replacement);
+      const requests = f.adapter.calls.length;
+      const remove = root.ctx.tools.register(replacement);
+      try {
+        assert.equal((await f.invoke(root, "dsmm_category", { category: "dsmm-coding", description: "Unadmitted replacement", prompt: "No child publication" })).isError, true);
+        assert.equal(f.adapter.calls.length, requests);
+      } finally { remove(); }
     } finally { await f.dispose(); }
   });
 }

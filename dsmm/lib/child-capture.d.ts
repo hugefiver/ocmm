@@ -1,4 +1,5 @@
 import type { DsmmInvocationLevel, DsmmLocale, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings, DsmmToolTopology } from "./settings.js";
+import type { ResolvedModelParameterPolicy } from "./model-parameter-policy.js";
 import type { DsmmRoleId } from "./roles.js";
 import type { ChildAdmissionLimitation, ChildEvidenceField } from "./child-evidence.js";
 export { CHILD_EVIDENCE_FIELDS, parseChildAdmissionEvidenceView } from "./child-evidence.js";
@@ -20,8 +21,7 @@ export interface ChildAuthorityCeiling {
 export type ChildRuntimePolicyCapture = Pick<DsmmSettings, "modules" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "defaultActive" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort" | "skills"> & {
     subagents: Pick<DsmmSettings["subagents"], "enableRunInBackground" | "backgroundMode">;
 };
-export interface ChildAdmissionCapture {
-    version: 1;
+interface ChildAdmissionCaptureBase {
     childSessionId: string;
     parentSessionId: string;
     role: DsmmRoleId;
@@ -40,6 +40,18 @@ export interface ChildAdmissionCapture {
     locale?: DsmmLocale;
     toolTopology: DsmmToolTopology;
 }
+export interface ChildAdmissionCaptureV1 extends ChildAdmissionCaptureBase {
+    version: 1;
+}
+export interface ChildAdmissionCaptureV2 extends ChildAdmissionCaptureBase {
+    version: 2;
+    modelParameterPolicy: ResolvedModelParameterPolicy;
+    invocation: ChildAdmissionCaptureBase["invocation"] & {
+        requestedRoute: DsmmModelRoute;
+        effortSource: "native" | "dsmm-config";
+    };
+}
+export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2;
 /** Trusted native folds only; never synthesized from the current parent's settings. */
 export interface LegacyChildEvidence {
     version: 1;

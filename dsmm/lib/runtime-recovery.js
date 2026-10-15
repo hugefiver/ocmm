@@ -1,10 +1,12 @@
 import { createUserMessage, expandAssistantStream } from "@deepseek-ai/dsh-llm";
 import { foldDurableRecoveryWork, isCurrentRecoveryStep } from "./recovery-policy.js";
 import { isDsmmRoleId } from "./roles.js";
-import { applyModelRoute, isUnavailableRouteFailure, latestNativeModelSelection, liveRolePolicyIdentity, recordAdmittedRecoveryRoute, roleRouteLock, sameModelRoute, selectInitialModelRoute } from "./role-routing.js";
+import { applyModelRoute, isUnavailableRouteFailure, latestNativeModelSelection, liveRolePolicyIdentity, recordAdmittedRecoveryRoute, roleRouteLock, sameExactModelRoute, selectInitialModelRouteChoice } from "./role-routing.js";
+import { modelRouteFromCall, modelRouteFromHeader, projectModelRouteParameters } from "./role-llm.js";
 import { childOwnedSessionEvents, resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
 import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
+import { configuredModelParameterPolicy, resolvedModelParameterPolicy } from "./model-parameter-policy.js";
 const installedContexts = new WeakSet();
 const RECOVERY_WARNING = "dsmm runtime recovery refused an unproven or exhausted retry";
 const CONTINUATION_WARNING = "dsmm runtime recovery continuation steering failed for turn";
@@ -115,7 +117,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 }
                 const previous = attemptsByAgent.get(agent);
                 const attempt = { id: frame.attemptId, turn: frame.turn, step: frame.step, revision: frame.revision, chunks: 0,
-                    route: { provider: header.config.provider, model: header.config.model }, header, policy, generation: lock?.generation, manualSelectionSeq: lock?.manualSelectionSeq,
+                    route: modelRouteFromHeader(header), header, policy, generation: lock?.generation, manualSelectionSeq: lock?.manualSelectionSeq,
                     valid: Number.isSafeInteger(frame.revision) && frame.revision >= 1 && (previous === undefined || frame.revision === previous.revision + 1), output: false, consumed: false };
                 attemptsByAgent.set(agent, attempt);
                 if (lock !== undefined)
@@ -177,10 +179,10 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                     return downstream;
                 }
             }
-            const accepted = frame.agent.session.requestHeader?.()?.config;
+            const accepted = frame.agent.session.requestHeader?.();
             const lock = pending.policy === undefined ? undefined : roleRouteLock(frame.agent, pending.policy);
             if (!active || lock === undefined || lock.generation !== pending.generation || attemptsByAgent.get(frame.agent) !== pending.attempt
-                || accepted === undefined || !sameModelRoute(accepted, pending.failedRoute)) {
+                || accepted === undefined || !sameExactModelRoute(modelRouteFromHeader(accepted), pending.failedRoute)) {
                 pendingByAgent.delete(frame.agent);
                 return downstream;
             }
@@ -215,7 +217,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 const attempt = attemptsByAgent.get(frame.agent);
                 const header = frame.agent.session.requestHeader?.();
                 if (!active || frame.signal.aborted || lock === undefined || header === undefined
-                    || header.config.provider !== frame.provider || !sameModelRoute(header.config, lock.route)
+                    || header.config.provider !== frame.provider || !sameExactModelRoute(modelRouteFromHeader(header), lock.route)
                     || attempt === undefined || attempt.policy !== policy || attempt.generation !== lock.generation
                     || latestNativeModelSelection(frame.agent)?.seq !== attempt.manualSelectionSeq
                     || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step) || !positiveNoOutput(frame, attempt))
@@ -224,6 +226,7 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 const resolved = resolveRoleRuntimePolicy(settings, role);
                 const bounds = resolved.rateLimit;
                 let route = lock.route;
+                let candidateIndex = lock.candidateIndex;
                 let switching = false;
                 if (unavailable) {
                     if (lock.startupSettled || lock.attempts !== 1)
@@ -241,12 +244,18 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                 if (switching) {
                     if (!unavailable && lock.switches >= bounds.maxSwitches)
                         return undefined;
-                    const index = lock.candidates.findIndex((candidate) => sameModelRoute(candidate, lock.route));
+                    const index = lock.candidateIndex;
                     const candidates = lock.candidates.slice(index + 1);
                     if (index < 0 || candidates.length === 0)
                         return undefined;
                     const llm = frame.agent.ctx?.get?.("llm") ?? ctx.get?.("llm") ?? ctx.llm;
-                    route = await selectInitialModelRoute(llm ?? {}, candidates, frame.signal);
+                    const admission = getSettings.admission?.(frame.agent);
+                    const parameterPolicy = admission === undefined ? configuredModelParameterPolicy(settings) : resolvedModelParameterPolicy(admission);
+                    const selected = await selectInitialModelRouteChoice(llm ?? {}, candidates, frame.signal, parameterPolicy.mode === "passthrough" ? ctx.get?.("dsmmLlmRoutes") : undefined);
+                    route = parameterPolicy.mode === "native-defaults"
+                        ? modelRouteFromCall(projectModelRouteParameters(selected.route, selected.requestedRoute.reasoningEffort === undefined ? "dsmm-config" : "native", false))
+                        : selected.route;
+                    candidateIndex = index + 1 + candidates.findIndex(candidate => sameExactModelRoute(candidate, selected.requestedRoute));
                 }
                 const serverMinimum = frame.failure.providerRetryAfterMs;
                 if (serverMinimum !== undefined && (!Number.isSafeInteger(serverMinimum) || serverMinimum < 0))
@@ -281,9 +290,10 @@ export function registerRuntimeRecovery(ctx, controller, getSettings) {
                     || attemptsByAgent.get(frame.agent) !== attempt || !isCurrentRecoveryStep(recoveryEvents(frame.agent), frame.turn, frame.step)
                     || latestNativeModelSelection(frame.agent)?.seq !== attempt.manualSelectionSeq
                     || !positiveNoOutput(frame, attempt, true)
-                    || !sameModelRoute(frame.agent.session.requestHeader?.()?.config ?? { provider: "", model: "" }, attempt.route))
+                    || !sameExactModelRoute(modelRouteFromHeader(frame.agent.session.requestHeader?.()), attempt.route))
                     return undefined;
                 if (switching) {
+                    lock.candidateIndex = candidateIndex;
                     lock.generation += 1;
                     if (!unavailable)
                         lock.switches += 1;

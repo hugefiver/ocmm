@@ -18,6 +18,9 @@ export interface DsmmChildAdmissionAuthority {
   resolveChildEvidence(ticket: ParentAdmissionTicket, childId: string, signal: AbortSignal): Promise<ChildAdmissionEvidence>;
   /** Preparation may fail before durable commit. Publication is synchronous and nonthrowing after it. */
   prepareParentAdmission(parent: DshAgent, expectedEpoch: string, nextAdmission: DsmmProfileAdmission): void;
+  /** Host-only non-delivery CAS; it never issues or authorizes a delivery ticket. */
+  assertCoreParentAdmission?(parent: DshAgent, owner: object, expected: DsmmProfileAdmission): void;
+  prepareCoreParentAdmission?(parent: DshAgent, owner: object, expected: DsmmProfileAdmission, next: DsmmProfileAdmission): void;
   publishParentAdmission(parent: DshAgent, expectedEpoch: string, nextAdmission: DsmmProfileAdmission, install: () => void): void;
   revokeParent(parent: DshAgent, reason: string): void;
 }

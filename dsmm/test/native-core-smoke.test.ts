@@ -25,7 +25,14 @@ async function auditIdentity(namespace: string, entryId: string) {
             modules: [{ startupMounted: false }] };
           assert.equal(method, "describe"); return { revision: "global-fixture" };
         } }],
-        ["loader", { entries() { return [{ id: "include:dsmm", options: { id: "dsmm", name: "@dsmm/dsmm" }, fiber: {} }]; } }],
+        ["loader", { entries() { return [
+          { id: "include:subagent", options: { id: "subagent", name: "@deepseek-ai/dsh-subagent" }, disabled: true },
+          { id: "include:dsmm-runtime", options: { id: "dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime" }, fiber: { state: 2 } },
+          { id: "include:dsmm", options: { id: "dsmm", name: "@dsmm/dsmm" }, fiber: { state: 2 } }
+        ]; } }],
+        ["profileContext", { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"] }],
+        ["dsmmProfileRuntime", { getSettings: { subagentRuntime() { return { binding: "dsmm", deliveryFenceReady: false, restartRequired: false }; } } }],
+        ["dsmmRuntimeIntegration", undefined],
         ["settings", { writable: true, describe() {
           settingsLookups++;
           throw Object.assign(new Error("owned Settings boundary fault"), { code: "EACCES" });

@@ -1,14 +1,14 @@
-# dsmm LSP MCP Integration
+# DSMM LSP boundary
 
-dsmm keeps LSP/MCP disabled by default. The default `cordis.patch.yml` installs only the dsmm prompt, skill, guard, and preset behavior; it does not add an MCP client row.
+This version doesn't enable DSMM-managed external LSP. The integration implementation, public interfaces and original `lsp` configuration are retained, but automatic MCP mounting stays off even when stored configuration contains `lsp.enabled:true`. Saving settings, enabling Deepwork or restarting the Host doesn't provide an activation path. DSMM's settings UI hides LSP controls.
 
-Enable DSMM-managed LSP with explicit `lsp.enabled:true` in the global/native deployment layer. Startup resolves the already-installed `@deepseek-ai/dsh-mcp-client` public package from trusted `profileContext.installAnchor`, mounts its namespace plugin through Cordis and awaits initial tool synchronization. No private Loader import, persisted extra row, home/directory guess, hardcoded SDK path or installation is involved. Missing anchor/package/tools report sanitized unavailable state; `failOnStartupError:true` fails startup. No fake successful tool is registered.
+The default `cordis.patch.yml` doesn't add an MCP client row. This restriction applies only to DSMM's automatic integration: it doesn't disable DSH's own LSP services or an MCP server independently configured by the operator. DSMM doesn't download servers or native binaries.
 
-The separate opt-in patch at `patches/ocmm-lsp-mcp.example.cordis.patch.yml` remains a manual native-host alternative. Do not enable both with the same `serverName`: the native bridge owns namespace uniqueness. The default `cordis.patch.yml` remains unchanged and LSP is **disabled by default**.
+## Retained manual example
 
-## dsh MCP patch settings
+The historical [manual patch](../patches/ocmm-lsp-mcp.example.cordis.patch.yml) remains available as a native-host configuration reference, not a supported DSMM activation entry for this version. Independently managed MCP composition remains the operator's responsibility, including executable availability, namespace uniqueness and native lifecycle ownership.
 
-The example patch uses these LSP/MCP settings:
+The retained example describes:
 
 - `serverName: dsmm_lsp`
 - `command: ocmm-lsp`
@@ -17,11 +17,9 @@ The example patch uses these LSP/MCP settings:
 - `failOnStartupError: true`
 - `toolCallTimeoutMs: 60000`
 
-If `ocmm-lsp` is not on `PATH`, explicitly configure the already-installed executable/wrapper. DSMM never downloads a server or native binary. LSP mounting uses frozen startup settings: desired save/new admission cannot start/stop/reconcile MCP; differences are restart-required. Actual scope teardown remains native-owned and closes the connection/process and unregisters its tool generation.
+## Retained tool interface
 
-## Tools exposed to dsh
-
-With `serverName: dsmm_lsp`, the dsh MCP client exposes these public tool names to the model:
+An independently mounted native MCP client using `serverName: dsmm_lsp` uses the following tool names. This inventory describes the retained interface, not tools automatically available from DSMM in this version:
 
 - `mcp__dsmm_lsp__status`
 - `mcp__dsmm_lsp__diagnostics`
@@ -35,16 +33,8 @@ With `serverName: dsmm_lsp`, the dsh MCP client exposes these public tool names 
 
 `format` applies the language server's document edits to the source file atomically. The debug adapter protocol (DAP) remains a separate debugging surface and is not an MCP tool.
 
-Read-only roles permit status/diagnostics/navigation/symbol lookup and prepare-rename, but not rename/format. Exact Agent/definition/realm guards enforce this independently of common/helper toggles. `lspRuntime` is a safe status projection containing state, fixed diagnostic code and tool names, never paths/arguments/environment values. Bridge-ready is not proof that a language server is installed or capable: native diagnostics must report actual availability/failure.
+DSMM's read-only role restrictions don't grant rename or format permission. The retained `lspRuntime` status interface reports bounded state, diagnostic codes and tool names, not executable paths, arguments or environment values. Tool discovery alone doesn't prove language-server availability or a successful symbol query.
 
-The keyless native test mounts the installed `ocmm-lsp` through real MCP, checks all nine actual names including symbol-related, calls status, exercises cancellation/read-only rejection, confirms desired off does not remount, and awaits owned process exit/tool withdrawal. rc.2's auto protocol negotiation may close an initial stdio probe and start the negotiated transport; this is native-equivalent, not multiple simultaneous established servers or a DSMM retry scheduler.
+DSMM's automatic external LSP integration isn't a delivered feature in this version. The existing release validator still requires a completed `receipt.lsp` with `directNativeDiagnosticsAndFormat` and `nativeDshMcpClient`; Docker smoke independently exercises the retained interface. These release checks remain required and don't establish a supported DSMM activation path or certify an independently configured server.
 
-## Verification
-
-The Windows native cold-query proof uses the unchanged test and a byte-identical, already-installed executable copied into a run-owned temporary fixture. Its first empty-cache request returns one definition and two references; no warm-up, retry, request rewriting or opaque-target parsing is involved. This is isolated bridge verification, not a production relocation policy.
-
-The original workspace executable entry still fails in this environment: an owned managed child can read its marker but receives `EPERM` when creating an owned log. The same executable bytes at the temporary entry complete the native query. The underlying protection/permission mechanism has not been identified; this is not proof of a URI or compilation defect, and the default entry has not been repaired. DSMM does not copy binaries persistently, install servers or change system protection/permissions to bypass that restriction. Report actual server failure rather than treating tool discovery or bridge-ready as a successful symbol query.
-
-Direct MCP verification should start `ocmm-lsp mcp`, send a JSON-RPC `tools/list` request, and assert that the nine raw MCP tools are present: `status`, `diagnostics`, `goto_definition`, `find_references`, `find_symbol_related`, `symbols`, `prepare_rename`, `rename`, and `format`. It should call `diagnostics` and `format` against a temporary LSP fixture, then read back the formatted source file.
-
-Docker bridge verification should install dsmm into a disposable dsh profile, apply `patches/ocmm-lsp-mcp.example.cordis.patch.yml`, mount `@deepseek-ai/dsh-mcp-client`, and call `mcp__dsmm_lsp__diagnostics` against the same temporary diagnostic fixture. This proves the dsh MCP bridge sees the public tool name and can pass the diagnostic request through to `ocmm-lsp mcp`.
+The workspace executable entry has an unresolved `EPERM` failure creating a child log in the inspected Windows environment. Repairing that path isn't a prerequisite for implementing this version's DSMM features, but it doesn't waive required release checks. Independently managed MCP users must check their actual server entry; this version doesn't certify or repair that environment.

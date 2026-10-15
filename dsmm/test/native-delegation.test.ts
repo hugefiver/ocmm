@@ -125,11 +125,15 @@ test("native identity fences research, bounded builder and local coordinators ac
       ["research", [], ["code-search", "quick"]],
       ["deep", ["coding", "code-search"], ["planner", "reviewer", "normal-task", "complex"]],
       ["builder", ["quick", "code-search"], ["planner", "coding", "builder"]],
-      ["reviewer", ["code-search", "research"], ["quick", "planner"]]
+      ["reviewer", ["code-search", "doc-search", "media-reader"], ["research", "quick", "planner"]]
     ] as const) {
       const run = await f.subagents.start(`dsmm-role-${role}`, { parent, prompt: [{ type: "text", text: "Bounded role proof" }], persona: "I am the root dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 });
       try {
         await run.result; const child = run.localAgent!; const tools = child.ctx.tools;
+        const capture = (f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).admission(child as DshAgent).childCapture;
+        assert.ok(capture);
+        assert.equal(capture.parentSessionId, parent.id); assert.equal(capture.childSessionId, child.id);
+        assert.equal(capture.role, `dsmm-${role}`);
         for (const target of allowed) {
           if (DSMM_ROLES.find(row => row.id === `dsmm-${target}`)!.kind === "role") assert.ok(tools.get(`dsmm_${target.replaceAll("-", "_")}`, child), `${role} catalog permits ${target}`);
           else {
@@ -138,16 +142,27 @@ test("native identity fences research, bounded builder and local coordinators ac
           }
         }
         for (const target of forbidden) {
-          const name = `dsmm_${target.replaceAll("-", "_")}`;
-          assert.equal(tools.get(name, child), undefined, `${role} hides ${target}`);
+          const category = DSMM_ROLES.find(row => row.id === `dsmm-${target}`)!.kind === "category";
+          const name = category ? "dsmm_category" : `dsmm_${target.replaceAll("-", "_")}`;
+          if (!category) assert.equal(tools.get(name, child), undefined, `${role} hides ${target}`);
           await assert.rejects(f.subagents.start(`dsmm-role-${target}`, { parent: child, prompt: [], signal: new AbortController().signal, maxDepth: 3 }), /cannot delegate/);
-          let invoked = false;
-          const remove = tools.register({ name, description: "same-layer bypass sentinel", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { invoked = true; return "bypass"; } });
-          const denied = await tools.execute({ name, callId: ToolCallId(`${role}-${target}`), arguments: {}, agent: child, signal: new AbortController().signal });
-          assert.equal(denied.isError, true); assert.equal(invoked, false); remove();
+          const definition = parent.ctx.tools.get(name, parent)!;
+          assert.ok(definition);
+          const requests = f.adapter.calls.length;
+          const remove = category ? undefined : tools.register(definition);
+          try {
+            const denied = await tools.execute({ name, callId: ToolCallId(`${role}-${target}`),
+              arguments: { description: "Forbidden delegation", prompt: "No child publication", ...(category ? { category: `dsmm-${target}` } : {}) }, agent: child, signal: new AbortController().signal });
+            assert.equal(denied.isError, true); assert.equal(f.adapter.calls.length, requests);
+          } finally { remove?.(); }
         }
-        await assert.rejects(f.subagents.start("spawn", { parent: child, prompt: [], persona: "dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 }), /generic spawn/);
+        const liveAgents = f.agents.list(), requests = f.adapter.calls.length;
+        await assert.rejects(f.subagents.start("spawn", { parent: child, prompt: [], persona: "dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 }),
+          (error: unknown) => error instanceof Error && "code" in error && error.code === "UNAUTHORIZED");
+        assert.deepEqual(f.agents.list(), liveAgents, "an unowned generic origin cannot publish a child from persona text");
+        assert.equal(f.adapter.calls.length, requests, "rejected native identity cannot enter the LLM body");
         if (role === "reviewer") {
+          assert.equal((await tools.execute({ name: "read", callId: ToolCallId("admitted-reviewer-read"), arguments: {}, agent: child, signal: new AbortController().signal })).isError, false);
           for (const name of ["read", "write", "pwsh", "mcp__dsmm_lsp__rename"]) {
             let writes = 0;
             const remove = tools.register({ name, description: "mutation sentinel", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { writes++; return "written"; } });

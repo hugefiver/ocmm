@@ -15,7 +15,7 @@ const scope: NativeScopeApi = sdk("@deepseek-ai/dsh-scope");
 export const { scopeOf, scopeParentOf } = scope;
 
 export function nativeAgentContext(agent: DshAgent): Context {
-  if (!(agent.ctx instanceof Context) || scopeOf(agent.ctx) !== agent) {
+  if (!Context.is(agent.ctx) || scopeOf(agent.ctx) !== agent) {
     throw new Error("dsmm skills require the exact native Agent scope, never a shared preset/global scope");
   }
   return agent.ctx;

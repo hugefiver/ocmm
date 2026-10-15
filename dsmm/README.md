@@ -32,7 +32,9 @@ Native Host ownership still governs lifecycle, depth, permissions, cancellation,
 
 ### Workflow resources
 
-Fourteen configurable Agent-scoped skills use metadata discovery and lazy body loading. Explicit Deepwork off hides DSMM skills without removing Host/project skills or role restrictions. Scoped shell/Git/plan/question/todo guards remain bounded by native authority. Idle continuation is separately opt-in. External `ocmm-lsp mcp` integration is optional; debugging/DAP is an on-demand skill, not an automatic debugger service. `/deepwork [off|message]` and inspection-only `/dsmm-status [json]` are Host-adapter commands, not headless task-text commands.
+Fourteen configurable Agent-scoped skills use metadata discovery and lazy body loading. Explicit Deepwork off hides DSMM skills without removing Host/project skills or role restrictions. Scoped shell/Git/plan/question/todo guards remain bounded by native authority. Idle continuation is separately opt-in. Debugging/DAP is an on-demand skill, not an automatic debugger service. `/deepwork [off|message]` and inspection-only `/dsmm-status [json]` are Host-adapter commands, not headless task-text commands.
+
+DSMM-managed external LSP isn't enabled in this version. Its implementation, interfaces and original configuration remain, but automatic MCP mounting stays off even with `lsp.enabled:true` and DSMM's settings UI hides LSP controls. DSH's own LSP and independently configured MCP are unaffected. The retained historical manual patch isn't a supported DSMM activation entry. Existing release checks still independently validate the retained LSP interface, without making automatic integration a delivered feature. See [LSP boundary](docs/lsp.md).
 
 ## Use a local artifact
 

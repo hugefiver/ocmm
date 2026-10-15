@@ -13,6 +13,7 @@ test("package MAIN executes its real Host admission, native lifecycle and Core r
   const child = spawnSync(process.execPath, ["--import", loader, "--test", "--test-concurrency=1", fixture], {
     encoding: "utf8", timeout: 60000, env,
   });
+  if (child.error !== undefined) t.diagnostic(child.stderr + child.stdout);
   assert.ifError(child.error);
   assert.equal(child.status, 0, child.stderr + child.stdout);
   t.diagnostic(child.stdout.trim());

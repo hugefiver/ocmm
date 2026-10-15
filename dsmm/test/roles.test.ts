@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DSMM_ROLE_IDS as EXPORTED_ROLE_IDS } from "../lib/index.js";
-import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, isRootRole, renderAgentCordis, renderPresetMetadata, rolePluginRows } from "../lib/roles.js";
+import { DSMM_ROLES, DSMM_ROLE_IDS, isDsmmRoleId, isRootRole, renderAgentCordis, renderPresetMetadata, rolePluginRows } from "../src/roles.ts";
 
 const EXPECTED_ROLE_IDS = [
   "dsmm-orchestrator",
@@ -100,8 +100,12 @@ test("agent cordis renders one full persona and native skill tools without a sta
     assert.ok(cordis.includes(role.id));
     assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-skill'/u);
     assert.match(cordis, /name: '@deepseek-ai\/dsh-skill-filesystem'/u);
-    assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs-search'/u);
-    assert.match(cordis, /name: '@deepseek-ai\/dsh-tool-fs'/u);
+    const rows = rolePluginRows(role);
+    assert.deepEqual(rows.filter(row => ["tool-fs", "tool-fs-search", "tool-web"].includes(row.id)), [
+      { id: "tool-fs", name: "@dsmm/dsmm/permission-fs" },
+      { id: "tool-fs-search", name: "@dsmm/dsmm/permission-fs-search", config: { sampleOverCapGlobResults: false } },
+      { id: "tool-web", name: "@dsmm/dsmm/permission-web", config: { fetch: true } },
+    ]);
     assert.equal(cordis.includes("name: '@deepseek-ai/dsh-tool-pwsh'"), role.access !== "read-only");
     assert.equal(cordis.endsWith("\n"), true);
     assert.doesNotMatch(cordis, /^[\t ]+$/mu, "blank scalar lines must not acquire indentation-only whitespace");

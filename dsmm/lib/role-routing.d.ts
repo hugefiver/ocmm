@@ -2,11 +2,13 @@ import type { AgentRequestFrame, DshAgent, DshContext, DshLlmCallConfig, DshLlmR
 import type { DsmmRoleId } from "./roles.js";
 import type { DsmmModelRoute, DsmmSettings } from "./settings.js";
 import type { DsmmRoleRuntimeState } from "./profile-types.js";
+import type { DsmmLlmRouteResolver } from "./role-llm.js";
 export declare const DSMM_ROLE_POLICY_EVENT = "dsmm/role-policy";
 export interface RoleRouteLock {
     identity: string;
     route: DsmmModelRoute;
     candidates: readonly DsmmModelRoute[];
+    candidateIndex: number;
     generation: number;
     attempts: number;
     startupSettled: boolean;
@@ -29,9 +31,16 @@ export declare function nativeModelSelectionWasAccepted(agent: DshAgent, intent:
 export declare function isUnavailableRouteFailure(error: unknown, nativeRequestFailure?: boolean): boolean;
 export declare function orderedModelRoutes(candidates: readonly DsmmModelRoute[]): DsmmModelRoute[];
 /** Exact metadata preparation, never a completion or advisory catalog health check. */
-export declare function selectInitialModelRoute(llm: DshLlmRuntime, candidates: readonly DsmmModelRoute[], signal?: AbortSignal): Promise<DsmmModelRoute>;
+export declare function selectInitialModelRoute(llm: DshLlmRuntime, candidates: readonly DsmmModelRoute[], signal?: AbortSignal, resolver?: DsmmLlmRouteResolver): Promise<DsmmModelRoute>;
+export declare function selectInitialModelRouteChoice(llm: DshLlmRuntime, candidates: readonly DsmmModelRoute[], signal?: AbortSignal, resolver?: DsmmLlmRouteResolver): Promise<{
+    route: DsmmModelRoute;
+    requestedRoute: DsmmModelRoute;
+}>;
 export declare function roleRouteLock(agent: DshAgent, identity: string): RoleRouteLock | undefined;
-export declare function pinRoleRoute(agent: DshAgent, identity: string, route: DsmmModelRoute, candidates: readonly DsmmModelRoute[]): RoleRouteLock;
+export declare function pinRoleRoute(agent: DshAgent, identity: string, route: DsmmModelRoute, candidates: readonly DsmmModelRoute[], projection?: {
+    preserveCandidates: boolean;
+    initialCandidate?: DsmmModelRoute;
+}): RoleRouteLock;
 export declare function clearRoleRouteLock(agent: DshAgent): void;
 export declare function roleRouteRuntimeState(agent: DshAgent, settings: DsmmSettings, role: DsmmRoleId | undefined, epoch?: string): DsmmRoleRuntimeState;
 export declare function rolePolicyIdentity(settings: DsmmSettings, role: DsmmRoleId | undefined, epoch?: string): string | undefined;

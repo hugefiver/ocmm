@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdtemp, mkdir, readFile, rm, writeFile, symlink } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
@@ -502,6 +502,7 @@ async function scenario(name) {
     childApproval: name.startsWith("child-ask-"), multipleChildren: name === "distinct-child-scopes" || name.startsWith("attach-"),
     nativeResidency: name === "report" || name === "off-report", missingAuditCallback: name === "missing-audit-callback",
     missingDefinitions: name === "missing-definition-admission", unregisteredDefinition: name === "unregistered-proxy" });
+  const parentExecutions = [];
   try {
     if (name.startsWith("attach-")) { await attachmentTransaction(name, f); return; }
     if (name === "off") {
@@ -622,8 +623,7 @@ async function scenario(name) {
     }
     if (name.startsWith("deny-") || name === "full-params") {
       const side = name === "full-params" ? "parent" : name.split("-")[1];
-      f.listen(side, "tools/execute", async (exec, next) => { if (name === "full-params") { assert.equal(exec.agent, f.parent);
-        assert.equal(exec.arguments.file_path, join(f.root, "child", "useful.txt")); assert.equal(exec.arguments.offset, 2); assert.equal(exec.arguments.limit, 1); }
+      f.listen(side, "tools/execute", async exec => { if (name === "full-params") parentExecutions.push(exec);
         return { isError: true, error: { message: "real late policy", info: { name: "ActualPolicy", code: "POLICY", reason: "native detail" } }, content: [{ type: "text", text: "normal denial" }] }; });
     }
     if (name.startsWith("post-") || name === "transform-child") f.listen(name.endsWith("parent") ? "parent" : "child", "tools/post-execute", async (_exec, _result, next) => {
@@ -721,6 +721,18 @@ async function scenario(name) {
     if (name === "audit-unavailable") f.setAuditAvailable(false);
     const result = await f.execute(name === "alias" ? { file_path: "alias.txt", offset: 2, limit: 1 } : undefined);
     const audit = await f.settle();
+    if (name === "full-params") {
+      assert.equal(parentExecutions.length, 1);
+      const exec = parentExecutions[0], expected = join(f.root, "child", "useful.txt");
+      assert.equal(exec.agent, f.parent);
+      assert.deepEqual(Object.keys(exec.arguments).sort(), ["file_path", "limit", "offset"]);
+      assert.equal(exec.arguments.offset, 2); assert.equal(exec.arguments.limit, 1);
+      const actualFile = await stat(exec.arguments.file_path), expectedFile = await stat(expected);
+      assert.equal(actualFile.isFile(), true);
+      assert.deepEqual([actualFile.dev, actualFile.ino], [expectedFile.dev, expectedFile.ino]);
+      assert.deepEqual(await readFile(exec.arguments.file_path), await readFile(expected));
+      assert.equal(audit.length, 1); assert.equal(audit[0].parentError, true); assert.equal(audit[0].childError, true);
+    }
     if (name.startsWith("deny-") || name === "full-params") { assert.equal(result.isError, true); assert.equal(result.error.info.code, "POLICY"); assert.equal(result.error.info.reason, "native detail"); assert.equal(f.bodies.read, 0); }
     else if (name.startsWith("post-") || name === "transform-child") { assert.equal(f.bodies.read, 1); assert.equal(result.isError, name !== "transform-child");
       assert.equal(result.content[0].text, name === "transform-child" ? "authoritative transformation" : "normal post denial"); }

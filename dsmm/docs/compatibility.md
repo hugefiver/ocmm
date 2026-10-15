@@ -14,9 +14,11 @@ This document describes the **local source candidate**, not a newly published re
 | CLI/headless | Native deployment configuration and delegation tools | One-shot headless doesn't select Agent presets |
 | TUI | Independent native deployment profile | Package installation doesn't prove every Web client control is exposed in TUI |
 | Managed child runtime | Explicit cold `./subagent-runtime` composition | Not installed by the default bundle |
-| LSP/MCP | Optional external `ocmm-lsp mcp` | Separate native capability/startup checks |
+| DSMM-managed external LSP | Not enabled in this version; interfaces and original config retained | Automatic MCP mounting stays off even with `lsp.enabled:true`; DSMM settings UI hides LSP controls |
 
 DSMM is the localized package/Core title; Deepwork names its optional module. Deepwork Profiles and `DW …` role labels don't rename package, Loader, command, role, provider or persistence IDs. Native metadata uses exported `locale/en.json` and `locale/zh.json`, not an invented manifest `displayName`.
+
+The LSP restriction doesn't affect DSH's own LSP or independently configured MCP. The retained historical manual patch isn't a supported DSMM activation entry. Existing release checks still independently validate the retained LSP interface; they don't establish automatic integration availability. See [LSP boundary](lsp.md).
 
 ## Stable configuration and admission
 

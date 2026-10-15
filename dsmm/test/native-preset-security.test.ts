@@ -13,8 +13,8 @@ import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshContext } from "../lib/dsh-types.js";
 import { registerRolePresets } from "../lib/preset-registry.js";
-import { DSMM_ROLES, isRootRole, rolePluginRows } from "../lib/roles.js";
-import { resolveConfig } from "../lib/settings.js";
+import { DSMM_ROLES, rolePluginRows } from "../lib/roles.js";
+import { isRootRoleEnabled, resolveConfig } from "../src/settings.ts";
 
 test("native role persona and instruction compositions accept required Config fields and activate", async () => {
   const ctx = new Context();
@@ -82,7 +82,8 @@ async function verifyReadonlyPresetSwitch(readOnlyRole: "dsmm-planner" | "dsmm-r
     const services = new Map([[builderKey, rawBuilderTools], [reviewerKey, rawReviewerTools]]);
     const ids = new Map([[builderKey, "dsmm-builder"], [reviewerKey, readOnlyRole]]);
     let registered = 0;
-    const expectedRegistrations = DSMM_ROLES.filter(isRootRole).length;
+    const settings = resolveConfig({ presets: { plannerRootEnabled: readOnlyRole === "dsmm-planner" } });
+    const expectedRegistrations = DSMM_ROLES.filter(role => isRootRoleEnabled(settings, role.id)).length;
     let resolveReady: (() => void) | undefined;
     const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
     ctx.provide("agentPresets", {
@@ -100,7 +101,7 @@ async function verifyReadonlyPresetSwitch(readOnlyRole: "dsmm-planner" | "dsmm-r
         return name === "tools" && key !== undefined ? services.get(scopeParentOf(key)!) : undefined;
       }
     });
-    registerRolePresets(ctx as unknown as DshContext, () => resolveConfig());
+    registerRolePresets(ctx as unknown as DshContext, () => settings);
     await ready;
     await Promise.resolve();
 

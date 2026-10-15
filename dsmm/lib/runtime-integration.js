@@ -41,7 +41,9 @@ import { scopeLifetime } from "./delivery-authority.js";
 import { createLegacyReadIntegration } from "./legacy-read-integration.js";
 import { NativeChildEvidenceReader } from "./native-child-evidence.js";
 import { DsmmProfileError } from "./profiles.js";
-import { capturedOriginalRoleInvocation } from "./role-invocation.js";
+import { capturedOriginalRoleInvocation, capturedRoleInvocation, currentRoleInvocation, duringRoleInvocation, invocationAgentOptions, resolveRoleInvocation } from "./role-invocation.js";
+import { roleFromProviderName } from "./role-providers.js";
+import { modelRouteFromCall } from "./role-llm.js";
 import { ROLE_CONTROL_HOST } from "./role-control-remote.js";
 import { registerRoleControlRpc } from "./role-control-rpc.js";
 import { RoleRunRegistry } from "./role-runs.js";
@@ -51,54 +53,95 @@ import { buildDsmmAgentGuidance } from "./prompts.js";
 import { DsmmSubagentRuntime } from "./subagent-runtime.js";
 function original(value) { return (Reflect.get(value, symbols.original) ?? value); }
 const runtimeScopes = new WeakMap();
-/** Native headers and own descriptors establish origin; absence from a DSMM registry never does. */
-export function classifyDsmmAgent(agent) {
+// Exact native creation provenance survives bundle replacement with its resident Agent.
+const nativeCreations = new WeakSet();
+const nativeCreationRegistries = new WeakMap();
+/** Captures retain DSMM identity; a live foreign registration cannot establish it by name. */
+function agentOrigin(agent, source) {
     const structural = agent;
     const own = childOwnedSessionEvents(structural.session);
     const selected = agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) ?? resolveSelectedAgentPreset(structural.session);
-    if (selected?.startsWith("dsmm-") || own.some(event => event.type === "dsmm/role-policy"))
+    if (selected?.startsWith("dsmm-") || own.some(event => event.type === "dsmm/role-policy") || capturedRoleInvocation(structural) !== undefined)
         return "dsmm";
     if (agent.session.header.origin === "subagent") {
+        if (nativeCreations.has(agent))
+            return "native";
         const descriptor = foldSubagentDescriptor(own);
-        // A creation without an establishing descriptor is unknown, not native.
-        return descriptor === undefined || descriptor.provider.startsWith("dsmm-role-") ? "dsmm" : "native";
+        if (descriptor === undefined)
+            return undefined;
+        if (!descriptor.provider.startsWith("dsmm-role-"))
+            return "native";
+        if (source !== "startup" || agent.session.header.isSeeded !== false)
+            return "dsmm";
+        const registry = agent.ctx.get("subagents"), provider = registry?.getProvider(descriptor.provider);
+        if (provider === undefined)
+            return "dsmm";
+        const captured = registry !== undefined && hosts.get(original(registry))?.current?.policy.ownsProvider(provider) === true;
+        return captured ? "dsmm" : "native";
     }
     return own.some(event => event.type === "deepwork/mode" && event.data?.active === true) ? "dsmm" : "native";
 }
-function nativeChild(ctx, agent, controlledParent) {
-    if (agent.session.header?.origin !== "subagent" || classifyDsmmAgent(agent) !== "native")
+/** An unestablished child is never a native-identity proof for delivery or resumed work. */
+export function classifyDsmmAgent(agent) { return agentOrigin(agent) ?? "dsmm"; }
+function nativeChild(ctx, agent, controlledParent, source) {
+    if (agent.session.header?.origin !== "subagent")
+        return false;
+    const fresh = source === "startup" && agent.session.header.isSeeded === false;
+    const origin = agentOrigin(agent, source);
+    // Native one-shot creation appends its descriptor after agent/created. Only
+    // fresh setup under an admitted ordinary parent can precede that evidence.
+    if (origin === "dsmm" || origin === undefined && !fresh)
         return false;
     const parent = agent.session.header.parentSession === undefined ? undefined : ctx.agents.get(SessionId(agent.session.header.parentSession));
-    return parent !== undefined && !controlledParent(parent);
+    if (parent === undefined || !ctx.agents.isOwnedBy(agent.id, parent) || controlledParent(parent))
+        return false;
+    if (fresh) {
+        nativeCreations.add(agent);
+        nativeCreationRegistries.set(agent, original(ctx.agents));
+    }
+    return true;
 }
 /** Limit DSMM's observers/guards to its own children without altering the native service or factories. */
 export function managedAgentContext(ctx, controlledParent) {
     const agents = ctx.agents;
-    const tools = ctx.get("tools");
     const filteredAgents = new Proxy(agents, { get(target, key) {
             if (key === "list")
                 return () => target.list().filter(agent => !nativeChild(ctx, agent, controlledParent));
             const value = Reflect.get(target, key);
             return typeof value === "function" ? value.bind(target) : value;
         } });
-    const filteredTools = tools === undefined ? undefined : new Proxy(tools, { get(target, key) {
-            if (key === "guard")
-                return (guard) => target.guard(exec => exec.agent !== undefined && nativeChild(ctx, exec.agent, controlledParent) ? undefined : guard(exec));
-            const value = Reflect.get(target, key);
-            return typeof value === "function" ? value.bind(target) : value;
-        } });
     return new Proxy(ctx, { get(target, key) {
             if (key === "get")
-                return (name) => name === "agents" ? filteredAgents : name === "tools" ? filteredTools : target.get(name);
+                return (name) => name === "agents" ? filteredAgents : target.get(name);
             if (key === "on")
                 return (event, listener, options) => target.on(event, ((...args) => {
                     const agent = args[0]?.agent ?? (event === "system-prompt/assemble" ? args[1]?.scope : undefined);
-                    if (agent !== undefined && agents.list().includes(agent) && nativeChild(ctx, agent, controlledParent)) {
+                    if (event !== "tools/execute" && event !== "tools/post-execute" && agent !== undefined && agents.list().includes(agent) && nativeChild(ctx, agent, controlledParent, event === "agent/created" ? args[0]?.source : undefined)) {
                         const next = args.at(-1);
                         return typeof next === "function" ? next() : undefined;
                     }
                     return listener(...args);
                 }), options);
+            const value = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+        } });
+}
+/** Enrollment consumes A's completed admissions while native creation retains its original serial owner. */
+export function admittedAgentContext(ctx, runtime) {
+    const agents = ctx.get("agents");
+    const admitted = new Proxy(agents, { get(target, key) {
+            if (key === "list")
+                return () => target.list().filter(agent => runtime.hasAdmission(agent));
+            const value = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+        } });
+    return new Proxy(ctx, { get(target, key) {
+            if (key === "get")
+                return (name) => name === "agents" ? admitted : target.get(name);
+            if (key === "on")
+                return (event, listener, options) => event === "agent/created"
+                    ? target.effect(() => runtime.observeAdmissions(async (agent) => { await listener({ agent }); }))
+                    : target.on(event, listener, options);
             const value = Reflect.get(target, key);
             return typeof value === "function" ? value.bind(target) : value;
         } });
@@ -136,8 +179,7 @@ function unavailableLegacy() {
     throw new DsmmProfileError("unavailable", "Legacy execution requires the separately installed real Host operation/approval/audit adapter.");
 }
 /** Exact live descendants are revoked synchronously before any native holder starts draining. */
-function revokeTree(ctx, revoke, parent, reason) {
-    const registry = ctx.agents;
+function revokeTree(registry, revoke, parent, reason) {
     const pending = [parent], seen = new Set();
     while (pending.length > 0) {
         const current = pending.pop();
@@ -153,16 +195,50 @@ function revokeTree(ctx, revoke, parent, reason) {
 const disabled = (reason) => ({ enabled: false, reason });
 export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime, startup = {}) {
     const bound = ctx.get("subagents");
+    if (bound === undefined || !(original(bound) instanceof DsmmSubagentRuntime) || !settings.modules.deepwork.enabled)
+        return undefined;
+    return new Promise((resolve, reject) => {
+        const unavailable = () => new DsmmProfileError("unavailable", "Native integration startup lost its injection lifetime.");
+        let entered = false, retired = false;
+        const retire = () => { retired = true; reject(unavailable()); };
+        const fiber = ctx.inject(["subagents"], async (scope) => {
+            entered = true;
+            try {
+                if (retired)
+                    throw unavailable();
+                const integration = await integrateManagedSubagentRuntime(scope, settings, policy, getRuntime, startup);
+                if (retired)
+                    throw unavailable();
+                resolve(integration);
+            }
+            catch (error) {
+                reject(error);
+                throw error;
+            }
+        });
+        if (fiber.uid === null || fiber.state === 5) {
+            retire();
+            return;
+        }
+        scopeLifetime(fiber.ctx, "dsmm.integration: cancel injection startup", retire);
+        // Cordis can skip the callback entirely when a required implementation is withdrawn.
+        void fiber.await().then(() => { if (!entered)
+            retire(); }, reject);
+    });
+}
+async function integrateManagedSubagentRuntime(ctx, settings, policy, getRuntime, startup) {
+    const bound = ctx.get("subagents");
     const native = bound === undefined ? undefined : original(bound);
     if (!(native instanceof DsmmSubagentRuntime) || !settings.modules.deepwork.enabled)
         return undefined;
     const hostScope = runtimeScopes.get(native);
     if (hostScope === undefined)
         throw new DsmmProfileError("unavailable", "Managed admission requires the explicit Host-owned startup entry, not a separately constructed runtime.");
+    // Revocation outlives the entry's injection scope; this reference only enumerates exact native owners during teardown.
+    const teardownAgents = original(ctx.agents);
     native.requireProviders(["spawn"]);
     const lifetime = new AbortController();
     scopeLifetime(ctx, "dsmm.integration: close startup preparation", () => lifetime.abort());
-    await native.waitForProvider("spawn", lifetime.signal);
     const history = ctx.get("sessionQuery");
     if (history === undefined || typeof history.observeSession !== "function")
         throw new DsmmProfileError("unavailable", "Managed child admission requires the actual public native session history service.");
@@ -185,10 +261,10 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
                     && state.policy.targets(parent).includes(invocation.capture.invocation.target);
             },
             teardown: {
-                revokeParent: (agent, reason) => revokeTree(hostScope, (agent, why) => native.authority.revokeParent(agent, why), agent, reason),
+                revokeParent: (agent, reason) => revokeTree(teardownAgents, (agent, why) => native.authority.revokeParent(agent, why), agent, reason),
                 async disposeRun(run) {
                     if (run.localAgent !== undefined)
-                        revokeTree(hostScope, (agent, why) => native.authority.revokeParent(agent, why), run.localAgent, "run-disposed");
+                        revokeTree(teardownAgents, (agent, why) => native.authority.revokeParent(agent, why), run.localAgent, "run-disposed");
                     await run.dispose();
                 },
             },
@@ -259,11 +335,48 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
         }, });
     completion = policy.configureAdmission({ nativeSubstrate: settings, resolveOriginalEvidence: bridge.resolveOriginalEvidence,
         ...(legacyCore === undefined ? {} : { classifyLegacyTool: legacyCore.classifyLegacyTool }),
-        revokeParent: (agent, reason) => revokeTree(ctx, bridge.authority.revokeParent, agent, reason) });
+        revokeParent: (agent, reason) => revokeTree(teardownAgents, bridge.authority.revokeParent, agent, reason) });
     // Native non-DSMM direct children remain native. This branch is established
     // from an actual public physical cut, never from a missing DSMM registration.
     const nativeEvidence = new WeakSet();
+    const nativeResidencies = new Map();
+    ctx.on("agent/created", ({ agent }) => { nativeResidencies.delete(agent.id); }, { global: true });
+    ctx.on("agent/disposed", ({ agent }) => {
+        nativeResidencies.delete(agent.id);
+        if (nativeCreationRegistries.get(agent) === original(ctx.agents)) {
+            nativeCreations.delete(agent);
+            nativeCreationRegistries.delete(agent);
+        }
+    }, { global: true });
     const isNativeEvidence = (evidence) => typeof evidence === "object" && evidence !== null && nativeEvidence.has(evidence);
+    const dsmmMarked = (events) => events.some(event => {
+        if (event.type === "dsmm/role-policy")
+            return true;
+        if (event.type === "deepwork/mode")
+            return event.data?.active === true;
+        if (event.type !== "agent-preset/selected")
+            return false;
+        const preset = event.data?.agentPreset;
+        return typeof preset === "string" && preset.startsWith("dsmm-");
+    });
+    const matchesNativeResidency = (evidence) => {
+        const registry = ctx.agents, resident = evidence.resident;
+        if (original(registry) !== evidence.registry || original(evidence.parent.ctx.agents) !== evidence.registry
+            || registry.get(evidence.childId) !== resident || nativeResidencies.get(evidence.childId) !== evidence.residency)
+            return false;
+        const prefixed = evidence.provider.startsWith("dsmm-role-");
+        if (resident === undefined)
+            return !prefixed;
+        if (original(resident.ctx.agents) !== evidence.registry || resident.id !== evidence.childId || resident.session.id !== evidence.childId
+            || !registry.isOwnedBy(evidence.childId, evidence.parent) || resident.session.header.parentSession !== evidence.parent.id
+            || resident.session.header.origin !== "subagent" || prefixed && (!nativeCreations.has(resident) || nativeCreationRegistries.get(resident) !== evidence.registry)
+            || classifyDsmmAgent(resident) !== "native")
+            return false;
+        const own = childOwnedSessionEvents(resident.session);
+        const descriptor = foldSubagentDescriptor(own);
+        return own.filter(event => event.type === "subagent/descriptor").length === 1 && descriptor?.mode === evidence.mode
+            && descriptor.provider === evidence.provider && !dsmmMarked(own);
+    };
     const proveNativeChild = async (ticket, childId, mode, signal) => {
         signal.throwIfAborted();
         native.authority.assertTicket(ticket);
@@ -280,23 +393,14 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
             if (!Number.isSafeInteger(inherited) || inherited < 0 || inherited > observation.events.length)
                 throw new SubagentError("Native child observation has no valid own-event boundary", "UNAUTHORIZED");
             const own = observation.events.slice(inherited), descriptor = foldSubagentDescriptor(own);
-            const marked = own.some(event => {
-                if (event.type === "dsmm/role-policy")
-                    return true;
-                if (event.type === "deepwork/mode")
-                    return event.data?.active === true;
-                if (event.type !== "agent-preset/selected")
-                    return false;
-                const preset = event.data?.agentPreset;
-                return typeof preset === "string" && preset.startsWith("dsmm-");
-            });
-            const resident = ctx.agents.get(childId);
             if (header.version !== 4 || header.id !== childId || header.parentSession !== ticket.parent.id || header.origin !== "subagent"
-                || own.filter(event => event.type === "subagent/descriptor").length !== 1 || descriptor?.mode !== mode || descriptor.provider.startsWith("dsmm-role-")
-                || marked
-                || resident !== undefined && classifyDsmmAgent(resident) !== "native")
+                || own.filter(event => event.type === "subagent/descriptor").length !== 1 || descriptor?.mode !== mode || dsmmMarked(own))
                 return undefined;
-            const evidence = Object.freeze({ parent: ticket.parent, childId });
+            const registry = ctx.agents, resident = registry.get(childId), residency = nativeResidencies.get(childId) ?? {};
+            nativeResidencies.set(childId, residency);
+            const evidence = Object.freeze({ parent: ticket.parent, childId, registry: original(registry), resident, residency, provider: descriptor.provider, mode });
+            if (!matchesNativeResidency(evidence))
+                return undefined;
             nativeEvidence.add(evidence);
             return evidence;
         }
@@ -304,7 +408,7 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
             observation[Symbol.dispose]();
         }
     };
-    native.authority.bindPolicy(ctx, stable.owner, {
+    const detachPolicy = native.authority.bindPolicy(ctx, stable.owner, {
         classifyParent: classifyDsmmAgent,
         async resolveChildEvidence(ticket, childId, signal) {
             const evidence = await proveNativeChild(ticket, childId, "continuable", signal);
@@ -314,7 +418,8 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
         },
         assertDelivery(ticket, childId, evidence) {
             if (isNativeEvidence(evidence)) {
-                if (evidence.parent !== ticket.parent || evidence.childId !== childId || policy.identity(ticket.parent).role !== undefined)
+                if (evidence.parent !== ticket.parent || evidence.childId !== childId || !matchesNativeResidency(evidence)
+                    || policy.identity(ticket.parent).role !== undefined)
                     throw new SubagentError("Native child delivery does not match this ordinary direct parent", "UNAUTHORIZED");
             }
             else
@@ -332,6 +437,33 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
     scopeLifetime(ctx, "dsmm.integration: release entry collaborators", () => { if (stable.current?.bridge === bridge)
         stable.current = undefined; });
     const managed = native;
+    let deliveryProvider = managed.getProvider("spawn"), providerEpoch = new AbortController();
+    const providerChanged = () => {
+        const current = managed.getProvider("spawn");
+        if (current === deliveryProvider)
+            return;
+        providerEpoch.abort();
+        providerEpoch = new AbortController();
+        deliveryProvider = current;
+    };
+    ctx.on("subagent/provider-added", providerChanged, { global: true });
+    ctx.on("subagent/provider-removed", providerChanged, { global: true });
+    managed.configureContinuablePreflight(async (spec, start) => {
+        const provider = managed.getProvider(spec.provider);
+        const role = provider !== undefined && policy.ownsProvider(provider) ? roleFromProviderName(spec.provider) : undefined;
+        if (role === undefined)
+            return start(spec);
+        const parent = spec.request.parent, actor = parent;
+        policy.assertDelegation(actor, role);
+        const ticket = managed.authority.acquireParentTicket(parent);
+        const signal = AbortSignal.any([spec.signal, ticket.signal, lifetime.signal]);
+        const invocation = currentRoleInvocation(actor, role) ?? await resolveRoleInvocation(parent, role, ticket.admission.settings, signal, {}, spec.request.agentOptions);
+        signal.throwIfAborted();
+        managed.authority.assertTicket(ticket);
+        policy.assertDelegation(actor, role);
+        return duringRoleInvocation(actor, invocation, () => start({ ...spec, signal,
+            request: { ...spec.request, agentOptions: invocationAgentOptions(invocation, spec.request.agentOptions) } }));
+    }, lifetime.signal);
     const enrolledLegacy = new Map();
     if (legacyCore !== undefined) {
         ctx.on("agent/disposed", ({ agent }) => { enrolledLegacy.delete(agent); }, { global: true });
@@ -353,7 +485,47 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
         interrupt: ticket.admission.settings.modules.deepwork.enabled ? { enabled: true } : disabled("module-off"),
         images: ctx.get("attachments") !== undefined ? { enabled: true } : disabled("unavailable"), runtime: managed.authority.view(),
     });
+    let startupCompletion;
     return { bridge, owner: stable.owner, registry: stable.registry, runtime: managed, legacyRead,
+        async admitLlmRequest(agent, signal) {
+            signal.throwIfAborted();
+            const dsmmAgent = agent;
+            policy.assertModuleAdmission(dsmmAgent);
+            const identity = policy.identity(dsmmAgent);
+            if (identity.role === undefined)
+                return undefined;
+            const admission = getRuntime().admission(dsmmAgent);
+            const ticket = managed.authority.acquireParentTicket(agent);
+            if (ticket.owner !== stable.owner || ticket.admission !== admission || ticket.parentEpoch !== admission.epoch)
+                throw new SubagentError("LLM request does not own its exact Host admission", "UNAUTHORIZED");
+            const parent = identity.parent;
+            const parentTicket = parent === undefined ? undefined : managed.authority.acquireParentTicket(parent);
+            if (identity.child && parentTicket === undefined)
+                throw new SubagentError("LLM child has no admitted direct parent", "UNAUTHORIZED");
+            const provider = deliveryProvider;
+            const merged = AbortSignal.any([signal, lifetime.signal, providerEpoch.signal, ticket.signal, ...parentTicket === undefined ? [] : [parentTicket.signal]]);
+            const evidence = parentTicket === undefined ? undefined : await getRuntime().resolveOriginalChildEvidence(bridge.authority.acquireParentTicket(parentTicket.parent), agent.id, merged);
+            const assertCurrent = () => {
+                merged.throwIfAborted();
+                managed.authority.assertTicket(ticket);
+                if (provider === undefined || managed.getProvider("spawn") !== provider)
+                    throw new SubagentError("LLM delivery provider was replaced", "UNAUTHORIZED");
+                if (stable.current?.bridge !== bridge || getRuntime().admission(dsmmAgent) !== admission)
+                    throw new SubagentError("LLM admission was replaced", "UNAUTHORIZED");
+                policy.assertModuleAdmission(dsmmAgent);
+                const current = policy.identity(dsmmAgent);
+                if (current.role !== identity.role || current.epoch !== identity.epoch || current.parent !== identity.parent || current.child !== identity.child)
+                    throw new SubagentError("LLM role identity changed", "UNAUTHORIZED");
+                if (parentTicket !== undefined && evidence !== undefined) {
+                    managed.authority.assertTicket(parentTicket);
+                    if (ctx.agents.get(parentTicket.parent.id) !== parentTicket.parent || !ctx.agents.isOwnedBy(agent.id, parentTicket.parent))
+                        throw new SubagentError("LLM child ownership changed", "UNAUTHORIZED");
+                    managed.authority.assertDelivery(parentTicket, agent.id, evidence);
+                }
+            };
+            assertCurrent();
+            return Object.freeze({ agent, admission, capture: admission.childCapture ?? evidence ?? ticket, epoch: admission.epoch, signal: merged, assertCurrent });
+        },
         async afterChildAdmission(agent, signal = lifetime.signal) {
             if (legacyCore === undefined || agent.session.header.origin !== "subagent")
                 return;
@@ -381,7 +553,7 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
             catch (error) {
                 // Reject back to the actual native admission owner only after revoking
                 // this exact residency. That owner retains its original rollback handle.
-                revokeTree(ctx, bridge.authority.revokeParent, agent, "child-admission-failed");
+                revokeTree(teardownAgents, bridge.authority.revokeParent, agent, "child-admission-failed");
                 throw error;
             }
         },
@@ -389,13 +561,26 @@ export async function integrateSubagentRuntime(ctx, settings, policy, getRuntime
             return legacyCore === undefined || enrolledLegacy.size === 0 ? Promise.resolve().then(mutate) : legacyCore.changeConfiguration(reason, mutate);
         },
         dispose(nativeDrain) {
-            for (const parent of ctx.agents.roots())
-                revokeTree(ctx, bridge.authority.revokeParent, parent, "host-dispose");
+            for (const parent of teardownAgents.roots())
+                revokeTree(teardownAgents, bridge.authority.revokeParent, parent, "host-dispose");
             return legacyCore === undefined ? nativeDrain() : legacyCore.dispose(nativeDrain);
         },
-        async ready() { bridge.onAdmissionGuardsInstalled(); await managed.waitUntilReady(lifetime.signal); },
+        onAdmissionGuardsInstalled() { lifetime.signal.throwIfAborted(); bridge.onAdmissionGuardsInstalled(); },
+        continueStartup(complete, callerSignal) {
+            if (startupCompletion !== undefined)
+                throw new DsmmProfileError("unavailable", "DW startup already has its Host continuation.");
+            const signal = AbortSignal.any([lifetime.signal, ...callerSignal === undefined ? [] : [callerSignal]]);
+            startupCompletion = (async () => {
+                await managed.waitUntilReady(signal);
+                signal.throwIfAborted();
+                await complete(signal);
+                signal.throwIfAborted();
+            })().catch(error => { lifetime.abort(error); detachPolicy(); throw error; });
+            return startupCompletion;
+        },
+        async ready() { await managed.waitUntilReady(lifetime.signal); await startupCompletion; lifetime.signal.throwIfAborted(); },
         async revokeBeforeDispose(agent, dispose) {
-            revokeTree(ctx, bridge.authority.revokeParent, agent, "holder-disposed");
+            revokeTree(teardownAgents, bridge.authority.revokeParent, agent, "holder-disposed");
             const nativeDispose = async () => { await stable.registry.drainParent(agent, stable.owner, "holder-disposed"); await dispose(); };
             if (legacyCore === undefined)
                 await nativeDispose();
@@ -483,7 +668,12 @@ function ownRoute(events) {
     const route = event.data?.header?.config;
     if (typeof route?.provider !== "string" || typeof route.model !== "string" || route.reasoningEffort !== undefined && typeof route.reasoningEffort !== "string")
         return { status: "unknown", reason: "invalid-own-request-header" };
-    return { status: "known", source: "own-native-request-header", route: { provider: route.provider, model: route.model, ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) } };
+    try {
+        return { status: "known", source: "own-native-request-header", route: modelRouteFromCall({ ...route, provider: route.provider, model: route.model }) };
+    }
+    catch {
+        return { status: "unknown", reason: "invalid-own-request-header" };
+    }
 }
 function observedOriginalInvocation(agent, admission, label, mode) {
     const original = capturedOriginalRoleInvocation(agent), capture = admission.childCapture;
@@ -500,7 +690,7 @@ export function registerRuntimeGuidance(ctx, getSettings, policy) {
         if (installed.has(agent) || !(agent.ctx instanceof Context))
             return;
         const scope = agent.ctx;
-        scope.get("systemPrompt")?.section({ name: "dsmm:admitted-guidance", order: 50, text() {
+        const disposeGuidance = scope.get("systemPrompt")?.section({ name: "dsmm:admitted-guidance", order: 50, text() {
                 const settings = getSettings(agent), admission = getSettings.admission(agent), tools = scope.get("tools");
                 const schemas = tools?.schemas(agent).filter(schema => policy.toolDenial(agent, schema.name, tools) === undefined) ?? [];
                 const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session));
@@ -528,6 +718,8 @@ export function registerRuntimeGuidance(ctx, getSettings, policy) {
                         managedChildDelivery: runtime?.binding === "dsmm" && runtime.deliveryFenceReady && scope.get("sessionQuery") !== undefined && scope.get("sessionPersistence") !== undefined },
                 });
             } });
+        if (disposeGuidance !== undefined)
+            ctx.effect?.(() => disposeGuidance);
         installed.add(agent);
     };
     ctx.on?.("agent/created", install, { global: true });

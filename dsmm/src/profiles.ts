@@ -1,12 +1,13 @@
 import { getNodeValue } from "jsonc-parser";
 import { DSMM_ROLE_IDS } from "./roles.js";
-import { DSMM_LOCALES, resolveConfig, normalizeLevelOverride } from "./settings.js";
+import { copyJson, DSMM_LOCALES, resolveConfig, normalizeLevelOverride } from "./settings.js";
 import type { DsmmPluginConfig, DsmmSettings } from "./settings.js";
 import type { ProfileErrorCode, ProfileErrorInfo } from "./profile-types.js";
 import { DSMM_RATE_LIMIT_BOUNDS, normalizeRateLimitOverrides, normalizeRoutingStrategy, normalizeRuntimePolicy } from "./routing-policy.js";
 import { DEPRECATED_DSMM_FIELDS, diagnostic, diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
 import type { ProfileDiagnostic, ProfileDiagnosticCode, ProfileDiagnosticLocation } from "./profile-diagnostics.js";
 import type { DsmmRoleId } from "./roles.js";
+import { normalizeModelRouteJson } from "./route-json.js";
 
 export const MAX_PROFILE_BYTES = 128 * 1024;
 export const MAX_PROFILE_COUNT = 128;
@@ -14,7 +15,7 @@ export const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
 export const MAX_PROFILE_REVISIONS = 1024;
 
 export type DsmmProfileOverlay = Pick<DsmmPluginConfig,
-  "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery"
+  "modelParameters" | "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery"
   | "roles" | "locale" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort"
   | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort"> & { subagents?: Pick<NonNullable<DsmmPluginConfig["subagents"]>, "toolTopology"> };
 
@@ -60,7 +61,7 @@ export function validateProfileRevision(revision: unknown, field = "expectedRevi
   if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) invalid(field, "must be a SHA256 file revision");
 }
 
-const OVERLAY_FIELDS = ["defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
+const OVERLAY_FIELDS = ["modelParameters", "defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
 
 export function parseProfileDocument(content: string, expectedId?: string): DsmmProfileDocument {
   const result = validateProfileDocument(content, expectedId);
@@ -105,9 +106,16 @@ export function profileDocumentWarnings(document: DsmmProfileDocument | null): P
 }
 
 export function validateProfileOverlay(input: unknown): asserts input is DsmmProfileOverlay {
-  const overlay = record(input, "settings");
+  let plain: unknown;
+  try { plain = copyJson(input); } catch { invalid("settings", "must be plain JSON"); }
+  const overlay = record(plain, "settings");
   keys(overlay, OVERLAY_FIELDS, "settings");
   optional(overlay, "defaultActive", bool, "settings");
+  optional(overlay, "modelParameters", (value, field) => {
+    const parameters = record(value, field);
+    keys(parameters, ["passthrough"], field);
+    optional(parameters, "passthrough", bool, field);
+  }, "settings");
   for (const prefix of ["deepseekV4Pro", "deepseekFlash"]) {
     optional(overlay, `${prefix}Calibration`, (value, field) => enumeration(value, ["off", "auto", "strict"], field), "settings");
     optional(overlay, `${prefix}DefaultReasoningEffort`, (value, field) => enumeration(value, ["off", "low", "high"], field), "settings");
@@ -133,7 +141,7 @@ export function validateProfileOverlay(input: unknown): asserts input is DsmmPro
 }
 
 export function mergeProfileConfig(baseline: DsmmPluginConfig, overlay: DsmmProfileOverlay): DsmmPluginConfig {
-  return mergeRecords(baseline as Record<string, unknown>, overlay as Record<string, unknown>) as DsmmPluginConfig;
+  return mergeRecords(copyJson(baseline) as Record<string, unknown>, copyJson(overlay) as Record<string, unknown>) as DsmmPluginConfig;
 }
 
 export function resolveProfileSettings(baseline: DsmmPluginConfig, overlay: DsmmProfileOverlay): DsmmSettings {
@@ -219,13 +227,7 @@ function array(value: unknown, field: string, maximum: number, validator: (value
 }
 
 function route(value: unknown, field: string): void {
-  const item = record(value, field);
-  keys(item, ["provider", "model", "reasoningEffort"], field);
-  string(item.provider, `${field}.provider`, 128);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(item.provider as string)) invalid(`${field}.provider`, "must reference a native provider ID, not a URL, credential or path");
-  string(item.model, `${field}.model`, 512);
-  if ((item.model as string).includes("://")) invalid(`${field}.model`, "must reference a native model ID, not a credential-bearing URL");
-  optional(item, "reasoningEffort", (effort, path) => string(effort, path, 64), field);
+  try { normalizeModelRouteJson(value); } catch { invalid(field, "must be a valid model route", "invalid-route"); }
 }
 
 function routeList(value: unknown, field: string): void {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdtemp, mkdir, readFile, rm, writeFile, symlink } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
@@ -337,7 +337,15 @@ if (scenario) {
       assert.equal(f.bodies.read, 0);
     } else if (scenario === "alias") {
       f.install(); f.ready(); const result = await f.execute({ file_path: "alias.txt", offset: 2, limit: 1 });
-      assert.equal(result.value.lines[0].text, "useful once"); assert.equal(result.value.path, join(f.root, "child", "useful.txt")); assert.equal(f.bodies.read, 1);
+      assert.equal(result.isError, false); assert.equal(result.value.lines[0].text, "useful once"); assert.equal(f.bodies.read, 1);
+      const target = join(f.root, "child", "useful.txt"), alias = join(f.root, "child", "alias.txt");
+      const actualFile = await stat(result.value.path), targetFile = await stat(target), aliasFile = await stat(alias);
+      assert.equal(actualFile.isFile(), true);
+      assert.deepEqual([actualFile.dev, actualFile.ino], [targetFile.dev, targetFile.ino]);
+      assert.deepEqual([aliasFile.dev, aliasFile.ino], [targetFile.dev, targetFile.ino]);
+      assert.deepEqual(await readFile(result.value.path), await readFile(target));
+      const audit = await f.settle();
+      assert.equal(audit.length, 1); assert.equal(audit[0].parentError, false); assert.equal(audit[0].childError, false);
     } else if (scenario === "unknown") {
       f.install(); assert.throws(() => f.ready(), { code: "composition-unavailable" }); assert.equal((await f.execute()).isError, true); assert.equal(f.bodies.read, 0);
     } else if (scenario.startsWith("incompatible")) {

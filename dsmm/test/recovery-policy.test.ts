@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DshLlmFailure, DshSessionEvent } from "../lib/dsh-types.js";
-import { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "../lib/recovery-policy.js";
-import type { DsmmRecoveryRoute, DsmmRuntimeRecoverySettings } from "../lib/settings.js";
+import type { DshLlmFailure, DshSessionEvent } from "../src/dsh-types.ts";
+import { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "../src/recovery-policy.ts";
+import type { DsmmRecoveryRoute, DsmmRuntimeRecoverySettings } from "../src/settings.ts";
 
 const settings: DsmmRuntimeRecoverySettings = {
   enabled: true,
@@ -166,6 +166,46 @@ test("foldAttemptedRecoveryRoutes feeds the fallback cap with inherited and chan
     fallbackRoutes: [{ provider: "fallback", model: "c" }],
     maxFallbackAttempts: 1
   }), undefined);
+});
+
+test("recovery folds native parameter envelopes without defaults and detaches complete route values", () => {
+  const config = { provider: "FaLlBaCk ", model: " b ", maxTokens: 2048, reasoningEffort: "high",
+    customParameters: { nested: { values: [null, false, 0] }, stop: [] } };
+  const events = [event("request/header", { header: { config, adapterDefaults: { maxTokens: true, reasoningEffort: true } }, reason: "initial" }),
+    step("step/start", 4, 2)];
+  const routes = foldAttemptedRecoveryRoutes(events, 4, 2);
+  assert.deepEqual(routes, [{ provider: "FaLlBaCk ", model: " b ", nested: { values: [null, false, 0] }, stop: [] }]);
+  assert.notEqual(routes[0].nested, config.customParameters.nested);
+  assert.notEqual((routes[0].nested as { values: unknown[] }).values, config.customParameters.nested.values);
+  (routes[0].nested as { values: unknown[] }).values.push("changed");
+  assert.deepEqual(config.customParameters.nested.values, [null, false, 0]);
+  assert.deepEqual(foldAttemptedRecoveryRoutes([
+    step("step/start", 4, 2),
+    event("request/header", { header: { config: { ...config, customParameters: { provider: "override" } } }, reason: "change" })
+  ], 4, 2), []);
+});
+
+test("recovery identity includes exact identity text and complete parameters while enforcing unique-attempt caps", () => {
+  const primary = { provider: "Primary", model: "a" };
+  const attempted = { provider: "FaLlBaCk ", model: " b ", nested: { a: null, b: [false, 0] } };
+  const reordered = { nested: { b: [false, 0], a: null }, model: " b ", provider: "FaLlBaCk " };
+  const changed = { ...attempted, nested: { a: null, b: [false, 1] } };
+  const input = { failedRoute: attempted, attemptedRoutes: [primary, attempted, reordered],
+    fallbackRoutes: [reordered, changed], maxFallbackAttempts: 2 };
+  const selected = selectFallbackRoute(input);
+  assert.deepEqual(selected, changed);
+  assert.notEqual(selected!.nested, changed.nested);
+  (selected!.nested as { b: unknown[] }).b.push("changed");
+  assert.deepEqual(changed.nested.b, [false, 1]);
+  assert.deepEqual(selectFallbackRoute({ ...input, fallbackRoutes: [{ ...attempted, provider: "fallback" }] }),
+    { ...attempted, provider: "fallback" });
+  assert.equal(selectFallbackRoute({ ...input, maxFallbackAttempts: 1 }), undefined);
+  assert.equal(selectFallbackRoute({ ...input, attemptedRoutes: [primary, attempted, changed] }), undefined);
+  const folded = foldAttemptedRecoveryRoutes([
+    header("Primary", "a", "initial"), step("step/start", 4, 2),
+    ...[attempted, reordered, changed].map(config => event("request/header", { header: { config }, reason: "change" }))
+  ], 4, 2);
+  assert.deepEqual(folded, [primary, attempted, changed]);
 });
 
 test("foldAttemptedRecoveryRoutes ignores invalid coordinate boundaries", () => {

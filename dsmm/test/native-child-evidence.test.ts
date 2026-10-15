@@ -15,7 +15,7 @@ for (const [phase, requirement] of [
   ["cold-materialization", "revocation during native cold materialization accepts no message and permits a fresh same-ID invocation"],
   ["delegating-child", "delegating children register their original admission and cold resume preserves direct grandchild adjacency/depth"],
   ["capture-integrity", "corrupt or missing-version capture and missing retained durable capture never downgrade to legacy"],
-  ["legacy-parameters", "legacy useful reads consume audited parameter/definition permissions intersected with the actual current parent"],
+  ["legacy-parameters", "legacy read parameter and definition checks cannot replace a registered leased native invocation"],
 ] as const) {
   test(requirement, () => {
     const root = mkdtempSync(join(tmpdir(), "dsmm-c2b-native-"));

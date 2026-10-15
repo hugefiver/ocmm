@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { TestContext } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
 import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionLogOffset } from "@deepseek-ai/dsh-session";
@@ -34,6 +35,16 @@ async function request(runtime: DsmmProfileRuntime, agent: Agent, id: string | n
   return { sessionId: agent.id, id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: state.selection.selectionRevision, expectedAdmissionEpoch: state.admissionEpoch };
 }
 function gate() { let release!: () => void; const promise = new Promise<void>((done) => { release = done; }); return { promise, release }; }
+function pauseSessionCandidate(t: TestContext, entered: ReturnType<typeof gate>, hold: ReturnType<typeof gate>) {
+  const select = ProfileStore.prototype.selectSession;
+  t.mock.method(ProfileStore.prototype, "selectSession", function<T>(this: ProfileStore, input: SessionProfileSelectRequest, epoch: string,
+    validate: (document: DsmmProfileDocument | null) => T | Promise<T>, commit: SessionProfileCommit<T>) {
+    return select.bind(this)<T>(input, epoch, async document => {
+      entered.release(); await hold.promise;
+      return validate(document);
+    }, commit);
+  });
+}
 async function localRuntime(f: Awaited<ReturnType<typeof nativeRoutingFixture>>, validateCandidate: () => Promise<void>, lookup?: Map<string, DshAgent>) {
   const ctx: DshContext = { get(name) { return (name === "agents" ? { list: () => lookup === undefined ? f.agents.list() as unknown as DshAgent[] : [...lookup.values()], get: (id: string) => lookup === undefined ? structural(f.agents.get(SessionId(id))!) : lookup.get(id), isOwnedBy: (id: string, owner: DshAgent) => f.agents.isOwnedBy(SessionId(id), owner as unknown as Agent) } : f.ctx.get(name)) as never; } };
   const runtime = new DsmmProfileRuntime(ctx, resolveConfig(), centralStore(f), { validateCandidate });
@@ -113,7 +124,12 @@ test("native idle switches isolate two roots and global default; old/new childre
     children.push(oldChildRun);
     assert.equal((await oldChildRun.result).stopReason, "completed");
     const oldChild = oldChildRun.localAgent!;
-    assert.equal(runtime.admission(structural(oldChild)), oldAdmission);
+    const oldChildAdmission = runtime.admission(structural(oldChild));
+    assert.equal(oldChildAdmission.epoch, oldAdmission.epoch);
+    assert.equal(oldChildAdmission.appliedRevision, a.revision);
+    assert.equal(oldChildAdmission.childCapture?.parentSessionId, first.id);
+    assert.equal(oldChildAdmission.childCapture?.originalAdmissionEpoch, oldAdmission.epoch);
+    assert.deepEqual(oldChildAdmission.settings.roleRouting, oldAdmission.settings.roleRouting);
     const switchedB = await runtime.selectSession(await request(runtime, second, "b", b.revision), structural(second));
     await runFixtureTurn(first); await runFixtureTurn(second);
     assert.equal(headerRoutes(first).at(-1)?.model, "native-a", "profile switch preserves the first root's native model");
@@ -125,12 +141,16 @@ test("native idle switches isolate two roots and global default; old/new childre
     assert.equal(existsSync(join(f.profileDir, "dsmm-profiles", ".selection.json")), false);
     const reapplied = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     assert.notEqual(reapplied.admissionEpoch, switchedA.admissionEpoch, "same revision explicitly reapplied starts a fenced epoch");
-    assert.equal(runtime.admission(structural(oldChild)), oldAdmission, "already-created child is never recursively rebound");
+    assert.equal(runtime.admission(structural(oldChild)), oldChildAdmission, "already-created child is never recursively rebound");
     const newChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the reapplied admission" }], signal: new AbortController().signal });
     children.push(newChildRun);
     assert.equal((await newChildRun.result).stopReason, "completed");
     const newChild = newChildRun.localAgent!;
-    assert.equal(runtime.admission(structural(newChild)), runtime.admission(structural(first)));
+    const newChildAdmission = runtime.admission(structural(newChild));
+    assert.equal(newChildAdmission.epoch, reapplied.admissionEpoch);
+    assert.equal(newChildAdmission.appliedRevision, a.revision);
+    assert.equal(newChildAdmission.childCapture?.parentSessionId, first.id);
+    assert.equal(newChildAdmission.childCapture?.originalAdmissionEpoch, reapplied.admissionEpoch);
     assert.notEqual(runtime.admission(structural(newChild)).epoch, runtime.admission(structural(oldChild)).epoch);
     await assert.rejects(async () => runtime.selectSession({ ...(await request(runtime, first, "b", b.revision)), expectedAdmissionEpoch: switchedA.admissionEpoch }, structural(first)), { code: "conflict" });
     const lineageOnly = await f.create({ parentSession: first.id, isSeeded: true, agentPreset: "dsmm-orchestrator" }, undefined, { seed: first.session.snapshotEvents(), inheritedEventCount: SessionLogOffset(first.session.snapshotEvents().length) });
@@ -231,7 +251,7 @@ test("profile model metadata follows the admitted ordinary root role without cha
   } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
 });
 
-test("native running and foreign maintenance activities refuse immediately; a queued wake uses the committed new epoch", async () => {
+test("native running and foreign maintenance activities refuse immediately; a queued wake uses the committed new epoch", async t => {
   const f = await nativeRoutingFixture();
   const wait = gate(); const entered = gate();
   try {
@@ -249,11 +269,7 @@ test("native running and foreign maintenance activities refuse immediately; a qu
     wait.release(); await agent.whenIdle(); f.adapter.beforeStream = undefined;
     const validation = gate(); const validating = gate();
     const current = runtimeOf(f);
-    const resolveModel = f.adapter.resolveModel.bind(f.adapter);
-    f.adapter.resolveModel = async (provider, model) => {
-      if (model === "wake-new") { validating.release(); await validation.promise; }
-      return resolveModel(provider, model);
-    };
+    pauseSessionCandidate(t, validating, validation);
     const pending = current.selectSession(await request(current, agent, "a", saved.revision), structural(agent));
     await validating.promise;
     const oldEpoch = current.admission(structural(agent)).epoch;
@@ -324,14 +340,13 @@ test("the final pre-rename fence rechecks native cancellation and exact Agent id
   }
 });
 
-test("native handle disposal cancels profile validation before committing or publishing late state", async () => {
+test("native handle disposal cancels profile validation before committing or publishing late state", async t => {
   const f = await nativeRoutingFixture(); const entered = gate(); const hold = gate();
   const handle = await f.agents.create({ sessionId: SessionId("dsmm-real-disposal"), agentOptions: { provider: "fixture", model: "native-default" } });
   try {
     const runtime = runtimeOf(f);
     const saved = await runtime.save({ id: "a", content: profile("a", "dispose-route"), expectedRevision: null });
-    const original = f.adapter.resolveModel.bind(f.adapter);
-    f.adapter.resolveModel = async (provider, model) => { if (model === "dispose-route") { entered.release(); await hold.promise; } return original(provider, model); };
+    pauseSessionCandidate(t, entered, hold);
     const old = runtime.admission(structural(handle.agent));
     const pending = runtime.selectSession(await request(runtime, handle.agent, "a", saved.revision), structural(handle.agent));
     await entered.promise;
@@ -370,10 +385,12 @@ test("trusted caller authority is rechecked after awaited validation and in the 
   }
 });
 
-test("native candidate admission accepts ordered resolvable chains and inherited routes without checking dormant alternatives", async () => {
+test("session Apply preserves all route candidates without model validation or provider work", async () => {
   const f = await nativeRoutingFixture();
   try {
     const runtime = runtimeOf(f); const agent = await f.create();
+    let metadataCalls = 0;
+    f.adapter.resolveModel = async () => { metadataCalls++; throw new Error("Model metadata is not an Apply dependency"); };
     const save = (id: string, policy: unknown) => runtime.save({ id, expectedRevision: null, content: JSON.stringify({ version: 1, id, settings: { roleRouting: { "dsmm-orchestrator": policy } } }) });
     const unavailable = { provider: "no-such-native-adapter", model: "manual-model" };
     const viable = await save("viable", { primary: unavailable, fallbackRoutes: [route("manual-resolvable"), unavailable] });
@@ -383,9 +400,11 @@ test("native candidate admission accepts ordered resolvable chains and inherited
     const old = runtime.admission(structural(agent));
     f.adapter.unsupportedMaxModels.add("unsupported-exact");
     const invalid = await save("invalid", { primary: { ...route("unsupported-exact"), reasoningEffort: "max" }, fallbackRoutes: [route("available-but-not-permission-to-normalize")] });
-    await assert.rejects(runtime.selectSession(await request(runtime, agent, "invalid", invalid.revision), structural(agent)), { code: "activation" });
-    assert.equal(runtime.admission(structural(agent)), old);
-    assert.equal(f.adapter.calls.length, 0, "native catalog admission never sends sacrificial completions");
+    await runtime.selectSession(await request(runtime, agent, "invalid", invalid.revision), structural(agent));
+    assert.notEqual(runtime.admission(structural(agent)), old);
+    assert.equal(runtime.admission(structural(agent)).settings.roleRouting["dsmm-orchestrator"]?.primary?.reasoningEffort, "max");
+    assert.equal(metadataCalls, 0);
+    assert.equal(f.adapter.calls.length, 0);
   } finally { await f.dispose(); }
 });
 

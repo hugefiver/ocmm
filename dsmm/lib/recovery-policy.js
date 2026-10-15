@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
+import { normalizeModelRouteJson } from "./route-json.js";
+import { modelRouteFromHeader } from "./role-llm.js";
 const REQUEST_HEADER_REASONS = new Set(["initial", "resume", "change", "series"]);
 const TODO_STATUSES = new Set(["pending", "in_progress", "completed"]);
 const GOAL_OPERATIONS = new Set(["create", "edit", "pause", "resume", "complete", "block"]);
@@ -106,9 +109,6 @@ export function selectFallbackRoute({ failedRoute, attemptedRoutes, fallbackRout
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function isNonEmptyString(value) {
-    return typeof value === "string" && value.trim() !== "";
-}
 function isNormalizedNonEmptyString(value) {
     return typeof value === "string" && value !== "" && value === value.trim();
 }
@@ -123,12 +123,15 @@ function hasExactKeys(value, expectedKeys) {
     return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key));
 }
 function readRoute(value) {
-    if (!isRecord(value) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.model))
+    try {
+        return normalizeModelRouteJson(value, false, true);
+    }
+    catch {
         return undefined;
-    return { provider: value.provider, model: value.model, ...(isNonEmptyString(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}) };
+    }
 }
 function sameRoute(left, right) {
-    return left.provider === right.provider && left.model === right.model;
+    return isDeepStrictEqual(readRoute(left), readRoute(right));
 }
 function appendUniqueRoute(routes, route) {
     if (!routes.some((candidate) => sameRoute(candidate, route)))
@@ -168,7 +171,17 @@ function readHeaderRoute(event) {
         return undefined;
     if (!isRecord(data.header) || !isRecord(data.header.config))
         return undefined;
-    return readRoute(data.header.config);
+    try {
+        const provider = data.header.config.provider;
+        if (typeof provider !== "string")
+            return undefined;
+        // Decode native envelopes with valid grammar, then retain the exact durable identity.
+        const route = modelRouteFromHeader({ ...data.header, config: { ...data.header.config, provider: provider.trim() } });
+        return readRoute({ ...route, provider });
+    }
+    catch {
+        return undefined;
+    }
 }
 function endsTargetScope(event) {
     const type = eventType(event);

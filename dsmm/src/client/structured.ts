@@ -14,14 +14,13 @@ export interface StructuredDocument {
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+// Project known control fields; opaque parameters remain raw for Host validation.
 function route(value: unknown): value is DsmmModelRoute {
   return record(value) && typeof value.provider === "string" && typeof value.model === "string"
-    && (value.reasoningEffort === undefined || typeof value.reasoningEffort === "string")
-    && Object.keys(value).every((key) => ["provider", "model", "reasoningEffort"].includes(key));
+    && (value.reasoningEffort === undefined || typeof value.reasoningEffort === "string");
 }
 function level(value: unknown): value is DsmmLevelOverride {
-  return route(value) || record(value) && typeof value.reasoningEffort === "string"
-    && Object.keys(value).every(key => key === "reasoningEffort");
+  return route(value) || record(value) && value.provider === undefined && value.model === undefined && typeof value.reasoningEffort === "string";
 }
 function validTree(node: Node, depth = 0): boolean {
   if (depth > 32) return false;

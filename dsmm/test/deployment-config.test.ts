@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -71,7 +71,6 @@ test("Deepwork module is a strict global-only ceiling; absence/unset defaults on
 });
 
 test("two actual Loader entries inherit one global base; volatile pins/unset preserve fibers and old admissions", async () => {
-  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "two-loader-global-base", time: Date.now() })}\n`);
   const root = mkdtempSync(join(tmpdir(), "dsmm-c0-native-"));
   const marker = join(root, ".run-owner"), owner = `c0:${root}`;
   writeFileSync(marker, owner, { flag: "wx" });
@@ -79,9 +78,16 @@ test("two actual Loader entries inherit one global base; volatile pins/unset pre
   mkdirSync(profileA); mkdirSync(profileB);
   const hosts: Awaited<ReturnType<typeof nativeRoutingFixture>>[] = [];
   try {
-    const roles = Object.fromEntries(DSMM_ROLE_IDS.filter((id) => id !== "dsmm-cross-cutting").map((id) => [id, false]));
-    const a = await nativeRoutingFixture({ roles, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "baseline-review", reasoningEffort: "high" } } } }, { nativePresets: true, spawn: false, home, profileDir: profileA }); hosts.push(a);
-    const b = await nativeRoutingFixture({ roles, defaultActive: false }, { nativePresets: true, spawn: false, home, profileDir: profileB }); hosts.push(b);
+    const roles = Object.fromEntries(DSMM_ROLE_IDS.filter((id) => id !== "dsmm-cross-cutting").map((id) => [id, id === "dsmm-orchestrator"]));
+    const nativeOptions = { nativePresets: true, nativeFs: true, nativeJobs: true, spawn: false, home, async beforeDsmm(ctx: Context) {
+      const denied = async (): Promise<never> => { throw new Error("fixture forbids external web/shell/subprocess work"); };
+      ctx.provide("web", { search: denied, fetch: denied });
+      ctx.provide("subprocess", { spawn: denied });
+      ctx.provide("shell", { execute: denied });
+      ctx.provide("shellEnv", { resolve: denied });
+    } };
+    const a = await nativeRoutingFixture({ roles, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "baseline-review", reasoningEffort: "high" } } } }, { ...nativeOptions, profileDir: profileA }); hosts.push(a);
+    const b = await nativeRoutingFixture({ roles, defaultActive: false }, { ...nativeOptions, profileDir: profileB }); hosts.push(b);
     const manager = (f: typeof a) => f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
     const deployment = (f: typeof a) => f.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
     const ordinary = (f: typeof a) => f.create({ agentPreset: "standard" });
@@ -132,8 +138,10 @@ test("two actual Loader entries inherit one global base; volatile pins/unset pre
     assert.notEqual(status.deployment?.sourceCaptures?.fields, constrainedAdmission.sourceCaptures?.fields);
     assert.equal(manager(b).getStartupSettings().defaultActive, false);
     assert.equal(manager(a).getSettings().defaultActive, false, "no-argument getter is not raw latest desired");
-    const child = await a.create({ origin: "subagent" }, undefined, { parentAgent: old });
-    assert.equal(manager(a).admission(child as DshAgent), oldAdmission, "future child inherits the old complete deployment/epoch");
+    const liveRoots = a.agents.list();
+    await assert.rejects(a.create({ origin: "subagent" }, undefined, { parentAgent: old }), { code: "unavailable" }, "parent lineage cannot grant admission without the managed child runtime");
+    assert.deepEqual(a.agents.list(), liveRoots, "failed unpublished child admission preserves the live roots");
+    assert.equal(manager(a).admission(old as DshAgent), oldAdmission, "failed child admission preserves the complete old deployment/epoch");
     const draft = await manager(a).save({ id: "runtime-overlay", expectedRevision: null, content: '{"version":1,"id":"runtime-overlay","settings":{"workflow":{"reviewCap":2},"roleRouting":{"dsmm-reviewer":{"primary":{"provider":"fixture","model":"overlay-review"}}}}}' });
     const before = await manager(a).getSession(old as DshAgent);
     await manager(a).selectSession({ sessionId: old.id, id: draft.id, expectedRevision: draft.revision,
@@ -167,8 +175,25 @@ test("two actual Loader entries inherit one global base; volatile pins/unset pre
   }
 });
 
+test("disabled standing and implicit orchestrator roots cannot be admitted by global activation", async () => {
+  const f = await nativeRoutingFixture({ roles: { "dsmm-orchestrator": false } }, { spawn: false });
+  try {
+    const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const deployment = f.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
+    const old = await f.create({ agentPreset: "standard" });
+    const admission = runtime.admission(old as DshAgent);
+    await deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["defaultActive"], value: true }] }, () => {});
+    const roots = f.agents.list();
+    await assert.rejects(f.create({ agentPreset: "standard" }), { code: "UNAUTHORIZED" });
+    await assert.rejects(f.create({ agentPreset: "dsmm-orchestrator" }), { code: "activation" });
+    assert.deepEqual(f.agents.list(), roots);
+    assert.equal(runtime.admission(old as DshAgent), admission);
+    assert.equal(admission.settings.defaultActive, false);
+    assert.equal(f.adapter.calls.length, 0);
+  } finally { await f.dispose(); }
+});
+
 test("direct Cordis remount restores the same central selection and session pin after different fiber allocation", async () => {
-  appendFileSync(join(tmpdir(), "dsmm-c0-journal.jsonl"), `${JSON.stringify({ probe: "stable-direct-namespace", time: Date.now() })}\n`);
   const root = mkdtempSync(join(tmpdir(), "dsmm-c0-direct-"));
   const owner = `c0-direct:${root}`, marker = join(root, ".run-owner");
   writeFileSync(marker, owner, { flag: "wx" });

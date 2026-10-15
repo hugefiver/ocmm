@@ -4,11 +4,28 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 // @ts-expect-error Native release harnesses are source-only modules.
-import { digest, inspectStableProfileStorage } from "../scripts/stable-native-acceptance.mjs";
+import { digest, inspectStableProfileStorage, stableNativeProofIdentity } from "../scripts/stable-native-acceptance.mjs";
 // @ts-expect-error Native release harnesses are source-only modules.
 import { createStableNativeBridge } from "../scripts/profile-ui-harness-stable021-native.mjs";
+// @ts-expect-error Native release harnesses are source-only modules.
+import { runStable021Acceptance } from "../scripts/profile-ui-harness-stable021.mjs";
 // @ts-expect-error Native release contracts are source-only modules.
 import { validateStableBootstrap } from "../scripts/release-contract.mjs";
+
+test("stable producers bind their proof identity to the installed manifest and explicit reviewed contract", async () => {
+  for (const version of ["0.2.1", "0.2.2"]) {
+    const manifest = { name: "@dsmm/dsmm", version };
+    assert.deepEqual(stableNativeProofIdentity(manifest, { sourceContract: version }), {
+      kind: version === "0.2.2" ? "native-client-stable-first-022" : "native-client-stable-first-021", sourceContract: version, packageVersion: version,
+    });
+    assert.throws(() => stableNativeProofIdentity(manifest, { sourceContract: version === "0.2.2" ? "0.2.1" : "0.2.2" }));
+    assert.throws(() => stableNativeProofIdentity({ ...manifest, name: "dsmm" }, { sourceContract: version }));
+  }
+  assert.equal(stableNativeProofIdentity({ name: "@dsmm/dsmm", version: "0.2.1" }).sourceContract, "0.2.1");
+  assert.throws(() => stableNativeProofIdentity({ name: "@dsmm/dsmm", version: "0.2.2" }));
+  for (const version of ["0.2.0", "0.2.3", "1.0.0"]) assert.throws(() => stableNativeProofIdentity({ name: "@dsmm/dsmm", version }, { sourceContract: version }));
+  await assert.rejects(runStable021Acceptance({ sourceContract: "0.2.2" }));
+});
 
 test("stable cold profile inspection allows absent storage without materializing files and refuses redirected ownership", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "dsmm-stable-storage-")));

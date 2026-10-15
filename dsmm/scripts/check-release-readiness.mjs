@@ -5,11 +5,15 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { checkFrontendAssets } from "./materialize-frontend.mjs";
+import { COLD_PROFILE_SCRIPTS_022 } from "./release-contract.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
 const repositoryLicensePath = resolve(scriptDirectory, "..", "..", "LICENSE");
-const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
+const operatorScripts = [
+  "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
+  ...COLD_PROFILE_SCRIPTS_022
+];
 const metadataResources = ["locale/en.json", "locale/zh.json"];
 
 const requiredExact = [
@@ -21,8 +25,8 @@ const requiredExact = [
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["runtime-integration", "legacy-read-host"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/lsp.md",
-  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/profiles.md", "docs/releasing.md",
+  "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/deferred-native-approval-risk.md", "docs/lsp.md",
+  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/native-permissions.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
   "docs/settings-status.md", "docs/skill-sync.md"
 ];
@@ -38,9 +42,11 @@ const expectedFiles = [
   "docs/agent-presets.md",
   "docs/compatibility.md",
   "docs/design.md",
+  "docs/deferred-native-approval-risk.md",
   "docs/lsp.md",
   "docs/migration-from-ocmm.md",
   "docs/model-routing.md",
+  "docs/native-permissions.md",
   "docs/profiles.md",
   "docs/releasing.md",
   "docs/research",
@@ -58,6 +64,13 @@ const expectedFiles = [
 ];
 
 const expectedExports = {
+  "./managed-settings": { types: "./lib/managed-settings.d.ts", default: "./lib/managed-settings.js" },
+  "./llm-runtime": { types: "./lib/llm-runtime.d.ts", default: "./lib/llm-runtime.js" },
+  "./permission-bash": { types: "./lib/permission-bash.d.ts", default: "./lib/permission-bash.js" },
+  "./permission-pwsh": { types: "./lib/permission-pwsh.d.ts", default: "./lib/permission-pwsh.js" },
+  "./permission-fs": { types: "./lib/permission-fs.d.ts", default: "./lib/permission-fs.js" },
+  "./permission-fs-search": { types: "./lib/permission-fs-search.d.ts", default: "./lib/permission-fs-search.js" },
+  "./permission-web": { types: "./lib/permission-web.d.ts", default: "./lib/permission-web.js" },
   ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
   "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
@@ -75,6 +88,7 @@ const expectedDependencies = {
 };
 
 const expectedPeers = {
+  "@earendil-works/pi-ai": "0.87.1",
   "@deepseek-ai/cordis": "~4.0.4",
   "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
@@ -82,6 +96,9 @@ const expectedPeers = {
   "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
   "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
   "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-llm-pi-ai": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-agent-loop": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
   "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
   "@deepseek-ai/dsh-session": "0.2.0-rc.2",
   "@deepseek-ai/dsh-session-persistence": "0.2.0-rc.2",
@@ -98,6 +115,7 @@ const expectedPeers = {
   "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-fs": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-fs-search": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-tool-web": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-bash": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-pwsh": "0.2.0-rc.2",
   "@deepseek-ai/dsh-tool-jobs": "0.2.0-rc.2",
@@ -150,7 +168,7 @@ const expectedScripts = {
   "sync:frontend": "node scripts/materialize-frontend.mjs --sync",
   "typecheck": "tsc -p tsconfig.json --noEmit",
   "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
-  "test": "pnpm run build && node --test --experimental-strip-types test/*.test.ts",
+  "test": "pnpm run build && node --test --experimental-strip-types --import ./test/prompt-source-loader.mjs --test-concurrency=1 test/*.test.ts",
   "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..",
   "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.2",
   "smoke:docker": "node scripts/docker-smoke.mjs"
@@ -304,7 +322,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.2.1",
+    version: "0.2.2",
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -325,7 +343,7 @@ function validateManifest(manifest, errors) {
   if (manifest.type !== "module") errors.push("manifest.type must equal module");
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
-  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the nine public exports");
+  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the public module contract");
   if (!isDeepStrictEqual(manifest.engines, { node: ">=22" })) errors.push("manifest.engines must equal the Node 22 policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
@@ -465,7 +483,7 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.2.1") errors.push("npm pack receipt version must equal 0.2.1");
+  if (entry.version !== "0.2.2") errors.push("npm pack receipt version must equal 0.2.2");
   validateRequiredSurface(paths, requiredPaths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);

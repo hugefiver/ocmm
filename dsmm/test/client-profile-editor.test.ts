@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
@@ -24,6 +25,9 @@ import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller
 import type { SessionEventWindow } from "@deepseek-ai/dsh-api-session-controller/client";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { isProfileId } from "../lib/profile-remote.js";
+import { build } from "esbuild";
+import type { EditableChoiceProps } from "../src/client/EditableChoice.js";
+import { editStructuredPath as editCurrentPath, moveFallback as moveCurrentFallback, structuredDocument as currentDocument } from "../src/client/structured.js";
 
 const revision = "a".repeat(64), otherRevision = "b".repeat(64);
 const content = `{
@@ -124,6 +128,127 @@ function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
   if (!isValidElement<Record<string, unknown>>(tree)) return [];
   return [tree, ...elements(tree.props.children), ...elements(tree.props.anchor), ...elements(tree.props.icon)];
 }
+
+test("one editable choice stores suggestion IDs and exact custom effort through save and read", async () => {
+  function NativeChoiceInput() { throw new Error("Element contract only; native input behavior is exercised in browser QA"); }
+  function NativeChoiceButton() { throw new Error("Element contract only; dropdown pointer behavior is exercised in browser QA"); }
+  const require = createRequire(import.meta.url);
+  const compiled = await build({ entryPoints: [fileURLToPath(new URL("../src/client/EditableChoice.tsx", import.meta.url))], bundle: true, write: false,
+    platform: "node", format: "cjs", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives"] });
+  const module = { exports: {} as { EditableChoice(props: EditableChoiceProps): unknown } };
+  runInContext(compiled.outputFiles![0]!.text, createContext({ module, exports: module.exports,
+    require: (id: string) => id === "@deepseek-ai/dsh-client-ui-primitives" ? { Input: NativeChoiceInput, Button: NativeChoiceButton, IconChevronDownOutlineRegular: NativeProfileIcon }
+      : id === "react" ? { ...require(id), useRef: () => ({ current: null }), useState: (initial: unknown) => [initial === false ? true : initial, () => {}], useEffect: () => {} } : require(id) }));
+  let saved = content, savedRevision = revision;
+  const f = fixture({ save: async request => { saved = request.content; savedRevision = otherRevision; return success({ id: request.id, content: saved, revision: savedRevision }); },
+    read: async id => success({ id, content: saved, revision: savedRevision }) });
+  const writes: string[] = [], selected: string[] = [], path = ["settings", "roleRouting", "dsmm-planner", "primary", "reasoningEffort"];
+  const writeValue = (value: string) => { writes.push(value); f.controller.actions.editPath(path, value); };
+  let choices = [{ id: "high", name: "High" }];
+  const control = () => elements(module.exports.EditableChoice({ id: "exact-effort", label: "Exact effort", value: structuredDocument(f.controller.store.getSnapshot().editor!.content)!.roleRouting["dsmm-planner"].primary!.reasoningEffort ?? "",
+    options: choices, disabled: false, onChange: writeValue, onSelect: value => { selected.push(value); writeValue(value); } }));
+  try {
+    await f.controller.refresh(); await f.controller.actions.open("p");
+    const nodes = control(), inputs = nodes.filter(node => node.type === NativeChoiceInput);
+    assert.equal(inputs.length, 1);
+    const list = nodes.find(node => node.props.role === "listbox")!;
+    assert.equal(inputs[0]!.props["aria-controls"], list.props.id);
+    const option = nodes.find(node => node.props.role === "option" && node.props["data-value"] === "high")!;
+    const change = inputs[0]!.props.onChange as (event: { currentTarget: { value: string } }) => void;
+    (option.props.onClick as () => void)();
+    assert.equal(control().find(node => node.type === NativeChoiceInput)!.props.value, "high");
+    await f.controller.actions.save(); await f.controller.actions.open("p");
+    assert.equal(structuredDocument(f.controller.store.getSnapshot().editor!.content)!.roleRouting["dsmm-planner"].primary!.reasoningEffort, "high");
+    change({ currentTarget: { value: "Exact-Custom-Medium" } });
+    assert.deepEqual(writes, ["high", "Exact-Custom-Medium"]);
+    assert.deepEqual(selected, ["high"]);
+    assert.equal(control().find(node => node.type === NativeChoiceInput)!.props.value, "Exact-Custom-Medium");
+    choices = [];
+    assert.equal(control().find(node => node.type === NativeChoiceInput)!.props.value, "Exact-Custom-Medium");
+    choices = [{ id: "low", name: "Low" }, { id: "high", name: "High" }];
+    assert.equal(control().find(node => node.type === NativeChoiceInput)!.props.value, "Exact-Custom-Medium");
+    assert.deepEqual(writes, ["high", "Exact-Custom-Medium"]);
+    await f.controller.actions.save(); await f.controller.actions.open("p");
+    assert.equal(structuredDocument(f.controller.store.getSnapshot().editor!.content)!.roleRouting["dsmm-planner"].primary!.reasoningEffort, "Exact-Custom-Medium");
+    assert.ok(saved.includes("/* route comment */"));
+    assert.deepEqual(structuredDocument(saved)!.roleRouting["dsmm-planner"].fallbackRoutes, structuredDocument(content)!.roleRouting["dsmm-planner"].fallbackRoutes);
+  } finally { f.controller.dispose(); }
+});
+
+test("known route edits and fallback moves retain opaque JSONC parameters without interpreting them", () => {
+  const raw = `{
+    "version": 1, "id": "opaque", "settings": {"roleRouting": {"dsmm-builder": {
+      "primary": {"provider":"custom", "model":"main", "reasoningEffort":"medium", /* opaque primary */ "temperature":0.25, "vendorKnob":{"nested":[1,"Keep Case"]}},
+      "fallbackRoutes": [
+        {"provider":"custom", "model":"first", "reasoningEffort":"high", /* opaque first */ "vendorFlag":false},
+        {"provider":"custom", "model":"second", "reasoningEffort":"high", "vendorFlag":{"deep":true}}
+      ],
+      "levels":{"low":{"provider":"custom", "model":"level", "reasoningEffort":"medium", "vendorLevel":["unchanged"]}, "high":{"reasoningEffort":"Exact-Level", "vendorLevel":{"opaque":true}}}
+    }}}
+  }`;
+  const original = parse(raw).settings.roleRouting["dsmm-builder"];
+  assert.ok(currentDocument(raw));
+  let next = editCurrentPath(raw, ["settings", "roleRouting", "dsmm-builder", "primary", "reasoningEffort"], "Exact-Custom")!;
+  next = editCurrentPath(next, ["settings", "roleRouting", "dsmm-builder", "levels", "low", "model"], "new-level-model")!;
+  next = editCurrentPath(next, ["settings", "roleRouting", "dsmm-builder", "levels", "high", "reasoningEffort"], "New-Exact-Level")!;
+  next = moveCurrentFallback(next, "dsmm-builder", 0, 1)!;
+  const expected = structuredClone(original);
+  expected.primary.reasoningEffort = "Exact-Custom"; expected.levels.low.model = "new-level-model"; expected.levels.high.reasoningEffort = "New-Exact-Level";
+  expected.fallbackRoutes.reverse();
+  assert.deepEqual(parse(next).settings.roleRouting["dsmm-builder"], expected);
+  assert.ok(next.includes("/* opaque primary */")); assert.ok(next.includes("/* opaque first */"));
+  for (const unsafe of [raw.replace('"temperature":0.25', '"temperature":0.25,"temperature":0.5'), raw.replace('"vendorKnob":', '"__proto__":')]) {
+    assert.equal(editCurrentPath(unsafe, ["settings", "roleRouting", "dsmm-builder", "primary", "model"], "rewritten"), null);
+  }
+});
+
+test("accepted editor replacements keep structured and advanced controls distinct across refreshes", async () => {
+  const component = await nativeHeaderComponent("ProfilesSection"), f = fixture();
+  const editorKeys = () => {
+    const editor = elements(headerTree(component, f.controller)).find(node => node.type === "div" && node.props.className === "dsmm-editor");
+    assert.ok(editor);
+    const children = editor.props.children as unknown[];
+    const keys = children.filter(isValidElement).map(node => node.key).filter(key => key !== null);
+    assert.ok(keys.length >= 2, "Both stateful editor controls need reconciliation identities");
+    assert.equal(new Set(keys).size, keys.length, "Sibling editor keys must not duplicate stale editable controls");
+    return keys;
+  };
+  try {
+    await f.controller.refresh(); await f.controller.actions.open("p");
+    const acceptedKeys = editorKeys();
+    await f.controller.refresh();
+    assert.deepEqual(editorKeys(), acceptedKeys);
+    f.controller.actions.editContent(content + "\n// current draft\n");
+    assert.deepEqual(editorKeys(), acceptedKeys);
+    await f.controller.actions.save();
+    const savedKeys = editorKeys();
+    assert.notDeepEqual(savedKeys, acceptedKeys);
+    await f.controller.refresh();
+    assert.deepEqual(editorKeys(), savedKeys);
+  } finally { f.controller.dispose(); }
+});
+
+test("documenting activation refusal retains safe code and field without accepting either Apply", async () => {
+  const refusal = () => ({ ok: false as const, error: new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", {
+    code: "activation", message: "The configured provider, model or exact reasoning effort is unavailable in the native model catalog.",
+    field: "settings.roleRouting.dsmm-documenting.primary",
+  }) });
+  const f = fixture({ select: async () => refusal(), selectSession: async () => refusal() });
+  try {
+    await f.controller.refresh(); await f.controller.actions.open("p");
+    const editor = f.controller.store.getSnapshot().editor;
+    await f.controller.actions.apply();
+    const future = f.controller.store.getSnapshot();
+    assert.deepEqual(future.issue, { kind: "domain", code: "activation", field: "settings.roleRouting.dsmm-documenting.primary" });
+    assert.equal(future.notice, null); assert.deepEqual(future.snapshot, snapshot); assert.deepEqual(future.editor, editor);
+    f.controller.setSession("documenting-packet"); await settle(f.controller);
+    const admission = f.controller.store.getSnapshot().session;
+    f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession();
+    const current = f.controller.store.getSnapshot();
+    assert.deepEqual(current.sessionIssue, future.issue);
+    assert.equal(current.sessionNotice, null); assert.deepEqual(current.session, admission); assert.deepEqual(current.editor, editor);
+  } finally { f.controller.dispose(); }
+});
 
 test("named legacy editor keeps its pinned selection inspectable and disables every library mutation", async () => {
   const component = await nativeHeaderComponent("ProfilesSection");
@@ -239,6 +364,48 @@ test("native catalog refresh retains exact manual route/effort and only explicit
   assert.ok(next.includes('"workflow": { "reviewCap": 2 }, // untouched workflow bytes'));
   assert.deepEqual(f.calls, ["describe", "read:p"]);
   f.controller.dispose();
+});
+
+test("manual medium and fallback routes pass unchanged through save and both profile Apply boundaries", async () => {
+  const manual = { provider: "manual-provider", model: "unlisted-model", reasoningEffort: "medium" };
+  const fallbacks = [
+    { provider: "fallback-one", model: "fallback-model", reasoningEffort: "high" },
+    { provider: "fallback-two", model: "fallback-model", reasoningEffort: "high" },
+  ];
+  const draft = JSON.stringify({ version: 1, id: "p", settings: { roleRouting: { "dsmm-documenting": { primary: manual, fallbackRoutes: fallbacks } } } });
+  for (const scope of ["future-default", "current-session"] as const) {
+    const saves: string[] = [], defaults: unknown[] = [];
+    const f = fixture({
+      read: async id => success({ id, content: draft, revision }),
+      save: async request => { saves.push(request.content); return success({ id: request.id, content: request.content, revision: otherRevision }); },
+      select: async request => { defaults.push(request); return success({ ...snapshot, profiles: [{ id: "p", revision: otherRevision }], selectedId: request.id, appliedRevision: otherRevision, selectionRevision: otherRevision }); },
+    });
+    try {
+      await f.controller.refresh(); await f.controller.actions.open("p");
+      f.controller.attachCatalog({ modelCatalog: async () => success({ default: { provider: "listed", model: "other" }, routableProviders: ["listed"], groups: [], failures: [] }) });
+      await setImmediate();
+      assert.equal(f.controller.store.getSnapshot().editor!.content, draft);
+      f.controller.actions.editPath(["label"], "Manual profile");
+      const submitted = f.controller.store.getSnapshot().editor!.content;
+      await f.controller.actions.save();
+      assert.deepEqual(saves, [submitted]);
+      assert.deepEqual(structuredDocument(submitted)!.roleRouting["dsmm-documenting"], { primary: manual, fallbackRoutes: fallbacks });
+      if (scope === "future-default") {
+        await f.controller.actions.apply();
+        assert.deepEqual(defaults, [{ id: "p", expectedRevision: otherRevision, expectedSelectionRevision: "absent" }]);
+        assert.equal(f.controller.store.getSnapshot().issue, null);
+        assert.equal(f.controller.store.getSnapshot().notice?.key, "applied");
+      } else {
+        f.controller.setSession("manual-medium"); await settle(f.controller);
+        f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession();
+        assert.deepEqual(f.selections, [{ sessionId: "manual-medium", id: "p", expectedRevision: otherRevision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "epoch-1" }]);
+        assert.deepEqual(defaults, []);
+        assert.equal(f.controller.store.getSnapshot().sessionIssue, null);
+        assert.equal(f.controller.store.getSnapshot().sessionNotice, "applied");
+      }
+      assert.equal(f.controller.store.getSnapshot().editor!.content, submitted);
+    } finally { f.controller.dispose(); }
+  }
 });
 
 test("current-session Apply uses session CAS/epoch without selecting the global default or changing the draft", async () => {
@@ -432,7 +599,8 @@ test("compact menu has one profile list and a model-only action using the admitt
   hold = true;
   menu.props.onSelect("@use-model");
   assert.deepEqual(calls, []);
-  accepted.resolve(success(appliedWithModel("explicit-native"))); await settle(f.controller);
+  const admitted = appliedWithModel("explicit-native");
+  accepted.resolve(success({ ...admitted, profileModel: { ...admitted.profileModel!, customParameters: { raw: false }, temperature: 0 } })); await settle(f.controller);
   assert.deepEqual(calls, [{ sessionId: "explicit-native", provider: "manual-provider", model: "profile-main", reasoningEffort: "exact-profile-effort" }]);
   assert.equal(f.controller.store.getSnapshot().sessionNotice, "applied-with-model");
   assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p", "the admitted ID, never an action prefix, remains selected");

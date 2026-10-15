@@ -11,10 +11,10 @@ import { structuredDocument } from "./structured.js";
 import type { JsonPath } from "./structured.js";
 import { RETRY_FIELD_LABEL_KEYS } from "./locales.js";
 import { RoleAvailability, roleAvailability } from "./RoleAvailability.js";
+import { EditableChoice } from "./EditableChoice.js";
 
 type Locale = PropsLocale<"settings.dsmm-profiles">;
 type Edit = ProfilesActions["editPath"];
-const MANUAL = "__dsmm_manual__";
 
 function RetryNumber({ id, name, field, value, inherited, path, disabled, actions, t }: Locale & {
   id: string; name: string; field: keyof DsmmRateLimitPolicy; value: number | undefined; inherited: number | undefined; path: JsonPath; disabled: boolean; actions: ProfilesActions;
@@ -48,10 +48,6 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
   const group = providers.find((candidate) => candidate.id === value.provider);
   const model = group?.models.find((candidate) => candidate.id === value.model);
   const efforts = model?.reasoning?.efforts ?? [];
-  const providerListed = group !== undefined;
-  const modelListed = model !== undefined;
-  const [manualProvider, setManualProvider] = useState(!providerListed);
-  const [manualModel, setManualModel] = useState(!modelListed);
   const updateModel = (provider: string, modelId: string) => {
     // This is an explicit user change, not a catalog refresh. Clear only this
     // route's adapter-owned effort; do not save or touch the native model default.
@@ -59,26 +55,16 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
   };
   return <div className="dsmm-route-fields">
     <div className="dsmm-field"><label htmlFor={`${prefix}-provider`}>{t("routeProvider", { name })}</label>
-      <select id={`${prefix}-provider`} disabled={disabled} value={manualProvider || !providerListed ? MANUAL : value.provider} onChange={(event) => { setManualProvider(event.currentTarget.value === MANUAL); setManualModel(true); updateModel(event.currentTarget.value === MANUAL ? "" : event.currentTarget.value, ""); }}>
-        <option value={MANUAL}>{providerListed ? t("manual") : t("manualValue", { value: value.provider || t("unset") })}</option>
-        {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
-      </select>
-      {(manualProvider || !providerListed) && <Input aria-label={t("manualProvider", { name })} className="dsmm-input" value={value.provider} disabled={disabled} onChange={(event) => updateModel(event.currentTarget.value, value.model)} />}
+      <EditableChoice id={`${prefix}-provider`} label={t("routeProvider", { name })} value={value.provider} options={providers} disabled={disabled}
+        onChange={provider => updateModel(provider, value.model)} onSelect={provider => updateModel(provider, "")} />
     </div>
     <div className="dsmm-field"><label htmlFor={`${prefix}-model`}>{t("routeModel", { name })}</label>
-      <select id={`${prefix}-model`} disabled={disabled} value={manualModel || !modelListed ? MANUAL : value.model} onChange={(event) => { setManualModel(event.currentTarget.value === MANUAL); updateModel(value.provider, event.currentTarget.value === MANUAL ? "" : event.currentTarget.value); }}>
-        <option value={MANUAL}>{modelListed ? t("manual") : t("manualValue", { value: value.model || t("unset") })}</option>
-        {group?.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} ({candidate.id})</option>)}
-      </select>
-      {(manualModel || !modelListed) && <Input aria-label={t("manualModel", { name })} className="dsmm-input" value={value.model} disabled={disabled} onChange={(event) => updateModel(value.provider, event.currentTarget.value)} />}
+      <EditableChoice id={`${prefix}-model`} label={t("routeModel", { name })} value={value.model} options={group?.models ?? []} disabled={disabled}
+        onChange={modelId => updateModel(value.provider, modelId)} />
     </div>
     <div className="dsmm-field"><label htmlFor={`${prefix}-effort`}>{t("routeEffort", { name })}</label>
-      <select id={`${prefix}-effort`} disabled={disabled} value={value.reasoningEffort ?? ""} onChange={(event) => edit([...path, "reasoningEffort"], event.currentTarget.value || undefined)}>
-        <option value="">{t("effortDefault")}</option>
-        {value.reasoningEffort !== undefined && !efforts.some((effort) => effort.id === value.reasoningEffort) && <option value={value.reasoningEffort}>{t("manualValue", { value: value.reasoningEffort })}</option>}
-        {efforts.map((effort) => <option key={effort.id} value={effort.id}>{effort.name} ({effort.id})</option>)}
-      </select>
-      <Input aria-label={t("manualEffort", { name })} className="dsmm-input" value={value.reasoningEffort ?? ""} disabled={disabled} placeholder={t("effortDefault")} onChange={(event) => edit([...path, "reasoningEffort"], event.currentTarget.value || undefined)} />
+      <EditableChoice id={`${prefix}-effort`} label={t("routeEffort", { name })} value={value.reasoningEffort ?? ""} options={efforts} disabled={disabled} placeholder={t("effortDefault")}
+        onChange={effort => edit([...path, "reasoningEffort"], effort || undefined)} />
     </div>
   </div>;
 }
@@ -114,7 +100,8 @@ function LevelFields({ level, value, path, catalog, disabled, actions, t }: Loca
       </select>
     </div>
     {mode === "effort" && <div className="dsmm-field"><label htmlFor={`${prefix}-effort`}>{t("routeEffort", { name: level })}</label>
-      <Input id={`${prefix}-effort`} className="dsmm-input" value={value?.reasoningEffort ?? ""} disabled={disabled} onChange={event => actions.editPath([...path, "reasoningEffort"], event.currentTarget.value)} />
+      <EditableChoice id={`${prefix}-effort`} label={t("routeEffort", { name: level })} value={value?.reasoningEffort ?? ""} options={[]} disabled={disabled}
+        onChange={effort => actions.editPath([...path, "reasoningEffort"], effort)} />
     </div>}
     {value?.provider !== undefined && <RouteFields value={value} path={path} name={t("levelName", { level })} catalog={catalog} disabled={disabled} edit={actions.editPath} editRoute={actions.editRoute} t={t} />}
   </fieldset>;

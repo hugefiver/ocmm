@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -20,9 +20,35 @@ function fixture() {
   return directory;
 }
 
+async function withFixtureCleanup(directory: string, body: () => void | Promise<void>) {
+  const ownedRoot = realpathSync(directory), owner = randomUUID();
+  assert.equal(dirname(ownedRoot), realpathSync(tmpdir()));
+  assert.equal(lstatSync(directory).isSymbolicLink(), false);
+  const marker = join(ownedRoot, ".source-inputs-test-owner");
+  writeFileSync(marker, owner, { flag: "wx" });
+  let bodyFailed = false, bodyFailure: unknown;
+  try {
+    return await body();
+  } catch (error) {
+    bodyFailed = true;
+    bodyFailure = error;
+    throw error;
+  } finally {
+    try {
+      assert.equal(realpathSync(directory), ownedRoot);
+      assert.equal(lstatSync(directory).isSymbolicLink(), false);
+      assert.equal(readFileSync(marker, "utf8"), owner);
+      rmSync(ownedRoot, { recursive: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      if (bodyFailed) throw new AggregateError([bodyFailure, error], `Fixture body and cleanup failed: ${ownedRoot}`);
+      throw error;
+    }
+  }
+}
+
 function git(directory: string, ...args: string[]) {
   const result = spawnSync("git", args, { cwd: directory, encoding: "utf8", timeout: 30000 });
-  assert.equal(result.status, 0, `${args.join(" ")}\n${result.stderr}`);
+  assert.equal(result.status, 0, `${args.join(" ")}\n${result.error?.stack ?? result.signal ?? ""}\n${result.stderr}`);
   return result.stdout.trim();
 }
 
@@ -77,7 +103,7 @@ function reseal(directory: string, path: string, bytes: Buffer | undefined) {
 test("cold Git checkout checks and regenerates every adapted byte from its committed DSMM snapshot", () => {
   const temporary = mkdtempSync(join(tmpdir(), "dsmm-cold-source-"));
   const seed = join(temporary, "seed"), directory = join(temporary, "checkout");
-  try {
+  return withFixtureCleanup(temporary, () => {
     cpSync(join(root, "source-inputs"), join(seed, "source-inputs"), { recursive: true });
     cpSync(join(root, ".gitattributes"), join(seed, ".gitattributes"));
     mkdirSync(join(seed, "scripts"));
@@ -96,65 +122,103 @@ test("cold Git checkout checks and regenerates every adapted byte from its commi
     git(seed, "-c", "core.autocrlf=true", "add", "--all");
     git(seed, "-c", "user.name=DSMM source fixture", "-c", "user.email=dsmm-fixture@example.invalid", "commit", "--quiet", "-m", "test: seal DSMM source fixture", "-m", "Capture only the snapshot, adapter and prepared source assets for cold regeneration.");
     git(temporary, "clone", "--quiet", "--no-local", "-c", "core.autocrlf=true", "--", seed, directory);
+    assert.deepEqual(loadSourceInputs(join(directory, "source-inputs")), loadSourceInputs());
+    for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
     assert.equal(existsSync(join(directory, "prompts/v1")), false);
     assert.equal(existsSync(join(directory, "src/hooks/config.ts")), false);
     // Only reuse the installed compiler; no Root inputs, product lib, bootstrap or network.
     mkdirSync(join(directory, "node_modules"));
     const installed = dirname(createRequire(import.meta.url).resolve("typescript/package.json"));
     symlinkSync(installed, join(directory, "node_modules/typescript"), process.platform === "win32" ? "junction" : "dir");
-    const run = (...args: string[]) => spawnSync(process.execPath, [join(directory, "scripts/sync-source-assets.mjs"), ...args], { cwd: directory, encoding: "utf8", timeout: 30000 });
+    let invocation = 0;
+    const run = (...args: string[]) => {
+      const started = performance.now();
+      const result = spawnSync(process.execPath, [join(directory, "scripts/sync-source-assets.mjs"), ...args], { cwd: directory, encoding: "utf8", timeout: 30000 });
+      const error = result.error as NodeJS.ErrnoException | undefined;
+      return { ...result, diagnostic: JSON.stringify({ invocation: ++invocation, args, cwd: directory,
+        elapsedMs: Math.round(performance.now() - started), status: result.status, signal: result.signal,
+        error: error === undefined ? null : { name: error.name, message: error.message, code: error.code, errno: error.errno, syscall: error.syscall },
+        stdoutBytes: Buffer.byteLength(result.stdout ?? ""), stderrBytes: Buffer.byteLength(result.stderr ?? ""),
+        stdout: result.stdout?.slice(0, 2048), stderr: result.stderr?.slice(0, 4096) }) };
+    };
     const incomplete = run("--check");
-    assert.notEqual(incomplete.status, 0);
-    assert.match(incomplete.stderr, /frontend resource closure drift/u);
+    assert.equal(incomplete.status, 1, incomplete.diagnostic);
+    assert.match(incomplete.stderr, /frontend resource closure drift/u, incomplete.diagnostic);
     for (const row of frontendRecipe()) {
       mkdirSync(dirname(join(directory, "skills/frontend", row.target)), { recursive: true });
       cpSync(join(root, "skills/frontend", row.target), join(directory, "skills/frontend", row.target));
     }
     cpSync(join(root, "skills/frontend/.frontend-materialized.json"), join(directory, "skills/frontend/.frontend-materialized.json"));
     const checked = run("--check");
-    assert.equal(checked.status, 0, checked.stderr);
+    assert.equal(checked.status, 0, checked.diagnostic);
     assert.deepEqual(JSON.parse(checked.stdout).differences, []);
     for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
     const vendor = join(directory, "skills/frontend", frontendRecipe()[0].target);
     const originalVendor = readFileSync(vendor);
     writeFileSync(vendor, Buffer.concat([originalVendor, Buffer.from("\n")]));
     const vendorDrift = run("--check");
-    assert.notEqual(vendorDrift.status, 0);
-    assert.match(vendorDrift.stderr, /frontend resource drift/u);
+    assert.equal(vendorDrift.status, 1, vendorDrift.diagnostic);
+    assert.match(vendorDrift.stderr, /frontend resource drift/u, vendorDrift.diagnostic);
     writeFileSync(vendor, originalVendor);
     for (const artifact of expected.keys()) if (artifact !== "src/skills.ts") rmSync(join(directory, artifact));
     const index = join(directory, "skills/frontend/references/design/_INDEX.md");
     assert.equal(existsSync(index), false);
     rmSync(vendor);
     const missingVendor = run();
-    assert.notEqual(missingVendor.status, 0);
-    assert.match(missingVendor.stderr, /missing frontend resource/u);
+    assert.equal(missingVendor.status, 1, missingVendor.diagnostic);
+    assert.match(missingVendor.stderr, /missing frontend resource/u, missingVendor.diagnostic);
     assert.equal(existsSync(index), false, "incomplete vendor library cannot write any prepared target");
     writeFileSync(vendor, Buffer.concat([originalVendor, Buffer.from("\n")]));
     const coldVendorDrift = run();
-    assert.notEqual(coldVendorDrift.status, 0);
-    assert.match(coldVendorDrift.stderr, /frontend resource drift/u);
+    assert.equal(coldVendorDrift.status, 1, coldVendorDrift.diagnostic);
+    assert.match(coldVendorDrift.stderr, /frontend resource drift/u, coldVendorDrift.diagnostic);
     assert.equal(existsSync(index), false);
     writeFileSync(vendor, originalVendor);
     const rebuilt = run();
-    assert.equal(rebuilt.status, 0, rebuilt.stderr);
+    assert.equal(rebuilt.status, 0, rebuilt.diagnostic);
     for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
     assert.deepEqual(loadSourceInputs(join(directory, "source-inputs")).provenance, loadSourceInputs().provenance);
     const repeated = run("--check");
-    assert.equal(repeated.status, 0, repeated.stderr);
+    assert.equal(repeated.status, 0, repeated.diagnostic);
     assert.deepEqual(JSON.parse(repeated.stdout).differences, []);
     writeFileSync(index, "stale prepared index without recipe anchors\n");
     const staleIndex = run("--check");
-    assert.equal(staleIndex.status, 1, staleIndex.stderr);
+    assert.equal(staleIndex.status, 1, staleIndex.diagnostic);
     assert.deepEqual(JSON.parse(staleIndex.stdout).differences, ["skills/frontend/references/design/_INDEX.md"]);
-    assert.equal(run().status, 0);
+    const repaired = run();
+    assert.equal(repaired.status, 0, repaired.diagnostic);
     assert.deepEqual(readFileSync(index), expected.get("skills/frontend/references/design/_INDEX.md"));
     const path = join(directory, "source-inputs/root/src/hooks/config.ts");
     writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from("\n")]));
     const refused = run("--check");
-    assert.notEqual(refused.status, 0);
-    assert.match(refused.stderr, /source input integrity drift/u);
-  } finally { rmSync(temporary, { recursive: true }); }
+    assert.equal(refused.status, 1, refused.diagnostic);
+    assert.match(refused.stderr, /source input integrity drift/u, refused.diagnostic);
+  });
+});
+
+test("cold Git checkouts preserve verbatim resource and license bytes under either newline policy", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "dsmm-resource-checkout-")), seed = join(temporary, "seed");
+  return withFixtureCleanup(temporary, () => {
+    const outputs: Map<string, Buffer> = sourceOutputs();
+    const artifacts = ["skills/coding-agent-sessions/scripts/agent_sessions/pi_family.py",
+      "skills/coding-agent-sessions/scripts/tests/test_pi_family_scanners.py", "skills/ast-grep/LICENSE"];
+    for (const artifact of artifacts) {
+      mkdirSync(dirname(join(seed, artifact)), { recursive: true });
+      writeFileSync(join(seed, artifact), outputs.get(artifact)!);
+    }
+    cpSync(join(root, ".gitattributes"), join(seed, ".gitattributes"));
+    git(seed, "init", "--quiet");
+    git(seed, "-c", "core.autocrlf=true", "add", "--all");
+    git(seed, "-c", "user.name=DSMM source fixture", "-c", "user.email=dsmm-fixture@example.invalid", "commit", "--quiet", "-m", "test: seal verbatim resources", "-m", "Preserve native resource and license bytes for cold delivery.");
+    for (const autocrlf of ["false", "true"]) {
+      const checkout = join(temporary, autocrlf);
+      git(temporary, "clone", "--quiet", "--no-local", "-c", `core.autocrlf=${autocrlf}`, "--", seed, checkout);
+      for (const artifact of artifacts) {
+        const expected = outputs.get(artifact)!, actual = readFileSync(join(checkout, artifact));
+        assert.ok(actual.equals(expected), `${artifact}: actual=${actual.length} expected=${expected.length}; core.autocrlf=${autocrlf}`);
+      }
+    }
+  });
 });
 
 test("raw snapshot tamper, missing/extra inputs, inventory gaps and resource links fail closed", async (t) => {
@@ -244,7 +308,7 @@ test("capture permits one consistent retake and refuses continuing Root drift", 
 test("explicit refresh captures the provable Git baseline and raw uncommitted inputs before sealing", () => {
   const temporary = mkdtempSync(join(tmpdir(), "dsmm-source-refresh-"));
   const sourceRoot = join(temporary, "root"), inputRoot = join(temporary, "snapshot");
-  try {
+  return withFixtureCleanup(temporary, () => {
     cpSync(join(root, "source-inputs/root"), sourceRoot, { recursive: true });
     git(sourceRoot, "init", "--quiet");
     git(sourceRoot, "-c", "core.autocrlf=false", "add", "--all");
@@ -271,12 +335,12 @@ test("explicit refresh captures the provable Git baseline and raw uncommitted in
     const replaced = refreshSourceInputs({ sourceRoot, root: inputRoot, validate: (inputs: unknown) => sourceOutputs({ inputs }) });
     assert.ok(replaced.differences.includes(`root/${added}`));
     assert.equal(loadSourceInputs(inputRoot).files.has(added), false, "only a previously sealed input may be retired during successful publication");
-  } finally { rmSync(temporary, { recursive: true }); }
+  });
 });
 
 test("refresh rejects metadata links, malformed directories and unknown content before any snapshot or outside write", async (t) => {
   const temporary = mkdtempSync(join(tmpdir(), "dsmm-refresh-safety-")), sourceRoot = join(temporary, "inputs");
-  try {
+  return withFixtureCleanup(temporary, async () => {
     inputRepository(sourceRoot);
     const source = join(sourceRoot, "prompts/shared/shell-safety.md");
     writeFileSync(source, Buffer.concat([readFileSync(source), Buffer.from("\nApproved input change.\n")]));
@@ -317,12 +381,12 @@ test("refresh rejects metadata links, malformed directories and unknown content 
         assert.deepEqual(readdirSync(directory).sort(), siblings, "no staged resources may leak on failure");
       } finally { rmSync(directory, { recursive: true }); }
     });
-  } finally { rmSync(temporary, { recursive: true }); }
+  });
 });
 
 test("validated candidate publication failure rolls back the original snapshot without deleting unknown content", () => {
   const directory = fixture(), sourceRoot = join(directory, "inputs"), inputRoot = join(directory, "source-inputs");
-  try {
+  return withFixtureCleanup(directory, () => {
     inputRepository(sourceRoot);
     const source = join(sourceRoot, "prompts/shared/shell-safety.md");
     writeFileSync(source, Buffer.concat([readFileSync(source), Buffer.from("\nApproved input change.\n")]));
@@ -336,5 +400,5 @@ test("validated candidate publication failure rolls back the original snapshot w
     assert.throws(() => refreshSourceInputs({ sourceRoot, root: inputRoot, validate() { throw new Error("candidate validation denied"); } }), /candidate validation denied/u);
     unchanged(inputRoot, before);
     assert.deepEqual(readdirSync(directory).sort(), siblings);
-  } finally { rmSync(directory, { recursive: true }); }
+  });
 });

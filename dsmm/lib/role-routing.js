@@ -5,6 +5,8 @@ import { isDsmmRoleId } from "./roles.js";
 import { isCurrentRecoveryStep } from "./recovery-policy.js";
 import { childOwnedSessionEvents, sessionEvents } from "./session-scope.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
+import { canonicalModelRouteJson, normalizeModelRouteJson, sameModelRouteJson } from "./route-json.js";
+import { DsmmMissingProviderError, modelRouteFromHeader, modelRouteToCall } from "./role-llm.js";
 const admittedRecoveryRoutes = new WeakMap();
 const routeLocks = new WeakMap();
 const agentEntries = new WeakMap();
@@ -25,38 +27,47 @@ export function latestNativeModelSelection(agent) {
     return selected;
 }
 export function sameExactModelRoute(left, right) {
-    return sameModelRoute(left, right) && left.reasoningEffort === right.reasoningEffort;
+    return sameModelRouteJson(left, right);
 }
 /** Consumed user intent stays explicit on cold resume and profile re-admission. */
 export function nativeModelSelectionWasAccepted(agent, intent) {
     return policyEvents({ agent }).some((event) => event.type === "request/header" && "seq" in event
         && typeof event.seq === "number" && event.seq > intent.seq && isRecord(event.data)
         && isRecord(event.data.header) && isRecord(event.data.header.config)
-        && sameExactModelRoute(event.data.header.config, intent.route));
+        && sameModelRoute(event.data.header.config, intent.route)
+        && modelRouteFromHeader(event.data.header).reasoningEffort === intent.route.reasoningEffort);
 }
 /** Only native, machine-routable absence authorizes initial candidate admission. */
 export function isUnavailableRouteFailure(error, nativeRequestFailure = false) {
     return isRecord(error) && (error.status === undefined || error.status === 503)
-        && (error.code === "NO_ADAPTER" || (error.code === "UNKNOWN_MODEL" && (nativeRequestFailure || error instanceof LlmError)));
+        && (error instanceof DsmmMissingProviderError || (error.code === "UNKNOWN_MODEL" && (nativeRequestFailure || error instanceof LlmError)));
 }
 export function orderedModelRoutes(candidates) {
     const routes = [];
     for (const route of candidates)
-        if (!routes.some((previous) => sameModelRoute(previous, route)))
+        if (!routes.some((previous) => sameExactModelRoute(previous, route)))
             routes.push(canonicalRoute(route));
     return routes;
 }
 /** Exact metadata preparation, never a completion or advisory catalog health check. */
-export async function selectInitialModelRoute(llm, candidates, signal) {
-    if (llm.resolveCallConfig === undefined)
-        throw new Error("dsmm route admission requires the Agent native LLM service");
+export async function selectInitialModelRoute(llm, candidates, signal, resolver) {
+    return (await selectInitialModelRouteChoice(llm, candidates, signal, resolver)).route;
+}
+export async function selectInitialModelRouteChoice(llm, candidates, signal, resolver) {
+    if (resolver === undefined && llm.resolveCallConfig === undefined)
+        throw new Error("dsmm route admission requires the Host model service");
     let unavailable;
     for (const route of orderedModelRoutes(candidates)) {
         signal?.throwIfAborted();
         try {
-            const prepared = await llm.resolveCallConfig({ ...route }, signal);
+            if (resolver === undefined && llm.listProviders !== undefined && !llm.listProviders().some(provider => provider.id === route.provider))
+                throw new DsmmMissingProviderError();
+            const call = modelRouteToCall(route);
+            const prepared = resolver === undefined ? await llm.resolveCallConfig(call, signal) : await resolver.resolveRoute(route, signal);
+            if (resolver === undefined && call.customParameters !== undefined)
+                throw new LlmError("Raw route parameters require their declared Host provider owner", "UNSUPPORTED_ROUTE_PARAMETERS");
             signal?.throwIfAborted();
-            return canonicalRoute(prepared);
+            return { route: canonicalRoute(prepared), requestedRoute: canonicalRoute(route) };
         }
         catch (error) {
             signal?.throwIfAborted();
@@ -71,8 +82,10 @@ export function roleRouteLock(agent, identity) {
     const lock = routeLocks.get(agent);
     return lock?.identity === identity ? lock : undefined;
 }
-export function pinRoleRoute(agent, identity, route, candidates) {
-    const lock = { identity, route: canonicalRoute(route), candidates: orderedModelRoutes(candidates), generation: 0,
+export function pinRoleRoute(agent, identity, route, candidates, projection) {
+    const ordered = projection?.preserveCandidates ? candidates.map(canonicalRoute) : orderedModelRoutes(candidates);
+    const lock = { identity, route: canonicalRoute(route), candidates: ordered,
+        candidateIndex: ordered.findIndex(candidate => sameExactModelRoute(candidate, projection?.initialCandidate ?? route)), generation: 0,
         attempts: 0, startupSettled: false, retries: 0, rateLimits: 0, switches: 0, totalDelayMs: 0 };
     routeLocks.set(agent, lock);
     return lock;
@@ -91,9 +104,19 @@ export function rolePolicyIdentity(settings, role, epoch) {
         return undefined;
     const policy = settings.roleRouting[role];
     const resolved = resolveRoleRuntimePolicy(settings, role);
+    const legacy = [policy?.primary, ...resolved.fallbackRoutes].every(route => route === undefined
+        || Object.keys(route).every(key => ["provider", "model", "reasoningEffort"].includes(key)));
+    const seen = new Set(policy?.primary === undefined ? [] : [JSON.stringify([policy.primary.provider, policy.primary.model])]);
+    const identityFallbacks = legacy ? resolved.fallbackRoutes.filter(route => {
+        const key = JSON.stringify([route.provider, route.model]);
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    }) : resolved.fallbackRoutes;
     return createHash("sha256").update(JSON.stringify({
         version: 2, role, epoch: epoch ?? null, primary: policy?.primary === undefined ? null : canonicalRoute(policy.primary),
-        fallbackSource: resolved.fallbackSource, fallbackRoutes: resolved.fallbackRoutes.map(canonicalRoute),
+        fallbackSource: resolved.fallbackSource, fallbackRoutes: identityFallbacks.map(canonicalRoute),
         strategy: resolved.strategy, rateLimit: resolved.rateLimit
     })).digest("hex");
 }
@@ -107,7 +130,10 @@ export function liveRolePolicyIdentity(agent, settings, role, epoch) {
     return rolePolicyIdentity(settings, role, `${epoch ?? "unscoped"}:${entry}`);
 }
 function canonicalRoute(route) {
-    return { provider: route.provider, model: route.model, ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) };
+    if (Object.keys(route).every(key => ["provider", "model", "reasoningEffort"].includes(key))) {
+        return { provider: route.provider, model: route.model, ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) };
+    }
+    return normalizeModelRouteJson(JSON.parse(canonicalModelRouteJson(route)));
 }
 function policyEvents(frame) {
     const session = frame.agent.session;
@@ -170,8 +196,7 @@ export function effectiveRoleFallbackRoutes(settings, role) {
     return resolveRoleRuntimePolicy(settings, role).fallbackRoutes;
 }
 export function applyModelRoute(config, route) {
-    const { reasoningEffort: _inheritedEffort, ...preserved } = config;
-    return { ...preserved, ...route };
+    return modelRouteToCall(route);
 }
 export function sameModelRoute(left, right) {
     return left.provider === right.provider && left.model === right.model;
@@ -199,21 +224,13 @@ export function persistedRoleRoute(frame, primary, fallbacks = [], identity) {
         if (typeof config?.provider !== "string" || config.provider.trim() === ""
             || typeof config.model !== "string" || config.model.trim() === "")
             continue;
-        selected = {
-            provider: config.provider, model: config.model,
-            ...(typeof config.reasoningEffort === "string" && !adapterDefaultEffort(header) ? { reasoningEffort: config.reasoningEffort } : {})
-        };
+        selected = modelRouteFromHeader(header);
     }
     // A configured fallback remains exact after its adapter/default header is
     // persisted. A later non-chain durable host route remains host-owned instead.
-    return selected === undefined ? undefined : [primary, ...fallbacks].find((route) => route !== undefined && sameModelRoute(route, selected)) ?? selected;
+    return selected === undefined ? undefined : [primary, ...fallbacks].find((route) => route !== undefined && sameExactModelRoute(route, selected)) ?? selected;
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function adapterDefaultEffort(header) {
-    if (!("adapterDefaults" in header) || typeof header.adapterDefaults !== "object" || header.adapterDefaults === null)
-        return false;
-    return "reasoningEffort" in header.adapterDefaults && header.adapterDefaults.reasoningEffort === true;
 }
 //# sourceMappingURL=role-routing.js.map

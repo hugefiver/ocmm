@@ -7,6 +7,7 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
 import { nativeConfigRun } from "./native-config-fixture.ts";
 import { runFixtureTurn } from "./native-routing-fixture.ts";
+import { DSMM_ROLE_IDS } from "../lib/roles.js";
 
 type DshAgent = Omit<PackageDshAgent, "ctx">;
 
@@ -18,9 +19,10 @@ function gate() {
 }
 
 test("rc.2 native SettingsForms persists sparse DSMM deployment without remounting or cancelling busy admissions", { timeout: 20_000 }, async (t) => {
-  const run = nativeConfigRun();
+  const run = nativeConfigRun({ managedRuntime: true });
   try {
-    const a = await run.createProfile("omitted"), b = await run.createProfile("explicit-false", { defaultActive: false });
+    const roles = Object.fromEntries(DSMM_ROLE_IDS.map(id => [id, id === "dsmm-orchestrator"]));
+    const a = await run.createProfile("omitted", { roles }), b = await run.createProfile("explicit-false", { roles, defaultActive: false });
     const oldRoot = await a.create(), oldB = await b.create();
     const oldAdmission = a.runtime.admission(asDshAgent(oldRoot));
     const oldBAdmission = b.runtime.admission(asDshAgent(oldB));
@@ -104,9 +106,7 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     assert.ok(oldRoot.session.snapshotEvents().some((event) => event.type === "assistant/message" && JSON.stringify(event.data).includes("fixture complete")), "the original request must actually finish");
     assert.ok(oldRoot.session.snapshotEvents().some((event) => event.type === "turn/end" && event.data.reason.kind === "completed"));
 
-    const futureChild = await a.create(oldRoot), newRoot = await a.create();
-    assert.equal(a.ctx.agents.isOwnedBy(futureChild.id, oldRoot), true);
-    assert.equal(a.runtime.admission(asDshAgent(futureChild)), oldAdmission, "a future child inherits its live parent's old deployment and epoch");
+    const newRoot = await a.create();
     const newAdmission = a.runtime.admission(asDshAgent(newRoot));
     assert.notEqual(newAdmission.epoch, oldAdmission.epoch);
     assert.equal(newAdmission.settings.defaultActive, false);
@@ -120,9 +120,14 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     assert.equal(newAdmission.deployment?.globalRevision, global.revision);
     assert.equal(newAdmission.deployment?.nativeFormRevision, a.descriptor().revision);
     assert.equal(newAdmission.deployment?.nativeNamespace, a.descriptor().ns);
+    const beforeInherited = a.adapter.calls.length;
     await runFixtureTurn(inheritedRoot);
+    assert.equal(a.adapter.calls.length, beforeInherited + 1);
+    assert.ok(inheritedRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
     assert.match(JSON.stringify(a.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/);
     await runFixtureTurn(newRoot);
+    assert.equal(a.adapter.calls.length, beforeInherited + 2);
+    assert.ok(newRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
     assert.doesNotMatch(JSON.stringify(a.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/);
 
     for (const profile of [a, b]) {
@@ -143,10 +148,41 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     assert.equal(a.runtime.admission(asDshAgent(newRoot)), newAdmission);
     assert.equal(readFileSync(globalPath, "utf8"), globalBytes);
     a.assertLive(); b.assertLive();
-    t.diagnostic(`rc.2 ConfigEditor/SettingsForms: fibers=${a.fiber.uid},${b.fiber.uid}; native revisions=${a.descriptor().revision},${b.descriptor().revision}; DSMM lifecycle A=${JSON.stringify(a.lifecycle)}, B=${JSON.stringify(b.lifecycle)}; busy request completed; old/future-child/new admissions verified`);
+    t.diagnostic(`rc.2 ConfigEditor/SettingsForms: fibers=${a.fiber.uid},${b.fiber.uid}; native revisions=${a.descriptor().revision},${b.descriptor().revision}; DSMM lifecycle A=${JSON.stringify(a.lifecycle)}, B=${JSON.stringify(b.lifecycle)}; busy request completed; old/new root admissions and unavailable child admission verified`);
     // Include's forced empty-pending update can emit the compatibility signal
     // without updating or disposing a fiber. Assert the actual lifetime seam.
     a.assertLive(); b.assertLive();
+    const liveRoots = a.ctx.agents.list();
+    await assert.rejects(a.create(oldRoot), { code: "UNAUTHORIZED" }, "direct child creation without managed capture cannot gain admission from parent lineage alone");
+    assert.deepEqual(a.ctx.agents.list(), liveRoots, "failed child admission is rolled back without disposing its live parent");
+    assert.equal(a.runtime.admission(asDshAgent(oldRoot)), oldAdmission);
+    assert.equal(a.lifecycle.agentDisposals, 1, "only the rejected unpublished child is disposed");
+    assert.equal(a.lifecycle.scopeDisposals, 0);
+    assert.equal(a.lifecycle.updates, 0);
+  } finally {
+    await run.dispose();
+    assert.equal(existsSync(run.root), false, "remove only this run's marked fixture tree");
+  }
+});
+
+test("native config fixture without managed delivery allows Core DWoff but blocks DWon requests", { timeout: 20_000 }, async () => {
+  const run = nativeConfigRun();
+  try {
+    const roles = Object.fromEntries(DSMM_ROLE_IDS.map(id => [id, id === "dsmm-orchestrator"]));
+    const off = await run.createProfile("core-off", { roles });
+    const offRoot = await off.create();
+    assert.equal(off.ctx.get("subagents"), undefined, "managed delivery is opt-in");
+    await runFixtureTurn(offRoot);
+    assert.equal(off.adapter.calls.length, 1);
+    assert.doesNotMatch(JSON.stringify(off.adapter.calls[0].messages), /DEEPWORK MODE ENABLED!/);
+    assert.ok(offRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
+
+    const on = await run.createProfile("no-delivery-on", { roles, defaultActive: true });
+    const onRoot = await on.create();
+    assert.equal(on.runtime.getSettings(asDshAgent(onRoot)).defaultActive, true);
+    await runFixtureTurn(onRoot);
+    assert.equal(on.adapter.calls.length, 0, "DWon must not reach the model without real managed delivery");
+    assert.ok(onRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "error"));
   } finally {
     await run.dispose();
     assert.equal(existsSync(run.root), false, "remove only this run's marked fixture tree");

@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { UI_CHECKS_015, sessionProfileChecksForVersion, requiresSessionProfileProof, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { isSource020, isSource021, isReviewedSource, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, PUBLIC_RUNTIME_EXPORTS_021, STABLE_UI_CHECKS_021, SKILL_EXECUTABLES_020, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
+import { isSource020, isSource022, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
 import { assertPackSource, CONTROL_FILES } from "./release-source.mjs";
 
 export const POLICY = Object.freeze({
@@ -72,6 +72,7 @@ export function resolveReleaseContext(input) {
     invariant(typeof input.ref === "string" && input.ref.startsWith("refs/tags/dsmm-scoped-v"), "invalid future tag ref");
     tag = input.ref.slice("refs/tags/".length); version = tag.slice("dsmm-scoped-v".length);
     invariant(stableVersion.test(version), "only stable canonical SemVer tags are permitted");
+    assertReviewedReleaseVersion(version);
     invariant(tag !== BOOTSTRAP.tag, "frozen bootstrap tag cannot enter the future lane");
     equal(input.eventSha, input.peeledSha, "future event/release SHA");
     equal(input.controlSha, input.peeledSha, "future control/release SHA");
@@ -104,7 +105,8 @@ export const UI_CHECKS = Object.freeze([
 export { UI_CHECKS_015, requiresSessionProfileProof, requiresNativePickerProof };
 export const UI_CHECKS_016 = Object.freeze(["nativePickerCompactProfileAcceptance"]);
 export function uiChecksForVersion(version) {
-  if (isSource021(version)) return [...STABLE_UI_CHECKS_021];
+  assertReviewedReleaseVersion(version);
+  if (isStableNativeSource(version)) return [...stableUiChecksForVersion(version)];
   const sourceContract = isSource020(version) ? "0.2.0" : undefined;
   return [...UI_CHECKS, ...(requiresSessionProfileProof(version) ? sessionProfileChecksForVersion(version, { sourceContract }) : []),
     ...(requiresNativePickerProof(version) ? [nativePickerCheckForVersion(version, { sourceContract })] : [])];
@@ -127,7 +129,13 @@ export function assertSanitizedReceipt(receipt) {
 
 export function validateStableUiProof021(ui, { sha256: artifactSha256, version }) {
   equal(version, "0.2.1", "stable UI trusted version");
-  equal(ui.sourceContract, "0.2.1", "stable UI source contract");
+  return validateStableUiProof(ui, { sha256: artifactSha256, version });
+}
+
+export function validateStableUiProof(ui, { sha256: artifactSha256, version }) {
+  const checks = stableUiChecksForVersion(version);
+  if (isSource022(version)) equal(ui.kind, stableUiKindForVersion(version), "stable UI proof kind");
+  equal(ui.sourceContract, version, "stable UI source contract");
   equal(ui.packageVersion, version, "stable UI installed version");
   equal(ui.artifactSha256, artifactSha256, "stable UI frozen bytes");
   equal(ui.pageErrors, [], "stable UI browser errors");
@@ -137,8 +145,8 @@ export function validateStableUiProof021(ui, { sha256: artifactSha256, version }
   equal(ui.artifactSha256After, artifactSha256, "stable UI unchanged artifact");
   invariant(sha256.test(ui.clientSha256), "stable compiled client digest required");
   equal(ui.clientSha256After, ui.clientSha256, "stable UI unchanged client");
-  equal(Object.keys(ui.checks ?? {}).sort(byteOrder), [...STABLE_UI_CHECKS_021].sort(byteOrder), "stable exact UI checks");
-  truth(ui.checks, STABLE_UI_CHECKS_021, "stable UI checks");
+  equal(Object.keys(ui.checks ?? {}).sort(byteOrder), [...checks].sort(byteOrder), "stable exact UI checks");
+  truth(ui.checks, checks, "stable UI checks");
   invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "stable session CAS Gateway calls required");
   invariant(["describe", "descendants", "prompt"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmChildren/${method}` && call.strictGateway === true && call.result === "accepted")), "stable native child Gateway calls required");
   invariant(["$events", "session/follow", "session/control"].every(endpoint => ui.nativeStreams?.some(stream => stream.endpoint === endpoint
@@ -177,6 +185,7 @@ export function validateDockerReceipt(receipt, identity) {
   invariant(object(receipt) && object(identity), "receipt and identity must be objects");
   assertSanitizedReceipt(receipt);
   invariant(sha256.test(identity.sha256) && stableVersion.test(identity.version), "invalid receipt identity");
+  assertReviewedReleaseVersion(identity.version);
   complete(receipt, "Docker receipt");
   equal(receipt.acceptanceScope, "native-final-artifact", "acceptance scope");
   equal(receipt.dshVersion, POLICY.dshVersion, "native DSH version");
@@ -191,8 +200,12 @@ export function validateDockerReceipt(receipt, identity) {
   for (const template of ["web", "headless"]) {
     const native = receipt.native?.[template]; const baseline = receipt.nativeBaseline?.[template];
     complete(native, `native.${template}`); complete(baseline, `baseline.${template}`);
-    if (isSource021(identity.version)) {
-      equal(native.sourceContract, "0.2.1", "stable native source contract");
+    if (isStableNativeSource(identity.version)) {
+      equal(native.sourceContract, identity.version, "stable native source contract");
+      if (isSource022(identity.version)) {
+        equal(native.packageVersion, identity.version, "stable native installed version");
+        equal(native.artifactSha256, identity.sha256, "stable native frozen bytes");
+      }
       validateStableBootstrap(native.bootstrap, { template });
     }
     equal(native.template, template, "native template"); truth(native, ["postAppReady"], `native.${template}`);
@@ -249,7 +262,7 @@ export function validateDockerReceipt(receipt, identity) {
   equal(receipt.sourceUnitTests?.outcome, "NOT_RUN", "artifact runner source-test nonclaim");
   const ui = receipt.uiProfiles;
   complete(ui, "UI/profile acceptance"); truth(ui, ["postAppReady"], "UI/profile acceptance");
-  equal(ui.kind, isSource021(identity.version) ? "native-client-stable-first-021" : "native-client-component-owned-carrier", "UI native carrier");
+  equal(ui.kind, isStableNativeSource(identity.version) ? stableUiKindForVersion(identity.version) : "native-client-component-owned-carrier", "UI native carrier");
   equal(ui.artifactSha256, identity.sha256, "UI artifact digest");
   const requiredUiChecks = uiChecksForVersion(identity.version);
   equal(Object.keys(ui.checks ?? {}).sort(byteOrder), requiredUiChecks.sort(byteOrder), "exact UI check set");
@@ -267,12 +280,12 @@ export function validateDockerReceipt(receipt, identity) {
   equal(ui.nativeStorage?.root, receipt.native.web.persistence.config.root, "UI/native storage root");
   equal(ui.nativeStorage?.compression, "zstd", "UI storage compression");
   equal(ui.nativeStorage?.provider, "dsmm-session-persistence", "UI storage provider");
-  invariant(Array.isArray(ui.nativeCalls) && ["describe", ...(isSource021(identity.version) ? [] : ["read"]), "save", "select"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "all native profile RPC methods required");
+  invariant(Array.isArray(ui.nativeCalls) && ["describe", ...(isStableNativeSource(identity.version) ? [] : ["read"]), "save", "select"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "all native profile RPC methods required");
   invariant(Array.isArray(ui.nativeStreams) && ui.nativeStreams.some((stream) => stream.endpoint === "session/control" && stream.strictGateway === true && stream.result === "accepted" && stream.disposed === true && stream.frames > 0), "disposed native session/control stream required");
   truth(ui.cleanup, ["browserContextClosed", "nativeAgentsDisposed", "ownedTemporaryRootRemoved", "nativeHostExited"], "UI cleanup");
   equal(ui.cleanup?.errors, [], "UI cleanup errors");
-  if (isSource021(identity.version)) {
-    validateStableUiProof021(ui, identity);
+  if (isStableNativeSource(identity.version)) {
+    validateStableUiProof(ui, identity);
   } else if (requiresSessionProfileProof(identity.version)) {
     invariant(["describeSession", "selectSession"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmProfiles/${method}` && call.strictGateway === true && call.result === "accepted")), "successor scoped native RPC methods required");
     invariant(ui.nativeCalls.some((call) => call.endpoint === "session/modelCatalog" && call.strictGateway === true && call.result === "accepted"), "actual native parameterless catalog RPC required");
@@ -294,7 +307,7 @@ export function validateDockerReceipt(receipt, identity) {
   invariant(!Object.hasOwn(receipt, "failure") && !Object.hasOwn(receipt, "error") && (!Object.hasOwn(receipt, "cleanupFailures") || isDeepStrictEqual(receipt.cleanupFailures, [])), "Docker failure/cleanup evidence contradicts completion");
   invariant(receipt.runtimeImage?.ownership === "owned" || receipt.runtimeImage?.ownership === "borrowed", "runtime image ownership missing");
   equal(receipt.runtimeImage.cleanup, receipt.runtimeImage.ownership === "owned" ? "COMPLETED" : "NOT_APPLICABLE", "Docker image cleanup");
-  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, ...(isSource021(identity.version) ? { sourceContract: "0.2.1" } : {}), uiCheckCount: requiredUiChecks.length,
+  return { outcome: "COMPLETED", acceptanceScope: receipt.acceptanceScope, ...(isStableNativeSource(identity.version) ? { sourceContract: identity.version } : {}), uiCheckCount: requiredUiChecks.length,
     sourceUnitTests: "NOT_RUN", realAuthentication: "NOT_EXERCISED" };
 }
 
@@ -305,8 +318,9 @@ const PUBLIC_EXPORTS = Object.freeze({
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" }, "./package.json": "./package.json",
 });
 export function manifestExportsForVersion(version) {
-  if (isSource021(version)) return { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])),
-    ...Object.fromEntries(Object.entries(PUBLIC_RUNTIME_EXPORTS_021).map(([name, path]) => [name, { types: `./${path.replace(/\.js$/u, ".d.ts")}`, default: `./${path}` }])) };
+  assertReviewedReleaseVersion(version);
+  if (isStableNativeSource(version)) return { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])),
+    ...Object.fromEntries(Object.entries(publicRuntimeExportsForVersion(version)).map(([name, path]) => [name, { types: `./${path.replace(/\.js$/u, ".d.ts")}`, default: `./${path}` }])) };
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])) } : { ...PUBLIC_EXPORTS };
 }
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
@@ -314,6 +328,7 @@ const requiredFiles = ["LICENSE", "README.md", "package.json", "cordis.patch.yml
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`)];
+const requiredDocs022 = ["docs/native-permissions.md", "docs/deferred-native-approval-risk.md"];
 
 function safeArchivePath(value) {
   invariant(typeof value === "string" && value.startsWith("package/") && !/[\\\x00-\x1f\x7f:]/u.test(value), "unsafe archive path");
@@ -326,10 +341,11 @@ function safeArchivePath(value) {
 export function isForbiddenPackagePath(path, version) {
   const segments = path.toLowerCase().split("/"); const name = segments.at(-1);
   if (isReviewedSource(version) && path.startsWith("skills/")) {
-    if (SKILL_EXECUTABLES_020.includes(path)) return false;
+    if (skillExecutablesForVersion(version).includes(path)) return false;
     if (/\.(?:py|pyw|sh|ps1|psm1|mjs|cjs|js|bat|cmd)$/iu.test(path)) return true;
   }
-  const forbiddenScript = segments.includes("scripts") && !operatorScripts.includes(path) && path !== "skills/debugging/references/scripts/dap.mjs";
+  const forbiddenScript = segments.includes("scripts") && !operatorScripts.includes(path)
+    && !(isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) && path !== "skills/debugging/references/scripts/dap.mjs";
   return segments.some((part) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", ".git", ".github", ".codex", "superpowers", "output_test"].includes(part))
     || forbiddenScript || /\.(?:test|spec)\.[^/]+$/iu.test(path) || /\.(?:map|tgz|tar|gz|zip|pem|key|p12|pfx)$/iu.test(name)
     || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || name === ".npmrc" || name === ".env" || name.startsWith(".env.") || /^(?:credentials|secrets)/u.test(name);
@@ -337,6 +353,7 @@ export function isForbiddenPackagePath(path, version) {
 
 export function validateTarballBuffer(buffer, { version, expectedDigests } = {}) {
   invariant(stableVersion.test(version), "invalid expected artifact version");
+  assertReviewedReleaseVersion(version);
   const digests = computeDigests(buffer);
   if (expectedDigests) for (const field of ["size", "sha256", "sha1", "integrity"]) if (expectedDigests[field] !== undefined) equal(digests[field], expectedDigests[field], `artifact ${field}`);
   invariant(buffer.length > 0 && buffer.length <= 16 * 1024 * 1024, "invalid compressed artifact size");
@@ -380,7 +397,13 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   }
   invariant(terminated, "tar archive has no terminator");
   for (const file of requiredFiles) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
-  if (isReviewedSource(version)) for (const file of SKILL_EXECUTABLES_020) {
+  if (isSource022(version)) for (const file of requiredDocs022) {
+    invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
+  }
+  if (isSource022(version)) for (const file of COLD_PROFILE_SCRIPTS_022) {
+    invariant(files.has(file) && files.get(file).length > 0, `missing required cold migration resource: ${file}`);
+  }
+  if (isReviewedSource(version)) for (const file of skillExecutablesForVersion(version)) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required skill resource: ${file}`);
   }
   if (requiresSessionProfileProof(version)) for (const file of compiledFilesForVersion(version)) {
@@ -388,6 +411,7 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   }
   for (const tree of ["agent-presets", "docs/research", "patches", "prompts", "skills"]) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
   for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
+    || (isSource022(version) && (COLD_PROFILE_SCRIPTS_022.includes(path) || requiredDocs022.includes(path)))
     || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
   validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), version);
   if (isReviewedSource(version)) {
@@ -431,6 +455,7 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.schemaVersion, 1, "identity schema"); equal(identity.repository, POLICY.repository, "identity repository");
   equal(identity.packageName, POLICY.packageName, "identity package");
   invariant(stableVersion.test(identity.version), "invalid identity version");
+  assertReviewedReleaseVersion(identity.version);
   equal(identity.tag, `dsmm-scoped-v${identity.version}`, "identity tag"); equal(identity.filename, `dsmm-dsmm-${identity.version}.tgz`, "identity filename");
   invariant(sha.test(identity.releaseSha) && sha.test(identity.controlSha), "invalid identity commit");
   invariant(positiveId.test(identity.runId) && positiveId.test(identity.runAttempt), "invalid identity run/attempt");
@@ -449,9 +474,9 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.workflow.ref, `${POLICY.repository}/${POLICY.workflowFile}@${identity.ref}`, "identity workflow ref");
   if (identity.mode === "future") equal(identity.controlSha, identity.releaseSha, "future source/control identity");
   equal(identity.dockerAcceptance?.outcome, "COMPLETED", "artifact Docker acceptance");
-  if (isSource021(identity.version)) {
-    equal(identity.dockerAcceptance.sourceContract, "0.2.1", "explicit stable acceptance identity");
-    equal(identity.dockerAcceptance.uiCheckCount, STABLE_UI_CHECKS_021.length, "stable acceptance scope");
+  if (isStableNativeSource(identity.version)) {
+    equal(identity.dockerAcceptance.sourceContract, identity.version, "explicit stable acceptance identity");
+    equal(identity.dockerAcceptance.uiCheckCount, stableUiChecksForVersion(identity.version).length, "stable acceptance scope");
   }
   equal(identity.dockerAcceptance?.origin, identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
   equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "COMPLETED", "source-check policy");
@@ -758,7 +783,7 @@ export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibi
   invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= visibilityCap, "invalid registry visibility deadline");
   invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
   const deadline = now() + visibilityDeadlineMs;
-  const prospective = identity.mode === "future" && ["0.1.8", "0.1.9", "0.2.0", "0.2.1"].includes(identity.version);
+  const prospective = identity.mode === "future" && (["0.1.8", "0.1.9"].includes(identity.version) || isReviewedSource(identity.version));
   let stage = "registry-metadata";
   // The reviewed 0.1.8/0.1.9 contracts bound every public visibility read to one
   // deadline. Historical contracts and all publisher absence checks stay intact.

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { isReviewedSource, isSource021, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion } from "./release-contract.mjs";
+import { isReviewedSource, isSource022, isStableNativeSource, assertReviewedReleaseVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion } from "./release-contract.mjs";
 import { inspectStableBootstrap, inspectStableExports } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-final-native-preset-acceptance";
@@ -29,6 +29,79 @@ export function assertStoredEventPrefix(liveEvents, storedEvents) {
     modeMarkers: metadata.filter((event) => event.type === "deepwork/mode").length,
     policyMarkers: metadata.filter((event) => event.type === "dsmm/role-policy").length,
     exactlyOnce: true, contiguousSeq: true, ignorable: true };
+}
+
+/** Exact 022 proof uses original native executors and one effective-Full parent control. */
+export async function prepareNativeReadonly022({ ctx, parent, workspace, label, sdk, toolsFor, ToolCallId }) {
+  const load = id => import(pathToFileURL(sdk.resolve(id)).href);
+  const [{ setSandboxMode }, { setApprovalPolicy }] = await Promise.all([load("@deepseek-ai/dsh-sandbox-policy"), load("@deepseek-ai/dsh-user-approval")]);
+  const proof = { controls: [], readonlyAgents: [], approvals: 0, nativeParentMode: "danger-full-access" };
+  const stopObserving = ctx.on("approval/request", (request, next) => { proof.approvals++; return next(); }, { global: true, prepend: true });
+  setSandboxMode(parent.session, "danger-full-access"); setApprovalPolicy(parent.session, "never");
+  assert.equal(parent.ctx.get("sandboxPolicy").resolve({ session: parent.session }).mode, proof.nativeParentMode);
+  if (toolsFor(parent).get("pwsh", parent) === undefined) {
+    const [{ SandboxPwshExecutor }, NativePwsh] = await Promise.all([load("@deepseek-ai/dsh-pwsh-sandbox"), load("@deepseek-ai/dsh-tool-pwsh")]);
+    const scope = ctx.isolate("shell");
+    await scope.plugin(SandboxPwshExecutor, { cwd: workspace, timeoutMs: 10000, maxTimeoutMs: 10000, maxOutputBytes: 4096, graceMs: 200 }).await();
+    await scope.plugin(NativePwsh, {}).await(); proof.pwshComposition = "original-native-public-plugins";
+  }
+  const original = "unchanged native readonly sentinel\n";
+  const fixture = prefix => {
+    const subject = join(workspace, `${prefix}-readonly-edit.txt`), writeTarget = join(workspace, `${prefix}-readonly-write.txt`);
+    const bashTarget = join(workspace, `${prefix}-readonly-bash.txt`), pwshTarget = join(workspace, `${prefix}-readonly-pwsh.txt`);
+    for (const target of [subject, writeTarget, bashTarget, pwshTarget]) assert.equal(existsSync(target), false);
+    writeFileSync(subject, original, { flag: "wx" });
+    return { subject, writeTarget, bashTarget, pwshTarget, requests: [
+      { name: "write", args: { file_path: writeTarget, content: "native write control\n" }, target: writeTarget, content: "native write control\n" },
+      { name: "edit", args: { file_path: subject, old_string: "unchanged", new_string: "changed" }, target: subject, content: "changed native readonly sentinel\n" },
+      { name: "bash", args: { command: `printf 'native bash control\\n' > '${bashTarget}'`, description: "Write one task-owned acceptance control", workdir: workspace }, target: bashTarget, content: "native bash control\n" },
+      { name: "pwsh", args: { command: `[IO.File]::WriteAllText('${pwshTarget}', 'native pwsh control')`, description: "Write one task-owned acceptance control", workdir: workspace }, target: pwshTarget, content: "native pwsh control" },
+    ] };
+  };
+  const initial = fixture(label), { subject, writeTarget, bashTarget, pwshTarget, requests } = initial;
+  const execute = (agent, name, args) => toolsFor(agent).execute({ agent, name, arguments: args, callId: ToolCallId(`${label}-${name}-${proof.controls.length}-${proof.readonlyAgents.length}`), signal: new AbortController().signal });
+  const read = async (agent, path = subject) => {
+    const result = await execute(agent, "read", { file_path: path });
+    assert.equal(result.isError, false, JSON.stringify(result));
+    assert.ok(result.content.some(block => block.type === "text" && block.text.includes(original.trim())));
+  };
+  const control = async (record, input = initial) => {
+    await read(parent, input.subject);
+    for (const request of input.requests) {
+      const result = await execute(parent, request.name, request.args);
+      assert.equal(result.isError, false, JSON.stringify(result)); assert.equal(readFileSync(request.target, "utf8"), request.content);
+      if (request.name === "edit") writeFileSync(request.target, original); else unlinkSync(request.target);
+      record.push(request.name);
+    }
+    assert.equal(proof.approvals, 0);
+  };
+  try { await control(proof.controls); } catch (error) { stopObserving(); throw error; }
+  return { proof, close: stopObserving, async verifyRestoredParent() {
+    assert.equal(ctx.get("agents").get(parent.id) === parent, true);
+    assert.equal(parent.ctx.get("sandboxPolicy").resolve({ session: parent.session }).mode, proof.nativeParentMode);
+    proof.restoredControls = []; await control(proof.restoredControls, fixture(`${label}-restored`));
+  }, async verify(agent, { captured = false } = {}) {
+    assert.equal(ctx.get("agents").get(agent.id) === agent, true);
+    assert.equal(agent.ctx.get("agents").get(agent.id) === agent, true);
+    if (captured) {
+      assert.equal(ctx.get("agents").isOwnedBy(agent.id, parent), true);
+      assert.equal(ctx.get("dsmmProfileRuntime").admission(agent).childCapture.authorityCeiling.readOnly, true);
+    }
+    assert.equal(agent.ctx.get("sandboxPolicy").resolve({ session: agent.session }).mode, proof.nativeParentMode);
+    await read(agent);
+    const denied = [];
+    for (const request of requests) {
+      const result = await execute(agent, request.name, request.args);
+      assert.equal(result.isError, true, JSON.stringify(result));
+      assert.equal(ctx.get("agents").get(agent.id) === agent, true);
+      assert.equal(readFileSync(subject, "utf8"), original);
+      for (const target of [writeTarget, bashTarget, pwshTarget]) assert.equal(existsSync(target), false);
+      denied.push(request.name);
+    }
+    assert.equal(proof.approvals, 0);
+    proof.readonlyAgents.push({ id: agent.id, capturedReadOnly: captured, readSucceeded: true, denied, zeroSideEffects: true, nativeMode: proof.nativeParentMode });
+    return denied;
+  } };
 }
 
 /** An ordinary native Host plugin; no vendor-internal imports or synthetic ready event. */
@@ -58,6 +131,7 @@ export async function apply(ctx, config) {
   ctx.get("llm").registerAdapter(["dsmm-acceptance-fixture"], new AcceptanceAdapter());
   let disposed = false;
   let started = false;
+  let readonlyProof;
   const onReady = ctx.get("appReady").onReady(() => {
     if (disposed || started) return;
     started = true;
@@ -73,6 +147,7 @@ export async function apply(ctx, config) {
 
   async function audit() {
     const version = config.nativeOnly ? null : JSON.parse(readFileSync(join(config.packageRoot, "package.json"), "utf8")).version;
+    if (!config.nativeOnly) assertReviewedReleaseVersion(version);
     const roleTools = isReviewedSource(version) ? roleToolsForVersion(version) : ROLE_TOOLS;
     const report = { outcome: "FAILED", template: config.template, postAppReady: true, presetRegistryPresent: false,
       model: { kind: "deterministic-test-only-adapter", externalModelCalls: false, calls }, uiAuthentication: "NOT_EXERCISED" };
@@ -80,10 +155,13 @@ export async function apply(ctx, config) {
     let childListener;
     try {
       report.persistence = inspectPersistence();
-      if (isSource021(version)) {
-        report.sourceContract = "0.2.1";
+      if (isStableNativeSource(version)) {
+        if (isSource022(version)) assert.match(config.sha256, /^[a-f0-9]{64}$/u);
+        report.sourceContract = version;
+        report.packageVersion = version;
+        report.artifactSha256 = config.sha256;
         report.bootstrap = inspectStableBootstrap(ctx, { template: config.template });
-        report.publicExports = await inspectStableExports(config.packageRoot, join(ctx.get("profileContext").dir, "package.json"));
+        report.publicExports = await inspectStableExports(config.packageRoot, join(ctx.get("profileContext").dir, "package.json"), { sourceContract: version });
       }
       const registry = ctx.get("agentPresets");
       report.presetRegistryPresent = registry !== undefined;
@@ -141,6 +219,11 @@ export async function apply(ctx, config) {
         ...(registry === undefined ? {} : { setup: (agentCtx) => registry.mount(agentCtx, "standard").then(() => undefined) }) });
       handles.push(parentHandle);
       const parent = parentHandle.agent;
+      if (isSource022(version)) {
+        readonlyProof = await prepareNativeReadonly022({ ctx, parent, workspace: config.workspace, label: config.template,
+          sdk: nativeRequire, toolsFor: agent => toolsFor(agent, registry), ToolCallId });
+        report.readonlyExecution = readonlyProof.proof;
+      }
       if (config.nativeOnly) {
         const run = await ctx.get("subagents").start("spawn", { parent,
           prompt: [{ type: "text", text: "Reply native fixture complete." }], persona: "Native control child persona",
@@ -176,6 +259,7 @@ export async function apply(ctx, config) {
         const restored = await snapshot(parent, registry);
         assert.equal(restored.tools.includes("write"), true, "blank root switch lifts planner restrictions");
         assert.deepEqual(restored.roleTools, roleTools);
+        if (readonlyProof !== undefined) await readonlyProof.verifyRestoredParent();
         const restoredTools = toolsFor(parent, registry);
         const restoredWritePath = join(config.workspace, "restored-orchestrator-write.txt");
         const restoredWriteBytes = "restored orchestrator mutation capability\n";
@@ -196,7 +280,10 @@ export async function apply(ctx, config) {
         report.headlessTools = { outcome: "COMPLETED", roleTools: headless.roleTools, disabledBuilderAbsent: true };
       }
       const subagents = ctx.get("subagents");
-      for (const tool of roleTools) assert.ok(subagents.getProvider(`dsmm-role-${tool.slice(5).replace(/_/gu, "-")}`), `enabled native provider ${tool}`);
+      const providerRoles = isSource022(version)
+        ? presetNamesForVersion(version).filter(({ id }) => !["dsmm-orchestrator", "dsmm-builder", "dsmm-cross-cutting"].includes(id)).map(({ id }) => id.slice(5))
+        : roleTools.map(tool => tool.slice(5).replace(/_/gu, "-"));
+      for (const role of providerRoles) assert.ok(subagents.getProvider(`dsmm-role-${role}`), `enabled native provider ${role}`);
       assert.equal(subagents.getProvider("dsmm-role-builder"), undefined);
       if (isReviewedSource(version)) {
         assert.equal(subagents.getProvider("dsmm-role-cross-cutting"), undefined);
@@ -244,9 +331,10 @@ export async function apply(ctx, config) {
     } catch (error) {
       report.failure = error.message;
     } finally {
+      readonlyProof?.close();
       if (typeof childListener === "function") childListener();
       for (const handle of handles.reverse()) {
-        if (isSource021(version)) await ctx.get("dsmmRuntimeIntegration").revokeBeforeDispose(handle.agent, () => handle.dispose());
+        if (isStableNativeSource(version)) await ctx.get("dsmmRuntimeIntegration").revokeBeforeDispose(handle.agent, () => handle.dispose());
         else await handle.dispose();
       }
     }
@@ -337,6 +425,16 @@ export async function apply(ctx, config) {
 
   async function denyMutations(agent, registry, label) {
     const tools = toolsFor(agent, registry);
+    if (readonlyProof !== undefined) {
+      const denied = [...await readonlyProof.verify(agent, { captured: label === "reviewer-child" })];
+      for (const name of ["dsmm_reviewer", "dsmm_builder"]) {
+        assert.equal(tools.get(name, agent), undefined, `${label} cannot resolve ${name}`);
+        const result = await tools.execute({ callId: ToolCallId(`${label}-deny-${name}`), name, agent,
+          arguments: { description: "Forbidden nested role request", prompt: "Reply complete" }, signal: new AbortController().signal });
+        assert.equal(result.isError, true); denied.push(name);
+      }
+      return denied;
+    }
     const subject = join(config.workspace, `${label}-sentinel.txt`);
     const writeTarget = join(config.workspace, `${label}-write-must-not-exist.txt`);
     const shellTarget = join(config.workspace, `${label}-shell-must-not-exist.txt`);

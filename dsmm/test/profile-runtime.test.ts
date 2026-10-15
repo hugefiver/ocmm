@@ -95,48 +95,57 @@ test("selection reports a post-commit external pointer change as a Host conflict
 });
 
 test("profile admission is immutable for existing and blank roots, and trusted children inherit the parent revision", async () => {
-  const rootDir = mkdtempSync(join(tmpdir(), "dsmm-profile-runtime-"));
-  const store = new ProfileStore(join(rootDir, "dsmm-profiles"));
-  const agents: DshAgent[] = [];
-  const owners = new Map<string, DshAgent>();
-  let created: ((payload: { agent: DshAgent }) => unknown) | undefined;
-  const ctx: DshContext = {
-    get(name) { return (name === "agents" ? { list: () => agents, isOwnedBy: (id: string, owner: DshAgent) => owners.get(id) === owner } : undefined) as never; },
-    on(event, listener) { if (event === "agent/created") created = listener as typeof created; }
-  };
-  const runtime = new DsmmProfileRuntime(ctx, resolveConfig({ roles: { "dsmm-builder": false } }), store, { validateCandidate() {} });
+  const fixture = await nativeRoutingFixture({ roles: { "dsmm-builder": false } }, { headless: true, persistence: true });
+  const runtime = fixture.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+  const store = ProfileStore.fromCentral(fixture.home, fixture.profileDir, fixture.dsmmEntryId ?? "trusted-direct");
+  let childRun: Awaited<ReturnType<typeof fixture.subagents.start>> | undefined;
   try {
-    await runtime.initialize();
+    assert.ok(runtime);
     const a = await runtime.save({ id: "a", content: profile("a", { defaultActive: true, guards: { gitWriteGuard: "deny" } }), expectedRevision: null });
     await runtime.select({ id: "a", expectedRevision: a.revision, expectedSelectionRevision: "absent" });
-    const root = mockAgent("a-root");
-    const blank = mockAgent("a-blank");
-    agents.push(root, blank);
-    await created!({ agent: root }); await created!({ agent: blank });
+    const parent = await fixture.create({ agentPreset: "dsmm-orchestrator" });
+    const root = parent as unknown as DshAgent;
+    const blank = await fixture.create({ agentPreset: "standard" }) as unknown as DshAgent;
     const admitted = runtime.getSettings(root);
+    const blankAdmitted = runtime.getSettings(blank);
+    assert.deepEqual(blankAdmitted, admitted);
     assert.equal(Object.isFrozen(admitted), true);
     assert.equal(Object.isFrozen(admitted.guards.toolOutputTruncation), true);
     const b = await runtime.save({ id: "b", content: profile("b", { defaultActive: false, guards: { gitWriteGuard: "off" } }), expectedRevision: null });
     assert.equal(runtime.getSettings().defaultActive, true, "saving is draft-only");
     await runtime.select({ id: "b", expectedRevision: b.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
-    const child = mockAgent("a-child");
-    agents.push(child); owners.set(child.id!, root);
-    await created!({ agent: child });
-    const newest = mockAgent("b-root"); agents.push(newest); await created!({ agent: newest });
+    const requests = fixture.adapter.calls.length;
+    await assert.rejects(fixture.create({ origin: "subagent", agentPreset: "dsmm-reviewer" }), { code: "not-owned" });
+    assert.equal(fixture.adapter.calls.length, requests, "an unowned child cannot borrow the new global policy or issue a request");
+    childRun = await fixture.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "Owned local profile inheritance fixture" }], signal: new AbortController().signal });
+    assert.equal((await childRun.result).stopReason, "completed");
+    const childAgent = childRun.localAgent;
+    assert.ok(childAgent);
+    const child = childAgent as unknown as DshAgent;
+    assert.equal(fixture.agents.isOwnedBy(childAgent.id, parent), true);
+    const capture = await store.readChildAdmission(childAgent.id, parent.id);
+    assert.ok(capture);
+    assert.equal(capture.profilePin?.revision, a.revision);
+    assert.equal(capture.originalAdmissionEpoch, runtime.admission(root).epoch);
+    const newest = await fixture.create({ agentPreset: "standard" }) as unknown as DshAgent;
+    const childAdmitted = runtime.getSettings(child);
+    assert.equal(Object.isFrozen(childAdmitted), true);
     assert.equal(runtime.getSettings(root), admitted);
-    assert.equal(runtime.getSettings(blank), admitted, "blank preset selection cannot change admitted runtime settings");
-    assert.equal(runtime.getSettings(child), admitted);
+    assert.equal(runtime.getSettings(blank), blankAdmitted, "a global selection cannot change the blank root's admitted runtime settings");
+    assert.equal(runtime.getSettings(child).defaultActive, admitted.defaultActive);
+    assert.equal(runtime.getSettings(child).guards.gitWriteGuard, admitted.guards.gitWriteGuard);
     assert.equal(runtime.admission(child).appliedRevision, a.revision);
     assert.equal(runtime.getSettings(newest).defaultActive, false);
     assert.equal(runtime.getSettings(newest).roles["dsmm-builder"], false);
     const edited = await runtime.save({ id: "b", content: profile("b", { defaultActive: true }), expectedRevision: b.revision });
     assert.notEqual(edited.revision, b.revision);
     assert.equal(runtime.getSettings(newest).defaultActive, false, "active draft edits never mutate a pinned snapshot");
+    assert.equal(runtime.getSettings(child), childAdmitted, "draft edits cannot change the child's original captured admission");
     const cold = new DsmmProfileRuntime({}, resolveConfig({ roles: { "dsmm-builder": false } }), store);
     await cold.initialize();
     assert.equal(cold.getSettings(mockAgent("cold-resume")).defaultActive, false, "restart follows immutable applied bytes, not the edited draft");
     assert.equal(cold.admission(mockAgent("another-resume")).appliedRevision, b.revision);
-  } finally { rmSync(rootDir, { recursive: true, force: true }); }
+  } finally { try { await childRun?.dispose(); } finally { await fixture.dispose(); } }
 });
 
 test("semantic activation and atomic selection-pointer failures leave the runtime and durable selection unchanged", async () => {
@@ -257,26 +266,29 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
   } finally { await fixture.dispose(); rmSync(profileDir, { recursive: true, force: true }); }
 });
 
-test("native profile activation rejects unsupported exact effort and missing Agent LLM before changing the pointer", async () => {
+test("profile Apply preserves requested effort without requiring an Agent LLM or model metadata", async () => {
   const fixture = await nativeRoutingFixture();
   try {
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const bad = await runtime.save({ id: "bad", expectedRevision: null, content: profile("bad", { roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "no-max", reasoningEffort: "max" } } } }) });
-    // This fixture has a real Host LLM; remove it from the validation seam to
-    // model the native preset-only Host, where LLM services exist only in Agents.
     const rootDir = mkdtempSync(join(tmpdir(), "dsmm-profile-runtime-"));
     try {
       const noAgent = new DsmmProfileRuntime({ get: () => undefined }, resolveConfig(), new ProfileStore(join(rootDir, "dsmm-profiles")));
       await noAgent.initialize();
       const draft = await noAgent.save({ id: "bad", expectedRevision: null, content: bad.content });
-      await assert.rejects(noAgent.select({ id: "bad", expectedRevision: draft.revision, expectedSelectionRevision: "absent" }), { code: "activation" });
-      assert.equal((await noAgent.describe()).selectedId, null);
+      await noAgent.select({ id: "bad", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
+      assert.equal((await noAgent.describe()).selectedId, "bad");
+      assert.equal(noAgent.getSettings().roleRouting["dsmm-reviewer"]?.primary?.reasoningEffort, "max");
     } finally { rmSync(rootDir, { recursive: true, force: true }); }
     await fixture.create();
     fixture.adapter.unsupportedMaxModels.add("no-max");
-    await assert.rejects(runtime.select({ id: "bad", expectedRevision: bad.revision, expectedSelectionRevision: "absent" }), { code: "activation", field: "settings.roleRouting.dsmm-reviewer.primary" });
-    assert.equal((await runtime.describe()).selectedId, null);
-    assert.equal(runtime.getSettings().roleRouting["dsmm-reviewer"], undefined);
+    let metadataCalls = 0;
+    fixture.adapter.resolveModel = async () => { metadataCalls++; throw new Error("Model metadata is not an Apply dependency"); };
+    await runtime.select({ id: "bad", expectedRevision: bad.revision, expectedSelectionRevision: "absent" });
+    assert.equal((await runtime.describe()).selectedId, "bad");
+    assert.equal(runtime.getSettings().roleRouting["dsmm-reviewer"]?.primary?.reasoningEffort, "max");
+    assert.equal(metadataCalls, 0);
+    assert.equal(fixture.adapter.calls.length, 0);
   } finally { await fixture.dispose(); }
 });
 
@@ -319,24 +331,27 @@ test("native role alias preflights exact parent-profile route before child creat
   } finally { await fixture.dispose(); }
 });
 
-test("native named-profile levels validate exact effort without changing the root model or committing an invalid selection", async () => {
+test("named-profile levels preserve arbitrary effort without model I/O or changing Root selection", async () => {
   const fixture = await nativeRoutingFixture();
   try {
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const root = await fixture.create();
     const options = structuredClone(root.options);
+    let metadataCalls = 0;
+    fixture.adapter.resolveModel = async () => { metadataCalls++; throw new Error("Model metadata is not an Apply dependency"); };
     const good = await runtime.save({ id: "level-good", expectedRevision: null, content: profile("level-good", { roleRouting: {
       "dsmm-reviewer": { levels: { low: { reasoningEffort: "low" }, high: { provider: "fixture", model: "review-high", reasoningEffort: "high" } } }
     } }) });
     const selected = await runtime.select({ id: good.id, expectedRevision: good.revision, expectedSelectionRevision: "absent" });
     assert.equal(selected.selectedId, good.id);
-    assert.deepEqual(root.options, options); assert.equal(fixture.adapter.calls.length, 0, "catalog validation sends no sacrificial request");
+    assert.deepEqual(root.options, options); assert.equal(fixture.adapter.calls.length, 0);
     fixture.adapter.unsupportedMaxModels.add("review-no-max");
     const bad = await runtime.save({ id: "level-bad", expectedRevision: null, content: profile("level-bad", { roleRouting: {
       "dsmm-reviewer": { levels: { max: { provider: "fixture", model: "review-no-max", reasoningEffort: "max" } } }
     } }) });
-    await assert.rejects(runtime.select({ id: bad.id, expectedRevision: bad.revision, expectedSelectionRevision: selected.selectionRevision }),
-      { code: "activation", field: "settings.roleRouting.dsmm-reviewer.levels.max" });
-    assert.equal((await runtime.describe()).selectedId, good.id); assert.deepEqual(root.options, options);
+    await runtime.select({ id: bad.id, expectedRevision: bad.revision, expectedSelectionRevision: selected.selectionRevision });
+    assert.equal((await runtime.describe()).selectedId, bad.id); assert.deepEqual(root.options, options);
+    assert.equal(runtime.getSettings().roleRouting["dsmm-reviewer"]?.levels?.max?.reasoningEffort, "max");
+    assert.equal(metadataCalls, 0);
   } finally { await fixture.dispose(); }
 });

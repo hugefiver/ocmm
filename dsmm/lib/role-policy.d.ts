@@ -1,4 +1,4 @@
-import type { ToolRestriction, ToolRuntime } from "@deepseek-ai/dsh-tools";
+import type { ToolRestriction, ToolRuntime, ToolExecution } from "@deepseek-ai/dsh-tools";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 export { allowedRoleChildren } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
@@ -17,6 +17,7 @@ export interface DsmmRoleIdentity {
     readonly readOnly?: boolean;
     readonly toolFilter?: ToolRestriction;
 }
+export declare const READONLY_ROLE_DENIED_TOOLS: readonly ["write", "edit", "bash", "pwsh"];
 export declare function inheritToolFilter(parent?: ToolRestriction, requested?: ToolRestriction): ToolRestriction | undefined;
 export declare function resolveAdmittedDsmmRole(agent: DshAgent, settings: DsmmSettings, active: boolean): DsmmRoleId | undefined;
 export declare function roleToolName(role: DsmmRoleId): string;
@@ -43,6 +44,8 @@ export declare class DsmmRolePolicy {
     private readonly getSettings;
     private readonly mode;
     private readonly calls;
+    private readonly executions;
+    private readonly toolCalls;
     private readonly providers;
     private readonly continuableCreations;
     private readonly preparedInvocations;
@@ -50,6 +53,7 @@ export declare class DsmmRolePolicy {
     private collaborators?;
     constructor(ctx: DshContext, getSettings: DsmmSettingsGetter, mode: DeepworkModeController);
     captureProvider(provider: object): void;
+    ownsProvider(provider: object): boolean;
     revokeResidency(agent: DshAgent): void;
     configureAdmission(collaborators: RoleAdmissionCollaborators): ChildAdmissionCompletion;
     validateRootRole(agent: DshAgent, admission: DsmmProfileAdmission): void;
@@ -61,6 +65,8 @@ export declare class DsmmRolePolicy {
     private readOnly;
     private agents;
     assertLive(agent: DshAgent): void;
+    private isAdmittedChild;
+    private assertPlannerRootAdmission;
     /** Core fence runs before native prompt/body assembly or provider execution. */
     assertModuleAdmission(agent: DshAgent): void;
     identity(agent: DshAgent): DsmmRoleIdentity;
@@ -71,9 +77,16 @@ export declare class DsmmRolePolicy {
     admit(agent: DshAgent): DsmmRoleIdentity;
     private captureIdentity;
     captureTools(agent: DshAgent, tools: ToolRuntime, controlledNames?: readonly string[], reset?: boolean): void;
-    toolDenial(agent: DshAgent, name: string, tools?: ToolRuntime, execution?: {
-        readonly arguments: unknown;
-    }): string | undefined;
+    /** Existing exact role denials only; missing admission or capability proof is not a blacklist. */
+    toolBlacklistDenial(agent: DshAgent, name: string, execution?: Readonly<ToolExecution>): string | undefined;
+    private blacklistDenial;
+    captureToolExecution(execution: Readonly<ToolExecution>, full: boolean): void;
+    assertToolExecution(execution: Readonly<ToolExecution>): void;
+    beforeToolDecision<T>(operation: () => T): T;
+    duringToolExecution<T>(execution: Readonly<ToolExecution>, operation: () => Promise<T>): Promise<T>;
+    toolDenial(agent: DshAgent, name: string, tools?: ToolRuntime, execution?: Readonly<ToolExecution>): string | undefined;
+    preToolDenial(agent: DshAgent, name: string, tools?: ToolRuntime, execution?: Readonly<ToolExecution>): string | undefined;
+    private permissionDenial;
     installDrain(agent: DshAgent): void;
 }
 //# sourceMappingURL=role-policy.d.ts.map

@@ -6,8 +6,9 @@ import { SystemPrompt, renderPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { defineTool, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DsmmPromptObservation } from "../src/prompts.js";
 import type { DsmmRoleAvailabilityState } from "../src/profile-types.js";
+import "./prompt-source-loader.mjs";
 
-// The --import prompt-source-loader.mjs harness transpiles only in memory.
+// Register source resolution before loading the prompt's source graph in memory.
 const { buildDsmmAgentGuidance, buildRolePersona, SOURCE_ROLE_CATALOG, buildDeepworkPrompt } = await import("../src/prompts.ts");
 const { DSMM_LOCALES, resolveConfig, freezeSettings } = await import("../src/settings.ts");
 const { callableRoleInventory } = await import("../src/role-subagents.ts");

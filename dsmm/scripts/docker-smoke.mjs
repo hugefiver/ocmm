@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { throwAfterCleanup } from "./docker-cleanup-errors.mjs";
 import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
-import { isReviewedSource, isSource021, validateCoreProof } from "./release-contract.mjs";
+import { isReviewedSource, isSource022, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
 import { stableMainStartupRow, stableRuntimeStartupRows } from "./stable-native-acceptance.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -19,7 +19,7 @@ const ARTIFACT_RECEIPT_PREFIX = "DSMM_FINAL_ARTIFACT_RECEIPT ";
 const STOCK_PERSISTENCE_ID = "session-persistence-jsonl";
 const STOCK_PERSISTENCE_MODULE = "@deepseek-ai/dsh-session-persistence-jsonl";
 export const PROFILE_UI_HARNESS_FILES = Object.freeze(["profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs", "native-picker-harness.mjs", "native-picker-browser.mjs", "native-picker-proof.mjs", "release-contract.mjs",
-  "stable-native-acceptance.mjs", "profile-ui-harness-stable021.mjs", "profile-ui-harness-stable021-native.mjs"]);
+  "stable-native-acceptance.mjs", "profile-ui-harness-stable021.mjs", "profile-ui-harness-stable021-native.mjs", "native-preset-smoke.mjs"]);
 const requiredRolePlugins = [
   "dsh-agent-preset-registry", "dsh-tool-subagent", "dsh-tool-fs", "dsh-tool-fs-search",
   "dsh-tool-bash", "dsh-tool-pwsh", "dsh-tool-jobs", "dsh-skill-filesystem",
@@ -86,7 +86,7 @@ export function artifactDockerArguments(options, imageTag) {
   if (options.hook !== undefined) args.push("--mount", `type=bind,source=${options.hook},target=/dsmm-acceptance/hook.mjs,readonly`);
   for (const file of options.hookSupport ?? []) args.push("--mount", `type=bind,source=${file},target=/dsmm-acceptance/${basename(file)},readonly`);
   if (options.evidenceDir !== undefined) args.push("--mount", `type=bind,source=${options.evidenceDir},target=/dsmm-acceptance/ui-qa`, "--env", "DSMM_UI_EVIDENCE_DIR=/dsmm-acceptance/ui-qa");
-  args.push("--env", "DSMM_DOCKER_INNER=1", imageTag);
+  args.push("--env", "DSMM_DOCKER_INNER=1", "--env", "COREPACK_HOME=/root/.cache/node/corepack", imageTag);
   if (options.hook !== undefined) args.push("xvfb-run", "-a", "--server-args=-screen 0 1440x1000x24");
   args.push("node", "/dsmm-acceptance/scripts/docker-smoke.mjs", "--artifact", "/dsmm-acceptance/package.tgz", "--expected-sha256", options.sha256);
   if (options.hook !== undefined) args.push("--acceptance-hook", "/dsmm-acceptance/hook.mjs");
@@ -144,11 +144,11 @@ async function runArtifactSmoke() {
 }
 
 export function freshArtifactEnvironment(home, ambient = process.env) {
-  const env = Object.fromEntries(["PATH", "LANG", "LC_ALL", "TZ", "DISPLAY", "XAUTHORITY", "DSMM_ACCEPTANCE_TOOLS_MANIFEST", "DSMM_BROWSER_EXECUTABLE", "DSMM_UI_EVIDENCE_DIR"]
+  const env = Object.fromEntries(["PATH", "LANG", "LC_ALL", "TZ", "DISPLAY", "XAUTHORITY", "COREPACK_HOME", "DSMM_ACCEPTANCE_TOOLS_MANIFEST", "DSMM_BROWSER_EXECUTABLE", "DSMM_UI_EVIDENCE_DIR"]
     .flatMap((key) => ambient[key] === undefined ? [] : [[key, ambient[key]]]));
   return { ...env, HOME: home, DSH_HOME: home, XDG_CONFIG_HOME: join(home, "xdg-config"), XDG_DATA_HOME: join(home, "xdg-data"),
     XDG_STATE_HOME: join(home, "xdg-state"), XDG_CACHE_HOME: join(home, "xdg-cache"),
-    POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+    POWERSHELL_TELEMETRY_OPTOUT: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1", COREPACK_DEFAULT_TO_LATEST: "0",
     DSH_TELEMETRY_MODE: "DISABLED", DSH_TELEMETRY_DISABLED: "1", DSH_PERMISSION_MODE: "workspace-write" };
 }
 
@@ -233,13 +233,14 @@ async function runInnerArtifactSmoke(options) {
         // Baseline asserted this exact id/name before the explicit startup
         // patch. The name is an identity assertion, never a backend rename.
         { id: STOCK_PERSISTENCE_ID, name: STOCK_PERSISTENCE_MODULE, disabled: true },
-        { id: "dsmm", config: { sessionPersistence: { ...nativeStorage }, defaultActive: true, roles: { "dsmm-builder": false }, roleRouting, runtimeRecovery: { enabled: false } } },
+        { id: "dsmm", config: { sessionPersistence: { ...nativeStorage }, defaultActive: true, roles: { "dsmm-builder": false }, roleRouting, runtimeRecovery: { enabled: false },
+          ...(isSource022(manifest.version) ? { presets: { plannerRootEnabled: true } } : {}) } },
         { id: "agent-default-model", config: route },
         { id: "session-title-llm", disabled: true },
         { insert: [{ id: "dsmm-final-native-audit", name: pathToFileURL(join(root, "scripts", "native-preset-smoke.mjs")).href,
-          config: { receipt: output, template, dshManifest, packageRoot, workspace, ownedHome: home, nativeStorage } }] }
+          config: { receipt: output, sha256: options.sha256, template, dshManifest, packageRoot, workspace, ownedHome: home, nativeStorage } }] }
       ];
-      if (isSource021(manifest.version)) {
+      if (isStableNativeSource(manifest.version)) {
         rows[1] = stableMainStartupRow(rows[1].config);
         rows.unshift(...stableRuntimeStartupRows());
       }
@@ -266,7 +267,14 @@ async function runInnerArtifactSmoke(options) {
       mkdirSync(join(home, "plugins", "dsmm"), { recursive: true });
       writeFileSync(join(home, "plugins", "dsmm", "config.json"), JSON.stringify({ modules: { deepwork: { enabled: false } } }), { flag: "wx" });
       const output = join(owned, "core-receipt.json"), patch = join(owned, "core-audit.patch.yml");
-      writeFileSync(patch, yaml.dump([...(isSource021(manifest.version) ? [...stableRuntimeStartupRows(), stableMainStartupRow({})] : []),
+      const coreStartup = isStableNativeSource(manifest.version) ? [...stableRuntimeStartupRows(), stableMainStartupRow({})] : [];
+      if (isSource022(manifest.version)) {
+        const nativePatch = join(home, "profiles", profile, "cordis.patch.yml");
+        const existing = existsSync(nativePatch) ? yaml.load(readFileSync(nativePatch, "utf8")) ?? [] : [];
+        if (!Array.isArray(existing)) throw new Error("native Core profile patch must contain a patch list");
+        writeFileSync(nativePatch, yaml.dump([...existing, ...coreStartup]));
+      }
+      writeFileSync(patch, yaml.dump([...(isSource022(manifest.version) ? [] : coreStartup),
         { id: "session-title-llm", disabled: true }, { insert: [{ id: "dsmm-core-audit", name: pathToFileURL(join(root, "scripts", "native-core-smoke.mjs")).href,
         config: { receipt: output, sha256: options.sha256, dshManifest, packageRoot, home, workspace } }] }]));
       const coreRun = spawnSync("dsh", ["--profile", profile, "--patch", patch, "--no-open", "--host", "127.0.0.1", "--port", "0"],

@@ -26,10 +26,31 @@ try {
     assert.throws(() => f.bridge.authority.acquireParentTicket({ ...parent }), denied);
     await assert.rejects(f.bridge.authority.resolveChildEvidence({ ...ticket }, child.id, signal()), denied);
     const foreign = await f.create();
-    await assert.rejects(f.native.sendMessage(foreign, child.id, message("foreign direct parent"), { signal: signal() }), denied);
-    child.session.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "continuable", provider: "dsmm-role-coding", label: "not the establishing descriptor",
-      agentProvider: "fixture", agentModel: "coding-original" }));
-    await assert.rejects(f.bridge.authority.resolveChildEvidence(ticket, child.id, signal()), denied);
+    const originalAdmission = f.runtime.admission(child), originalMessages = accepted(child);
+    const requests = child.session.ownEvents().filter(event => event.type === "request/header");
+    const path = join(f.runtime.childCaptureStore.stateDir, ".children", "v1", `${createHash("sha256").update(child.id).digest("hex")}.json`);
+    const originalBytes = await readFile(path);
+    await assert.rejects(f.native.sendMessage(foreign, child.id, message("foreign direct parent"), { signal: signal() }), { code: "corrupt-selection" });
+    assert.deepEqual(accepted(child), originalMessages);
+    assert.deepEqual(child.session.ownEvents().filter(event => event.type === "request/header"), requests);
+    assert.equal(f.runtime.admission(child), originalAdmission);
+    assert.deepEqual(await readFile(path), originalBytes);
+    assert.equal((await f.bridge.authority.resolveChildEvidence(ticket, child.id, signal())).childSessionId, child.id);
+    const entered = gate(), held = gate();
+    f.adapter.beforeStream = async options => { if (options.model === "reviewer-original") { entered.release(); await held.promise; } };
+    try {
+      await f.native.sendMessage(parent, child.id, message("hold exact native residency while validating descriptor provenance"), { signal: signal() });
+      child = f.ctx.agents.get(child.id); await entered.promise;
+      assert.equal(f.ctx.agents.get(child.id), child);
+      child.session.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "continuable", provider: "dsmm-role-coding", label: "not the establishing descriptor",
+        agentProvider: "fixture", agentModel: "coding-original" }));
+      await f.ctx.sessions.flush(child.session);
+      await assert.rejects(f.bridge.authority.resolveChildEvidence(ticket, child.id, signal()), denied);
+      const baseline = accepted(child);
+      await assert.rejects(f.native.sendMessage(parent, child.id, message("duplicate descriptor cannot receive a delivery"), { signal: signal() }), denied);
+      assert.deepEqual(accepted(child), baseline);
+      assert.deepEqual(await readFile(path), originalBytes);
+    } finally { held.release(); f.adapter.beforeStream = undefined; }
   } else if (phase === "observed-revocation") {
     const entered = gate(), held = gate();
     let observedSignal;
@@ -191,27 +212,35 @@ try {
     const reader = new NativeChildEvidenceReader(f.ctx, ticket => f.native.authority.assertTicket(ticket), f.ctx.sessionQuery);
     const evidence = legacyEvidenceFromNativeFacts(await reader.read(nativeTicket, child.id, signal()));
     const readDefinition = child.ctx.tools.get("read", child);
+    let parentQueries = 0;
     const collaborators = {
       classifyTool(name) {
         if (name !== "read") return undefined;
         return { kind: "read", definition: readDefinition, assertArguments(args) { if (Object.keys(args).length) throw new Error("Unproven read parameter"); } };
       },
-      assertParentTool(exactParent, name, args, definition) { assert.equal(exactParent, parent); assert.equal(parent.ctx.tools.get(name, parent), definition); },
+      assertParentTool(exactParent, name, args, definition) { parentQueries++; assert.equal(exactParent, parent); assert.equal(parent.ctx.tools.get(name, parent), definition); },
     };
+    assert.equal((await f.execute(child, "read")).isError, false);
     const toolPolicy = new LegacyChildToolPolicy(evidence, parent, child, collaborators);
     const detach = installLegacyChildToolPolicy(evidence, parent, child, collaborators);
-    assert.equal((await f.execute(child, "read")).isError, false);
     const bodies = f.bodies.read;
+    assert.deepEqual(toolPolicy.denial("read", {}, child.ctx.tools), { field: "tool-filter", code: "unverified" });
+    assert.equal((await f.execute(child, "read")).isError, true);
+    assert.equal(f.bodies.read, bodies);
     assert.deepEqual(toolPolicy.denial("read", { command: "unknown" }, child.ctx.tools), { field: "tool-filter", code: "missing-evidence" });
     assert.equal((await f.execute(child, "read", { command: "not part of the audited read contract" })).isError, true);
     assert.equal(f.bodies.read, bodies);
     const releaseParentRestriction = parent.ctx.tools.restrict({ deny: ["read"] });
-    assert.deepEqual(toolPolicy.denial("read", {}, child.ctx.tools), { field: "tool-filter", code: "parent-denied" });
+    assert.deepEqual(toolPolicy.denial("read", {}, child.ctx.tools), { field: "tool-filter", code: "unverified" });
     assert.equal((await f.execute(child, "read")).isError, true); assert.equal(f.bodies.read, bodies);
     releaseParentRestriction();
     const remove = child.ctx.tools.register({ ...readDefinition, async execute() { f.bodies.read++; return "replacement body"; } });
     assert.equal((await f.execute(child, "read")).isError, true); assert.equal(f.bodies.read, bodies);
     remove(); detach();
+    assert.equal(parentQueries, 0, "A parent permission query never substitutes for a registered leased read invocation");
+    const restored = await f.execute(child, "read");
+    assert.equal(restored.isError, false); assert.equal(restored.value, "useful permitted read");
+    assert.equal(f.bodies.read, bodies + 1);
   } else throw new Error("Unknown native guard phase");
 } finally { if (!fixtureDisposed) await f.dispose(); }
 console.log(JSON.stringify({ phase, shutdown: true }));

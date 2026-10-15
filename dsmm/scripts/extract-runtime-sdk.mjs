@@ -55,6 +55,6 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const { values } = parseArgs({ options: { image: { type: "string" }, destination: { type: "string" } } });
   assert.ok(values.image && values.destination);
   const result = extractRuntimeSdk({ image: values.image, destination: resolve(values.destination) });
-  if (process.env.GITHUB_ENV !== undefined) appendFileSync(process.env.GITHUB_ENV, `DSMM_TEST_DSH_ENTRY=${result.manifest}\n`);
+  if (process.env.GITHUB_ENV !== undefined) appendFileSync(process.env.GITHUB_ENV, `DSMM_TEST_DSH_ENTRY=${result.manifest}\nDSMM_COLD_PROFILE_SDK_ANCHOR=${result.manifest}\n`);
   console.log(JSON.stringify(result));
 }

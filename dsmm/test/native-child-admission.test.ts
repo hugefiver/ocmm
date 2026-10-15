@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,16 +42,11 @@ test("durable captured children recover in a new process with the same ID and or
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("published 0.2 children recover conservatively in a new process: useful same-ID read, no write/shell/Git bodies or migration", async (t) => {
+test("published 0.2 children recover conservatively with useful same-ID continuation, no unleased read/write/shell bodies or migration", (t) => {
+  const artifact = process.env.DSMM_TEST_LEGACY_ARTIFACT;
+  assert.ok(artifact, "Provide the verified published 0.2 archive as an isolated fixture input");
   const root = mkdtempSync(join(tmpdir(), "dsmm-c2b-legacy-"));
   try {
-    let artifact = process.env.DSMM_TEST_LEGACY_ARTIFACT;
-    if (artifact === undefined) {
-      const response = await fetch("https://registry.npmjs.org/@dsmm/dsmm/-/dsmm-0.2.0.tgz");
-      assert.equal(response.ok, true);
-      artifact = join(root, "published.tgz");
-      writeFileSync(artifact, Buffer.from(await response.arrayBuffer()), { flag: "wx" });
-    }
     const producer = run("old-create", root, artifact);
     const originalRecords = recordBytes(join(root, "sessions"));
     assert.ok(originalRecords.size > 0);
@@ -59,8 +54,8 @@ test("published 0.2 children recover conservatively in a new process: useful sam
     assert.notEqual(producer.pid, resumer.pid);
     assert.deepEqual(resumer.rows.map(row => row.childId), producer.rows.map(row => row.childId));
     assert.ok(resumer.rows.every(row => row.mode === "legacy-conservative"));
-    assert.equal(resumer.rows[0]!.readUseful, true);
-    assert.ok(resumer.bodies.read > 0); assert.equal(resumer.bodies.write, 0); assert.equal(resumer.bodies.pwsh, 0);
+    assert.ok(resumer.rows.every(row => row.readUseful === false));
+    assert.deepEqual(resumer.bodies, { read: 0, write: 0, pwsh: 0 });
     assert.ok(resumer.usefulTurns! >= 4);
     for (const [relative, bytes] of originalRecords) {
       assert.deepEqual(readFileSync(join(root, "sessions", relative)).subarray(0, bytes.length), bytes, "Original native physical bytes are immutable; continuation may append");
