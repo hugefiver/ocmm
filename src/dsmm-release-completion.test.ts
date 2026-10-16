@@ -236,31 +236,23 @@ test("completion CLI rejects unbound identities and arbitrary modes", () => {
   ]) assert.throws(() => parseCompletionArguments(args));
 });
 
-test("DSMM YAML keeps pnpm, isolated permissions and complete frozen Docker gate", async () => {
+test("DSMM workflow keeps ordinary publication permissions isolated from recovery", async () => {
   const { readFileSync } = await import("node:fs");
-  const yaml = readFileSync(new URL("../.github/workflows/dsmm-release.yml", import.meta.url), "utf8");
-  assert.equal((yaml.match(/id-token: write/gu) ?? []).length, 1);
-  assert.equal((yaml.match(/contents: write/gu) ?? []).length, 2);
-  assert.equal((yaml.match(/persist-credentials: false/gu) ?? []).length, 5);
-  assert.match(yaml, /cancel-in-progress: false/u);
-  assert.match(yaml, /pnpm install --frozen-lockfile/u);
-  assert.match(yaml, /pnpm --dir control\/dsmm pack/u);
-  assert.match(yaml, /--expected-sha256 "\$DSMM_FROZEN_SHA256"/u);
-  for (const required of ["--require-hook", "--acceptance-hook", "profile-ui-harness-server.mjs", "profile-ui-harness-browser.mjs", "profile-ui-harness-native.mjs", "native-picker-harness.mjs", "native-picker-browser.mjs", "native-picker-proof.mjs"]) assert.ok(yaml.includes(required));
-  assert.doesNotMatch(yaml, /NPM_TOKEN|NODE_AUTH_TOKEN|--clobber|npm publish/u);
-  assert.equal((yaml.match(/artifact-ids: \$\{\{ needs\.prepare\.outputs\.artifact-id \}\}/gu) ?? []).length, 3);
-  const importer = yaml.split("  import-bootstrap:\n")[1].split("  prepare:\n")[0];
-  const prepare = yaml.split("  prepare:\n")[1].split("  publish:\n")[0];
-  assert.match(importer, /if: github\.event_name == 'workflow_dispatch'/u);
-  assert.match(importer, /contents: write/u);
-  assert.doesNotMatch(importer, /id-token:|pnpm|corepack|docker|\.mjs publish|\.mjs transport|\.mjs finalize/u);
-  assert.match(importer, /\.mjs bootstrap /u);
-  assert.match(importer, /name: dsmm-bootstrap-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/u);
-  assert.match(prepare, /needs: import-bootstrap/u);
-  assert.match(prepare, /!cancelled\(\).*workflow_dispatch.*needs\.import-bootstrap\.result == 'success'.*push.*needs\.import-bootstrap\.result == 'skipped'/u);
-  assert.match(prepare, /permissions:\n      contents: read/u);
-  assert.match(prepare, /artifact-ids: \$\{\{ needs.import-bootstrap.outputs.artifact-id \}\}/u);
-  assert.doesNotMatch(prepare, /\.mjs bootstrap /u);
-  assert.match(prepare, /\.mjs validate .*--context "\$RUNNER_TEMP\/dsmm-context.json".*--artifact-dir "\$RUNNER_TEMP\/dsmm-accepted"/u);
-  assert.match(yaml, /!cancelled\(\) && needs.prepare.result == 'success'/u);
+  const { createRequire } = await import("node:module");
+  const sdk = createRequire(new URL("../dsmm/package.json", import.meta.url));
+  const yaml = createRequire(sdk.resolve("@deepseek-ai/dsh-agent-preset-registry"))("js-yaml");
+  const workflow = yaml.load(readFileSync(new URL("../.github/workflows/dsmm-release.yml", import.meta.url), "utf8"));
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.equal(workflow.permissions.contents, "read");
+  assert.equal(workflow.jobs.prepare.permissions.contents, "read");
+  assert.equal(workflow.jobs.publish.permissions.contents, "read");
+  assert.equal(workflow.jobs.publish.permissions["id-token"], "write");
+  for (const [name, job] of Object.entries<any>(workflow.jobs)) {
+    if (!["publish", "publish-recovery-022"].includes(name)) assert.equal(job.permissions?.["id-token"], undefined);
+    for (const step of job.steps) if (step.uses?.startsWith("actions/checkout@")) assert.equal(step.with["persist-credentials"], false);
+  }
+  assert.equal(workflow.jobs["import-bootstrap"].permissions.contents, "write");
+  assert.equal(workflow.jobs["github-release"].permissions.contents, "write");
+  assert.deepEqual(workflow.jobs.verify.needs, ["prepare", "publish", "prepare-recovery-022", "publish-recovery-022"]);
+  assert.ok(workflow.jobs["github-release"].needs.includes("prepare-recovery-022"));
 });

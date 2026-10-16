@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -9,7 +9,8 @@ import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion,
 import { UI_CHECKS_015, sessionProfileChecksForVersion, requiresSessionProfileProof, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
 import { isSource020, isSource022, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
-import { assertPackSource, CONTROL_FILES } from "./release-source.mjs";
+import { assertPackSource, CONTROL_FILES, RECOVERY_CONTROL_FILES } from "./release-source.mjs";
+import { RECOVERY_022, RELEASE_TOPOLOGY, dispatchSelector, selectAcceptedArtifact, validateRecoveryBinding } from "./release-recovery-policy.mjs";
 
 export const POLICY = Object.freeze({
   repository: "hugefiver/ocmm", packageName: "@dsmm/dsmm", defaultBranch: "master",
@@ -58,10 +59,20 @@ export function resolveReleaseContext(input) {
   for (const key of ["eventSha", "workflowSha", "controlSha", "peeledSha"]) invariant(sha.test(input[key]), `invalid ${key}`);
   for (const key of ["runId", "runAttempt"]) invariant(positiveId.test(String(input[key])), `invalid ${key}`);
   equal(input.controlSha, input.workflowSha, "control/workflow SHA");
-  const mode = input.eventName === "workflow_dispatch" ? "bootstrap" : input.eventName === "push" ? "future" : null;
+  const selector = dispatchSelector(input.inputs);
+  invariant(!selector || input.eventName === "workflow_dispatch", "recovery is dispatch-only");
+  const mode = input.eventName === "workflow_dispatch" ? selector ? "recovery-022" : "bootstrap" : input.eventName === "push" ? "future" : null;
   invariant(mode, "only workflow_dispatch bootstrap or tag push is permitted");
   let tag, version;
-  if (mode === "bootstrap") {
+  if (mode === "recovery-022") {
+    equal(input.ref, "refs/heads/master", "recovery ref");
+    equal(input.eventSha, input.controlSha, "recovery event/control SHA");
+    equal(input.peeledSha, RECOVERY_022.releaseSha, "recovery fixed source SHA");
+    invariant(input.controlSha !== RECOVERY_022.releaseSha, "recovery requires distinct controls");
+    equal(input.controlInDefaultHistory, true, "trusted recovery control ancestry");
+    invariant(String(input.runId) !== RECOVERY_022.runId, "recovery needs a new run");
+    tag = RECOVERY_022.tag; version = RECOVERY_022.version;
+  } else if (mode === "bootstrap") {
     equal(input.ref, "refs/heads/master", "bootstrap ref");
     equal(input.eventSha, input.controlSha, "bootstrap event/control SHA");
     equal(input.peeledSha, BOOTSTRAP.releaseSha, "bootstrap release SHA");
@@ -82,6 +93,7 @@ export function resolveReleaseContext(input) {
   equal(input.workflowRef, `${POLICY.repository}/${POLICY.workflowFile}@${input.ref}`, "workflow identity");
   equal(input.packageVersion, version, "source package version");
   return { schemaVersion: 1, repository: POLICY.repository, packageName: POLICY.packageName, mode,
+    releaseTopology: RELEASE_TOPOLOGY, recoveryPolicy: mode === "recovery-022" ? RECOVERY_022.selector : null,
     version, tag, releaseSha: input.peeledSha, controlSha: input.controlSha,
     workflow: { file: POLICY.workflowFile, ref: input.workflowRef, sha: input.workflowSha },
     eventName: input.eventName, eventSha: input.eventSha, ref: input.ref,
@@ -90,7 +102,7 @@ export function resolveReleaseContext(input) {
     bootstrapImport: mode === "bootstrap" ? { job: "import-bootstrap", artifactName: `dsmm-bootstrap-${input.runId}-${input.runAttempt}`,
       runId: String(input.runId), runAttempt: String(input.runAttempt) } : null,
     origin: mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built",
-    provenance: mode === "future", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "REQUIRED_BEFORE_FREEZE" };
+    provenance: mode !== "bootstrap", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "REQUIRED_BEFORE_FREEZE" };
 }
 
 export const UI_CHECKS = Object.freeze([
@@ -465,12 +477,18 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.receiptFilename, POLICY.receiptFilename, "receipt filename");
   equal(identity.workflow?.file, POLICY.workflowFile, "identity workflow file");
   equal(identity.workflow?.sha, identity.controlSha, "identity workflow SHA");
-  invariant(identity.mode === "bootstrap" || identity.mode === "future", "invalid identity mode");
+  invariant(["bootstrap", "future", "recovery-022"].includes(identity.mode), "invalid identity mode");
+  const dispatch = identity.mode !== "future";
+  if (identity.mode === "recovery-022") validateRecoveryBinding(identity);
+  else {
+    invariant(identity.releaseTopology === undefined || identity.releaseTopology === RELEASE_TOPOLOGY, "invalid release topology");
+    invariant(identity.recoveryPolicy === undefined || identity.recoveryPolicy === null, "unexpected recovery policy");
+  }
   equal(identity.origin, identity.mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built", "artifact origin");
-  equal(identity.provenance, identity.mode === "future", "artifact provenance policy");
-  equal(identity.eventName, identity.mode === "bootstrap" ? "workflow_dispatch" : "push", "identity event");
-  equal(identity.ref, identity.mode === "bootstrap" ? "refs/heads/master" : `refs/tags/${identity.tag}`, "identity ref");
-  equal(identity.eventSha, identity.mode === "bootstrap" ? identity.controlSha : identity.releaseSha, "identity event SHA");
+  equal(identity.provenance, identity.mode !== "bootstrap", "artifact provenance policy");
+  equal(identity.eventName, dispatch ? "workflow_dispatch" : "push", "identity event");
+  equal(identity.ref, dispatch ? "refs/heads/master" : `refs/tags/${identity.tag}`, "identity ref");
+  equal(identity.eventSha, dispatch ? identity.controlSha : identity.releaseSha, "identity event SHA");
   equal(identity.workflow.ref, `${POLICY.repository}/${POLICY.workflowFile}@${identity.ref}`, "identity workflow ref");
   if (identity.mode === "future") equal(identity.controlSha, identity.releaseSha, "future source/control identity");
   equal(identity.dockerAcceptance?.outcome, "COMPLETED", "artifact Docker acceptance");
@@ -490,7 +508,7 @@ export function validateArtifactIdentity(identity, { context } = {}) {
     equal(identity.bootstrapTransport, null, "future transport is not the frozen bootstrap");
     equal(identity.bootstrapImport, null, "future bootstrap import is not applicable");
   }
-  if (context) for (const key of ["repository", "packageName", "mode", "version", "tag", "releaseSha", "controlSha", "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "origin", "provenance", "bootstrapTransport", "bootstrapImport"]) equal(identity[key], context[key], `run-bound ${key}`);
+  if (context) for (const key of ["repository", "packageName", "mode", "version", "tag", "releaseSha", "controlSha", "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "origin", "provenance", "bootstrapTransport", "bootstrapImport", "releaseTopology", "recoveryPolicy"]) equal(identity[key], context[key], `run-bound ${key}`);
   return identity;
 }
 
@@ -571,6 +589,11 @@ export function prepareTransport(directory, context, { tarballPath, receiptPath,
 }
 
 export function validateArtifactDirectory(directory, context) {
+  if (context.releaseTopology === RELEASE_TOPOLOGY) {
+    const keys = ["schemaVersion", "repository", "packageName", "mode", "releaseTopology", "recoveryPolicy", "version", "tag", "releaseSha", "controlSha",
+      "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "bootstrapTransport", "bootstrapImport", "origin", "provenance", "sourceChecks"];
+    equal(Object.keys(context).sort(byteOrder), keys.sort(byteOrder), "stable cross-job context fields");
+  }
   equal(readdirSync(directory).sort(byteOrder), [...expectedAssetNames(context.version), "identity.json", "context.json"].sort(byteOrder), "exact accepted artifact file set");
   for (const name of readdirSync(directory)) invariant(lstatSync(join(directory, name)).isFile() && !lstatSync(join(directory, name)).isSymbolicLink(), "artifact files must not be links");
   equal(JSON.parse(readFileSync(join(directory, "context.json"), "utf8")), context, "downloaded run context");
@@ -597,8 +620,8 @@ export function resolveContextFromEnvironment(controlRoot, env = process.env) {
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
   equal(event.repository?.full_name, POLICY.repository, "event repository");
   equal(event.repository?.default_branch, POLICY.defaultBranch, "event default branch");
-  if (env.GITHUB_EVENT_NAME === "workflow_dispatch") equal(event.inputs ?? {}, {}, "bootstrap exposes no caller-controlled inputs");
-  const tag = env.GITHUB_EVENT_NAME === "workflow_dispatch" ? BOOTSTRAP.tag : String(env.GITHUB_REF).slice("refs/tags/".length);
+  const selector = dispatchSelector(event.inputs);
+  const tag = env.GITHUB_EVENT_NAME === "workflow_dispatch" ? selector ? RECOVERY_022.tag : BOOTSTRAP.tag : String(env.GITHUB_REF).slice("refs/tags/".length);
   invariant(/^dsmm-scoped-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(tag), "unsafe tag");
   const peeledSha = git(controlRoot, ["rev-parse", "--verify", `refs/tags/${tag}^{commit}`]);
   const controlSha = git(controlRoot, ["rev-parse", "HEAD"]);
@@ -609,10 +632,11 @@ export function resolveContextFromEnvironment(controlRoot, env = process.env) {
     equal(event.deleted, false, "deleted tag forbidden");
   }
   invariant(CONTROL_FILES.every((path) => hasGitPath(controlRoot, controlSha, path)), "checkout is missing trusted local controls");
+  if (selector) invariant(RECOVERY_CONTROL_FILES.every(path => hasGitPath(controlRoot, controlSha, path)), "recovery controls missing");
   const manifest = JSON.parse(git(controlRoot, ["show", `${peeledSha}:dsmm/package.json`]));
   equal(manifest.name, POLICY.packageName, "source package name");
   return resolveReleaseContext({ repository: env.GITHUB_REPOSITORY, defaultBranch: event.repository.default_branch,
-    eventName: env.GITHUB_EVENT_NAME, ref: env.GITHUB_REF, eventSha: env.GITHUB_SHA,
+    eventName: env.GITHUB_EVENT_NAME, inputs: event.inputs, ref: env.GITHUB_REF, eventSha: env.GITHUB_SHA,
     workflowRef: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA, controlSha, peeledSha,
     runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT, packageVersion: manifest.version,
     controlInDefaultHistory: isAncestor(controlRoot, controlSha), sourceInDefaultHistory: isAncestor(controlRoot, peeledSha),
@@ -630,8 +654,9 @@ async function responseBuffer(response, maxBytes = 16 * 1024 * 1024) {
 
 export async function githubRequest(path, { method = "GET", body, binary = false, allow404 = false, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN } = {}) {
   const pagination = typeof path === "string" && /^\/repos\/hugefiver\/ocmm\/releases\?per_page=100&page=(?:[1-9]|1[0-9]|20)$/u.test(path);
-  invariant(typeof path === "string" && path.startsWith(`/repos/${POLICY.repository}/`)
-    && (!/[?#\s]/u.test(path) || (pagination && method === "GET" && body === undefined && !binary && !allow404)), "untrusted GitHub API path");
+  const recoveryInventory = typeof path === "string" && /^\/repos\/hugefiver\/ocmm\/actions\/runs\/38822000490\/(?:attempts\/1\/jobs|artifacts)\?per_page=100&page=(?:[1-9]|1[0-9]|20)$/u.test(path);
+  invariant(typeof path === "string" && (path === `/repos/${POLICY.repository}` || path.startsWith(`/repos/${POLICY.repository}/`))
+    && (!/[?#\s]/u.test(path) || ((pagination || recoveryInventory) && method === "GET" && body === undefined && !binary && !allow404)), "untrusted GitHub API path");
   if (pagination) invariant(typeof token === "string" && token.length > 0, "authenticated GitHub Release list is required to inspect drafts");
   const headers = { Accept: binary ? "application/octet-stream" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -728,7 +753,9 @@ export function validateRegistryMetadata(metadata, identity) {
 }
 
 export function validateRegistryProvenance(attestations, identity) {
-  invariant(identity.mode === "future", "bootstrap must not claim CI build provenance");
+  invariant(identity.mode === "future" || identity.mode === "recovery-022", "bootstrap must not claim CI build provenance");
+  const recovery = identity.mode === "recovery-022";
+  if (recovery) validateRecoveryBinding(identity);
   invariant(Array.isArray(attestations?.attestations), "npm attestations response missing");
   const candidates = attestations.attestations.filter((entry) => entry.predicateType === "https://slsa.dev/provenance/v1");
   invariant(candidates.length === 1, "one supported genuine CI provenance statement required");
@@ -745,13 +772,14 @@ export function validateRegistryProvenance(attestations, identity) {
   const definition = statement.predicate?.buildDefinition;
   equal(definition?.buildType, "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1", "provenance build type");
   equal(definition?.externalParameters?.workflow, { ref: identity.ref, repository: `https://github.com/${POLICY.repository}`, path: POLICY.workflowFile }, "provenance workflow/source ref");
-  invariant(Array.isArray(definition.resolvedDependencies) && definition.resolvedDependencies.some((dependency) => dependency.uri === `git+https://github.com/${POLICY.repository}@${identity.ref}` && dependency.digest?.gitCommit === identity.releaseSha), "provenance tagged source commit missing");
+  invariant(Array.isArray(definition.resolvedDependencies) && definition.resolvedDependencies.some((dependency) => dependency.uri === `git+https://github.com/${POLICY.repository}@${identity.ref}` && dependency.digest?.gitCommit === (recovery ? identity.controlSha : identity.releaseSha)), "provenance workflow commit missing");
+  if (recovery) equal(definition.internalParameters?.github?.event_name, "workflow_dispatch", "provenance actual dispatch event");
   const runDetails = statement.predicate?.runDetails;
   equal(runDetails?.builder?.id, "https://github.com/actions/runner/github-hosted", "provenance hosted builder");
   equal(runDetails?.metadata?.invocationId, `https://github.com/${POLICY.repository}/actions/runs/${identity.runId}/attempts/${identity.runAttempt}`, "provenance run/attempt");
-  equal(identity.controlSha, identity.releaseSha, "provenance control/source SHA");
+  if (!recovery) equal(identity.controlSha, identity.releaseSha, "provenance control/source SHA");
   return { outcome: "COMPLETED", source: "npm-registry-served-validated-attestation-over-https", predicateType: statement.predicateType,
-    sourceSha: identity.releaseSha, workflowFile: POLICY.workflowFile, runId: identity.runId, runAttempt: identity.runAttempt,
+    ...(recovery ? { productSourceSha: identity.releaseSha, attestedControlSha: identity.controlSha } : { sourceSha: identity.releaseSha }), workflowFile: POLICY.workflowFile, runId: identity.runId, runAttempt: identity.runAttempt,
     independentSigstoreVerification: false };
 }
 
@@ -778,12 +806,12 @@ export async function verifyRegistryArtifact(identity, fetcher = fetch, { visibi
   validateArtifactIdentity(identity);
   // This is an after-publication read path only. Absence checks used by the
   // publisher stay single-shot and can never admit a collision or republish.
-  const poll404 = identity.mode === "future" && requiresSessionProfileProof(identity.version);
+  const poll404 = identity.mode !== "bootstrap" && requiresSessionProfileProof(identity.version);
   const visibilityCap = identity.mode === "future" && identity.version === "0.1.9" ? 1_200_000 : 300_000;
   invariant(Number.isSafeInteger(visibilityDeadlineMs) && visibilityDeadlineMs >= 0 && visibilityDeadlineMs <= visibilityCap, "invalid registry visibility deadline");
   invariant(Number.isSafeInteger(visibilityPollMs) && visibilityPollMs > 0 && visibilityPollMs <= 10_000, "invalid registry visibility poll");
   const deadline = now() + visibilityDeadlineMs;
-  const prospective = identity.mode === "future" && (["0.1.8", "0.1.9"].includes(identity.version) || isReviewedSource(identity.version));
+  const prospective = identity.mode !== "bootstrap" && (["0.1.8", "0.1.9"].includes(identity.version) || isReviewedSource(identity.version));
   let stage = "registry-metadata";
   // The reviewed 0.1.8/0.1.9 contracts bound every public visibility read to one
   // deadline. Historical contracts and all publisher absence checks stay intact.
@@ -885,6 +913,10 @@ export async function publishArtifact(directory, context, workDirectory, { env =
   equal(computeDigests(readFileSync(artifactPath)).sha256, identity.sha256, "pre-publish bytes");
   await verifyRemoteReleaseTag(identity, request);
   invariant(await registryVersion(identity.version, fetcher) === null, "registry version appeared before upload; no publication attempted");
+  if (identity.mode === "recovery-022") {
+    const { assertRecoveryAdmission } = await import("./release-recovery-022.mjs");
+    await assertRecoveryAdmission(context, { request, fetcher });
+  }
   let failure;
   try { execute("pnpm", publishArguments(identity, artifactPath), { cwd: workDirectory, env: publishEnv, timeout: 600000 }); } catch (error) { failure = error; }
   equal(computeDigests(readFileSync(artifactPath)).sha256, identity.sha256, "post-publish bytes");
@@ -953,12 +985,12 @@ export async function finalizeRelease(directory, context, verification, request 
   return { outcome: "PUBLIC_NOT_TERMINALLY_VERIFIED", releaseId: String(result.id), tag: identity.tag, sha256: identity.sha256 };
 }
 
-export function packFrozenArtifact(controlRoot, context, directory, execute = run) {
-  assertPackSource(controlRoot, context);
+export function packFrozenArtifact(controlRoot, context, directory, execute = run, sourceRoot) {
+  assertPackSource(controlRoot, context, undefined, { sourceRoot });
   emptyOwnedDirectory(directory);
   equal(execute("pnpm", ["--version"]), POLICY.pnpmVersion, "packing pnpm runtime");
-  execute("pnpm", ["--dir", join(controlRoot, "dsmm"), "pack", "--pack-destination", directory], { timeout: 600000 });
-  assertPackSource(controlRoot, context);
+  execute("pnpm", ["--dir", join(sourceRoot ?? controlRoot, "dsmm"), "pack", "--pack-destination", directory], { timeout: 600000 });
+  assertPackSource(controlRoot, context, undefined, { sourceRoot });
   const filename = `dsmm-dsmm-${context.version}.tgz`;
   equal(readdirSync(directory), [filename], "exact one-time packed file set");
   const artifact = validateTarballBuffer(readFileSync(join(directory, filename)), { version: context.version });
@@ -966,18 +998,18 @@ export function packFrozenArtifact(controlRoot, context, directory, execute = ru
 }
 
 function parseCli(args) {
-  const command = args.shift(); invariant(["resolve", "assert-source", "bootstrap", "pack", "freeze", "validate", "publish", "transport", "finalize"].includes(command), "unknown trusted-release stage");
+  const command = args.shift(); invariant(["resolve", "select-artifact", "assert-source", "bootstrap", "pack", "freeze", "validate", "publish", "transport", "finalize"].includes(command), "unknown trusted-release stage");
   const options = {};
   while (args.length) {
     const key = args.shift(); const value = args.shift();
     invariant(/^--[a-z-]+$/u.test(key ?? "") && value && !value.startsWith("--") && !Object.hasOwn(options, key.slice(2)), "invalid or duplicate CLI option");
     options[key.slice(2)] = value;
   }
-  const allowed = { resolve: ["control-root", "output"], "assert-source": ["control-root", "context"], bootstrap: ["control-root", "context", "output-dir"], pack: ["control-root", "context", "output-dir"],
+  const allowed = { resolve: ["control-root", "output"], "select-artifact": ["control-root"], "assert-source": ["control-root", "context"], bootstrap: ["control-root", "context", "output-dir"], pack: ["control-root", "context", "output-dir"],
     freeze: ["control-root", "context", "tarball", "receipt", "output-dir", "source-checks"],
     validate: ["control-root", "context", "artifact-dir"], publish: ["control-root", "context", "artifact-dir", "work-dir"],
     transport: ["control-root", "context", "artifact-dir"], finalize: ["control-root", "context", "artifact-dir", "verification"] };
-  for (const key of Object.keys(options)) invariant(allowed[command].includes(key), `unrecognized ${command} option`);
+  for (const key of Object.keys(options)) invariant(allowed[command].includes(key) || (key === "source-root" && ["assert-source", "pack", "freeze"].includes(command)), `unrecognized ${command} option`);
   for (const key of allowed[command].filter((key) => key !== "source-checks")) invariant(options[key], `missing --${key}`);
   return { command, options };
 }
@@ -986,12 +1018,21 @@ export async function main(args = process.argv.slice(2)) {
   const { command, options } = parseCli([...args]);
   const context = resolveContextFromEnvironment(resolve(options["control-root"]));
   if (command === "resolve") { exclusivelyWrite(resolve(options.output), jsonBytes(context)); return context; }
+  if (command === "select-artifact") {
+    const id = selectAcceptedArtifact(context.mode, process.env.DSMM_NORMAL_ARTIFACT, process.env.DSMM_RECOVERY_ARTIFACT);
+    invariant(process.env.GITHUB_OUTPUT, "Actions output destination missing");
+    appendFileSync(process.env.GITHUB_OUTPUT, `artifact-id=${id}\n`); return { artifactId: id };
+  }
   equal(JSON.parse(readFileSync(resolve(options.context), "utf8")), context, "current event/control context");
-  if (command === "assert-source") return assertPackSource(resolve(options["control-root"]), context);
+  const sourceRoot = options["source-root"] && resolve(options["source-root"]);
+  if (command === "assert-source") return assertPackSource(resolve(options["control-root"]), context, undefined, { sourceRoot });
   const directory = options["artifact-dir"] && resolve(options["artifact-dir"]);
   if (command === "bootstrap") return downloadBootstrap(resolve(options["output-dir"]), context);
-  if (command === "pack") return packFrozenArtifact(resolve(options["control-root"]), context, resolve(options["output-dir"]));
-  if (command === "freeze") return prepareTransport(resolve(options["output-dir"]), context, { tarballPath: resolve(options.tarball), receiptPath: resolve(options.receipt), sourceChecks: options["source-checks"] });
+  if (command === "pack") return packFrozenArtifact(resolve(options["control-root"]), context, resolve(options["output-dir"]), undefined, sourceRoot);
+  if (command === "freeze") {
+    if (context.mode === "recovery-022") assertPackSource(resolve(options["control-root"]), context, undefined, { sourceRoot });
+    return prepareTransport(resolve(options["output-dir"]), context, { tarballPath: resolve(options.tarball), receiptPath: resolve(options.receipt), sourceChecks: options["source-checks"] });
+  }
   if (command === "validate") return validateArtifactDirectory(directory, context);
   if (command === "publish") return publishArtifact(directory, context, resolve(options["work-dir"]));
   if (command === "transport") return stageDraftTransport(directory, context);

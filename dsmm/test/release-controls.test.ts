@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 // @ts-expect-error Source-only release controls are deliberately not published.
 import * as controls from "../scripts/dsmm-release.mjs";
@@ -14,6 +17,8 @@ import { sessionProfileChecksForVersion, validateSessionProfileProof, validateSt
 import { runStartupLockContention } from "../scripts/profile-ui-acceptance.mjs";
 // @ts-expect-error Historical acceptance is a distinct source-only grammar.
 import { nativePickerContract } from "../scripts/native-picker-harness.mjs";
+// @ts-expect-error Source-only dispatch policy.
+import { HISTORICAL_TOPOLOGY, RECOVERY_022, RELEASE_TOPOLOGY, SPLIT_RELEASE_JOBS } from "../scripts/release-recovery-policy.mjs";
 // @ts-expect-error Synthetic historical data is never native acceptance proof.
 import { archiveFiles, contextInput, makeAcceptedFixture, makeInstallFixture, packageFiles, receiptFixture } from "../../src/dsmm-trusted-release-fixtures.mjs";
 
@@ -74,11 +79,11 @@ test("local registry probe accepts exact 020 installed Core/role/client bytes an
 test("reviewed source artifact and terminal authority bind fixed source/control/run/attempt and exact mode-specific jobs", () => {
   for (const version of ["0.2.0", "0.2.1", "0.2.2"]) {
     const { identity } = artifactFixture(version);
-    const expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha };
+    const expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha, releaseTopology: RELEASE_TOPOLOGY };
     const run = { id: Number(identity.runId), run_attempt: Number(identity.runAttempt), workflow_id: 123, repository: { full_name: "hugefiver/ocmm" }, head_repository: { full_name: "hugefiver/ocmm" }, status: "completed", conclusion: "success", head_sha: identity.controlSha, head_branch: identity.tag, event: "push" };
     const workflow = { id: 123, path: ".github/workflows/dsmm-release.yml" };
-    const jobs = completion.REQUIRED_JOBS.map((name: string, index: number) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: name === "import-bootstrap" ? "skipped" : "success" }));
-    assert.equal(completion.validateRunEvidence(run, workflow, jobs, identity, expected).length, 5);
+    const jobs = SPLIT_RELEASE_JOBS.map((name: string, index: number) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: name === "import-bootstrap" || name.includes("recovery") ? "skipped" : "success" }));
+    assert.equal(completion.validateRunEvidence(run, workflow, jobs, identity, expected).length, 7);
     for (const changedRun of [{ ...run, run_attempt: run.run_attempt + 1 }, { ...run, head_sha: "c".repeat(40) }, { ...run, conclusion: "failure" }, { ...run, status: "in_progress" }]) assert.throws(() => completion.validateRunEvidence(changedRun, workflow, jobs, identity, expected));
     assert.throws(() => completion.validateRunEvidence(run, workflow, jobs.slice(1), identity, expected));
     const wrongJob = structuredClone(jobs); wrongJob[0].conclusion = "success";
@@ -137,6 +142,16 @@ for (const version of ["0.2.1", "0.2.2"]) test(`${version} installs versioned pu
     const unverified = structuredClone(f.receipt); delete unverified.checks.coldMigrationResources;
     assert.throws(() => probe.validateInstallReceipt(unverified, f.identity));
   }
+});
+
+test("historical five-job DSMM validation remains explicitly bound to its original source/control/run/attempt", () => {
+  const { identity } = makeAcceptedFixture(), expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha, releaseTopology: HISTORICAL_TOPOLOGY };
+  const run = { id: Number(identity.runId), run_attempt: Number(identity.runAttempt), workflow_id: 123, repository: { full_name: identity.repository },
+    head_repository: { full_name: identity.repository }, status: "completed", conclusion: "success", head_sha: identity.controlSha, head_branch: identity.tag, event: "push" };
+  const workflow = { id: 123, path: ".github/workflows/dsmm-release.yml" };
+  const jobs = completion.REQUIRED_JOBS.map((name: string, index: number) => ({ id: index + 1, name, status: "completed", conclusion: name === "import-bootstrap" ? "skipped" : "success", run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt) }));
+  assert.equal(completion.validateRunEvidence(run, workflow, jobs, identity, expected).length, 5);
+  for (const changed of [{ ...expected, runAttempt: "2" }, { ...expected, controlSha: "c".repeat(40) }, { ...expected, releaseTopology: RELEASE_TOPOLOGY }]) assert.throws(() => completion.validateRunEvidence(run, workflow, jobs, identity, changed));
 });
 
 test("022 tarballs require nonempty permission resources and preserve the exact versioned docs surface", () => {
@@ -377,4 +392,166 @@ test("reviewed stable artifacts deliver the exact executable resources without w
     }
     assert.equal(controls.isForbiddenPackagePath("skills/coding-agent-sessions/scripts/agent_sessions/injected.py", version), true);
   }
+});
+
+function recoveryFixture() {
+  const f = stableDockerFixture("0.2.2"), controlSha = "e".repeat(40);
+  const context = controls.resolveReleaseContext({ repository: RECOVERY_022.repository, packageVersion: "0.2.2", inputs: { recovery: RECOVERY_022.selector },
+    eventName: "workflow_dispatch", ref: "refs/heads/master", eventSha: controlSha, workflowSha: controlSha, controlSha,
+    workflowRef: "hugefiver/ocmm/.github/workflows/dsmm-release.yml@refs/heads/master", peeledSha: RECOVERY_022.releaseSha,
+    runId: "900001", runAttempt: "1", controlInDefaultHistory: true });
+  const receiptBytes = Buffer.from(JSON.stringify(f.receipt));
+  const identity = controls.createArtifactIdentity(context, f.tarball, receiptBytes, { sourceChecks: "COMPLETED" });
+  const assets = new Map([[identity.filename, f.tarball], [identity.receiptFilename, receiptBytes], ["SHA256SUMS.txt", controls.deterministicChecksums(identity)]]);
+  return { ...f, identity, context, receiptBytes, assets };
+}
+function recoveryProvenance(identity: any) {
+  return { _type: "https://in-toto.io/Statement/v1", predicateType: "https://slsa.dev/provenance/v1",
+    subject: [{ name: `pkg:npm/%40dsmm/dsmm@${identity.version}`, digest: { sha512: Buffer.from(identity.integrity.slice(7), "base64").toString("hex") } }],
+    predicate: { buildDefinition: { buildType: "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+      externalParameters: { workflow: { ref: "refs/heads/master", repository: "https://github.com/hugefiver/ocmm", path: ".github/workflows/dsmm-release.yml" } },
+      internalParameters: { github: { event_name: "workflow_dispatch" } },
+      resolvedDependencies: [{ uri: "git+https://github.com/hugefiver/ocmm@refs/heads/master", digest: { gitCommit: identity.controlSha } }] },
+      runDetails: { builder: { id: "https://github.com/actions/runner/github-hosted" },
+        metadata: { invocationId: `https://github.com/hugefiver/ocmm/actions/runs/${identity.runId}/attempts/${identity.runAttempt}` } } } };
+}
+function attestation(statement: any) {
+  return { attestations: [{ predicateType: statement.predicateType, bundle: { dsseEnvelope: { payloadType: "application/vnd.in-toto+json",
+    payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [{ sig: "synthetic-validator-fixture" }] } } }] };
+}
+function recoveryRegistry(f: ReturnType<typeof recoveryFixture>) {
+  const i = f.identity, statement = recoveryProvenance(i);
+  const metadata = { name: "@dsmm/dsmm", version: i.version, dist: { shasum: i.sha1, integrity: i.integrity,
+    tarball: `https://registry.npmjs.org/@dsmm/dsmm/-/dsmm-${i.version}.tgz`, attestations: {
+      url: `https://registry.npmjs.org/-/npm/v1/attestations/@dsmm%2fdsmm@${i.version}`, provenance: { predicateType: statement.predicateType } } } };
+  return { metadata, fetcher: async (url: string) => url === metadata.dist.tarball ? new Response(f.tarball)
+    : url === metadata.dist.attestations.url ? Response.json(attestation(statement)) : Response.json(metadata) };
+}
+
+test("recovery provenance truthfully attests master control and frozen subject, never the distinct product source as a build commit", () => {
+  const f = recoveryFixture(), statement = recoveryProvenance(f.identity);
+  const proof = controls.validateRegistryProvenance(attestation(statement), f.identity);
+  assert.equal(proof.attestedControlSha, f.identity.controlSha); assert.equal(proof.productSourceSha, RECOVERY_022.releaseSha);
+  assert.equal(proof.sourceSha, undefined);
+  for (const change of [
+    (p: any) => { p.subject[0].digest.sha512 = "0".repeat(128); },
+    (p: any) => { p.predicate.buildDefinition.externalParameters.workflow.ref = `refs/tags/${RECOVERY_022.tag}`; },
+    (p: any) => { p.predicate.buildDefinition.externalParameters.workflow.path = ".github/workflows/other.yml"; },
+    (p: any) => { p.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit = RECOVERY_022.releaseSha; },
+    (p: any) => { p.predicate.buildDefinition.resolvedDependencies[0].uri = `git+https://github.com/hugefiver/ocmm@refs/tags/${RECOVERY_022.tag}`; },
+    (p: any) => { p.predicate.buildDefinition.internalParameters.github.event_name = "push"; },
+    (p: any) => { delete p.predicate.buildDefinition.internalParameters; },
+    (p: any) => { p.predicate.runDetails.builder.id = "self-hosted"; },
+    (p: any) => { p.predicate.runDetails.metadata.invocationId = `https://github.com/hugefiver/ocmm/actions/runs/${RECOVERY_022.runId}/attempts/1`; },
+  ]) { const p = structuredClone(statement); change(p); assert.throws(() => controls.validateRegistryProvenance(attestation(p), f.identity)); }
+  for (const change of [
+    (r: any) => { delete r.nativeCore; }, (r: any) => { delete r.lsp; }, (r: any) => { delete r.uiProfiles; },
+    (r: any) => { r.native.web.artifactSha256 = "b".repeat(64); },
+  ]) { const receipt = structuredClone(f.receipt); change(receipt); assert.throws(() => controls.createArtifactIdentity(f.context, f.tarball, Buffer.from(JSON.stringify(receipt)), { sourceChecks: "COMPLETED" })); }
+  assert.throws(() => controls.validateArtifactIdentity({ ...f.identity, releaseSha: f.identity.controlSha }));
+});
+
+test("recovery metadata, tarball and provenance share the bounded post-publication 404 budget", async () => {
+  const f = recoveryFixture(), registry = recoveryRegistry(f);
+  let now = 0; const visited = new Set<string>();
+  const result = await controls.verifyRegistryArtifact(f.identity, async (url: string) => {
+    if (!visited.has(url)) { visited.add(url); return new Response(null, { status: 404 }); }
+    return registry.fetcher(url);
+  }, { now: () => now, wait: async (ms: number) => { now += ms; } });
+  assert.equal(result.provenance.attestedControlSha, f.identity.controlSha); assert.equal(now, 6_000); assert.equal(visited.size, 3);
+  now = 0;
+  await assert.rejects(controls.verifyRegistryArtifact(f.identity, async () => new Response(null, { status: 404 }), {
+    now: () => now, wait: async (ms: number) => { now += ms; },
+  }));
+  assert.equal(now, 120_000);
+  await assert.rejects(controls.verifyRegistryArtifact(f.identity, registry.fetcher, { visibilityDeadlineMs: 300_001 }));
+  for (const stage of [registry.metadata.dist.tarball, registry.metadata.dist.attestations.url]) {
+    now = 0;
+    await assert.rejects(controls.verifyRegistryArtifact(f.identity, async (url: string) => {
+      if (url === stage) return new Response(null, { status: 404 });
+      now += 45_000; return registry.fetcher(url);
+    }, { now: () => now, wait: async (ms: number) => { now += ms; } }));
+    assert.equal(now, 120_000);
+  }
+});
+
+test("recovery terminal traverses seven exact jobs, control-bound artifacts, immutable source/tag, native install and three public assets", async () => {
+  async function scenario(change?: string) {
+    const f = recoveryFixture(), i = f.identity, registry = recoveryRegistry(f), install = installFixture("0.2.2").receipt;
+    const verification = await completion.verifyPublishedArtifact(i, { registryCheck: () => controls.verifyRegistryArtifact(i, registry.fetcher), installProbe: async () => install });
+    const expected = { runId: i.runId, runAttempt: i.runAttempt, controlSha: i.controlSha, releaseTopology: RELEASE_TOPOLOGY, mode: "recovery-022" };
+    const run = { id: Number(i.runId), run_attempt: 1, workflow_id: RECOVERY_022.workflowId, repository: { full_name: i.repository }, head_repository: { full_name: i.repository },
+      status: "completed", conclusion: "success", head_sha: i.controlSha, head_branch: "master", event: "workflow_dispatch" };
+    const jobs = SPLIT_RELEASE_JOBS.map((name: string, index: number) => ({ id: index + 1, name, run_id: Number(i.runId), run_attempt: 1, status: "completed",
+      conclusion: ["import-bootstrap", "prepare", "publish"].includes(name) ? "skipped" : "success" }));
+    const artifacts = ["dsmm-accepted", "dsmm-registry-verification"].map((prefix, index) => ({ id: index + 10, name: `${prefix}-${i.runId}-1`, expired: false,
+      digest: `sha256:${"a".repeat(64)}`, workflow_run: { id: Number(i.runId), head_sha: i.controlSha, head_branch: "master" } }));
+    const assets = [...f.assets].map(([name, bytes], index) => ({ id: 20 + index, name, size: bytes.length, state: "uploaded" }));
+    if (change === "five-jobs") jobs.splice(3, 2);
+    if (change === "wrong-skip") jobs[1].conclusion = "success";
+    if (change === "missing-native-proof") delete verification.freshInstall.compiledFiles["lib/runtime-integration.js"];
+    if (change === "proof-run") verification.identity.runId = "900002";
+    if (change === "attested-source") verification.registry.provenance.attestedControlSha = i.releaseSha;
+    if (change === "artifact-control") artifacts[0].workflow_run.head_sha = i.releaseSha;
+    if (change === "artifact-branch") artifacts[1].workflow_run.head_branch = i.tag;
+    if (change === "artifact-other-run") artifacts[1].workflow_run.id++;
+    if (change === "source-substitution") f.context.releaseSha = i.controlSha;
+    if (change === "asset") assets.pop();
+    if (change === "downgrade") { delete f.context.releaseTopology; delete i.releaseTopology; }
+    if (change === "context-path") f.context.sourceRoot = "C:/untrusted/source";
+    const request = (path: string) => {
+      if (path === `actions/runs/${i.runId}/attempts/1`) return change === "event" ? { ...run, event: "push" } : run;
+      if (path.startsWith("actions/workflows/")) return { id: RECOVERY_022.workflowId, path: ".github/workflows/dsmm-release.yml" };
+      if (path.includes("/jobs?")) return { total_count: jobs.length, jobs };
+      if (path.includes("/artifacts?")) return { total_count: artifacts.length, artifacts };
+      if (path.startsWith("git/ref/")) return { object: { type: "commit", sha: change === "tag" ? i.controlSha : RECOVERY_022.releaseSha } };
+      if (path.startsWith("releases/tags/")) return { id: 33, tag_name: i.tag, draft: false, prerelease: false, assets };
+      throw Error(`unexpected terminal read ${path}`);
+    };
+    return completion.checkTerminalCompletion(expected, { request,
+      downloadArtifact: (artifact: any, directory: string) => {
+        if (artifact.id === 11) writeFileSync(join(directory, "dsmm-registry-verification.json"), JSON.stringify(verification));
+        else { for (const [name, bytes] of f.assets) writeFileSync(join(directory, name), bytes);
+          writeFileSync(join(directory, "context.json"), JSON.stringify(f.context)); writeFileSync(join(directory, "identity.json"), JSON.stringify(i)); }
+      }, fetchAsset: async (asset: any) => f.assets.get(asset.name),
+      publishedCheck: (identity: any, runtime: any) => completion.verifyPublishedArtifact(identity, { ...runtime, registryCheck: () => controls.verifyRegistryArtifact(identity, registry.fetcher) }),
+    });
+  }
+  const result = await scenario(); assert.equal(result.outcome, "COMPLETED"); assert.equal(result.workflow.jobs.length, 7);
+  assert.equal(result.artifact.releaseSha, RECOVERY_022.releaseSha); assert.equal(result.publication.registry.provenance.attestedControlSha, result.artifact.controlSha);
+  for (const change of ["five-jobs", "wrong-skip", "missing-native-proof", "proof-run", "attested-source", "artifact-control", "artifact-branch", "artifact-other-run", "source-substitution", "asset", "downgrade", "event", "tag", "context-path"]) await assert.rejects(scenario(change));
+});
+
+test("recovery publisher repeats original-run and absence admission at the sole irreversible boundary and never retries", async () => {
+  const f = recoveryFixture(), i = f.identity, owned = mkdtempSync(join(tmpdir(), "dsmm-recovery-publish-"));
+  try {
+    const accepted = join(owned, "accepted"); mkdirSync(accepted);
+    for (const [name, bytes] of f.assets) writeFileSync(join(accepted, name), bytes);
+    writeFileSync(join(accepted, "context.json"), JSON.stringify(f.context)); writeFileSync(join(accepted, "identity.json"), JSON.stringify(i));
+    for (const scenario of ["success", "attempt", "draft", "ambiguous-publish"]) {
+      let publishes = 0, originReads = 0, registryReads = 0;
+      const request = async (path: string) => {
+        if (path.endsWith("/compare/" + i.controlSha + "...master")) return { status: "ahead", merge_base_commit: { sha: i.controlSha } };
+        if (path === "/repos/hugefiver/ocmm") return { full_name: i.repository, default_branch: "master" };
+        if (path.includes("/git/ref/")) return { ref: `refs/tags/${i.tag}`, object: { type: "commit", sha: i.releaseSha } };
+        if (path.includes("/jobs?")) return { total_count: 5, jobs: ["import-bootstrap", "prepare", "publish", "verify", "github-release"].map((name, index) => ({ id: index + 1,
+          name, run_id: Number(RECOVERY_022.runId), run_attempt: 1, status: "completed", conclusion: name === "prepare" ? "failure" : "skipped" })) };
+        if (path.includes("/artifacts?")) return { total_count: 0, artifacts: [] };
+        if (path.includes("/actions/workflows/")) return { id: RECOVERY_022.workflowId, path: ".github/workflows/dsmm-release.yml" };
+        if (path.includes("/releases")) return path.includes("?") ? scenario === "draft" ? [{ id: 42, tag_name: i.tag, draft: true, prerelease: false }] : [] : { id: 42, tag_name: i.tag, draft: true, prerelease: false };
+        originReads++;
+        return { id: Number(RECOVERY_022.runId), run_attempt: scenario === "attempt" ? 2 : 1, repository: { full_name: i.repository }, head_repository: { full_name: i.repository },
+          workflow_id: RECOVERY_022.workflowId, status: "completed", conclusion: "failure", event: "push", head_sha: i.releaseSha, head_branch: i.tag };
+      };
+      const publish = () => controls.publishArtifact(accepted, f.context, join(owned, scenario), { request,
+        nodeVersion: "24.0.0", env: { GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://run.actions.githubusercontent.com/token", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "synthetic" },
+        fetcher: async () => { registryReads++; return new Response(null, { status: 404 }); },
+        execute: (_command: string, args: string[]) => { if (args[0] === "--version") return "11.9.0"; publishes++; assert.ok(originReads >= 3);
+          if (scenario === "ambiguous-publish") throw Error("unknown outcome"); return "submitted"; },
+      });
+      if (scenario === "success") { assert.equal((await publish()).outcome, "SUBMITTED_NOT_VERIFIED"); assert.equal(publishes, 1); assert.equal(registryReads, 3); }
+      else { await assert.rejects(publish()); assert.equal(publishes, scenario === "ambiguous-publish" ? 1 : 0); }
+    }
+    assert.equal(controls.computeDigests(readFileSync(join(accepted, i.filename))).sha256, i.sha256);
+  } finally { rmSync(owned, { recursive: true }); }
 });

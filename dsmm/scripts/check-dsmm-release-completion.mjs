@@ -9,6 +9,7 @@ import {
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { isReviewedSource } from "./release-contract.mjs";
+import { HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY, RECOVERY_022, SPLIT_RELEASE_JOBS } from "./release-recovery-policy.mjs";
 
 export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
 const REPOSITORY = "hugefiver/ocmm";
@@ -73,22 +74,31 @@ export function validateRunEvidence(run, workflow, jobs, identity, expected) {
   requireCondition(workflow.path === WORKFLOW && workflow.id === run.workflow_id, "wrong workflow file/ID");
   requireCondition(run.status === "completed" && run.conclusion === "success", "workflow has not successfully terminated");
   requireCondition(run.head_sha === identity.controlSha, "workflow control commit differs");
-  const bootstrap = identity.origin === "frozen-local-bootstrap";
-  requireCondition(run.event === (bootstrap ? "workflow_dispatch" : "push"), "workflow event differs");
+  const bootstrap = identity.origin === "frozen-local-bootstrap", recovery = identity.mode === "recovery-022", dispatch = bootstrap || recovery;
+  const topology = expected.releaseTopology ?? HISTORICAL_TOPOLOGY;
+  requireCondition([HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY].includes(topology), "untrusted topology");
+  requireCondition(topology === RELEASE_TOPOLOGY ? identity.releaseTopology === RELEASE_TOPOLOGY : identity.releaseTopology === undefined && !recovery, "artifact topology differs from trusted control expectation");
+  if (recovery) requireCondition(workflow.id === RECOVERY_022.workflowId && expected.mode === "recovery-022", "recovery workflow/expected mode differs");
+  if (expected.mode !== undefined) requireCondition(identity.mode === expected.mode, "expected release mode differs");
+  requireCondition(run.event === (dispatch ? "workflow_dispatch" : "push"), "workflow event differs");
   requireCondition(identity.eventName === run.event, "artifact event identity differs");
-  requireCondition(identity.ref === (bootstrap ? "refs/heads/master" : `refs/tags/${identity.tag}`), "artifact release ref differs");
+  requireCondition(identity.ref === (dispatch ? "refs/heads/master" : `refs/tags/${identity.tag}`), "artifact release ref differs");
   requireCondition(identity.workflow.ref === `${REPOSITORY}/${WORKFLOW}@${identity.ref}`, "artifact workflow ref differs");
-  requireCondition(!bootstrap || run.head_branch === "master", "bootstrap was not dispatched from master");
-  requireCondition(jobs.length === REQUIRED_JOBS.length, "unexpected workflow job set");
+  requireCondition(run.head_branch === (dispatch ? "master" : identity.tag), "workflow branch/tag differs");
+  const requiredJobs = topology === RELEASE_TOPOLOGY ? SPLIT_RELEASE_JOBS : REQUIRED_JOBS;
+  requireCondition(jobs.length === requiredJobs.length, "unexpected workflow job set");
   requireCondition(new Set(jobs.map(job => job.name)).size === jobs.length, "duplicate workflow jobs");
-  for (const name of REQUIRED_JOBS) {
+  requireCondition(new Set(jobs.map(job => job.id)).size === jobs.length, "duplicate job IDs");
+  const skipped = new Set(recovery ? ["import-bootstrap", "prepare", "publish"] : ["prepare-recovery-022", "publish-recovery-022", ...(bootstrap ? [] : ["import-bootstrap"])]);
+  for (const name of requiredJobs) {
     const job = jobs.find(candidate => candidate.name === name);
-    const expectedConclusion = name === "import-bootstrap" && !bootstrap ? "skipped" : "success";
+    requireCondition(Number.isSafeInteger(job?.id) && job.id > 0, `required job ${name} has an invalid ID`);
+    const expectedConclusion = skipped.has(name) ? "skipped" : "success";
     requireCondition(job?.status === "completed" && job.conclusion === expectedConclusion, `required job ${name} has the wrong mode-specific conclusion`);
     requireCondition(String(job.run_id) === String(expected.runId) && String(job.run_attempt) === String(expected.runAttempt), `job ${name} is from another run/attempt`);
   }
   return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt,
-    applicability: name === "import-bootstrap" && !bootstrap ? "NOT_APPLICABLE" : "REQUIRED" }));
+    applicability: skipped.has(name) ? "NOT_APPLICABLE" : "REQUIRED" }));
 }
 
 export function validateVerificationReceipt(receipt, identity) {
@@ -100,6 +110,13 @@ export function validateVerificationReceipt(receipt, identity) {
   const registry = receipt.registry;
   requireCondition(registry.name === "@dsmm/dsmm" && registry.version === identity.version && registry.registry === "https://registry.npmjs.org/", "registry package identity differs");
   requireCondition(registry.sha256 === identity.sha256 && registry.sha1 === identity.sha1 && registry.integrity === identity.integrity && registry.size === identity.size, "registry artifact differs");
+  if (identity.mode === "recovery-022") {
+    const p = registry.provenance;
+    requireCondition(p?.outcome === "COMPLETED" && p.productSourceSha === identity.releaseSha && p.attestedControlSha === identity.controlSha
+      && p.sourceSha === undefined && p.runId === identity.runId && p.runAttempt === identity.runAttempt
+      && p.workflowFile === WORKFLOW && p.predicateType === "https://slsa.dev/provenance/v1"
+      && p.source === "npm-registry-served-validated-attestation-over-https" && p.independentSigstoreVerification === false, "recovery provenance receipt differs");
+  }
   validateInstallReceipt(receipt.freshInstall, { version: identity.version, sha256: identity.sha256 });
   requireCondition(receipt.freshInstall.registry.size === identity.size && receipt.freshInstall.registry.sha1 === identity.sha1 && receipt.freshInstall.registry.integrity === identity.integrity, "fresh install registry identity differs");
   return receipt;
@@ -380,6 +397,7 @@ export async function checkTerminalPublishedContinuation(expected, { request = g
 }
 
 export async function checkTerminalCompletion(expected, { request = github, downloadArtifact = defaultDownloadArtifact, publishedCheck = verifyPublishedArtifact, fetchAsset = defaultFetchAsset } = {}) {
+  requireCondition(expected.releaseTopology === RELEASE_TOPOLOGY || expected.releaseTopology === HISTORICAL_TOPOLOGY, "terminal requires a trusted control topology");
   const run = request(`actions/runs/${expected.runId}/attempts/${expected.runAttempt}`);
   if (run.status !== "completed") throw new Error("workflow is still running");
   const workflow = request(`actions/workflows/${run.workflow_id}`);
@@ -406,7 +424,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     const identity = validateArtifactDirectory(owned, context);
     const jobs = validateRunEvidence(run, workflow, jobsResponse.jobs, identity, expected);
     if (isReviewedSource(identity.version)) for (const artifact of [acceptedArtifact, proofArtifact]) {
-      requireCondition(artifact.workflow_run.head_sha === identity.controlSha && artifact.workflow_run.head_branch === identity.tag, "run artifact source/control identity differs");
+      requireCondition(artifact.workflow_run.head_sha === identity.controlSha && artifact.workflow_run.head_branch === (identity.mode === "recovery-022" ? "master" : identity.tag), "run artifact source/control identity differs");
     }
     requireCondition(await peelRemoteTag(identity.tag, request) === identity.releaseSha, "immutable release tag changed");
     const expectedFiles = ["context.json", "identity.json", identity.filename, identity.receiptFilename, "SHA256SUMS.txt"].sort();
@@ -452,6 +470,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     return {
       schemaVersion: 1, outcome: "COMPLETED", repository: REPOSITORY,
       workflow: { file: WORKFLOW, id: workflow.id, controlSha: identity.controlSha, runId: expected.runId, runAttempt: expected.runAttempt, jobs },
+      releaseTopology: expected.releaseTopology,
       artifact: identity, githubRelease: { id: release.id, tag: release.tag_name, draft: false, assetIds: release.assets.map(({ id, name }) => ({ id, name })) },
       publication,
       bootstrapImportEvidence,
@@ -527,6 +546,7 @@ export function parseCompletionArguments(args) {
     "artifact-dir": { type: "string" }, "run-id": { type: "string" }, "run-attempt": { type: "string" },
     "control-sha": { type: "string" }, receipt: { type: "string" },
     "origin-version": { type: "string" },
+    recovery: { type: "string" },
   } });
   requireCondition(positionals.length === 1 && ["verify", "terminal", "terminal-continuation"].includes(positionals[0]), "choose verify, terminal or terminal-continuation mode");
   requireCondition(typeof values.receipt === "string" && values.receipt.length > 0, "--receipt is required");
@@ -534,6 +554,7 @@ export function parseCompletionArguments(args) {
     requireCondition(positionals[0] === "terminal-continuation", "--origin-version is only valid for terminal-continuation");
     resolvePublishedOriginPolicy(values["origin-version"]);
   }
+  if (values.recovery !== undefined) requireCondition(positionals[0] === "terminal" && values.recovery === RECOVERY_022.selector, "invalid recovery terminal selector");
   if (positionals[0] === "verify") requireCondition(Boolean(values["artifact-dir"]), "--artifact-dir is required");
   else {
     for (const key of ["run-id", "run-attempt"]) requireCondition(/^[1-9][0-9]*$/u.test(values[key] ?? ""), `invalid --${key}`);
@@ -553,6 +574,12 @@ export async function main(args = process.argv.slice(2)) {
       receipt = await verifyPublishedArtifact(identity);
     } else {
       const expected = { runId: options["run-id"], runAttempt: options["run-attempt"], controlSha: options["control-sha"] };
+      if (options.mode === "terminal") {
+        const checkout = fileURLToPath(new URL("../..", import.meta.url));
+        requireCondition(execFileSync("git", ["-C", checkout, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() === expected.controlSha, "terminal checkout must be the exact trusted control HEAD");
+        expected.releaseTopology = RELEASE_TOPOLOGY;
+        if (options.recovery) expected.mode = "recovery-022";
+      }
       receipt = options.mode === "terminal-continuation"
         ? await checkTerminalPublishedContinuation(expected, { originVersion: options["origin-version"] })
         : await checkTerminalCompletion(expected);
