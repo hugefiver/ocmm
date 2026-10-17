@@ -69,8 +69,11 @@ test("standard cold MAIN constructs its configured official loop only after DSMM
       { id: "agent-loop", disabled: true }, { id: "headless-startup", disabled: true }, { id: "headless-runner", disabled: true },
       { id: "session-persistence-jsonl", disabled: true },
       { id: "llm-pi-ai", config: { providers: {} } },
-      { id: "subagent", disabled: true },
-      { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: {} }] },
+      { id: "agent", disabled: true }, { id: "subagent", disabled: true },
+      { insert: [
+        { id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} },
+        { id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: {} },
+      ] },
       { id: "dsmm", inject: ["subagents"], config },
     ];
     await writeFile(join(profileDir, "cordis.patch.yml"), JSON.stringify(patches));

@@ -8,13 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { throwAfterCleanup } from "./docker-cleanup-errors.mjs";
 import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
-import { isReviewedSource, isSource022, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
+import { dshPolicyForVersion, isReviewedSource, isSource022, isSource030, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
 import { stableMainStartupRow, stableRuntimeStartupRows } from "./stable-native-acceptance.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PROFILE = "dsmm-v1-smoke";
 const PACKAGE_NAME = "@dsmm/dsmm";
-const DSH_VERSION = "0.2.0-rc.2";
 const ARTIFACT_RECEIPT_PREFIX = "DSMM_FINAL_ARTIFACT_RECEIPT ";
 const STOCK_PERSISTENCE_ID = "session-persistence-jsonl";
 const STOCK_PERSISTENCE_MODULE = "@deepseek-ai/dsh-session-persistence-jsonl";
@@ -109,14 +108,21 @@ export function parseContainerArtifactReceipt(output, expectedSha256) {
 async function runArtifactSmoke() {
   const options = parseArtifactOptions(process.argv.slice(2));
   if (process.env.DSMM_DOCKER_INNER === "1") return await runInnerArtifactSmoke(options);
+  const manifest = JSON.parse(success(spawnSync("tar", ["-xOf", options.artifact, "package/package.json"], { encoding: "utf8" }), "read frozen package manifest"));
+  const dshPolicy = dshPolicyForVersion(manifest.version);
   const imageTag = options.image ?? `dsmm-final-artifact:${process.pid}-${randomUUID()}`;
   let imageOwned = false;
+  let runtimeInputRoot;
   let primaryError;
   const cleanupErrors = [];
   let receipt = { outcome: "FAILED", acceptanceScope: "native-final-artifact", artifact: { sha256: options.sha256 }, uiProfiles: { outcome: "NOT_RUN" } };
   try {
     if (options.image === undefined) {
-      success(spawnSync("docker", ["build", "--build-arg", `DSH_PACKAGE=@deepseek-ai/dsh@${DSH_VERSION}`, "-f", "docker/Dockerfile.artifact", "-t", imageTag, ".."], { cwd: root, stdio: "inherit" }), "independent Docker runtime build");
+      runtimeInputRoot = mkdtempSync(join(tmpdir(), "dsmm-dsh-runtime-input-"));
+      const runtimeInput = join(runtimeInputRoot, "input");
+      const { prepareDshRuntimeInput } = await import("./prepare-dsh-runtime-input.mjs");
+      await prepareDshRuntimeInput({ packageVersion: manifest.version, destination: runtimeInput });
+      success(spawnSync("docker", ["build", "--build-context", `dsh-input=${runtimeInput}`, "--build-arg", `DSH_VERSION=${dshPolicy.runtimeVersion}`, "-f", "docker/Dockerfile.artifact", "-t", imageTag, ".."], { cwd: root, stdio: "inherit" }), "independent Docker runtime build");
       imageOwned = true;
     }
     const result = spawnSync("docker", artifactDockerArguments(options, imageTag), { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
@@ -134,6 +140,10 @@ async function runArtifactSmoke() {
   } finally {
     if (imageOwned) {
       try { success(spawnSync("docker", ["image", "rm", imageTag], { stdio: "inherit" }), "owned artifact image cleanup"); }
+      catch (error) { cleanupErrors.push(error); }
+    }
+    if (runtimeInputRoot !== undefined) {
+      try { rmSync(runtimeInputRoot, { recursive: true, force: false }); }
       catch (error) { cleanupErrors.push(error); }
     }
     receipt.runtimeImage = { name: imageTag, ownership: imageOwned ? "owned" : "borrowed", cleanup: imageOwned ? (cleanupErrors.length ? "FAILED" : "COMPLETED") : "NOT_APPLICABLE" };
@@ -165,7 +175,7 @@ export function preservedNativeStorage(control, ownedHome) {
 
 async function runInnerArtifactSmoke(options) {
   const owned = mkdtempSync(join(tmpdir(), "dsmm-final-artifact-"));
-  const receipt = { outcome: "FAILED", acceptanceScope: "native-final-artifact", dshVersion: DSH_VERSION,
+  const receipt = { outcome: "FAILED", acceptanceScope: "native-final-artifact",
     artifact: { sha256: options.sha256 }, installedPackages: [], native: {},
     sourceUnitTests: { outcome: "NOT_RUN", reason: "source tests are distinct evidence, not frozen-artifact acceptance" },
     uiProfiles: { outcome: "NOT_RUN", reason: "requires the separately supplied compiled UI/profile acceptance hook" } };
@@ -174,8 +184,10 @@ async function runInnerArtifactSmoke(options) {
   try {
     const manifest = JSON.parse(success(spawnSync("tar", ["-xOf", options.artifact, "package/package.json"], { encoding: "utf8" }), "read frozen package manifest"));
     if (manifest.name !== PACKAGE_NAME || !/^\d+\.\d+\.\d+$/u.test(manifest.version)) throw new Error("frozen artifact is not a versioned @dsmm/dsmm package");
+    const dshPolicy = dshPolicyForVersion(manifest.version);
+    receipt.dshVersion = dshPolicy.runtimeVersion;
     receipt.artifact.package = { name: manifest.name, version: manifest.version };
-    const dshRequire = pinnedDshRequire();
+    const dshRequire = pinnedDshRequire(dshPolicy.runtimeVersion);
     const dshManifest = dshRequire.resolve("@deepseek-ai/dsh/package.json");
     const yaml = dshRequire("js-yaml");
     const installs = [];
@@ -234,15 +246,15 @@ async function runInnerArtifactSmoke(options) {
         // patch. The name is an identity assertion, never a backend rename.
         { id: STOCK_PERSISTENCE_ID, name: STOCK_PERSISTENCE_MODULE, disabled: true },
         { id: "dsmm", config: { sessionPersistence: { ...nativeStorage }, defaultActive: true, roles: { "dsmm-builder": false }, roleRouting, runtimeRecovery: { enabled: false },
-          ...(isSource022(manifest.version) ? { presets: { plannerRootEnabled: true } } : {}) } },
+          ...(isSource022(manifest.version) || isSource030(manifest.version) ? { presets: { plannerRootEnabled: true } } : {}) } },
         { id: "agent-default-model", config: route },
         { id: "session-title-llm", disabled: true },
         { insert: [{ id: "dsmm-final-native-audit", name: pathToFileURL(join(root, "scripts", "native-preset-smoke.mjs")).href,
           config: { receipt: output, sha256: options.sha256, template, dshManifest, packageRoot, workspace, ownedHome: home, nativeStorage } }] }
       ];
       if (isStableNativeSource(manifest.version)) {
-        rows[1] = stableMainStartupRow(rows[1].config);
-        rows.unshift(...stableRuntimeStartupRows());
+        rows[1] = stableMainStartupRow(rows[1].config, manifest.version);
+        rows.unshift(...stableRuntimeStartupRows(manifest.version));
       }
       // Headless intentionally has no selector/Host. Keep its real composition,
       // but let the audit own the bounded native task rather than racing its driver.
@@ -267,7 +279,7 @@ async function runInnerArtifactSmoke(options) {
       mkdirSync(join(home, "plugins", "dsmm"), { recursive: true });
       writeFileSync(join(home, "plugins", "dsmm", "config.json"), JSON.stringify({ modules: { deepwork: { enabled: false } } }), { flag: "wx" });
       const output = join(owned, "core-receipt.json"), patch = join(owned, "core-audit.patch.yml");
-      const coreStartup = isStableNativeSource(manifest.version) ? [...stableRuntimeStartupRows(), stableMainStartupRow({})] : [];
+      const coreStartup = isStableNativeSource(manifest.version) ? [...stableRuntimeStartupRows(manifest.version), stableMainStartupRow({}, manifest.version)] : [];
       if (isSource022(manifest.version)) {
         const nativePatch = join(home, "profiles", profile, "cordis.patch.yml");
         const existing = existsSync(nativePatch) ? yaml.load(readFileSync(nativePatch, "utf8")) ?? [] : [];
@@ -292,7 +304,7 @@ async function runInnerArtifactSmoke(options) {
     mkdirSync(operatorHome, { recursive: true });
     const operatorEnv = freshArtifactEnvironment(operatorHome);
     success(spawnSync("npm", ["install", "--prefix", operatorRoot, "--ignore-scripts", "--no-audit", "--no-fund",
-      options.artifact, `@deepseek-ai/dsh-session-persistence-jsonl@${DSH_VERSION}`],
+       options.artifact, `@deepseek-ai/dsh-session-persistence-jsonl@${dshPolicy.sdkVersion}`],
     { cwd: operatorRoot, env: operatorEnv, encoding: "utf8", timeout: 300_000, maxBuffer: 8 * 1024 * 1024 }), "install exact artifact and pinned standalone operator SDK");
     const operatorRequire = createRequire(join(operatorRoot, "package.json"));
     const operatorPackageRoot = dirname(operatorRequire.resolve(`${PACKAGE_NAME}/package.json`));
@@ -303,7 +315,7 @@ async function runInnerArtifactSmoke(options) {
       const peerManifestPath = operatorRequire.resolve(`${name}/package.json`);
       inside(peerManifestPath, operatorRoot, "standalone operator native SDK");
       const peer = JSON.parse(readFileSync(peerManifestPath, "utf8"));
-      if (peer.name !== name || peer.version !== DSH_VERSION) throw new Error("standalone operator SDK is not the pinned native release");
+      if (peer.name !== name || peer.version !== dshPolicy.sdkVersion) throw new Error("standalone operator SDK is not the pinned native release");
     }
     const history = await import(pathToFileURL(join(root, "scripts", "session-history-smoke.mjs")).href);
     if (typeof history.runSessionHistorySmoke !== "function") throw new Error("operator harness must export runSessionHistorySmoke(inputs)");
@@ -409,7 +421,9 @@ async function runOuterSmoke() {
   let primaryError;
   const cleanupErrors = [];
   try {
-    success(spawnSync("docker", ["build", "--build-arg", "DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2", "-f", "docker/Dockerfile.smoke", "-t", imageTag, ".."], { cwd: root, stdio: "inherit" }), "docker build");
+    const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+    const { runtimeVersion } = dshPolicyForVersion(version);
+    success(spawnSync("docker", ["build", "--build-arg", `DSH_PACKAGE=@deepseek-ai/dsh@${runtimeVersion}`, "-f", "docker/Dockerfile.smoke", "-t", imageTag, ".."], { cwd: root, stdio: "inherit" }), "docker build");
     imageOwned = true;
     success(spawnSync("docker", ["run", "--rm", imageTag], { stdio: "inherit" }), "docker run");
   } catch (error) {
@@ -449,10 +463,10 @@ async function runInnerSmoke() {
     assertDump(env, false);
     assertSentinels(sentinels, snapshots);
 
-    const dshRequire = pinnedDshRequire();
+    const sourceVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+    const dshRequire = pinnedDshRequire(dshPolicyForVersion(sourceVersion).runtimeVersion);
     success(spawnSync("pnpm", ["--dir", root, "pack", "--pack-destination", workspace], { env, encoding: "utf8" }), "pnpm pack dsmm");
     const tarballs = readdirSync(workspace).filter((name) => name.endsWith(".tgz"));
-    const sourceVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
     if (tarballs.length !== 1 || tarballs[0] !== `dsmm-dsmm-${sourceVersion}.tgz`) throw new Error("pnpm pack did not produce exactly one scoped dsmm tarball matching the source manifest");
     const tarball = join(workspace, tarballs[0]);
     inside(tarball, workspace, "dsmm tarball");
@@ -496,11 +510,11 @@ async function runInnerSmoke() {
   console.log("DSMM_PACKAGED_RUNTIME_SMOKE_OK");
 }
 
-function pinnedDshRequire() {
+function pinnedDshRequire(expectedVersion) {
   const npmRoot = success(spawnSync("npm", ["root", "-g"], { encoding: "utf8" }), "npm root -g").trim();
   const packagePath = join(npmRoot, "@deepseek-ai", "dsh", "package.json");
   const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
-  if (manifest.name !== "@deepseek-ai/dsh" || manifest.version !== DSH_VERSION) throw new Error(`pinned DSH identity mismatch: ${manifest.name}@${manifest.version}`);
+  if (manifest.name !== "@deepseek-ai/dsh" || manifest.version !== expectedVersion) throw new Error(`pinned DSH identity mismatch: ${manifest.name}@${manifest.version}`);
   return createRequire(packagePath);
 }
 

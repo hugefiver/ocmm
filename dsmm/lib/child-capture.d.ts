@@ -51,7 +51,11 @@ export interface ChildAdmissionCaptureV2 extends ChildAdmissionCaptureBase {
         effortSource: "native" | "dsmm-config";
     };
 }
-export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2;
+export interface ChildAdmissionCaptureV3 extends Omit<ChildAdmissionCaptureV2, "version"> {
+    version: 3;
+    delegationMode: "one-shot" | "continuable";
+}
+export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2 | ChildAdmissionCaptureV3;
 /** Trusted native folds only; never synthesized from the current parent's settings. */
 export interface LegacyChildEvidence {
     version: 1;

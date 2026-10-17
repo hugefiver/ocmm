@@ -49,7 +49,11 @@ export interface ChildAdmissionCaptureV2 extends ChildAdmissionCaptureBase {
     effortSource: "native" | "dsmm-config";
   };
 }
-export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2;
+export interface ChildAdmissionCaptureV3 extends Omit<ChildAdmissionCaptureV2, "version"> {
+  version: 3;
+  delegationMode: "one-shot" | "continuable";
+}
+export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2 | ChildAdmissionCaptureV3;
 /** Trusted native folds only; never synthesized from the current parent's settings. */
 export interface LegacyChildEvidence {
   version: 1;
@@ -129,9 +133,10 @@ export function parseLegacyChildEvidence(input: unknown): LegacyChildEvidence {
 export function parseChildAdmissionCapture(input: unknown): ChildAdmissionCapture {
   const plain = copyJson(input);
   const version = (plain as { version?: unknown } | null)?.version;
-  if (version !== 1 && version !== 2) fail();
-  const row = object(plain, ["version", "childSessionId", "parentSessionId", "role", "profilePin", "originalAdmissionEpoch", "invocation", "runtimePolicyCapture", "authorityCeiling", "toolTopology", ...version === 2 ? ["modelParameterPolicy"] : []], ["locale"]);
-  if (version === 2) parseModelParameterPolicy(row.modelParameterPolicy);
+  if (version !== 1 && version !== 2 && version !== 3) fail();
+  const row = object(plain, ["version", "childSessionId", "parentSessionId", "role", "profilePin", "originalAdmissionEpoch", "invocation", "runtimePolicyCapture", "authorityCeiling", "toolTopology", ...version !== 1 ? ["modelParameterPolicy"] : [], ...version === 3 ? ["delegationMode"] : []], ["locale"]);
+  if (version !== 1) parseModelParameterPolicy(row.modelParameterPolicy);
+  if (version === 3 && row.delegationMode !== "one-shot" && row.delegationMode !== "continuable") fail();
   text(row.childSessionId, 256); text(row.parentSessionId, 256); role(row.role); epoch(row.originalAdmissionEpoch);
   if (row.childSessionId === row.parentSessionId) fail();
   if (row.profilePin !== null) {
@@ -139,10 +144,10 @@ export function parseChildAdmissionCapture(input: unknown): ChildAdmissionCaptur
     if (typeof pin.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(pin.id) || /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(pin.id)) fail();
     epoch(pin.revision);
   }
-  const invocation = object(row.invocation, ["level", "initialRoute", "routeSource", ...version === 2 ? ["requestedRoute", "effortSource"] : []]);
+  const invocation = object(row.invocation, ["level", "initialRoute", "routeSource", ...version !== 1 ? ["requestedRoute", "effortSource"] : []]);
   if (typeof invocation.level !== "string" || !["normal", "low", "high", "max"].includes(invocation.level) || !(DSMM_ROUTE_SOURCES as readonly unknown[]).includes(invocation.routeSource)) fail();
   (version === 1 ? legacyRoute : route)(invocation.initialRoute);
-  if (version === 2) {
+  if (version !== 1) {
     route(invocation.requestedRoute);
     if (invocation.effortSource !== "native" && invocation.effortSource !== "dsmm-config") fail();
   }

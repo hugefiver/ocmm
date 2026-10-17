@@ -140,10 +140,10 @@ test("invalid advanced/schema fields refuse writes while preserving the draft", 
   assert.equal(validateEditorValue({ modules: { arbitrary: {} } }, f.get().schema), false); c.dispose();
 });
 
-test("profile native form requires exact namespace, revision, explicit metadata and writable Host mode", async () => {
+test("profile native form requires exact namespace, revision, explicit metadata and Host writability", async () => {
   const f = fixture(); f.change({ nativeForm: { base: { defaultActive: true }, user: { defaultActive: false } }, profile: { defaultActive: false } });
   const c = new DeploymentController(f.remote, "profile", "dsmm"); let mutations = 0;
-  const state = { status: "ready" as const, mode: "host" as const, writable: true, revision: 0, value: { defaultActive: false }, base: { defaultActive: true }, user: { defaultActive: false } };
+  const state = { status: "ready" as const, writable: true, revision: 0, value: { defaultActive: false }, base: { defaultActive: true }, user: { defaultActive: false } };
   const mutate = async (ops: unknown, revision?: number) => { assert.equal(revision, 0); assert.deepEqual(ops, [{ op: "unset", path: ["defaultActive"] }]); mutations++; return true; };
   c.attachForm({ state, mutate }); await c.refresh(); assert.deepEqual(c.getSnapshot().draft, { defaultActive: false }, "never schema-filled form.value"); assert.equal(c.canWriteProfile(), true);
   c.attachForm({ state: { ...state, writable: false }, mutate }); c.edit(["defaultActive"], undefined); await c.save(); assert.equal(mutations, 0);
@@ -166,7 +166,7 @@ test("profile editor preserves startup-only input and sparse native primary inhe
   const user = { roleRouting: { "dsmm-reviewer": { primary: { model: "override" } } }, sessionPersistence: { root: "/owned/existing-native-log", compression: "none" } };
   f.change({ global: { roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "native-default" } } } }, nativeForm: { base: {}, user } });
   const c = new DeploymentController(f.remote, "profile", "dsmm");let mutations = 0;
-  c.attachForm({ state: { status: "ready", mode: "host", writable: true, revision: 0, value: {}, base: {}, user }, mutate: async (ops, revision) => {
+  c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: {}, base: {}, user }, mutate: async (ops, revision) => {
     assert.equal(revision, 0);assert.deepEqual(ops, [{ op: "set", path: ["roleRouting", "dsmm-reviewer", "primary", "model"], value: "changed" }]);mutations++;return true;
   } });
   await c.refresh();c.edit(["roleRouting", "dsmm-reviewer", "primary", "model"], "changed");await c.save();

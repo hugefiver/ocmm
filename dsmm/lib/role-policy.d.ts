@@ -5,8 +5,6 @@ import type { DsmmRoleId } from "./roles.js";
 import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./settings.js";
 import type { ChildAdmissionCompletion, ChildRoleAdmissionCandidate, ParentAdmissionTicket } from "./child-admission-contract.js";
 import type { ChildAdmissionEvidence, PreparedChildAdmission } from "./child-capture.js";
-import type { LegacyCapabilityCollaborators } from "./legacy-child-policy.js";
-export { createConservativeLegacyAdmission as conservativeLegacyAdmission } from "./legacy-child-policy.js";
 import type { ResolvedRoleInvocation } from "./role-invocation.js";
 import type { DeepworkModeController } from "./state.js";
 export interface DsmmRoleIdentity {
@@ -35,8 +33,6 @@ export interface RoleAdmissionCollaborators {
     resolveOriginalEvidence(ticket: ParentAdmissionTicket, childId: string, signal: AbortSignal): Promise<ChildAdmissionEvidence>;
     nativeSubstrate: DsmmSettings;
     revokeParent(agent: DshAgent, reason: string): void;
-    /** Shared C2b native-capability audit; this does not grant parent tool permissions. */
-    classifyLegacyTool?: LegacyCapabilityCollaborators["classifyTool"];
 }
 /** Identity admission only: native services retain every run, inbox and retry lifecycle. */
 export declare class DsmmRolePolicy {
@@ -62,6 +58,7 @@ export declare class DsmmRolePolicy {
     /** Used at A's single awaited completion point; old original epochs remain valid facts. */
     validatePreparedRole(agent: DshAgent, parent: DshAgent, candidate: ChildRoleAdmissionCandidate): void;
     assertChildDelivery(ticket: ParentAdmissionTicket, childId: string, raw: ChildAdmissionEvidence): void;
+    assertChildExecution(ticket: ParentAdmissionTicket, childId: string, raw: ChildAdmissionEvidence): void;
     private readOnly;
     private agents;
     assertLive(agent: DshAgent): void;

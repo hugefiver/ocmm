@@ -153,7 +153,7 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     // without updating or disposing a fiber. Assert the actual lifetime seam.
     a.assertLive(); b.assertLive();
     const liveRoots = a.ctx.agents.list();
-    await assert.rejects(a.create(oldRoot), { code: "UNAUTHORIZED" }, "direct child creation without managed capture cannot gain admission from parent lineage alone");
+    await assert.rejects(a.create(oldRoot), { code: "UNSUPPORTED_CAPABILITY" }, "direct child creation without managed capture cannot gain admission from parent lineage alone");
     assert.deepEqual(a.ctx.agents.list(), liveRoots, "failed child admission is rolled back without disposing its live parent");
     assert.equal(a.runtime.admission(asDshAgent(oldRoot)), oldAdmission);
     assert.equal(a.lifecycle.agentDisposals, 1, "only the rejected unpublished child is disposed");

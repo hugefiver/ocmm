@@ -70,8 +70,8 @@ test("native Root intent retains stock metadata and does not take the configured
     assert.equal(Object.hasOwn(body, "reasoning_effort"), false);
     assert.equal(Object.hasOwn(body, "role_only"), false);
     const agents = f.ctx.agents.list();
-    await assert.rejects(f.ctx.subagents.start("dsmm-role-doc-search", { parent: f.agent, prompt: [],
-      agentOptions: { provider: "apai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, signal: new AbortController().signal }));
+    await assert.rejects(f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", label: "Unsupported native effort", delivery: "caller",
+      request: { parent: f.agent, prompt: [], agentOptions: { provider: "apai", model: "gpt-6.1-sol", reasoningEffort: "medium" } }, signal: new AbortController().signal }));
     assert.deepEqual(f.ctx.agents.list(), agents);
   });
 });

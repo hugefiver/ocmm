@@ -1,4 +1,18 @@
+- id: agent
+  name: '@deepseek-ai/dsh-agent'
+  disabled: true
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+  disabled: true
 - insert:
+    - id: dsmm-agent-registry
+      name: '@dsmm/dsmm/agent-registry'
+      config: {}
+    - id: dsmm-subagent-runtime
+      name: '@dsmm/dsmm/subagent-runtime'
+      inject: [agents]
+      config: {}
     - id: dsmm
       name: '@dsmm/dsmm'
+      inject: [profileContext, agents]
       config: {}

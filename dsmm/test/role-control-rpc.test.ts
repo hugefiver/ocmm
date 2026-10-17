@@ -43,8 +43,9 @@ test("real Gateway decodes closed child DTOs before operator/session work; no fa
   const f = await controlDeliveryFixture();
   try {
     const root = await f.create();
-    const operator = f.ctx.connection.operator;
-    const foreign = { id: operator.id, ctx: new (operator.ctx.constructor as typeof import("@deepseek-ai/cordis").Context)(), async dispose() {} };
+    const operator = f.ctx.connection.browserPeer;
+    const foreign = { ...operator, ctx: new (operator.ctx.constructor as typeof import("@deepseek-ai/cordis").Context)(), async dispose() {} };
+    const independentOwner = f.ctx.connection.createPeer({ principal: { kind: "owner" } });
     let resumes = 0;
     f.ctx.provide("sessionController", { async resolveAgent() { resumes++; throw new Error("PRIVATE_SESSION_PATH"); } });
     const request = { ...f.request(root, root.id, "bad target"), parentSessionId: "cold-root" };
@@ -52,12 +53,33 @@ test("real Gateway decodes closed child DTOs before operator/session work; no fa
       await assert.rejects(f.invoke("prompt", { sessionId: "cold-root", request: invalid }), error => String(remoteErrorOf(error)?.code) === "gateway/input-invalid");
     }
     await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method: "describe", args: { sessionId: "cold-root" }, peer: foreign }), refused("not-owned"));
+    await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method: "describe", args: { sessionId: "cold-root" }, peer: independentOwner }), refused("not-owned"));
+    await assert.rejects(Promise.resolve().then(() => Reflect.apply(f.ctx.typertGateway.invoke, f.ctx.typertGateway,
+      [{ namespace: "dsmmChildren", method: "describe", args: { sessionId: "cold-root" } }])));
     await assert.rejects(f.invoke("prompt", { sessionId: "cold-root", request }), refused("unavailable"));
     assert.equal(resumes, 0);
     const child = await f.start(root);
     await assert.rejects(f.invoke("describe", { sessionId: child.childId }), refused("not-owned"));
     await assert.rejects(f.invoke("prompt", { sessionId: root.id, request: { ...request, parentSessionId: "different" } }), refused("validation"));
+    await f.replaceConnection();
+    await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method: "describe", args: { sessionId: root.id }, peer: operator }));
+    assert.equal((await f.invoke("describe", { sessionId: root.id }) as ChildSessionSnapshot).sessionId, root.id);
     assert.equal(resumes, 0);
+  } finally { await f.dispose(); }
+});
+
+test("external native catalog entries remain unknown and read-only in the child RPC", { timeout: 20000 }, async t => {
+  const f = await controlDeliveryFixture();
+  const { SessionId } = await import("@deepseek-ai/dsh-session");
+  try {
+    const root = await f.create(), entry = { id: SessionId("external-child"), mode: "external" as const, createdAt: 0 };
+    t.mock.method(f.runtime, "listChildren", async () => [entry]);
+    const view = await f.invoke("describe", { sessionId: root.id }) as ChildSessionSnapshot;
+    assert.equal(view.children[0].mode, "unknown");
+    assert.equal(view.children[0].readonly, true);
+    assert.deepEqual(view.children[0].controls, { prompt: { enabled: false, reason: "unknown-mode" }, interrupt: { enabled: false, reason: "unknown-mode" } });
+    await assert.rejects(f.invoke("prompt", { sessionId: root.id, request: f.request(root, entry.id, "not a local continuation") }), refused("not-resumable"));
+    assert.equal(entry.mode, "external");
   } finally { await f.dispose(); }
 });
 
@@ -131,7 +153,7 @@ test("native child label truncation preserves Unicode and control sanitization t
     ];
     const children: (typeof cases[number] & { id: typeof root.id })[] = [];
     for (const item of cases) {
-      const child = await f.runtime.startContinuable({ provider: "spawn", label: item.label, signal: new AbortController().signal,
+      const child = await f.runtime.startActivation({ provider: "spawn", label: item.label, delivery: "caller", signal: new AbortController().signal,
         request: { parent: root, maxDepth: 3, prompt: [{ type: "text", text: "native label boundary task" }] } });
       children.push({ ...item, id: child.childId });
     }
@@ -153,9 +175,9 @@ test("native child label truncation preserves Unicode and control sanitization t
       const invalid = "children" in result ? { ...result, children: [invalidRow] }
         : { ...result, descendants: [{ kind: "child", depth: 1, hasChildren: false, child: invalidRow }] };
       assert.throws(() => codec.create().parse(invalid), "unpaired surrogates remain invalid on the wire");
-      const operator = f.ctx.connection.operator;
+      const operator = f.ctx.connection.browserPeer;
       await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method, args: { sessionId: root.id },
-        peer: { id: operator.id, ctx: operator.ctx, async dispose() {} } }), refused("not-owned"));
+        peer: { ...operator, async dispose() {} } }), refused("not-owned"));
     });
     f.setRoleEnabled(false);
     const child = f.ctx.agents.get(children[1].id)!;
@@ -192,9 +214,10 @@ test("C3 real native prompt receipts retain browser request identity, queue/stee
 test("C3 pending child observation is cancelled by Apply, Connection replacement, operator and RPC disposal with zero acceptance", { timeout: 30000 }, async t => {
   for (const change of ["Apply", "connection", "operator", "RPC"] as const) await t.test(change, async () => {
     const f = await controlDeliveryFixture();
-    const held = gate(), entered = gate(), release = gate(); f.adapter.beforeStream = () => held.promise;
+    const held = gate(), streaming = gate(), entered = gate(), release = gate(); f.adapter.beforeStream = () => { streaming.release(); return held.promise; };
     try {
       const root = await f.create(), first = await f.start(root), child = f.ctx.agents.get(first.childId)!;
+      await streaming.promise;
       const before = accepted(child).length;
       f.setBeforeObserve(async () => { entered.release(); await release.promise; });
       const pending = f.invoke("prompt", { sessionId: root.id, request: f.request(root, child.id, "pending") });
@@ -202,7 +225,7 @@ test("C3 pending child observation is cancelled by Apply, Connection replacement
       await entered.promise;
       if (change === "Apply") f.publish(root, false);
       else if (change === "connection") await f.replaceConnection();
-      else if (change === "operator") await f.connectionOwner().operator.dispose();
+      else if (change === "operator") await f.connectionOwner().browserPeer.dispose();
       else await f.rpc.dispose();
       release.release(); await rejected;
       assert.equal(accepted(child).length, before);
@@ -213,10 +236,11 @@ test("C3 pending child observation is cancelled by Apply, Connection replacement
 
 test("native text receipts survive post-acceptance Apply; accepted queue and old running task remain, catalog reads never warm a child", { timeout: 20000 }, async () => {
   const f = await controlDeliveryFixture();
-  const held = gate(); f.adapter.beforeStream = () => held.promise;
+  const held = gate(), streaming = gate(); f.adapter.beforeStream = () => { streaming.release(); return held.promise; };
   const originalPrompt = f.runtime.prompt;
   try {
     const root = await f.create(), first = await f.start(root), child = f.ctx.agents.get(first.childId)!;
+    await streaming.promise;
     f.runtime.prompt = async function (request, signal) {
       const receipt = await originalPrompt.call(this, request, signal);
       f.publish(root, false);
@@ -233,7 +257,7 @@ test("native text receipts survive post-acceptance Apply; accepted queue and old
     assert.equal(accepted(child).length, before);
     f.runtime.prompt = originalPrompt;
     held.release(); f.adapter.beforeStream = undefined;
-    await f.runtime.drainContinuableChildren(root, [child.id]);
+    await f.runtime.drainChildren(root, [child.id]);
     await f.ctx.sessionPersistence.flush();
     assert.equal(f.ctx.agents.get(child.id), undefined);
     const size = f.ctx.agents.list().length;
@@ -286,7 +310,7 @@ test("C3 starting observation omits run identity; foreign/stale runs cannot crea
   const f = await controlRunFixture();
   const entered = gate(), release = gate();
   try {
-    const run = f.start({ async start(signal) { entered.release(); await release.promise; return f.runtime.start("spawn", { parent: f.parent, signal, prompt: [{ type: "text", text: "native" }] }); } });
+    const run = f.start({ async start(signal) { entered.release(); await release.promise; return f.runtime.startActivation({ provider: "spawn", label: "Native control", delivery: "caller", signal, request: { parent: f.parent, prompt: [{ type: "text", text: "native" }] } }); } });
     await entered.promise;
     const view = await f.invoke("describe", { sessionId: f.parent.id }) as ChildSessionSnapshot;
     assert.equal(view.runs[0].state, "starting"); assert.equal(view.runs[0].invocation, undefined);
@@ -300,8 +324,8 @@ test("C3 starting observation omits run identity; foreign/stale runs cannot crea
     f.runtime.authority.publishParentAdmission(foreignParent, previous.epoch, foreignAdmission, () => f.admissions.set(foreignParent, foreignAdmission));
     await assert.rejects(f.invoke("background", { sessionId: foreignParent.id,
       request: { ...request, sessionId: foreignParent.id, expectedAdmissionEpoch: foreignAdmission.epoch } }), refused("not-found"));
-    const operator = f.ctx.connection.operator;
-    await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method: "background", args: { sessionId: f.parent.id, request }, peer: { id: operator.id, ctx: operator.ctx, async dispose() {} } }), refused("not-owned"));
+    const operator = f.ctx.connection.browserPeer;
+    await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method: "background", args: { sessionId: f.parent.id, request }, peer: { ...operator, async dispose() {} } }), refused("not-owned"));
     assert.equal(f.ctx.jobs.list(f.parent.id).length, 0);
     f.adapter.output.release(); await run.holder.drained;
   } finally { release.release(); f.adapter.output.release(); await f.dispose(); }
@@ -320,7 +344,7 @@ test("C3 asynchronous handoff preparation cannot create a job after Apply/connec
       await entered.promise;
       if (change === "Apply") f.publish();
       else if (change === "connection") await f.replaceConnection();
-      else if (change === "operator") await f.ctx.connection.operator.dispose();
+      else if (change === "operator") await f.ctx.connection.browserPeer.dispose();
       else await f.rpc.dispose();
       release.release(); await rejected;
       assert.equal(f.ctx.jobs.list(f.parent.id).length, 0); assert.equal(holder.holderSignal.aborted, false);
@@ -329,7 +353,7 @@ test("C3 asynchronous handoff preparation cannot create a job after Apply/connec
   });
 });
 
-test("native job registration wins before Apply: C3 returns the accepted handoff, and settlement during preparation is observation only", { timeout: 20000 }, async () => {
+test("native job registration wins before Apply and C3 returns the accepted handoff", { timeout: 20000 }, async () => {
   const f = await controlRunFixture();
   try {
     const first = f.start(); await first.holder.ready; await f.adapter.entered.promise;
@@ -341,12 +365,20 @@ test("native job registration wins before Apply: C3 returns the accepted handoff
     f.adapter.output.release(); await first.holder.drained;
     assert.equal((await f.ctx.jobs.wait(receipt.jobId as Parameters<typeof f.ctx.jobs.wait>[0], 5000, f.parent.id)).status, "completed");
   } finally { f.adapter.output.release(); await f.dispose(); }
+});
 
+test("settlement during background preparation is observation only", { timeout: 20000 }, async t => {
   const settled = await controlRunFixture();
   const entered = gate(), release = gate(), disposing = gate(), finishDisposal = gate();
   try {
-    const { holder } = settled.start(); await holder.ready; await settled.adapter.entered.promise;
-    settled.runs[0].localAgent!.ctx.effect(() => async () => { disposing.release(); await finishDisposal.promise; });
+    const started = settled.start(), startNative = started.request.start;
+    started.request.start = async signal => {
+      const activation = await startNative(signal), dispose = activation.dispose.bind(activation);
+      t.mock.method(activation, "dispose", async () => { disposing.release(); await finishDisposal.promise; await dispose(); });
+      return activation;
+    };
+    const { holder } = started;
+    await holder.ready; await settled.adapter.entered.promise;
     const request = { sessionId: settled.parent.id, toolCallId: holder.toolCallId, runId: holder.invocation!.runId, expectedAdmissionEpoch: settled.admissions.get(settled.parent)!.epoch };
     settled.setBeforeBackground(async () => { entered.release(); await release.promise; });
     const pending = settled.invoke("background", { sessionId: settled.parent.id, request });

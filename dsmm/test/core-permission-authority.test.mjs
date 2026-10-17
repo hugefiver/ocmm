@@ -84,7 +84,7 @@ test("live Core admissions bind stable signals, admission and disposal", async t
 test("Core writable checks use live native policy without DW integration or idle state", { timeout: 30000 }, async t => {
   let release;
   const gate = new Promise(resolve => { release = resolve; }), entered = Promise.withResolvers();
-  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { nativeSubagent: true, cleanup: () => release(), async respond(body, res) {
+  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { globalConfig: { modules: { deepwork: { enabled: false } } }, cleanup: () => release(), async respond(body, res) {
     entered.resolve(); await gate;
     res.writeHead(200, { "content-type": "text/event-stream" });
     const base = { id: "permission-core-response", object: "chat.completion.chunk", created: 1, model: body.model };
@@ -169,10 +169,10 @@ test("actual invocation children borrow only their registered holder and indepen
 
 test("ordinary native child permission authority uses its real Core parent and independent native restrictions", async t => {
   const response = Promise.withResolvers();
-  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { nativeSubagent: true, beforeRespond: () => response.promise, cleanup: () => response.resolve() });
+  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { beforeRespond: () => response.promise, cleanup: () => response.resolve() });
   const { ToolCallId } = await loadNative("@deepseek-ai/dsh-llm");
   const a = await adapter(f), root = await f.create();
-  const started = await f.ctx.subagents.startContinuable({ provider: "spawn", label: "Core native child", signal: new AbortController().signal,
+  const started = await f.ctx.subagents.startActivation({ provider: "spawn", label: "Core native child", delivery: "parent", signal: new AbortController().signal,
     request: { parent: root, prompt: [{ type: "text", text: "Answer in the native child" }], agentOptions: { provider: "local", model: "root-model" } } });
   const child = f.ctx.agents.get(started.childId);
   assert.ok(child);

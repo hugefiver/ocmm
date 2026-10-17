@@ -27,6 +27,10 @@ const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/d
 const { ApprovalService, setApprovalPolicy } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-user-approval")).href);
 const connectionSdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-client-connection"));
 const { CredentialProvider } = await import(pathToFileURL(connectionSdk.resolve("@deepseek-ai/dsh-credentials")).href);
+const native = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
+const { RemoteAccessService } = await import(pathToFileURL(native.resolve("@deepseek-ai/dsh-api-remote-access")).href);
+const FileSystem = await import(pathToFileURL(native.resolve("@deepseek-ai/dsh-fs-local")).href);
+const WorkingDirectory = await import(pathToFileURL(native.resolve("@deepseek-ai/dsh-working-directory")).href);
 
 export function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
@@ -49,7 +53,7 @@ export interface PermissionFixture {
   permissions: PermissionControl;
   specs: Record<string, unknown>[];
   requests: ApprovalRequest[];
-  invoke(method: string, args: Record<string, unknown>, peer?: object, signal?: AbortSignal): ReturnType<Context["typertGateway"]["invoke"]>;
+  invoke(method: string, args: Record<string, unknown>, peer?: Context["connection"]["browserPeer"], signal?: AbortSignal): ReturnType<Context["typertGateway"]["invoke"]>;
   update(policy: PermissionControlSchemaInput): ReturnType<PermissionRulesRuntimeSync["commit"]>;
   create(parent?: Agent): Promise<Agent>;
   starts(): number;
@@ -85,7 +89,10 @@ export async function permissionFixture(_timeoutMs = 2000, options: {
     async modifyRecord(_key: string, modify: (value: unknown) => Promise<unknown>) { return modify(undefined); }
   }
   try {
+    await ctx.plugin(RemoteAccessService).await();
     for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: options.mode ?? "native" }], [ApprovalService, { policy: "ask" }], [TypertRegistry], [TypertGatewayService, {}], [MemoryCredentials]] as const) { const fiber = ctx.plugin(plugin as never, config as never); await fiber.await(); if (plugin === ApprovalService) approvalFiber = fiber; }
+    await ctx.plugin(FileSystem.default, { cwd: process.cwd() }).await();
+    await ctx.plugin(WorkingDirectory.default, { defaultDirectory: process.cwd() }).await();
     let connectionFiber = ctx.plugin(Connection); await connectionFiber.await();
     ctx.provide("shellEnv", { collect() { return {}; } });
     ctx.provide("sandboxPolicy", { resolve() { return { mode: options.sandboxMode ?? "workspace-write", workspaceRoot: process.cwd() }; } });
@@ -107,7 +114,7 @@ export async function permissionFixture(_timeoutMs = 2000, options: {
     const root = await create();
     const externalRules = options.rules?.(controller.permissions, ctx);
     const rpc = ctx.plugin({ name: "owned-permission-rules-rpc", inject: ["typert", "connection"], apply(scope: Context) { if (externalRules !== undefined) registerPermissionControlRpc(scope, externalRules); } }); await rpc.await();
-    const invoke = (method: string, args: Record<string, unknown>, peer?: object, signal?: AbortSignal) => ctx.typertGateway.invoke({ namespace: "dsmmPermissions", method, args, ...peer === undefined ? {} : { peer: peer as Context["connection"]["operator"] }, ...signal === undefined ? {} : { signal } });
+    const invoke = (method: string, args: Record<string, unknown>, peer = ctx.connection.browserPeer, signal?: AbortSignal) => ctx.typertGateway.invoke({ namespace: "dsmmPermissions", method, args, peer, ...signal === undefined ? {} : { signal } });
     const update = async (policy: PermissionControlSchemaInput) => { const ticket = sync.begin(sync.status().savedRevision); return sync.commit(ticket, { revision: randomUUID(), policy: resolvePermissionControl(policy) }, async () => {}); };
     return { ctx, root, controller, sync, authorities, lifetime, owner, realm, invoke, update, create,
       runtime: ctx.tools, permissions: controller.permissions, starts: () => starts, nativeAnswers: () => nativeAnswers, specs, requests,

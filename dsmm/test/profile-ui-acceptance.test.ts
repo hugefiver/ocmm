@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
+import type { SubagentActivation } from "@deepseek-ai/dsh-subagent";
 import type { DshAgent } from "../lib/dsh-types.js";
 import { createProfileRuntime, DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { ProfileStore } from "../lib/profile-store.js";
@@ -16,7 +17,7 @@ import { headerRoutes, nativeRoutingFixture } from "./native-routing-fixture.ts"
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, nativeClientPreflight } from "../scripts/profile-ui-harness-browser.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { extractNativeThemeStyles, NATIVE_IDS } from "../scripts/profile-ui-harness-server.mjs";
+import { extractNativeThemeStyles, NATIVE_IDS, resolveNativeClientBundle } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
 
@@ -24,7 +25,7 @@ const structural = (agent: Agent) => agent as unknown as DshAgent;
 
 test("cold UI reads release native listeners before old-child/apply/new-reviewer admission", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true, workflow: { reviewCap: 2 } });
-  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const runs: SubagentActivation[] = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
     const saved = await runtime.save({ id: "cold-ui", expectedRevision: null, content: JSON.stringify({ version: 1, id: "cold-ui", settings: { workflow: { reviewCap: 7 } } }) });
@@ -44,6 +45,9 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
     assert.equal(oldAdmission.epoch, before.epoch);
     assert.equal(oldAdmission.childCapture!.parentSessionId, parent.id);
     assert.equal(oldAdmission.childCapture!.originalAdmissionEpoch, before.epoch);
+    assert.equal((await runs[0]!.result).stopReason, "completed");
+    assert.equal(f.agents.get(oldChild.id), undefined);
+    assert.equal(f.agents.isOwnedBy(oldChild.id, parent), false);
     const reviewerRoute = { provider: "fixture", model: "ui-admitted-reviewer", reasoningEffort: "max" };
     const sessionProfile = await runtime.save({ id: "ui-session", expectedRevision: null, content: JSON.stringify({ version: 1, id: "ui-session", settings: {
       defaultActive: true, workflow: { reviewCap: 6 }, roleRouting: { "dsmm-reviewer": { primary: reviewerRoute } },
@@ -63,15 +67,20 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
     assert.equal(f.agents.get(newChild.id), newChild);
     assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
     assert.equal(foldSubagentDescriptor(newChild.session.snapshotEvents().slice(newChild.session.inheritedEventCount))!.provider, "dsmm-role-reviewer");
-    assert.deepEqual(headerRoutes(newChild), [reviewerRoute]);
-    assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [
-      { provider: "fixture", model: "native-default", reasoningEffort: "low" }, reviewerRoute,
-    ]);
     const tools = newChild.ctx.get("tools")!;
     assert.equal(newAdmission.childCapture!.authorityCeiling.readOnly, true);
     for (const name of ["write", "edit", "bash", "pwsh"]) {
       assert.equal((await tools.execute({ callId: ToolCallId(`ui-read-only-${name}`), name, arguments: {}, agent: newChild, signal: new AbortController().signal })).isError, true);
     }
+    assert.equal(f.agents.get(newChild.id), newChild);
+    assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
+    assert.equal((await runs[1]!.result).stopReason, "completed");
+    assert.deepEqual(headerRoutes(newChild), [reviewerRoute]);
+    assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [
+      { provider: "fixture", model: "native-default", reasoningEffort: "low" }, reviewerRoute,
+    ]);
+    assert.equal(f.agents.get(newChild.id), undefined);
+    assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
     await runs[1]!.dispose();
     assert.equal(f.agents.get(newChild.id), undefined);
     assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
@@ -80,7 +89,7 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
 
 test("failed cold UI plugin startup releases native listeners before subsequent child creation", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
-  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const runs: SubagentActivation[] = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
     const parent = await f.create();
@@ -99,19 +108,25 @@ test("failed cold UI plugin startup releases native listeners before subsequent 
     assert.equal(admission.epoch, runtime.admission(structural(parent)).epoch);
     assert.equal(admission.childCapture!.parentSessionId, parent.id);
     assert.equal(admission.childCapture!.originalAdmissionEpoch, runtime.admission(structural(parent)).epoch);
+    assert.equal((await runs[0]!.result).stopReason, "completed");
+    assert.equal(f.agents.get(child.id), undefined);
+    assert.equal(f.agents.isOwnedBy(child.id, parent), false);
   } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
 });
 
 test("a refused native reviewer result retains its real run disposer for acceptance cleanup", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
-  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const runs: SubagentActivation[] = [];
   try {
     const parent = await f.create();
     f.adapter.failModels.add("native-default");
-    await assert.rejects(startSuccessorReviewer(f.ctx, parent, runs), { code: "ERR_ASSERTION" });
+    const child = await startSuccessorReviewer(f.ctx, parent, runs);
     assert.equal(runs.length, 1);
-    const child = runs[0]!.localAgent!;
+    assert.equal(f.agents.get(runs[0]!.childId), child);
     assert.equal(f.agents.isOwnedBy(child.id, parent), true);
+    assert.notEqual((await runs[0]!.result).stopReason, "completed");
+    assert.equal(f.agents.get(child.id), undefined);
+    assert.equal(f.agents.isOwnedBy(child.id, parent), false);
     await runs[0]!.dispose();
     assert.equal(f.agents.get(child.id), undefined);
     assert.equal(f.agents.isOwnedBy(child.id, parent), false);
@@ -257,6 +272,19 @@ test("native browser Gateway boots with its real Typert registry provider", () =
   assert.equal(new Set(NATIVE_IDS).size, NATIVE_IDS.length, "native client providers must materialize once");
 });
 
+test("native client bundle resolution selects the browser export instead of the Node condition", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dsmm-native-client-export-"));
+  try {
+    const manifestPath = join(root, "package.json");
+    await writeFile(manifestPath, JSON.stringify({ exports: { "./client": { node: "./client.node.js", browser: "./client.browser.js", default: "./client.browser.js" } } }));
+    await writeFile(join(root, "client.node.js"), "import 'node:fs';\n");
+    await writeFile(join(root, "client.browser.js"), "window.__ModuleLoader__.load({});\n");
+    const nativeRequire = { resolve(specifier: string) { assert.equal(specifier, "@fixture/native/package.json"); return manifestPath; } };
+    const resolved = await resolveNativeClientBundle(nativeRequire, "@fixture/native");
+    assert.equal(resolved.filename, await realpath(join(root, "client.browser.js")));
+  } finally { await rm(root, { recursive: true, force: false }); }
+});
+
 test("native root renderer receives the real optional Session scope provider and its complete closure", () => {
   for (const id of ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"]) {
     assert.ok(NATIVE_IDS.includes(id), `native session-maybe rendering requires the real provider closure: ${id}`);
@@ -307,7 +335,6 @@ test("acceptance hook enters the real native Host after appReady and never impor
   const source = await readFile(new URL("../scripts/profile-ui-acceptance.mjs", import.meta.url), "utf8");
   assert.match(source, /get\("appReady"\)\.onReady/u);
   assert.match(source, /runtime = ctx\.get\("dsmmProfileRuntime"\)/u);
-  assert.match(source, /peer = ctx\.get\("connection"\)\.operator/u);
   assert.match(source, /gateway\.invoke\(/u);
   assert.match(source, /browser\.newContext\(/u);
   assert.match(source, /getByRole\("heading", \{ name: "Deepwork Profiles", exact: true \}\)/u);

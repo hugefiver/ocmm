@@ -1,5 +1,6 @@
-import { settleRun, SubagentError } from "@deepseek-ai/dsh-subagent";
+import { SubagentError } from "@deepseek-ai/dsh-subagent";
 import { scopeLifetime } from "./delivery-authority.js";
+import { isManagedCancellation } from "./agent-registry.js";
 // Cancellation provenance belongs to each holder, not to a rejection's error code.
 const cancelledDrains = new WeakSet();
 function deferred() {
@@ -15,6 +16,9 @@ function terminalError(result) {
     const partial = result.output.filter((block) => block.type === "text").map((block) => block.text).join("");
     return new SubagentError(`subagent ${result.stopReason}${result.diagnostic === undefined ? "" : `: ${result.diagnostic}`}${partial === "" ? "" : `\nPartial output: ${partial}`}`, result.stopReason.toUpperCase());
 }
+function outcomeFailure(error) {
+    return error instanceof AggregateError ? [String(error), ...error.errors.map(outcomeFailure)].join("; ") : String(error);
+}
 /** One foreground call's real native run and its revocable caller-cancel relay. */
 export class RoleRunHolder {
     controller = new AbortController();
@@ -25,6 +29,7 @@ export class RoleRunHolder {
     identity;
     receipt;
     outcome;
+    disposeActivation;
     terminal = false;
     finished = false;
     registering = false;
@@ -72,6 +77,7 @@ export class RoleRunHolder {
         if (!this.terminal)
             this.currentState = "cancelled";
         this.controller.abort(reason);
+        void this.disposeActivation?.().catch(() => { });
     }
     background(request) {
         this.assertAddress(request);
@@ -145,9 +151,9 @@ export class RoleRunHolder {
             }
             const run = await this.request.start(this.controller.signal);
             this.identity = Object.freeze({ parent: this.request.parent, owner: this.request.owner,
-                sessionId: this.request.sessionId, toolCallId: this.request.toolCallId, runId: run.id,
+                sessionId: this.request.sessionId, toolCallId: this.request.toolCallId, runId: run.childId,
                 admissionEpoch: this.request.admissionEpoch, capture: this.request.capture, projection: this.request.projection,
-                mode: "one-shot", ...(run.localAgent === undefined ? {} : { childId: run.localAgent.id }) });
+                mode: "one-shot", childId: run.childId });
             if (!this.controller.signal.aborted)
                 this.currentState = "running";
             let execution;
@@ -164,17 +170,40 @@ export class RoleRunHolder {
                 throw reason;
             });
             let disposed;
-            const dispose = () => disposed ??= Promise.resolve().then(() => {
-                if (run.localAgent !== undefined)
-                    this.collaborators.teardown.revokeParent(run.localAgent, "run-disposed");
-                return this.collaborators.teardown.disposeRun(run);
-            }).then(() => { disposal = { status: "fulfilled", value: undefined }; }, (reason) => {
-                disposal = { status: "rejected", reason };
-                throw reason;
+            const dispose = () => {
+                if (disposed !== undefined)
+                    return disposed;
+                try {
+                    disposed = this.collaborators.teardown.disposeRun(run);
+                }
+                catch (error) {
+                    disposed = Promise.reject(error);
+                }
+                return disposed = disposed.then(() => { disposal = { status: "fulfilled", value: undefined }; }, (reason) => {
+                    disposal = { status: "rejected", reason };
+                    throw reason;
+                });
+            };
+            this.disposeActivation = dispose;
+            if (this.controller.signal.aborted)
+                void dispose().catch(() => { });
+            const settlement = (async () => {
+                await Promise.allSettled([result]);
+                await Promise.allSettled([dispose()]);
+            })();
+            this.outcome = settlement.then(() => {
+                const value = execution.status === "fulfilled" ? execution.value : undefined;
+                const failures = [execution, disposal].flatMap(result => result.status === "rejected" ? [outcomeFailure(result.reason)] : []);
+                return { status: disposal.status === "rejected" || execution.status === "rejected" ? "failed"
+                        : value?.stopReason === "aborted" ? "killed" : value?.stopReason === "completed" ? "completed" : "failed",
+                    ...(value === undefined ? {} : { result: value.output.filter(block => block.type === "text").map(block => block.text).join("") }),
+                    detail: failures.length ? failures.join("; ") : value?.diagnostic ?? value?.stopReason };
             });
-            this.outcome = settleRun({ id: run.id, localAgent: run.localAgent, result, dispose });
-            this.readyResult.resolve(this.identity);
-            await this.outcome;
+            if (this.controller.signal.aborted)
+                this.readyResult.reject(this.controller.signal.reason);
+            else
+                this.readyResult.resolve(this.identity);
+            await settlement;
             const failure = execution.status === "rejected" ? execution.reason : terminalError(execution.value);
             const failed = execution.status === "rejected" || failure !== undefined;
             if (execution.status === "fulfilled" && execution.value.stopReason === "aborted" && disposal.status === "fulfilled") {
@@ -188,10 +217,12 @@ export class RoleRunHolder {
                 throw failure;
             if (disposal.status === "rejected")
                 throw disposal.reason;
-            this.foregroundResult.resolve({ kind: "foreground", runId: run.id, invocation: this.identity, output: execution.value.output });
+            this.foregroundResult.resolve({ kind: "foreground", runId: run.childId, invocation: this.identity, output: execution.value.output });
             this.drainedResult.resolve();
         }
         catch (error) {
+            if (isManagedCancellation(error))
+                cancelledDrains.add(this.drained);
             this.observed(this.controller.signal.aborted);
             this.readyResult.reject(error);
             this.foregroundResult.reject(error);

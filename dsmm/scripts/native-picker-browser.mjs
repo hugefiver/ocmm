@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { bootstrapFacade, carrierBootstrap, createBootGraph } from "./profile-ui-harness-browser.mjs";
+import { resolveNativeClientBundle } from "./profile-ui-harness-server.mjs";
 
 export const PICKER_COMPOSITION_ID = "@dsmm/native-picker-owned-diagnostic";
 export const PICKER_ENTRY_PACKAGES = Object.freeze(["@deepseek-ai/dsh-client-ui-model-selection", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-layout"]);
@@ -14,7 +15,7 @@ export async function nativePickerClosure(nativeRequire) {
   const visit = async (id) => {
     if (declarations.has(id)) return;
     const manifest = JSON.parse(await readFile(nativeRequire.resolve(`${id}/package.json`), "utf8"));
-    assert.equal(manifest.version, "0.2.0-rc.2");
+    assert.equal(manifest.version, "0.2.1-rc.1");
     assert.ok(manifest.dsh?.client, `${id} has no native client metadata`);
     declarations.set(id, manifest.dsh.client);
     for (const dependency of manifest.dsh.client.inject ?? []) await visit(dependency);
@@ -76,21 +77,22 @@ export async function startNativePickerServer({ nativeRequire, packageRoot, revi
   const rows = [];
   for (const [id, declaration] of declarations) {
     const url = `/bundles/native-${rows.length}.js`;
-    const bytes = await readFile(nativeRequire.resolve(`${id}/client`));
+    const { filename, manifest } = await resolveNativeClientBundle(nativeRequire, id);
+    const bytes = await readFile(filename);
     bundles.set(url, bytes);
-    nativeClientArtifacts.push({ id, version: "0.2.0-rc.2", sha256: createHash("sha256").update(bytes).digest("hex"), rewritten: false });
+    nativeClientArtifacts.push({ id, version: manifest.version, sha256: createHash("sha256").update(bytes).digest("hex"), rewritten: false });
     const inject = [...(declaration.inject ?? [])];
     if (id === "@deepseek-ai/dsh-api-gateway") inject.push(PICKER_COMPOSITION_ID);
     rows.push({ id, url, inject, external: declaration.external ?? [] });
   }
   const storeId = "@deepseek-ai/dsh-client-store";
   const storeManifest = JSON.parse(await readFile(nativeRequire.resolve(`${storeId}/package.json`), "utf8"));
-  assert.equal(storeManifest.version, "0.2.0-rc.2");
+  assert.equal(storeManifest.version, "0.2.1-rc.1");
   assert.equal(storeManifest.dsh?.client, undefined, "Store must be described as a native frontend seed, not a declared client plugin");
   const frontendBytes = await readFile(join(frontend, "assets", main[0]));
   assert.ok(frontendBytes.includes(Buffer.from(`"${storeId}"`)), "native frontend must supply the actual Store seed");
   const modelClientId = "@deepseek-ai/dsh-client-ui-model-selection";
-  const modelClientBytes = await readFile(nativeRequire.resolve(`${modelClientId}/client`));
+  const modelClientBytes = await readFile((await resolveNativeClientBundle(nativeRequire, modelClientId)).filename);
   assert.ok(modelClientBytes.includes(Buffer.from(`require("${storeId}")`)), "native ModelDirectory client must consume the Store seed");
   const nativeStoreLibrary = { id: storeId, version: storeManifest.version, delivery: "native-web-frontend-seed", declaredClientAsset: false,
     installedEntrySha256: createHash("sha256").update(await readFile(nativeRequire.resolve(storeId))).digest("hex"),

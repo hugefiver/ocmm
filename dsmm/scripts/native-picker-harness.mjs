@@ -253,12 +253,15 @@ export async function runPickerLane(ctx, config) {
   const offStart = ctx.on("agent/assistant-stream", ({ agent, frame }) => { if (frame.type === "start") lastStart = { sessionId: agent.id, attemptId: frame.attemptId, turn: frame.turn, step: frame.step, header: route(agent.session.requestHeader().config) }; }, { global: true });
   await ctx.get("agentDefaultModel").saveSelection({ provider, model: "target", reasoningEffort: ReasoningEffortId("high") });
   const gateway = ctx.get("typertGateway");
-  const peer = ctx.get("connection").operator;
-  assert.ok(peer?.ctx, "owned native Host has no genuine operator Peer");
-  const workspaceResult = await gateway.invoke({ namespace: "workspace", method: "create", args: { request: { path: config.workspace } }, peer, signal: new AbortController().signal });
-  const workspaceId = workspaceResult.workspace.workspaceId;
-  assert.equal(typeof workspaceId, "string");
-  if (currentCandidate) {
+  const peer = ctx.get("connection").createPeer({ principal: { kind: "owner" } });
+  assert.ok(peer?.ctx, "owned native Host did not create a genuine owner Peer");
+  let server, browser, context, page;
+  const browserErrors = [];
+  try {
+    const workspaceResult = await gateway.invoke({ namespace: "workspace", method: "create", args: { request: { path: config.workspace } }, peer, signal: new AbortController().signal });
+    const workspaceId = workspaceResult.workspace.workspaceId;
+    assert.equal(typeof workspaceId, "string");
+    if (currentCandidate) {
     const installedManifest = JSON.parse(await readFile(join(config.packageRoot, "package.json"), "utf8"));
     assert.equal(installedManifest.name, "@dsmm/dsmm");
     if (config.artifactKind === "ci-frozen-artifact") assert.equal(installedManifest.version, config.packageVersion, "frozen picker installed a different package version");
@@ -277,10 +280,7 @@ export async function runPickerLane(ctx, config) {
       const saved = await gateway.invoke({ namespace: "dsmmProfiles", method: "save", args: { request: { id, content, expectedRevision: null } }, peer, signal: new AbortController().signal });
       report.seededProfiles.push({ id: saved.id, revision: saved.revision, contentSha256: hash(Buffer.from(saved.content)) });
     }
-  }
-  let server, browser, context, page;
-  const browserErrors = [];
-  try {
+    }
     server = await startNativePickerServer({ nativeRequire, packageRoot: config.packageRoot, revision: config.sha256, dsmm: report.dsmm, observerTrace: config.observerDiagnostic === true });
     report.nativePackages = server.nativePackages;
     report.nativeClientArtifacts = server.nativeClientArtifacts;
@@ -519,7 +519,7 @@ export async function runPickerLane(ctx, config) {
         const retainedSession = sessionId;
         const { SessionId, Session } = await load("@deepseek-ai/dsh-session");
         const { Context } = await load("@deepseek-ai/cordis");
-        const { default: StockPersistence } = await load("@deepseek-ai/dsh-session-persistence-jsonl");
+        const StockPersistence = await load("@deepseek-ai/dsh-session-persistence-jsonl");
         const modeHandles = [];
         const storedModes = async (id) => {
           await ctx.get("sessionPersistence").flush();
@@ -1004,6 +1004,7 @@ export async function runPickerLane(ctx, config) {
     if (context) { await context.tracing.stop({ path: join(config.evidenceRoot, `${config.lane}-trace.zip`) }); await context.close(); }
     if (browser) await browser.close();
     if (server) await server.close();
+    await peer.dispose();
     report.browserErrors = browserErrors; report.serverErrors = server?.errors ?? [];
     if (browserErrors.length > 0 || report.serverErrors.length > 0) { report.outcome = "BOUNDARY"; report.failure ??= "Owned native browser/server errors require investigation"; }
     report.cleanup = { browserClosed: true, ownedContextClosed: true, hostDisposal: "appExit", serverClosed: true };

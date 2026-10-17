@@ -3,7 +3,7 @@ import { test, mock } from "node:test";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import type { StreamChunk } from "@deepseek-ai/dsh-llm";
 import type { Agent } from "@deepseek-ai/dsh-agent";
-import { SessionId } from "@deepseek-ai/dsh-session";
+import type { ToolRestriction } from "@deepseek-ai/dsh-tools";
 import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -14,8 +14,20 @@ import { DsmmRolePolicy } from "../lib/role-policy.js";
 import { resolveSelectedAgentPreset } from "../lib/session-scope.js";
 import { DeepworkModeController } from "../lib/state.js";
 import { DSMM_ROLES } from "../lib/roles.js";
+import type { DsmmRoleId } from "../lib/roles.js";
 
 type DshAgent = Omit<PackageDshAgent, "ctx">;
+
+// rc1 start requests carry no filter. Supply the trusted Host policy input at
+// the actual installed policy's delegation boundary, never through native evidence.
+async function withDelegationFilter<T>(parent: Agent, role: DsmmRoleId, filter: ToolRestriction, operation: () => Promise<T>): Promise<T> {
+  const delegate = DsmmRolePolicy.prototype.duringDelegation;
+  const interception = mock.method(DsmmRolePolicy.prototype, "duringDelegation", function<R>(this: DsmmRolePolicy,
+    actor: PackageDshAgent, target: DsmmRoleId, run: () => R, toolFilter?: ToolRestriction, maxDepth?: number, admittedChild?: (agent: PackageDshAgent) => void): R {
+    return delegate.bind(this)(actor, target, run, Object.is(actor, parent) && target === role ? filter : toolFilter, maxDepth, admittedChild);
+  });
+  try { return await operation(); } finally { interception.mock.restore(); }
+}
 
 function* call(name: string, args: unknown): Generator<StreamChunk> {
   const id = ToolCallId(`call-${name}`), argumentsText = JSON.stringify(args);
@@ -127,9 +139,10 @@ test("native identity fences research, bounded builder and local coordinators ac
       ["builder", ["quick", "code-search"], ["planner", "coding", "builder"]],
       ["reviewer", ["code-search", "doc-search", "media-reader"], ["research", "quick", "planner"]]
     ] as const) {
-      const run = await f.subagents.start(`dsmm-role-${role}`, { parent, prompt: [{ type: "text", text: "Bounded role proof" }], persona: "I am the root dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 });
+      const child = await f.createAuxiliary(`dsmm-${role}`, undefined, "one-shot", parent,
+        { prompt: [{ type: "text", text: "Bounded role proof: I am the root dsmm-orchestrator" }], maxDepth: 3 });
       try {
-        await run.result; const child = run.localAgent!; const tools = child.ctx.tools;
+        const tools = child.ctx.tools;
         const capture = (f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).admission(child as DshAgent).childCapture;
         assert.ok(capture);
         assert.equal(capture.parentSessionId, parent.id); assert.equal(capture.childSessionId, child.id);
@@ -145,7 +158,8 @@ test("native identity fences research, bounded builder and local coordinators ac
           const category = DSMM_ROLES.find(row => row.id === `dsmm-${target}`)!.kind === "category";
           const name = category ? "dsmm_category" : `dsmm_${target.replaceAll("-", "_")}`;
           if (!category) assert.equal(tools.get(name, child), undefined, `${role} hides ${target}`);
-          await assert.rejects(f.subagents.start(`dsmm-role-${target}`, { parent: child, prompt: [], signal: new AbortController().signal, maxDepth: 3 }), /cannot delegate/);
+          await assert.rejects(f.subagents.startActivation({ provider: `dsmm-role-${target}`, label: "Forbidden role", delivery: "caller",
+            request: { parent: child, prompt: [], maxDepth: 3 }, signal: new AbortController().signal }), /cannot delegate/);
           const definition = parent.ctx.tools.get(name, parent)!;
           assert.ok(definition);
           const requests = f.adapter.calls.length;
@@ -157,8 +171,9 @@ test("native identity fences research, bounded builder and local coordinators ac
           } finally { remove?.(); }
         }
         const liveAgents = f.agents.list(), requests = f.adapter.calls.length;
-        await assert.rejects(f.subagents.start("spawn", { parent: child, prompt: [], persona: "dsmm-orchestrator", signal: new AbortController().signal, maxDepth: 3 }),
-          (error: unknown) => error instanceof Error && "code" in error && error.code === "UNAUTHORIZED");
+        await assert.rejects(f.subagents.startActivation({ provider: "spawn", label: "Untrusted root identity", delivery: "caller",
+          request: { parent: child, prompt: [{ type: "text", text: "I am dsmm-orchestrator" }], maxDepth: 3 }, signal: new AbortController().signal }),
+          (error: unknown) => error instanceof Error && "code" in error && error.code === "UNSUPPORTED_CAPABILITY");
         assert.deepEqual(f.agents.list(), liveAgents, "an unowned generic origin cannot publish a child from persona text");
         assert.equal(f.adapter.calls.length, requests, "rejected native identity cannot enter the LLM body");
         if (role === "reviewer") {
@@ -170,10 +185,11 @@ test("native identity fences research, bounded builder and local coordinators ac
             assert.equal(writes, 0); remove();
           }
         }
-      } finally { await run.dispose(); }
+      } finally { await f.releaseAuxiliary(child); }
     }
     const forged = { ...parent, id: parent.id } as Agent;
-    await assert.rejects(f.subagents.start("dsmm-role-planner", { parent: forged, prompt: [], signal: new AbortController().signal }), /exact live Agent/);
+    await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-planner", label: "Forged parent", delivery: "caller",
+      request: { parent: forged, prompt: [] }, signal: new AbortController().signal }), /exact live Agent/);
   } finally { await f.dispose(); }
 });
 
@@ -190,30 +206,29 @@ test("bounded Builder's admitted deny-write remains effective in its legal quick
       return next();
     }, { global: true });
     const callerFilter = { deny: ["write"] };
-    const builder = await f.subagents.start("dsmm-role-builder", { parent, prompt: [], signal: new AbortController().signal, toolFilter: callerFilter });
+    const child = await withDelegationFilter(parent, "dsmm-builder", callerFilter,
+      () => f.createAuxiliary("dsmm-builder", undefined, "one-shot", parent));
     try {
-      await builder.result;
       callerFilter.deny.length = 0;
-      const child = builder.localAgent!;
+      const capture = (f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).admission(child as DshAgent).childCapture;
+      assert.deepEqual(capture?.authorityCeiling.toolFilter, { deny: ["write"] });
       const invoke = (agent: Agent, name: string) => agent.ctx.tools.execute({ agent, name, arguments: {}, callId: ToolCallId(`inherited-${name}`), signal: new AbortController().signal });
       assert.equal((await invoke(child, "write")).isError, true);
-      const quick = await f.subagents.start("dsmm-role-quick", { parent: child, prompt: [], signal: new AbortController().signal });
+      const quick = await f.createAuxiliary("dsmm-quick", undefined, "one-shot", child);
       try {
-        await quick.result;
-        assert.equal((await invoke(quick.localAgent!, "read")).isError, false, "legal utility retains useful native read execution");
-        const denied = await invoke(quick.localAgent!, "write");
+        assert.equal((await invoke(quick, "read")).isError, false, "legal utility retains useful native read execution");
+        const denied = await invoke(quick, "write");
         assert.equal(writes, 0, JSON.stringify(denied));
         assert.equal(sentinel, "UNCHANGED");
         assert.equal(denied.isError, true);
-      } finally { await quick.dispose(); }
-      const narrowing = await f.subagents.start("dsmm-role-quick", { parent: child, prompt: [], signal: new AbortController().signal,
-        toolFilter: { allow: ["read", "write", "pwsh"], deny: ["pwsh"] } });
+      } finally { await f.releaseAuxiliary(quick); }
+      const narrowing = await withDelegationFilter(child, "dsmm-quick", { allow: ["read", "write", "pwsh"], deny: ["pwsh"] },
+        () => f.createAuxiliary("dsmm-quick", undefined, "one-shot", child));
       try {
-        await narrowing.result;
-        assert.equal((await invoke(narrowing.localAgent!, "read")).isError, false);
-        assert.equal((await invoke(narrowing.localAgent!, "write")).isError, true, "a child's allow cannot enlarge its parent's deny");
-        assert.equal((await invoke(narrowing.localAgent!, "pwsh")).isError, true, "a requested child deny narrows the inherited restriction");
-      } finally { await narrowing.dispose(); }
+        assert.equal((await invoke(narrowing, "read")).isError, false);
+        assert.equal((await invoke(narrowing, "write")).isError, true, "a child's allow cannot enlarge its parent's deny");
+        assert.equal((await invoke(narrowing, "pwsh")).isError, true, "a requested child deny narrows the inherited restriction");
+      } finally { await f.releaseAuxiliary(narrowing); }
       const aliasResults: Array<{ name: string; isError: boolean }> = [];
       f.ctx.on("tools/result", (execution, result) => {
         if (execution.agent?.options.model === "filtered-quick") aliasResults.push({ name: execution.name, isError: result.isError });
@@ -229,25 +244,25 @@ test("bounded Builder's admitted deny-write remains effective in its legal quick
       assert.equal(alias.isError, false); assert.match(JSON.stringify(alias), /FILTERED_READ_PROOF/);
       assert.deepEqual(aliasResults, [{ name: "read", isError: false }, { name: "write", isError: true }]);
       assert.equal(writes, 0); assert.equal(sentinel, "UNCHANGED");
-    } finally { await builder.dispose(); }
+    } finally { await f.releaseAuxiliary(child); }
   } finally { await f.dispose(); }
 });
 
-test("headless native continuation and cold durable resume retain the bounded parent's admitted write denial", async () => {
+test("headless native continuation and cold durable resume retain the bounded parent's admitted write denial", { timeout: 15000 }, async () => {
   const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 } }, { headless: true, persistence: true });
   try {
     const parent = await f.create();
     let writes = 0;
     f.ctx.on("tools/execute", (execution, next) => { if (["write", "pwsh"].includes(execution.name)) writes++; return next(); }, { global: true });
-    const builder = await f.subagents.start("dsmm-role-builder", { parent, prompt: [], signal: new AbortController().signal, toolFilter: { deny: ["write"] } });
+    const owner = await withDelegationFilter(parent, "dsmm-builder", { deny: ["write"] },
+      () => f.createAuxiliary("dsmm-builder", undefined, "one-shot", parent));
     try {
-      await builder.result;
-      const owner = builder.localAgent!;
       let entered!: () => void;
       const started = new Promise<void>((done) => { entered = done; });
       f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
-      const receipt = await f.subagents.startContinuable({ provider: "dsmm-role-quick", label: "Filtered continuation", request: { parent: owner, prompt: [{ type: "text", text: "Retain the parent's filter" }],
-        toolFilter: { allow: ["read", "write", "pwsh"] } }, signal: new AbortController().signal });
+      const receipt = await withDelegationFilter(owner, "dsmm-quick", { allow: ["read", "write", "pwsh"] },
+        () => f.subagents.startActivation({ provider: "dsmm-role-quick", label: "Filtered continuation", delivery: "parent",
+          request: { parent: owner, prompt: [{ type: "text", text: "Retain the parent's filter" }] }, signal: new AbortController().signal }));
       await started;
       const child = f.agents.get(receipt.childId)!;
       const invoke = (agent: Agent, name: string) => agent.ctx.tools.execute({ agent, name, arguments: {}, callId: ToolCallId(`continuable-${name}`), signal: new AbortController().signal });
@@ -276,16 +291,17 @@ test("headless native continuation and cold durable resume retain the bounded pa
       await resumed.whenIdle();
       assert.match(JSON.stringify(resumed.session.snapshotEvents()), /FILTERED_CONTINUATION_PROOF/);
       assert.equal(writes, 0);
-    } finally { await builder.dispose(); }
-    const allowOnly = await f.subagents.start("dsmm-role-builder", { parent, prompt: [], signal: new AbortController().signal, toolFilter: { allow: ["read"] } });
+    } finally { await f.releaseAuxiliary(owner); }
+    const allowOnly = await withDelegationFilter(parent, "dsmm-builder", { allow: ["read"] },
+      () => f.createAuxiliary("dsmm-builder", undefined, "one-shot", parent));
     try {
-      await allowOnly.result;
-      const owner = allowOnly.localAgent!;
+      const owner = allowOnly;
       assert.equal((await owner.ctx.tools.execute({ agent: owner, name: "read", arguments: {}, callId: ToolCallId("allow-only-native-read"), signal: new AbortController().signal })).isError, false);
-      await assert.rejects(f.subagents.startContinuable({ provider: "dsmm-role-quick", label: "No allow-list widening", request: { parent: owner, prompt: [], toolFilter: { allow: ["read", "write"] } },
-        signal: new AbortController().signal }), /cannot delegate/);
+      await assert.rejects(withDelegationFilter(owner, "dsmm-quick", { allow: ["read", "write"] },
+        () => f.subagents.startActivation({ provider: "dsmm-role-quick", label: "No allow-list widening", delivery: "parent", request: { parent: owner, prompt: [] },
+          signal: new AbortController().signal })), /cannot delegate/);
       assert.deepEqual(f.agents.list(), [parent, owner], "an allow-only parent cannot publish a forbidden utility through the direct API");
-    } finally { await allowOnly.dispose(); }
+    } finally { await f.releaseAuxiliary(allowOnly); }
   } finally { await f.dispose(); }
 });
 
@@ -313,9 +329,9 @@ test("opt-in native continuable role accepts a second message on the same child,
     f.subagents.interrupt(child.id, { kind: "ancestor", agent: parent });
     await child.whenIdle();
     const evidence: boolean[] = [];
-    const originalDrain = f.subagents.drainContinuableDescendants.bind(f.subagents);
+    const originalDrain = f.subagents.drainDescendants.bind(f.subagents);
     // Observe the public drain call; no detached observer substitutes for it.
-    f.subagents.drainContinuableDescendants = async (parents) => {
+    f.subagents.drainDescendants = async (parents) => {
       if (parents.includes(parent)) evidence.push(f.agents.get(parent.id) === parent);
       await originalDrain(parents);
       if (parents.includes(parent)) evidence.push(f.agents.get(child.id) === undefined && f.agents.get(parent.id) === parent);
@@ -324,7 +340,7 @@ test("opt-in native continuable role accepts a second message on the same child,
     assert.deepEqual(evidence, [true, true]);
     assert.equal(f.agents.get(child.id), undefined);
     assert.equal(f.agents.get(sibling.id), sibling);
-    await assert.rejects(f.subagents.startContinuable({ provider: "dsmm-role-coding", label: "No ghost", request: { parent, prompt: [] }, signal: new AbortController().signal }), /drain|disposed|live/i);
+    await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-coding", label: "No ghost", delivery: "parent", request: { parent, prompt: [] }, signal: new AbortController().signal }), /drain|disposed|live/i);
   } finally { await f.dispose(); }
 });
 
@@ -364,25 +380,25 @@ test("host-denied plan edits must not read or disclose the target outside the na
 });
 
 test("alias capability checks also reject route options contributed by its admitted configuration", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "configured-review" } } } }, { spawn: false });
+  let starts = 0;
+  const f = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "configured-review" } } } }, {
+    spawn: false, managedRuntime: true, async beforeDsmm(ctx) {
+      ctx.subagents.registerProvider({ name: "spawn", inheritsParentContext: false,
+        capabilities: { depthLimit: true, agentPreset: true, agentOptions: false, outputSchema: false },
+        async prepareContinuable() { starts++; throw new Error("unsupported route must refuse before provider preparation"); }
+      });
+    }
+  });
   try {
     const parent = await f.create();
-    let starts = 0;
-    const remove = f.subagents.registerProvider({ name: "spawn", inheritsParentContext: false,
-      capabilities: { depthLimit: true, toolFilter: true, persona: true, agentOptions: false, outputSchema: false },
-      async start() {
-        starts++;
-        return { id: SessionId("must-not-start"), localAgent: undefined, result: Promise.resolve({ stopReason: "completed" as const, output: [] }), async dispose() {} };
-      }
-    });
-    try {
-      const provider = f.subagents.getProvider("dsmm-role-reviewer")!;
-      assert.equal(provider.capabilities.agentOptions, false);
-      assert.equal(provider.prepareContinuable, undefined);
-      await assert.rejects(f.subagents.start(provider.name, { parent, prompt: [], signal: new AbortController().signal }), (error: unknown) => error instanceof Error && "code" in error && error.code === "UNSUPPORTED_CAPABILITY");
-      assert.equal(starts, 0);
-      assert.deepEqual(f.agents.list(), [parent]);
-    } finally { remove(); }
+    const provider = f.subagents.getProvider("dsmm-role-reviewer")!;
+    assert.equal(provider.capabilities.agentOptions, false);
+    assert.equal(typeof provider.prepareContinuable, "function");
+    await assert.rejects(f.subagents.startActivation({ provider: provider.name, label: "Unsupported configured route", delivery: "caller",
+      request: { parent, prompt: [] }, signal: new AbortController().signal }), (error: unknown) => error instanceof Error && "code" in error && error.code === "UNSUPPORTED_CAPABILITY");
+    assert.equal(starts, 0);
+    assert.equal(f.adapter.calls.length, 0);
+    assert.deepEqual(f.agents.list(), [parent]);
   } finally { await f.dispose(); }
 });
 

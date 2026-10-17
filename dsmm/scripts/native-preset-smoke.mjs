@@ -3,7 +3,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { isReviewedSource, isSource022, isStableNativeSource, assertReviewedReleaseVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion } from "./release-contract.mjs";
+import { isReviewedSource, isSource022, isSource030, isStableNativeSource, assertReviewedReleaseVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion } from "./release-contract.mjs";
 import { inspectStableBootstrap, inspectStableExports } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-final-native-preset-acceptance";
@@ -14,6 +14,20 @@ const ROLE_TOOLS = ["dsmm_planner", "dsmm_plan_critic", "dsmm_reviewer", "dsmm_o
   "dsmm_creative", "dsmm_code_search", "dsmm_doc_search", "dsmm_clarifier", "dsmm_media_reader"].sort();
 const STOCK_PERSISTENCE_ID = "session-persistence-jsonl";
 const STOCK_PERSISTENCE_MODULE = "@deepseek-ai/dsh-session-persistence-jsonl";
+
+function boundedText(value, limit = 2000) {
+  const text = String(value);
+  return text.length <= limit ? text : `${text.slice(0, limit)}...[truncated]`;
+}
+
+function errorEvidence(error, depth = 0) {
+  if (depth >= 4 || error === null || typeof error !== "object") return error === undefined ? undefined : boundedText(error);
+  const row = { name: typeof error.name === "string" ? error.name : error.constructor?.name, message: boundedText(typeof error.message === "string" ? error.message : error) };
+  if (typeof error.code === "string") row.code = error.code;
+  if (error.cause !== undefined) row.cause = errorEvidence(error.cause, depth + 1);
+  if (Array.isArray(error.errors)) row.errors = error.errors.slice(0, 4).map((item) => errorEvidence(item, depth + 1));
+  return row;
+}
 const METADATA_COMPATIBILITY = Symbol.for("dsmm.sessionPersistence.ignorable.v1");
 const DSMM_METADATA_TYPES = new Set(["deepwork/mode", "dsmm/role-policy"]);
 
@@ -108,7 +122,7 @@ export async function prepareNativeReadonly022({ ctx, parent, workspace, label, 
 export async function apply(ctx, config) {
   const nativeRequire = createRequire(config.dshManifest);
   const load = async (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
-  const [{ LlmAdapter, ReasoningEffortId, ToolCallId, createUserMessage }, { Session, SessionId }, { renderPrompt }, { Context, getTraceable }, { foldSubagentDescriptor }, { default: JsonlSessionPersistence }] = await Promise.all([
+  const [{ LlmAdapter, ReasoningEffortId, ToolCallId, createUserMessage }, { Session, SessionId }, { renderPrompt }, { Context, getTraceable }, { foldSubagentDescriptor }, JsonlSessionPersistence] = await Promise.all([
     load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session"), load("@deepseek-ai/dsh-system-prompt"),
     load("@deepseek-ai/cordis"), load("@deepseek-ai/dsh-subagent"), load(STOCK_PERSISTENCE_MODULE)
   ]);
@@ -156,11 +170,11 @@ export async function apply(ctx, config) {
     try {
       report.persistence = inspectPersistence();
       if (isStableNativeSource(version)) {
-        if (isSource022(version)) assert.match(config.sha256, /^[a-f0-9]{64}$/u);
+        if (isSource022(version) || isSource030(version)) assert.match(config.sha256, /^[a-f0-9]{64}$/u);
         report.sourceContract = version;
         report.packageVersion = version;
         report.artifactSha256 = config.sha256;
-        report.bootstrap = inspectStableBootstrap(ctx, { template: config.template });
+        report.bootstrap = inspectStableBootstrap(ctx, { template: config.template, version });
         report.publicExports = await inspectStableExports(config.packageRoot, join(ctx.get("profileContext").dir, "package.json"), { sourceContract: version });
       }
       const registry = ctx.get("agentPresets");
@@ -219,25 +233,40 @@ export async function apply(ctx, config) {
         ...(registry === undefined ? {} : { setup: (agentCtx) => registry.mount(agentCtx, "standard").then(() => undefined) }) });
       handles.push(parentHandle);
       const parent = parentHandle.agent;
-      if (isSource022(version)) {
+      if (isSource022(version) || isSource030(version)) {
         readonlyProof = await prepareNativeReadonly022({ ctx, parent, workspace: config.workspace, label: config.template,
           sdk: nativeRequire, toolsFor: agent => toolsFor(agent, registry), ToolCallId });
         report.readonlyExecution = readonlyProof.proof;
       }
       if (config.nativeOnly) {
-        const run = await ctx.get("subagents").start("spawn", { parent,
-          prompt: [{ type: "text", text: "Reply native fixture complete." }], persona: "Native control child persona",
-          toolFilter: { allow: ["read", "glob", "grep"] },
-          agentOptions: { provider: "dsmm-acceptance-fixture", model: "deterministic-native", reasoningEffort: ReasoningEffortId("high") }, signal: new AbortController().signal });
+        let nativeControl;
+        const detachNativeControl = ctx.on("subagent/start", (info) => {
+          if (nativeControl !== undefined || info.provider !== "spawn" || !info.local) return;
+          const agent = agents.get(info.id);
+          if (agent !== undefined && agents.isOwnedBy(agent.id, parent)) {
+            nativeControl = { agent, defaultWriteAvailable: toolsFor(agent).get("write", agent) !== undefined };
+          }
+        }, { global: true });
+        let run;
         try {
-          assert.equal((await run.result).stopReason, "completed");
-          assert.ok(run.localAgent);
-          assert.match((await snapshot(run.localAgent)).prompt, /Native control child persona/u);
-          report.nativeSpawn = { outcome: "COMPLETED", denied: await denyMutations(run.localAgent, undefined, "native-control-child") };
+          run = await ctx.get("subagents").startActivation({ provider: "spawn", label: "native-control-child", delivery: "caller", signal: new AbortController().signal,
+            request: { parent, prompt: [{ type: "text", text: "Reply native fixture complete." }], ...(registry === undefined ? {} : { agentPreset: "minimal" }),
+              agentOptions: { provider: "dsmm-acceptance-fixture", model: "deterministic-native", reasoningEffort: ReasoningEffortId("high") } } });
+          const result = await run.result;
+          report.nativeSpawn = { outcome: result.stopReason, ...(nativeControl === undefined ? {} : {
+            exactLocalAgent: nativeControl.agent.id === run.childId, defaultWriteAvailable: nativeControl.defaultWriteAvailable }) };
           report.model.calls = calls;
+          assert.equal(result.stopReason, "completed");
+          assert.ok(nativeControl, "native control activation did not publish its exact local Agent while live");
+          assert.equal(nativeControl.agent.id, run.childId, "native control proof did not inspect the activation child");
+          assert.equal(nativeControl.defaultWriteAvailable, true, "preset-free native control child did not retain the stock default write tool");
+          report.nativeSpawn = { outcome: "COMPLETED", exactLocalAgent: true, defaultWriteAvailable: true };
           report.outcome = "COMPLETED";
           return report;
-        } finally { await run.dispose(); }
+        } finally {
+          detachNativeControl();
+          if (run !== undefined) await run.dispose();
+        }
       }
       const commands = parent.ctx.get("commands");
       assert.ok(commands, "native metadata proof requires the actual DSMM deepwork command");
@@ -280,7 +309,7 @@ export async function apply(ctx, config) {
         report.headlessTools = { outcome: "COMPLETED", roleTools: headless.roleTools, disabledBuilderAbsent: true };
       }
       const subagents = ctx.get("subagents");
-      const providerRoles = isSource022(version)
+      const providerRoles = isSource022(version) || isSource030(version)
         ? presetNamesForVersion(version).filter(({ id }) => !["dsmm-orchestrator", "dsmm-builder", "dsmm-cross-cutting"].includes(id)).map(({ id }) => id.slice(5))
         : roleTools.map(tool => tool.slice(5).replace(/_/gu, "-"));
       for (const role of providerRoles) assert.ok(subagents.getProvider(`dsmm-role-${role}`), `enabled native provider ${role}`);
@@ -290,24 +319,51 @@ export async function apply(ctx, config) {
         report.delegation = { roleTools: [...roleTools], disabledBuilderAbsent: true, disabledCrossCuttingAbsent: true };
       }
       const children = [];
+      const delegationPrompts = [];
       const checkedChildren = new Set();
       childListener = ctx.on("agent/request", async ({ agent }, next) => {
-        if (agent.session.header.origin !== "subagent" || !agents.isOwnedBy(agent.id, parent)) return await next();
+        const request = await next();
+        if (agent.session.header.origin !== "subagent" || !agents.isOwnedBy(agent.id, parent)) return request;
         const descriptor = foldSubagentDescriptor(agent.session.snapshotEvents());
-        if (descriptor?.provider !== "dsmm-role-reviewer" || checkedChildren.has(agent.id)) return await next();
+        if (descriptor?.provider !== "dsmm-role-reviewer" || checkedChildren.has(agent.id)) return request;
         checkedChildren.add(agent.id);
-        const child = await snapshot(agent, registry);
-        assert.match(child.prompt, /You are DW Reviewer \(role ID: dsmm-reviewer\)/u);
+        const child = await snapshot(agent);
+        const promptIdentity = { childId: agent.id, provider: descriptor.provider,
+          reviewer: /You are DW Reviewer \(role ID: dsmm-reviewer\)/u.test(child.prompt),
+          orchestrator: /You are DW Orchestrator \(role ID: dsmm-orchestrator\)/u.test(child.prompt) };
+        delegationPrompts.push(promptIdentity);
+        assert.equal(promptIdentity.reviewer, true, "native reviewer child did not assemble the Reviewer persona");
         children.push({ agent, provider: descriptor.provider, persona: true, tools: child.tools,
           denied: await denyMutations(agent, registry, "reviewer-child") });
-        return await next();
+        return request;
       }, { global: true, prepend: true });
       // Exercise the packaged standing tool itself, so persona/filter/alias
       // configuration is consumed by native ToolRuntime and native spawn.
       const tools = toolsFor(parent, registry);
-      const delegated = await tools.execute({ callId: ToolCallId("artifact-native-reviewer"), name: "dsmm_reviewer",
-        agent: parent, arguments: { description: "Inspect local acceptance fixture", prompt: "Reply native fixture complete. Do not call any tool." }, signal: new AbortController().signal });
-      if (delegated.isError) report.delegationFailure = delegated.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").slice(0, 2000);
+      const delegationErrors = [], delegationEvents = [];
+      const detachError = ctx.on("agent/error", ({ agent, error }) => {
+        if (agent?.session.header.parentSession === parent.id) delegationErrors.push({ childId: agent.id, error: errorEvidence(error) });
+      });
+      const detachEvent = ctx.on("session/event", (session, event) => {
+        if (session.header.parentSession !== parent.id || delegationEvents.length >= 128) return;
+        const row = { childId: session.id, type: event.type };
+        if (event.type === "request/header") {
+          const header = event.data.header.config;
+          Object.assign(row, { provider: header.provider, model: header.model, reasoningEffort: header.reasoningEffort });
+        } else if (event.type === "turn/end") row.reason = event.data.reason.kind === "error"
+          ? { kind: "error", error: errorEvidence(event.data.reason.error) }
+          : event.data.reason;
+        delegationEvents.push(row);
+      });
+      let delegated;
+      try {
+        delegated = await tools.execute({ callId: ToolCallId("artifact-native-reviewer"), name: "dsmm_reviewer",
+          agent: parent, arguments: { description: "Inspect local acceptance fixture", prompt: "Reply native fixture complete. Do not call any tool." }, signal: new AbortController().signal });
+      } finally { detachEvent(); detachError(); }
+      if (delegated.isError) {
+        report.delegationFailure = delegated.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").slice(0, 2000);
+        report.delegationDiagnostics = { prompts: delegationPrompts, errors: delegationErrors, events: delegationEvents };
+      }
       assert.equal(delegated.isError, false, "native packaged dsmm_reviewer tool must complete");
       assert.equal(children.length, 1, "the packaged role tool must actually create one native read-only child");
       assert.ok(calls.length > 0, "the native child loop must reach the local model adapter");

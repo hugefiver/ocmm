@@ -8,7 +8,7 @@ import type {
   SessionHandleReadOptions, SessionPersistenceCreateOptions, SessionPersistenceListOptions,
   SessionPersistenceOpenOptions, SessionPersistenceStatOptions
 } from "@deepseek-ai/dsh-session-persistence";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import type { Config } from "@deepseek-ai/dsh-session-persistence-jsonl";
 import { isDeepStrictEqual } from "node:util";
 import { annotateDsmmEvent, DSMM_PERSISTENCE_COMPATIBILITY } from "./session-metadata.js";

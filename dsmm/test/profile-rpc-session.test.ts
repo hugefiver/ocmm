@@ -29,6 +29,11 @@ import type { GlobalConfigSnapshot } from "../lib/deployment-config.js";
 import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 
 const require = createRequire(import.meta.url);
+async function installAccess(ctx: Context) {
+  const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
+  const { RemoteAccessService } = sdk("@deepseek-ai/dsh-api-remote-access");
+  await ctx.plugin(RemoteAccessService).await();
+}
 const nativeRequire = createRequire(require.resolve("@deepseek-ai/dsh-client-connection/package.json"));
 const { CredentialProvider } = nativeRequire("@deepseek-ai/dsh-credentials") as { CredentialProvider: new (ctx: Context) => Service };
 
@@ -46,6 +51,7 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
   const root = await mkdtemp(join(tmpdir(), "dsmm-scoped-rpc-"));
   const ctx = new Context();
   try {
+    await installAccess(ctx);
     await Promise.all([ctx.plugin(TypertRegistry).await(), ctx.plugin(TypertGatewayService, {}).await(), ctx.plugin(AgentRegistry).await()]);
     if (nativeConnection) {
       await ctx.plugin(MemoryCredentials).await();
@@ -68,7 +74,8 @@ async function fixture(nativeConnection = true, options?: DsmmProfileRuntimeOpti
     } });
     await rpc.await();
     const gateway = ctx.typertGateway;
-    const invoke = <T>(method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> => gateway.invoke({ namespace: "dsmmProfiles", method, args, ...(signal === undefined ? {} : { signal }) }) as Promise<T>;
+    const peer = nativeConnection ? ctx.connection.browserPeer : new NativeConnection.Peer(ctx, { principal: { kind: "owner" } });
+    const invoke = <T>(method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> => gateway.invoke({ namespace: "dsmmProfiles", method, args, peer, ...(signal === undefined ? {} : { signal }) }) as Promise<T>;
     // Session/registry/Gateway/Connection/store are native. This lightweight
     // maintenance callback is a backend contract seam, not native-loop proof.
     const createRoot = async (id: string, origin?: "subagent") => {
@@ -98,26 +105,23 @@ async function ownedFixture(defaultActive = false) {
   const native = await nativeRoutingFixture({ defaultActive }, { headless: true, persistence: true });
   try {
     const ctx = native.ctx;
+    await installAccess(ctx);
     await Promise.all([ctx.plugin(TypertRegistry).await(), ctx.plugin(TypertGatewayService, {}).await()]);
     await ctx.plugin(MemoryCredentials).await();
     await ctx.plugin(NativeConnection).await();
     const runtime = ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
     const store = ProfileStore.fromCentral(native.home, native.profileDir, native.dsmmEntryId ?? "trusted-direct");
-    const runs: Array<{ dispose(): void | Promise<void> }> = [];
-    const invoke = <T>(method: string, args: Record<string, unknown>): Promise<T> => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args }) as Promise<T>;
+    const invoke = <T>(method: string, args: Record<string, unknown>): Promise<T> => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args, peer: ctx.connection.browserPeer }) as Promise<T>;
     return { ctx, runtime, store, gateway: ctx.typertGateway, invoke,
       createRoot: () => native.create({ agentPreset: "standard" }),
       createUnownedChild: () => native.create({ origin: "subagent" }),
       async createChild(parent: Agent) {
-        const run = await native.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "Owned local profile RPC fixture" }], signal: new AbortController().signal });
-        runs.push(run);
-        assert.equal((await run.result).stopReason, "completed");
-        assert.ok(run.localAgent);
-        assert.equal(ctx.agents.isOwnedBy(run.localAgent.id, parent), true);
-        assert.ok(await store.readChildAdmission(run.localAgent.id, parent.id));
-        return run.localAgent;
+        const child = await native.createAuxiliary("dsmm-reviewer", undefined, "one-shot", parent);
+        assert.equal(ctx.agents.isOwnedBy(child.id, parent), true);
+        assert.ok(await store.readChildAdmission(child.id, parent.id));
+        return child;
       },
-      async dispose() { try { for (const run of runs.reverse()) await run.dispose(); } finally { await native.dispose(); } }
+      dispose: () => native.dispose()
     };
   } catch (error) { await native.dispose(); throw error; }
 }
@@ -139,7 +143,7 @@ test("native Gateway read-only admission DTOs redact private configuration witho
   try {
     const agent = await f.createRoot("safe-read-root");
     const session = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: agent.id });
-    const editor = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }) as DeploymentEditorSnapshot;
+    const editor = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {}, peer: f.ctx.connection.browserPeer }) as DeploymentEditorSnapshot;
     assert.equal(editor.startupSources?.["lsp.env"], "mixed");
     assert.doesNotMatch(JSON.stringify({ desired: editor.desired, startup: editor.startup, sources: editor.sources, startupSources: editor.startupSources }), /REVIEW_\w*SENTINEL|private-only-fixture|private-preset-fixture/u);
     for (const view of [session.configuration, editor.nextRoot]) {
@@ -159,19 +163,21 @@ test("native Gateway read-only admission DTOs redact private configuration witho
     const editorCodec = TYPERT_REMOTE.descriptors.find(row => row.method === "describeSettings")!.result;
     assert.equal(editorCodec.mode, "strict"); if (editorCodec.mode !== "strict") throw new Error("strict editor result required");
     assert.throws(() => editorCodec.create().parse({ ...editor, startupSources: { "lsp.env.REVIEW_KEY_SENTINEL": "profile" } }));
-    await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: editor.globalRevision,
+    await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", peer: f.ctx.connection.browserPeer, args: { request: { expectedRevision: editor.globalRevision,
       edits: [{ op: "set", path: ["lsp", "env"], value: { TOKEN: "EDITOR_SENTINEL" } }] } } });
-    const edited = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }) as DeploymentEditorSnapshot;
+    const edited = await f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {}, peer: f.ctx.connection.browserPeer }) as DeploymentEditorSnapshot;
     assert.deepEqual((edited.global.lsp as Record<string, unknown>).env, { TOKEN: "EDITOR_SENTINEL" }, "authorized raw sparse editor input remains editable");
     assert.doesNotMatch(JSON.stringify({ desired: edited.desired, startup: edited.startup, nextRoot: edited.nextRoot, sources: edited.sources, startupSources: edited.startupSources }), /EDITOR_SENTINEL|REVIEW_\w*SENTINEL|private-only-fixture|private-preset-fixture/u);
-    const operator = f.ctx.connection.operator, impostor = { id: operator.id, ctx: new Context(), async dispose() {} };
+    const operator = f.ctx.connection.browserPeer, impostor = { ...operator, ctx: new Context(), async dispose() {} };
+    const independentOwner = f.ctx.connection.createPeer({ principal: { kind: "owner" } });
     for (const [namespace, method, args] of [["dsmmProfiles", "describeSession", { sessionId: agent.id }], ["dsmmConfig", "describeSettings", {}]] as const) {
       await assert.rejects(f.gateway.invoke({ namespace, method, args, peer: impostor }), refused("not-owned"));
+      await assert.rejects(f.gateway.invoke({ namespace, method, args, peer: independentOwner }), refused("not-owned"));
     }
     f.carrier.host = "0.0.0.0";
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }), refused("not-owned"));
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {}, peer: f.ctx.connection.browserPeer }), refused("not-owned"));
     f.carrier.host = "127.0.0.1"; f.settingsAuthority.writable = false;
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {} }), refused("not-owned"));
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmConfig", method: "describeSettings", args: {}, peer: f.ctx.connection.browserPeer }), refused("not-owned"));
   } finally { await f.dispose(); }
 });
 
@@ -180,10 +186,10 @@ test("fixed global backend through native Gateway requires operator plus trusted
   try {
     // Carrier bind/writability are a public authority seam; the operator, Gateway,
     // strict codec and backend are real native services, not a fake invocation.
-    const invoke = (request: unknown, peer?: Parameters<typeof f.gateway.invoke>[0]["peer"]) => f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request }, ...(peer === undefined ? {} : { peer }) }) as Promise<GlobalConfigSnapshot>;
+    const invoke = (request: unknown, peer = f.ctx.connection.browserPeer) => f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request }, peer }) as Promise<GlobalConfigSnapshot>;
     const request = { expectedRevision: "absent", edits: [{ op: "set", path: ["defaultActive"], value: true }] };
-    const peer = f.ctx.connection.operator;
-    const impostor = { id: peer.id, ctx: new Context(), async dispose() {} };
+    const peer = f.ctx.connection.browserPeer;
+    const impostor = { ...peer, ctx: new Context(), async dispose() {} };
     await assert.rejects(invoke(request, impostor), refused("not-owned"));
     f.carrier.host = "0.0.0.0"; await assert.rejects(invoke(request), refused("not-owned"));
     f.carrier.host = "127.0.0.1"; f.settingsAuthority.writable = false;
@@ -229,8 +235,8 @@ test("native mode RPC changes only the owned root, preserves profile epoch/globa
     assert.notEqual(selected.deepwork!.revision, before.deepwork!.revision);
     assert.deepEqual(await f.runtime.describe(), global); assert.deepEqual(await f.runtime.getSession(b as unknown as DshAgent), other);
     await assert.rejects(f.invoke("selectMode", { sessionId: a.id, request }), refused("conflict"));
-    const operator = f.ctx.connection.operator;
-    const wrongPeer = { id: operator.id, ctx: new Context(), async dispose() {} };
+    const operator = f.ctx.connection.browserPeer;
+    const wrongPeer = { ...operator, ctx: new Context(), async dispose() {} };
     await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: a.id, request: modeRequest(selected, false) }, peer: wrongPeer }), refused("not-owned"));
     await assert.rejects(f.invoke("selectMode", { sessionId: b.id, request: modeRequest(selected, false) }), refused("validation"));
     await assert.rejects(f.createUnownedChild(), { code: "not-owned" });
@@ -257,8 +263,8 @@ test("mode RPC rejects busy, cancellation, unowned cold lookups and malformed in
     for (const invalid of [{ ...cold, peer: true }, { ...cold, active: "true" }, { ...cold, expectedModeRevision: "bad" }]) {
       await assert.rejects(f.invoke("selectMode", { sessionId: "cold-mode", request: invalid }));
     }
-    const operator = f.ctx.connection.operator;
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: "cold-mode", request: cold }, peer: { id: operator.id, ctx: new Context(), async dispose() {} } }), refused("not-owned"));
+    const operator = f.ctx.connection.browserPeer;
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectMode", args: { sessionId: "cold-mode", request: cold }, peer: { ...operator, ctx: new Context(), async dispose() {} } }), refused("not-owned"));
     assert.equal(resumes, 0); assert.deepEqual(await f.runtime.getSession(agent), before);
   } finally { await f.dispose(); }
 });
@@ -277,9 +283,9 @@ test("native Gateway Core reads refuse data after pending-read authority or life
         const entered = gate(), releaseRead = gate();
         const connection = (Reflect.get(f.ctx.connection, symbols.original) ?? f.ctx.connection) as NativeConnection.HostConnectionService;
         const connectionContext = Reflect.get(connection, "ctx") as Context;
-        const operator = connection.operator;
+        const operator = connection.browserPeer;
         try {
-          await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: "absent",
+          await f.gateway.invoke({ namespace: "dsmmConfig", method: "save", peer: operator, args: { request: { expectedRevision: "absent",
             edits: [{ op: "set", path: ["lsp", "env"], value: { TOKEN: "PENDING_CORE_READ_SENTINEL" } }] } } });
           const authorized = await f.gateway.invoke({ namespace: "dsmmConfig", method, args: {}, peer: operator });
           if (method !== "describeModules") assert.match(JSON.stringify(authorized), /PENDING_CORE_READ_SENTINEL/u);
@@ -294,13 +300,13 @@ test("native Gateway Core reads refuse data after pending-read authority or life
           const pending = f.gateway.invoke({ namespace: "dsmmConfig", method, args: {}, peer: operator, signal: abort.signal })
             .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
           await entered.promise;
-          if (change === "operator") Reflect.set(connection, "operator", { id: operator.id, ctx: f.ctx, async dispose() {} });
+          if (change === "operator") Reflect.set(connection, "browserPeer", { ...operator, ctx: f.ctx, async dispose() {} });
           else if (change === "owner") {
             // Replace the provided native service value, keeping the exact Peer
             // and active provider fiber so only the connection owner changes.
             const replacement = Object.create(Object.getPrototypeOf(connection), Object.getOwnPropertyDescriptors(connection)) as NativeConnection.HostConnectionService;
             connectionContext.set("connection", replacement);
-            assert.equal(f.ctx.connection.operator, operator);
+            assert.equal(f.ctx.connection.browserPeer, operator);
             assert.notEqual(Reflect.get(f.ctx.connection, symbols.original), connection);
           } else if (change === "service") await f.rpc.dispose();
           else if (change === "request") abort.abort();
@@ -319,7 +325,7 @@ test("native Gateway Core reads refuse data after pending-read authority or life
           }
         } finally {
           releaseRead.release();
-          Reflect.set(connection, "operator", operator);
+          Reflect.set(connection, "browserPeer", operator);
           if (change === "owner") connectionContext.set("connection", connection);
           await f.dispose();
         }
@@ -339,7 +345,7 @@ test("native Gateway Core save retains success when service disposal follows its
       await releaseSave.promise;
       return snapshot;
     };
-    const pending = f.gateway.invoke({ namespace: "dsmmConfig", method: "save", args: { request: { expectedRevision: "absent",
+    const pending = f.gateway.invoke({ namespace: "dsmmConfig", method: "save", peer: f.ctx.connection.browserPeer, args: { request: { expectedRevision: "absent",
       edits: [{ op: "set", path: ["defaultActive"], value: true }] } } }) as Promise<GlobalConfigSnapshot>;
     await committed.promise;
     const durable = await f.deployment!.readGlobal();
@@ -470,8 +476,8 @@ test("bad peers and malformed payloads refuse before native cold-session authori
     // input. It is not offered as evidence of a supported native cold resume.
     f.ctx.provide("sessionController", { async resolveAgent() { resumes++; throw new Error("PRIVATE_RESUME_SENTINEL"); } });
     const request = { sessionId: "cold-root", id: null, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) };
-    const operator = f.ctx.connection.operator;
-    const wrongPeer = { id: operator.id, ctx: new Context(), async dispose() {} };
+    const operator = f.ctx.connection.browserPeer;
+    const wrongPeer = { ...operator, ctx: new Context(), async dispose() {} };
     await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "selectSession", args: { sessionId: "cold-root", request }, peer: wrongPeer }), refused("not-owned"));
     await assert.rejects(f.invoke("selectSession", { sessionId: "other-root", request }), refused("validation"));
     for (const args of [
@@ -490,7 +496,7 @@ test("bad peers and malformed payloads refuse before native cold-session authori
   } finally { await f.dispose(); }
 });
 
-test("a Gateway fallback operator is not native Connection authority; global API remains intact", async () => {
+test("an independent owner Peer is not native Connection authority; global API remains intact", async () => {
   const f = await fixture(false);
   try {
     await f.createRoot("no-connection-root");
@@ -532,7 +538,7 @@ test("native cold-resume capability absence and withdrawn descriptors fail close
 });
 
 test("scoped RPC abort, service disposal and native Connection withdrawal fence paused validation before the durable commit", async () => {
-  for (const cancelBy of ["request", "service", "connection"] as const) {
+  for (const cancelBy of ["request", "service", "connection", "peer"] as const) {
     const entered = gate();
     const releaseValidation = gate();
     const f = await fixture(true, { async validateCandidate() { entered.release(); await releaseValidation.promise; } });
@@ -542,10 +548,16 @@ test("scoped RPC abort, service disposal and native Connection withdrawal fence 
       const before = await f.invoke<SessionProfileSnapshot>("describeSession", { sessionId: agent.id });
       const signal = new AbortController();
       const pending = f.invoke<SessionProfileSnapshot>("selectSession", { sessionId: agent.id, request: selectRequest(before, draft.id, draft.revision) }, signal.signal);
-      const refusal = assert.rejects(pending, cancelBy === "request" ? (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/cancelled" : refused(cancelBy === "connection" ? "not-owned" : "cancelled"));
+      const refusal = assert.rejects(pending, error => {
+        const remote = remoteErrorOf(error);
+        assert.equal(remote?.code, cancelBy === "request" ? "gateway/cancelled" : "dsmm-profiles/refused");
+        if (remote?.code === "dsmm-profiles/refused") assert.equal(remote.details.code, "cancelled");
+        return true;
+      });
       await entered.promise;
       if (cancelBy === "request") signal.abort();
       else if (cancelBy === "service") await f.rpc.dispose();
+      else if (cancelBy === "peer") await f.ctx.connection.browserPeer.dispose();
       else { assert.ok(f.connectionFiber); await f.connectionFiber.dispose(); assert.equal(signal.signal.aborted, false); }
       releaseValidation.release();
       await refusal;

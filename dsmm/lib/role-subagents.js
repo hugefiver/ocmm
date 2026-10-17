@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { SubagentError } from "@deepseek-ai/dsh-subagent";
+import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
 import { DSMM_ROLES } from "./roles.js";
 import { isDsmmRoleId } from "./roles.js";
 import { DsmmRolePolicy, roleToolName } from "./role-policy.js";
@@ -12,6 +13,7 @@ import { childOwnedSessionEvents } from "./session-scope.js";
 import { agentForScope, nativeAgentContext, scopeParentOf } from "./native-scope.js";
 import { roleRouteRuntimeState } from "./role-routing.js";
 import { modelRouteFromCall } from "./role-llm.js";
+import { duringActivationOwnership } from "./agent-registry.js";
 const hostControls = ["send_message", "interrupt_agent", "exit_plan_mode", "ask_user_question", "todo_write", "job_output", "job_list", "job_kill"];
 // Agent-owned policy realms survive a bundle reinstall; do not register another
 // identity prompt/tools layer on the same retained live Agent.
@@ -149,7 +151,7 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
             const invocation = await resolveRoleInvocation(parent, role.id, current, exec.signal, { ...(args.level === undefined ? {} : { level: args.level }), ...(args.route === undefined ? {} : { route: args.route }) });
             const capturedProvider = provider;
             const request = { parent, label: args.description, prompt: [{ type: "text", text: args.prompt }],
-                persona: role.persona, agentOptions: invocationAgentOptions(invocation), maxDepth: subagents.resolveMaxDepth(current.subagents.maxDepth) };
+                agentOptions: invocationAgentOptions(invocation), maxDepth: subagents.resolveMaxDepth(current.subagents.maxDepth) };
             const assertCurrent = () => {
                 if (policy.assertDelegation(parent, role.id).epoch !== admitted.epoch)
                     throw new SubagentError("DSMM parent admission changed before delegation", "UNAUTHORIZED");
@@ -162,8 +164,8 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
                 if (provider.prepareContinuable === undefined)
                     throw new SubagentError("DSMM provider has no prepareContinuable capability", "UNSUPPORTED_CAPABILITY");
                 assertCurrent();
-                const child = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(parent, role.id, () => subagents.startContinuable({ provider: provider.name, label: args.description,
-                    request, signal: exec.signal }), request.toolFilter, request.maxDepth));
+                const child = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(parent, role.id, () => subagents.startActivation({ provider: provider.name, label: args.description,
+                    request, signal: exec.signal, delivery: "parent" }), undefined, request.maxDepth));
                 return { kind: "continuable", subagentId: child.childId, invocation: { ...invocationView(invocation, args.description, "continuable", { childId: child.childId }) } };
             }
             assertCurrent();
@@ -183,9 +185,8 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
                 admissionEpoch: admitted.epoch, capture: Object.freeze({ invocation, admission }), projection, label: args.description, callerAbort: exec.signal, jobs,
                 async start(signal) {
                     assertCurrent();
-                    const run = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(agent, role.id, () => subagents.start(provider.name, { ...request, signal }), request.toolFilter, request.maxDepth, agent => { child = agent; }));
-                    projection.runId = run.id;
-                    child ??= run.localAgent;
+                    const run = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(agent, role.id, () => duringActivationOwnership(signal, () => subagents.startActivation({ provider: provider.name, label: args.description, request, signal, delivery: "caller" })), undefined, request.maxDepth, agent => { child = agent; }));
+                    projection.runId = run.childId;
                     if (child?.id !== undefined)
                         projection.childId = child.id;
                     return run;
@@ -232,6 +233,14 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         if (tools === undefined)
             throw new Error("DSMM role tools require native guard/restrict services");
         const settings = getSettings(agent), identity = policy.identity(agent), targets = policy.targets(agent);
+        const personaRole = identity.child ? identity.role : undefined;
+        if (state.personaRole !== personaRole) {
+            state.persona?.();
+            const prompt = agentCtx.get("systemPrompt");
+            state.persona = personaRole === undefined ? undefined : prompt.section({ name: PERSONA_PREFIX_SECTION,
+                order: prompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"), text: DSMM_ROLES.find(role => role.id === personaRole).persona });
+            state.personaRole = personaRole;
+        }
         const subagents = agentCtx.get("subagents");
         const host = ctx.get?.("tools");
         const names = [...hostControls, ...host?.schemas().map((row) => row.name).filter((name) => name.startsWith(`mcp__${settings.lsp.serverName}__`)) ?? []];
@@ -287,6 +296,7 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
             const state = states.get(agent);
             state?.restriction?.();
             state?.guard?.();
+            state?.persona?.();
             for (const dispose of state?.owned ?? [])
                 dispose();
             states.delete(agent);

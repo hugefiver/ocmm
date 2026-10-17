@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CORE_CHECKS_020, isReviewedSource, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
+import { CORE_CHECKS_020, isReviewedSource, isSource030, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
 import { inspectStableBootstrap } from "./stable-native-acceptance.mjs";
 
 export const name = "dsmm-native-core-020-acceptance";
@@ -27,9 +27,9 @@ export function apply(ctx, config) {
   });
   async function audit() {
     stage = "native-core-services";
-    const gateway = ctx.get("typertGateway"), peer = ctx.get("connection").operator;
+    const gateway = ctx.get("typertGateway"), connection = ctx.get("connection"), peer = connection.createPeer({ principal: { kind: "owner" } });
+    try {
     assert.ok(peer?.ctx); assert.equal(ctx.get("webServer").host, "127.0.0.1"); assert.equal(ctx.get("settings").writable, true);
-    const invoke = (method, args = {}, invokingPeer = peer) => gateway.invoke({ namespace: "dsmmConfig", method, args, peer: invokingPeer, signal: new AbortController().signal });
     for (const method of ["describe", "describeSettings", "describeModules", "save"]) {
       stage = `native-core-codec-${method}`;
       const descriptor = ctx.get("typert").local.get(`dsmmConfig/${method}`);
@@ -38,6 +38,9 @@ export function apply(ctx, config) {
     stage = "native-core-package-identity";
     const manifest = JSON.parse(readFileSync(join(config.packageRoot, "package.json"), "utf8"));
     assert.equal(manifest.name, "@dsmm/dsmm"); assert.equal(isReviewedSource(manifest.version), true);
+    const operatorPeer = isSource030(manifest.version) ? connection.browserPeer : peer;
+    const foreignPeer = isSource030(manifest.version) ? peer : connection.browserPeer;
+    const invoke = (method, args = {}, invokingPeer = operatorPeer) => gateway.invoke({ namespace: "dsmmConfig", method, args, peer: invokingPeer, signal: new AbortController().signal });
     stage = "native-core-describe-startup";
     const before = await invoke("describeSettings"), global = await invoke("describe");
     assert.equal(before.startup.modules.deepwork.enabled, false); assert.equal(before.desired.modules.deepwork.enabled, false);
@@ -48,7 +51,14 @@ export function apply(ctx, config) {
     stage = "native-core-loader-namespace";
     assert.equal(before.namespace, entry.options.id);
     assert.equal(before.entryId, entry.id);
-    const bootstrap = isStableNativeSource(manifest.version) ? inspectStableBootstrap(ctx, { requireDeliveryFence: false }) : undefined;
+    const bootstrap = isStableNativeSource(manifest.version) ? inspectStableBootstrap(ctx, { requireDeliveryFence: false, version: manifest.version }) : undefined;
+    if (isSource030(manifest.version)) {
+      stage = "native-core-profile-overlay";
+      // The acceptance overlay pins startup wiring only; profile Settings must remain the effective config writer.
+      const overlays = ctx.get("profileContext").overlays.filter((row) => row.id === before.namespace && row.name === manifest.name && Object.hasOwn(row, "config"));
+      assert.equal(overlays.length, 1); assert.deepEqual(overlays[0].config, {});
+      assert.equal(Reflect.deleteProperty(overlays[0], "config"), true);
+    }
     stage = "native-core-loader-and-profile";
     const form = ctx.get("settings").describe().find(({ ns }) => ns === before.namespace);
     assert.ok(form && Number.isSafeInteger(form.revision));
@@ -56,7 +66,7 @@ export function apply(ctx, config) {
     assert.equal((await ctx.get("agentPresets").list()).some(({ id }) => id.startsWith("dsmm-")), false);
     const patchPath = ctx.get("settings").documentPath, patchBefore = readFileSync(patchPath);
     stage = "native-core-foreign-peer";
-    await assert.rejects(() => invoke("describe", {}, { id: "foreign-acceptance-peer" }));
+    await assert.rejects(() => invoke("describe", {}, foreignPeer));
     stage = "native-core-global-save";
     const saved = await invoke("save", { request: { expectedRevision: global.revision, edits: [{ op: "set", path: ["modules", "deepwork", "enabled"], value: true }] } });
     assert.equal(saved.config.modules.deepwork.enabled, true);
@@ -93,5 +103,6 @@ export function apply(ctx, config) {
       clientSha256: createHash("sha256").update(readFileSync(join(config.packageRoot, "lib", "client.js"))).digest("hex"),
       checks: Object.fromEntries(CORE_CHECKS_020.map((key) => [key, true])) };
     return validateCoreProof(proof, { sha256: config.sha256, version: manifest.version });
+    } finally { await peer.dispose(); }
   }
 }

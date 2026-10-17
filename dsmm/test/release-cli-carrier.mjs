@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
+import { SPLIT_RELEASE_JOBS } from "../scripts/release-recovery-policy.mjs";
 
 assert.equal(process.env.DSMM_RELEASE_CLI_TEST, "fixture-only");
 const fixture = JSON.parse(readFileSync(process.env.DSMM_RELEASE_CLI_FIXTURE, "utf8"));
@@ -55,7 +56,7 @@ function github(route) {
   if (route === `actions/runs/${identity.runId}/attempts/${identity.runAttempt}`) return run;
   if (route === "actions/workflows/123") return { id: 123, path: identity.workflow.file };
   if (route === `actions/runs/${identity.runId}/attempts/${identity.runAttempt}/jobs?per_page=100`) {
-    const jobs = ["import-bootstrap", "prepare", "publish", "verify", "github-release"].map((name, index) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: name === "import-bootstrap" ? "skipped" : "success" }));
+    const jobs = SPLIT_RELEASE_JOBS.map((name, index) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: ["import-bootstrap", "prepare-recovery-022", "publish-recovery-022"].includes(name) ? "skipped" : "success" }));
     return { total_count: jobs.length, jobs };
   }
   if (route === `actions/runs/${identity.runId}/artifacts?per_page=100`) {
@@ -69,6 +70,7 @@ function github(route) {
   throw Error("unknown fixture GitHub read");
 }
 childProcess.execFileSync = (command, args) => {
+  if (command === "git" && args.length === 4 && args[0] === "-C" && args[2] === "rev-parse" && args[3] === "HEAD") return `${identity.controlSha}\n`;
   if (command === "gh") {
     assert.equal(args[0], "api"); const route = args[1].replace(`repos/${identity.repository}/`, "");
     if (/^actions\/artifacts\/[12]\/zip$/u.test(route)) return Buffer.from(`fixture-zip-${route.split("/")[2]}`);

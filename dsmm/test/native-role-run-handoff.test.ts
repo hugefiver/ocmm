@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { gate, roleRunFixture, SubagentError } from "./role-run-fixture.ts";
+import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
+import type { SubagentActivationSpec } from "@deepseek-ai/dsh-subagent";
+
+test("holder cancellation in native receipt gap drains before ready or job handoff", { timeout: 15000 }, async () => {
+  const f = await roleRunFixture(), accepted = gate(), release = gate();
+  const start = SubagentRuntime.prototype.startActivation;
+  const interception = mock.method(SubagentRuntime.prototype, "startActivation", async function(this: SubagentRuntime, spec: SubagentActivationSpec) {
+    const receipt = await start.call(this, spec); accepted.release(); await release.promise; return receipt;
+  });
+  try {
+    const { holder, caller } = f.start();
+    const ready = assert.rejects(holder.ready, { code: "ABORTED" }), foreground = assert.rejects(holder.foreground, { code: "ABORTED" }), drained = assert.rejects(holder.drained, { code: "ABORTED" });
+    await accepted.promise; caller.abort(); const draining = f.registry.drain(); release.release();
+    await Promise.all([ready, foreground, drained, draining]);
+    assert.equal(holder.state, "cancelled"); assert.equal(f.adapter.calls.length, 0);
+    assert.equal(f.ctx.jobs.list(f.parent.id).length, 0); assert.deepEqual(f.ctx.agents.list(), [f.parent]);
+  } finally { interception.mock.restore(); release.release(); await f.dispose(); }
+});
 
 test("foreground → same-run native job completes without restarting a child; double-click returns one real job", { timeout: 15000 }, async () => {
   const f = await roleRunFixture();
@@ -8,7 +26,7 @@ test("foreground → same-run native job completes without restarting a child; d
     const { holder, caller } = f.start();
     await holder.ready;
     await f.adapter.entered.promise;
-    const child = f.runs[0].localAgent;
+    const child = f.ctx.agents.get(f.runs[0].childId);
     const address = f.address(holder);
     const transferred = holder.background(address);
     assert.equal(transferred.status, "background");
@@ -30,7 +48,7 @@ test("foreground → same-run native job completes without restarting a child; d
     assert.equal(f.adapter.calls.length, 1);
     assert.deepEqual(f.ctx.agents.list(), [f.parent]);
     const catalog = await f.runtime.listChildren(f.parent.id);
-    assert.equal(catalog.find((entry) => entry.id === holder.invocation!.childId)?.mode, "one-shot");
+    assert.equal(catalog.find((entry) => entry.id === holder.invocation!.childId)?.mode, "continuable");
     assert.equal(holder.background(address).status, "already-background");
     await assert.rejects(f.runtime.sendMessage(f.parent, holder.invocation!.childId!, [{ type: "text", text: "one-shot must not resume" }],
       { signal: new AbortController().signal }), (error: unknown) => error instanceof SubagentError && error.code === "NOT_RESUMABLE");
@@ -81,22 +99,21 @@ test("native job cancellation is owned by the exact parent, not a foreign owner 
   } finally { await f.dispose(); }
 });
 
-test("result wins before disposal finishes: handoff cannot replace complete foreground output", { timeout: 15000 }, async () => {
+test("native activation result settles after disposal, retaining complete foreground output", { timeout: 15000 }, async () => {
   const f = await roleRunFixture();
   try {
     const { holder } = f.start();
     await holder.ready;
-    const child = f.runs[0].localAgent!;
+    const child = f.ctx.agents.get(f.runs[0].childId)!;
     const disposing = gate(), released = gate();
     const detach = child.ctx.effect(() => async () => { disposing.release(); await released.promise; });
     f.adapter.output.release();
     await disposing.promise;
-    assert.equal(holder.state, "settled");
-    assert.equal(holder.background(f.address(holder)).status, "already-settled");
+    assert.equal(holder.state, "running");
     assert.equal(f.ctx.jobs.list(f.parent.id).length, 0);
     const parentDisposal = f.disposeParent();
     assert.equal(holder.holderSignal.aborted, true, "owner lifetime remains connected through disposal quiescence");
-    assert.equal(holder.state, "settled", "the real result already won");
+    assert.equal(holder.state, "cancelled", "native receipt has not settled before cleanup finishes");
     released.release();
     const result = await holder.foreground;
     assert.equal(result.kind, "foreground");
@@ -211,7 +228,7 @@ test("real native result rejection and disposal failure both survive foreground 
       const { holder } = f.start();
       await holder.ready;
       await f.adapter.entered.promise;
-      const child = f.runs[0].localAgent!;
+      const child = f.ctx.agents.get(f.runs[0].childId)!;
       const snapshot = child.session.snapshotEvents.bind(child.session);
       // Inject a fault in the native result reader's Session boundary, while
       // preserving the actual SDK run, AgentLoop, starter and jobs registry.
@@ -221,7 +238,8 @@ test("real native result rejection and disposal failure both survive foreground 
       });
       const transition = background ? holder.background(f.address(holder)) : undefined;
       f.adapter.output.release();
-      await assert.rejects(holder.drained, (error: unknown) => error instanceof AggregateError && error.errors[0] === resultFailure && error.errors[1] === disposalFailure);
+      await assert.rejects(holder.drained, (error: unknown) => error instanceof AggregateError && error.errors[0] === resultFailure
+        && error.errors[1] instanceof AggregateError && error.errors[1].errors[0]?.cause === resultFailure && error.errors[1].errors[1] === disposalFailure);
       spy.mock.restore();
       if (transition !== undefined && "receipt" in transition) {
         assert.equal((await f.ctx.jobs.wait(transition.receipt.jobId, 5000, f.parent.id)).status, "failed");

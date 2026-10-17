@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { COMPILED_FILES, compiledFilesForVersion, DW_PRESET_NAMES, LOCALE_FILES, lifecycleCommands, publicExportsForVersion, requiredChecksForVersion, requiresDeepworkMetadata, validateLocaleResources } from "../scripts/dsmm-registry-install-probe.mjs";
 import { BOOTSTRAP, POLICY, UI_CHECKS, computeDigests, createArtifactIdentity, deterministicChecksums, manifestExportsForVersion, resolveReleaseContext, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
+import { dshPolicyForVersion } from "../dsmm/scripts/release-contract.mjs";
+import { compiledFilesForVersion as compiledFilesForDsmmVersion } from "../dsmm/scripts/dsmm-registry-install-probe.mjs";
+import { manifestExportsForVersion as manifestExportsForDsmmVersion } from "../dsmm/scripts/dsmm-release.mjs";
 
 export function contextInput(bootstrap = false) {
   const commit = "a".repeat(40);
@@ -15,6 +18,7 @@ export function contextInput(bootstrap = false) {
 }
 
 export function receiptFixture(version, digest) {
+  const dshPolicy = dshPolicyForVersion(version);
   const makeNative = (template) => ({ outcome: "COMPLETED", template, postAppReady: true,
     presetRegistryPresent: template === "web", model: { kind: "deterministic-test-only-adapter", externalModelCalls: false }, uiAuthentication: "NOT_EXERCISED",
     persistence: { backendName: "dsmm-session-persistence", config: { root: `/tmp/fixture/${template}/sessions`, compression: "zstd" },
@@ -32,7 +36,7 @@ export function receiptFixture(version, digest) {
       branding: { pluginTitle: "Deepwork", presetNames: DW_PRESET_NAMES.map((entry) => ({ ...entry })),
         rootPresetNames: template === "web" ? DW_PRESET_NAMES.filter(({ id }) => ["dsmm-orchestrator", "dsmm-planner"].includes(id)).map((entry) => ({ ...entry })) : [] } } : {}),
   });
-  return { outcome: "COMPLETED", acceptanceScope: "native-final-artifact", dshVersion: POLICY.dshVersion,
+  return { outcome: "COMPLETED", acceptanceScope: "native-final-artifact", dshVersion: dshPolicy.runtimeVersion,
     artifact: { package: { name: POLICY.packageName, version }, sha256: digest, sha256After: digest, hostSha256After: digest },
     installedPackages: ["web", "headless"].map((template) => ({ template, name: POLICY.packageName, version, publicExportsResolved: true })),
     native: Object.fromEntries(["web", "headless"].map((template) => [template, makeNative(template)])),
@@ -49,10 +53,14 @@ export function receiptFixture(version, digest) {
       nativeCalls: ["describe", "read", "save", "select"].map((method) => ({ endpoint: `dsmmProfiles/${method}`, strictGateway: true, result: "accepted" })),
       nativeStreams: [{ endpoint: "session/control", strictGateway: true, result: "accepted", disposed: true, frames: 3 }],
       cleanup: { browserContextClosed: true, nativeAgentsDisposed: true, ownedTemporaryRootRemoved: true, nativeHostExited: true, errors: [] } },
-    sessionHistory: { outcome: "COMPLETED", artifactSha256: digest, packageVersion: version, nativeVersion: POLICY.dshVersion,
-      syntheticOnly: true, originalRefused: true, dryRunUnchanged: true, originalBackupByteIdentical: true,
-      repairedNativeReadAndRestore: true, retainedModelVisibleHistory: true, nativeWriterExclusionBothDirections: true,
-      hostsExitedBeforeOperator: true, standalonePinnedSdk: true, exactMetadataEvents: 2, installedPackage: { name: POLICY.packageName, version } },
+    sessionHistory: version === "0.3.0"
+      ? { outcome: "COMPLETED", artifactSha256: digest, packageVersion: version, nativeVersion: dshPolicy.sdkVersion,
+          syntheticOnly: true, currentNativeWriteRead: true, currentIgnorableMetadata: true, retainedModelVisibleHistory: true, nativeWriterExclusion: true,
+          hostsExitedBeforeOperator: true, standalonePinnedSdk: true, exactMetadataEvents: 2, installedPackage: { name: POLICY.packageName, version } }
+      : { outcome: "COMPLETED", artifactSha256: digest, packageVersion: version, nativeVersion: dshPolicy.sdkVersion,
+          syntheticOnly: true, originalRefused: true, dryRunUnchanged: true, originalBackupByteIdentical: true,
+          repairedNativeReadAndRestore: true, retainedModelVisibleHistory: true, nativeWriterExclusionBothDirections: true,
+          hostsExitedBeforeOperator: true, standalonePinnedSdk: true, exactMetadataEvents: 2, installedPackage: { name: POLICY.packageName, version } },
     lsp: { outcome: "COMPLETED", directNativeDiagnosticsAndFormat: true, nativeDshMcpClient: true },
     profileLifecycle: { outcome: "COMPLETED", installRemoveReinstall: true, unrelatedSentinelsUnchanged: true },
     temporaryHomesRemoved: true, runtimeImage: { ownership: "owned", cleanup: "COMPLETED" } };
@@ -81,14 +89,20 @@ const FROZEN_HISTORICAL_LOCALE_RESOURCES = {
 
 export function packageFiles(version = "0.1.3") {
   const manifest = JSON.parse(readFileSync(new URL("../dsmm/package.json", import.meta.url), "utf8")); manifest.version = version;
-  manifest.exports = manifestExportsForVersion(version);
+  const dshPolicy = dshPolicyForVersion(version);
+  manifest.exports = version === "0.3.0" ? manifestExportsForDsmmVersion(version) : manifestExportsForVersion(version);
+  manifest.engines = { ...dshPolicy.engines };
+  for (const collection of [manifest.peerDependencies, manifest.devDependencies]) {
+    for (const name of Object.keys(collection)) if (name.startsWith("@deepseek-ai/dsh-")) collection[name] = dshPolicy.peerVersion;
+  }
   if (!requiresDeepworkMetadata(version)) manifest.files = manifest.files.filter((path) => path !== "locale/*.json");
-  const names = ["LICENSE", "README.md", "cordis.patch.yml", "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
+  const names = ["LICENSE", "README.md", "cordis.patch.yml", ...(version === "0.3.0" ? [] : ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"]),
     "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
     ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
     ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`),
     "agent-presets/default.yml", "docs/research/reference.md", "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
-  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...compiledFilesForVersion(version)])].map((name) => [name, Buffer.from("fixture\n")]),
+  const compiledFiles = version === "0.3.0" ? compiledFilesForDsmmVersion(version) : compiledFilesForVersion(version);
+  return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...compiledFiles])].map((name) => [name, Buffer.from("fixture\n")]),
     ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, Buffer.from(JSON.stringify(FROZEN_HISTORICAL_LOCALE_RESOURCES[path]))]) : [])]);
 }
 
@@ -105,6 +119,7 @@ export function makeAcceptedFixture() {
 }
 
 export function makeInstallFixture({ identity, tarball }) {
+  const dshPolicy = dshPolicyForVersion(identity.version);
   const hash = "a".repeat(64), profile = `dsmm-registry-${"a".repeat(32)}`;
   const { files } = validateTarballBuffer(tarball, { version: identity.version, expectedDigests: identity });
   const fileIdentity = (path) => ({ path, sha256: computeDigests(files.get(path)).sha256 });
@@ -115,13 +130,13 @@ export function makeInstallFixture({ identity, tarball }) {
       integrity: identity.integrity, sha1: identity.sha1, sha256: identity.sha256,
       sha512: identity.integrity.slice("sha512-".length), size: identity.size },
     packageManager: { name: "pnpm", version: POLICY.pnpmVersion, integrity: "sha512-vWgtXQP+Ul73yf1ngMaITR51asTJyf4AxTh4KCQxDc+Q493E9Tg18G3669UIXkGFXgvLs7YN4qxburieUDbwOw==" },
-    native: { version: POLICY.dshVersion, integrity: "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==",
+    native: { version: dshPolicy.runtimeVersion, integrity: dshPolicy.integrity,
       binSha256: hash, headless: true, profileList: true, dumpConfig: true, profile,
       commands: lifecycleCommands(profile, identity.version).map((command) => ({ ...command, status: 0, stdoutSha256: hash, stderrSha256: hash })) },
     exports: Object.fromEntries(Object.entries(publicExports).map(([name, path]) => [name, fileIdentity(path)])),
     compiledFiles: Object.fromEntries(compiledFilesForVersion(identity.version).map((path) => [path, fileIdentity(path)])),
     checks: Object.fromEntries(requiredChecksForVersion(identity.version).map((name) => [name, true])), temporaryRootRemoved: true, cleanup: { outcome: "COMPLETED" },
-    ...(requiresDeepworkMetadata(identity.version) ? { nativeMetadata: { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: POLICY.dshVersion,
+    ...(requiresDeepworkMetadata(identity.version) ? { nativeMetadata: { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: dshPolicy.runtimeVersion,
       readerSha256: hash, packageName: POLICY.packageName, version: identity.version, source: "profile-owned-installed-package",
       locales: validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), identity.version),
       execution: { status: 0, stdoutSha256: hash, stderrSha256: hash } } } : {}),

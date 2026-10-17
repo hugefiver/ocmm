@@ -1,6 +1,6 @@
 import { Context, Service } from "@deepseek-ai/cordis";
 import { SessionHandleClosedError, SessionPersistence, SessionReadOnlyError, materializeAppendBatch } from "@deepseek-ai/dsh-session-persistence";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import { isDeepStrictEqual } from "node:util";
 import { annotateDsmmEvent, DSMM_PERSISTENCE_COMPATIBILITY } from "./session-metadata.js";
 export { DSMM_PERSISTENCE_COMPATIBILITY } from "./session-metadata.js";

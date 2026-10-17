@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nativeRootLlmFixture, loadNative } from "./native-root-llm-fixture.mjs";
+import { nativeRootLlmFixture, loadNative, nativeCli, nativeEntry } from "./native-root-llm-fixture.mjs";
 import { DsmmNativeLlmRuntime } from "../src/llm-runtime.ts";
 import { sessionEvents } from "../src/session-scope.ts";
 import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createDsmmRoleLlmOwner } from "../src/role-llm-runtime.ts";
@@ -235,7 +235,7 @@ test("ordinary managed SettingsForms edits retain native provider ownership and 
 });
 
 test("native SettingsForms permission save revokes an awaiting real Core LLM request before wire", async t => {
-  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { deferredCredentials: true });
+  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { deferredCredentials: true, managedSettings: true });
   const permissions = f.ctx.get("dsmmPermissionController");
   assert.ok(permissions, "the ordinary main entry must install the real permission controller");
   assert.ok(f.ctx.get("dsmmPermissions"), "the ordinary main entry must publish the shared permission RPC");
@@ -250,6 +250,7 @@ test("native SettingsForms permission save revokes an awaiting real Core LLM req
   const descriptor = f.ctx.settings.describe().find(row => row.ns === "dsmm");
   assert.ok(descriptor);
   await f.ctx.settings.mutate("dsmm", [{ op: "set", path: ["permissionControl", "outsideReads"], value: "ask" }], descriptor.revision);
+  await f.ctx.loader.await();
   assert.equal(previousSignal.aborted, true);
   assert.notEqual(permissions.rules.getPolicy().revision, previous.revision);
   assert.equal(permissions.rules.status().state, "synced");
@@ -525,8 +526,8 @@ test("standard stop needs the raw Pi-AI executor even without an opaque envelope
   assert.deepEqual(f.bodies[0].body.stop, ["END"]);
 });
 
-test("Core raw execution does not require a DSMM subagent runtime when DW is off", async t => {
-  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { nativeSubagent: true });
+test("Core raw execution stays independent of DW admission when the module is off", async t => {
+  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { globalConfig: { modules: { deepwork: { enabled: false } } } });
   assert.equal(f.ctx.get("dsmmRuntimeIntegration"), undefined);
   assert.ok(f.ctx.get("dsmmCoreLlmOwner"));
   const agent = await f.create(undefined, { provider: "local", model: "root-model", core_only: false });
@@ -536,9 +537,9 @@ test("Core raw execution does not require a DSMM subagent runtime when DW is off
 });
 
 test("ordinary native children retain the stock LLM path without a DW admission", async t => {
-  const f = await nativeRootLlmFixture(t, { defaultActive: false }, { nativeSubagent: true });
+  const f = await nativeRootLlmFixture(t, { defaultActive: false });
   const parent = await f.create();
-  const started = await f.ctx.subagents.startContinuable({ provider: "spawn", label: "ordinary native child", signal: new AbortController().signal,
+  const started = await f.ctx.subagents.startActivation({ provider: "spawn", label: "ordinary native child", delivery: "parent", signal: new AbortController().signal,
     request: { parent, prompt: [{ type: "text", text: "Answer from the ordinary native child" }], agentOptions: { provider: "local", model: "root-model" } } });
   const child = f.ctx.agents.get(started.childId);
   assert.ok(child);
@@ -594,15 +595,17 @@ test("real child invocation uses each absent candidate's complete parameters and
       { provider: "local", model: "fallback-model", reasoningEffort: "unknown-exact", final_null: null }],
   } } });
   const parent = await f.create("dsmm-orchestrator");
-  const run = await f.ctx.subagents.start("dsmm-role-doc-search", { parent, prompt: [{ type: "text", text: "Read local documentation" }], signal: new AbortController().signal });
-  const child = run.localAgent;
+  const run = await f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", label: "Local documentation", delivery: "caller",
+    request: { parent, prompt: [{ type: "text", text: "Read local documentation" }] }, signal: new AbortController().signal });
+  const child = f.ctx.agents.get(run.childId);
+  assert.ok(child);
   try {
     assert.equal((await run.result).stopReason, "completed", f.errors.map(error => error.stack).join("\n"));
     const header = child.session.requestHeader();
     const body = f.bodies[0].body;
     assert.equal(body.model, "fallback-model"); assert.equal(body.reasoning_effort, "unknown-exact");
     assert.equal(body.primary_only, undefined); assert.equal(body.absent_only, undefined); assert.equal(body.final_null, null);
-    assert.equal(await f.ctx.sessions.flush(child.session), true);
+    assert.equal(f.ctx.agents.get(child.id), undefined, "rc1 caller result settles after residency cleanup");
     const id = child.id;
     await run.dispose();
     const observation = await f.ctx.sessionQuery.observeSession(id, { signal: new AbortController().signal, projectionMode: "none" });
@@ -629,7 +632,8 @@ test("registered not-ready, authentication and unsupported raw protocols never a
     await runtime.selectSession({ sessionId: parent.id, id, expectedRevision: saved.revision, expectedSelectionRevision: current.selection.selectionRevision,
       expectedAdmissionEpoch: current.admissionEpoch }, parent);
   };
-  const run = () => f.ctx.subagents.start("dsmm-role-doc-search", { parent, prompt: [{ type: "text", text: "Local input" }], signal: new AbortController().signal });
+  const run = () => f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", label: "Exact candidate refusal", delivery: "caller",
+    request: { parent, prompt: [{ type: "text", text: "Local input" }] }, signal: new AbortController().signal });
   await select("unready", { provider: "not-ready", model: "root-model" });
   await assert.rejects(run(), { code: "NO_ADAPTER" });
   assert.equal(f.bodies.length, 0);
@@ -657,9 +661,9 @@ test("original dsh CLI consumes the migrated ordinary package and sends a real e
   const raw = { reasoning_effort: "cli-exact-unknown", cli_false: false, cli_zero: 0, cli_nested: [{ nil: null }] };
   const f = await nativeRootLlmFixture(t, { defaultActive: false }, { cli: raw });
   const env = Object.fromEntries(["PATH", "SystemRoot", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
-  Object.assign(env, { DSH_HOME: f.home, DSH_AGENTS_HOME: join(f.root, "agents"), DSH_TELEMETRY_DISABLED: "1", DSMM_ROOT_FICTIONAL: "fictional-cli-key", DSMM_TEST_DSH_ENTRY: process.env.DSMM_TEST_DSH_ENTRY });
-  const args = ["--experimental-strip-types", "--import", new URL("./prompt-source-loader.mjs", import.meta.url).href, "--import", new URL("./host-llm-source-loader.mjs", import.meta.url).href,
-    join(dirname(process.env.DSMM_TEST_DSH_ENTRY), "lib", "bin.js"), "--profile", "native-root", "Complete this isolated native request"];
+  Object.assign(env, { DSH_HOME: f.home, DSH_AGENTS_HOME: join(f.root, "agents"), DSH_TELEMETRY_DISABLED: "1", DSMM_ROOT_FICTIONAL: "fictional-cli-key", DSMM_TEST_DSH_ENTRY: nativeEntry });
+  const args = ["--experimental-strip-types", "--import", new URL("./child-admission-source-loader.mjs", import.meta.url).href,
+    nativeCli, "--profile", "native-root", "Complete this isolated native request"];
   const child = spawn(process.execPath, args, { env, cwd: f.workspace, stdio: ["ignore", "pipe", "pipe"], signal: t.signal, timeout: 45000 });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", value => { stdout += value; });
@@ -675,7 +679,7 @@ test("compiled ordinary CLI refreshes an outside-read restriction after the mode
   let fixture;
   const secret = "owned-outside-content-must-not-reach-provider";
   const f = await nativeRootLlmFixture(t, { defaultActive: false }, {
-    cli: {}, compiled: true,
+    cli: {}, compiled: true, migrateFs: true,
     globalConfig: { permissionControl: { outsideReads: "inherit" } },
     async respond(body, res) {
       const step = fixture.bodies.length, reading = step <= 2;
@@ -693,7 +697,7 @@ test("compiled ordinary CLI refreshes an outside-read restriction after the mode
   await mkdir(join(f.root, "outside")); await writeFile(join(f.root, "outside", "secret.txt"), secret);
   const env = Object.fromEntries(["PATH", "SystemRoot", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   Object.assign(env, { DSH_HOME: f.home, DSH_AGENTS_HOME: join(f.root, "agents"), DSH_TELEMETRY_DISABLED: "1", DSMM_ROOT_FICTIONAL: "fictional-cli-key" });
-  const child = spawn(process.execPath, [join(dirname(process.env.DSMM_TEST_DSH_ENTRY), "lib", "bin.js"), "--profile", "native-root", "Read the requested owned file, then finish"],
+  const child = spawn(process.execPath, [nativeCli, "--profile", "native-root", "Read the requested owned file, then finish"],
     { env, cwd: f.workspace, stdio: ["ignore", "pipe", "pipe"], signal: t.signal, timeout: 45000 });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", value => { stdout += value; });

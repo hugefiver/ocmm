@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { mkdtemp, mkdir, writeFile, symlink, realpath, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, symlink, realpath, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createDsmmLlmColdStartup } from "../src/host-llm-startup.ts";
 
@@ -25,6 +26,7 @@ export async function fixture(t, controls = {}) {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     bodies.push(JSON.parse(Buffer.concat(chunks).toString()));
+    await controls.beforeRespond?.(bodies.at(-1));
     const status = controls.status?.(bodies.at(-1)) ?? 200;
     if (status !== 200) {
       res.writeHead(status, { "content-type": "application/json" });
@@ -39,9 +41,16 @@ export async function fixture(t, controls = {}) {
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let ctx;
-  t.after(async () => {
-    controls.cleanup?.();
+  const activations = new Set();
+  async function closeHost() {
+    for (const run of activations) await run.dispose();
+    activations.clear();
     await ctx?.fiber.dispose();
+    ctx = undefined;
+  }
+  t.after(async () => {
+    await controls.cleanup?.();
+    await closeHost();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     assert.equal(dirname(await realpath(root)), parent);
@@ -54,15 +63,27 @@ export async function fixture(t, controls = {}) {
   const { createUserMessage, LlmError } = await load("@deepseek-ai/dsh-llm");
   const { SessionId } = await load("@deepseek-ai/dsh-session");
   const profileDir = bootApi.resolveProfileDir("review", home);
-  await mkdir(join(profileDir, "node_modules", "@dsmm"), { recursive: true });
-  await symlink(fileURLToPath(new URL("../", import.meta.url)), join(profileDir, "node_modules", "@dsmm", "dsmm"), "junction");
+  const packageDir = join(profileDir, "node_modules", "@dsmm", "dsmm");
+  await mkdir(packageDir, { recursive: true });
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const sourceTarget = target => target.startsWith("./lib/") ? target.replace("./lib/", "./src/").replace(/\.js$/u, ".ts") : target;
+  const exports = Object.fromEntries(Object.entries(manifest.exports).map(([name, target]) => [name,
+    name === "./client" ? target : typeof target === "string" ? sourceTarget(target) : { ...target, default: sourceTarget(target.default) }]));
+  await writeFile(join(packageDir, "package.json"), JSON.stringify({ ...manifest, main: "./src/index.ts", exports }));
+  for (const name of ["src", "locale", "prompts", "skills", "agent-presets"]) {
+    await symlink(fileURLToPath(new URL(`../${name}/`, import.meta.url)), join(packageDir, name), "junction");
+  }
+  await writeFile(join(packageDir, "cordis.patch.yml"), await readFile(new URL("../cordis.patch.yml", import.meta.url)));
   await writeFile(join(profileDir, "package.json"), JSON.stringify({ private: true, type: "module", dsh: { profile: { bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless", "@dsmm/dsmm"] } } }));
   await writeFile(join(profileDir, "cordis.patch.yml"), JSON.stringify([
     { id: "headless-startup", disabled: true }, { id: "headless-runner", disabled: true }, { id: "session-persistence-jsonl", disabled: true },
     ...(controls.disableNativeBash ? [{ id: "tool-bash", disabled: true }] : []),
-    { id: "llm-pi-ai", config: { providers: {} } }, { id: "subagent", disabled: true },
-    { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: {} }] },
-    { id: "dsmm", inject: ["subagents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, sessionPersistence: { root: join(root, "sessions"), compression: "none" }, ...controls.dsmm } },
+    { id: "llm-pi-ai", config: { providers: {} } }, { id: "agent", disabled: true }, { id: "subagent", disabled: true },
+    { insert: [
+      { id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} },
+      { id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: {} },
+    ] },
+    { id: "dsmm", inject: ["profileContext", "agents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, sessionPersistence: { root: join(root, "sessions"), compression: "none" }, ...controls.dsmm } },
   ]));
   const profile = prepareProfile("review");
   const resolution = await bootApi.createRuntimeResolution({ installAnchor: process.env.DSMM_TEST_DSH_ENTRY, profile });
@@ -111,8 +132,8 @@ export async function fixture(t, controls = {}) {
   ready = startup.assertReady(); agent = await created.promise;
   }
   await bootHost();
-  return { get ctx() { return ctx; }, get ready() { return ready; }, get agent() { return agent; }, bodies, errors, failures, requests, admissionLife, LlmError,
-    async restart(beforeBoot) { await ctx.fiber.dispose(); ctx = undefined; await beforeBoot?.(); await bootHost(); },
+  return { get ctx() { return ctx; }, get ready() { return ready; }, get agent() { return agent; }, bodies, errors, failures, requests, admissionLife, LlmError, activations,
+    async restart(beforeBoot) { await closeHost(); await beforeBoot?.(); await bootHost(); },
     createRoot(id) { return ready.loop.create(SessionId(id), { provider: "apai", model: "gpt-6.1-sol" }, { cwd: workspace }); },
     start(text) { agent.followup(createUserMessage({ content: [{ type: "text", text }], source: { kind: "user" } })); },
     async run(text) { this.start(text); await agent.whenIdle(); },
@@ -132,10 +153,25 @@ export async function applyRoleProfile(f, id, policy, settings = {}) {
     expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch }, f.agent);
 }
 
-export async function runDoc(f) {
-  const child = await f.ctx.subagents.start("dsmm-role-doc-search", { parent: f.agent, prompt: [{ type: "text", text: "Read isolated documentation" }], signal: new AbortController().signal });
+export async function startDoc(f, request = {}, delivery = "caller") {
+  const { SessionId } = await load("@deepseek-ai/dsh-session");
+  const childId = SessionId(randomUUID());
+  let agent;
+  const remove = f.ctx.on("agent/created", event => { if (event.agent.id === childId) agent = event.agent; }, { global: true });
   try {
-    const result = await child.result;
-    return { result, header: child.localAgent.session.requestHeader(), capture: f.ctx.get("dsmmProfileRuntime").admission(child.localAgent).childCapture };
-  } finally { await child.dispose(); }
+    const run = await f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", childId, label: "Isolated documentation", delivery,
+      request: { parent: f.agent, prompt: [{ type: "text", text: "Read isolated documentation" }], ...request }, signal: new AbortController().signal });
+    f.activations.add(run);
+    assert.ok(agent);
+    return { run, agent };
+  } finally { remove(); }
+}
+
+export async function runDoc(f) {
+  const { run, agent } = await startDoc(f);
+  const capture = f.ctx.get("dsmmProfileRuntime").admission(agent).childCapture;
+  try {
+    const result = await run.result;
+    return { result, header: agent.session.requestHeader(), capture };
+  } finally { await run.dispose(); }
 }

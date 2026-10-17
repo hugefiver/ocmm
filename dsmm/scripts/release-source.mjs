@@ -8,6 +8,7 @@ export const CONTROL_FILES = Object.freeze([
   ".github/workflows/dsmm-release.yml", "dsmm/scripts/dsmm-release.mjs", "dsmm/scripts/check-dsmm-release-completion.mjs",
   "dsmm/scripts/dsmm-registry-install-probe.mjs", "dsmm/scripts/release-contract.mjs", "dsmm/scripts/release-source.mjs",
   "dsmm/scripts/native-core-smoke.mjs", "dsmm/scripts/native-picker-proof.mjs", "dsmm/scripts/extract-runtime-sdk.mjs",
+  "dsmm/scripts/prepare-dsh-runtime-input.mjs",
 ]);
 export const RECOVERY_CONTROL_FILES = Object.freeze([...CONTROL_FILES,
   "dsmm/scripts/release-recovery-022.mjs", "dsmm/scripts/release-recovery-policy.mjs", "dsmm/scripts/release-native-gate.mjs",

@@ -3,14 +3,27 @@ import { test } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { Context } from "@deepseek-ai/cordis";
-import { AgentRegistry } from "@deepseek-ai/dsh-agent";
+import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
+import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
+import { DsmmAgentRegistry } from "../lib/agent-registry.js";
 import DsmmPlugin from "../lib/index.js";
 import RuntimePlugin, { integrateSubagentRuntime, runtimeAdmissionView } from "../lib/runtime-integration.js";
 import { DsmmRolePolicy } from "../lib/role-policy.js";
 import { resolveConfig } from "../lib/settings.js";
 import { DeepworkModeController } from "../lib/state.js";
 import type { DshContext } from "../lib/dsh-types.js";
+
+const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
+
+async function installHostFilesystem(ctx: Context, root: string): Promise<void> {
+  const fsLocal = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-fs-local")).href);
+  const directory = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-working-directory")).href);
+  await ctx.plugin(fsLocal.default, { cwd: root }).await();
+  await ctx.plugin(directory.default, { defaultDirectory: root }).await();
+}
 
 async function settles<T>(operation: Promise<T>, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -22,9 +35,11 @@ async function settles<T>(operation: Promise<T>, label: string): Promise<T> {
 }
 
 for (const withdraw of ["runtime", "injection", "injection-during-create"] as const) test(`native integration rejects when ${withdraw} is disposed before its injection callback executes`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "dsmm-integration-callback-"));
   const ctx = new Context();
   try {
-    await ctx.plugin(AgentRegistry).await();
+    await Promise.all([ctx.plugin(DsmmAgentRegistry).await(), ctx.plugin(SessionProjectionRegistry).await(), ctx.plugin(SystemPrompt, {}).await()]);
+    await installHostFilesystem(ctx, root);
     const runtime = ctx.plugin(RuntimePlugin, {});
     await runtime.await();
     let injection: Context["fiber"] | undefined;
@@ -49,14 +64,18 @@ for (const withdraw of ["runtime", "injection", "injection-during-create"] as co
     }
     assert.equal(ctx.get("dsmmRuntimeIntegration"), undefined);
     assert.deepEqual(ctx.agents.list(), []);
-  } finally { await settles(ctx.fiber.dispose(), "Host disposal"); }
+  } finally {
+    try { await settles(ctx.fiber.dispose(), "Host disposal"); }
+    finally { await rm(root, { recursive: true, force: true }); }
+  }
 });
 
 for (const withdraw of ["runtime", "entry"] as const) test(`real native DSMM entry startup and disposal settle when ${withdraw} is withdrawn before integration callback execution`, async () => {
   const root = await mkdtemp(join(tmpdir(), "dsmm-integration-startup-"));
   const ctx = new Context();
   try {
-    await ctx.plugin(AgentRegistry).await();
+    await Promise.all([ctx.plugin(DsmmAgentRegistry).await(), ctx.plugin(SessionProjectionRegistry).await(), ctx.plugin(SystemPrompt, {}).await()]);
+    await installHostFilesystem(ctx, root);
     ctx.provide("profileContext", { home: root, dir: root, startedBundles: ["@deepseek-ai/dsh-headless"] });
     const runtime = ctx.plugin(RuntimePlugin, {});
     await runtime.await();

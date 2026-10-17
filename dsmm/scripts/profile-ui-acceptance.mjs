@@ -306,12 +306,12 @@ export async function readColdProfileSettings(ctx, createProfileRuntime, baselin
 }
 
 export async function startSuccessorReviewer(ctx, parent, handles) {
-  const run = await ctx.get("subagents").start("dsmm-role-reviewer", {
-    parent, prompt: [{ type: "text", text: "Complete the owned new-admission reviewer fixture" }], signal: new AbortController().signal,
+  const run = await ctx.get("subagents").startActivation({
+    provider: "dsmm-role-reviewer", label: "successor-reviewer", delivery: "caller", signal: new AbortController().signal,
+    request: { parent, prompt: [{ type: "text", text: "Complete the owned new-admission reviewer fixture" }] },
   });
   handles.push(run);
-  assert.equal((await run.result).stopReason, "completed");
-  const agent = run.localAgent;
+  const agent = ctx.get("agents").get(run.childId);
   assert.ok(agent, "native reviewer run did not return its exact local Agent");
   assert.equal(ctx.get("agents").get(agent.id), agent);
   assert.equal(ctx.get("agents").isOwnedBy(agent.id, parent), true);
@@ -320,7 +320,7 @@ export async function startSuccessorReviewer(ctx, parent, handles) {
 
 async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles, createRoot, editor, action, idle, nativeRequire, packageRoot, profileStorage, workspace, screenshot, report }) {
   const load = (specifier) => import(pathToFileURL(nativeRequire.resolve(specifier)).href);
-  const [{ createUserMessage, ToolCallId }, { Session, SessionId }, { Context }, { default: StockPersistence }, { foldSubagentDescriptor }] = await Promise.all([
+  const [{ createUserMessage, ToolCallId }, { Session, SessionId }, { Context }, StockPersistence, { foldSubagentDescriptor }] = await Promise.all([
     load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session"), load("@deepseek-ai/cordis"), load("@deepseek-ai/dsh-session-persistence-jsonl"),
     load("@deepseek-ai/dsh-subagent"),
   ]);
@@ -426,6 +426,12 @@ async function runSuccessorUiChecks(ctx, { page, runtime, gateway, peer, handles
     assert.equal(denied.isError, true);
     reviewerReadOnly.push({ name, excluded: true, denied: true });
   }
+  assert.equal(ctx.get("agents").get(newChild.id), newChild);
+  assert.equal(ctx.get("agents").isOwnedBy(newChild.id, roots[0]), true);
+  assert.equal((await handles.at(-1).result).stopReason, "completed");
+  await handles.at(-1).dispose();
+  assert.equal(ctx.get("agents").get(newChild.id), undefined);
+  assert.equal(ctx.get("agents").isOwnedBy(newChild.id, roots[0]), false);
   await screenshot("current-session-structured-1280");
   const rootProof = await Promise.all(roots.map(async (agent, index) => ({ sessionId: agent.id, selectedId: after[index].selection.selectedId, appliedRevision: after[index].selection.appliedRevision,
     epochBefore: before[index].admissionEpoch, epochAfter: after[index].admissionEpoch, sidecarSha256: proofDigest(await readFile(sidecarPath(agent))), snapshot: after[index] })));
@@ -585,8 +591,8 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     assert.ok(controlDescriptor, "native Session observer descriptor was not registered");
     assert.equal(controlDescriptor.result.mode, "strict");
     report.nativeControlDescriptor = { endpoint: "session/control", resultMode: controlDescriptor.result.mode };
-    peer = ctx.get("connection").operator;
-    assert.ok(peer?.ctx, "native Connection did not supply its genuine operator Peer");
+    peer = ctx.get("connection").createPeer({ principal: { kind: "owner" } });
+    assert.ok(peer?.ctx, "native Connection did not create its genuine owner Peer");
     let agentSequence = 0;
     const createRoot = async () => {
       const handle = await ctx.get("agents").create({ sessionId: SessionId(`dsmm-ui-root-${++agentSequence}`), meta: { cwd: workspace }, agentOptions: { provider: "dsmm-ui-fixture", model: "local-catalog", reasoningEffort: ReasoningEffortId("high") } });
@@ -872,6 +878,7 @@ async function runNativeBrowserAcceptance(ctx, { sha256, dshManifest, packageRoo
     }
     if (browser) await cleanup("browser process", () => browser.close());
     if (server) await cleanup("owned static server", () => server.close());
+    if (peer) await cleanup("native owner Peer", () => peer.dispose());
     for (const handle of handles.reverse()) await cleanup("native Agent", () => handle.dispose());
     report.cleanup = { browserContextClosed: !cleanupErrors.some(({ label }) => label === "browser context"), nativeAgentsDisposed: !cleanupErrors.some(({ label }) => label === "native Agent"), nativeHostDisposal: "owned-by-appExit", errors: cleanupErrors };
     if (cleanupErrors.length > 0) report.outcome = "FAILED";

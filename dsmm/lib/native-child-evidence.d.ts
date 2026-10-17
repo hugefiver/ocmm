@@ -2,7 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { SessionEvent, SessionHeader, SessionId as NativeSessionId } from "@deepseek-ai/dsh-session";
 import type { ContinuableSubagentDescriptorData } from "@deepseek-ai/dsh-subagent";
 import type { ParentAdmissionTicket } from "./delivery-authority.js";
-import type { ChildAdmissionCapture, LegacyChildEvidence } from "./child-capture.js";
+import type { ChildAdmissionCapture } from "./child-capture.js";
 import type { DsmmProfileAdmission } from "./settings.js";
 import type { DsmmRoleId } from "./roles.js";
 /** Host-only borrowed cut returned by the PUBLIC SessionQueryEngine.observeSession service. */
@@ -34,9 +34,7 @@ export declare class NativeChildEvidenceReader {
     private readonly history;
     constructor(ctx: Context, assertTicket: (ticket: ParentAdmissionTicket<DsmmProfileAdmission>) => void, history: NativeChildHistory);
     read(ticket: ParentAdmissionTicket<DsmmProfileAdmission>, childId: string, callerSignal: AbortSignal): Promise<NativeChildFacts>;
-    legacy(ticket: ParentAdmissionTicket<DsmmProfileAdmission>, childId: string, signal: AbortSignal): Promise<LegacyChildEvidence>;
 }
-export declare function legacyEvidenceFromNativeFacts(facts: NativeChildFacts): LegacyChildEvidence;
 /** Capture evidence must agree with the child's establishing descriptor, not current parent routing. */
 export declare function assertNativeChildCapture(capture: ChildAdmissionCapture, facts: NativeChildFacts): void;
 //# sourceMappingURL=native-child-evidence.d.ts.map

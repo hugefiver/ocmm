@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { digest, removeStableUiRoot, stableMainStartupRow, stableNativeProofIdentity, stableNativeStorage, stableRuntimeStartupRows } from "./stable-native-acceptance.mjs";
 
-export function stableUiStartupPatch({ env, nativeStorage, auditConfig }) {
+export function stableUiStartupPatch({ env, nativeStorage, auditConfig, version }) {
   return [
-    ...stableRuntimeStartupRows(),
+    ...stableRuntimeStartupRows(version),
     { id: "session-persistence-jsonl", name: "@deepseek-ai/dsh-session-persistence-jsonl", disabled: true },
     stableMainStartupRow({ defaultActive: true, presets: { materialize: false }, runtimeRecovery: { enabled: false },
       sessionPersistence: stableNativeStorage(nativeStorage, env), roles: { "dsmm-builder": false },
       subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 },
-      roleRouting: { "dsmm-reviewer": { primary: { provider: "dsmm-stable021-fixture", model: "reviewer-original", reasoningEffort: "high" } } } }),
+       roleRouting: { "dsmm-reviewer": { primary: { provider: "dsmm-stable021-fixture", model: "reviewer-original", reasoningEffort: "high" } } } }, version),
     { id: "session-title-llm", disabled: true },
     { insert: [{ id: "dsmm-stable021-browser-audit", name: new URL("./profile-ui-harness-stable021-native.mjs", import.meta.url).href, config: auditConfig }] },
   ];
@@ -47,7 +47,7 @@ export async function runStableNativeAcceptance({ artifact, sha256, sourceContra
   let nativeExit;
   try {
     const auditConfig = { artifact, sha256, sourceContract: proofIdentity.sourceContract, dshManifest, packageRoot, profilePackage, env, workspace, evidenceRoot, nativeReceipt: receiptPath, nativeStorage };
-    await writeFile(patch, createRequire(dshManifest)("js-yaml").dump(stableUiStartupPatch({ env, nativeStorage, auditConfig })), { flag: "wx" });
+    await writeFile(patch, createRequire(dshManifest)("js-yaml").dump(stableUiStartupPatch({ env, nativeStorage, auditConfig, version: manifest.version })), { flag: "wx" });
     const child = spawn("dsh", ["--profile", basename(dirname(profilePackage)), "--patch", patch, "--no-open", "--host", "127.0.0.1", "--port", "0"], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
     // Retain only error lines; native launch URLs and authentication material are excluded.
     const startupErrors = [];

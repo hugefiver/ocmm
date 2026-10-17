@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Context, symbols } from "@deepseek-ai/cordis";
-import { AgentRegistry } from "@deepseek-ai/dsh-agent";
+import { DsmmAgentRegistry } from "../src/agent-registry.ts";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
+import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { SubagentError } from "@deepseek-ai/dsh-subagent";
 import { pathToFileURL } from "node:url";
@@ -28,7 +29,13 @@ test("actual Loader concurrent composition supplies the sole subagents before la
   const cancelled = new AbortController();
   let mounting: Promise<void> | undefined;
   try {
-    await Promise.all([ctx.plugin(AgentRegistry).await(), ctx.plugin(SystemPrompt, {}).await(), ctx.plugin(ToolRuntime, { mode: "native" }).await(), ctx.plugin(TypertRegistry).await()]);
+    await Promise.all([ctx.plugin(DsmmAgentRegistry).await(), ctx.plugin(SessionProjectionRegistry).await(), ctx.plugin(SystemPrompt, {}).await(), ctx.plugin(ToolRuntime, { mode: "native" }).await(), ctx.plugin(TypertRegistry).await()]);
+    const access = await carrierPlugin("@deepseek-ai/dsh-api-remote-access");
+    await ctx.plugin(access.default).await();
+    const fs = await carrierPlugin("@deepseek-ai/dsh-fs-local"), directory = await carrierPlugin("@deepseek-ai/dsh-working-directory");
+    await ctx.plugin(fs.default, { cwd: process.cwd() }).await();
+    await ctx.plugin(directory.default, { defaultDirectory: process.cwd() }).await();
+    assert.ok(ctx.get("workingDirectory"), "native workingDirectory must be registered");
     const loaderModule = await carrierPlugin("@deepseek-ai/cordis-plugin-loader");
     const entry = process.env.DSMM_TEST_DSH_ENTRY;
     const baseUrl = new URL(".", entry === undefined ? import.meta.url : pathToFileURL(entry)).href;

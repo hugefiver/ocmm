@@ -1629,7 +1629,7 @@ function applyEdits(text5, edits) {
   return text5;
 }
 
-// ../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.5/node_modules/@deepseek-ai/cosmokit/lib/index.js
+// ../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.6/node_modules/@deepseek-ai/cosmokit/lib/index.js
 function isNullable(value) {
   return value === null || value === void 0;
 }
@@ -1854,7 +1854,7 @@ var Time;
   Time2.template = template;
 })(Time || (Time = {}));
 
-// ../node_modules/.pnpm/@deepseek-ai+schemastery@3.18.4/node_modules/@deepseek-ai/schemastery/lib/index.mjs
+// ../node_modules/.pnpm/@deepseek-ai+schemastery@3.18.5/node_modules/@deepseek-ai/schemastery/lib/index.mjs
 var kSchema = Symbol.for("schemastery");
 var kValidationError = Symbol.for("ValidationError");
 globalThis.__schemastery_index__ ??= 0;
@@ -5472,7 +5472,7 @@ var DeploymentController = class _DeploymentController {
   }
   canWriteProfile(snapshot4 = this.state.snapshot) {
     const native = this.form?.state;
-    return this.currentConnection() && snapshot4 !== null && this.rowNamespace !== null && this.rowNamespace === snapshot4.namespace && native?.status === "ready" && native.mode === "host" && native.writable && native.revision === snapshot4.nativeFormRevision && snapshot4.nativeForm !== null && equal(native.base ?? null, snapshot4.nativeForm.base) && equal(native.user ?? null, snapshot4.nativeForm.user);
+    return this.currentConnection() && snapshot4 !== null && this.rowNamespace !== null && this.rowNamespace === snapshot4.namespace && native?.status === "ready" && native.writable && native.revision === snapshot4.nativeFormRevision && snapshot4.nativeForm !== null && equal(native.base ?? null, snapshot4.nativeForm.base) && equal(native.user ?? null, snapshot4.nativeForm.user);
   }
   edit(path, value) {
     if (this.state.busy || this.disposed || this.state.snapshot === null || !this.currentConnection() || this.state.issue === "not-owned" || this.layer === "profile" && !this.canWriteProfile()) return;

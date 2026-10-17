@@ -97,16 +97,16 @@ export class DsmmChildrenHost<A extends DeliveryAdmission, E, C, P> extends Type
   private async scoped<T>(sessionId: string, readOnly: boolean, operation: (scope: ControlScope<A>) => Promise<T>): Promise<T> {
     const invocation = this.ctx.invocation;
     const connection = this.ctx.get("connection") as HostConnectionHandle | undefined;
-    if (invocation?.peer === undefined || connection === undefined || connection.operator !== invocation.peer) throw new ControlRefusal("not-owned");
+    if (invocation?.peer === undefined || connection === undefined || connection.browserPeer !== invocation.peer) throw new ControlRefusal("not-owned");
     const connectionOwner = original(connection);
     const runtime = this.collaborators.runtime;
     if (!runtime.authority.view().deliveryFenceReady) throw new ControlRefusal("unavailable", undefined, "delivery-fence-unavailable");
     const browserSignal = runtime.authority.acquireBrowserSignal(this.ctx);
-    const initialSignal = AbortSignal.any([invocation.signal, browserSignal, this.lifetime.signal]);
+    const initialSignal = AbortSignal.any([invocation.signal, invocation.peer.signal, browserSignal, this.lifetime.signal]);
     const checkConnection = (): void => {
       if (initialSignal.aborted) throw new ControlRefusal("cancelled");
       const current = this.ctx.get("connection") as HostConnectionHandle | undefined;
-      if (current === undefined || original(current) !== connectionOwner || current.operator !== invocation.peer) throw new ControlRefusal("not-owned");
+      if (current === undefined || original(current) !== connectionOwner || current.browserPeer !== invocation.peer) throw new ControlRefusal("not-owned");
       const bound = this.ctx.get("subagents");
       if (bound === undefined || original(bound) !== original(runtime)) throw new ControlRefusal("unavailable", undefined, "delivery-fence-unavailable");
     };
@@ -165,16 +165,17 @@ export class DsmmChildrenHost<A extends DeliveryAdmission, E, C, P> extends Type
     const inactive = this.ctx.get("agents")?.get(entry.id)?.status !== "running";
     const observation = direct ? await this.collaborators.observeChild(scope.ticket, entry, scope.signal) : undefined;
     scope.check();
-    const reason = !direct ? "not-direct-child" : entry.mode === "one-shot" ? "one-shot" : "unknown-mode";
+    const projected = observation?.invocation === undefined ? undefined : parseDsmmInvocationView(observation.invocation);
+    const mode = entry.mode === "external" ? "unknown" : entry.mode === "continuable" && projected?.mode === "one-shot" ? "one-shot" : entry.mode;
+    const reason = !direct ? "not-direct-child" : mode === "one-shot" ? "one-shot" : "unknown-mode";
     const global = this.capabilities(scope);
-    const controls = entry.mode === "continuable" && observation !== undefined
+    const controls = mode === "continuable" && entry.mode === "continuable" && observation !== undefined
       ? { prompt: global.prompt.enabled ? observation.prompt : global.prompt, interrupt: global.interrupt.enabled ? observation.interrupt : global.interrupt }
       : { prompt: disabled(reason), interrupt: disabled(reason) };
-    const projected = observation?.invocation === undefined ? undefined : parseDsmmInvocationView(observation.invocation);
     const routeComparison = observation?.routeComparison === undefined ? undefined : parseDsmmRoleRouteComparison(observation.routeComparison);
     if (projected?.childId !== undefined && projected.childId !== entry.id) throw new ControlRefusal("unavailable", "childSessionId");
     if (routeComparison !== undefined && routeComparison.childId !== entry.id) throw new ControlRefusal("unavailable", "childSessionId");
-    return { id: entry.id, parentSessionId, mode: entry.mode, activity: inactive ? "inactive" : "running", readonly: !controls.prompt.enabled && !controls.interrupt.enabled,
+    return { id: entry.id, parentSessionId, mode, activity: inactive ? "inactive" : "running", readonly: !controls.prompt.enabled && !controls.interrupt.enabled,
       ...(entry.label === undefined ? {} : { label: boundedChildLabel(entry.label) }), controls,
       ...(projected === undefined ? {} : { invocation: { ...projected, childId: entry.id } }),
       ...(routeComparison === undefined ? {} : { routeComparison }),
@@ -277,7 +278,9 @@ export class DsmmChildrenHost<A extends DeliveryAdmission, E, C, P> extends Type
     const child = catalog.find(child => child.id === childId);
     if (child === undefined) throw new ControlRefusal("not-owned", "childSessionId");
     if (child.mode !== "continuable") throw new ControlRefusal("not-resumable", "childSessionId");
-    return this.childView(scope, child);
+    const view = await this.childView(scope, child);
+    if (view.mode !== "continuable") throw new ControlRefusal("not-resumable", "childSessionId");
+    return view;
   }
 
   @Remote

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import { Session, SessionId, SessionSeq, SessionStore } from "@deepseek-ai/dsh-session";
 import type { SessionEvent } from "@deepseek-ai/dsh-session";
 import {
@@ -128,14 +128,13 @@ test("a queued background timer cannot consume a later direct append's live over
   const release = new Promise<void>((resolve) => { releaseAppend = resolve; });
   const automaticDrain = new Promise<void>((resolve) => { observeAutomaticDrain = resolve; });
   const persistedSequences: number[] = [];
-  const originalCreate = JsonlSessionPersistence.prototype.create;
-  t.mock.method(JsonlSessionPersistence.prototype, "create", async function(
-    this: JsonlSessionPersistence, ...args: Parameters<typeof originalCreate>
-  ) {
-    const native = await originalCreate.apply(this, args);
-    const originalAppend = native.append.bind(native);
+  const f = await fixture();
+  const nativeWriter = await f.persistence.create(Session.create(SessionId("dsmm-queued-timer-order")).header);
+  const nativeHandle = Reflect.get(nativeWriter, "native") as import("@deepseek-ai/dsh-session-persistence").SessionHandle;
+  {
+    const originalAppend = nativeHandle.append.bind(nativeHandle);
     let held = false;
-    t.mock.method(native, "append", async (...appendArgs: Parameters<typeof originalAppend>) => {
+    t.mock.method(nativeHandle, "append", async (...appendArgs: Parameters<typeof originalAppend>) => {
       if (!held && appendArgs[0][0]?.seq === 0) {
         held = true;
         observeStart();
@@ -145,13 +144,11 @@ test("a queued background timer cannot consume a later direct append's live over
       persistedSequences.push(...appendArgs[0].map((event) => event.seq));
       if (appendArgs[0].length === 0) observeAutomaticDrain();
     });
-    return native;
-  });
-  const f = await fixture();
+  }
   const accepted: Promise<void>[] = [];
   try {
     const session = f.ctx.sessions.prepare(SessionId("dsmm-queued-timer-order"));
-    const writer = await f.persistence.create(session.header);
+    const writer = nativeWriter;
     f.publish(session);
     const first = session.append("deepwork/mode", { active: true });
     accepted.push(writer.append([first]));

@@ -16,7 +16,7 @@ const groups = [
 for (const [contract, fixture] of groups) test(`native Host LLM ${contract}`, { skip: entry === undefined ? "requires an explicit installed DSH anchor" : false }, (t) => {
   const env: NodeJS.ProcessEnv = { ...process.env, DSMM_TEST_DSH_ENTRY: entry };
   delete env.NODE_TEST_CONTEXT;
-  const result = spawnSync(process.execPath, ["--import", "./test/host-llm-source-loader.mjs", "--test", "--test-concurrency=1", `./test/${fixture}`], {
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", "--import", "./test/child-admission-source-loader.mjs", "--test", "--test-concurrency=1", `./test/${fixture}`], {
     cwd: fileURLToPath(new URL("../", import.meta.url)), encoding: "utf8", timeout: 120_000,
     env,
   });

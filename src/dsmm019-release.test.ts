@@ -9,8 +9,8 @@ import { EvidenceMismatch, verificationFailureForError, verifyPublishedArtifact 
 import { archiveFiles, makeAcceptedFixture, packageFiles } from "./dsmm-trusted-release-fixtures.mjs";
 
 /** Synthetic registry fixtures exercise verification, never publication proof. */
-function fixture(version = "0.1.9") {
-  const base = makeAcceptedFixture().identity, tarball = archiveFiles(packageFiles(version));
+function fixture(version = "0.1.9", contentVersion = version) {
+  const base = makeAcceptedFixture().identity, tarball = archiveFiles(packageFiles(contentVersion));
   const tag = `dsmm-scoped-v${version}`, ref = `refs/tags/${tag}`;
   const identity = { ...base, ...computeDigests(tarball), version, tag, ref, filename: `dsmm-dsmm-${version}.tgz`,
     workflow: { ...base.workflow, ref: `${POLICY.repository}/${POLICY.workflowFile}@${ref}` } };
@@ -56,13 +56,13 @@ test("0.1.9 shares the twenty-minute cap across metadata, tarball and provenance
 
 test("0.1.9 rejects above-cap budgets and never automatically expands later versions", async () => {
   for (const version of ["0.1.10", "0.1.20", "0.2.0"]) {
-    const future = fixture(version); let clock = 0, calls = 0;
+    const future = fixture(version, "0.1.9"); let clock = 0, calls = 0;
     await assert.rejects(verifyRegistryArtifact(future.identity, async () => { calls++; return new Response("", { status: 404 }); },
       { now: () => clock, wait: async (ms: number) => { clock += ms; } }), /absent/);
     assert.equal(clock, 120_000); assert.equal(calls, 61);
   }
   for (const [version, cap] of [["0.1.9", 1_200_000], ["0.1.8", 300_000], ["0.1.10", 300_000], ["0.1.20", 300_000], ["0.2.0", 300_000]] as const) {
-    await assert.rejects(verifyRegistryArtifact(fixture(version).identity, async () => assert.fail("invalid budget cannot fetch"), { visibilityDeadlineMs: cap + 1 }), /deadline/);
+    await assert.rejects(verifyRegistryArtifact(fixture(version, "0.1.9").identity, async () => assert.fail("invalid budget cannot fetch"), { visibilityDeadlineMs: cap + 1 }), /deadline/);
   }
 });
 

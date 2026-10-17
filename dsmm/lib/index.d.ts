@@ -41,11 +41,11 @@ export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkAct
 export type { DsmmHostStartupOptions } from "./runtime-integration.js";
 export { DsmmNativeLlmRuntime } from "./llm-runtime.js";
 export type { DsmmLlmAdmission, DsmmLlmCallConfig, DsmmLlmHostOwner, DsmmLlmGeneration, DsmmJson } from "./host-llm.js";
-/** Experimental Host collaborators are programmatic only; serialized settings cannot authenticate them. */
+/** The current Host composition does not accept compatibility adapters. */
 export declare function createDsmmHostPlugin(startup: DsmmHostStartupOptions): {
     name: string;
     Config: import("@deepseek-ai/schemastery").default<DsmmPluginConfig>;
-    inject: string[] | readonly ["profileContext", "agents"];
+    inject: readonly ["profileContext", "agents"];
     apply(ctx: DshContext, config?: Config): void | Promise<void>;
 };
 export declare function apply(ctx: DshContext, config?: Config, hostStartup?: DsmmHostStartupOptions): void | Promise<void>;

@@ -1,8 +1,7 @@
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { SubagentError } from "@deepseek-ai/dsh-subagent";
 import { parseChildAdmissionCapture, parseChildAdmissionEvidenceView, parseLegacyChildEvidence } from "./child-capture.js";
-import { NativeChildEvidenceReader, assertNativeChildCapture, legacyEvidenceFromNativeFacts } from "./native-child-evidence.js";
-import { createConservativeLegacyAdmission, installLegacyChildToolPolicy } from "./legacy-child-policy.js";
+import { NativeChildEvidenceReader, assertNativeChildCapture } from "./native-child-evidence.js";
 function unauthorized() { throw new SubagentError("Child admission requires an issued ticket and exact native Agent owner", "UNAUTHORIZED"); }
 /** Connects A's structural contract to C1's opaque ticket provenance without manufacturing Agents. */
 export function createChildAdmissionBinding(options) {
@@ -42,7 +41,7 @@ export function createChildAdmissionBinding(options) {
         return actual;
     };
     const reader = new NativeChildEvidenceReader(ctx, assertNative, options.nativeHistory);
-    const readLegacy = (ticket, id, signal) => reader.legacy(nativeTicket(ticket), id, signal);
+    const readLegacy = () => { throw new SubagentError("Child admission without a current capture or trusted fresh invocation is unsupported; no evidence is synthesized", "UNSUPPORTED_CAPABILITY"); };
     const resolve = async (ticket, id, callerSignal) => {
         assertNative(ticket);
         const signal = AbortSignal.any([ticket.signal, callerSignal]);
@@ -50,17 +49,13 @@ export function createChildAdmissionBinding(options) {
         const evidence = await collaborators.resolveOriginalChildEvidence(profileTicket(ticket), id, signal, readLegacy);
         signal.throwIfAborted();
         assertNative(ticket);
-        const parsed = "mode" in evidence ? parseLegacyChildEvidence(evidence) : parseChildAdmissionCapture(evidence);
+        if ("mode" in evidence || evidence.version !== 3)
+            throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
+        const parsed = parseChildAdmissionCapture(evidence);
         const facts = await reader.read(ticket, id, signal);
         signal.throwIfAborted();
         assertNative(ticket);
-        if ("mode" in parsed) {
-            const physical = legacyEvidenceFromNativeFacts(facts);
-            if (!sameLegacyEvidence(parsed, physical))
-                unauthorized();
-        }
-        else
-            assertNativeChildCapture(parsed, facts);
+        assertNativeChildCapture(parsed, facts);
         return evidence;
     };
     const authority = {
@@ -90,7 +85,7 @@ export function createChildAdmissionBinding(options) {
         revokeParent: (parent, reason) => {
             const actual = registeredParents.get(parent);
             if (actual !== undefined) {
-                delivery.revokeParent(actual, reason);
+                delivery.withdrawParent(actual, reason);
                 registeredParents.delete(parent);
             }
         },
@@ -110,14 +105,14 @@ export function createChildAdmissionBinding(options) {
             const prepared = await collaborators.childAdmission.prepare(agent, parent, ticket, merged);
             merged.throwIfAborted();
             assertNative(issued);
-            return "mode" in prepared.evidence ? { ...prepared,
-                admission: createConservativeLegacyAdmission(prepared.evidence, ticket.admission, options.nativeSubstrate) } : prepared;
+            if ("mode" in prepared.evidence || prepared.evidence.version !== 3)
+                throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
+            return prepared;
         },
         validateRole(agent, parent, candidate) {
+            if ("mode" in candidate.evidence || candidate.evidence.version !== 3)
+                throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
             collaborators.childAdmission.validateRole(agent, parent, candidate);
-            if ("mode" in candidate.evidence && !candidate.retained) {
-                installLegacyChildToolPolicy(candidate.evidence, exact(parent), exact(agent), options.legacyCapabilities);
-            }
         },
     };
     return { authority, policy, childAdmission, readLegacy,
@@ -126,16 +121,10 @@ export function createChildAdmissionBinding(options) {
         onAdmissionGuardsInstalled() { delivery.enablePolicy(owner); },
         /** Holder owner calls this before native disposal/drain; no replacement residency is revoked. */
         async revokeBeforeDispose(parent, dispose) {
-            authority.revokeParent(parent, "holder-disposed");
+            delivery.revokeParent(parent, "holder-disposed");
             await dispose();
         },
     };
-}
-function sameLegacyEvidence(left, right) {
-    return left.childSessionId === right.childSessionId && left.parentSessionId === right.parentSessionId && left.role === right.role
-        && left.depth === right.depth && JSON.stringify(left.route) === JSON.stringify(right.route)
-        && JSON.stringify(left.toolFilter) === JSON.stringify(right.toolFilter)
-        && left.provenFields.every(field => right.provenFields.includes(field));
 }
 /** DTO consumers supply the CURRENT direct-parent epoch; original epochs are not an authorization equality test. */
 export function projectChildAdmissionEvidence(evidence, parentAdmissionEpoch, parentDenied = []) {

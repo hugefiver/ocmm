@@ -24,8 +24,7 @@ import { agentForScope } from "./native-scope.js";
 import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
 import { projectDsmmModules } from "./modules.js";
 import { scopeLifetime } from "./delivery-authority.js";
-import { admittedAgentContext, classifyDsmmAgent, integrateSubagentRuntime, managedAgentContext, publicProfileRuntime, registerRoleControlContribution, registerRuntimeGuidance, runtimeAdmissionView } from "./runtime-integration.js";
-import { LegacyReadUnavailable } from "./legacy-read-contracts.js";
+import { admittedAgentContext, assertSupportedHostStartup, classifyDsmmAgent, integrateSubagentRuntime, managedAgentContext, publicProfileRuntime, registerRoleControlContribution, registerRuntimeGuidance, runtimeAdmissionView } from "./runtime-integration.js";
 import { createCorePermissionAuthority } from "./core-permission-authority.js";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 import { installCorePermissions } from "./core-permissions.js";
@@ -56,25 +55,17 @@ export { DsmmDeploymentConfig, parseGlobalConfig, editGlobalConfig } from "./dep
 export { DSMM_MODULE_DESCRIPTORS, deepworkEnabled, projectDeepworkModule } from "./modules.js";
 export { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "./state.js";
 export { DsmmNativeLlmRuntime } from "./llm-runtime.js";
-/** Experimental Host collaborators are programmatic only; serialized settings cannot authenticate them. */
+/** The current Host composition does not accept compatibility adapters. */
 export function createDsmmHostPlugin(startup) {
-    if (startup.experimentalLegacyRead !== undefined) {
-        const host = startup.experimentalLegacyRead.startup;
-        if (host === null || typeof host !== "object" || [host.captureClosedComposition, host.resolveReadBindings, host.acquireCallContext,
-            host.reportAuditFault, host.reportRetirementFault, host.revoke].some(callback => typeof callback !== "function"))
-            throw new DsmmProfileError("unavailable", "Legacy read startup requires actual Host composition, FS, turn and audit collaborators.");
-    }
-    return { name, Config, inject: startup.experimentalLegacyRead === undefined ? inject : [...inject, "subagents"],
+    assertSupportedHostStartup(startup);
+    return { name, Config, inject,
         apply(ctx, config = {}) { return apply(ctx, config, startup); } };
 }
 export function apply(ctx, config = {}, hostStartup = {}) {
+    assertSupportedHostStartup(hostStartup);
     if (!Context.is(ctx)) {
-        if (hostStartup.experimentalLegacyRead !== undefined)
-            throw new DsmmProfileError("unavailable", "Legacy read requires a real cold native Host.");
         return applyConfigured(ctx, config, undefined, undefined, hostStartup);
     }
-    if (hostStartup.experimentalLegacyRead !== undefined && (ctx.get("dsmmProfileRuntime") !== undefined || runtimeAdmissionView(ctx).deliveryFenceReady))
-        throw new LegacyReadUnavailable("lifetime-unavailable");
     const deployment = new DsmmDeploymentConfig(ctx, config);
     return deployment.readDesired().then((startup) => applyConfigured(ctx, config, deployment, startup, hostStartup));
 }
@@ -245,8 +236,6 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                     await presets;
                 const integration = await integrateSubagentRuntime(hostCtx, getReadySettings(), rolePolicy, () => runtime, hostStartup);
                 lifetime.signal.throwIfAborted();
-                if (hostStartup.experimentalLegacyRead !== undefined && integration === undefined)
-                    throw new DsmmProfileError("unavailable", "Legacy read requires the explicit cold DSMM runtime composition.");
                 if (startupMounted && hostCtx.get("subagents") !== undefined) {
                     // The actual registry exists now. Alias registration is synchronous and
                     // does not wait on a policy-ready provider, avoiding a startup cycle.
@@ -257,7 +246,7 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                     getMountedPermission, deferRetainedChildren: integration !== undefined,
                     ...(startup === undefined ? {} : { startup }), ...(deployment === undefined ? {} : { readDesired: () => deployment.readDesired() }),
                     ...(integration === undefined ? {} : { childAuthority: integration.bridge.authority, childAuthorityOwner: integration.owner,
-                        childAdmission: integration.bridge.childAdmission, childCapturePersistence: hostCtx.get("sessionPersistence") === undefined ? "resident" : "durable" }),
+                        childAdmission: integration.bridge.childAdmission, childCapturePersistence: "durable" }),
                     validateRootRole: (agent, admission) => {
                         // Candidate identity validation precedes publication. Its mode check
                         // must not recursively demand the not-yet-bound live admission.
@@ -280,11 +269,6 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                             completedRootAdmissions.add(agent);
                         }
                         rootAdmissionsInitialized = true;
-                        if (integration?.legacyRead !== undefined) {
-                            profileCtx.on?.("agent/created", async ({ agent, signal }) => {
-                                await integration.afterChildAdmission(agent, signal);
-                            }, { global: true });
-                        }
                     },
                     subagentCapabilities: {
                         backgroundJobs: profileCtx.get?.("jobs") !== undefined,
@@ -298,7 +282,7 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                 const admittedCtx = admittedAgentContext(profileCtx, manager);
                 install(admittedCtx, getBoundSettings);
                 registerRuntimeGuidance(admittedCtx, getBoundSettings, rolePolicy);
-                const published = publicProfileRuntime(manager, hostCtx, integration?.legacyRead === undefined ? undefined : integration);
+                const published = publicProfileRuntime(manager, hostCtx);
                 profileCtx.provide?.("dsmmProfileRuntime", published);
                 if (integration !== undefined) {
                     hostCtx.provide("dsmmRuntimeIntegration", integration);
@@ -319,7 +303,6 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                                 if (parent !== undefined && classifyDsmmAgent(agent) === "native" && !controlledParent(parent))
                                     return;
                                 await manager.completeAdmission(agent, signal, startup);
-                                await integration.afterChildAdmission(agent, signal);
                             };
                             for (const agent of retainedChildren)
                                 if (hostCtx.agents.get(agent.id) === agent)
@@ -332,7 +315,7 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
                             await registerHeadlessRoleTools(admittedAgentContext(profileCtx, manager), controller, getBoundSettings, rolePolicy, integration);
                             signal.throwIfAborted();
                             lifetime.signal.throwIfAborted();
-                            hostCtx.inject(["typert"], scope => integration.registerControls(scope));
+                            hostCtx.inject(["typert", "subagents"], scope => integration.registerControls(scope));
                         }, AbortSignal.any([lifetime.signal, continuation.signal]));
                     });
                 }
@@ -367,11 +350,15 @@ function applyRuntime(ctx, config, deployment, startup, hostStartup = {}) {
     if (ctx.get !== undefined) {
         ctx.on?.("system-prompt/assemble", async (_assembly, options, next) => {
             const agent = agentForScope(ctx, options.scope);
-            if (agent !== undefined)
+            if (agent !== undefined) {
+                await native?.get("dsmmRuntimeIntegration")?.runtime.authority.waitForPromotion(agent, options.signal);
                 rolePolicy.assertModuleAdmission(agent);
+                assertDwDelivery(agent);
+            }
             return next();
         }, { prepend: true, global: true });
         ctx.on?.("agent/request", async (frame, next) => {
+            await native?.get("dsmmRuntimeIntegration")?.runtime.authority.waitForPromotion(frame.agent, frame.signal);
             rolePolicy.assertModuleAdmission(frame.agent);
             assertDwDelivery(frame.agent);
             return next();

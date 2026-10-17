@@ -77,7 +77,7 @@ export class DeploymentController {
     canWriteProfile(snapshot = this.state.snapshot) {
         const native = this.form?.state;
         return this.currentConnection() && snapshot !== null && this.rowNamespace !== null && this.rowNamespace === snapshot.namespace
-            && native?.status === "ready" && native.mode === "host" && native.writable
+            && native?.status === "ready" && native.writable
             && native.revision === snapshot.nativeFormRevision && snapshot.nativeForm !== null
             && equal(native.base ?? null, snapshot.nativeForm.base) && equal(native.user ?? null, snapshot.nativeForm.user);
     }

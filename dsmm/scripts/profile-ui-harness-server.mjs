@@ -4,9 +4,22 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { COMPOSITION_ID, bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph } from "./profile-ui-harness-browser.mjs";
 
-const SESSION_PROVIDER_IDS = ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"];
+const SESSION_PROVIDER_IDS = ["@deepseek-ai/dsh-api-remote-access", "@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"];
 export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway", ...SESSION_PROVIDER_IDS];
 const mime = { ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
+
+export async function resolveNativeClientBundle(nativeRequire, id) {
+  const manifestPath = nativeRequire.resolve(`${id}/package.json`);
+  const packageRoot = dirname(await realpath(manifestPath));
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const declaration = manifest.exports?.["./client"];
+  const target = typeof declaration === "string" ? declaration : declaration?.browser ?? declaration?.default;
+  assert.ok(typeof target === "string" && target.startsWith("./"), `${id} has no browser client export`);
+  const filename = await realpath(resolve(packageRoot, target));
+  const subpath = relative(packageRoot, filename);
+  assert.ok(subpath !== "" && !subpath.startsWith("..") && !isAbsolute(subpath), `${id} browser client export escaped its package`);
+  return { filename, manifest };
+}
 
 /** Serve only run-owned test HTML and exact installed, unmodified artifacts. */
 export async function startProfileUiServer({ nativeRequire, packageRoot, sha256, composition = compositionBundle() }) {
@@ -23,11 +36,11 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256,
   const rows = [];
   for (const [index, id] of NATIVE_IDS.entries()) {
     const url = `/bundles/native-${index}.js`;
-    bundles.set(url, await readFile(nativeRequire.resolve(`${id}/client`)));
+    const { filename, manifest } = await resolveNativeClientBundle(nativeRequire, id);
+    bundles.set(url, await readFile(filename));
     // Scope owners activate unchanged; their installed native metadata owns
     // the full package dependency graph, not harness-invented service aliases.
-    const declaration = SESSION_PROVIDER_IDS.includes(id)
-      ? JSON.parse(await readFile(nativeRequire.resolve(`${id}/package.json`), "utf8")).dsh.client : undefined;
+    const declaration = SESSION_PROVIDER_IDS.includes(id) ? manifest.dsh.client : undefined;
     const inject = declaration?.inject ?? (id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID] : []);
     for (const dependency of inject) assert.ok(NATIVE_IDS.includes(dependency) || dependency === COMPOSITION_ID, `${id} requires unprovided native client package ${dependency}`);
     rows.push({ id, url, inject, external: declaration?.external ?? [] });

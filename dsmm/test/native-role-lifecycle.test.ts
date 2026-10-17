@@ -117,33 +117,35 @@ test("native one-shot background jobs deliver useful output, enforce owner cance
 });
 
 test("native default depth and unknown filters refuse before publication; foreground failure and abort retain typed terminal outcomes", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "typed-error" } } } });
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, backgroundMode: "continuable" }, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "typed-error" } } } }, { persistence: true });
   try {
     const parent = await f.create();
     f.adapter.streamChunks = async function* () { yield* call("structured_output", { ok: true }); };
-    const structured = await f.subagents.start("dsmm-role-coding", { parent, prompt: [], signal: new AbortController().signal, toolFilter: { allow: ["read"] },
-      outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } });
+    const removeFilter = f.ctx.on("agent/created", ({ agent }) => { if (f.agents.isOwnedBy(agent.id, parent)) agent.ctx.tools.restrict({ allow: ["read"] }); }, { global: true });
+    const structured = await f.subagents.startActivation({ provider: "dsmm-role-coding", delivery: "caller", label: "Structured output", signal: new AbortController().signal, request: { parent, prompt: [],
+      outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } } });
     try { const result = await structured.result; assert.equal(result.stopReason, "completed"); assert.deepEqual(result.structured, { ok: true }); }
-    finally { await structured.dispose(); f.adapter.streamChunks = undefined; }
-    await assert.rejects(f.subagents.start("dsmm-role-reviewer", { parent, prompt: [], signal: new AbortController().signal, toolFilter: { allow: ["unknown-native-tool-filter"] } }), /unknown|not.*registered/i);
+    finally { removeFilter(); await structured.dispose(); f.adapter.streamChunks = undefined; }
+    const removeUnknown = f.ctx.on("agent/created", ({ agent }) => { if (f.agents.isOwnedBy(agent.id, parent)) agent.ctx.tools.restrict({ allow: ["unknown-native-tool-filter"] }); }, { global: true });
+    try { await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-reviewer", delivery: "caller", label: "Invalid filter", request: { parent, prompt: [] }, signal: new AbortController().signal }), /unknown|not.*registered/i); }
+    finally { removeUnknown(); }
     assert.deepEqual(f.agents.list(), [parent]);
-    const deep = await f.subagents.start("dsmm-role-deep", { parent, prompt: [], signal: new AbortController().signal });
+    const child = await f.createAuxiliary("dsmm-deep", undefined, "continuable", parent);
     try {
-      await deep.result;
-      const child = deep.localAgent!;
+      await runFixtureTurn(child);
       const overDepth = await child.ctx.get("tools")!.execute({ agent: child, name: "dsmm_category", callId: ToolCallId("native-depth-default"), arguments: { category: "dsmm-coding", description: "Legitimate but too deep", prompt: "Native default 1 applies" }, signal: new AbortController().signal });
       assert.equal(overDepth.isError, true); assert.match(JSON.stringify(overDepth), /depth/i);
       assert.equal(f.agents.list().length, 2);
-    } finally { await deep.dispose(); }
+    } finally { await f.releaseAuxiliary(child); }
     f.adapter.failModels.add("typed-error");
-    const fail = await parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-failure"), arguments: { category: "dsmm-coding", description: "Typed failure proof", prompt: "Fail inside mock model" }, signal: new AbortController().signal });
+    const fail = await parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-failure"), arguments: { category: "dsmm-coding", description: "Typed failure proof", prompt: "Fail inside mock model", run_in_background: false }, signal: new AbortController().signal });
     assert.equal(fail.isError, true); assert.match(JSON.stringify(fail), /ERROR|subagent error/);
     f.adapter.failModels.clear();
     let entered!: () => void;
     const started = new Promise<void>((done) => { entered = done; });
     f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
     const abort = new AbortController();
-    const pending = parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-abort"), arguments: { category: "dsmm-coding", description: "Owned abort proof", prompt: "Wait for abort" }, signal: abort.signal });
+    const pending = parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-abort"), arguments: { category: "dsmm-coding", description: "Owned abort proof", prompt: "Wait for abort", run_in_background: false }, signal: abort.signal });
     await started; abort.abort();
     const cancelled = await pending; assert.equal(cancelled.isError, true); assert.match(JSON.stringify(cancelled), /ABORTED|abort|cancel/i);
     assert.deepEqual(f.agents.list(), [parent]);
@@ -181,6 +183,7 @@ test("native continuable capacity is per-parent and builtin controls continue us
     const events = child.session.snapshotEvents();
     assert.match(JSON.stringify(events), /SAME_CHILD_CONTINUATION_INPUT/);
     assert.match(JSON.stringify(events.filter((event) => event.type === "assistant/message")), /CONTINUED_USEFUL_OUTPUT/);
+    await f.subagents.drainChildren(parent, [id]);
     await disposed;
     const cold = await invoke(parent, "send_message", { agent_id: id, message: "Cold-resume the same durable child" });
     assert.equal(cold.isError, false, JSON.stringify(cold));

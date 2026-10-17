@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { ReasoningEffortId, ToolCallId } from "@deepseek-ai/dsh-llm";
-import { SessionId } from "@deepseek-ai/dsh-session";
-import type { ResolvedSubagentStartRequest, SubagentProvider } from "@deepseek-ai/dsh-subagent";
+import { foldSubagentDescriptor, STRUCTURED_OUTPUT_TOOL, SubagentDepthError } from "@deepseek-ai/dsh-subagent";
 import { renderPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { registerDsmmStatusCommand } from "../lib/commands.js";
 import type { DshAgent, DshCommandsRegistry, DshContext } from "../lib/dsh-types.js";
@@ -98,7 +97,7 @@ test("profile admission is immutable for existing and blank roots, and trusted c
   const fixture = await nativeRoutingFixture({ roles: { "dsmm-builder": false } }, { headless: true, persistence: true });
   const runtime = fixture.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
   const store = ProfileStore.fromCentral(fixture.home, fixture.profileDir, fixture.dsmmEntryId ?? "trusted-direct");
-  let childRun: Awaited<ReturnType<typeof fixture.subagents.start>> | undefined;
+  let childRun: Awaited<ReturnType<typeof fixture.subagents.startActivation>> | undefined;
   try {
     assert.ok(runtime);
     const a = await runtime.save({ id: "a", content: profile("a", { defaultActive: true, guards: { gitWriteGuard: "deny" } }), expectedRevision: null });
@@ -117,12 +116,13 @@ test("profile admission is immutable for existing and blank roots, and trusted c
     const requests = fixture.adapter.calls.length;
     await assert.rejects(fixture.create({ origin: "subagent", agentPreset: "dsmm-reviewer" }), { code: "not-owned" });
     assert.equal(fixture.adapter.calls.length, requests, "an unowned child cannot borrow the new global policy or issue a request");
-    childRun = await fixture.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "Owned local profile inheritance fixture" }], signal: new AbortController().signal });
-    assert.equal((await childRun.result).stopReason, "completed");
-    const childAgent = childRun.localAgent;
+    childRun = await fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Profile inheritance", delivery: "caller", signal: new AbortController().signal,
+      request: { parent, prompt: [{ type: "text", text: "Owned local profile inheritance fixture" }] } });
+    const childAgent = fixture.agents.get(childRun.childId);
     assert.ok(childAgent);
     const child = childAgent as unknown as DshAgent;
     assert.equal(fixture.agents.isOwnedBy(childAgent.id, parent), true);
+    assert.equal((await childRun.result).stopReason, "completed");
     const capture = await store.readChildAdmission(childAgent.id, parent.id);
     assert.ok(capture);
     assert.equal(capture.profilePin?.revision, a.revision);
@@ -217,19 +217,18 @@ test("native global A-to-B switching retains A child routes, startup-locked fail
     assert.equal(switched, true);
     assert.deepEqual(headerRoutes(parent).map((value) => value.model), ["native-default"], "ordinary-root failures retain the native model rather than imply profile routing");
     assert.equal(runtime.admission(parent as unknown as DshAgent).appliedRevision, a.revision);
-    const child = await fixture.subagents.start("dsmm-role-reviewer", {
-      parent, prompt: [{ type: "text", text: "Complete local profile inheritance fixture" }],
-      toolFilter: { allow: ["read", "glob", "grep"] }, persona: "spoofed dsmm-orchestrator", signal: new AbortController().signal
-    });
+    const child = await fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Captured A route", delivery: "caller", signal: new AbortController().signal,
+      request: { parent, prompt: [{ type: "text", text: "Complete local profile inheritance fixture" }] } });
+    const childAgent = fixture.agents.get(child.childId);
+    assert.ok(childAgent);
     let persistedChild: ReturnType<typeof parent.session.snapshotEvents>;
     try {
-      assert.equal((await child.result).stopReason, "completed");
-      assert.ok(child.localAgent);
-      assert.equal(headerRoutes(child.localAgent).at(-1)?.model, "review-a");
-      assert.equal(runtime.admission(child.localAgent as unknown as DshAgent).appliedRevision, a.revision);
-      persistedChild = JSON.parse(JSON.stringify(child.localAgent.session.snapshotEvents()));
-      const denied = await child.localAgent.ctx.get("tools")!.execute({ callId: ToolCallId("profile-child-deny"), name: "write", arguments: {}, agent: child.localAgent, signal: new AbortController().signal });
+      const denied = await childAgent.ctx.get("tools")!.execute({ callId: ToolCallId("profile-child-deny"), name: "write", arguments: {}, agent: childAgent, signal: new AbortController().signal });
       assert.equal(denied.isError, true);
+      assert.equal((await child.result).stopReason, "completed");
+      assert.equal(headerRoutes(childAgent).at(-1)?.model, "review-a");
+      assert.equal(runtime.admission(childAgent as unknown as DshAgent).appliedRevision, a.revision);
+      persistedChild = JSON.parse(JSON.stringify(childAgent.session.snapshotEvents()));
     } finally { await child.dispose(); }
     const newRoot = await fixture.create({ agentPreset: "dsmm-orchestrator" });
     await runFixtureTurn(newRoot);
@@ -293,41 +292,56 @@ test("profile Apply preserves requested effort without requiring an Agent LLM or
 });
 
 test("native role alias preflights exact parent-profile route before child creation and preserves explicit request priority", async () => {
-  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review-preflight", reasoningEffort: "max" } } } });
+  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review-preflight", reasoningEffort: "max" } } } }, { nativePresets: true, nativeJobs: true, beforeDsmm(ctx) {
+    const denied = async (): Promise<never> => { throw new Error("Profile fixture forbids external work"); };
+    ctx.provide("web", { search: denied, fetch: denied });
+    ctx.provide("subprocess", { spawn: denied });
+    ctx.provide("shell", { execute: denied });
+    ctx.provide("shellEnv", { resolve: denied });
+    return Promise.resolve();
+  } });
   try {
     const parent = await fixture.create();
     fixture.adapter.unsupportedMaxModels.add("review-preflight");
     const count = fixture.agents.list().length;
-    await assert.rejects(fixture.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "bounded local preflight" }], signal: new AbortController().signal }), /reasoning effort/u);
+    await assert.rejects(fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Preflight", delivery: "caller", signal: new AbortController().signal,
+      request: { parent, prompt: [{ type: "text", text: "bounded local preflight" }] } }), /reasoning effort/u);
     assert.equal(fixture.agents.list().length, count, "unsupported effort rejects before native child allocation");
     assert.equal(fixture.adapter.calls.length, 0);
-    await fixture.spawnFiber!.dispose();
-    let accepted: ResolvedSubagentStartRequest | undefined;
-    const provider: SubagentProvider = {
-      name: "spawn", inheritsParentContext: false,
-      capabilities: { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
-      async start(request) {
-        accepted = request;
-        return { id: SessionId("profile-forwarding-fixture"), localAgent: undefined, result: Promise.resolve({ output: [], stopReason: "completed" }), async dispose() {} };
-      }
+    const signal = new AbortController().signal;
+    const agentOptions = { provider: "fixture", model: "explicit-route", reasoningEffort: ReasoningEffortId("low"), maxTokens: 30 };
+    await assert.rejects(fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Depth ceiling", delivery: "caller", signal,
+      request: { parent, prompt: [], agentOptions, maxDepth: 0 } }), SubagentDepthError);
+    assert.equal(fixture.agents.list().length, count);
+    const outputSchema = { type: "object" as const, properties: { approved: { type: "boolean" as const } }, required: ["approved"], additionalProperties: false };
+    fixture.adapter.streamChunks = async function* () {
+      const id = ToolCallId("profile-explicit-structured");
+      yield { type: "block-start", index: 0, blockType: "tool-call" };
+      yield { type: "tool-call-delta", index: 0, id, name: STRUCTURED_OUTPUT_TOOL, argumentsDelta: '{"approved":true}' };
+      yield { type: "block-end", index: 0, block: { type: "tool-call", id, name: STRUCTURED_OUTPUT_TOOL, arguments: '{"approved":true}' } };
+      yield { type: "finish", reason: { kind: "tool-calls" } };
     };
-    const remove = fixture.subagents.registerProvider(provider);
+    const run = await fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Explicit route", delivery: "caller", signal,
+      request: { parent, prompt: [{ type: "text", text: "forward exact native authority" }], agentOptions, agentPreset: "standard", outputSchema, maxDepth: 2 } });
     try {
-      const signal = new AbortController().signal;
-      const filter = { allow: ["read"] };
-      const outputSchema = { type: "object" as const, properties: {} };
-      const run = await fixture.subagents.start("dsmm-role-reviewer", { parent, prompt: [{ type: "text", text: "forward exact native authority" }], signal, agentOptions: { provider: "fixture", model: "explicit-route", reasoningEffort: ReasoningEffortId("low"), maxTokens: 30 }, toolFilter: filter, persona: "native persona", outputSchema, maxDepth: 2 });
-      assert.ok(accepted);
-      assert.deepEqual(accepted.agentOptions, { provider: "fixture", model: "explicit-route", reasoningEffort: "low", maxTokens: 30 });
-      assert.equal(accepted.parent, parent);
-      assert.equal(accepted.signal, signal);
-      assert.deepEqual(accepted.toolFilter, filter);
-      assert.equal(accepted.persona, "native persona");
-      assert.deepEqual(accepted.outputSchema, outputSchema);
-      assert.equal(accepted.maxDepth, 2);
-      assert.equal(accepted.descriptor.provider, "dsmm-role-reviewer");
-      await run.dispose();
-    } finally { remove(); }
+      const child = fixture.agents.get(run.childId);
+      assert.ok(child);
+      assert.equal(child.options.model, "explicit-route");
+      assert.equal(child.options.reasoningEffort, "low");
+      assert.equal(child.options.maxTokens, 30);
+      assert.equal(fixture.ctx.agentPresets.composedPreset(child.ctx), "standard");
+      assert.equal(child.session.header.parentSession, parent.id);
+      assert.equal(child.session.header.delegationDepth, 1);
+      assert.equal(fixture.agents.isOwnedBy(child.id, parent), true);
+      assert.equal((await child.ctx.tools.execute({ agent: child, name: "write", arguments: {}, callId: ToolCallId("explicit-reviewer-deny"), signal })).isError, true);
+      const result = await run.result;
+      assert.equal(result.stopReason, "completed");
+      assert.deepEqual(result.structured, { approved: true });
+      const descriptor = foldSubagentDescriptor(child.session.snapshotEvents());
+      assert.equal(descriptor?.mode, "continuable");
+      assert.equal(descriptor?.provider, "dsmm-role-reviewer");
+      assert.equal(fixture.adapter.calls.at(-1)?.model, "explicit-route");
+    } finally { await run.dispose(); }
   } finally { await fixture.dispose(); }
 });
 

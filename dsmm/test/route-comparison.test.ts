@@ -206,7 +206,8 @@ test("Gateway real-run projection retains comparison only from projectRun and re
     const parent = await f.create();
     const holder = f.registry.start({ parent, owner: f.owner, sessionId: parent.id, toolCallId: ToolCallId("comparison-call"),
       admissionEpoch: f.admissions.get(parent)!.epoch, capture: {}, projection: {}, label: "Comparison run", callerAbort: new AbortController().signal,
-      async start(signal) { starts++; return f.runtime.start("spawn", { parent, signal, prompt: [{ type: "text", text: "native one-shot comparison task" }] }); } });
+      async start(signal) { starts++; return f.runtime.startActivation({ provider: "spawn", label: "Comparison run", delivery: "caller", signal,
+        request: { parent, prompt: [{ type: "text", text: "native one-shot comparison task" }] } }); } });
     await holder.ready; await entered.promise;
     const id = holder.invocation!.childId; assert.ok(id);
     const old = await f.invoke("describe", { sessionId: parent.id }) as ChildSessionSnapshot;

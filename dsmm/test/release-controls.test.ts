@@ -10,7 +10,7 @@ import * as probe from "../scripts/dsmm-registry-install-probe.mjs";
 // @ts-expect-error Source-only completion checker is deliberately not published.
 import * as completion from "../scripts/check-dsmm-release-completion.mjs";
 // @ts-expect-error Source-only version contract is deliberately not published.
-import { COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COLD_PROFILE_SCRIPTS_022, PRESET_NAMES_020, SKILL_EXECUTABLES_020, STABLE_UI_CHECKS_021, STABLE_UI_CHECKS_022, CORE_CHECKS_020, isSource020, isSource021, isSource022, isReviewedSource, isStableNativeSource, roleToolsForVersion, sourceContractForVersion, skillExecutablesForVersion, stableUiKindForVersion, startupProfileContract } from "../scripts/release-contract.mjs";
+import { COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COMPILED_NAMES_030, COLD_PROFILE_SCRIPTS_022, PRESET_NAMES_020, SKILL_EXECUTABLES_020, STABLE_UI_CHECKS_021, STABLE_UI_CHECKS_022, STABLE_UI_CHECKS_030, CORE_CHECKS_020, dshPolicyForVersion, isSource020, isSource021, isSource022, isSource030, isReviewedSource, isStableNativeSource, roleToolsForVersion, sourceContractForVersion, skillExecutablesForVersion, stableUiKindForVersion, startupProfileContract } from "../scripts/release-contract.mjs";
 // @ts-expect-error Historical acceptance is a distinct source-only grammar.
 import { sessionProfileChecksForVersion, validateSessionProfileProof, validateStartupProfileProof } from "../scripts/profile-ui-harness-native.mjs";
 // @ts-expect-error Historical acceptance is a distinct source-only producer.
@@ -35,8 +35,8 @@ function artifactFixture(version = "0.2.0") {
     for (const path of skillExecutablesForVersion(version)) files.set(path, Buffer.from("synthetic skill resource\n"));
     if (isSource022(version)) {
       for (const path of COLD_PROFILE_SCRIPTS_022) files.set(path, Buffer.from("synthetic cold migration resource\n"));
-      for (const path of ["docs/native-permissions.md", "docs/deferred-native-approval-risk.md"]) files.set(path, Buffer.from("synthetic permission resource\n"));
     }
+    if (isSource022(version) || isSource030(version)) for (const path of ["docs/native-permissions.md", "docs/deferred-native-approval-risk.md"]) files.set(path, Buffer.from("synthetic permission resource\n"));
   }
   const tarball = archiveFiles(files), digests = controls.computeDigests(tarball), historical = makeAcceptedFixture();
   const input = contextInput();
@@ -49,6 +49,8 @@ function artifactFixture(version = "0.2.0") {
 function installFixture(version = "0.2.0") {
   const f = artifactFixture(version), receipt = makeInstallFixture(makeAcceptedFixture());
   receipt.version = f.identity.version; receipt.sha256 = f.identity.sha256;
+  const dshPolicy = dshPolicyForVersion(receipt.version);
+  receipt.native.version = dshPolicy.runtimeVersion; receipt.native.integrity = dshPolicy.integrity;
   Object.assign(receipt.registry, { ...controls.computeDigests(f.tarball), tarball: `https://registry.npmjs.org/@dsmm/dsmm/-/dsmm-${receipt.version}.tgz`, sha512: f.identity.integrity.slice(7) });
   receipt.native.commands = probe.lifecycleCommands(receipt.native.profile, receipt.version).map((command: object) => ({ ...command, status: 0, stdoutSha256: f.identity.sha256, stderrSha256: f.identity.sha256 }));
   const file = (path: string) => ({ path, sha256: controls.computeDigests(f.files.get(path)).sha256 });
@@ -56,6 +58,7 @@ function installFixture(version = "0.2.0") {
   receipt.compiledFiles = Object.fromEntries(probe.compiledFilesForVersion(receipt.version).map((path: string) => [path, file(path)]));
   receipt.checks = Object.fromEntries(probe.requiredChecksForVersion(receipt.version).map((key: string) => [key, true]));
   receipt.nativeMetadata.version = receipt.version;
+  receipt.nativeMetadata.readerVersion = dshPolicy.runtimeVersion;
   receipt.nativeMetadata.locales = probe.validateLocaleResources(new Map([...f.files].filter(([path]) => String(path).startsWith("locale/"))), receipt.version);
   return { ...f, receipt };
 }
@@ -77,7 +80,7 @@ test("local registry probe accepts exact 020 installed Core/role/client bytes an
   assert.throws(() => controls.validateTarballBuffer(archiveFiles(wrongLocale), { version: "0.2.0" }));
 });
 test("reviewed source artifact and terminal authority bind fixed source/control/run/attempt and exact mode-specific jobs", () => {
-  for (const version of ["0.2.0", "0.2.1", "0.2.2"]) {
+  for (const version of ["0.2.0", "0.2.1", "0.2.2", "0.3.0"]) {
     const { identity } = artifactFixture(version);
     const expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha, releaseTopology: RELEASE_TOPOLOGY };
     const run = { id: Number(identity.runId), run_attempt: Number(identity.runAttempt), workflow_id: 123, repository: { full_name: "hugefiver/ocmm" }, head_repository: { full_name: "hugefiver/ocmm" }, status: "completed", conclusion: "success", head_sha: identity.controlSha, head_branch: identity.tag, event: "push" };
@@ -102,7 +105,7 @@ test("OIDC-only exact-tarball publication rejects static auth and never enables 
   assert.throws(() => controls.publishArguments(identity, "/owned/repacked.tgz"));
 });
 test("visibility defaults preserve historical 019 special budget and keep reviewed sources bounded without publishing", async () => {
-  for (const [version, expectedBudget] of [["0.1.9", 1_200_000], ["0.2.0", 120_000], ["0.2.1", 120_000], ["0.2.2", 120_000]] as const) {
+  for (const [version, expectedBudget] of [["0.1.9", 1_200_000], ["0.2.0", 120_000], ["0.2.1", 120_000], ["0.2.2", 120_000], ["0.3.0", 120_000]] as const) {
     const { identity } = artifactFixture(version); let now = 0; let reads = 0;
     await assert.rejects(() => controls.verifyRegistryArtifact(identity, async () => { reads++; return new Response(null, { status: 404 }); }, { now: () => now, wait: async (ms: number) => { now += ms; } }));
     assert.equal(now, expectedBudget); assert.ok(reads > 0);
@@ -110,17 +113,18 @@ test("visibility defaults preserve historical 019 special budget and keep review
   }
 });
 
-for (const version of ["0.2.1", "0.2.2"]) test(`${version} installs versioned public exports and complete runtime/client bytes without changing historical contracts`, () => {
+for (const version of ["0.2.1", "0.2.2", "0.3.0"]) test(`${version} installs versioned public exports and complete runtime/client bytes without changing historical contracts`, () => {
   const f = installFixture(version);
   assert.equal(probe.validateInstallReceipt(f.receipt, f.identity), f.receipt);
   completion.validateInstalledFileHashes(f.receipt, f.files);
-  assert.equal(Object.keys(f.receipt.exports).length, version === "0.2.2" ? 16 : 9);
+  assert.equal(Object.keys(f.receipt.exports).length, version === "0.3.0" || version === "0.2.2" ? 16 : 9);
   assert.equal(f.receipt.exports["./subagent-runtime"].path, "lib/runtime-integration.js");
-  assert.equal(f.receipt.exports["./legacy-read-host"].path, "lib/legacy-read-host.js");
+  if (!isSource030(version)) assert.equal(f.receipt.exports["./legacy-read-host"].path, "lib/legacy-read-host.js");
+  else assert.equal(f.receipt.exports["./agent-registry"].path, "lib/agent-registry.js");
   assert.equal(Object.keys(probe.publicExportsForVersion("0.2.0")).length, 7);
   assert.equal(Object.keys(probe.publicExportsForVersion("0.1.3")).length, 7);
-  for (const name of version === "0.2.2" ? COMPILED_NAMES_022 : COMPILED_NAMES_021) assert.ok(f.receipt.compiledFiles[`lib/${name}.d.ts`]);
-  for (const path of ["lib/runtime-integration.js", "lib/runtime-integration.d.ts", "lib/legacy-read-host.js", "lib/client/ChildrenPanel.js", "lib/profile-diagnostics.js"]) {
+  for (const name of version === "0.3.0" ? COMPILED_NAMES_030 : version === "0.2.2" ? COMPILED_NAMES_022 : COMPILED_NAMES_021) assert.ok(f.receipt.compiledFiles[`lib/${name}.d.ts`]);
+  for (const path of ["lib/runtime-integration.js", "lib/runtime-integration.d.ts", ...(isSource030(version) ? [] : ["lib/legacy-read-host.js"]), "lib/client/ChildrenPanel.js", "lib/profile-diagnostics.js"]) {
     const missing = new Map(f.files); missing.delete(path);
     assert.throws(() => controls.validateTarballBuffer(archiveFiles(missing), { version }));
     const changed = new Map(f.files); changed.set(path, Buffer.from("changed public bytes"));
@@ -130,8 +134,10 @@ for (const version of ["0.2.1", "0.2.2"]) test(`${version} installs versioned pu
   manifest.exports["./subagent-runtime"].default = "./lib/subagent-runtime.js";
   wrongTarget.set("package.json", Buffer.from(JSON.stringify(manifest)));
   assert.throws(() => controls.validateTarballBuffer(archiveFiles(wrongTarget), { version }));
-  const oldReceipt = structuredClone(f.receipt); delete oldReceipt.exports["./legacy-read-host"];
-  assert.throws(() => probe.validateInstallReceipt(oldReceipt, f.identity));
+  if (!isSource030(version)) {
+    const oldReceipt = structuredClone(f.receipt); delete oldReceipt.exports["./legacy-read-host"];
+    assert.throws(() => probe.validateInstallReceipt(oldReceipt, f.identity));
+  }
   if (isSource022(version)) {
     for (const path of COLD_PROFILE_SCRIPTS_022) {
       const missing = new Map(f.files); missing.delete(path);
@@ -193,6 +199,14 @@ test("source and startup identities explicitly separate reviewed stable identiti
   assert.throws(() => startupProfileContract("0.2.3", { sourceContract: "0.2.3" }));
   assert.deepEqual(controls.uiChecksForVersion("0.2.1"), STABLE_UI_CHECKS_021);
   assert.deepEqual(controls.uiChecksForVersion("0.2.2"), STABLE_UI_CHECKS_022);
+  assert.equal(isSource030("0.3.0"), true);
+  assert.equal(sourceContractForVersion("0.3.0"), "0.3.0");
+  assert.equal(startupProfileContract("0.3.0", { sourceContract: "0.3.0" }), "stable-native-first-030");
+  assert.equal(stableUiKindForVersion("0.3.0"), "native-client-stable-first-030");
+  assert.deepEqual(controls.uiChecksForVersion("0.3.0"), STABLE_UI_CHECKS_030);
+  assert.deepEqual(dshPolicyForVersion("0.3.0"), { runtimeVersion: "0.2.1-rc.1", sdkVersion: "0.2.1-rc.1", peerVersion: "0.2.1-rc.1",
+    integrity: "sha512-ce+4rnRuhkheK8++2EGm0CjHKVfF7IjUk4DO/NydRS8inAM8A0GFGQmX3cWKM4OzzbT+diIMyOiDuA1wYAZioA==",
+    engines: { node: ">=22", dsh: ">=0.2.1-rc.1 <0.3.0-0" }, sourceCommit: "1600d8a1e140dcde43a1a0941940a0480712c011" });
   assert.equal(controls.uiChecksForVersion("0.2.0").length, 27);
   const { identity } = artifactFixture("0.2.1");
   const historical = structuredClone(identity); delete historical.dockerAcceptance.sourceContract;
@@ -203,14 +217,18 @@ function stableUiFixture(version = "0.2.1", sha256 = "a".repeat(64)) {
   const childId = "owned-child", rootId = "owned-root", epoch = "b".repeat(64);
   const nativeCalls = ["dsmmProfiles/describe", "dsmmProfiles/save", "dsmmProfiles/select", "dsmmProfiles/describeSession", "dsmmProfiles/selectSession",
     "dsmmChildren/describe", "dsmmChildren/descendants", "dsmmChildren/prompt", "dsmmChildren/background"].map(endpoint => ({ endpoint, strictGateway: true, nativePeer: "operator", result: "accepted" }));
+  const bootstrap = { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], stockSubagentDisabled: true,
+    customRuntimeEntries: 1, mainEntries: 1, runtimeLoaded: true, mainLoaded: true, binding: "dsmm", deliveryFenceReady: true, restartRequired: false, experimentalLegacyRead: "unconfigured/unavailable",
+    loader: [{ id: "include:dsmm", name: "@dsmm/dsmm", state: 2 }, { id: "include:dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 }] };
+  if (isSource030(version)) Object.assign(bootstrap, { stockAgentDisabled: true, registryEntries: 1, registryLoaded: true, legacyCompatibility: "not-composed", experimentalLegacyRead: undefined,
+    agentsService: "DsmmAgentRegistry", subagentsService: "DsmmSubagentRuntime",
+    loader: [bootstrap.loader[0], { id: "include:dsmm-registry", name: "@dsmm/dsmm/agent-registry", state: 2 }, bootstrap.loader[1]] });
   return { sha256, version, ui: {
     kind: stableUiKindForVersion(version), sourceContract: version, packageVersion: version, artifactSha256: sha256, artifactSha256After: sha256,
     clientSha256: sha256, clientSha256After: sha256, checks: Object.fromEntries(STABLE_UI_CHECKS_021.map((key: string) => [key, true])),
     pageErrors: [], externalRequests: [], viewport: { width: 1280, height: 900 }, nativeCalls,
     nativeStreams: ["$events", "session/follow", "session/control"].map(endpoint => ({ endpoint, strictGateway: true, nativePeer: "operator", result: "accepted", frames: 1, disposed: true })),
-    bootstrap: { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], stockSubagentDisabled: true,
-      customRuntimeEntries: 1, mainEntries: 1, runtimeLoaded: true, mainLoaded: true, binding: "dsmm", deliveryFenceReady: true, restartRequired: false, experimentalLegacyRead: "unconfigured/unavailable",
-      loader: [{ id: "include:dsmm", name: "@dsmm/dsmm", state: 2 }, { id: "include:dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 }] },
+    bootstrap,
     model: { kind: "deterministic-test-only-adapter", externalModelCalls: false, calls: [{ provider: "dsmm-stable021-fixture", model: "reviewer-original", reasoningEffort: "high" }] },
     cas: { future: { code: "conflict", beforeSha256: sha256, afterSha256: sha256 }, current: { code: "conflict", epoch, beforeSha256: sha256, afterSha256: sha256 } },
     native: { rootId, childId, rootModel: "native-root", originalChildEpoch: epoch, model: "reviewer-original", originalCaptureSha256: sha256, directNativeOwnership: true,
@@ -223,7 +241,7 @@ function stableUiFixture(version = "0.2.1", sha256 = "a".repeat(64)) {
   } };
 }
 
-for (const version of ["0.2.1", "0.2.2"]) test(`${version} stable proof requires immutable CAS, actual child delivery, same-run native background and cutoff evidence`, () => {
+for (const version of ["0.2.1", "0.2.2", "0.3.0"]) test(`${version} stable proof requires immutable CAS, actual child delivery, same-run native background and cutoff evidence`, () => {
   const f = stableUiFixture(version);
   assert.equal(controls.validateStableUiProof(f.ui, f), f.ui);
   if (version === "0.2.1") assert.equal(controls.validateStableUiProof021(f.ui, f), f.ui);
@@ -270,6 +288,15 @@ function stableDockerFixture(version: string) {
   return { ...artifact, receipt };
 }
 
+test("030 Docker receipt requires current rc1 native persistence evidence", () => {
+  const f = stableDockerFixture("0.3.0");
+  assert.equal(controls.validateDockerReceipt(f.receipt, f.identity).sourceContract, "0.3.0");
+  for (const key of ["currentNativeWriteRead", "currentIgnorableMetadata", "retainedModelVisibleHistory", "nativeWriterExclusion"] as const) {
+    const receipt = structuredClone(f.receipt); receipt.sessionHistory[key] = false;
+    assert.throws(() => controls.validateDockerReceipt(receipt, f.identity), Error, key);
+  }
+});
+
 test("022 freeze validates fresh complete Docker proof and rejects prior identity, byte and substrate evidence", () => {
   const f = stableDockerFixture("0.2.2"), receiptBytes = Buffer.from(JSON.stringify(f.receipt));
   const identity = controls.createArtifactIdentity(f.context, f.tarball, receiptBytes, { sourceChecks: "COMPLETED" });
@@ -313,7 +340,7 @@ test("022 freeze validates fresh complete Docker proof and rejects prior identit
 });
 
 test("only reviewed release versions select byte, export, registry and browser contracts", () => {
-  for (const version of ["0.2.3", "0.3.0", "1.0.0", "0.1.10"]) {
+  for (const version of ["0.2.3", "0.3.1", "1.0.0", "0.1.10"]) {
     assert.equal(sourceContractForVersion(version), undefined);
     assert.throws(() => artifactFixture(version));
     assert.throws(() => controls.uiChecksForVersion(version));
@@ -369,7 +396,7 @@ test("022 registry verification binds provenance and fresh native install to the
 });
 
 test("stable sources refuse historical picker, session-profile and startup producers with explicit contracts", async () => {
-  for (const version of ["0.2.1", "0.2.2"]) {
+  for (const version of ["0.2.1", "0.2.2", "0.3.0"]) {
     const options = { version, sourceContract: version };
     assert.throws(() => nativePickerContract(version, options));
     assert.throws(() => sessionProfileChecksForVersion(version, options));
@@ -380,7 +407,7 @@ test("stable sources refuse historical picker, session-profile and startup produ
 });
 
 test("reviewed stable artifacts deliver the exact executable resources without widening historical package policy", () => {
-  for (const version of ["0.2.1", "0.2.2"]) {
+  for (const version of ["0.2.1", "0.2.2", "0.3.0"]) {
     const f = artifactFixture(version);
     assert.equal(controls.validateTarballBuffer(f.tarball, { version }).version, version);
     for (const path of SKILL_EXECUTABLES_020) assert.equal(controls.isForbiddenPackagePath(path, version), false);

@@ -5,15 +5,16 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { checkFrontendAssets } from "./materialize-frontend.mjs";
-import { COLD_PROFILE_SCRIPTS_022 } from "./release-contract.mjs";
+import { dshPolicyForVersion } from "./release-contract.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
 const repositoryLicensePath = resolve(scriptDirectory, "..", "..", "LICENSE");
-const operatorScripts = [
-  "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
-  ...COLD_PROFILE_SCRIPTS_022
-];
+const RELEASE_VERSION = "0.3.0";
+const DSH_POLICY = dshPolicyForVersion(RELEASE_VERSION);
+const operatorScripts = [];
+const retiredCompatibilityFiles = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]
+  .flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]));
 const metadataResources = ["locale/en.json", "locale/zh.json"];
 
 const requiredExact = [
@@ -22,9 +23,10 @@ const requiredExact = [
   ...metadataResources,
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
+  "lib/agent-registry.js", "lib/agent-registry.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  ...["runtime-integration", "legacy-read-host"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["runtime-integration"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/deferred-native-approval-risk.md", "docs/lsp.md",
   "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/native-permissions.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
@@ -36,6 +38,7 @@ const requiredTrees = ["agent-presets", "docs/research", "patches", "prompts", "
 const expectedFiles = [
   "lib/**/*.js",
   "lib/**/*.d.ts",
+  ...[...retiredCompatibilityFiles].map((path) => `!${path}`),
   ...operatorScripts,
   "locale/*.json",
   "agent-presets",
@@ -64,6 +67,7 @@ const expectedFiles = [
 ];
 
 const expectedExports = {
+  "./agent-registry": { types: "./lib/agent-registry.d.ts", default: "./lib/agent-registry.js" },
   "./managed-settings": { types: "./lib/managed-settings.d.ts", default: "./lib/managed-settings.js" },
   "./llm-runtime": { types: "./lib/llm-runtime.d.ts", default: "./lib/llm-runtime.js" },
   "./permission-bash": { types: "./lib/permission-bash.d.ts", default: "./lib/permission-bash.js" },
@@ -75,7 +79,6 @@ const expectedExports = {
   "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
   "./subagent-runtime": { types: "./lib/runtime-integration.d.ts", default: "./lib/runtime-integration.js" },
-  "./legacy-read-host": { types: "./lib/legacy-read-host.d.ts", default: "./lib/legacy-read-host.js" },
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
   "./locale/en.json": "./locale/en.json",
   "./locale/zh.json": "./locale/zh.json",
@@ -83,13 +86,13 @@ const expectedExports = {
 };
 
 const expectedDependencies = {
-  "@deepseek-ai/schemastery": "~3.18.4",
+  "@deepseek-ai/schemastery": "~3.18.5",
   "jsonc-parser": "^3.3.1"
 };
 
 const expectedPeers = {
-  "@earendil-works/pi-ai": "0.87.1",
-  "@deepseek-ai/cordis": "~4.0.4",
+  "@earendil-works/pi-ai": "^1.1.0",
+  "@deepseek-ai/cordis": "~4.0.5",
   "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
   "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
@@ -124,6 +127,9 @@ const expectedPeers = {
   "@deepseek-ai/dsh-persona": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-instructions": "0.2.0-rc.2"
 };
+expectedPeers["@deepseek-ai/dsh-jobs"] = DSH_POLICY.peerVersion;
+delete expectedPeers["@deepseek-ai/dsh-invariants"];
+for (const name of Object.keys(expectedPeers)) if (name.startsWith("@deepseek-ai/dsh-")) expectedPeers[name] = DSH_POLICY.peerVersion;
 
 const expectedDevDependencies = {
   ...expectedPeers,
@@ -155,8 +161,12 @@ const expectedDevDependencies = {
   "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-subagent-spawn-in-process": "0.2.0-rc.2",
   "@types/node": "^26.0.0",
-  "typescript": "^6.0.3"
+  "typescript": "^6.0.3",
+  "@deepseek-ai/cordis-plugin-group": "1.0.5",
+  "@deepseek-ai/cordis-plugin-include": "1.0.10"
 };
+expectedDevDependencies["@earendil-works/pi-ai"] = "1.3.0";
+for (const name of Object.keys(expectedDevDependencies)) if (name.startsWith("@deepseek-ai/dsh-")) expectedDevDependencies[name] = DSH_POLICY.sdkVersion;
 
 const expectedScripts = {
   "build": "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs",
@@ -169,7 +179,7 @@ const expectedScripts = {
   "typecheck": "tsc -p tsconfig.json --noEmit",
   "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
   "test": "pnpm run build && node --test --experimental-strip-types --import ./test/prompt-source-loader.mjs --test-concurrency=1 test/*.test.ts",
-  "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..",
+  "smoke:docker:build": `docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@${DSH_POLICY.runtimeVersion} -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..`,
   "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.2",
   "smoke:docker": "node scripts/docker-smoke.mjs"
 };
@@ -294,7 +304,7 @@ function compiledOutputPaths(packageRoot, current = resolve(packageRoot, "src"))
     }
     if (!entry.isFile() || !/\.tsx?$/u.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
     const base = normalizePackedPath(relative(resolve(packageRoot, "src"), entryPath)).replace(/\.tsx?$/u, "");
-    paths.push(`lib/${base}.js`, `lib/${base}.d.ts`);
+    for (const path of [`lib/${base}.js`, `lib/${base}.d.ts`]) if (!retiredCompatibilityFiles.has(path)) paths.push(path);
   }
   return paths;
 }
@@ -322,7 +332,7 @@ function requiredPathsFor(packageRoot) {
 function validateManifest(manifest, errors) {
   const expectedMetadata = {
     name: "@dsmm/dsmm",
-    version: "0.2.2",
+    version: RELEASE_VERSION,
     author: "Hugefiver",
     license: "LicenseRef-AAAPL",
     repository: "https://github.com/hugefiver/ocmm",
@@ -344,7 +354,7 @@ function validateManifest(manifest, errors) {
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
   if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the public module contract");
-  if (!isDeepStrictEqual(manifest.engines, { node: ">=22" })) errors.push("manifest.engines must equal the Node 22 policy");
+  if (!isDeepStrictEqual(manifest.engines, DSH_POLICY.engines)) errors.push("manifest.engines must equal the release runtime policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.devDependencies, expectedDevDependencies)) errors.push("manifest.devDependencies must preserve release ranges");
@@ -380,6 +390,24 @@ function validateRequiredSurface(paths, requiredPaths, errors) {
   }
 }
 
+function validatePackedModuleClosure(packageRoot, paths, errors) {
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?(?:[^"'()]*?\s+from\s*)?["'](\.[^"']+)["']/gu,
+    /\bimport\s*\(\s*["'](\.[^"']+)["']\s*\)/gu
+  ];
+  for (const path of paths) {
+    if (!/^lib\/.*\.(?:js|d\.ts)$/u.test(path)) continue;
+    const source = readFileSync(resolve(packageRoot, path), "utf8");
+    for (const pattern of patterns) {
+      for (const match of source.matchAll(pattern)) {
+        const specifier = match[1].replace(/[?#].*$/u, "");
+        const target = normalizePackedPath(relative(packageRoot, resolve(packageRoot, dirname(path), specifier)));
+        if (!paths.has(target)) errors.push(`packed module closure missing target: ${path} -> ${target}`);
+      }
+    }
+  }
+}
+
 function isForbiddenPath(path, sourceResources) {
   const basename = path.slice(path.lastIndexOf("/") + 1);
   const segments = path.split("/");
@@ -387,7 +415,8 @@ function isForbiddenPath(path, sourceResources) {
   const forbiddenScript = segments.some((segment) => segment.toLowerCase() === "scripts")
     && !operatorScripts.includes(path) && !skillResource;
   const forbiddenMetadataResource = /^locale\//iu.test(path) && !metadataResources.includes(path);
-  return segments.some((segment) => ["src", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", "__pycache__"].includes(segment.toLowerCase()))
+  return retiredCompatibilityFiles.has(path)
+    || segments.some((segment) => ["src", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", "__pycache__"].includes(segment.toLowerCase()))
     || (!skillResource && (segments.some((segment) => ["test", "tests"].includes(segment.toLowerCase())) || /\.(?:test|spec)\.[^/]+$/u.test(path)))
     || forbiddenScript || forbiddenMetadataResource || path.endsWith(".map") || path.endsWith(".tgz") || path.endsWith(".pyc") || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || segments.some((segment) => segment.toLowerCase() === "superpowers") || basename === ".npmrc" || basename === ".env" || basename.startsWith(".env.") || basename.toLowerCase().startsWith("credentials") || basename.toLowerCase().startsWith("secrets") || /\.(?:pem|key|p12|pfx)$/iu.test(basename);
 }
@@ -483,8 +512,9 @@ function check(packageRoot) {
   const requiredPaths = requiredPathsFor(packageRoot);
 
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
-  if (entry.version !== "0.2.2") errors.push("npm pack receipt version must equal 0.2.2");
+  if (entry.version !== RELEASE_VERSION) errors.push(`npm pack receipt version must equal ${RELEASE_VERSION}`);
   validateRequiredSurface(paths, requiredPaths, errors);
+  validatePackedModuleClosure(packageRoot, paths, errors);
   validateLicense(packageRoot, paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);
   validateNativeClient(packageRoot, paths, errors);

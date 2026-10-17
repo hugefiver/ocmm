@@ -4,7 +4,7 @@ import test from "node:test";
 // @ts-expect-error Source-only release validator is deliberately not published.
 import { computeDigests, isForbiddenPackagePath, manifestExportsForVersion, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
 // @ts-expect-error Source-only release inventory is deliberately not published.
-import { COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COLD_PROFILE_SCRIPTS_022, PRESET_NAMES_020, PRESET_NAMES_021, PRESET_NAMES_022, SKILL_EXECUTABLES_020, SKILL_EXECUTABLES_021, SKILL_EXECUTABLES_022 } from "../scripts/release-contract.mjs";
+import { COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_030, PRESET_NAMES_020, PRESET_NAMES_021, PRESET_NAMES_030, SKILL_EXECUTABLES_020, SKILL_EXECUTABLES_021, SKILL_EXECUTABLES_030 } from "../scripts/release-contract.mjs";
 // @ts-expect-error In-memory archives are safety fixtures, never packaged or published artifacts.
 import { archiveFiles, packageFiles } from "../../src/dsmm-trusted-release-fixtures.mjs";
 
@@ -14,7 +14,7 @@ const resources: string[] = source.files.map((record: { artifact: string }) => r
 const contracts = [
   { version: "0.2.0", compiled: COMPILED_NAMES_020, presets: PRESET_NAMES_020, resources: SKILL_EXECUTABLES_020 },
   { version: "0.2.1", compiled: COMPILED_NAMES_021, presets: PRESET_NAMES_021, resources: SKILL_EXECUTABLES_021 },
-  { version: "0.2.2", compiled: COMPILED_NAMES_022, presets: PRESET_NAMES_022, resources: SKILL_EXECUTABLES_022 },
+  { version: "0.3.0", compiled: COMPILED_NAMES_030, presets: PRESET_NAMES_030, resources: SKILL_EXECUTABLES_030 },
 ];
 type ResourceContract = typeof contracts[number];
 const currentVersion: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -29,7 +29,7 @@ function fixture(contract: ResourceContract) {
   for (const language of ["en", "zh"]) files.set(`locale/${language}.json`, Buffer.from(JSON.stringify({ meta: { title: "DSMM", description: "Synthetic release metadata" } })));
   for (const name of contract.compiled) for (const extension of ["js", "d.ts"]) files.set(`lib/${name}.${extension}`, Buffer.from("synthetic compiled fixture\n"));
   for (const path of contract.resources) files.set(path, readFileSync(new URL(`../${path}`, import.meta.url)));
-  if (contract.version === "0.2.2") for (const path of [...COLD_PROFILE_SCRIPTS_022, "docs/native-permissions.md", "docs/deferred-native-approval-risk.md"]) files.set(path, readFileSync(new URL(`../${path}`, import.meta.url)));
+  if (contract.version === "0.3.0") for (const path of ["docs/native-permissions.md", "docs/deferred-native-approval-risk.md"]) files.set(path, readFileSync(new URL(`../${path}`, import.meta.url)));
   return files;
 }
 const validate = (files: Map<string, Buffer>, version: string) => validateTarballBuffer(archiveFiles(files), { version });
@@ -71,7 +71,7 @@ for (const contract of contracts) {
 }
 
 test("historical and default release consumers retain their original resource prohibition", () => {
-  for (const version of [undefined, "0.1.3", "0.1.5", "0.1.9", "0.2.3", "0.3.0", "1.0.0"]) {
+  for (const version of [undefined, "0.1.3", "0.1.5", "0.1.9", "0.2.3", "0.3.1", "1.0.0"]) {
     for (const path of resources.filter((path) => path.includes("/scripts/") || path.includes("/tests/"))) {
       assert.equal(isForbiddenPackagePath(path, version), path !== "skills/debugging/references/scripts/dap.mjs", `${version}: ${path}`);
     }

@@ -94,6 +94,8 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
   try {
     await Promise.all([native.ctx.plugin(TypertRegistry).await(), native.ctx.plugin(TypertGatewayService, {}).await(), client.plugin(TypertRegistry).await()]);
     await native.ctx.plugin(MemoryCredentials).await();
+    const remoteAccess = await nativeFixturePlugin("@deepseek-ai/dsh-api-remote-access");
+    await native.ctx.plugin(remoteAccess.default).await();
     await native.ctx.plugin(NativeConnection).await();
     const gateway = native.ctx.typertGateway;
     gateway.registerRemoteEvents(async function* (signal) {
@@ -105,7 +107,11 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
     async function loadClient(packageName: string) {
       let factory: ((require: (id: string) => unknown) => any) | undefined;
       realm.window = { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } };
-      runInContext(await readFile(join(dirname(require.resolve(`${packageName}/package.json`)), "lib/client.js"), "utf8"), realm);
+      const manifestPath = require.resolve(`${packageName}/package.json`);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const clientExport = manifest.exports["./client"];
+      const entry = typeof clientExport === "string" ? clientExport : clientExport.browser ?? clientExport.default;
+      runInContext(await readFile(join(dirname(manifestPath), entry), "utf8"), realm);
       delete realm.window;
       assert.ok(factory);
       return factory(id => { assert.equal(id, "@deepseek-ai/cordis"); return Cordis; });
@@ -116,7 +122,7 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
         assert.equal(channel, "/api");
         const [namespace, method] = endpoint.split("/");
         try {
-          const value = await gateway.invoke({ namespace, method, args: JSON.parse(JSON.stringify(payload.args)), signal });
+          const value = await gateway.invoke({ namespace, method, args: JSON.parse(JSON.stringify(payload.args)), peer: native.ctx.connection.browserPeer, signal });
           return clone(JSON.stringify({ ok: true, value }));
         } catch (error) {
           const failure = remoteErrorOf(error);
@@ -126,7 +132,7 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
       },
       async *open(channel: string, endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>) {
         assert.equal(channel, "/api");
-        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), undefined, signal);
+        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), native.ctx.connection.browserPeer, signal);
       },
     } } });
     await client.plugin(await loadClient("@deepseek-ai/dsh-api-gateway")).await();
@@ -323,7 +329,7 @@ test("pending native session Apply fails closed on draft edits, cancellation, op
           expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch };
         const controller = new AbortController();
         const applying = f.native.ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "selectSession",
-          args: { sessionId: root.id, request }, signal: controller.signal }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+          args: { sessionId: root.id, request }, peer: f.native.ctx.connection.browserPeer, signal: controller.signal }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
         pending = applying;
         assert.equal(await Promise.race([entered.promise.then(() => true), applying.then(() => false)]), true,
           "Apply must reach candidate validation before the concurrent change");
@@ -331,7 +337,8 @@ test("pending native session Apply fails closed on draft edits, cancellation, op
         else if (change === "cancel") controller.abort();
         else if (change === "operator") {
           const connection = Reflect.get(f.native.ctx.connection, Cordis.symbols.original) ?? f.native.ctx.connection;
-          Reflect.set(connection, "operator", { id: connection.operator.id, ctx: f.native.ctx, async dispose() {} });
+          const replacement = f.native.ctx.connection.createPeer({ principal: { kind: "owner" } });
+          Reflect.set(connection, "browserPeer", replacement);
         } else { disposing = f.native.disposeAgent(root); await setImmediate(); }
         held.release();
         const result = await applying;

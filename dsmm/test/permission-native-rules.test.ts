@@ -33,6 +33,7 @@ useIsolatedDshEnvironment();
 const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-tools"));
 const { ApprovalService, setApprovalPolicy } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-user-approval")).href);
 const { FileSystem } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-fs")).href);
+const WorkingDirectory = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-working-directory")).href);
 
 async function nativeFixture(policy: PermissionControlSchemaInput = {}, fullAccess = false) {
   assert.ok(existsSync(tmpdir()));
@@ -62,7 +63,8 @@ async function nativeFixture(policy: PermissionControlSchemaInput = {}, fullAcce
   }
   try {
     await Promise.all([ctx.plugin(AgentRegistry).await(), ctx.plugin(SessionStore).await(), ctx.plugin(SessionProjectionRegistry).await(), ctx.plugin(LlmRuntime).await(), ctx.plugin(SystemPrompt, {}).await()]);
-    await ctx.plugin(ToolRuntime, { mode: "native" }).await(); await ctx.plugin(OwnedFs).await(); await ctx.plugin(ApprovalService, { policy: "ask" }).await();
+    await ctx.plugin(ToolRuntime, { mode: "native" }).await(); await ctx.plugin(OwnedFs).await();
+    await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await(); await ctx.plugin(ApprovalService, { policy: "ask" }).await();
     if (fullAccess) ctx.provide("sandboxPolicy", { resolve() { return { mode: "danger-full-access", workspaceRoot: workspace }; } });
     ctx.provide("subprocess", { spawn(request: { argv: string[]; cwd: string; signal: AbortSignal }) {
       assert.equal(request.cwd, workspace); assert.equal(request.argv[1], "--no-config"); assert.equal(request.argv.some(arg => arg.startsWith("--pre")), false);

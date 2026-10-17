@@ -12,6 +12,6 @@ export interface DsmmSubagentRegistry {
 }
 export declare function roleFromProviderName(provider: string): DsmmRoleId | undefined;
 export declare function roleAgentOptions(parent: Agent, role: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, explicit?: AgentOptions): Promise<AgentOptions | undefined>;
-/** Only the native outer start owns descriptors, capability admission and returned runs. */
+/** The native manager owns descriptors, capability admission and activations. */
 export declare function registerRoleProviders(ctx: DshContext, getSettings: DsmmSettingsGetter, getDeploymentSettings?: DsmmSettingsGetter, policy?: DsmmRolePolicy): void;
 //# sourceMappingURL=role-providers.d.ts.map

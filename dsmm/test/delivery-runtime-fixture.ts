@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { after } from "node:test";
 import { Context, symbols } from "@deepseek-ai/cordis";
 import type { Service } from "@deepseek-ai/cordis";
-import { AgentRegistry } from "@deepseek-ai/dsh-agent";
+import { DsmmAgentRegistry } from "../src/agent-registry.ts";
 import type { Agent, AgentHandle } from "@deepseek-ai/dsh-agent";
 import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
 import { LlmAdapter, LlmRuntime } from "@deepseek-ai/dsh-llm";
@@ -18,7 +18,7 @@ import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
 import { SubagentError } from "@deepseek-ai/dsh-subagent";
 import type { SubagentPromptRequest, SubagentPromptRequestId } from "@deepseek-ai/dsh-subagent";
 import * as Spawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import * as SubagentTools from "@deepseek-ai/dsh-tool-subagent";
@@ -109,21 +109,31 @@ export async function deliveryFixture(options: { bind?: boolean; spawn?: boolean
   const ctx = new Context();
   const handles: AgentHandle[] = [];
   const managed = new Set<Agent>();
+  let agentsFiber!: ReturnType<Context["plugin"]>;
   try {
     await Promise.all([
-      ctx.plugin(AgentRegistry).await(), ctx.plugin(SessionStore).await(), ctx.plugin(SessionProjectionRegistry).await(),
+      (agentsFiber = ctx.plugin(DsmmAgentRegistry)).await(), ctx.plugin(SessionStore).await(), ctx.plugin(SessionProjectionRegistry).await(),
       ctx.plugin(LlmRuntime).await(), ctx.plugin(SystemPrompt, {}).await(), ctx.plugin(ToolRuntime, { mode: "native" }).await(),
       ctx.plugin(JsonlSessionPersistence, { root: join(root, "sessions"), compression: "none" }).await(),
       ctx.plugin(TypertRegistry).await(), ctx.plugin(TypertGatewayService, {}).await(),
     ]);
     await ctx.plugin(ExactQuery).await();
+    const access = await carrierPlugin("@deepseek-ai/dsh-api-remote-access");
+    await ctx.plugin(access.default).await();
+    const fs = await carrierPlugin("@deepseek-ai/dsh-fs-local"), directory = await carrierPlugin("@deepseek-ai/dsh-working-directory");
+    await ctx.plugin(fs.default, { cwd: root }).await();
+    await ctx.plugin(directory.default, { defaultDirectory: root }).await();
     let runtime!: InstanceType<typeof DsmmSubagentRuntime<FixtureAdmission, FixtureEvidence>>;
-    const runtimeFiber = ctx.plugin({ name: "c1-explicit-subagents", apply(scope: Context) {
+    const runtimeFiber = ctx.plugin({ name: "c1-explicit-subagents", inject: ["agents", "workingDirectory"], apply(scope: Context) {
       runtime = new DsmmSubagentRuntime<FixtureAdmission, FixtureEvidence>(scope,
         { maxDepth: { get: () => 3 }, maxActiveSubagents: { get: () => 8 } },
         options.nativeClassification ? (parent) => managed.has(parent) ? "dsmm" : "native" : undefined);
     } });
     await runtimeFiber.await();
+    ctx.on("system-prompt/assemble", async (_assembly, context, next) => {
+      if (context.agent !== undefined) await runtime.authority.waitForPromotion(context.agent, context.signal);
+      return next();
+    }, { global: true, prepend: true });
     await ctx.plugin(AgentLoop, {}).await();
     const spawnFiber = options.spawn === false ? undefined : ctx.plugin(Spawn, { providerName: "spawn" });
     await spawnFiber?.await();
@@ -185,12 +195,12 @@ export async function deliveryFixture(options: { bind?: boolean; spawn?: boolean
       }
       return handle.agent;
     };
-    const start = (parent: Agent) => runtime.startContinuable({ provider: "spawn", label: "native child", signal: new AbortController().signal,
+    const start = (parent: Agent) => runtime.startActivation({ provider: "spawn", label: "native child", delivery: "parent", signal: new AbortController().signal,
       request: { parent, maxDepth: 3, prompt: [{ type: "text", text: "initial native input" }] } });
     const request = (parent: Agent, childId: SessionId, text: string, delivery: "queue" | "steer" = "queue"): SubagentPromptRequest => ({
       requestId: randomUUID() as SubagentPromptRequestId, parentSessionId: parent.id, childSessionId: childId, mode: "continuable", delivery, content: [{ type: "text", text }]
     });
-    const prompt = (request: SubagentPromptRequest, signal?: AbortSignal) => ctx.typertGateway.invoke({ namespace: "subagents", method: "prompt", args: { request }, ...(signal === undefined ? {} : { signal }) });
+    const prompt = (request: SubagentPromptRequest, signal?: AbortSignal) => ctx.typertGateway.invoke({ peer: ctx.connection.browserPeer, namespace: "subagents", method: "prompt", args: { request }, ...(signal === undefined ? {} : { signal }) });
     const publish = (parent: Agent, permitted = true, install: () => void = () => {}) => {
       const previous = admissions.get(parent)!;
       const next = Object.freeze({ epoch: randomUUID(), permitted });
@@ -198,7 +208,8 @@ export async function deliveryFixture(options: { bind?: boolean; spawn?: boolean
       runtime.authority.publishParentAdmission(parent, previous.epoch, next, () => { admissions.set(parent, next); install(); });
       return next;
     };
-    return { root, ctx, runtime, runtimeFiber, spawnFiber, bindingFiber, bindingScope, owner, adapter, admissions, evidence, managed,
+    const agents = ctx.agents;
+    return { root, ctx, runtime, runtimeFiber, agentsFiber, spawnFiber, bindingFiber, bindingScope, owner, adapter, admissions, evidence, managed,
       create, start, request, prompt, publish, bind,
       setBeforeEvidence(fn: typeof beforeEvidence) { beforeEvidence = fn; },
       async replaceConnection() {
@@ -216,8 +227,8 @@ export async function deliveryFixture(options: { bind?: boolean; spawn?: boolean
       async disposeAgent(agent: Agent) { const handle = handles.find((handle) => handle.agent === agent); assert.ok(handle); await handle.dispose(); },
       async dispose() {
         // Drain owned native Activations while their projection/session services are still live.
-        await runtime.drainContinuableDescendants(handles.map((handle) => handle.agent).filter((agent) => ctx.agents.get(agent.id) === agent));
-        assert.ok(ctx.agents.list().every((agent) => handles.some((handle) => handle.agent === agent)));
+        if (ctx.get("agents") !== undefined && ctx.get("subagents") !== undefined) await runtime.drainDescendants(handles.map((handle) => handle.agent).filter((agent) => ctx.agents.get(agent.id) === agent));
+        assert.ok(agents.list().every((agent) => handles.some((handle) => handle.agent === agent)));
         for (const handle of [...handles].reverse()) await handle.dispose();
         await ctx.fiber.dispose();
         await rm(root, { recursive: true, force: true });

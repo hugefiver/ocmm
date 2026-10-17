@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
-import { createRequire, findPackageJSON } from "node:module";
+import { createRequire, findPackageJSON, registerHooks } from "node:module";
+import { realpathSync } from "node:fs";
+import { after } from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { cp, mkdtemp, mkdir, writeFile, readFile, symlink, realpath, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { modelRouteToCall } from "../src/role-llm.ts";
-import { planColdProfileMigration, applyColdProfileMigration } from "../scripts/migrate-cold-profile.mjs";
 
-const native = createRequire(process.env.DSMM_TEST_DSH_ENTRY);
+export const nativeEntry = realpathSync(process.env.DSMM_TEST_DSH_ENTRY);
+const native = createRequire(nativeEntry);
+let resolvingNative = false;
+const nativeGraph = registerHooks({ resolve(specifier, context, next) {
+  if (resolvingNative || !specifier.startsWith("@deepseek-ai/")) return next(specifier, context);
+  resolvingNative = true;
+  try { return { url: pathToFileURL(native.resolve(specifier)).href, shortCircuit: true }; }
+  finally { resolvingNative = false; }
+} });
+after(() => nativeGraph.deregister());
 export const loadNative = name => import(pathToFileURL(native.resolve(name)).href);
+export const nativeCli = join(dirname(native.resolve("@deepseek-ai/dsh/package.json")), "lib", "bin.js");
 
 /** All services and admissions are production modules; only the remote HTTP peer is local. */
 export async function nativeRootLlmFixture(t, config = {}, controls = {}) {
@@ -41,6 +52,8 @@ export async function nativeRootLlmFixture(t, config = {}, controls = {}) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let ctx;
   t.after(async () => {
+    for (const agent of ctx?.get("agents")?.list() ?? []) agent.cancel({ kind: "user" });
+    ctx?.get("fixtureCredentialControl")?.releaseAll();
     await controls.cleanup?.(); await ctx?.fiber.dispose();
     await new Promise(resolve => server.close(resolve));
     for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -62,7 +75,7 @@ export async function nativeRootLlmFixture(t, config = {}, controls = {}) {
   for (const name of ["locale", "prompts", "skills", "agent-presets"]) await symlink(fileURLToPath(new URL(`../${name}/`, import.meta.url)), join(packageDir, name), "junction");
   if (controls.compiled) {
     await cp(fileURLToPath(new URL("../lib/", import.meta.url)), join(packageDir, "lib"), { recursive: true });
-    const anchors = [process.env.DSMM_TEST_DSH_ENTRY, ...["@deepseek-ai/dsh-base/package.json", "@deepseek-ai/dsh-sdk-minimal/package.json", "@deepseek-ai/dsh-llm-pi-ai/package.json"].map(name => native.resolve(name))];
+    const anchors = [nativeEntry, ...["@deepseek-ai/dsh-base/package.json", "@deepseek-ai/dsh-sdk-minimal/package.json", "@deepseek-ai/dsh-llm-pi-ai/package.json"].map(name => native.resolve(name))];
     for (const name of Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })) {
       let packageRoot;
       for (const anchor of anchors) {
@@ -79,7 +92,7 @@ export async function nativeRootLlmFixture(t, config = {}, controls = {}) {
         packageRoot = dirname(findPackageJSON(name, import.meta.url));
       }
       const target = join(packageDir, "node_modules", name);
-      await mkdir(dirname(target), { recursive: true }); await symlink(packageRoot, target, "junction");
+      await mkdir(dirname(target), { recursive: true }); await symlink(await realpath(packageRoot), target, "junction");
     }
   } else await symlink(fileURLToPath(new URL("../src/", import.meta.url)), join(packageDir, "src"), "junction");
   await writeFile(join(packageDir, "cordis.patch.yml"), await readFile(new URL("../cordis.patch.yml", import.meta.url)));
@@ -87,14 +100,14 @@ export async function nativeRootLlmFixture(t, config = {}, controls = {}) {
     await writeFile(join(profileDir, "credential-fixture.mjs"), `import { CredentialProvider } from ${JSON.stringify(pathToFileURL(native.resolve("@deepseek-ai/dsh-credentials")).href)};
 export default class FixtureCredentials extends CredentialProvider {
   constructor(ctx) {
-    super(ctx); this.values = new Map(); this.pending = undefined;
-    ctx.provide('fixtureCredentialControl', { pauseNext: () => {
+    super(ctx); this.values = new Map(); this.pending = undefined; this.pauses = new Set();
+    ctx.provide('fixtureCredentialControl', { releaseAll: () => { for (const pause of this.pauses) pause.gate.resolve(); }, pauseNext: () => {
       const entered = Promise.withResolvers(), gate = Promise.withResolvers();
-      this.pending = { entered, gate }; return { entered: entered.promise, release: () => gate.resolve() };
+      this.pending = { entered, gate }; this.pauses.add(this.pending); return { entered: entered.promise, release: () => gate.resolve() };
     } });
   }
   async resolve(ref) { const pending = this.pending; this.pending = undefined;
-    if (pending) { pending.entered.resolve(); await pending.gate.promise; }
+    if (pending) { pending.entered.resolve(); try { await pending.gate.promise; } finally { this.pauses.delete(pending); } }
     const value = this.values.get(ref); return value === undefined ? undefined : { value, source: 'fictional' }; }
   async set(ref, value) { this.values.set(ref, value); this.notifyUpdated(ref); }
   async unset(ref) { this.values.delete(ref); this.notifyUpdated(ref); }
@@ -113,28 +126,36 @@ export function apply(ctx) { ctx.on('agent/request', async (_frame, next) => ({ 
   const provider = { api: "openai-completions", baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKeyEnv: "DSMM_ROOT_FICTIONAL",
     models: [{ id: "root-model" }, { id: "fallback-model" }], compat: { maxTokensField: "max_tokens" }, retryPolicy: { mode: "normal", maxRetries: 0 } };
   await writeFile(join(profileDir, "cordis.patch.yml"), JSON.stringify([
+    { id: "llm", disabled: true },
+    { insert: [{ id: "dsmm-llm", name: "@dsmm/dsmm/llm-runtime" }] },
+    { id: "session-persistence-jsonl", disabled: true },
+    { insert: [{ id: "dsmm-session-persistence", name: "@dsmm/dsmm/session-persistence", config: { root: join(root, "sessions"), compression: "none" } }] },
+    ...controls.managedSettings ? [{ id: "settings", disabled: true },
+      { insert: [{ id: "dsmm-settings", name: "@dsmm/dsmm/managed-settings" }] }] : [],
+    ...controls.cli ? [{ id: "credentials", disabled: false, config: { path: join(home, ".credentials.yaml"), watch: false } }] : [],
+    ...controls.migrateShell ? ["bash", "pwsh"].flatMap(kind => [{ id: `tool-${kind}`, disabled: true },
+      { insert: [{ id: `dsmm-tool-${kind}`, name: `@dsmm/dsmm/permission-${kind}`, disabled: { __jsExpr: `process.platform ${kind === "pwsh" ? "!==" : "==="} 'win32'` } }] }]) : [],
+    ...controls.migrateFs ? ["fs", "fs-search"].flatMap(kind => [{ id: `tool-${kind}`, disabled: true },
+      { insert: [{ id: `dsmm-tool-${kind}`, name: `@dsmm/dsmm/permission-${kind}`, ...kind === "fs-search" ? { config: { sampleOverCapGlobResults: false } } : {} }] }]) : [],
     ...controls.lateSpawn ? [{ id: "subagent-spawn-in-process", disabled: true }] : [],
     ...controls.deferredCredentials ? [{ id: "credentials", disabled: true }, { insert: [{ id: "fixture-credentials", name: "./credential-fixture.mjs" }] }] : [],
     ...controls.cli ? [{ insert: [{ id: "request-input", name: "./route-input.mjs" }] }] : [],
     { insert: [{ id: "agent-presets", name: "@deepseek-ai/dsh-agent-preset-registry", config: { default: "dsmm-orchestrator" } }] },
     { id: "hmr", disabled: true },
     { id: "session-title-llm", disabled: true },
-    ...controls.llmRealm ? ["llm", "agent-loop", "llm-pi-ai", "llm-deepseek", "llm-deepseek-account", "compaction-basic", "command-compact", "session-checkpoint-policy", "dsmm"].map(id => ({ id, isolate: { llm: controls.llmRealm } })) : [],
+    ...controls.llmRealm ? ["dsmm-llm", "agent-loop", "llm-pi-ai", "llm-deepseek", "llm-deepseek-account", "compaction-basic", "command-compact", "session-checkpoint-policy", "dsmm"].map(id => ({ id, isolate: { llm: controls.llmRealm } })) : [],
     ...controls.approvalPolicy ? [{ id: "approval", config: { policy: controls.approvalPolicy } },
       { id: "permission", config: { presets: { fixture: { sandbox: "workspace-write", approval: controls.approvalPolicy } }, defaultPreset: "fixture" } }] : [],
     ...controls.loopConfig ? [{ id: "agent-loop", config: { ...controls.loopConfig,
       agents: (controls.loopConfig.agents ?? []).map(agent => ({ cwd: workspace, ...agent })) } }] : [],
     { id: "llm-pi-ai", config: { providers: { local: provider } } },
     { id: "agent-default-model", config: { provider: "local", model: "root-model" } },
-    { id: "dsmm", inject: ["subagents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, ...config } },
+    { id: "dsmm", inject: ["profileContext", "agents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, ...config } },
   ]));
-  const migration = { target: controls.target ?? "dsh-tui", profileDir, home, installAnchor: process.env.DSMM_TEST_DSH_ENTRY, migrateShell: controls.migrateShell ?? false, migrateSubagent: !controls.nativeSubagent, migrateSessionPersistence: true };
-  const planned = await planColdProfileMigration(migration);
-  await applyColdProfileMigration({ ...migration, expectedRevision: planned.revision, sourceWriteExclusion: true });
   if (controls.cli) return { root, home, profileDir, workspace, bodies, errors, provider };
   const profile = prepareProfile("native-root");
-  const resolution = await bootApi.createRuntimeResolution({ installAnchor: process.env.DSMM_TEST_DSH_ENTRY, profile });
-  const profileContext = { name: "native-root", dir: profile.dir, patchPath: profile.patchPath, installAnchor: process.env.DSMM_TEST_DSH_ENTRY, startedBundles: profile.layers.map(layer => layer.packageName), cwd: workspace, home, overlays: [], telemetryDisabledEnv: "1" };
+  const resolution = await bootApi.createRuntimeResolution({ installAnchor: nativeEntry, profile });
+  const profileContext = { name: "native-root", dir: profile.dir, patchPath: profile.patchPath, installAnchor: nativeEntry, startedBundles: profile.layers.map(layer => layer.packageName), cwd: workspace, home, overlays: [], telemetryDisabledEnv: "1" };
   ctx = await bootApi.boot("dsmm-native-root", join(profile.dir, PROFILE_ROOT_FILENAME), bootApi.readProfilePatches("dsmm-native-root", profileContext, profile), async host => {
     host.provide("profileContext", profileContext);
     if (controls.configuredIdentities) host.provide("configuredAgentIdentities", controls.configuredIdentities);
@@ -144,6 +165,7 @@ export function apply(ctx) { ctx.on('agent/request', async (_frame, next) => ({ 
     await host.plugin(bootApi.PluginPackages, { resolution });
   });
   assert.ok(ctx.get("dsmmCoreLlmOwner"), "ordinary main module must publish real Core admission");
+  assert.ok(ctx.get("sessionPersistence"), "the native fixture requires its durable session backend");
   await ctx.credentials.set(credentialRef("DSMM_ROOT_FICTIONAL"), "fictional-loopback-key");
   let sequence = 0;
   const handles = [];

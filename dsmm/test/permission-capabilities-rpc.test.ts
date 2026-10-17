@@ -34,10 +34,9 @@ test("rules RPC keeps saved/synced state but omits coverage from an unrelated co
   } finally { await f.dispose(); }
 });
 
-test("rules describe/save project live exact Root registrations and never infer a same-name replacement", async t => {
+test("rules describe/save project live exact Root registrations and never infer a same-name replacement", async () => {
   const f = await fixture();
   try {
-    if (typeof Reflect.get(f.controller, "capabilities") !== "function") { t.skip("Pending parent controller.capabilities integration"); return; }
     const describe = async () => parsePermissionRulesResult(await f.invoke("describeRules", { sessionId: f.root.id }));
     assert.deepEqual((await describe()).capabilities!.tools, []);
     const managed = await f.mountManagedShell();

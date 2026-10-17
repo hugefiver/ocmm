@@ -45,17 +45,17 @@ A running foreground one-shot can be handed to background jobs using the exact p
 
 The session-scoped Conversation child panel shows actual runs, direct children and a read-only descendant tree. IDs, activity, mode, admitted role/level, route comparison, original evidence and disabled reasons remain separate facts. Corrupt, unsupported or unavailable branches show diagnostics, not fabricated successful results. Descendant inspection doesn't grant control over non-direct children.
 
-Route comparison uses real initial `invocation-capture` and the child's latest `own-native-request-header`. Missing/invalid/unobserved evidence remains unknown, never inferred from the root route, current profile or compatibility invocation projection. Original capture evidence and conservative legacy evidence expose `provenFields` and limitations; neither a role label nor an empty limitation list proves full old-configuration recovery.
+Route comparison uses the current version-3 `invocation-capture` and the child's latest `own-native-request-header`. Missing, invalid, old-version, or unobserved evidence remains unknown and refuses current resume; it is never inferred from the root route, current profile, role label, or compatibility projection.
 
 Human messages target only an admitted direct continuable child with current parent authority and ready delivery fencing. Entries whose observed control projection is read-only remain inspection-only; this isn't the role's tool-level read-only policy. **Queue** accepts a distinct later turn; **Steer** targets the nearest step. Idle/cold continuation keeps the same durable child ID. Native attachment and model admission validate images separately.
 
 An inbox receipt means **accepted**, not executed or completed. An interrupt acknowledgment isn't completion and doesn't claim queued work was removed. If transport leaves a send outcome unknown, the draft stays visible and automatic resend is disabled. Inspect the native child conversation before explicitly allowing a new message, which could duplicate an accepted one. Refresh and reconnection never imply automatic retry.
 
-## Explicit runtime and legacy boundaries
+## Explicit runtime and capture boundaries
 
-Managed delivery uses explicit cold-start `@dsmm/dsmm/subagent-runtime` composition and the optional [runtime patch](../patches/subagent-runtime.yml), not automatic replacement by the default bundle. Keep one provider in the same Host scope, preserve native spawn/fork/model/Gateway services, and retain explicit stock capacity/depth settings. Runtime binding, delivery readiness and restart requirement are observable separately. See [settings](settings-status.md#child-runtime-composition).
+Managed delivery uses the bundled explicit cold-start Agent registry/runtime/Main composition, not automatic replacement by the default bundle. Keep one provider in the same Host scope, preserve native spawn/fork/model/Gateway services, and retain explicit capacity/depth settings. Runtime binding, delivery readiness and restart requirement are observable separately. See [settings](settings-status.md#child-runtime-composition).
 
-An old child without complete original capture uses conservative evidence and per-field limitations, not the current parent's settings as recovered history. The separate legacy read adapter remains default off and requires explicit trusted Host composition. Its compatibility boundary doesn't grant arbitrary writes, invented approvals or durable guarantees. See [compatibility](compatibility.md); named legacy storage and old-child admission evidence aren't the same mechanism.
+An old child without a valid version-3 capture is unsupported in 0.3.0 and remains untouched. The legacy-read adapter is not exported or composed; current parent settings cannot be treated as recovered history. See [compatibility](compatibility.md#retired-compatibility-surfaces).
 
 Native Host commands, sessions, inbox, permissions, process/cwd/model selection and transports retain ownership. DSMM supplies role admission and bounded controls, not a replacement lifecycle scheduler, generic permission bypass or automatic retry system.
 

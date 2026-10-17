@@ -62,7 +62,7 @@ test("Core saves preserve nonempty rules in either Global or owned native layers
     const c = new DeploymentController(f.remote, layer, layer === "profile" ? "dsmm" : null);
     const mutations: unknown[] = [];
     if (layer === "profile") {
-      c.attachForm({ state: { status: "ready", mode: "host", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile },
+      c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile },
         mutate: async (edits, revision) => {
           assert.equal(revision, 0);
           let next = f.snapshot.profile;

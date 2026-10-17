@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { after } from "node:test";
 import type { Agent, AgentHandle } from "@deepseek-ai/dsh-agent";
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from "@deepseek-ai/dsh-llm";
-import type { SubagentRun } from "@deepseek-ai/dsh-subagent";
+import type { SubagentActivation } from "@deepseek-ai/dsh-subagent";
 import type { SessionId as NativeSessionId } from "@deepseek-ai/dsh-session";
 import type { RoleRunBackgroundRequest, RoleRunHolder, RoleRunInvocation, RoleRunStart } from "../src/role-runs.ts";
 
@@ -32,7 +32,7 @@ const hooks = registerHooks({ resolve(specifier, context, next) {
 after(() => hooks.deregister());
 
 const { Context } = await import("@deepseek-ai/cordis");
-const { AgentRegistry } = await import("@deepseek-ai/dsh-agent");
+const { DsmmAgentRegistry, duringActivationOwnership } = await import("../src/agent-registry.ts");
 const { AgentLoop } = await import("@deepseek-ai/dsh-agent-loop");
 const { LlmAdapter, LlmRuntime, ToolCallId } = await import("@deepseek-ai/dsh-llm");
 const { SessionId, SessionStore } = await import("@deepseek-ai/dsh-session");
@@ -99,7 +99,7 @@ export async function roleRunFixture(options: { jobs?: boolean; controller?: boo
   const root = await mkdtemp(join(tmpdir(), "dsmm-c2a-role-run-"));
   const ctx = new Context();
   const handles: AgentHandle[] = [];
-  const runs: SubagentRun[] = [];
+  const runs: SubagentActivation[] = [];
   const owner = {};
   const managed = new Set<Agent>();
   const admissions = new Map<Agent, Admission>();
@@ -110,15 +110,23 @@ export async function roleRunFixture(options: { jobs?: boolean; controller?: boo
   let allowed = options.permitted !== false;
   try {
     await Promise.all([
-      ctx.plugin(AgentRegistry).await(), ctx.plugin(SessionStore).await(), ctx.plugin(SessionProjectionRegistry).await(),
+      ctx.plugin(DsmmAgentRegistry).await(), ctx.plugin(SessionStore).await(), ctx.plugin(SessionProjectionRegistry).await(),
       ctx.plugin(LlmRuntime).await(), ctx.plugin(SystemPrompt, {}).await(), ctx.plugin(ToolRuntime, { mode: "native" }).await(),
     ]);
     await ctx.plugin(ExactQuery).await();
+    const Fs = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-fs-local")).href);
+    const Directory = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-working-directory")).href);
+    await ctx.plugin(Fs.default, { cwd: root }).await();
+    await ctx.plugin(Directory.default, { defaultDirectory: root }).await();
     let runtime!: InstanceType<typeof DsmmSubagentRuntime<Admission, ChildEvidence>>;
-    await ctx.plugin({ name: "c2a-native-subagents", apply(scope: InstanceType<typeof Context>) {
+    await ctx.plugin({ name: "c2a-native-subagents", inject: ["agents", "workingDirectory"], apply(scope: InstanceType<typeof Context>) {
       runtime = new DsmmSubagentRuntime<Admission, ChildEvidence>(scope, { maxDepth: { get: () => 3 }, maxActiveSubagents: { get: () => 8 } },
         (agent) => managed.has(agent) ? "dsmm" : "native");
     } }).await();
+    ctx.on("system-prompt/assemble", async (_assembly, options, next) => {
+      if (options.agent !== undefined) await runtime.authority.waitForPromotion(options.agent, options.signal);
+      return next();
+    }, { global: true, prepend: true });
     await ctx.plugin(AgentLoop, {}).await();
     await ctx.plugin(Spawn, { providerName: "spawn" }).await();
     if (options.jobs !== false) await ctx.plugin(Jobs.default, {}).await();
@@ -141,12 +149,13 @@ export async function roleRunFixture(options: { jobs?: boolean; controller?: boo
     ctx.llm.registerAdapter(["fixture"], adapter);
     const teardown = {
       revokeParent(agent: Agent, reason: string) { revoked.push({ agent, reason }); runtime.authority.revokeParent(agent, reason); },
-      async disposeRun(run: SubagentRun) {
+      async disposeRun(run: SubagentActivation) {
         counters.disposals++;
-        if (run.localAgent !== undefined) {
-          assert.throws(() => runtime.authority.acquireParentTicket(run.localAgent!), (error: unknown) => error instanceof SubagentError && error.code === "UNAUTHORIZED");
-        }
-        await run.dispose();
+        const child = ctx.get("agents")?.get(run.childId);
+        const disposal = run.dispose();
+        if (child !== undefined) assert.throws(() => runtime.authority.acquireParentTicket(child), (error: unknown) => error instanceof SubagentError && error.code === "UNAUTHORIZED");
+        try { await disposal; }
+        catch (error) { if (disposeFault !== undefined) throw new AggregateError([error, disposeFault], "Native and collaborator disposal failed"); throw error; }
         if (disposeFault !== undefined) throw disposeFault;
       },
     };
@@ -194,7 +203,8 @@ export async function roleRunFixture(options: { jobs?: boolean; controller?: boo
         label: projection.description, callerAbort: caller.signal, jobs: ctx.get("jobs"),
         async start(signal) {
           counters.starts++;
-          const run = await runtime.start("spawn", { parent: selected, prompt: [{ type: "text", text: "return a useful result" }], signal, maxDepth: 3 });
+          const run = await duringActivationOwnership(signal, () => runtime.startActivation({ provider: "spawn", label: "same native run", delivery: "caller",
+            request: { parent: selected, prompt: [{ type: "text", text: "return a useful result" }], maxDepth: 3 }, signal }));
           runs.push(run);
           const result = run.result;
           Object.defineProperty(run, "result", { get() { counters.resultReads++; return result; } });
@@ -230,7 +240,7 @@ export async function roleRunFixture(options: { jobs?: boolean; controller?: boo
         registry.close("fixture-disposed");
         await registry.drain();
         const agents = ctx.get("agents");
-        if (agents !== undefined) await runtime.drainContinuableDescendants(handles.map((handle) => handle.agent).filter((agent) => agents.get(agent.id) === agent));
+        if (agents !== undefined) await runtime.drainDescendants(handles.map((handle) => handle.agent).filter((agent) => agents.get(agent.id) === agent));
         for (const handle of [...handles].reverse()) { teardown.revokeParent(handle.agent, "fixture-disposed"); await handle.dispose(); }
         await ctx.fiber.dispose();
         await rm(root, { recursive: true, force: true });

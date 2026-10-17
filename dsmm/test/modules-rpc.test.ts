@@ -49,6 +49,9 @@ function permission(modules: DsmmModuleState[]): DsmmModuleState {
 async function fixture(profile: DsmmPluginConfig = {}, initialEnabled?: boolean, home?: string) {
   const root = home ?? await mkdtemp(join(tmpdir(), "dsmm-module-rpc-")), ctx = new Context();
   try {
+    const native = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
+    const { RemoteAccessService } = native("@deepseek-ai/dsh-api-remote-access");
+    await ctx.plugin(RemoteAccessService).await();
     await Promise.all([ctx.plugin(AgentRegistry).await(), ctx.plugin(TypertRegistry).await(),
       ctx.plugin(TypertGatewayService, {}).await(), ctx.plugin(SystemPrompt, {}).await()]);
     await ctx.plugin(MemoryCredentials).await();
@@ -90,8 +93,8 @@ async function fixture(profile: DsmmPluginConfig = {}, initialEnabled?: boolean,
       registerConfigRpc(scope, deployment, startup.settings, () => runtime, startup.sources, getMountedPermission);
     } });
     await rpc.await();
-    const config = <T>(method: string, args: Record<string, unknown> = {}) => ctx.typertGateway.invoke({ namespace: "dsmmConfig", method, args }) as Promise<T>;
-    const profiles = <T>(method: string, args: Record<string, unknown>) => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args }) as Promise<T>;
+    const config = <T>(method: string, args: Record<string, unknown> = {}) => ctx.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer: ctx.connection.browserPeer }) as Promise<T>;
+    const profiles = <T>(method: string, args: Record<string, unknown>) => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args, peer: ctx.connection.browserPeer }) as Promise<T>;
     let sequence = 0;
     const createRoot = async () => {
       const session = Session.create(SessionId(`module-root-${++sequence}`));

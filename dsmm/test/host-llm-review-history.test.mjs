@@ -13,10 +13,11 @@ test("historical v1 cold restore keeps native effort validation and captured cal
     const created = Promise.withResolvers(), retired = Promise.withResolvers();
     f.ctx.on("agent/created", ({ agent }) => { if (agent !== f.agent) created.resolve(agent); }, { global: true });
     f.ctx.on("agent/disposed", ({ agent }) => { if (agent !== f.agent) retired.resolve(); }, { global: true });
-    await f.ctx.subagents.startContinuable({ provider: "dsmm-role-doc-search", label: "Historical native role",
+    const activation = await f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", label: "Historical native role", delivery: "parent",
       request: { parent: f.agent, prompt: [{ type: "text", text: "Prepare the isolated native session fixture" }] }, signal: new AbortController().signal });
+    f.activations.add(activation);
     const child = await created.promise;
-    await child.whenIdle(); await retired.promise; await f.agent.whenIdle();
+    await child.whenIdle(); await activation.dispose(); await retired.promise; await f.agent.whenIdle();
     const store = f.ctx.dsmmProfileRuntime.childCaptureStore;
     const original = await store.readChildAdmission(child.id, f.agent.id);
     const { modelParameterPolicy: _policy, invocation: { requestedRoute: _requested, effortSource: _source, ...invocation }, ...base } = original;

@@ -6,8 +6,7 @@ import type { SessionEvent, SessionHeader, SessionId as NativeSessionId } from "
 import { foldSubagentDescriptor, SubagentError } from "@deepseek-ai/dsh-subagent";
 import type { ContinuableSubagentDescriptorData } from "@deepseek-ai/dsh-subagent";
 import type { ParentAdmissionTicket } from "./delivery-authority.js";
-import type { ChildAdmissionCapture, ChildAdmissionLimitation, ChildEvidenceField, LegacyChildEvidence } from "./child-capture.js";
-import { parseLegacyChildEvidence } from "./child-capture.js";
+import type { ChildAdmissionCapture } from "./child-capture.js";
 import type { DsmmProfileAdmission } from "./settings.js";
 import { freezeSettings } from "./settings.js";
 import { isDsmmRoleId } from "./roles.js";
@@ -72,9 +71,6 @@ export class NativeChildEvidenceReader {
     } finally { observation[Symbol.dispose](); }
   }
 
-  async legacy(ticket: ParentAdmissionTicket<DsmmProfileAdmission>, childId: string, signal: AbortSignal): Promise<LegacyChildEvidence> {
-    return legacyEvidenceFromNativeFacts(await this.read(ticket, childId, signal));
-  }
 }
 
 function readFacts(parent: Agent, childId: string, observation: NativeChildObservation): NativeChildFacts {
@@ -110,27 +106,6 @@ function readFacts(parent: Agent, childId: string, observation: NativeChildObser
 function hasRequestBudget(event: SessionEvent): boolean {
   if (event.type !== "request/header") return false;
   return event.data.header.config.maxTokens !== undefined;
-}
-
-export function legacyEvidenceFromNativeFacts(facts: NativeChildFacts): LegacyChildEvidence {
-  const provenFields: ChildEvidenceField[] = ["lineage", "role", "route"];
-  if (facts.descriptor.toolFilter !== undefined) provenFields.push("tool-filter");
-  if (facts.active !== undefined) provenFields.push("active-intent");
-  if (facts.requestBudgetObserved) provenFields.push("max-tokens");
-  const limitations: ChildAdmissionLimitation[] = [
-    ...(["profile-pin", "admission-epoch", "invocation-level", "locale", "tool-topology"] as const).map(field => ({ field, code: "missing-evidence" as const, effect: "display-only" as const })),
-    ...(["runtime-policy", "modules", "roles", "read-only", "route-override", "max-depth", "guards", "git-write", "shell", "delegation"] as const).map(field => ({ field, code: "missing-evidence" as const, effect: "capability-denied" as const })),
-    { field: "max-tokens", code: "not-persisted", effect: "native-default" },
-    { field: "output-schema", code: "unverified", effect: "capability-denied" },
-  ];
-  if (facts.descriptor.toolFilter === undefined) limitations.push({ field: "tool-filter", code: "missing-evidence", effect: "capability-denied" });
-  if (facts.active === undefined) limitations.push({ field: "active-intent", code: "missing-evidence", effect: "display-only" });
-  return parseLegacyChildEvidence({ version: 1, mode: "legacy-conservative", childSessionId: facts.childSessionId,
-    parentSessionId: facts.parentSessionId, role: facts.role, depth: facts.depth,
-    route: { provider: facts.descriptor.agentProvider!, model: facts.descriptor.agentModel!,
-      ...(facts.descriptor.agentReasoningEffort === undefined ? {} : { reasoningEffort: facts.descriptor.agentReasoningEffort }) },
-    ...(facts.descriptor.toolFilter === undefined ? {} : { toolFilter: facts.descriptor.toolFilter }),
-    ...(facts.active === undefined ? {} : { active: facts.active }), provenFields, limitations });
 }
 
 /** Capture evidence must agree with the child's establishing descriptor, not current parent routing. */

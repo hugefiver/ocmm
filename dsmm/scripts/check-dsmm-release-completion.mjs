@@ -8,7 +8,7 @@ import {
   validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory, registryVerificationFailure,
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
-import { isReviewedSource } from "./release-contract.mjs";
+import { isReviewedSource, isSource030 } from "./release-contract.mjs";
 import { HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY, RECOVERY_022, SPLIT_RELEASE_JOBS } from "./release-recovery-policy.mjs";
 
 export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
@@ -117,8 +117,12 @@ export function validateVerificationReceipt(receipt, identity) {
       && p.workflowFile === WORKFLOW && p.predicateType === "https://slsa.dev/provenance/v1"
       && p.source === "npm-registry-served-validated-attestation-over-https" && p.independentSigstoreVerification === false, "recovery provenance receipt differs");
   }
-  validateInstallReceipt(receipt.freshInstall, { version: identity.version, sha256: identity.sha256 });
-  requireCondition(receipt.freshInstall.registry.size === identity.size && receipt.freshInstall.registry.sha1 === identity.sha1 && receipt.freshInstall.registry.integrity === identity.integrity, "fresh install registry identity differs");
+  if (isSource030(identity.version)) {
+    requireCondition(receipt.freshInstall?.outcome === "NOT_RUN_RELEASE_POLICY" && Object.keys(receipt.freshInstall).length === 1, "native installation policy differs");
+  } else {
+    validateInstallReceipt(receipt.freshInstall, { version: identity.version, sha256: identity.sha256 });
+    requireCondition(receipt.freshInstall.registry.size === identity.size && receipt.freshInstall.registry.sha1 === identity.sha1 && receipt.freshInstall.registry.integrity === identity.integrity, "fresh install registry identity differs");
+  }
   return receipt;
 }
 
@@ -141,7 +145,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   validateArtifactIdentity(identity);
   const { tarball: _tarball, ...registry } = await registryCheck(identity);
   let freshInstall;
-  try { freshInstall = await installProbe(identity); }
+  try { freshInstall = isSource030(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" } : await installProbe(identity); }
   catch (error) {
     if (!["0.1.8", "0.1.9"].includes(identity.version) && !isReviewedSource(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
@@ -462,7 +466,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     requireCondition(lstatSync(join(proofDirectory, "dsmm-registry-verification.json")).isFile(), "verification artifact must not be a link");
     const recorded = JSON.parse(readFileSync(join(proofDirectory, "dsmm-registry-verification.json"), "utf8"));
     validateVerificationReceipt(recorded, identity);
-    validateInstalledFileHashes(recorded.freshInstall, accepted.files);
+    if (!isSource030(identity.version)) validateInstalledFileHashes(recorded.freshInstall, accepted.files);
     const publication = await publishedCheck(identity, {
       installProbe: async () => recorded.freshInstall,
     });
@@ -474,8 +478,9 @@ export async function checkTerminalCompletion(expected, { request = github, down
       artifact: identity, githubRelease: { id: release.id, tag: release.tag_name, draft: false, assetIds: release.assets.map(({ id, name }) => ({ id, name })) },
       publication,
       bootstrapImportEvidence,
-      freshInstallEvidence: { origin: "CI verify job, Linux/Node 24", artifactId: proofArtifact.id, runId: expected.runId, runAttempt: expected.runAttempt },
-      nonclaims: { ...publication.nonclaims, terminalHostNativeInstall: "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
+      freshInstallEvidence: isSource030(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" }
+        : { origin: "CI verify job, Linux/Node 24", artifactId: proofArtifact.id, runId: expected.runId, runAttempt: expected.runAttempt },
+      nonclaims: { ...publication.nonclaims, terminalHostNativeInstall: isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
     };
   } finally {
     cleanupOwnedRoot(owner);

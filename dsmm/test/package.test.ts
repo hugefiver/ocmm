@@ -60,7 +60,7 @@ test("public package entries resolve delivered files and expose native bundle co
   assert.equal(pkg.type, "module");
   assert.equal(pkg.main, "./lib/index.js");
   assert.equal(pkg.types, "./lib/index.d.ts");
-  for (const entry of ["", "/preset-skills", "/session-persistence", "/subagent-runtime", "/legacy-read-host",
+  for (const entry of ["", "/agent-registry", "/preset-skills", "/session-persistence", "/subagent-runtime",
     "/managed-settings", "/llm-runtime", "/permission-bash", "/permission-pwsh", "/permission-fs", "/permission-fs-search", "/permission-web",
     "/client", "/package.json", "/locale/en.json", "/locale/zh.json"]) {
     const resolved = fileURLToPath(import.meta.resolve(`@dsmm/dsmm${entry}`));
@@ -71,20 +71,12 @@ test("public package entries resolve delivered files and expose native bundle co
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
   assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
-  assert.equal(pkg.peerDependencies["@deepseek-ai/cordis"], "~4.0.4");
-  for (const name of ["attachment", "brand", "invariants", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
-    assert.equal(pkg.peerDependencies[`@deepseek-ai/dsh-${name}`], "0.2.0-rc.2");
+  assert.equal(pkg.peerDependencies["@deepseek-ai/cordis"], "~4.0.5");
+  for (const name of ["attachment", "brand", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
+    assert.equal(pkg.peerDependencies[`@deepseek-ai/dsh-${name}`], "0.2.1-rc.1");
   }
 
   assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
-});
-
-test("operator repair entrypoints are explicit scripts rather than public plugin imports", async () => {
-  const scripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
-  for (const path of scripts) {
-    assert.throws(() => import.meta.resolve(`@dsmm/dsmm/${path}`), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
-    await import(new URL(`../${path}`, import.meta.url).href);
-  }
 });
 
 test("exported native plugin metadata displays DSMM Core in both languages without renaming the package", () => {

@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 export const isSource020 = (version) => version === "0.2.0";
 export const isSource021 = (version) => version === "0.2.1";
 export const isSource022 = (version) => version === "0.2.2";
-export const isStableNativeSource = (version) => isSource021(version) || isSource022(version);
+export const isSource030 = (version) => version === "0.3.0";
+export const isStableNativeSource = (version) => isSource021(version) || isSource022(version) || isSource030(version);
 export const isReviewedSource = (version) => isSource020(version) || isStableNativeSource(version);
 export const isReviewedReleaseVersion = (version) => ["0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8", "0.1.9"].includes(version) || isReviewedSource(version);
 export function assertReviewedReleaseVersion(version) {
@@ -12,16 +13,36 @@ export function assertReviewedReleaseVersion(version) {
   return version;
 }
 export const sourceContractForVersion = (version) => isReviewedSource(version) ? version : undefined;
+const DSH_RC2_POLICY = Object.freeze({
+  runtimeVersion: "0.2.0-rc.2",
+  sdkVersion: "0.2.0-rc.2",
+  peerVersion: "0.2.0-rc.2",
+  integrity: "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==",
+  engines: Object.freeze({ node: ">=22" }),
+});
+const DSH_RC1_030_POLICY = Object.freeze({
+  runtimeVersion: "0.2.1-rc.1",
+  sdkVersion: "0.2.1-rc.1",
+  peerVersion: "0.2.1-rc.1",
+  integrity: "sha512-ce+4rnRuhkheK8++2EGm0CjHKVfF7IjUk4DO/NydRS8inAM8A0GFGQmX3cWKM4OzzbT+diIMyOiDuA1wYAZioA==",
+  engines: Object.freeze({ node: ">=22", dsh: ">=0.2.1-rc.1 <0.3.0-0" }),
+  sourceCommit: "1600d8a1e140dcde43a1a0941940a0480712c011",
+});
+export function dshPolicyForVersion(version) {
+  assertReviewedReleaseVersion(version);
+  return isSource030(version) ? DSH_RC1_030_POLICY : DSH_RC2_POLICY;
+}
 export function startupProfileContract(version, { sourceContract } = {}) {
   if (sourceContract === undefined) return "historical-read-lock";
   assert.equal(isReviewedSource(sourceContract), true, "unreviewed source contract");
   assert.equal(version, sourceContract);
+  if (isSource030(version)) return "stable-native-first-030";
   if (isSource022(version)) return "stable-native-first-022";
   return isSource021(version) ? "stable-native-first-021" : "central-read-lock-free-020";
 }
 export function stableUiKindForVersion(version) {
   assert.equal(isStableNativeSource(version), true, "unreviewed stable native version");
-  return isSource022(version) ? "native-client-stable-first-022" : "native-client-stable-first-021";
+  return isSource030(version) ? "native-client-stable-first-030" : isSource022(version) ? "native-client-stable-first-022" : "native-client-stable-first-021";
 }
 export function nativePickerCheckForVersion(version, options = {}) {
   assertReviewedReleaseVersion(version);
@@ -45,8 +66,10 @@ export const ROLE_TOOLS_021 = Object.freeze([...ROLE_TOOLS_020]);
 export const PRESET_NAMES_022 = Object.freeze([...PRESET_NAMES_021]);
 export const ROLE_TOOLS_022 = Object.freeze(["dsmm_category", "dsmm_clarifier", "dsmm_code_search", "dsmm_doc_search", "dsmm_media_reader",
   "dsmm_oracle", "dsmm_oracle_2nd", "dsmm_plan_critic", "dsmm_planner", "dsmm_reviewer"].sort());
-export const presetNamesForVersion = (version) => isSource022(version) ? PRESET_NAMES_022 : isSource021(version) ? PRESET_NAMES_021 : PRESET_NAMES_020;
-export const roleToolsForVersion = (version) => isSource022(version) ? ROLE_TOOLS_022 : isSource021(version) ? ROLE_TOOLS_021 : ROLE_TOOLS_020;
+export const PRESET_NAMES_030 = Object.freeze([...PRESET_NAMES_022]);
+export const ROLE_TOOLS_030 = Object.freeze([...ROLE_TOOLS_022]);
+export const presetNamesForVersion = (version) => isSource030(version) ? PRESET_NAMES_030 : isSource022(version) ? PRESET_NAMES_022 : isSource021(version) ? PRESET_NAMES_021 : PRESET_NAMES_020;
+export const roleToolsForVersion = (version) => isSource030(version) ? ROLE_TOOLS_030 : isSource022(version) ? ROLE_TOOLS_022 : isSource021(version) ? ROLE_TOOLS_021 : ROLE_TOOLS_020;
 export const COMPILED_NAMES_020 = Object.freeze([
   "config-file-store", "deployment-config", "modules", "native-scope", "role-policy", "skills", "prompt-content",
   "roles", "role-subagents", "preset-registry", "preset-materializer", "mode", "state", "prompts", "commands",
@@ -75,6 +98,8 @@ export const COMPILED_NAMES_022 = Object.freeze([
   ...COMPILED_NAMES_021, "llm-runtime", "managed-settings", "permission-bash", "permission-pwsh", "permission-native-command",
   "permission-fs", "permission-fs-search", "permission-web"
 ]);
+const RETIRED_COMPATIBILITY_MODULES_030 = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]);
+export const COMPILED_NAMES_030 = Object.freeze([...COMPILED_NAMES_022.filter((name) => !RETIRED_COMPATIBILITY_MODULES_030.has(name)), "agent-registry"]);
 export const PUBLIC_RUNTIME_EXPORTS_022 = Object.freeze({
   ...PUBLIC_RUNTIME_EXPORTS_021,
   "./llm-runtime": "lib/llm-runtime.js",
@@ -85,17 +110,22 @@ export const PUBLIC_RUNTIME_EXPORTS_022 = Object.freeze({
   "./permission-fs-search": "lib/permission-fs-search.js",
   "./permission-web": "lib/permission-web.js"
 });
+export const PUBLIC_RUNTIME_EXPORTS_030 = Object.freeze({
+  ...Object.fromEntries(Object.entries(PUBLIC_RUNTIME_EXPORTS_022).filter(([name]) => name !== "./legacy-read-host")),
+  "./agent-registry": "lib/agent-registry.js",
+});
 export const COLD_PROFILE_SCRIPTS_022 = Object.freeze([
   "scripts/migrate-cold-profile.mjs", "scripts/cold-profile-composition.mjs", "scripts/cold-profile-sources.mjs"
 ]);
 export const STABLE_UI_CHECKS_022 = Object.freeze([...STABLE_UI_CHECKS_021]);
+export const STABLE_UI_CHECKS_030 = Object.freeze([...STABLE_UI_CHECKS_022]);
 export function stableUiChecksForVersion(version) {
   assert.equal(isStableNativeSource(version), true, "unreviewed stable native version");
-  return isSource022(version) ? STABLE_UI_CHECKS_022 : STABLE_UI_CHECKS_021;
+  return isSource030(version) ? STABLE_UI_CHECKS_030 : isSource022(version) ? STABLE_UI_CHECKS_022 : STABLE_UI_CHECKS_021;
 }
 export function publicRuntimeExportsForVersion(version) {
   assert.equal(isStableNativeSource(version), true, "unreviewed stable native version");
-  return isSource022(version) ? PUBLIC_RUNTIME_EXPORTS_022 : PUBLIC_RUNTIME_EXPORTS_021;
+  return isSource030(version) ? PUBLIC_RUNTIME_EXPORTS_030 : isSource022(version) ? PUBLIC_RUNTIME_EXPORTS_022 : PUBLIC_RUNTIME_EXPORTS_021;
 }
 export const SKILL_EXECUTABLES_020 = Object.freeze([
   "skills/debugging/references/scripts/dap.mjs", "skills/debugging/references/scripts/dap.test.mjs", "skills/debugging/references/scripts/fixture-adapter.mjs",
@@ -110,19 +140,30 @@ export const SKILL_EXECUTABLES_020 = Object.freeze([
 ]);
 export const SKILL_EXECUTABLES_021 = Object.freeze([...SKILL_EXECUTABLES_020]);
 export const SKILL_EXECUTABLES_022 = Object.freeze([...SKILL_EXECUTABLES_021]);
+export const SKILL_EXECUTABLES_030 = Object.freeze([...SKILL_EXECUTABLES_022]);
 export function skillExecutablesForVersion(version) {
   assert.equal(isReviewedSource(version), true, "unreviewed source resource version");
-  return isSource022(version) ? SKILL_EXECUTABLES_022 : isSource021(version) ? SKILL_EXECUTABLES_021 : SKILL_EXECUTABLES_020;
+  return isSource030(version) ? SKILL_EXECUTABLES_030 : isSource022(version) ? SKILL_EXECUTABLES_022 : isSource021(version) ? SKILL_EXECUTABLES_021 : SKILL_EXECUTABLES_020;
 }
-export function validateStableBootstrap(proof, { template = "web", requireDeliveryFence = true } = {}) {
+export function validateStableBootstrap(proof, { template = "web", requireDeliveryFence = true, version } = {}) {
   assert.deepEqual(proof?.startedBundles, ["@deepseek-ai/dsh-base", template === "web" ? "@deepseek-ai/dsh-web-app" : "@deepseek-ai/dsh-headless", "@dsmm/dsmm"]);
   for (const key of ["stockSubagentDisabled", "runtimeLoaded", "mainLoaded"]) assert.equal(proof[key], true, key);
   assert.equal(proof.customRuntimeEntries, 1); assert.equal(proof.mainEntries, 1); assert.equal(proof.binding, "dsmm");
-  assert.equal(proof.loader?.length, 2);
-  assert.deepEqual(proof.loader.map(entry => entry.name).sort(), ["@dsmm/dsmm", "@dsmm/dsmm/subagent-runtime"]);
-  assert.equal(new Set(proof.loader.map(entry => entry.id)).size, 2);
+  const version030 = isSource030(version);
+  if (version030) {
+    for (const key of ["stockAgentDisabled", "registryLoaded"]) assert.equal(proof[key], true, key);
+    assert.equal(proof.registryEntries, 1); assert.equal(proof.agentsService, "DsmmAgentRegistry");
+    assert.equal(proof.subagentsService, "DsmmSubagentRuntime");
+  }
+  const expectedNames = version030
+    ? ["@dsmm/dsmm", "@dsmm/dsmm/agent-registry", "@dsmm/dsmm/subagent-runtime"]
+    : ["@dsmm/dsmm", "@dsmm/dsmm/subagent-runtime"];
+  assert.equal(proof.loader?.length, expectedNames.length);
+  assert.deepEqual(proof.loader.map(entry => entry.name).sort(), expectedNames);
+  assert.equal(new Set(proof.loader.map(entry => entry.id)).size, expectedNames.length);
   for (const entry of proof.loader) { assert.ok(typeof entry.id === "string" && entry.id.length > 0); assert.equal(entry.state, 2); }
-  assert.equal(proof.experimentalLegacyRead, "unconfigured/unavailable");
+  if (version030) assert.equal(proof.legacyCompatibility, "not-composed");
+  else assert.equal(proof.experimentalLegacyRead, "unconfigured/unavailable");
   if (requireDeliveryFence) { assert.equal(proof.deliveryFenceReady, true); assert.equal(proof.restartRequired, false); }
   return proof;
 }
@@ -130,7 +171,7 @@ export function validateCoreProof(proof, { sha256, version }) {
   assert.equal(isReviewedSource(version), true);
   if (isStableNativeSource(version)) {
     assert.equal(proof?.sourceContract, version);
-    validateStableBootstrap(proof.bootstrap, { requireDeliveryFence: false });
+    validateStableBootstrap(proof.bootstrap, { requireDeliveryFence: false, version });
   }
   assert.equal(proof?.outcome, "COMPLETED");
   assert.equal(proof.artifactSha256, sha256); assert.equal(proof.packageVersion, version);

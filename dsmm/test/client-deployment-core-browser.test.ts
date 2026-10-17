@@ -30,6 +30,8 @@ test("Core deployment controls save sparse desired values through native Gateway
   const sdk = createRequire(await realpath(process.env.DSMM_TEST_DSH_ENTRY!));
   const { chromium } = createRequire(process.env.DSMM_TEST_PLAYWRIGHT_ENTRY!)("playwright");
   const { startProfileUiServer } = await import(new URL("../scripts/profile-ui-harness-server.mjs", import.meta.url).href);
+  const { COMPOSITION_ID } = await import(new URL("../scripts/profile-ui-harness-browser.mjs", import.meta.url).href);
+  const { stableCompositionBundle } = await import(new URL("../scripts/stable-native-acceptance.mjs", import.meta.url).href);
   const temporaryParent = await realpath(tmpdir());
   const owned = await realpath(await mkdtemp(join(temporaryParent, "dsmm-core-ui-")));
   const packageRoot = join(owned, "package"), sourceRoot = fileURLToPath(new URL("../src/client/", import.meta.url));
@@ -50,6 +52,8 @@ test("Core deployment controls save sparse desired values through native Gateway
         const next = await modify(this.records.get(key)); if (next !== undefined) this.records.set(key, next); return this.records.get(key);
       }
     }
+    const { RemoteAccessService } = sdk("@deepseek-ai/dsh-api-remote-access");
+    await host.plugin(RemoteAccessService).await();
     await host.plugin(TypertRegistry).await(); await host.plugin(TypertGatewayService, {}).await();
     await host.plugin(MemoryCredentials).await(); await host.plugin(NativeConnection).await();
     host.provide("webServer", { host: "127.0.0.1" }); host.provide("settings", { writable: true });
@@ -61,7 +65,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     const invoke = async (method: string, args: Record<string, unknown>) => {
       calls.push({ method, args });
       if (method === "save" && holdSave) { holdSave = false; await saveGate; }
-      try { return { ok: true, value: await host.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer: host.connection.operator }) }; }
+      try { return { ok: true, value: await host.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer: host.connection.browserPeer }) }; }
       catch (error) { const failure = remoteErrorOf(error); if (failure === undefined) throw error; return { ok: false, error: { code: failure.code, message: failure.message, details: failure.details } }; }
     };
     await mkdir(join(packageRoot, "lib"), { recursive: true });
@@ -80,7 +84,7 @@ test("Core deployment controls save sparse desired values through native Gateway
       }};
       const forms={get:()=>shared};
       async function refreshForm(){const result=await remote.describeSettings();if(result.ok){const s=result.value;
-        formState={status:'ready',mode:'host',writable:true,revision:s.nativeFormRevision,value:s.profile,base:s.nativeForm.base,user:s.nativeForm.user};
+        formState={status:'ready',writable:true,revision:s.nativeFormRevision,value:s.profile,base:s.nativeForm.base,user:s.nativeForm.user};
         listeners.forEach(listener=>listener());}}
       function Surface(){const [locale,setLocale]=useState('en');useEffect(()=>{void refreshForm()},[]);
         const copy=locale==='zh'?deploymentZh:deploymentEn;
@@ -92,7 +96,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     ` }, bundle: true, write: false, platform: "browser", format: "cjs", target: "es2022", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives"],
       banner: { js: 'window.__ModuleLoader__.load({id:"@dsmm/dsmm",factory:(require)=>{const module={exports:{}};const exports=module.exports;' }, footer: { js: "return module.exports;}});" } });
     await writeFile(join(packageRoot, "lib", "client.js"), result.outputFiles![0]!.text);
-    server = await startProfileUiServer({ nativeRequire: sdk, packageRoot, sha256: "owned-core-source-fixture" });
+    server = await startProfileUiServer({ nativeRequire: sdk, packageRoot, sha256: "owned-core-source-fixture", composition: stableCompositionBundle(COMPOSITION_ID) });
     browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true, args: ["--disable-extensions", "--disable-sync"] });
     const context = await browser.newContext({ viewport: { width: 768, height: 900 }, serviceWorkers: "block" });
     assert.deepEqual(await context.cookies(), []);

@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 
 // Native subprocess spill storage belongs to the process, not an individual Context.
 const ownedDirectories = [];
@@ -39,10 +40,11 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
   const { SandboxPwshExecutor } = await sdk("dsh-pwsh-sandbox"), { LocalJobRegistry } = await sdk("dsh-jobs-local"), ShellEnv = await sdk("dsh-shell-env");
   const ToolJobs = await sdk("dsh-tool-jobs");
   const Native = await sdk("dsh-tool-pwsh");
+  const { LocalFileSystem } = await sdk("dsh-fs-local"), WorkingDirectory = await sdk("dsh-working-directory");
   const { installPermissionController } = await import("../src/permission-controller.ts");
   const { installDeploymentPermissionRules } = await import("../src/deployment-permission-rules.ts");
   const { DsmmDeploymentConfig } = await import("../src/deployment-config.ts");
-  const parent = await realpath("C:/Users/HUGEFI~1/AppData/Local/Temp/opencode"), owned = await mkdtemp(join(parent, "dsmm-product-permission-"));
+  const parent = await realpath(tmpdir()), owned = await mkdtemp(join(parent, "dsmm-product-permission-"));
   ownedDirectories.push({ directory: owned, parent });
   const workspace = join(owned, "workspace"), outside = join(owned, "outside"), home = join(owned, "home");
   const values = { DSH_HOME: home, TEMP: join(owned, "tmp"), TMP: join(owned, "tmp"), GOCACHE: join(owned, "go-cache"), GOTMPDIR: join(owned, "go-tmp"), GOPATH: join(owned, "gopath"), GOPROXY: "off", GOTOOLCHAIN: "local", GOENV: "off", GOWORK: "off" };
@@ -61,7 +63,9 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
     await writeFile(join(workspace, "go.mod"), `module owned.invalid/permission\n\ngo ${goVersion}\n`);
     await writeFile(join(workspace, "owned_test.go"), `package owned\nimport("testing";"os";"fmt")\nfunc TestOwned(t *testing.T){if e:=os.WriteFile("../outside/go-marker.txt",[]byte("owned"),0600);e!=nil{t.Fatal(e)};fmt.Println("OWNED_NATIVE_GO") }\n`);
     await saveFile();
-    for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "both" }], [ApprovalService, { policy: "ask" }], [SandboxPolicyService, { mode: "workspace-write", workspaceRoot: workspace }], [LocalSubprocessRuntime], [LocalSandboxProvider, {}], [SandboxPwshExecutor, { cwd: workspace, timeoutMs: 30000, maxTimeoutMs: 90000, maxOutputBytes: 4096, graceMs: 200 }], [LocalJobRegistry, { pumpPollMs: 20 }], [ShellEnv, { dshHome: home }], [ToolJobs, {}], [AgentLoop, {}]]) await ctx.plugin(plugin, config).await();
+    for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [SandboxPolicyService, { mode: "workspace-write", workspaceRoot: workspace }], [LocalSubprocessRuntime], [LocalSandboxProvider, {}], [SandboxPwshExecutor, { cwd: workspace, timeoutMs: 30000, maxTimeoutMs: 90000, maxOutputBytes: 4096, graceMs: 200 }], [LocalJobRegistry, { pumpPollMs: 20 }], [ShellEnv, { dshHome: home }], [ToolJobs, {}], [AgentLoop, {}]]) await ctx.plugin(plugin, config).await();
+    await ctx.plugin(LocalFileSystem, { cwd: workspace }).await();
+    await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
     ctx.provide("profileContext", { home, dir: owned });
     const backend = installDeploymentPermissionRules(ctx, { deployment: new DsmmDeploymentConfig(ctx, {}), assertWritable() {}, revoke: () => controller?.permissions.revokePolicy(), notify: async () => { assert.ok(controller); } });
     controller = installPermissionController(ctx, { rules: backend.runtime, authority: {
@@ -77,6 +81,7 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
     // Observe original Native.apply body entry without changing its arguments, executor or output.
     const tools = { register(definition) { return nativeTools.register({ ...definition, execute(args, exec) { bodies++; return Reflect.apply(definition.execute, definition, [args, exec]); } }); } };
     const nativeFiber = ctx.plugin({ name: "owned-product-native", inject: Native.inject, apply(scope) { Native.apply(nativeScope.extend({ tools }), { enableRunInBackground: true, promoteOnTimeout: true }); } }); await nativeFiber.await();
+    assert.equal(nativeFiber.state, 2); assert.ok(ctx.tools.get("pwsh"));
     handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: workspace }, agentOptions: { provider: "unused-local", model: "unused-local" } });
     const agent = handle.agent; facts.set(agent, { agent, root: agent, realm: agent.ctx, owner: ctx, ownerGeneration: 1, admissionRevision: "owned", permissionRevision: "owned", signal: lifetime.signal }); agent.session.append("turn/start", { turn: 1 });
     const call = (command = goCommand, extra = {}, signal = new AbortController().signal, callId = ToolCallId(randomUUID())) => ctx.tools.execute({ name: "pwsh", arguments: { command, description: "Execute one owned native fixture", workdir: workspace, timeoutMs: 90000, ...extra }, agent, signal, callId });
@@ -93,15 +98,16 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
     const combined = await call(); assert.equal(combined.value.exitCode, 0, JSON.stringify(combined)); assert.equal(asks(), sdkAsks + 1); assert.equal(interactions, sdkInteractions + 1); await rm(marker);
     const runtimeSdk = createRequire(requireSdk.resolve("@deepseek-ai/dsh-sdk-minimal/package.json"));
     const { NodePtcRuntime } = await import(pathToFileURL(runtimeSdk.resolve("@deepseek-ai/dsh-ptc-runtime-node")).href);
-    const { LocalFileSystem } = await sdk("dsh-fs-local");
     const leafArgs = { command: goCommand, description: "Execute one owned native fixture", workdir: workspace, timeoutMs: 90000 };
     const program = `return await tools.pwsh(${JSON.stringify(leafArgs)});`;
-    await ctx.plugin(LocalFileSystem, { cwd: workspace }).await();
     await ctx.plugin(NodePtcRuntime, { timeoutMs: 90000, maxTimeoutMs: 90000 }).await();
     const ptcCall = () => ctx.tools.execute({ name: "run_code", arguments: { code: program, description: "Execute an owned native Go leaf" }, agent, callId: ToolCallId(randomUUID()), signal: new AbortController().signal });
     const ptcAsks = asks(), ptcInteractions = interactions, ptcBodies = bodies;
-    const ptc = await ptcCall(); assert.equal(ptc.isError, false, JSON.stringify(ptc)); assert.equal(await readFile(marker, "utf8"), "owned"); assert.equal(bodies, ptcBodies + 1); assert.equal(asks(), ptcAsks + 1); assert.equal(interactions, ptcInteractions + 1); await rm(marker);
-    outcome = "rejected"; assert.equal((await ptcCall()).isError, true); assert.equal(bodies, ptcBodies + 1); assert.equal(existsSync(marker), false); outcome = "allowed-once";
+    const restoreNativePresentation = agent.ctx.tools.presentAs("ptc");
+    try {
+      const ptc = await ptcCall(); assert.equal(ptc.isError, false, JSON.stringify(ptc)); assert.equal(await readFile(marker, "utf8"), "owned"); assert.equal(bodies, ptcBodies + 1); assert.equal(asks(), ptcAsks + 1); assert.equal(interactions, ptcInteractions + 1); await rm(marker);
+      outcome = "rejected"; assert.equal((await ptcCall()).isError, true); assert.equal(bodies, ptcBodies + 1); assert.equal(existsSync(marker), false); outcome = "allowed-once";
+    } finally { restoreNativePresentation(); }
     const officialAsks = asks(), officialInteractions = interactions;
     const official = await call(goCommand, { sandbox_permissions: "danger-full-access", justification: "Owned Go test needs actual external cache and marker writes" });
     assert.equal(official.value.exitCode, 0, JSON.stringify(official)); assert.equal(asks(), officialAsks + 1); assert.equal(interactions, officialInteractions + 1); await rm(marker); downstreamAsk = false;
@@ -166,9 +172,10 @@ test("native same-level purpose, cancellation, timeout and spill reach the origi
   const { ApprovalService, setApprovalPolicy } = await sdk("dsh-user-approval"), { SandboxPolicyService } = await sdk("dsh-sandbox-policy");
   const { LocalSandboxProvider } = await sdk("dsh-sandbox-local"), { LocalSubprocessRuntime } = await sdk("dsh-subprocess-local");
   const { SandboxPwshExecutor } = await sdk("dsh-pwsh-sandbox"), { LocalJobRegistry } = await sdk("dsh-jobs-local"), ShellEnv = await sdk("dsh-shell-env"), Native = await sdk("dsh-tool-pwsh");
+  const { LocalFileSystem } = await sdk("dsh-fs-local"), WorkingDirectory = await sdk("dsh-working-directory");
   const { installPermissionController } = await import("../src/permission-controller.ts"), { PermissionRulesRuntimeSync, importPermissionRules } = await import("../src/permission-rules.ts"), { resolvePermissionControl } = await import("../src/permission-settings.ts");
   const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
-  const parent = await realpath("C:/Users/HUGEFI~1/AppData/Local/Temp/opencode"), owned = await mkdtemp(join(parent, "dsmm-native-boundary-"));
+  const parent = await realpath(tmpdir()), owned = await mkdtemp(join(parent, "dsmm-native-boundary-"));
   ownedDirectories.push({ directory: owned, parent });
   const workspace = join(owned, "workspace"), home = join(owned, "home"), temporary = join(owned, "tmp");
   const previous = { DSH_HOME: process.env.DSH_HOME, TEMP: process.env.TEMP, TMP: process.env.TMP };
@@ -180,6 +187,8 @@ test("native same-level purpose, cancellation, timeout and spill reach the origi
   try {
     await mkdir(workspace); await mkdir(home); await mkdir(temporary); Object.assign(process.env, { DSH_HOME: home, TEMP: temporary, TMP: temporary });
     for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [SandboxPolicyService, { mode: "workspace-write", workspaceRoot: workspace }], [LocalSubprocessRuntime], [LocalSandboxProvider, {}], [SandboxPwshExecutor, { cwd: workspace, timeoutMs: 10000, maxTimeoutMs: 10000, maxOutputBytes: 1024, graceMs: 200 }], [LocalJobRegistry, { pumpPollMs: 20 }], [ShellEnv, { dshHome: home }], [AgentLoop, {}]]) await ctx.plugin(plugin, config).await();
+    await ctx.plugin(LocalFileSystem, { cwd: workspace }).await();
+    await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
     const rules = importPermissionRules([{ id: "owned-purpose", action: "ask", match: { kind: "shell", executable: identity, command: raw, workingDirectory: workspace } }], "owned configuration", 1);
     const runtime = new PermissionRulesRuntimeSync({ revision: "owned-initial", policy: policy({ rules }) }, () => controller?.permissions.revokePolicy());
     controller = installPermissionController(ctx, { rules: runtime, authority: {
@@ -194,7 +203,8 @@ test("native same-level purpose, cancellation, timeout and spill reach the origi
       const value = Reflect.get(originalShell, key, originalShell); return typeof value === "function" ? value.bind(originalShell) : value;
     } });
     const tools = { register(definition) { return originalTools.register({ ...definition, execute(args, exec) { bodies++; return Reflect.apply(definition.execute, definition, [args, exec]); } }); } };
-    await ctx.plugin({ name: "owned-native-boundary", inject: Native.inject, apply() { Native.apply(scope.extend({ shell, tools }), { enableRunInBackground: false, promoteOnTimeout: false }); } }).await();
+    const nativeFiber = ctx.plugin({ name: "owned-native-boundary", inject: Native.inject, apply() { Native.apply(scope.extend({ shell, tools }), { enableRunInBackground: false, promoteOnTimeout: false }); } });
+    await nativeFiber.await(); assert.equal(nativeFiber.state, 2); assert.ok(ctx.tools.get("pwsh"));
     handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: workspace }, agentOptions: { provider: "unused-local", model: "unused-local" } });
     const agent = handle.agent; facts.set(agent, { agent, root: agent, realm: agent.ctx, owner: ctx, ownerGeneration: 1, admissionRevision: "owned", permissionRevision: "owned", signal: lifetime.signal }); agent.session.append("turn/start", { turn: 1 });
     const call = (command = raw, extra = {}) => ctx.tools.execute({ name: "pwsh", arguments: { command, description: "Owned native boundary", workdir: workspace, ...extra }, callId: ToolCallId(randomUUID()), signal: new AbortController().signal, agent });

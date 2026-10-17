@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRoleProfile, fixture, load, runDoc } from "./host-llm-review-fixture.mjs";
+import { applyRoleProfile, fixture, load, runDoc, startDoc } from "./host-llm-review-fixture.mjs";
 
 test("admitted preparation failure cannot fall through to a working stock adapter", async t => {
   let absent;
@@ -126,7 +126,9 @@ test("OFF keeps distinct configured fallback positions even when disabled parame
 
 test("owned raw routes activate through both profile Apply scopes without completion", async t => {
   for (const scope of ["default", "session"]) await t.test(scope, async t => {
-    const f = await fixture(t, { production: true, disableNativeBash: true, dsmm: { guards: { gitWriteGuard: "deny" } } });
+    const response = Promise.withResolvers();
+    const f = await fixture(t, { production: true, disableNativeBash: true, dsmm: { guards: { gitWriteGuard: "deny" } },
+      beforeRespond: () => response.promise, cleanup: () => response.resolve() });
     const runtime = f.ctx.get("dsmmProfileRuntime");
     const primary = { provider: "apai", model: "gpt-6.1-sol", reasoningEffort: "medium", full: false, zero: 0, nil: null,
       nested: [[], {}, { flag: false }], customParameters: { keepOriginalName: true } };
@@ -158,24 +160,25 @@ test("owned raw routes activate through both profile Apply scopes without comple
     assert.equal(executed, 0);
     const parent = scope === "default" ? await f.createRoot("dsmm-w2-new-root") : f.agent;
     assert.deepEqual(runtime.admission(parent).settings.roleRouting["dsmm-doc-search"].primary, primary);
-    const child = await f.ctx.subagents.start("dsmm-role-doc-search", { parent, prompt: [{ type: "text", text: "Read the isolated documentation response" }], signal: new AbortController().signal });
+    const { run, agent } = await startDoc(f, { parent, prompt: [{ type: "text", text: "Read the isolated documentation response" }] });
     try {
-      assert.equal((await child.result).stopReason, "completed", f.errors.map(error => error.stack).join("\n"));
-      assert.equal(f.ctx.agents.isOwnedBy(child.localAgent.id, parent), true);
-      const capture = runtime.admission(child.localAgent).childCapture;
+      assert.equal(f.ctx.agents.isOwnedBy(agent.id, parent), true);
+      const capture = runtime.admission(agent).childCapture;
       assert.deepEqual(capture.invocation.initialRoute, primary);
       assert.equal(capture.authorityCeiling.readOnly, true);
+      const denied = await agent.ctx.tools.execute({ name: "dsmm_role", callId: ToolCallId("dsmm-w2-child-escalation"), arguments: { role: "dsmm-orchestrator", description: "invalid escalation", prompt: "must not run" }, agent, signal: new AbortController().signal });
+      assert.equal(denied.isError, true);
+      const writeDenied = await agent.ctx.tools.execute({ name: "bash", callId: ToolCallId("dsmm-w2-child-write"), arguments: { command: "echo isolated-stub" }, agent, signal: new AbortController().signal });
+      assert.equal(writeDenied.isError, true);
+      assert.equal(executed, 0);
+      response.resolve();
+      assert.equal((await run.result).stopReason, "completed", f.errors.map(error => error.stack).join("\n"));
       const body = f.bodies.at(-1);
       assert.equal(body.model, primary.model);
       assert.equal(body.reasoning_effort, "medium");
       for (const key of ["full", "zero", "nil", "nested", "customParameters"]) assert.deepEqual(body[key], primary[key]);
-      assert.equal(child.localAgent.session.requestHeader().config.reasoningEffort, "medium");
-      assert.deepEqual(child.localAgent.session.requestHeader().config.customParameters.customParameters, primary.customParameters);
-      const denied = await child.localAgent.ctx.tools.execute({ name: "dsmm_role", callId: ToolCallId("dsmm-w2-child-escalation"), arguments: { role: "dsmm-orchestrator", description: "invalid escalation", prompt: "must not run" }, agent: child.localAgent, signal: new AbortController().signal });
-      assert.equal(denied.isError, true);
-      const writeDenied = await child.localAgent.ctx.tools.execute({ name: "bash", callId: ToolCallId("dsmm-w2-child-write"), arguments: { command: "echo isolated-stub" }, agent: child.localAgent, signal: new AbortController().signal });
-      assert.equal(writeDenied.isError, true);
-      assert.equal(executed, 0);
-    } finally { await child.dispose(); }
+      assert.equal(agent.session.requestHeader().config.reasoningEffort, "medium");
+      assert.deepEqual(agent.session.requestHeader().config.customParameters.customParameters, primary.customParameters);
+    } finally { response.resolve(); await run.dispose(); }
   });
 });

@@ -2,6 +2,7 @@ import { Context, Service } from "@deepseek-ai/cordis";
 import type { SessionHeader, SessionId } from "@deepseek-ai/dsh-session";
 import { SessionPersistence } from "@deepseek-ai/dsh-session-persistence";
 import type { SessionAccess, SessionHandle, SessionPersistenceCreateOptions, SessionPersistenceListOptions, SessionPersistenceOpenOptions, SessionPersistenceStatOptions } from "@deepseek-ai/dsh-session-persistence";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import type { Config } from "@deepseek-ai/dsh-session-persistence-jsonl";
 export { DSMM_PERSISTENCE_COMPATIBILITY } from "./session-metadata.js";
 export type { Config } from "@deepseek-ai/dsh-session-persistence-jsonl";
@@ -12,7 +13,7 @@ export type { Config } from "@deepseek-ai/dsh-session-persistence-jsonl";
  */
 export default class DsmmSessionPersistence extends SessionPersistence {
     readonly config: Config;
-    static Config: import("@deepseek-ai/schemastery").default<Config>;
+    static Config: import("@deepseek-ai/schemastery").default<JsonlSessionPersistence.Config>;
     readonly name = "dsmm-session-persistence";
     private readonly inner;
     private readonly ready;

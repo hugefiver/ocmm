@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { UI_CHECKS_015, sessionProfileChecksForVersion, requiresSessionProfileProof, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { isSource020, isSource022, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
+import { dshPolicyForVersion, isSource020, isSource022, isSource030, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
 import { assertPackSource, CONTROL_FILES, RECOVERY_CONTROL_FILES } from "./release-source.mjs";
 import { RECOVERY_022, RELEASE_TOPOLOGY, dispatchSelector, selectAcceptedArtifact, validateRecoveryBinding } from "./release-recovery-policy.mjs";
 
@@ -102,7 +102,7 @@ export function resolveReleaseContext(input) {
     bootstrapImport: mode === "bootstrap" ? { job: "import-bootstrap", artifactName: `dsmm-bootstrap-${input.runId}-${input.runAttempt}`,
       runId: String(input.runId), runAttempt: String(input.runAttempt) } : null,
     origin: mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built",
-    provenance: mode !== "bootstrap", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "REQUIRED_BEFORE_FREEZE" };
+    provenance: mode !== "bootstrap", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isSource030(version) ? "NOT_RUN_RELEASE_POLICY" : "REQUIRED_BEFORE_FREEZE" };
 }
 
 export const UI_CHECKS = Object.freeze([
@@ -146,14 +146,14 @@ export function validateStableUiProof021(ui, { sha256: artifactSha256, version }
 
 export function validateStableUiProof(ui, { sha256: artifactSha256, version }) {
   const checks = stableUiChecksForVersion(version);
-  if (isSource022(version)) equal(ui.kind, stableUiKindForVersion(version), "stable UI proof kind");
+  if (isSource022(version) || isSource030(version)) equal(ui.kind, stableUiKindForVersion(version), "stable UI proof kind");
   equal(ui.sourceContract, version, "stable UI source contract");
   equal(ui.packageVersion, version, "stable UI installed version");
   equal(ui.artifactSha256, artifactSha256, "stable UI frozen bytes");
   equal(ui.pageErrors, [], "stable UI browser errors");
   equal(ui.externalRequests, [], "stable UI external requests");
   equal(ui.viewport, { width: 1280, height: 900 }, "stable UI real viewport");
-  validateStableBootstrap(ui.bootstrap);
+  validateStableBootstrap(ui.bootstrap, { version });
   equal(ui.artifactSha256After, artifactSha256, "stable UI unchanged artifact");
   invariant(sha256.test(ui.clientSha256), "stable compiled client digest required");
   equal(ui.clientSha256After, ui.clientSha256, "stable UI unchanged client");
@@ -198,9 +198,18 @@ export function validateDockerReceipt(receipt, identity) {
   assertSanitizedReceipt(receipt);
   invariant(sha256.test(identity.sha256) && stableVersion.test(identity.version), "invalid receipt identity");
   assertReviewedReleaseVersion(identity.version);
+  if (isSource030(identity.version)) {
+    complete(receipt, "artifact integrity receipt");
+    equal(receipt.acceptanceScope, "artifact-integrity-only", "acceptance scope");
+    equal(receipt.tests, "NOT_RUN_RELEASE_POLICY", "release test policy");
+    equal(receipt.artifact?.package, { name: POLICY.packageName, version: identity.version }, "receipt package");
+    equal(receipt.artifact?.sha256, identity.sha256, "receipt artifact digest");
+    return { outcome: "NOT_RUN_RELEASE_POLICY", sourceContract: identity.version };
+  }
+  const dshPolicy = dshPolicyForVersion(identity.version);
   complete(receipt, "Docker receipt");
   equal(receipt.acceptanceScope, "native-final-artifact", "acceptance scope");
-  equal(receipt.dshVersion, POLICY.dshVersion, "native DSH version");
+  equal(receipt.dshVersion, dshPolicy.runtimeVersion, "native DSH version");
   equal(receipt.artifact?.package, { name: POLICY.packageName, version: identity.version }, "Docker package");
   for (const key of ["sha256", "sha256After", "hostSha256After"]) equal(receipt.artifact?.[key], identity.sha256, `artifact.${key}`);
   invariant(Array.isArray(receipt.installedPackages) && receipt.installedPackages.length === 2, "both exact native package installations required");
@@ -214,11 +223,11 @@ export function validateDockerReceipt(receipt, identity) {
     complete(native, `native.${template}`); complete(baseline, `baseline.${template}`);
     if (isStableNativeSource(identity.version)) {
       equal(native.sourceContract, identity.version, "stable native source contract");
-      if (isSource022(identity.version)) {
+      if (isSource022(identity.version) || isSource030(identity.version)) {
         equal(native.packageVersion, identity.version, "stable native installed version");
         equal(native.artifactSha256, identity.sha256, "stable native frozen bytes");
       }
-      validateStableBootstrap(native.bootstrap, { template });
+      validateStableBootstrap(native.bootstrap, { template, version: identity.version });
     }
     equal(native.template, template, "native template"); truth(native, ["postAppReady"], `native.${template}`);
     equal(native.presetRegistryPresent, template === "web", "native preset registry");
@@ -309,8 +318,10 @@ export function validateDockerReceipt(receipt, identity) {
   }
   const history = receipt.sessionHistory;
   complete(history, "session history"); equal(history.artifactSha256, identity.sha256, "session-history digest");
-  equal(history.packageVersion, identity.version, "session-history version"); equal(history.nativeVersion, POLICY.dshVersion, "session-history native version");
-  truth(history, ["syntheticOnly", "originalRefused", "dryRunUnchanged", "originalBackupByteIdentical", "repairedNativeReadAndRestore", "retainedModelVisibleHistory", "nativeWriterExclusionBothDirections", "hostsExitedBeforeOperator", "standalonePinnedSdk"], "session history");
+  equal(history.packageVersion, identity.version, "session-history version"); equal(history.nativeVersion, dshPolicy.sdkVersion, "session-history native version");
+  truth(history, isSource030(identity.version)
+    ? ["syntheticOnly", "currentNativeWriteRead", "currentIgnorableMetadata", "retainedModelVisibleHistory", "nativeWriterExclusion", "hostsExitedBeforeOperator", "standalonePinnedSdk"]
+    : ["syntheticOnly", "originalRefused", "dryRunUnchanged", "originalBackupByteIdentical", "repairedNativeReadAndRestore", "retainedModelVisibleHistory", "nativeWriterExclusionBothDirections", "hostsExitedBeforeOperator", "standalonePinnedSdk"], "session history");
   equal(history.installedPackage, { name: POLICY.packageName, version: identity.version }, "session-history installed package");
   equal(history.exactMetadataEvents, 2, "session-history metadata evidence");
   complete(receipt.lsp, "LSP"); truth(receipt.lsp, ["directNativeDiagnosticsAndFormat", "nativeDshMcpClient"], "LSP");
@@ -336,7 +347,10 @@ export function manifestExportsForVersion(version) {
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])) } : { ...PUBLIC_EXPORTS };
 }
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
-const requiredFiles = ["LICENSE", "README.md", "package.json", "cordis.patch.yml", ...operatorScripts,
+const operatorScriptsForVersion = version => isSource030(version) ? [] : operatorScripts;
+const retiredCompatibilityFiles030 = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]
+  .flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]));
+const requiredFiles = ["LICENSE", "README.md", "package.json", "cordis.patch.yml",
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`)];
@@ -356,9 +370,10 @@ export function isForbiddenPackagePath(path, version) {
     if (skillExecutablesForVersion(version).includes(path)) return false;
     if (/\.(?:py|pyw|sh|ps1|psm1|mjs|cjs|js|bat|cmd)$/iu.test(path)) return true;
   }
-  const forbiddenScript = segments.includes("scripts") && !operatorScripts.includes(path)
+  const forbiddenScript = segments.includes("scripts") && !operatorScriptsForVersion(version).includes(path)
     && !(isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) && path !== "skills/debugging/references/scripts/dap.mjs";
-  return segments.some((part) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", ".git", ".github", ".codex", "superpowers", "output_test"].includes(part))
+  return isSource030(version) && retiredCompatibilityFiles030.has(path)
+    || segments.some((part) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", ".git", ".github", ".codex", "superpowers", "output_test"].includes(part))
     || forbiddenScript || /\.(?:test|spec)\.[^/]+$/iu.test(path) || /\.(?:map|tgz|tar|gz|zip|pem|key|p12|pfx)$/iu.test(name)
     || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || name === ".npmrc" || name === ".env" || name.startsWith(".env.") || /^(?:credentials|secrets)/u.test(name);
 }
@@ -408,8 +423,8 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
     offset += 512 + Math.ceil(size / 512) * 512;
   }
   invariant(terminated, "tar archive has no terminator");
-  for (const file of requiredFiles) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
-  if (isSource022(version)) for (const file of requiredDocs022) {
+  for (const file of [...requiredFiles, ...operatorScriptsForVersion(version)]) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
+  if (isSource022(version) || isSource030(version)) for (const file of requiredDocs022) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
   }
   if (isSource022(version)) for (const file of COLD_PROFILE_SCRIPTS_022) {
@@ -422,8 +437,8 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
     invariant(files.has(file) && files.get(file).length > 0, `missing required successor compiled surface: ${file}`);
   }
   for (const tree of ["agent-presets", "docs/research", "patches", "prompts", "skills"]) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
-  for (const path of files.keys()) invariant(requiredFiles.includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
-    || (isSource022(version) && (COLD_PROFILE_SCRIPTS_022.includes(path) || requiredDocs022.includes(path)))
+  for (const path of files.keys()) invariant(requiredFiles.includes(path) || operatorScriptsForVersion(version).includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
+    || ((isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) || ((isSource022(version) || isSource030(version)) && requiredDocs022.includes(path)))
     || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
   validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), version);
   if (isReviewedSource(version)) {
@@ -441,9 +456,11 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   equal(manifest.type, "module", "module type"); equal(manifest.main, "./lib/index.js", "main export"); equal(manifest.types, "./lib/index.d.ts", "types export");
   equal(manifest.exports, manifestExportsForVersion(version), "public exports");
   equal(manifest.publishConfig, { registry: POLICY.registry, access: "public" }, "publish configuration");
-  equal(manifest.engines, { node: ">=22" }, "Node engine contract");
-  invariant(object(manifest.peerDependencies) && Object.entries(manifest.peerDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === POLICY.dshVersion), "native DSH peers must remain exactly pinned");
-  for (const name of ["@deepseek-ai/dsh-typert-protocol", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-agent-preset-registry"]) equal(manifest.peerDependencies[name], POLICY.dshVersion, `peer ${name}`);
+  const dshPolicy = dshPolicyForVersion(version);
+  equal(manifest.engines, dshPolicy.engines, "runtime engine contract");
+  invariant(object(manifest.peerDependencies) && Object.entries(manifest.peerDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === dshPolicy.peerVersion), "native DSH peers must remain exactly pinned");
+  invariant(object(manifest.devDependencies) && Object.entries(manifest.devDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === dshPolicy.sdkVersion), "native DSH SDK dependencies must remain exactly pinned");
+  for (const name of ["@deepseek-ai/dsh-typert-protocol", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-agent-preset-registry"]) equal(manifest.peerDependencies[name], dshPolicy.peerVersion, `peer ${name}`);
   for (const name of ["prepublish", "prepublishOnly", "publish", "postpublish", "prepack", "postpack", "prepare", "preinstall", "install", "postinstall"]) invariant(!Object.hasOwn(manifest.scripts ?? {}, name), `package lifecycle ${name} forbidden`);
   const client = files.get("lib/client.js").toString("utf8");
   invariant(!/(?:["']node:|[A-Za-z]:[\\/](?:Users|home)[\\/]|\/Users\/|\/home\/|react-grab|react-scan|react-doctor|localhost:\d+|127\.0\.0\.1:\d+)/iu.test(client), "client bundle leaks host or development code");
@@ -491,13 +508,15 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.eventSha, dispatch ? identity.controlSha : identity.releaseSha, "identity event SHA");
   equal(identity.workflow.ref, `${POLICY.repository}/${POLICY.workflowFile}@${identity.ref}`, "identity workflow ref");
   if (identity.mode === "future") equal(identity.controlSha, identity.releaseSha, "future source/control identity");
-  equal(identity.dockerAcceptance?.outcome, "COMPLETED", "artifact Docker acceptance");
-  if (isStableNativeSource(identity.version)) {
+  equal(identity.dockerAcceptance?.outcome, isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "artifact Docker acceptance");
+  if (isSource030(identity.version)) {
+    equal(identity.dockerAcceptance.sourceContract, identity.version, "release acceptance identity");
+  } else if (isStableNativeSource(identity.version)) {
     equal(identity.dockerAcceptance.sourceContract, identity.version, "explicit stable acceptance identity");
     equal(identity.dockerAcceptance.uiCheckCount, stableUiChecksForVersion(identity.version).length, "stable acceptance scope");
   }
-  equal(identity.dockerAcceptance?.origin, identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
-  equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : "COMPLETED", "source-check policy");
+  equal(identity.dockerAcceptance?.origin, isSource030(identity.version) ? "not-run" : identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
+  equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "source-check policy");
   if (identity.mode === "bootstrap") {
     invariant(identity.controlSha !== BOOTSTRAP.releaseSha, "bootstrap identity requires distinct new trusted controls");
     for (const key of ["version", "tag", "releaseSha", "filename", "size", "sha256", "sha1", "integrity", "receiptSha256"]) equal(identity[key], BOOTSTRAP[key], `frozen bootstrap ${key}`);
@@ -520,7 +539,7 @@ export function createArtifactIdentity(context, tarballBuffer, receiptBuffer, { 
   const identity = { ...context, filename: `dsmm-dsmm-${context.version}.tgz`, size: artifact.size, sha256: artifact.sha256,
     sha1: artifact.sha1, integrity: artifact.integrity, receiptFilename: POLICY.receiptFilename, receiptSha256,
     receiptSize: receiptBuffer.length, sourceChecks: context.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : sourceChecks,
-    dockerAcceptance: { ...acceptance, origin: context.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact" } };
+    dockerAcceptance: { ...acceptance, origin: isSource030(context.version) ? "not-run" : context.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact" } };
   return validateArtifactIdentity(identity, { context });
 }
 
@@ -577,7 +596,13 @@ function emptyOwnedDirectory(path) {
 }
 
 export function prepareTransport(directory, context, { tarballPath, receiptPath, sourceChecks } = {}) {
-  const tarballBuffer = readFileSync(tarballPath); const receiptBuffer = readFileSync(receiptPath);
+  const tarballBuffer = readFileSync(tarballPath);
+  if (isSource030(context.version)) invariant(receiptPath === undefined, "artifact-only releases do not import test receipts");
+  else invariant(receiptPath !== undefined, "native acceptance receipt required");
+  const receiptBuffer = isSource030(context.version)
+    ? jsonBytes({ outcome: "COMPLETED", acceptanceScope: "artifact-integrity-only", tests: "NOT_RUN_RELEASE_POLICY",
+      artifact: { package: { name: POLICY.packageName, version: context.version }, sha256: computeDigests(tarballBuffer).sha256 } })
+    : readFileSync(receiptPath);
   const identity = createArtifactIdentity(context, tarballBuffer, receiptBuffer, { sourceChecks });
   emptyOwnedDirectory(directory);
   exclusivelyWrite(join(directory, identity.filename), tarballBuffer);
@@ -926,6 +951,7 @@ export async function publishArtifact(directory, context, workDirectory, { env =
 }
 
 function releaseNotes(identity) {
+  if (isSource030(identity.version)) return `@dsmm/dsmm ${identity.version}\n\nPackage source: ${identity.releaseSha}\nTrusted workflow control: ${identity.controlSha}\nArtifact SHA256: ${identity.sha256}\nArtifact integrity receipt SHA256: ${identity.receiptSha256}\n\nBuilt and packed once from tagged source in CI; published through OIDC with CI provenance. Release test suites, native/browser acceptance and fresh-install tests were not run.\n`;
   return `@dsmm/dsmm ${identity.version}\n\nPackage source: ${identity.releaseSha}\nTrusted workflow control: ${identity.controlSha}\nArtifact SHA256: ${identity.sha256}\nDocker acceptance receipt SHA256: ${identity.receiptSha256}\n\n${identity.mode === "bootstrap" ? "Frozen local bootstrap: imported prior native final-artifact Docker acceptance; no source rebuild, repack or fresh CI Docker claim. OIDC-authenticated exact-byte publication with build provenance explicitly disabled." : "Built and packed once from the tagged source in CI; fresh independent native final-artifact Docker acceptance; OIDC-authenticated exact-byte publication with genuine CI provenance."}\nReal authentication and Desktop integration were not exercised.\n`;
 }
 
@@ -966,8 +992,11 @@ export function validateFinalizationEvidence(evidence, identity) {
   complete(evidence.registry, "registry verification");
   for (const field of ["size", "sha256", "sha1", "integrity"]) equal(evidence.registry[field], identity[field], `verified registry ${field}`);
   equal(evidence.registry.name, POLICY.packageName, "verified registry package"); equal(evidence.registry.version, identity.version, "verified registry version");
-  validateInstallReceipt(evidence.freshInstall, { version: identity.version, sha256: identity.sha256 });
-  for (const field of ["size", "sha1", "integrity"]) equal(evidence.freshInstall.registry[field], identity[field], `installed registry ${field}`);
+  if (isSource030(identity.version)) equal(evidence.freshInstall, { outcome: "NOT_RUN_RELEASE_POLICY" }, "native installation policy");
+  else {
+    validateInstallReceipt(evidence.freshInstall, { version: identity.version, sha256: identity.sha256 });
+    for (const field of ["size", "sha1", "integrity"]) equal(evidence.freshInstall.registry[field], identity[field], `installed registry ${field}`);
+  }
   return evidence;
 }
 
@@ -1010,7 +1039,7 @@ function parseCli(args) {
     validate: ["control-root", "context", "artifact-dir"], publish: ["control-root", "context", "artifact-dir", "work-dir"],
     transport: ["control-root", "context", "artifact-dir"], finalize: ["control-root", "context", "artifact-dir", "verification"] };
   for (const key of Object.keys(options)) invariant(allowed[command].includes(key) || (key === "source-root" && ["assert-source", "pack", "freeze"].includes(command)), `unrecognized ${command} option`);
-  for (const key of allowed[command].filter((key) => key !== "source-checks")) invariant(options[key], `missing --${key}`);
+  for (const key of allowed[command].filter((key) => key !== "source-checks" && !(command === "freeze" && key === "receipt"))) invariant(options[key], `missing --${key}`);
   return { command, options };
 }
 
@@ -1031,7 +1060,7 @@ export async function main(args = process.argv.slice(2)) {
   if (command === "pack") return packFrozenArtifact(resolve(options["control-root"]), context, resolve(options["output-dir"]), undefined, sourceRoot);
   if (command === "freeze") {
     if (context.mode === "recovery-022") assertPackSource(resolve(options["control-root"]), context, undefined, { sourceRoot });
-    return prepareTransport(resolve(options["output-dir"]), context, { tarballPath: resolve(options.tarball), receiptPath: resolve(options.receipt), sourceChecks: options["source-checks"] });
+    return prepareTransport(resolve(options["output-dir"]), context, { tarballPath: resolve(options.tarball), receiptPath: options.receipt && resolve(options.receipt), sourceChecks: options["source-checks"] });
   }
   if (command === "validate") return validateArtifactDirectory(directory, context);
   if (command === "publish") return publishArtifact(directory, context, resolve(options["work-dir"]));

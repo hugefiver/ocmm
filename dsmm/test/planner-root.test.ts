@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Context } from "@deepseek-ai/cordis";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
+import { JobRegistry } from "@deepseek-ai/dsh-jobs";
 import type { StreamChunk } from "@deepseek-ai/dsh-llm";
 import type { DshAgent as PackageDshAgent, DshContext } from "../src/dsh-types.ts";
 import { DsmmDeploymentConfig as DeploymentConfig, parseGlobalConfig } from "../src/deployment-config.ts";
@@ -43,7 +44,19 @@ async function inertHost(ctx: Context): Promise<void> {
   if (ctx.get("fs") === undefined) ctx.provide("fs", { readFile: denied, writeFile: denied, edit: denied, stat: denied });
   ctx.provide("subprocess", { spawn: denied }); ctx.provide("shell", { execute: denied });
   ctx.provide("shellEnv", { resolve: denied });
-  ctx.provide("jobs", { start: denied, list: () => [], attachController: () => () => {}, events: { subscribe: () => () => {} } });
+  class InertJobs extends JobRegistry {
+    events = { subscribe: () => () => {} };
+    start(): never { throw new Error("Planner fixture forbids background work"); }
+    list() { return []; }
+    get(): never { throw new Error("No fixture job"); }
+    read(): never { throw new Error("No fixture job"); }
+    readAt(): never { throw new Error("No fixture job"); }
+    wait(): never { throw new Error("No fixture job"); }
+    kill(): never { throw new Error("No fixture job"); }
+    remove(): never { throw new Error("No fixture job"); }
+    attachController() { return () => {}; }
+  }
+  await ctx.plugin(InertJobs).await();
 }
 
 function nativePlannerDefinition() {
@@ -265,10 +278,11 @@ test("Root-off workflow Planner returns real native child output and readonly gu
     await runFixtureTurn(parent);
     assert.match(JSON.stringify(childResults), /PLANNER_NATIVE_RESULT/u);
     assert.deepEqual([...turns], [["native-default", 2], ["workflow-planner", 2]]);
-    const run = await f.subagents.start("dsmm-role-planner", { parent, prompt: [], signal: new AbortController().signal });
+    const run = await f.subagents.startActivation({ provider: "dsmm-role-planner", label: "Readonly planner", delivery: "caller", signal: new AbortController().signal,
+      request: { parent, prompt: [] } });
     try {
-      assert.equal((await run.result).stopReason, "completed");
-      const child = run.localAgent!;
+      const child = f.agents.get(run.childId)!;
+      assert.ok(child);
       assert.equal(policy.identity(child as DshAgent).role, "dsmm-planner");
       assert.equal(policy.identity(child as DshAgent).readOnly, true);
       const original = runtime.admission(child as DshAgent).childCapture!;
@@ -284,6 +298,7 @@ test("Root-off workflow Planner returns real native child output and readonly gu
       }
       assert.equal(mutations, 0);
       assert.equal((await child.ctx.tools.execute({ agent: child, name: "read", arguments: {}, callId: ToolCallId("planner-read"), signal: new AbortController().signal })).isError, false);
+      assert.equal((await run.result).stopReason, "completed");
     } finally { await run.dispose(); }
   } finally { await f.dispose(); }
 });
@@ -354,7 +369,8 @@ test("Planner child capture cold-resumes readonly without borrowing desired Root
     child.session.append("agent-preset/selected", { agentPreset: "dsmm-planner" });
     await runFixtureTurn(child);
     const original = runtime.admission(child as DshAgent).childCapture!;
-    assert.equal(original.version, 2);
+    assert.equal(original.version, 3);
+    assert.equal(original.delegationMode, "continuable");
     assert.equal(Object.hasOwn(original.runtimePolicyCapture, "presets"), false);
     const serialized = JSON.stringify(original);
     const deployment = f.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
@@ -389,7 +405,8 @@ for (const disabled of ["role", "module"] as const) {
       // The disabled-role fixture may supply a standing persona independently.
       await assert.rejects(f.create({ agentPreset: "dsmm-planner" }));
       const parent = await f.create({ agentPreset: "standard" });
-      await assert.rejects(f.subagents.start("dsmm-role-planner", { parent, prompt: [], signal: new AbortController().signal }));
+      await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-planner", label: "Disabled planner", delivery: "caller", signal: new AbortController().signal,
+        request: { parent, prompt: [] } }));
       assert.equal(f.adapter.calls.length, 0);
     } finally { await f.dispose(); }
   });

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { startProfileUiServer } from "./profile-ui-harness-server.mjs";
 import { COMPOSITION_ID, nativeClientPreflight } from "./profile-ui-harness-browser.mjs";
 import { digest, inspectStableBootstrap, inspectStableExports, inspectStableProfileStorage, stableCompositionBundle, stableNativeProofIdentity, stableNativeStorage } from "./stable-native-acceptance.mjs";
-import { isSource022, stableUiChecksForVersion } from "./release-contract.mjs";
+import { isSource022, isSource030, stableUiChecksForVersion } from "./release-contract.mjs";
 import { prepareNativeReadonly022 } from "./native-preset-smoke.mjs";
 
 export const name = "dsmm-stable021-native-browser-acceptance";
@@ -114,9 +114,9 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
   }
   try {
     assert.equal(digest(await readFile(artifact)), sha256);
-    report.bootstrap = inspectStableBootstrap(ctx);
+    report.bootstrap = inspectStableBootstrap(ctx, { version: proofIdentity.packageVersion });
     report.publicExports = await inspectStableExports(packageRoot, profilePackage, { sourceContract: proofIdentity.sourceContract });
-    const runtime = ctx.get("dsmmProfileRuntime"), gateway = ctx.get("typertGateway"), peer = ctx.get("connection").operator;
+    const runtime = ctx.get("dsmmProfileRuntime"), gateway = ctx.get("typertGateway"), peer = ctx.get("connection").browserPeer;
     assert.ok(peer?.ctx); assert.equal(ctx.get("dsmmProfiles").backend, runtime);
     assert.equal(ctx.get("profileContext").dir, dirname(profilePackage));
     const persistence = ctx.get("sessionPersistence"), storage = stableNativeStorage(nativeStorage, env);
@@ -137,7 +137,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     if (previous.selectedId !== null) await runtime.select({ id: null, expectedSelectionRevision: previous.selectionRevision });
     const parent = await createRoot(), parentAdmission = runtime.admission(parent);
     let readonlyDenied, readonlyFailure;
-    if (isSource022(proofIdentity.packageVersion)) {
+    if (isSource022(proofIdentity.packageVersion) || isSource030(proofIdentity.packageVersion)) {
       readonlyProof = await prepareNativeReadonly022({ ctx, parent, workspace, label: "stable-ui", sdk, toolsFor: agent => agent.ctx.get("tools"), ToolCallId });
       report.readonlyExecution = readonlyProof.proof;
       readonlyListener = ctx.on("agent/request", async ({ agent }, next) => {
@@ -169,7 +169,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.equal(captured.capture.childSessionId, child.id); assert.equal(captured.capture.parentSessionId, parent.id);
     assert.equal(captured.revision, digest(JSON.stringify(captured.capture)));
     assert.equal(child.options.model, "reviewer-original");
-    if (isSource022(proofIdentity.packageVersion)) assert.deepEqual(readonlyDenied, ["write", "edit", "bash", "pwsh"]);
+    if (isSource022(proofIdentity.packageVersion) || isSource030(proofIdentity.packageVersion)) assert.deepEqual(readonlyDenied, ["write", "edit", "bash", "pwsh"]);
     else {
       readonlyDenied = [];
       for (const name of ["write", "edit", "bash", "pwsh"]) {
@@ -197,7 +197,12 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     bridge = createStableNativeBridge({ gateway, peer, page, origin: server.origin, report });
     await page.exposeBinding("__dsmmNativeBridge", bridge.invoke);
     await page.goto(`${server.origin}/?root=${encodeURIComponent(parent.id)}`);
-    await page.getByRole("heading", { name: "Deepwork Profiles", exact: true }).waitFor();
+    try { await page.getByRole("heading", { name: "Deepwork Profiles", exact: true }).waitFor(); }
+    catch (error) {
+      report.preflight = await page.evaluate(nativeClientPreflight);
+      report.activationFailures = report.preflight.entries.filter(entry => entry.startupError !== undefined);
+      throw error;
+    }
     await page.evaluate(() => window.__dsmmUiContext.root.get("connection").reconnect());
     await page.waitForFunction(() => document.querySelector(".dsmm-profiles")?.getAttribute("aria-busy") === "false");
     report.preflight = await page.evaluate(nativeClientPreflight); assert.deepEqual(report.preflight.missingServices, []);
@@ -226,27 +231,14 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.deepEqual(await readFile(profileStorage.pointerPath), pointerBefore);
     report.cas = { future: { code: "conflict", beforeSha256: digest(pointerBefore), afterSha256: digest(await readFile(profileStorage.pointerPath)) } };
     report.checks.browserFutureApplyAndStaleCas = true;
-    report.stage = "current-session-apply";
+    await section.locator('[data-dsmm-zone="future-default"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidenceRoot, "profiles-1280.png") }); report.screenshots.push("profiles-1280.png");
+    report.stage = "children-panel";
     await page.evaluate(async id => {
       const reference = window.__dsmmUiContext.root.get("sessions").retain(id, { source: "mainView" });
       window.__dsmmStableOwnedReference = reference; await reference.ready;
     }, parent.id);
     await page.waitForFunction(id => window.__dsmmUiContext.root.get("uiSession").adapter.current.getSnapshot().key === id, parent.id);
-    await page.getByLabel("Current-session profile", { exact: true }).selectOption(profileId);
-    await action("Apply profile to current session").click();
-    await section.getByText("Applied the saved revision to this session only. Global default and existing children were not changed.", { exact: true }).waitFor();
-    const applied = await runtime.getSession(parent); assert.equal(applied.selection.selectedId, profileId); assert.notEqual(applied.admissionEpoch, parentAdmission.epoch);
-    assert.equal(parent.options.model, "native-root"); assert.equal(runtime.admission(child), originalChildAdmission);
-    const sessionArgs = report.nativeCalls.findLast(row => row.endpoint === "dsmmProfiles/selectSession").args;
-    const sidecar = join(profileStorage.stateDir, ".sessions", `${digest(parent.id)}.json`), sidecarBefore = await readFile(sidecar);
-    await assert.rejects(invoke("dsmmProfiles", "selectSession", sessionArgs), error => gateway.wireStream.failure(error).details?.code === "conflict");
-    assert.equal(runtime.admission(parent).epoch, applied.admissionEpoch); assert.deepEqual(await readFile(sidecar), sidecarBefore);
-    assert.deepEqual(await readFile(profileStorage.pointerPath), pointerBefore); assert.deepEqual(await readFile(capturePath), captureBefore);
-    report.cas.current = { code: "conflict", epoch: applied.admissionEpoch, beforeSha256: digest(sidecarBefore), afterSha256: digest(await readFile(sidecar)) };
-    report.checks.browserCurrentApplyAndStaleCas = true;
-    await section.locator('[data-dsmm-zone="future-default"]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidenceRoot, "profiles-1280.png") }); report.screenshots.push("profiles-1280.png");
-    report.stage = "children-panel";
     const panel = page.locator(".dsmm-children"); await panel.getByRole("heading", { name: "Deepwork children", exact: true }).waitFor();
     await panel.getByRole("button", { name: "Refresh", exact: true }).click();
     await panel.getByRole("region", { name: "Direct children", exact: true }).getByText("Stable native captured reviewer", { exact: true }).waitFor();
@@ -267,6 +259,19 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     report.native.messageObservation = { childId: observed.id, originalChildEpoch: observed.evidence.originalAdmissionEpoch, liveModel: observed.routeComparison.liveRoute.route.model,
       acceptedNativeReviewerRequestsWithMessage: delivered.length, captureAfterSha256: digest(await readFile(capturePath)) };
     report.checks.browserChildrenNativeMessage = true;
+    report.stage = "current-session-apply";
+    await page.getByLabel("Current-session profile", { exact: true }).selectOption(profileId);
+    await action("Apply profile to current session").click();
+    await section.getByText("Applied the saved revision to this session only. Global default and existing children were not changed.", { exact: true }).waitFor();
+    const applied = await runtime.getSession(parent); assert.equal(applied.selection.selectedId, profileId); assert.notEqual(applied.admissionEpoch, parentAdmission.epoch);
+    assert.equal(parent.options.model, "native-root"); assert.equal(runtime.admission(child), originalChildAdmission);
+    const sessionArgs = report.nativeCalls.findLast(row => row.endpoint === "dsmmProfiles/selectSession").args;
+    const sidecar = join(profileStorage.stateDir, ".sessions", `${digest(parent.id)}.json`), sidecarBefore = await readFile(sidecar);
+    await assert.rejects(invoke("dsmmProfiles", "selectSession", sessionArgs), error => gateway.wireStream.failure(error).details?.code === "conflict");
+    assert.equal(runtime.admission(parent).epoch, applied.admissionEpoch); assert.deepEqual(await readFile(sidecar), sidecarBefore);
+    assert.deepEqual(await readFile(profileStorage.pointerPath), pointerBefore); assert.deepEqual(await readFile(capturePath), captureBefore);
+    report.cas.current = { code: "conflict", epoch: applied.admissionEpoch, beforeSha256: digest(sidecarBefore), afterSha256: digest(await readFile(sidecar)) };
+    report.checks.browserCurrentApplyAndStaleCas = true;
     report.stage = "browser-same-run-background";
     let enteredStream;
     const entered = new Promise(settle => { enteredStream = settle; });
@@ -346,7 +351,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
       const integration = ctx.get("dsmmRuntimeIntegration");
       if (!await cleanup(() => integration.revokeBeforeDispose(handle.agent, async () => {
         const subagents = ctx.get("subagents"), children = await subagents.listChildren(handle.agent.id);
-        await subagents.drainContinuableChildren(handle.agent, children.filter(row => row.mode === "continuable").map(row => row.id)); await handle.dispose();
+        await subagents.drainChildren(handle.agent, children.filter(row => row.mode === "continuable").map(row => row.id)); await handle.dispose();
       }))) agentsDisposed = false;
     }
     report.cleanup.nativeAgentsDisposed = agentsDisposed && ctx.get("agents").list().length === 0;

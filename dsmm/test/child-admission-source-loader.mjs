@@ -8,6 +8,7 @@ const sdkAnchor = process.env.DSMM_TEST_DSH_ENTRY === undefined ? new URL("../pa
 const sdk = createRequire(sdkAnchor);
 const ts = project("typescript");
 const source = new URL("../src/", import.meta.url).href;
+const compiled = new URL("../lib/", import.meta.url).href;
 let resolvingPeer = false;
 
 // Test-owned in-memory source compilation: no shared lib writes or SDK modifications.
@@ -20,7 +21,8 @@ registerHooks({
       finally { resolvingPeer = false; }
     }
     if (context.parentURL !== undefined && specifier.startsWith(".")) {
-      const url = new URL(specifier, context.parentURL);
+      let url = new URL(specifier, context.parentURL);
+      if (url.href.startsWith(compiled)) url = new URL(source + url.href.slice(compiled.length));
       if (url.href.startsWith(source) && url.pathname.endsWith(".js")) {
         url.pathname = url.pathname.slice(0, -3) + ".ts";
         if (existsSync(fileURLToPath(url))) return { url: url.href, shortCircuit: true };

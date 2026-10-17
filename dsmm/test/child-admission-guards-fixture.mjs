@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { childFixture, gate, accepted } from "./child-admission-native-fixture.mjs";
-import { NativeChildEvidenceReader, legacyEvidenceFromNativeFacts } from "../src/native-child-evidence.ts";
-import { installLegacyChildToolPolicy, LegacyChildToolPolicy } from "../src/legacy-child-policy.ts";
 import { projectChildAdmissionEvidence } from "../src/child-admission.ts";
 import { snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
+import { apply, createDsmmHostPlugin } from "../src/index.ts";
+
+async function nativeLogBytes(directory, prefix = "") {
+  const records = {};
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name), relative = join(prefix, entry.name);
+    if (entry.isDirectory()) Object.assign(records, await nativeLogBytes(path, relative));
+    else if (entry.name.endsWith(".jsonl")) records[relative] = await readFile(path);
+  }
+  return records;
+}
 
 const [phase, root] = process.argv.slice(2);
 const f = await childFixture(root);
@@ -135,7 +144,7 @@ try {
     const old = child;
     const oldTicket = f.bridge.authority.acquireParentTicket(child);
     f.bridge.authority.revokeParent(child, "owned-drain");
-    await f.native.drainContinuableChildren(parent, [old.id]);
+    await f.native.drainChildren(parent, [old.id]);
     assert.equal(f.ctx.agents.get(old.id), undefined); assert.equal(oldTicket.signal.aborted, true);
     const entered = gate(), held = gate();
     const detach = f.ctx.on("agent/created", async ({ agent }) => {
@@ -169,7 +178,7 @@ try {
     await assert.rejects(f.native.sendMessage(parent, grandchild.id, message("root cannot borrow adjacency"), { signal: signal() }), denied);
     assert.equal(accepted(grandchild).length, count);
     f.bridge.authority.revokeParent(builder, "owned-drain");
-    await f.native.drainContinuableChildren(parent, [builder.id, child.id]);
+    await f.native.drainChildren(parent, [builder.id, child.id]);
     assert.equal(builderTicket.signal.aborted, true);
     const entered = gate(), held = gate();
     f.adapter.beforeStream = async options => { if (options.model === "builder-original") { entered.release(); await held.promise; } };
@@ -207,40 +216,50 @@ try {
     await writeFile(path, bytes);
     assert.equal((await f.bridge.authority.resolveChildEvidence(ticket, child.id, signal())).childSessionId, child.id);
     } finally { held.release(); f.adapter.beforeStream = undefined; }
-  } else if (phase === "legacy-parameters") {
-    const nativeTicket = f.native.authority.acquireParentTicket(parent);
-    const reader = new NativeChildEvidenceReader(f.ctx, ticket => f.native.authority.assertTicket(ticket), f.ctx.sessionQuery);
-    const evidence = legacyEvidenceFromNativeFacts(await reader.read(nativeTicket, child.id, signal()));
-    const readDefinition = child.ctx.tools.get("read", child);
-    let parentQueries = 0;
-    const collaborators = {
-      classifyTool(name) {
-        if (name !== "read") return undefined;
-        return { kind: "read", definition: readDefinition, assertArguments(args) { if (Object.keys(args).length) throw new Error("Unproven read parameter"); } };
-      },
-      assertParentTool(exactParent, name, args, definition) { parentQueries++; assert.equal(exactParent, parent); assert.equal(parent.ctx.tools.get(name, parent), definition); },
-    };
-    assert.equal((await f.execute(child, "read")).isError, false);
-    const toolPolicy = new LegacyChildToolPolicy(evidence, parent, child, collaborators);
-    const detach = installLegacyChildToolPolicy(evidence, parent, child, collaborators);
-    const bodies = f.bodies.read;
-    assert.deepEqual(toolPolicy.denial("read", {}, child.ctx.tools), { field: "tool-filter", code: "unverified" });
-    assert.equal((await f.execute(child, "read")).isError, true);
-    assert.equal(f.bodies.read, bodies);
-    assert.deepEqual(toolPolicy.denial("read", { command: "unknown" }, child.ctx.tools), { field: "tool-filter", code: "missing-evidence" });
-    assert.equal((await f.execute(child, "read", { command: "not part of the audited read contract" })).isError, true);
-    assert.equal(f.bodies.read, bodies);
-    const releaseParentRestriction = parent.ctx.tools.restrict({ deny: ["read"] });
-    assert.deepEqual(toolPolicy.denial("read", {}, child.ctx.tools), { field: "tool-filter", code: "unverified" });
-    assert.equal((await f.execute(child, "read")).isError, true); assert.equal(f.bodies.read, bodies);
-    releaseParentRestriction();
-    const remove = child.ctx.tools.register({ ...readDefinition, async execute() { f.bodies.read++; return "replacement body"; } });
-    assert.equal((await f.execute(child, "read")).isError, true); assert.equal(f.bodies.read, bodies);
-    remove(); detach();
-    assert.equal(parentQueries, 0, "A parent permission query never substitutes for a registered leased read invocation");
-    const restored = await f.execute(child, "read");
-    assert.equal(restored.isError, false); assert.equal(restored.value, "useful permitted read");
-    assert.equal(f.bodies.read, bodies + 1);
+  } else if (phase === "unsupported-admission") {
+    const id = child.id, original = f.runtime.admission(child);
+    const path = join(f.runtime.childCaptureStore.stateDir, ".children", "v1", `${createHash("sha256").update(id).digest("hex")}.json`);
+    const currentBytes = await readFile(path), envelope = JSON.parse(currentBytes);
+    await f.native.drainChildren(parent, [id]);
+    assert.equal(f.ctx.agents.get(id), undefined);
+    const logs = await nativeLogBytes(join(root, "sessions"));
+    assert.ok(Object.keys(logs).length > 0);
+    const calls = f.adapter.calls.length, bodies = { ...f.bodies };
+    const ticket = f.bridge.authority.acquireParentTicket(parent);
+    const unsupported = { code: "UNSUPPORTED_CAPABILITY" };
+    for (const version of [1, 2]) {
+      const capture = structuredClone(envelope.capture);
+      capture.version = version; delete capture.delegationMode;
+      if (version === 1) {
+        delete capture.modelParameterPolicy;
+        delete capture.invocation.requestedRoute; delete capture.invocation.effortSource;
+      }
+      const bytes = JSON.stringify({ version: 1, capture, revision: createHash("sha256").update(JSON.stringify(capture)).digest("hex") });
+      await writeFile(path, bytes);
+      await assert.rejects(f.bridge.authority.resolveChildEvidence(ticket, id, signal()), unsupported);
+      await assert.rejects(f.native.sendMessage(parent, id, message("unsupported capture must not resume"), { signal: signal() }), unsupported);
+      assert.equal(await readFile(path, "utf8"), bytes);
+      assert.deepEqual(await nativeLogBytes(join(root, "sessions")), logs);
+    }
+    await unlink(path);
+    await assert.rejects(f.bridge.authority.resolveChildEvidence(ticket, id, signal()), unsupported);
+    await assert.rejects(f.native.sendMessage(parent, id, message("missing capture must not synthesize authority"), { signal: signal() }), unsupported);
+    await assert.rejects(readFile(path), { code: "ENOENT" });
+    assert.deepEqual(await nativeLogBytes(join(root, "sessions")), logs);
+    assert.equal(f.ctx.agents.get(id), undefined);
+    assert.equal(f.adapter.calls.length, calls); assert.deepEqual(f.bodies, bodies);
+    const legacy = { version: 1, mode: "legacy-conservative", childSessionId: id, parentSessionId: parent.id,
+      role: "dsmm-reviewer", route: { provider: "fixture", model: "reviewer-original" }, depth: 1,
+      provenFields: ["lineage", "role", "route"], limitations: [] };
+    assert.throws(() => f.policy.assertChildDelivery(ticket, id, legacy), unsupported);
+    assert.equal(f.runtime.admission(child), original);
+    let callbacks = 0;
+    const startup = { experimentalLegacyRead: { startup: { captureClosedComposition() { callbacks++; } } } };
+    assert.throws(() => createDsmmHostPlugin(startup), { code: "unavailable" });
+    assert.throws(() => apply(f.ctx, {}, startup), { code: "unavailable" });
+    assert.equal(callbacks, 0);
+    assert.deepEqual(await nativeLogBytes(join(root, "sessions")), logs);
+    await writeFile(path, currentBytes);
   } else throw new Error("Unknown native guard phase");
 } finally { if (!fixtureDisposed) await f.dispose(); }
 console.log(JSON.stringify({ phase, shutdown: true }));

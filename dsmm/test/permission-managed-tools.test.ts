@@ -26,13 +26,19 @@ import { PermissionRefusal } from "../src/permission-control.ts";
 import { FixedConfigFileStore } from "../src/config-file-store.ts";
 import { profileStoreFilePrimitives } from "../src/profile-store.ts";
 import { DsmmProfileError } from "../src/profiles.ts";
-import { deferred } from "./permission-fixture.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 
 useIsolatedDshEnvironment();
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(fulfill => { resolve = fulfill; });
+  return { promise, resolve };
+}
 const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-tools"));
 const { ApprovalService, setApprovalPolicy } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-user-approval")).href);
 const { FileSystem, FsError } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-fs")).href);
+const native = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-agent-preset-registry"));
+const WorkingDirectory = await import(pathToFileURL(native.resolve("@deepseek-ai/dsh-working-directory")).href);
 const webSdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-tool-web"));
 const { WebRuntime } = await import(pathToFileURL(webSdk.resolve("@deepseek-ai/dsh-web")).href);
 
@@ -55,6 +61,7 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
   };
   class OwnedFs extends FileSystem {
     get sandboxMode() { return sandboxFs ? "workspace-write" : undefined; }
+    processPath(target: NativePermissionFsTarget) { return filePath(target); }
     async resolve(path: string, options: { cwd?: string; signal?: AbortSignal } = {}) {
       options.signal?.throwIfAborted(); const canonical = resolve(options.cwd ?? workspace, path);
       let target = targets.get(canonical);
@@ -87,6 +94,7 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
   try {
     ctx.provide("profileContext", { home, dir: directory });
     for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [OwnedFs], [AgentLoop, {}]] as const) await ctx.plugin(plugin as never, config as never).await();
+    await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
     ctx.provide("sandboxPolicy", { resolve() { return { mode: fullAccess ? "danger-full-access" : "workspace-write", workspaceRoot: workspace }; } });
     await ctx.plugin(WebRuntime, {}).await();
     ctx.web.registerSearchProvider({ id: "owned-search", available: () => true,
@@ -101,6 +109,8 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
     const fsFiber = ctx.plugin(ManagedFs, {}); await fsFiber.await();
     const searchFiber = ctx.plugin(ManagedSearch, { sampleOverCapGlobResults: false }); await searchFiber.await();
     const webFiber = ctx.plugin(ManagedWeb, { fetch: true }); await webFiber.await();
+    for (const fiber of [fsFiber, searchFiber, webFiber]) assert.equal(fiber.state, 2);
+    for (const name of ["read", "write", "edit", "glob", "grep", "web_search", "web_fetch"]) assert.ok(ctx.tools.get(name), `${name} must be registered before permission checks`);
     const create = async (parentAgent?: Agent) => {
       const handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), ...parentAgent === undefined ? {} : { parentAgent }, meta: { cwd: workspace, ...parentAgent === undefined ? {} : { origin: "subagent" as const } }, agentOptions: { provider: "unused-local", model: "unused-local" } });
       handles.push(handle); handle.agent.session.append("turn/start", { turn: 1 }); return handle.agent;

@@ -124,7 +124,7 @@ test("Core permission enabled field uses ordinary Global/native Save and preserv
   for (const native of [false, true]) {
     const f = fixture(native ? {} : { permissionControl: policy }, native ? { permissionControl: policy } : {});
     const c = native ? new DeploymentController(f.remote, "profile", "dsmm") : f.controller, mutations: unknown[] = [];
-    if (native) { f.snapshot.nativeForm = { base: {}, user: f.snapshot.profile }; c.attachForm({ state: { status: "ready", mode: "host", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } }); }
+    if (native) { f.snapshot.nativeForm = { base: {}, user: f.snapshot.profile }; c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } }); }
     try {
       await c.refresh();
       const tree = renderTree(DeploymentPage({ core: c, remote: f.remote, view: "page", t: key => key }));
@@ -234,7 +234,7 @@ test("Profile advanced fields inherit global and native base members but persist
   const f = fixture(global, mergeConfigLayers(validateSparseConfig(base), validateSparseConfig(user)) as Record<string, unknown>, base);
   f.snapshot.nativeForm = { base, user };
   const c = new DeploymentController(f.remote, "profile", "dsmm"), mutations: unknown[] = [];
-  c.attachForm({ state: { status: "ready", mode: "host", writable: true, revision: 0, value: {}, base, user }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } });
+  c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: {}, base, user }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } });
   try {
     await c.refresh(); advancedInput(c, f.remote)('{"dsmm-reviewer":{"primary":{"model":"changed"}}}'); await c.save();
     assert.equal(c.getSnapshot().saved, true);
@@ -248,7 +248,7 @@ test("native Global and profile controls omit LSP while unrelated UI saves prese
   const stored = { enabled: true, serverName: "retained-server", command: "retained-command", args: ["retained-argument"] };
   const f = fixture({ lsp: stored, defaultActive: true }, { lsp: stored, defaultActive: true }, {});
   f.snapshot.nativeForm = { base: {}, user: structuredClone(f.snapshot.profile) };
-  const nativeState = { status: "ready" as const, mode: "host" as const, writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile };
+  const nativeState = { status: "ready" as const, writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile };
   const mutations: unknown[] = [];
   const form = { state: nativeState, mutate: async (ops: unknown, revision?: number) => { assert.equal(revision, 0); mutations.push(ops); return true; } };
   const profile = new DeploymentController(f.remote, "profile", "dsmm");

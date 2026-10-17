@@ -5,8 +5,6 @@ import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
 import type { ChildAdmissionCompletion } from "./child-admission-contract.js";
 import type { ChildAdmissionEvidence } from "./child-capture.js";
 import type { DshAgent, DshContext } from "./dsh-types.js";
-import type { LegacyCapabilityCollaborators } from "./legacy-child-policy.js";
-import type { LegacyReadIntegrationChild, LegacyReadTrustedStartup } from "./legacy-read-integration.js";
 import type { DsmmProfileRuntime } from "./profile-runtime.js";
 import type { DsmmInvocationView, SubagentRuntimeAdmissionView } from "./profile-types.js";
 import type { DsmmRolePolicy } from "./role-policy.js";
@@ -22,17 +20,10 @@ export declare function managedAgentContext(ctx: Context, controlledParent: (age
 export declare function admittedAgentContext(ctx: DshContext, runtime: DsmmProfileRuntime): DshContext;
 export declare function runtimeAdmissionView(ctx: Context): SubagentRuntimeAdmissionView;
 /** Capability projection only. Admission objects and A's CAS/maintenance methods remain untouched. */
-export declare function publicProfileRuntime(runtime: DsmmProfileRuntime, ctx: Context, integration?: {
-    changeConfiguration(reason: string, mutate: () => Promise<void>): Promise<void>;
-}): DsmmProfileRuntime;
-/** Actual programmatic Host collaborators; never profile, YAML or RPC input. */
-export interface DsmmHostStartupOptions {
-    /** Experimental, cold-only read composition. Disabled in the default MAIN. */
-    readonly experimentalLegacyRead?: {
-        readonly startup: LegacyReadTrustedStartup;
-        readonly classifyChildReport?: LegacyCapabilityCollaborators["classifyTool"];
-    };
-}
+export declare function publicProfileRuntime(runtime: DsmmProfileRuntime, ctx: Context): DsmmProfileRuntime;
+/** No optional compatibility composition is supported by the current Host. */
+export type DsmmHostStartupOptions = Readonly<Record<string, never>>;
+export declare function assertSupportedHostStartup(startup: DsmmHostStartupOptions): void;
 interface NativeDeliveryEvidence {
     readonly parent: Agent;
     readonly childId: SessionId;
@@ -56,29 +47,7 @@ export declare function integrateSubagentRuntime(ctx: Context, settings: DsmmSet
     owner: object;
     registry: RoleRunRegistry<DsmmRoleRunCapture, DsmmInvocationView>;
     runtime: DsmmSubagentRuntime<DsmmProfileAdmission, ChildAdmissionEvidence | NativeDeliveryEvidence>;
-    legacyRead: {
-        core: import("./legacy-read-integration.js").LegacyReadCoreConsumption | undefined;
-        host: {
-            composition: import("./legacy-read-composition.js").LegacyReadComposition;
-            attachChild(parent: Agent, child: Agent, evidence: import("./child-capture.js").LegacyChildEvidence, definition: import("@deepseek-ai/dsh-tools").ToolDefinition): import("./legacy-read-proxy.js").LegacyReadProxy;
-            releaseAfterChildDispose(child: Agent): Promise<void>;
-            publishCheckedGeneration(): void;
-            dispose(nativeDrain: () => Promise<void>): Promise<void>;
-        };
-        legacyCapabilities: LegacyCapabilityCollaborators;
-        classifyLegacyTool: (name: string, tools: import("@deepseek-ai/dsh-tools").ToolRuntime, child: Agent) => import("./legacy-child-policy.js").LegacyToolCapability | undefined;
-        view(): import("./legacy-read-integration.js").LegacyReadIntegrationView;
-        attachChild(parent: Agent, child: Agent, signal: AbortSignal): Promise<LegacyReadIntegrationChild>;
-        publishCheckedGeneration(): void;
-        change(reason: string, mutate: () => void | Promise<void>): Promise<void>;
-        removeProxy(child: Agent): Promise<void>;
-        revokeChildBeforeDispose(child: Agent, nativeDispose: () => void | Promise<void>): Promise<void>;
-        whenChildRetired(child: Agent): Promise<void>;
-        dispose(nativeDrain: () => Promise<void>): Promise<void>;
-    } | undefined;
     admitLlmRequest(agent: Agent, signal: AbortSignal): Promise<import("./host-llm.js").DsmmLlmAdmission | undefined>;
-    afterChildAdmission(agent: Agent, signal?: AbortSignal): Promise<void>;
-    changeConfiguration(reason: string, mutate: () => void | Promise<void>): Promise<void>;
     dispose(nativeDrain: () => Promise<void>): Promise<void>;
     onAdmissionGuardsInstalled(): void;
     continueStartup(complete: (signal: AbortSignal) => Promise<void>, callerSignal?: AbortSignal): Promise<void>;

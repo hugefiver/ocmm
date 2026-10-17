@@ -21,7 +21,6 @@ type DshAgent = Omit<PackageDshAgent, "ctx">;
 
 test("public home peer resolves from the declared filesystem anchor and honors host > env > default", () => {
   const sdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-skill-filesystem"));
-  assert.equal(sdk("@deepseek-ai/dsh-skill-filesystem/package.json").peerDependencies["@deepseek-ai/dsh-home-paths"], "0.2.0-rc.2");
   const official = sdk("@deepseek-ai/dsh-home-paths") as { resolveDshHome: typeof resolveDshHome };
   assert.equal(resolveDshHome("explicit", { DSH_HOME: "environment" }), resolve("explicit"));
   assert.equal(resolveDshHome(undefined, { DSH_HOME: "environment" }), resolve("environment"));

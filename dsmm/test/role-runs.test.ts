@@ -5,6 +5,8 @@ import { gate, roleRunFixture, SubagentError } from "./role-run-fixture.ts";
 
 const unauthorized = (error: unknown) => error instanceof SubagentError && error.code === "UNAUTHORIZED";
 const unsupported = (error: unknown) => error instanceof SubagentError && error.code === "UNSUPPORTED_CAPABILITY";
+const nativeResultFault = (error: unknown, fault: unknown) => error instanceof AggregateError
+  && error.errors[0] === fault && error.errors[1] instanceof SubagentError && error.errors[1].cause === fault;
 
 test("foreground holder returns the complete native ContentBlocks and releases the one-shot child once", { timeout: 15000 }, async () => {
   const f = await roleRunFixture();
@@ -18,8 +20,8 @@ test("foreground holder returns the complete native ContentBlocks and releases t
     assert.equal(invocation.toolCallId, request.toolCallId);
     assert.equal(invocation.capture, request.capture);
     assert.equal(invocation.projection, request.projection);
-    assert.equal(invocation.runId, f.runs[0].id);
-    assert.equal(invocation.childId, f.runs[0].localAgent!.id);
+    assert.equal(invocation.runId, f.runs[0].childId);
+    assert.equal(invocation.childId, f.runs[0].childId);
     assert.equal(invocation.mode, "one-shot");
     assert.equal(f.registry.get(f.parent, f.owner, invocation), holder);
     assert.deepEqual(f.registry.list(f.parent, f.owner), [holder]);
@@ -87,7 +89,7 @@ test("native job controller preflight rejection keeps the run, caller cancellati
     assert.throws(() => holder.background(f.address(holder)));
     assert.equal(holder.state, "running");
     assert.equal(f.ctx.jobs.list(f.parent.id).length, 0);
-    assert.equal(f.ctx.agents.get(holder.invocation!.childId!), f.runs[0].localAgent);
+    assert.equal(f.ctx.agents.get(holder.invocation!.childId!)?.id, f.runs[0].childId);
     caller.abort();
     await assert.rejects(holder.foreground, (error: unknown) => error instanceof SubagentError && error.code === "ABORTED");
     assert.equal(holder.background(f.address(holder)).status, "cancelled");
@@ -105,7 +107,7 @@ test("starting call cannot transfer and cancellation before publication cannot r
       reached.release();
       await paused.promise;
       f.counters.starts++;
-      try { return await f.runtime.start("spawn", { parent: f.parent, prompt: [], signal, maxDepth: 3 }); }
+      try { return await f.runtime.startActivation({ provider: "spawn", label: "starting", delivery: "caller", request: { parent: f.parent, prompt: [], maxDepth: 3 }, signal }); }
       catch (error) { nativeFailure = error; throw error; }
     } });
     await reached.promise;
@@ -152,7 +154,7 @@ test("cancellation before handoff waits for native disposal quiescence and never
     await holder.ready;
     await f.adapter.entered.promise;
     const disposing = gate(), released = gate();
-    f.runs[0].localAgent!.ctx.effect(() => async () => { disposing.release(); await released.promise; });
+    f.ctx.agents.get(f.runs[0].childId)!.ctx.effect(() => async () => { disposing.release(); await released.promise; });
     let returned = false;
     void holder.foreground.then(() => { returned = true; }, () => { returned = true; });
     caller.abort();
@@ -256,7 +258,7 @@ for (const background of [false, true]) {
         const { holder, caller } = f.start();
         await holder.ready;
         await f.adapter.entered.promise;
-        const child = f.runs[0].localAgent!;
+        const child = f.ctx.agents.get(f.runs[0].childId)!;
         const snapshot = child.session.snapshotEvents.bind(child.session);
         const spy = mock.method(child.session, "snapshotEvents", (...args: Parameters<typeof snapshot>) => {
           if (args[0] !== undefined) throw fault;
@@ -265,17 +267,17 @@ for (const background of [false, true]) {
         try {
           const transition = background ? holder.background(f.address(holder)) : undefined;
           const pendingDrain = f.registry.drain();
-          const checkedDrain = assert.rejects(pendingDrain, (error: unknown) => error instanceof AggregateError && error.errors.length === 1 && error.errors[0] === fault);
+          const checkedDrain = assert.rejects(pendingDrain, (error: unknown) => error instanceof AggregateError && error.errors.length === 1 && nativeResultFault(error.errors[0], fault));
           if (cancelled) {
             // The caller relay is intentionally gone after native handoff.
             if (transition !== undefined && "receipt" in transition) f.ctx.jobs.kill(transition.receipt.jobId, f.parent.id);
             else caller.abort();
           } else f.adapter.output.release();
           await checkedDrain;
-          await assert.rejects(holder.drained, (error: unknown) => error === fault);
+          await assert.rejects(holder.drained, (error: unknown) => nativeResultFault(error, fault));
           if (transition !== undefined && "receipt" in transition) {
             assert.equal((await f.ctx.jobs.wait(transition.receipt.jobId, 5000, f.parent.id)).status, "failed");
-          } else await assert.rejects(holder.foreground, (error: unknown) => error === fault);
+          } else await assert.rejects(holder.foreground, (error: unknown) => nativeResultFault(error, fault));
           assert.deepEqual(f.counters, { starts: 1, children: 1, resultReads: 1, disposals: 1 });
           assert.deepEqual(f.ctx.agents.list(), [f.parent]);
         } finally { spy.mock.restore(); }
@@ -299,12 +301,12 @@ test("drain accepts confirmed native cancellation only after successful one-shot
     });
     try {
       const pendingDrain = f.registry.drain();
-      const checkedDrain = assert.rejects(pendingDrain, (error: unknown) => error instanceof AggregateError && error.errors.length === 1 && error.errors[0] === fault);
+      const checkedDrain = assert.rejects(pendingDrain, (error: unknown) => error instanceof AggregateError && error.errors.length === 1 && nativeResultFault(error.errors[0], fault));
       cancelled.caller.abort();
       failing.caller.abort();
       await checkedDrain;
       await assert.rejects(cancelled.holder.drained, (error: unknown) => error instanceof SubagentError && error.code === "ABORTED");
-      await assert.rejects(failing.holder.drained, (error: unknown) => error === fault);
+      await assert.rejects(failing.holder.drained, (error: unknown) => nativeResultFault(error, fault));
       assert.deepEqual(f.counters, { starts: 2, children: 2, resultReads: 2, disposals: 2 });
     } finally { spy.mock.restore(); }
   } finally { await f.dispose(); }

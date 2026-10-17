@@ -4,19 +4,19 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { Context } from "@deepseek-ai/cordis";
-import { defineTool } from "@deepseek-ai/dsh-tools";
 import { LlmError, ReasoningEffortId, ToolCallId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { StreamChunk } from "@deepseek-ai/dsh-llm";
 import { deliveryFixture, carrierPlugin, gate } from "./delivery-runtime-fixture.ts";
+import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 import type { DshAgent, DshContext } from "../src/dsh-types.js";
 import type { DsmmProfileAdmission, DsmmSettingsGetter, DsmmPluginConfig } from "../src/settings.js";
 import { freezeSettings, resolveConfig } from "../src/settings.js";
-import type { ChildAdmissionEvidence, LegacyChildEvidence } from "../src/child-capture.js";
+import type { ChildAdmissionEvidence } from "../src/child-capture.js";
 import type { ParentAdmissionTicket } from "../src/child-admission-contract.js";
-import { DsmmRolePolicy, conservativeLegacyAdmission } from "../src/role-policy.js";
+import { DsmmRolePolicy } from "../src/role-policy.js";
 import { registerHeadlessRoleTools, callableRoleInventory, admittedCallableRoleInventory, roleInvocationObservation, roleRouteComparison } from "../src/role-subagents.js";
 import type { DsmmRoleRunCapture } from "../src/role-subagents.js";
-import { registerRoleProviders, roleFromProviderName, roleProviderName } from "../src/role-providers.js";
+import { registerRoleProviders, roleProviderName } from "../src/role-providers.js";
 import { registerModelRouting } from "../src/model-routing.js";
 import { capturedRoleInvocation } from "../src/role-invocation.js";
 import type { DsmmInvocationView } from "../src/profile-types.js";
@@ -26,13 +26,8 @@ import { registerSafetyGuards } from "../src/guards.js";
 import { DSMM_ROLES } from "../src/roles.js";
 import type { DsmmSubagentRuntime } from "../src/subagent-runtime.js";
 import DsmmSessionPersistence from "../src/session-persistence.js";
-import NativeJsonlPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
-import * as Spawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
-import { SubagentError, delegationDepthOf, foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
-import { childOwnedSessionEvents } from "../src/session-scope.js";
-import type { DsmmRoleId } from "../src/roles.js";
-import { installLegacyChildToolPolicy } from "../src/legacy-child-policy.js";
-import type { LegacyCapabilityCollaborators } from "../src/legacy-child-policy.js";
+import * as NativeJsonlPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import { SubagentError } from "@deepseek-ai/dsh-subagent";
 
 const epoch = () => randomBytes(32).toString("hex");
 function* call(name: string, args: unknown): Generator<StreamChunk> {
@@ -67,22 +62,15 @@ function pauseChild(f: Awaited<ReturnType<typeof roleFixture>>, model?: string) 
 }
 
 /** Real PUBLIC runtime, AgentRegistry, tools and adapter; resident original evidence is task-owned. */
-async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegistry?: boolean; opaqueRun?: boolean; jobs?: boolean; controller?: boolean; legacyTarget?: DsmmRoleId; legacyReport?: boolean } = {}) {
-  const f = await deliveryFixture({ bind: false, spawn: !options.opaqueRun, nativeControls: options.legacyReport });
-  let opaqueDisposals = 0;
-  if (options.opaqueRun) {
-    await f.ctx.plugin(Spawn, { providerName: "fixture-opaque-source" }).await();
-    const source = f.runtime.getProvider("fixture-opaque-source")!;
-    f.runtime.registerProvider({ ...source, name: "spawn", async start(request) {
-      const run = await source.start(request);
-      return { id: run.id, result: run.result, localAgent: undefined, dispose() {
-        assert.ok(run.localAgent); assert.throws(() => f.runtime.authority.acquireParentTicket(run.localAgent!));
-        assert.equal(f.ctx.agents.get(run.localAgent!.id), run.localAgent); opaqueDisposals++;
-        return run.dispose();
-      } };
-    } });
-  }
-  const persistence = [...f.ctx.registry.values()].find(registration => registration.callback === NativeJsonlPersistence)!;
+async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegistry?: boolean; observeDisposal?: boolean; jobs?: boolean; controller?: boolean } = {}) {
+  const f = await deliveryFixture({ bind: false });
+  let nativeDisposals = 0;
+  if (options.observeDisposal) f.ctx.on("agent/created", ({ agent }) => {
+    if (agent.session.header.origin === "subagent") agent.ctx.effect(() => () => {
+      assert.throws(() => f.runtime.authority.acquireParentTicket(agent)); nativeDisposals++;
+    });
+  }, { global: true });
+  const persistence = [...f.ctx.registry.values()].find(registration => registration.callback === NativeJsonlPersistence.apply)!;
   assert.ok(persistence); assert.equal([...persistence.fibers].length, 1);
   await [...persistence.fibers][0].dispose();
   await f.ctx.plugin(DsmmSessionPersistence, { root: join(f.root, "role-sessions"), compression: "none" }).await();
@@ -100,19 +88,9 @@ async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegi
   getSettings.admission = agent => { const admission = agent === undefined ? undefined : admissions.get(agent); assert.ok(admission); return admission; };
   const mode = new DeepworkModeController(f.ctx as unknown as DshContext);
   const policy = new DsmmRolePolicy(f.ctx as unknown as DshContext, getSettings, mode);
-  const nativeReport = f.ctx.tools.get("send_message");
-  const classifyLegacyTool: LegacyCapabilityCollaborators["classifyTool"] = (name, tools, child) => {
-    if (!options.legacyReport || name !== "send_message" || nativeReport === undefined || tools.get(name, child) !== nativeReport) return undefined;
-    return { kind: "child-report", definition: nativeReport, assertArguments(arguments_) {
-      assert.ok(typeof arguments_ === "object" && arguments_ !== null && !Array.isArray(arguments_));
-      const args = arguments_ as Record<string, unknown>;
-      assert.deepEqual(Object.keys(args).sort(), ["agent_id", "message"]);
-      assert.equal(args.agent_id, child.session.header.parentSession); assert.equal(typeof args.message, "string");
-    } };
-  };
   const completion = policy.configureAdmission({ nativeSubstrate: settings,
     async resolveOriginalEvidence(_ticket, id) { const evidence = originals.get(id); assert.ok(evidence); return evidence; },
-    revokeParent(agent, reason) { f.runtime.authority.revokeParent(agent as Agent, reason); }, classifyLegacyTool });
+    revokeParent(agent, reason) { f.runtime.authority.revokeParent(agent as Agent, reason); } });
   runtime.authority.bindPolicy(f.bindingScope, owner, {
     classifyParent: parent => managed.has(parent) ? "dsmm" : "native",
     async resolveChildEvidence(_ticket, id) { const evidence = originals.get(id); assert.ok(evidence); return evidence; },
@@ -129,31 +107,6 @@ async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegi
     }
     const parent = f.ctx.agents.get(agent.session.header.parentSession!)!;
     const ticket = f.runtime.authority.acquireParentTicket(parent) as unknown as ParentAdmissionTicket;
-    const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session) as Parameters<typeof foldSubagentDescriptor>[0]);
-    if (descriptor?.mode === "continuable" && roleFromProviderName(descriptor.provider) === options.legacyTarget) {
-      const evidence: LegacyChildEvidence = { version: 1, mode: "legacy-conservative", childSessionId: agent.id, parentSessionId: parent.id,
-        role: options.legacyTarget!, route: { provider: agent.options.provider!, model: agent.options.model!,
-          ...(agent.options.reasoningEffort === undefined ? {} : { reasoningEffort: agent.options.reasoningEffort }) },
-        depth: delegationDepthOf(agent), ...(descriptor.toolFilter === undefined ? {} : { toolFilter: {
-          ...(descriptor.toolFilter.allow === undefined ? {} : { allow: [...descriptor.toolFilter.allow] }),
-          ...(descriptor.toolFilter.deny === undefined ? {} : { deny: [...descriptor.toolFilter.deny] }) } }),
-        provenFields: ["lineage", "role", "route", "tool-filter"],
-        limitations: [{ field: "invocation-level", code: "missing-evidence", effect: "display-only" }] };
-      const admission = conservativeLegacyAdmission(evidence, ticket.admission, settings);
-      policy.validatePreparedRole(agent as unknown as DshAgent, parent as unknown as DshAgent, { evidence, admission, creation: false, retained: false });
-      admissions.set(agent, admission); originals.set(agent.id, evidence); managed.add(agent);
-      f.runtime.authority.registerParent(agent, admission as never, owner);
-      if (options.legacyReport) {
-        const dispose = installLegacyChildToolPolicy(evidence, parent, agent, { classifyTool: classifyLegacyTool,
-          assertParentTool(currentParent, name, arguments_, definition) {
-            assert.equal(currentParent, parent); assert.equal(name, "send_message"); assert.equal(definition, nativeReport);
-            classifyLegacyTool(name, agent.ctx.tools, agent)!.assertArguments(arguments_);
-            policy.assertChildDelivery(f.runtime.authority.acquireParentTicket(currentParent) as unknown as ParentAdmissionTicket, agent.id, evidence);
-          } });
-        agent.ctx.effect(() => dispose);
-      }
-      return;
-    }
     const prepared = await completion.prepare(agent as unknown as DshAgent, parent as unknown as DshAgent, ticket, ticket.signal);
     completion.validateRole(agent as unknown as DshAgent, parent as unknown as DshAgent, { ...prepared, retained: false });
     admissions.set(agent, prepared.admission); originals.set(agent.id, prepared.evidence); managed.add(agent);
@@ -199,10 +152,10 @@ async function roleFixture(config: DsmmPluginConfig = {}, options: { missingRegi
     f.runtime.authority.publishParentAdmission(parent, previous.epoch, next as never, () => admissions.set(parent, next));
     return next;
   };
-  return { ...f, runtime, settings, getSettings, policy, admissions, originals, missing, create, invoke, publish, runs, roleProvidersFiber, classifyLegacyTool, roleOwner: owner,
+  return { ...f, runtime, settings, getSettings, policy, admissions, originals, missing, create, invoke, publish, runs, roleProvidersFiber, roleOwner: owner,
     setChunks(value: typeof chunks) { chunks = value; },
     setDisposeFault(value: Error | undefined) { disposeFault = value; },
-    get opaqueDisposals() { return opaqueDisposals; },
+    get nativeDisposals() { return nativeDisposals; },
     async dispose() { runs.close("test-owner-disposed"); await runs.drain(); for (const agent of f.ctx.agents.list()) f.runtime.authority.revokeParent(agent, "test-owner-disposed"); await f.dispose(); } };
 }
 
@@ -254,24 +207,6 @@ for (const topology of ["per-role", "parameterized"] as const) {
   });
 }
 
-test("legacy execution route does not fabricate an original invocation capture while own request route remains observable", async () => {
-  const f = await roleFixture({ subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 } }, { legacyTarget: "dsmm-code-search" });
-  try {
-    f.ctx.tools.register(defineTool({ name: "read", description: "Audited native read fixture", parameters: {},
-      output: { schema: { type: "string" }, render: () => [] }, async execute() { return "useful read"; } }));
-    const root = await f.create();
-    const started = await f.runtime.startContinuable({ provider: roleProviderName("dsmm-code-search"), label: "Proven native legacy route",
-      signal: new AbortController().signal, request: { parent: root, prompt: [{ type: "text", text: "Useful legacy output" }],
-        agentOptions: { provider: "fixture", model: "legacy-execution", reasoningEffort: ReasoningEffortId("low") }, toolFilter: { allow: ["read"] }, maxDepth: 3 } });
-    const child = f.ctx.agents.get(started.childId)!; await child.whenIdle();
-    assert.equal(f.admissions.get(child)!.childCapture, undefined);
-    assert.ok(capturedRoleInvocation(child as unknown as DshAgent));
-    const comparison = roleRouteComparison(child);
-    assert.deepEqual(comparison.initialRoute, { status: "unknown", reason: "missing-invocation-capture" });
-    assert.deepEqual(comparison.liveRoute, { status: "known", source: "own-native-request-header", route: { provider: "fixture", model: "legacy-execution", reasoningEffort: "low" } });
-  } finally { await f.dispose(); }
-});
-
 test("admitted inventory follows exact registered enum and depth-capable providers rather than the merged tool name", async () => {
   const f = await roleFixture({ subagents: { toolTopology: "parameterized", maxDepth: 3 } });
   try {
@@ -300,55 +235,6 @@ test("admitted inventory follows exact registered enum and depth-capable provide
     assert.equal(tools.get("dsmm_role", root), undefined);
     assert.equal(inventory().some(entry => entry.name === "dsmm_role"), false);
   } finally { await f.dispose(); }
-});
-
-test("legacy audited native child report reaches only its direct parent through both execution guards", async () => {
-  const f = await roleFixture({ subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 } }, { legacyTarget: "dsmm-code-search", legacyReport: true });
-  let builder: Awaited<ReturnType<typeof f.runtime.start>> | undefined;
-  try {
-    const root = await f.create(), foreign = await f.create();
-    builder = await f.runtime.start(roleProviderName("dsmm-builder"), { parent: root, label: "Real direct parent", prompt: [{ type: "text", text: "Parent useful task" }], maxDepth: 3, signal: new AbortController().signal });
-    await builder.result; const parent = builder.localAgent!;
-    const started = await f.runtime.startContinuable({ provider: roleProviderName("dsmm-code-search"), label: "Legacy child report",
-      signal: new AbortController().signal, request: { parent, prompt: [{ type: "text", text: "Useful native legacy task" }],
-        agentOptions: { provider: "fixture", model: "legacy-report" }, toolFilter: { allow: ["send_message"] }, maxDepth: 3 } });
-    const child = f.ctx.agents.get(started.childId)!; await child.whenIdle();
-    const report = await f.invoke(child, "send_message", { agent_id: parent.id, message: "AUDITED_DIRECT_PARENT_REPORT" });
-    assert.equal(report.isError, false, JSON.stringify(report)); await parent.whenIdle();
-    const accepted = () => parent.session.snapshotEvents().filter(event => JSON.stringify(event).includes("AUDITED_DIRECT_PARENT_REPORT")).length;
-    assert.ok(accepted() > 0); const before = accepted();
-    for (const args of [{ agent_id: foreign.id, message: "FOREIGN_REFUSED" }, { agent_id: root.id, message: "ANCESTOR_REFUSED" },
-      { agent_id: child.id, message: "SELF_REFUSED" }, { message: "ENUMERATION_REFUSED" },
-      { agent_id: parent.id, message: "PROVIDER_ROUTE_REFUSED", provider: "untrusted", model: "route" }]) {
-      assert.equal((await f.invoke(child, "send_message", args)).isError, true);
-    }
-    assert.equal(accepted(), before);
-    await Promise.all([root.whenIdle(), foreign.whenIdle(), child.whenIdle(), parent.whenIdle()]);
-    for (const receiver of [root, foreign, child, parent]) {
-      assert.equal(receiver.session.snapshotEvents().some(event => JSON.stringify(event).includes("FOREIGN_REFUSED")
-        || JSON.stringify(event).includes("ANCESTOR_REFUSED") || JSON.stringify(event).includes("SELF_REFUSED")
-        || JSON.stringify(event).includes("ENUMERATION_REFUSED") || JSON.stringify(event).includes("PROVIDER_ROUTE_REFUSED")), false);
-    }
-    let replacementBodies = 0;
-    const replace = child.ctx.tools.register({ name: "send_message", description: "Unadmitted report replacement", parameters: {},
-      output: { schema: { type: "string" }, render: () => [] }, async execute() { replacementBodies++; return "not audited"; } });
-    assert.equal((await f.invoke(child, "send_message", { agent_id: parent.id, message: "REPLACEMENT_REFUSED" })).isError, true); assert.equal(replacementBodies, 0); replace();
-    let mutationBodies = 0;
-    for (const name of ["write", "pwsh", "subagent"]) {
-      const remove = child.ctx.tools.register({ name, description: "Refused legacy mutation or delegation", parameters: {},
-        output: { schema: { type: "string" }, render: () => [] }, async execute() { mutationBodies++; return "not permitted"; } });
-      assert.equal((await f.invoke(child, name, {})).isError, true); remove();
-    }
-    assert.equal(mutationBodies, 0);
-    const filtered = await f.runtime.startContinuable({ provider: roleProviderName("dsmm-code-search"), label: "No original report grant",
-      signal: new AbortController().signal, request: { parent, prompt: [{ type: "text", text: "Useful bounded legacy task" }],
-        agentOptions: { provider: "fixture", model: "legacy-report-filtered" }, toolFilter: { allow: [] }, maxDepth: 3 } });
-    const filteredChild = f.ctx.agents.get(filtered.childId)!; await filteredChild.whenIdle();
-    assert.equal((await f.invoke(filteredChild, "send_message", { agent_id: parent.id, message: "ORIGINAL_FILTER_DENIED" })).isError, true);
-    assert.equal(parent.session.snapshotEvents().some(event => JSON.stringify(event).includes("ORIGINAL_FILTER_DENIED")), false);
-    f.publish(parent, { roles: { ...f.settings.roles, "dsmm-code-search": false } });
-    assert.equal((await f.invoke(child, "send_message", { agent_id: parent.id, message: "CURRENT_PARENT_DENIED" })).isError, true);
-  } finally { if (builder !== undefined) await builder.dispose(); await f.dispose(); }
 });
 
 test("level/route native request headers are exact, omission equals normal, strict cannot override invocation effort, and root options stay native", async () => {
@@ -396,30 +282,23 @@ test("current named role denial is real at direct provider and generic spawn, wh
     assert.ok(f.adapter.calls.every(row => row.model === "old-child" && row.reasoningEffort === "low"));
     f.publish(root, { roles: { ...f.settings.roles, "dsmm-code-search": false } });
     await assert.rejects(f.runtime.sendMessage(root, id, [{ type: "text", text: "Denied new message" }], { signal: new AbortController().signal }), error => error instanceof Error && "code" in error && error.code === "UNAUTHORIZED");
-    await assert.rejects(f.runtime.start("dsmm-role-code-search", { parent: root, prompt: [], signal: new AbortController().signal }));
-    await assert.rejects(f.runtime.start("spawn", { parent: root, prompt: [], persona: "dsmm-code-search", signal: new AbortController().signal }));
+    await assert.rejects(f.runtime.startActivation({ provider: "dsmm-role-code-search", delivery: "caller", label: "Denied role", request: { parent: root, prompt: [] }, signal: new AbortController().signal }));
+    await assert.rejects(f.runtime.startActivation({ provider: "spawn", delivery: "caller", label: "Spoofed role", request: { parent: root, prompt: [], agentPreset: "dsmm-code-search" }, signal: new AbortController().signal }));
   } finally { await f.dispose(); }
 });
 
-test("read-only merged targets and conservative legacy native filters refuse write/shell bodies while preserving useful reads", async () => {
-  const f = await roleFixture({ subagents: { toolTopology: "parameterized", maxDepth: 3 } });
+test("read-only merged targets refuse write/shell bodies", async () => {
+  const f = await roleFixture({ subagents: { toolTopology: "parameterized", maxDepth: 3, enableRunInBackground: true, backgroundMode: "continuable" } });
   try {
     const root = await f.create();
-    const run = await f.runtime.start("dsmm-role-reviewer", { parent: root, prompt: [], signal: new AbortController().signal });
+    const run = await f.runtime.startActivation({ provider: "dsmm-role-reviewer", delivery: "parent", label: "Read-only reviewer", request: { parent: root, prompt: [] }, signal: new AbortController().signal });
     try {
-      await run.result; const child = run.localAgent!;
+      const child = f.ctx.agents.get(run.childId)!; await child.whenIdle();
       let bodies = 0;
       const removals = ["write", "pwsh"].map(name => child.ctx.tools.register({ name, description: "Counter-only mutation", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { bodies++; return "mutated"; } }));
       for (const name of ["write", "pwsh"]) assert.equal((await f.invoke(child, name, {})).isError, true);
       assert.equal((await f.invoke(child, "dsmm_category", { category: "dsmm-quick", description: "No write leaf", prompt: "Not authorized" })).isError, true);
       assert.equal(bodies, 0); removals.forEach(remove => remove());
-      f.publish(root, { locale: "fr" });
-      const legacy = conservativeLegacyAdmission({ version: 1, mode: "legacy-conservative", childSessionId: child.id, parentSessionId: root.id,
-        role: "dsmm-reviewer", route: { provider: "fixture", model: "native" }, depth: 1, toolFilter: { allow: ["read"] },
-        provenFields: ["lineage", "role", "route", "tool-filter"], limitations: [{ field: "git-write", code: "missing-evidence", effect: "capability-denied" }] }, f.admissions.get(root)!, f.settings);
-      assert.equal(legacy.settings.subagents.allowRouteOverride, false); assert.equal(legacy.settings.guards.gitWriteGuard, "deny");
-      assert.equal(legacy.settings.locale, undefined, "current parent locale is not original legacy evidence");
-      assert.deepEqual(DSMM_ROLES.filter(row => legacy.settings.roles[row.id]).map(row => row.id), ["dsmm-reviewer"]);
     } finally { await run.dispose(); }
   } finally { await f.dispose(); }
 });
@@ -470,25 +349,35 @@ test("fresh continuable route preflight cannot relabel an old invocation with a 
 });
 
 test("captured caller deny-write survives child delegation and native read-only execution checks the exact captured definition", async () => {
-  const f = await roleFixture({ subagents: { maxDepth: 3 } });
+  const f = await roleFixture({ subagents: { maxDepth: 3, enableRunInBackground: true, backgroundMode: "continuable" } });
   try {
     let writes = 0, reads = 0;
     f.ctx.tools.register({ name: "read", description: "Useful read", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { reads++; return "READ_PROOF"; } });
     f.ctx.tools.register({ name: "write", description: "Counter-only write", parameters: {}, output: { schema: { type: "string" }, render: () => [] }, async execute() { writes++; return "WRITE"; } });
     const root = await f.create();
-    const builder = await f.runtime.start("dsmm-role-builder", { parent: root, prompt: [], maxDepth: 3, toolFilter: { deny: ["write"] }, signal: new AbortController().signal });
+    const builder = await f.policy.duringDelegation(root as unknown as DshAgent, "dsmm-builder", () => f.runtime.startActivation({ provider: "dsmm-role-builder", delivery: "parent", label: "Filtered builder", request: { parent: root, prompt: [], maxDepth: 3 }, signal: new AbortController().signal }), { deny: ["write"] }, 3);
     try {
-      await builder.result;
-      const quick = await f.runtime.start("dsmm-role-quick", { parent: builder.localAgent!, prompt: [], signal: new AbortController().signal });
+      const builderAgent = f.ctx.agents.get(builder.childId)!; await builderAgent.whenIdle();
+      const quick = await f.runtime.startActivation({ provider: "dsmm-role-quick", delivery: "parent", label: "Bounded quick task", request: { parent: builderAgent, prompt: [] }, signal: new AbortController().signal });
       try {
-        await quick.result;
-        assert.equal((await f.invoke(quick.localAgent!, "read", {})).isError, false);
-        assert.equal((await f.invoke(quick.localAgent!, "write", {})).isError, true);
+        const quickAgent = f.ctx.agents.get(quick.childId)!; await quickAgent.whenIdle();
+        assert.equal((await f.invoke(quickAgent, "read", {})).isError, false);
+        assert.equal((await f.invoke(quickAgent, "write", {})).isError, true);
         assert.equal(reads, 1); assert.equal(writes, 0);
-        await assert.rejects(f.runtime.start("dsmm-role-planner", { parent: builder.localAgent!, prompt: [], signal: new AbortController().signal }));
-        await assert.rejects(f.runtime.start("dsmm-role-quick", { parent: builder.localAgent!, prompt: [], maxDepth: 100, signal: new AbortController().signal }));
+        await assert.rejects(f.runtime.startActivation({ provider: "dsmm-role-planner", delivery: "caller", label: "Denied planner", request: { parent: builderAgent, prompt: [] }, signal: new AbortController().signal }));
       } finally { await quick.dispose(); }
     } finally { await builder.dispose(); }
+  } finally { await f.dispose(); }
+});
+
+test("actual Main activation preflight refuses an enlarged captured caller depth ceiling", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { maxDepth: 3, enableRunInBackground: true, backgroundMode: "continuable" } }, { persistence: true });
+  try {
+    const root = await f.create(), builder = await f.createAuxiliary("dsmm-builder", undefined, "continuable", root);
+    await runFixtureTurn(builder);
+    await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-quick", label: "Denied depth", delivery: "caller",
+      request: { parent: builder, prompt: [], maxDepth: 100 }, signal: new AbortController().signal }), { code: "UNAUTHORIZED" });
+    assert.equal(f.agents.list().some(agent => f.agents.isOwnedBy(agent.id, builder)), false);
   } finally { await f.dispose(); }
 });
 
@@ -509,7 +398,7 @@ test("cold continuable consumes the resolved invocation once and preserves calib
       assert.deepEqual(originalInitial, { status: "known", source: "invocation-capture", route: f.admissions.get(original)!.childCapture!.invocation.initialRoute });
       assert.equal(f.adapter.calls.at(-1)!.reasoningEffort, effort);
       f.runtime.authority.revokeParent(original, "test-cold-residency-release");
-      await f.runtime.drainContinuableChildren(root, [id]);
+      await f.runtime.drainChildren(root, [id]);
       assert.equal(f.ctx.agents.get(id), undefined);
       await f.runtime.sendMessage(root, id, [{ type: "text", text: "Same conversation useful continuation" }], { signal: new AbortController().signal });
       const resumed = f.ctx.agents.get(id)!; assert.notEqual(resumed, original); await resumed.whenIdle();
@@ -563,15 +452,15 @@ test("native role tool uses the supplied C2a registry for one actual run, full f
   } finally { await f.dispose(); }
 });
 
-test("opaque native run teardown revokes the exact prepared child before entering its original public disposer", async () => {
-  const f = await roleFixture({ deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "off", subagents: { allowRouteOverride: true } }, { opaqueRun: true });
+test("native activation teardown revokes the exact prepared child before its scope cleanup", async () => {
+  const f = await roleFixture({ deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "off", subagents: { allowRouteOverride: true } }, { observeDisposal: true });
   try {
     const root = await f.create(); let child: Agent | undefined;
     f.ctx.on("agent/created", ({ agent }) => { if (agent.session.header.origin === "subagent") child = agent; }, { global: true });
     const result = await f.invoke(root, "dsmm_category", { category: "dsmm-coding", description: "Opaque native handle", prompt: "Return useful output",
       route: { provider: "deepseek-official", model: "deepseek-v4-pro" } });
     assert.equal(result.isError, false, JSON.stringify(result));
-    assert.equal(f.opaqueDisposals, 1); assert.equal(f.adapter.calls.length, 1); assert.deepEqual(f.ctx.agents.list(), [root]);
+    assert.equal(f.nativeDisposals, 1); assert.equal(f.adapter.calls.length, 1); assert.deepEqual(f.ctx.agents.list(), [root]);
     const view = (result.value as unknown as { invocation: DsmmInvocationView }).invocation;
     assert.equal(view.childId, child!.id); assert.equal(view.mode, "one-shot");
     assert.deepEqual(view.route, { provider: "deepseek-official", model: "deepseek-v4-pro", reasoningEffort: "off" });
@@ -586,7 +475,7 @@ test("opaque native run teardown revokes the exact prepared child before enterin
 });
 
 test("native fork route comparison ignores inherited parent headers and never invents a missing invocation capture", async () => {
-  const f = await deliveryFixture({ bind: false });
+  const f = await deliveryFixture({ bind: false, nativeClassification: true });
   try {
     await f.ctx.plugin(await carrierPlugin("@deepseek-ai/dsh-subagent-fork-in-process"), {}).await();
     const root = await f.create(false);
@@ -601,13 +490,13 @@ test("native fork route comparison ignores inherited parent headers and never in
         initialRoute: { status: "unknown", reason: "missing-invocation-capture" }, liveRoute: { status: "unknown", reason: "no-own-request-header" } });
       observed = true;
     }, { global: true });
-    const run = await f.runtime.start("fork", { parent: root, prompt: [{ type: "text", text: "Child own useful output" }], signal: new AbortController().signal });
+    const run = await f.runtime.startActivation({ provider: "fork", delivery: "parent", label: "Native fork", request: { parent: root, prompt: [{ type: "text", text: "Child own useful output" }] }, signal: new AbortController().signal });
     try {
-      await run.result; assert.equal(observed, true);
-      const comparison = roleRouteComparison(run.localAgent!);
+      const child = f.ctx.agents.get(run.childId)!; await child.whenIdle(); assert.equal(observed, true);
+      const comparison = roleRouteComparison(child);
       assert.deepEqual(comparison.initialRoute, { status: "unknown", reason: "missing-invocation-capture" });
       assert.equal(comparison.liveRoute.status, "known");
-      const { provider, model, reasoningEffort } = run.localAgent!.session.requestHeader()!.config;
+      const { provider, model, reasoningEffort } = child.session.requestHeader()!.config;
       if (comparison.liveRoute.status === "known") assert.deepEqual(comparison.liveRoute.route, { provider, model,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }) });
     } finally { await run.dispose(); }

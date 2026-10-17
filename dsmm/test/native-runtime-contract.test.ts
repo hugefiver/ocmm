@@ -53,7 +53,6 @@ test("mounting DSMM after an ordinary root registers enabled startup presets bef
     };
     Object.assign(ctx.loader, { internal: imports });
     const denied = async (): Promise<never> => { throw new Error("fixture forbids filesystem/process operations"); };
-    ctx.provide("fs", { readFile: denied, writeFile: denied, edit: denied, stat: denied });
     ctx.provide("subprocess", { spawn: denied });
     ctx.provide("shell", { execute: denied });
     ctx.provide("shellEnv", { resolve: denied });
@@ -149,7 +148,7 @@ test("actual isolated prompt realm has no Host service and preserves literal/ord
 });
 
 test("A regression: role persona survives but durable explicit off wins over role common", async () => {
-  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, nativeFs: true, spawn: false, beforeDsmm: contractHostServices });
+  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, nativeFs: true, beforeDsmm: contractHostServices });
   try {
     const agent = await f.create({ agentPreset: "dsmm-planner" });
     assert.equal(scopeOf(agent.ctx), agent); assert.notEqual(scopeParentOf(agent), agent);

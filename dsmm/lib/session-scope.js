@@ -1,6 +1,7 @@
 import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import { isDsmmRoleId } from "./roles.js";
 import { roleFromProviderName } from "./role-providers.js";
+import { capturedRoleInvocation } from "./role-invocation.js";
 export function sessionEvents(session) {
     return session?.snapshotEvents?.() ?? session?.events ?? [];
 }
@@ -31,7 +32,9 @@ export function resolveEffectiveDsmmRole(agent, settings, modeActive) {
     if (agent.session.header?.origin === "subagent") {
         const own = childOwnedSessionEvents(agent.session);
         const descriptor = foldSubagentDescriptor(own);
-        role = descriptor?.mode === "one-shot" ? roleFromProviderName(descriptor.provider) : undefined;
+        // Native lifecycle mode does not determine an exact Agent's admitted DSMM role.
+        role = capturedRoleInvocation(agent)?.target
+            ?? (descriptor?.mode === "one-shot" ? roleFromProviderName(descriptor.provider) : undefined);
     }
     else {
         const preset = resolveSelectedAgentPreset(agent.session);

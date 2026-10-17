@@ -384,8 +384,8 @@ export class ProfileStore {
     async createChildAdmission(input, assertCurrent) {
         this.assertWritable();
         const capture = parseChildAdmissionCapture(input);
-        if (capture.version !== 2)
-            throw new DsmmProfileError("validation", "New child admissions require capture v2.");
+        if (capture.version !== 3)
+            throw new DsmmProfileError("validation", "New child admissions require capture v3.");
         const revision = digest(Buffer.from(JSON.stringify(capture), "utf8"));
         const bytes = Buffer.from(`${JSON.stringify({ version: 1, revision, capture })}\n`, "utf8");
         if (bytes.length > MAX_PROFILE_BYTES)

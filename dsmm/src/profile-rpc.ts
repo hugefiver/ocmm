@@ -46,6 +46,7 @@ export class DsmmProfilesHost extends TypertRemoteService {
       throw new RemoteError("dsmm-profiles/peer-required", "Use Deepwork Profiles through the native Host connection.", {});
     }
     invocation.signal.throwIfAborted();
+    invocation.peer.signal.throwIfAborted();
     try { return await operation(); }
     catch (error) { throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", parseProfileErrorInfo(profileErrorInfo(error))); }
   }
@@ -64,18 +65,18 @@ export class DsmmProfilesHost extends TypertRemoteService {
     return this.invoke(async () => {
       const invocation = this.ctx.invocation!;
       const connection = this.ctx.get("connection") as HostConnectionHandle | undefined;
-      if (connection === undefined || connection.operator !== invocation.peer) {
+      if (connection === undefined || connection.browserPeer !== invocation.peer) {
         throw new DsmmProfileError("not-owned", "The native Host operator must own this session profile operation.");
       }
       // Cordis rebinds Service projections for each accessing Context. Its
       // public original symbol identifies the exact native authority owner.
       const connectionOwner: unknown = Reflect.get(connection, symbols.original) ?? connection;
-      const signal = AbortSignal.any([invocation.signal, this.lifetime.signal]);
+      const signal = AbortSignal.any([invocation.signal, connection.browserPeer.signal, this.lifetime.signal]);
       const checkAuthority = (): DshAgentsRegistry => {
         if (signal.aborted) throw new DsmmProfileError("cancelled", "The session profile operation was cancelled; no late selection is allowed.");
         const currentConnection = this.ctx.get("connection") as HostConnectionHandle | undefined;
         const currentOwner: unknown = currentConnection === undefined ? undefined : Reflect.get(currentConnection, symbols.original) ?? currentConnection;
-        if (currentOwner !== connectionOwner || currentConnection?.operator !== invocation.peer) {
+        if (currentOwner !== connectionOwner || currentConnection?.browserPeer !== invocation.peer) {
           throw new DsmmProfileError("not-owned", "The native Host operator connection is no longer active.");
         }
         const agents = this.ctx.get("agents") as DshAgentsRegistry | undefined;
@@ -162,11 +163,12 @@ export function assertLocalSettingsOperator(ctx: Context): void {
   const connection = ctx.get("connection") as HostConnectionHandle | undefined;
   const webServer = ctx.get("webServer") as { host?: string } | undefined;
   const settings = ctx.get("settings") as { writable?: boolean } | undefined;
-  if (invocation?.peer === undefined || connection?.operator !== invocation.peer
+  if (invocation?.peer === undefined || connection?.browserPeer !== invocation.peer
     || webServer?.host !== "127.0.0.1" || settings?.writable !== true) {
     throw new DsmmProfileError("not-owned", "Global deployment edits require the authenticated operator of a local writable native Host.");
   }
   invocation.signal.throwIfAborted();
+  invocation.peer.signal.throwIfAborted();
 }
 
 export class DsmmConfigHost extends TypertRemoteService {

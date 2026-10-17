@@ -19,14 +19,14 @@ export class DsmmPermissionsHost extends TypertRemoteService {
     return Promise.resolve().then(() => {
       const id = SessionId(parsePermissionSessionId(sessionId));
       const invocation = this.ctx.invocation, connection = this.ctx.get("connection") as HostConnectionHandle | undefined;
-      if (invocation?.peer === undefined || connection === undefined || invocation.peer !== connection.operator) throw new PermissionRefusal("not-owned");
+      if (invocation?.peer === undefined || connection === undefined || invocation.peer !== connection.browserPeer) throw new PermissionRefusal("not-owned");
       const peer = invocation.peer, owner = permissionOriginal(connection), agents = this.ctx.get("agents"), root = agents?.get(id);
       if (root === undefined) throw new PermissionRefusal("not-owned");
-      const signal = AbortSignal.any([invocation.signal, this.lifetime.signal]);
+      const signal = AbortSignal.any([invocation.signal, peer.signal, this.lifetime.signal]);
       const check = (): void => {
         const current = this.ctx.get("connection") as HostConnectionHandle | undefined, registry = this.ctx.get("agents");
         if (signal.aborted) throw new PermissionRefusal("cancelled");
-        if (current === undefined || permissionOriginal(current) !== owner || current.operator !== peer || registry?.get(id) !== root
+        if (current === undefined || permissionOriginal(current) !== owner || current.browserPeer !== peer || registry?.get(id) !== root
           || root.id !== sessionId || root.session.id !== sessionId || root.session.header.origin === "subagent" || !registry.roots().includes(root)
           || registry.list().some(agent => agent !== root && registry.isOwnedBy(id, agent))) throw new PermissionRefusal("not-owned");
       };

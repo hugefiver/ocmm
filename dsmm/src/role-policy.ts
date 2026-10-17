@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { currentManagedCreation } from "./agent-registry.js";
 import { delegationDepthOf, foldSubagentDescriptor, SubagentError } from "@deepseek-ai/dsh-subagent";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { symbols } from "@deepseek-ai/cordis";
@@ -12,10 +13,7 @@ import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter } from "./s
 import { copyJson, freezeSettings, isRootRoleEnabled } from "./settings.js";
 import type { ChildAdmissionCompletion, ChildRoleAdmissionCandidate, ParentAdmissionTicket } from "./child-admission-contract.js";
 import type { ChildAdmissionCapture, ChildAdmissionEvidence, PreparedChildAdmission } from "./child-capture.js";
-import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "./child-capture.js";
-import { createConservativeLegacyAdmission } from "./legacy-child-policy.js";
-import type { LegacyCapabilityCollaborators } from "./legacy-child-policy.js";
-export { createConservativeLegacyAdmission as conservativeLegacyAdmission } from "./legacy-child-policy.js";
+import { admissionFromChildCapture, parseChildAdmissionCapture } from "./child-capture.js";
 import { bindRoleInvocation, currentRoleInvocation, resolveRoleInvocation } from "./role-invocation.js";
 import type { ResolvedRoleInvocation } from "./role-invocation.js";
 import { captureRoleRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
@@ -97,8 +95,6 @@ export interface RoleAdmissionCollaborators {
   resolveOriginalEvidence(ticket: ParentAdmissionTicket, childId: string, signal: AbortSignal): Promise<ChildAdmissionEvidence>;
   nativeSubstrate: DsmmSettings;
   revokeParent(agent: DshAgent, reason: string): void;
-  /** Shared C2b native-capability audit; this does not grant parent tool permissions. */
-  classifyLegacyTool?: LegacyCapabilityCollaborators["classifyTool"];
 }
 
 /** Identity admission only: native services retain every run, inbox and retry lifecycle. */
@@ -169,8 +165,8 @@ export class DsmmRolePolicy {
       if (this.collaborators === undefined) throw new SubagentError("Original child evidence resolver is unavailable", "UNAUTHORIZED");
       const evidence = await this.collaborators.resolveOriginalEvidence(ticket, agent.id!, signal);
       signal.throwIfAborted(); ticket.signal.throwIfAborted();
-      return { evidence, admission: "mode" in evidence ? createConservativeLegacyAdmission(evidence, ticket.admission, this.collaborators.nativeSubstrate)
-        : admissionFromChildCapture(evidence, this.collaborators.nativeSubstrate), creation: false };
+      if ("mode" in evidence || evidence.version !== 3) throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
+      return { evidence, admission: admissionFromChildCapture(evidence, this.collaborators.nativeSubstrate), creation: false };
     }
     if ((call?.parent === parent ? call.epoch : pending!.epoch) !== ticket.parentEpoch) throw new SubagentError("Child invocation parent epoch changed", "UNAUTHORIZED");
     const settings = ticket.admission.settings, parentIdentity = this.identity(parent);
@@ -187,7 +183,8 @@ export class DsmmRolePolicy {
         primary: { ...route, ...(invocation.exactEffort && reasoningEffort !== undefined ? { reasoningEffort } : {}) },
         fallbackRoutes: (invocation.requestedPolicy ?? invocation.policy).fallbackRoutes.map(route => ({ ...route })) };
     }
-    const capture = parseChildAdmissionCapture({ version: 2, childSessionId: agent.id, parentSessionId: parent.id, role: invocation.target,
+    const capture = parseChildAdmissionCapture({ version: 3, childSessionId: agent.id, parentSessionId: parent.id, role: invocation.target,
+      delegationMode: currentManagedCreation()?.delegationMode,
       modelParameterPolicy: invocation.modelParameterPolicy ?? resolvedModelParameterPolicy(ticket.admission),
       profilePin: ticket.admission.profile, originalAdmissionEpoch: ticket.parentEpoch,
       invocation: { level: invocation.effectiveLevel, initialRoute: invocation.initialRoute, requestedRoute: invocation.requestedRoute ?? invocation.initialRoute,
@@ -204,7 +201,9 @@ export class DsmmRolePolicy {
   /** Used at A's single awaited completion point; old original epochs remain valid facts. */
   validatePreparedRole(agent: DshAgent, parent: DshAgent, candidate: ChildRoleAdmissionCandidate): void {
     this.assertLive(agent); this.assertLive(parent);
-    const evidence = "mode" in candidate.evidence ? parseLegacyChildEvidence(candidate.evidence) : parseChildAdmissionCapture(candidate.evidence);
+    if ("mode" in candidate.evidence || candidate.evidence.version !== 3) throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
+    const evidence = parseChildAdmissionCapture(candidate.evidence);
+    if (!candidate.creation && !candidate.retained && !("mode" in evidence) && evidence.version === 3 && evidence.delegationMode === "one-shot") throw new SubagentError("One-shot child cannot acquire a new residency", "UNAUTHORIZED");
     if (evidence.childSessionId !== agent.id || evidence.parentSessionId !== parent.id || (agent as unknown as Agent).session.header.parentSession !== parent.id || !this.agents().isOwnedBy(agent.id!, parent)) throw new SubagentError("Child evidence does not match exact native lineage", "UNAUTHORIZED");
     this.assertDelegation(parent, evidence.role);
     const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session) as Parameters<typeof foldSubagentDescriptor>[0]);
@@ -215,7 +214,7 @@ export class DsmmRolePolicy {
     const original = candidate.admission;
     if (!original.settings.modules.deepwork.enabled || !original.settings.roles[evidence.role]) throw new SubagentError("Original child role/module is disabled", "UNAUTHORIZED");
     if (descriptor?.mode === "continuable") {
-      const route = "mode" in evidence ? evidence.route : evidence.invocation.initialRoute;
+      const route = evidence.invocation.initialRoute;
       if (descriptor.agentProvider !== undefined && descriptor.agentProvider !== route.provider || descriptor.agentModel !== undefined && descriptor.agentModel !== route.model
         || descriptor.agentReasoningEffort !== undefined && descriptor.agentReasoningEffort !== route.reasoningEffort) throw new SubagentError("Original route does not match native descriptor provenance", "UNAUTHORIZED");
     }
@@ -227,14 +226,7 @@ export class DsmmRolePolicy {
     let invocation: ResolvedRoleInvocation;
     let filter: ToolRestriction | undefined;
     let readOnly: boolean;
-    if ("mode" in evidence) {
-      if (evidence.depth !== delegationDepthOf(agent as unknown as Agent)) throw new SubagentError("Legacy depth evidence does not match its physical native lineage", "UNAUTHORIZED");
-      const safe = evidence.toolFilter?.allow?.filter(name => readonlyRoleTool(name, original.settings) && !["interrupt_agent", "job_kill"].includes(name)) ?? [];
-      filter = inheritToolFilter({ allow: safe }, evidence.toolFilter); readOnly = true;
-      invocation = freezeSettings({ target: evidence.role, effectiveLevel: "normal", routeSource: "inherited", initialRoute: evidence.route,
-        candidates: [evidence.route], exactEffort: evidence.route.reasoningEffort !== undefined, modelParameterPolicy: resolvedModelParameterPolicy(original), effortSource: "native",
-        policy: { ...resolveRoleRuntimePolicy(original.settings, evidence.role), primary: evidence.route, fallbackRoutes: [] } });
-    } else {
+    {
       if (candidate.creation && JSON.stringify(this.preparedCaptures.get(agent)) !== JSON.stringify(evidence)) throw new SubagentError("Fresh capture does not match its trusted prepared invocation and ceiling", "UNAUTHORIZED");
       if (original.epoch !== evidence.originalAdmissionEpoch || candidate.creation && this.getSettings.admission?.(parent).epoch !== evidence.originalAdmissionEpoch) throw new SubagentError("Original capture or creation epoch does not match", "UNAUTHORIZED");
       const depth = delegationDepthOf(agent as unknown as Agent);
@@ -260,7 +252,7 @@ export class DsmmRolePolicy {
     const identity = Object.freeze({ role: evidence.role, child: true, parent, epoch: original.epoch, readOnly,
       ...(filter === undefined ? {} : { toolFilter: inheritToolFilter(undefined, filter) }) });
     this.captureIdentity(agent, identity, original);
-    bindRoleInvocation(agent, invocation, "mode" in evidence ? undefined : evidence);
+    bindRoleInvocation(agent, invocation, evidence);
     captureRoleRuntimePolicy(original.settings, evidence.role, invocation.policy);
     const call = this.calls.getStore();
     if (candidate.creation && call?.parent === parent && call.role === evidence.role) call.admittedChild?.(agent);
@@ -269,9 +261,15 @@ export class DsmmRolePolicy {
   }
 
   assertChildDelivery(ticket: ParentAdmissionTicket, childId: string, raw: ChildAdmissionEvidence): void {
+    if (!("mode" in raw) && raw.version === 3 && raw.delegationMode === "one-shot") throw new SubagentError("One-shot children cannot resume", "UNAUTHORIZED");
+    this.assertChildExecution(ticket, childId, raw);
+  }
+
+  assertChildExecution(ticket: ParentAdmissionTicket, childId: string, raw: ChildAdmissionEvidence): void {
     ticket.signal.throwIfAborted(); this.assertLive(ticket.parent);
     if (this.getSettings.admission?.(ticket.parent) !== ticket.admission || ticket.admission.epoch !== ticket.parentEpoch) throw new SubagentError("Delivery parent admission changed", "UNAUTHORIZED");
-    const evidence = "mode" in raw ? parseLegacyChildEvidence(raw) : parseChildAdmissionCapture(raw);
+    if ("mode" in raw || raw.version !== 3) throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
+    const evidence = parseChildAdmissionCapture(raw);
     if (evidence.childSessionId !== childId || evidence.parentSessionId !== ticket.parent.id) throw new SubagentError("Delivery evidence is not this direct child", "UNAUTHORIZED");
     this.assertDelegation(ticket.parent, evidence.role);
     const depth = delegationDepthOf(ticket.parent as unknown as Agent) + 1;
@@ -553,20 +551,6 @@ export class DsmmRolePolicy {
     }
     if (identity.toolFilter?.allow !== undefined && !identity.toolFilter.allow.includes(name) && name !== "structured_output"
       || identity.toolFilter?.deny?.includes(name)) return "DSMM child native toolFilter does not permit this tool";
-    if (name === "send_message" && liveIdentities.get(agent)?.admission?.childEvidence?.mode === "legacy-conservative") {
-      const realm = tools ?? (agent.ctx as Context).get("tools"), parent = identity.parent;
-      const capability = realm === undefined ? undefined : this.collaborators?.classifyLegacyTool?.(name, realm, agent as Agent);
-      if (parent === undefined || realm === undefined || capability?.kind !== "child-report" || realm.get(name, agent as Agent) !== capability.definition) return "DSMM legacy report requires its audited native capability";
-      try {
-        this.assertLive(parent);
-        this.assertDelegation(parent, identity.role!);
-        if (execution !== undefined) {
-          capability.assertArguments(execution.arguments);
-          const args = execution.arguments as { agent_id?: unknown } | null;
-          if (args === null || typeof args !== "object" || args.agent_id !== parent.id) return "DSMM legacy report destination must be this exact direct parent";
-        }
-      } catch { return "DSMM legacy report arguments or current parent authority are not admitted"; }
-    }
     if (readonly && !readonlyRoleTool(name, settings)) return "DSMM read-only role does not permit this tool";
     if (identity.role === undefined) return identity.child && settings.modules.deepwork.enabled && ["subagent", "spawn", "fork"].includes(name) ? "DSMM unadmitted children cannot delegate" : undefined;
     if (!settings.modules.deepwork.enabled || !settings.roles[identity.role]) return "DSMM role is disabled in this Agent admission";
@@ -581,7 +565,7 @@ export class DsmmRolePolicy {
       this.collaborators?.revokeParent?.(agent, "role-residency-disposed");
       const agents = this.agents();
       if (agents.get(agent.id!) !== agent) throw new Error("DSMM Agent was detached before continuable descendants drained");
-      await native.get("subagents")?.drainContinuableDescendants([agent as Agent]);
+      await native.get("subagents")?.drainDescendants([agent as Agent]);
       liveIdentities.delete(agent);
       toolIdentities.delete(agent);
     });

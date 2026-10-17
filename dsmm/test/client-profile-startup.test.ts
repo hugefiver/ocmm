@@ -10,6 +10,7 @@ import * as Cordis from "@deepseek-ai/cordis";
 import { Context } from "@deepseek-ai/cordis";
 import * as SlotCore from "@deepseek-ai/dsh-client-ui-slots";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
+import { Peer } from "@deepseek-ai/dsh-client-connection";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import type * as ConnectionClient from "@deepseek-ai/dsh-client-connection/client";
@@ -60,7 +61,10 @@ function surfaceStyles(styles: Set<StyleNode>) {
 }
 
 async function nativeClient<T>(packageName: string, document: ReturnType<typeof startupDocument>["document"], sourceOverride?: string): Promise<T> {
-  const source = sourceOverride ?? await readFile(join(dirname(require.resolve(`${packageName}/package.json`)), "lib/client.js"), "utf8");
+  const manifestPath = require.resolve(`${packageName}/package.json`);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const entry = manifest.exports["./client"];
+  const source = sourceOverride ?? await readFile(join(dirname(manifestPath), entry.browser ?? entry.default), "utf8");
   let factory: ((require: (id: string) => unknown) => T) | undefined;
   const realm = createContext({ crypto: globalThis.crypto, AbortController, AbortSignal, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout, queueMicrotask, console,
     ...(packageName === "@dsmm/dsmm" ? { document } : {}),
@@ -90,8 +94,12 @@ async function fixture(sourceOverride?: string, deferUi = false) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-client-startup-"));
   const host = new Context();
   const client = new Context();
+  const peer = new Peer(host, { principal: { kind: "owner" } });
   const dom = startupDocument();
   try {
+    const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
+    const { RemoteAccessService } = sdk("@deepseek-ai/dsh-api-remote-access");
+    await host.plugin(RemoteAccessService).await();
     await Promise.all([host.plugin(TypertRegistry).await(), host.plugin(TypertGatewayService, {}).await(), client.plugin(TypertRegistry).await()]);
     const store = new ProfileStore(join(root, "dsmm-profiles"));
     const runtime = new DsmmProfileRuntime(host as unknown as DshContext, resolveConfig(), store);
@@ -110,7 +118,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
         // Match the native JSON wire boundary between the isolated client realm
         // and Host codecs; VM-prototype request objects are not Host inputs.
         const args = (JSON.parse(JSON.stringify(payload)) as { args: Record<string, unknown> }).args;
-        try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal }) }; }
+        try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal, peer }) }; }
         catch (error) {
           const failure = remoteErrorOf(error);
           if (failure === undefined) throw error;
@@ -119,7 +127,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
       },
       async *open(channel, endpoint, payload, signal, uplink) {
         assert.equal(channel, "/api");
-        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), undefined, signal);
+        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), peer, signal);
       },
     } } });
     const remoteModule = await nativeClient<ClientPlugin>("@deepseek-ai/dsh-api-gateway", dom.document);

@@ -1,7 +1,6 @@
 import { symbols } from "@deepseek-ai/cordis";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { foldSubagentDescriptor, SubagentError } from "@deepseek-ai/dsh-subagent";
-import { parseLegacyChildEvidence } from "./child-capture.js";
 import { freezeSettings } from "./settings.js";
 import { isDsmmRoleId } from "./roles.js";
 function unauthorized() { throw new SubagentError("Child history does not prove its direct native identity", "UNAUTHORIZED"); }
@@ -46,9 +45,6 @@ export class NativeChildEvidenceReader {
             observation[Symbol.dispose]();
         }
     }
-    async legacy(ticket, childId, signal) {
-        return legacyEvidenceFromNativeFacts(await this.read(ticket, childId, signal));
-    }
 }
 function readFacts(parent, childId, observation) {
     const header = observation.header;
@@ -91,31 +87,6 @@ function hasRequestBudget(event) {
     if (event.type !== "request/header")
         return false;
     return event.data.header.config.maxTokens !== undefined;
-}
-export function legacyEvidenceFromNativeFacts(facts) {
-    const provenFields = ["lineage", "role", "route"];
-    if (facts.descriptor.toolFilter !== undefined)
-        provenFields.push("tool-filter");
-    if (facts.active !== undefined)
-        provenFields.push("active-intent");
-    if (facts.requestBudgetObserved)
-        provenFields.push("max-tokens");
-    const limitations = [
-        ...["profile-pin", "admission-epoch", "invocation-level", "locale", "tool-topology"].map(field => ({ field, code: "missing-evidence", effect: "display-only" })),
-        ...["runtime-policy", "modules", "roles", "read-only", "route-override", "max-depth", "guards", "git-write", "shell", "delegation"].map(field => ({ field, code: "missing-evidence", effect: "capability-denied" })),
-        { field: "max-tokens", code: "not-persisted", effect: "native-default" },
-        { field: "output-schema", code: "unverified", effect: "capability-denied" },
-    ];
-    if (facts.descriptor.toolFilter === undefined)
-        limitations.push({ field: "tool-filter", code: "missing-evidence", effect: "capability-denied" });
-    if (facts.active === undefined)
-        limitations.push({ field: "active-intent", code: "missing-evidence", effect: "display-only" });
-    return parseLegacyChildEvidence({ version: 1, mode: "legacy-conservative", childSessionId: facts.childSessionId,
-        parentSessionId: facts.parentSessionId, role: facts.role, depth: facts.depth,
-        route: { provider: facts.descriptor.agentProvider, model: facts.descriptor.agentModel,
-            ...(facts.descriptor.agentReasoningEffort === undefined ? {} : { reasoningEffort: facts.descriptor.agentReasoningEffort }) },
-        ...(facts.descriptor.toolFilter === undefined ? {} : { toolFilter: facts.descriptor.toolFilter }),
-        ...(facts.active === undefined ? {} : { active: facts.active }), provenFields, limitations });
 }
 /** Capture evidence must agree with the child's establishing descriptor, not current parent routing. */
 export function assertNativeChildCapture(capture, facts) {

@@ -2,14 +2,20 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ContentBlock, ToolCallId } from "@deepseek-ai/dsh-llm";
 import type { SessionId } from "@deepseek-ai/dsh-session";
-import type { SubagentRun } from "@deepseek-ai/dsh-subagent";
+import type { SubagentActivation } from "@deepseek-ai/dsh-subagent";
+import type { JobRegistry } from "@deepseek-ai/dsh-jobs";
+declare module "@deepseek-ai/dsh-jobs/view" {
+    interface JobKindMap {
+        subagent: "subagent";
+    }
+}
 export type RoleRunState = "starting" | "running" | "background" | "settled" | "cancelled";
-export type RoleRunJobId = ReturnType<Context["jobs"]["start"]>;
+export type RoleRunJobId = ReturnType<JobRegistry["start"]>;
 export interface RoleRunAddress {
     readonly sessionId: SessionId;
     readonly toolCallId: ToolCallId;
-    /** The native SubagentRun.id, not the distinct lifecycle-event runId. */
-    readonly runId: SubagentRun["id"];
+    /** Public role-run address is the activation childId, never lifecycle-event runId. */
+    readonly runId: SubagentActivation["childId"];
 }
 /** Host-only identity. Capture/projection are the borrowed original admitted objects. */
 export interface RoleRunInvocation<C = unknown, P = unknown> extends RoleRunAddress {
@@ -23,7 +29,7 @@ export interface RoleRunInvocation<C = unknown, P = unknown> extends RoleRunAddr
 }
 export interface RoleRunForeground<C = unknown, P = unknown> {
     readonly kind: "foreground";
-    readonly runId: SubagentRun["id"];
+    readonly runId: SubagentActivation["childId"];
     readonly invocation: RoleRunInvocation<C, P>;
     readonly output: readonly ContentBlock[];
 }
@@ -46,12 +52,8 @@ export interface RoleRunBackgroundRequest extends RoleRunAddress {
 export interface RoleRunTeardown {
     /** Supply the stable Host authority's revokeParent, never an epoch-only abort. */
     revokeParent(agent: Agent, reason: string): void;
-    /**
-     * Invoke the original run disposer. Any opaque native handles/descendants this
-     * callback owns MUST also be authority-revoked before their original disposal.
-     * The holder revokes the public localAgent before calling this collaborator.
-     */
-    disposeRun(run: SubagentRun): Promise<void>;
+    /** Invoke the exact activation disposer, whose runtime boundary revokes its tree. */
+    disposeRun(run: SubagentActivation): Promise<void>;
 }
 export interface RoleRunCollaborators<C = unknown, P = unknown> {
     /** Synchronous exact-parent/entry-owner check plus the current stable epoch. */
@@ -70,9 +72,9 @@ export interface RoleRunStart<C = unknown, P = unknown> {
     readonly projection: P;
     readonly label: string;
     readonly callerAbort: AbortSignal;
-    readonly jobs?: Context["jobs"];
-    /** Call native subagents.start exactly once, forwarding this holder signal. */
-    start(signal: AbortSignal): Promise<SubagentRun>;
+    readonly jobs?: JobRegistry;
+    /** Call native startActivation exactly once, forwarding this holder signal. */
+    start(signal: AbortSignal): Promise<SubagentActivation>;
 }
 /** One foreground call's real native run and its revocable caller-cancel relay. */
 export declare class RoleRunHolder<C = unknown, P = unknown> {
@@ -84,6 +86,7 @@ export declare class RoleRunHolder<C = unknown, P = unknown> {
     private identity?;
     private receipt?;
     private outcome?;
+    private disposeActivation?;
     private terminal;
     private finished;
     private registering;

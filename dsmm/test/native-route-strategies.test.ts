@@ -8,7 +8,14 @@ import type { DshAgent, DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { roleRouteRuntimeState, selectInitialModelRoute } from "../lib/role-routing.js";
 import type { DshLlmRuntime } from "../lib/dsh-types.js";
-import { headerRoutes, nativeRoutingFixture, RoutingFixtureAdapter, runFixtureTurn } from "./native-routing-fixture.ts";
+import { headerRoutes, nativeRoutingFixture as createNativeRoutingFixture, RoutingFixtureAdapter, runFixtureTurn } from "./native-routing-fixture.ts";
+
+async function nativeRoutingFixture(config: Parameters<typeof createNativeRoutingFixture>[0] = {}, options: Parameters<typeof createNativeRoutingFixture>[1] = {}) {
+  const fixture = await createNativeRoutingFixture({ ...config, subagents: { enableRunInBackground: true, backgroundMode: "continuable", ...config.subagents } }, { persistence: true, ...options });
+  return { ...fixture, createAuxiliary(...args: Parameters<typeof fixture.createAuxiliary>) {
+    return fixture.createAuxiliary(args[0], args[1], args[2] ?? "continuable", args[3], args[4]);
+  } };
+}
 
 const primary = { provider: "fixture", model: "strategy-primary", reasoningEffort: "max" };
 const backup = { provider: "fixture", model: "strategy-backup", reasoningEffort: "high" };
@@ -35,15 +42,16 @@ test("native alias preflight selects initial fallback while preserving native re
   } } });
   try {
     const parent = await fixture.create();
-    const child = await fixture.subagents.start("dsmm-role-reviewer", { parent, signal: new AbortController().signal,
-      prompt: [{ type: "text", text: "Native fallback admission" }], toolFilter: { allow: ["read", "glob", "grep"] } });
+    const child = await fixture.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent, {
+      prompt: [{ type: "text", text: "Native fallback admission" }] });
     try {
-      assert.equal((await child.result).stopReason, "completed"); assert.ok(child.localAgent);
-      assert.deepEqual(headerRoutes(child.localAgent), [backup]);
-      assert.equal(fixture.agents.isOwnedBy(child.localAgent.id, parent), true);
-      const denied = await child.localAgent.ctx.get("tools")!.execute({ callId: ToolCallId("fallback-read-only"), name: "write", arguments: {}, agent: child.localAgent, signal: new AbortController().signal });
+      await runFixtureTurn(child);
+      assert.ok(child.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
+      assert.deepEqual(headerRoutes(child), [backup]);
+      assert.equal(fixture.agents.isOwnedBy(child.id, parent), true);
+      const denied = await child.ctx.get("tools")!.execute({ callId: ToolCallId("fallback-read-only"), name: "write", arguments: {}, agent: child, signal: new AbortController().signal });
       assert.equal(denied.isError, true);
-    } finally { await child.dispose(); }
+    } finally { await fixture.releaseAuxiliary(child); }
   } finally { await fixture.dispose(); }
 });
 
@@ -206,12 +214,12 @@ test("an owned child's locked explicit max fails its next real turn when max sup
   } });
   try {
     const parent = await fixture.create({ agentPreset: "dsmm-orchestrator" });
-    const run = await fixture.subagents.start("dsmm-role-reviewer", { parent,
+    const child = await fixture.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent, {
       prompt: [{ type: "text", text: "Exercise explicit max on this owned child" }],
-      agentOptions: { ...route, reasoningEffort: ReasoningEffortId("max") }, signal: new AbortController().signal });
+      agentOptions: { ...route, reasoningEffort: ReasoningEffortId("max") } });
     try {
-      assert.equal((await run.result).stopReason, "completed");
-      const child = run.localAgent!;
+      await runFixtureTurn(child);
+      assert.ok(child.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
       assert.ok(child); assert.equal(fixture.agents.isOwnedBy(child.id, parent), true);
       assert.deepEqual(headerRoutes(child), [route]);
       assert.deepEqual(fixture.adapter.calls.map(call => call.reasoningEffort), ["max"]);
@@ -223,7 +231,7 @@ test("an owned child's locked explicit max fails its next real turn when max sup
       assert.equal(next.some(event => event.type === "turn/end" && event.data.reason.kind === "error"), true);
       assert.equal(next.some(event => event.type === "request/header" || event.type === "assistant/attempt"), false);
       assert.deepEqual(headerRoutes(child), [route]);
-    } finally { await run.dispose(); }
+    } finally { await fixture.releaseAuxiliary(child); }
   } finally { await fixture.dispose(); }
 });
 

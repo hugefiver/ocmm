@@ -11,7 +11,7 @@ import { parseProfileDocument, profileErrorInfo, requiredDeepworkRoles, resolveP
 import { ProfileStore } from "../src/profile-store.js";
 import { DsmmProfileRuntime } from "../src/profile-runtime.js";
 import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "../src/child-capture.js";
-import type { ChildAdmissionCapture } from "../src/child-capture.js";
+import type { ChildAdmissionCaptureV3 } from "../src/child-capture.js";
 import { parseChildAdmissionEvidenceView } from "../src/child-evidence.js";
 import { parseDsmmInvocationView, parseProfileDiagnostic, parseRoleAvailability, parseSubagentRuntimeAdmissionView, TYPERT_REMOTE } from "../src/profile-remote.js";
 import type { DshAgent, DshContext } from "../src/dsh-types.js";
@@ -20,9 +20,9 @@ import type { DsmmChildAdmissionAuthority, ParentAdmissionTicket } from "../src/
 
 const raw = (settings: unknown, label?: string) => JSON.stringify({ version: 1, id: "focus", ...(label === undefined ? {} : { label }), settings });
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
-function capture(child = "child/opaque", parent = "parent/opaque", epoch = "a".repeat(64)): ChildAdmissionCapture {
+function capture(child = "child/opaque", parent = "parent/opaque", epoch = "a".repeat(64)): ChildAdmissionCaptureV3 {
   const settings = resolveConfig({ locale: "ja", guards: { gitWriteGuard: "deny" }, roleRouting: { "dsmm-reviewer": { levels: { low: { reasoningEffort: "low" } } } } });
-  return { version: 2, modelParameterPolicy: { mode: "passthrough" }, childSessionId: child, parentSessionId: parent, role: "dsmm-reviewer", profilePin: null, originalAdmissionEpoch: epoch,
+  return { version: 3, delegationMode: "continuable", modelParameterPolicy: { mode: "passthrough" }, childSessionId: child, parentSessionId: parent, role: "dsmm-reviewer", profilePin: null, originalAdmissionEpoch: epoch,
     invocation: { level: "low", initialRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" },
       requestedRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" }, effortSource: "dsmm-config", routeSource: "level" },
     runtimePolicyCapture: { modules: settings.modules, roleRouting: settings.roleRouting, runtimePolicy: settings.runtimePolicy, workflow: settings.workflow,

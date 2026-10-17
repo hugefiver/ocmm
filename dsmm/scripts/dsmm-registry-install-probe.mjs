@@ -6,14 +6,14 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { isSource020, isSource022, isStableNativeSource, isReviewedReleaseVersion, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COLD_PROFILE_SCRIPTS_022, publicRuntimeExportsForVersion } from "./release-contract.mjs";
+import { dshPolicyForVersion, isSource020, isSource022, isSource030, isStableNativeSource, isReviewedReleaseVersion, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COMPILED_NAMES_030, COLD_PROFILE_SCRIPTS_022, publicRuntimeExportsForVersion } from "./release-contract.mjs";
 
 export const PACKAGE_NAME = "@dsmm/dsmm";
 export const DSH_VERSION = "0.2.0-rc.2";
 export const PNPM_VERSION = "11.9.0";
 export const REGISTRY = "https://registry.npmjs.org/";
 const PNPM_INTEGRITY = "sha512-vWgtXQP+Ul73yf1ngMaITR51asTJyf4AxTh4KCQxDc+Q493E9Tg18G3669UIXkGFXgvLs7YN4qxburieUDbwOw==";
-const DSH_INTEGRITY = "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==";
+export const DSH_INTEGRITY = "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==";
 const ROOT_PREFIX = "dsmm-registry-probe-";
 const MARKER = ".dsmm-registry-probe-owner";
 const SHA256 = /^[a-f0-9]{64}$/u;
@@ -45,7 +45,10 @@ export const COMPILED_FILES_015 = Object.freeze([
 
 export function compiledFilesForVersion(version) {
   requireFact(validVersion(version), "INVALID_COMPILED_POLICY_VERSION");
-  if (isStableNativeSource(version)) return [...new Set([...COMPILED_FILES_015, ...(isSource022(version) ? COMPILED_NAMES_022 : COMPILED_NAMES_021).flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
+  if (isStableNativeSource(version)) {
+    const names = isSource030(version) ? COMPILED_NAMES_030 : isSource022(version) ? COMPILED_NAMES_022 : COMPILED_NAMES_021;
+    return [...new Set([...COMPILED_FILES_015, ...names.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
+  }
   if (isSource020(version)) return [...new Set([...COMPILED_FILES_015, ...COMPILED_NAMES_020.flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`])])];
   const [major, minor, patch] = version.split(".").map(Number);
   return major > 0 || minor > 1 || (minor === 1 && patch >= 5) ? [...COMPILED_FILES_015] : [...COMPILED_FILES];
@@ -357,7 +360,8 @@ export async function readInstalledPluginMetadata(profilePackage, profileRoot, n
   requireFact(manifest.name === PACKAGE_NAME && manifest.version === version && exactKeys(manifest.exports, Object.keys(publicExportsForVersion(version))), "METADATA_PACKAGE_IDENTITY_MISMATCH");
   const reader = realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot"));
   const readerManifest = JSON.parse(readFileSync(realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot/package.json")), "utf8"));
-  requireFact(isInside(reader, realpathSync(nativeRoot)) && readerManifest.name === "@deepseek-ai/dsh-app-boot" && readerManifest.version === DSH_VERSION, "NATIVE_METADATA_READER_IDENTITY_MISMATCH");
+  const dshPolicy = dshPolicyForVersion(version);
+  requireFact(isInside(reader, realpathSync(nativeRoot)) && readerManifest.name === "@deepseek-ai/dsh-app-boot" && readerManifest.version === dshPolicy.runtimeVersion, "NATIVE_METADATA_READER_IDENTITY_MISMATCH");
   const resources = new Map();
   for (const [name, path] of Object.entries(LOCALE_EXPORTS)) {
     const location = realpathSync(profileRequire.resolve(`${PACKAGE_NAME}${name.slice(1)}`));
@@ -372,12 +376,12 @@ export async function readInstalledPluginMetadata(profilePackage, profileRoot, n
   requireFact(metadata && metadata.error === undefined && exactKeys(metadata.title, ["en", "zh"]) && exactKeys(metadata.description, ["en", "zh"]), "NATIVE_PLUGIN_METADATA_UNPROVED");
   for (const language of ["en", "zh"]) requireFact(metadata.title[language] === locales[language].title
     && metadata.description[language] === locales[language].description, "NATIVE_PLUGIN_METADATA_RESOURCE_MISMATCH");
-  return { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: DSH_VERSION, readerSha256: digest(readFileSync(reader)),
+  return { reader: "@deepseek-ai/dsh-app-boot/readPluginMeta", readerVersion: dshPolicy.runtimeVersion, readerSha256: digest(readFileSync(reader)),
     packageName: PACKAGE_NAME, version, source: "profile-owned-installed-package", locales };
 }
 
 export function validateNativeMetadataReceipt(metadata, version, exports) {
-  requireFact(metadata?.reader === "@deepseek-ai/dsh-app-boot/readPluginMeta" && metadata.readerVersion === DSH_VERSION
+  requireFact(metadata?.reader === "@deepseek-ai/dsh-app-boot/readPluginMeta" && metadata.readerVersion === dshPolicyForVersion(version).runtimeVersion
     && SHA256.test(metadata.readerSha256 ?? "") && metadata.packageName === PACKAGE_NAME && metadata.version === version
     && metadata.source === "profile-owned-installed-package" && exactKeys(metadata.locales, ["en", "zh"]), "INSTALL_RECEIPT_NATIVE_METADATA_INVALID");
   requireFact(metadata.execution?.status === 0 && SHA256.test(metadata.execution.stdoutSha256 ?? "")
@@ -458,12 +462,13 @@ function pnpmShim(root, entry) {
 
 export async function runInstallProbe(options, runtime = {}) {
   requireFact(validVersion(options.version) && SHA256.test(options.sha256), "INVALID_INPUT");
+  const dshPolicy = dshPolicyForVersion(options.version);
   const requiredChecks = requiredChecksForVersion(options.version);
   const owner = (runtime.createOwnedRoot ?? createOwnedRoot)();
   const receipt = {
     schemaVersion: 1, outcome: "FAILED", packageName: PACKAGE_NAME, version: options.version, sha256: options.sha256,
     startedAt: new Date().toISOString(), packageManager: { name: "pnpm", version: PNPM_VERSION },
-    native: { version: DSH_VERSION, headless: false, profileList: false, dumpConfig: false, commands: [] },
+    native: { version: dshPolicy.runtimeVersion, headless: false, profileList: false, dumpConfig: false, commands: [] },
     exports: {}, compiledFiles: {}, checks: Object.fromEntries(requiredChecks.map((key) => [key, false])),
     temporaryRootRemoved: false, cleanup: { outcome: "NOT_RUN" },
     nonClaims: { paidModelCall: false, realLogin: false, authenticatedDesktop: false, uiAcceptance: false },
@@ -497,18 +502,18 @@ export async function runInstallProbe(options, runtime = {}) {
     receipt.packageManager.integrity = tool.registry.integrity;
     receipt.checks.pinnedPackageManager = true;
     stage = "pinned-native-runtime";
-    const nativeExpected = await registryPackage("@deepseek-ai/dsh", DSH_VERSION, fetcher, undefined, DSH_INTEGRITY);
+    const nativeExpected = await registryPackage("@deepseek-ai/dsh", dshPolicy.runtimeVersion, fetcher, undefined, dshPolicy.integrity);
     const nativeRoot = join(owner.root, "native-runtime");
     mkdirSync(nativeRoot);
     writeFileSync(join(nativeRoot, "package.json"), JSON.stringify({ name: "dsmm-isolated-registry-probe", private: true,
-      dependencies: { "@deepseek-ai/dsh": DSH_VERSION } }), { flag: "wx", mode: 0o600 });
+      dependencies: { "@deepseek-ai/dsh": dshPolicy.runtimeVersion } }), { flag: "wx", mode: 0o600 });
     await runChecked(process.execPath, [pnpmEntry, "install", "--ignore-scripts", `--registry=${REGISTRY}`,
       `--store-dir=${join(owner.root, "pnpm-store")}`, "--config.manage-package-manager-versions=false"], nativeRoot);
     const nativeRequire = createRequire(join(nativeRoot, "package.json"));
     const nativePackage = realpathSync(nativeRequire.resolve("@deepseek-ai/dsh/package.json"));
     requireFact(isInside(nativePackage, nativeRoot), "NATIVE_RUNTIME_RESOLUTION_ESCAPE");
     const nativeManifest = JSON.parse(readFileSync(nativePackage, "utf8"));
-    requireFact(nativeManifest.name === "@deepseek-ai/dsh" && nativeManifest.version === DSH_VERSION
+    requireFact(nativeManifest.name === "@deepseek-ai/dsh" && nativeManifest.version === dshPolicy.runtimeVersion
       && nativeManifest.bin?.dsh === "lib/bin.js", "NATIVE_RUNTIME_IDENTITY_MISMATCH");
     const nativeBin = realpathSync(join(dirname(nativePackage), "lib", "bin.js"));
     requireFact(isInside(nativeBin, dirname(nativePackage))
@@ -585,6 +590,7 @@ export async function runInstallProbe(options, runtime = {}) {
 
 export function validateInstallReceipt(receipt, { version, sha256 }) {
   const publicExports = publicExportsForVersion(version), requiredChecks = requiredChecksForVersion(version);
+  const dshPolicy = dshPolicyForVersion(version);
   requireFact(validVersion(version) && SHA256.test(sha256), "INVALID_EXPECTED_IDENTITY");
   requireFact(receipt?.schemaVersion === 1 && receipt.outcome === "COMPLETED" && receipt.packageName === PACKAGE_NAME
     && receipt.version === version && receipt.sha256 === sha256, "INSTALL_RECEIPT_IDENTITY_MISMATCH");
@@ -595,7 +601,7 @@ export function validateInstallReceipt(receipt, { version, sha256 }) {
     && Number.isSafeInteger(receipt.registry.size) && receipt.registry.size > 0, "INSTALL_RECEIPT_REGISTRY_INVALID");
   requireFact(receipt.packageManager?.name === "pnpm" && receipt.packageManager.version === PNPM_VERSION
     && receipt.packageManager.integrity === PNPM_INTEGRITY, "INSTALL_RECEIPT_PACKAGE_MANAGER_INVALID");
-  requireFact(receipt.native?.version === DSH_VERSION && receipt.native.integrity === DSH_INTEGRITY
+  requireFact(receipt.native?.version === dshPolicy.runtimeVersion && receipt.native.integrity === dshPolicy.integrity
     && SHA256.test(receipt.native.binSha256 ?? "") && receipt.native.headless === true && receipt.native.profileList === true
     && receipt.native.dumpConfig === true, "INSTALL_RECEIPT_NATIVE_INVALID");
   const commands = lifecycleCommands(receipt.native.profile, version);

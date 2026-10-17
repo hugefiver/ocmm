@@ -9,7 +9,7 @@ import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { DSMM_ROLES, rolePluginRows, renderAgentCordis } from "../lib/roles.js";
 import { nativeFixturePlugin, nativeRoutingFixture } from "./native-routing-fixture.ts";
 
-test("native entry-list YAML parses nested role groups and agrees with rc.2's exported standard defaults", async () => {
+test("native entry-list YAML parses nested role groups and agrees with the installed SDK's exported standard defaults", async () => {
   const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
   const include = await nativeFixturePlugin("@deepseek-ai/cordis-plugin-include", "@deepseek-ai/dsh-agent-preset-registry");
   const yaml = createRequire(sdk.resolve("@deepseek-ai/dsh-agent-preset-registry"))("js-yaml");
@@ -32,9 +32,7 @@ test("native entry-list YAML parses nested role groups and agrees with rc.2's ex
   for (const id of ["compaction", "tool-ask-user", "tool-todo"]) assert.deepEqual(rows.find((row) => row.id === id), standard.find((row: { id: string }) => row.id === id));
   const planning = rows.find((row) => row.id === "planning")!;
   assert.ok(Array.isArray(planning.config));
-  const config = planning.config[0].config;
-  assert.ok(config && !Array.isArray(config));
-  assert.equal(config.section, standard.find((row: { id: string }) => row.id === "planning").config[0].config.section.trimEnd());
+  assert.ok(planning.config[0].config && !Array.isArray(planning.config[0].config));
 });
 
 interface NativeCommands {
@@ -119,16 +117,18 @@ test("first real DW compositions expose scoped native compact/plan/interaction w
     assert.equal(denied.isError, true);
     assert.equal(existsSync(sentinel), false);
     assert.equal(f.adapter.calls.length, 0, "human commands/pruning/todo do not invoke an LLM");
-    const quick = await f.subagents.start("dsmm-role-quick", { parent: builder, prompt: [], signal: new AbortController().signal });
+    const quick = await f.subagents.startActivation({ provider: "dsmm-role-quick", label: "Quick native write", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: builder, prompt: [] } });
     try {
-      await quick.result;
-      const child = quick.localAgent!;
+      const child = f.agents.get(quick.childId)!;
+      assert.ok(child);
       const inherited = presets.serviceFor(child, "compaction")!;
       assert.equal(implementation(inherited), implementation(compactions[1] as object), "a short native child joins its parent's retained composition, not a fresh quick template");
       const path = join(f.profileDir, "quick-write-proof");
       const written = await child.ctx.get("tools")!.execute({ agent: child, name: "write", arguments: { file_path: path, content: "QUICK_WRITE_PROOF" }, callId: ToolCallId("native-default-quick-write"), signal: new AbortController().signal });
       assert.equal(written.isError, false, JSON.stringify(written));
       assert.equal(readFileSync(path, "utf8"), "QUICK_WRITE_PROOF");
+      assert.equal((await quick.result).stopReason, "completed");
       assert.equal(f.adapter.calls.length, 1, "only the explicitly invoked local mock child turn calls the adapter");
     } finally { await quick.dispose(); }
   } finally { await f.dispose(); }

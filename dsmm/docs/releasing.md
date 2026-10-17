@@ -1,6 +1,26 @@
 # DSMM Source Readiness, Release and Rollback
 
-## 0.2.2 stable native release contract
+## 0.3.0 pure compatibility release contract
+
+The reviewed identity is **@dsmm/dsmm@0.3.0**, tag **dsmm-scoped-v0.3.0**, artifact **dsmm-dsmm-0.3.0.tgz**. This release carries the current 0.2.2 product behavior onto exact DSH `0.2.1-rc.1`, with the required public `./agent-registry` entry. It does not support or package old DSH cohorts, old capture/history formats, session-repair entrypoints, or Desktop/TUI cold-profile migration. It never reads, rewrites, or auto-migrates those user resources. Unified deployment/role UI, automatic runtime selection, and the unrelated six-job publication redesign remain outside 0.3.0. Historical tags, packages, assets, receipts, rc.2 SDK/runtime policy, and recovery authority remain immutable.
+
+The manifest pins DSH peers and development SDK packages to exact `0.2.1-rc.1` and declares engine range `>=0.2.1-rc.1 <0.3.0-0`. The 0.3.0 release lane builds and packs the source without running test suites, test typechecks, source snapshot comparisons, Docker/browser acceptance, or post-publication native installation tests. Build compilation and resource generation remain required. Historical 0.1.x–0.2.2 receipt validation retains its own native acceptance requirements.
+
+The sixteen public exports replace the retired `./legacy-read-host` compatibility entry with `./agent-registry` → `lib/agent-registry.{js,d.ts}`. `COMPILED_NAMES_030` removes the six legacy-read/capture compatibility modules and adds `agent-registry`; the package file policy excludes those compiled compatibility outputs and all repair/cold-migration operator scripts. Release receipts do not claim browser, history, permission, or other runtime tests passed.
+
+The packaged startup patch is explicit: disable the exact stock Agent and Subagent rows, load one `DsmmAgentRegistry`, one `DsmmSubagentRuntime`, and Main, then restart the Host. The release neither hot-replaces stock services nor uses `runtime.enabled` or automatic composition.
+
+The 0.3.0 transport records `sourceChecks: NOT_RUN_RELEASE_POLICY`, native acceptance and fresh installation as `NOT_RUN_RELEASE_POLICY`, and receipt scope `artifact-integrity-only`. The existing receipt asset filename is retained for transport compatibility; its content is package-integrity evidence, not a Docker test result. Artifact digests, trusted tag/run/attempt identity, registry provenance, and non-overwriting publication remain required. The terminal checker verifies these publication surfaces without executing functional tests or asserting they passed.
+
+The workflow retains the existing mutually exclusive ordinary `import-bootstrap` / `prepare` / `publish` lane and `prepare-recovery-022` / `publish-recovery-022` lane, followed by shared `verify` and `github-release`. The completion authority and immutable-failure rules below are unchanged. After the authorized `dsmm-scoped-v0.3.0` run terminates, ordinary completion uses the released checkout and exact run identity:
+
+```powershell
+node dsmm/scripts/check-dsmm-release-completion.mjs terminal --run-id <run> --run-attempt <attempt> --control-sha <released-commit> --receipt <new-030-terminal-receipt.json>
+```
+
+Only exit 0 with receipt outcome `COMPLETED` establishes completion. A workflow conclusion, producer boolean, local build, registry visibility, or browser receipt alone does not.
+
+## Historical 0.2.2 stable native release contract
 
 The reviewed source identity is **@dsmm/dsmm@0.2.2**, tag **dsmm-scoped-v0.2.2**, artifact **dsmm-dsmm-0.2.2.tgz**. The tag is permanently fixed to **dff1ac8ffd58316455256ef1c64c19d6e73e1293**. This is a distinct source and acceptance contract, not a relabelled 0.2.1 or 0.2.0 receipt or an inferred later-version override. Every historical tag, package, asset and receipt remains immutable. A working checkout or local smoke receipt is not release completion or publication authorization.
 

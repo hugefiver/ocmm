@@ -568,7 +568,7 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
   const subagent = roleScope === "child" ? await load("@deepseek-ai/dsh-subagent") : undefined;
   const installedManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   assert.equal(installedManifest.name, "@dsmm/dsmm");
-  const unavailableCode = installedManifest.version === "0.2.2" ? "UNKNOWN_MODEL" : "NO_ADAPTER";
+  const unavailableCode = installedManifest.version === "0.2.2" || installedManifest.version === "0.3.0" ? "UNKNOWN_MODEL" : "NO_ADAPTER";
   const runtime = ctx.get("dsmmProfileRuntime");
   const { resolveRoleRuntimePolicy } = await import(pathToFileURL(join(packageRoot, "lib", "settings.js")).href);
   const agents = ctx.get("agents");
@@ -660,11 +660,12 @@ export async function runNativeRouteScenarios(ctx, { nativeRequire, packageRoot,
           if (agents.isOwnedBy(child.id, parent)) active = { name, agent: child, calls: [], live: [], toolExecutions: [], downstreamAlwaysCalls: 0 };
         }, { global: true });
         try {
-          const run = await ctx.get("subagents").start(`dsmm-role-${role.slice("dsmm-".length)}`, {
-            parent, prompt: [{ type: "text", text: "Complete the owned native strategy fixture" }], signal: new AbortController().signal,
+          const run = await ctx.get("subagents").startActivation({
+            provider: `dsmm-role-${role.slice("dsmm-".length)}`, label: `native-strategy-${name}`, delivery: "caller", signal: new AbortController().signal,
+            request: { parent, prompt: [{ type: "text", text: "Complete the owned native strategy fixture" }] },
           });
           handles.push(run);
-          agent = run.localAgent;
+          agent = agents.get(run.childId);
           assert.ok(agent && active?.agent === agent, "native run must publish its exact observed local child");
           assert.equal(agents.get(agent.id), agent);
           assert.equal(agents.isOwnedBy(agent.id, parent), true);

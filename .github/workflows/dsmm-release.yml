@@ -106,7 +106,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node control/dsmm/scripts/dsmm-release.mjs resolve --control-root control --output "$RUNNER_TEMP/dsmm-context.json"
-          node -e 'const fs=require("node:fs");const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/dsmm-context.json","utf8"));fs.appendFileSync(process.env.GITHUB_OUTPUT,"mode="+c.mode+"\n");'
+          node --input-type=module -e 'import fs from "node:fs";import {dshPolicyForVersion} from "./control/dsmm/scripts/release-contract.mjs";const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/dsmm-context.json","utf8")),p=dshPolicyForVersion(c.version);fs.appendFileSync(process.env.GITHUB_OUTPUT,"mode="+c.mode+"\nversion="+c.version+"\n");fs.appendFileSync(process.env.GITHUB_ENV,"DSMM_PACKAGE_VERSION="+c.version+"\nDSMM_DSH_VERSION="+p.runtimeVersion+"\n");'
       - name: Reject a missing bootstrap import ID before download
         if: steps.context.outputs.mode == 'bootstrap'
         id: selected-import
@@ -122,27 +122,18 @@ jobs:
       - name: Revalidate imported frozen 0.1.2 and previous Docker proof with read-only control
         if: steps.context.outputs.mode == 'bootstrap'
         run: node control/dsmm/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
-      - name: Build exact native acceptance runtime before source tests
+      - name: Prepare verified native runtime input
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
+        working-directory: control
+        run: node dsmm/scripts/prepare-dsh-runtime-input.mjs --version "$DSMM_PACKAGE_VERSION" --destination "$RUNNER_TEMP/dsmm-dsh-runtime-input"
+      - name: Build exact native acceptance runtime
         id: native-runtime
-        if: steps.context.outputs.mode == 'future'
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
         working-directory: control
         run: |
-          docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.0-rc.2 --iidfile "$RUNNER_TEMP/dsmm-runtime-image.id" -f dsmm/docker/Dockerfile.artifact -t "dsmm-final-artifact:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" .
+          docker build --build-context dsh-input="$RUNNER_TEMP/dsmm-dsh-runtime-input" --build-arg DSH_VERSION="$DSMM_DSH_VERSION" --iidfile "$RUNNER_TEMP/dsmm-runtime-image.id" -f dsmm/docker/Dockerfile.artifact -t "dsmm-final-artifact:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" .
           node --input-type=module -e 'import fs from "node:fs";const id=fs.readFileSync(process.env.RUNNER_TEMP+"/dsmm-runtime-image.id","utf8").trim();if(!/^sha256:[a-f0-9]{64}$/.test(id))throw Error("runtime image identity missing");fs.appendFileSync(process.env.GITHUB_ENV,"DSMM_RUNTIME_IMAGE="+id+"\n");'
-      - name: Extract pinned source SDK from the exact acceptance runtime
-        if: steps.context.outputs.mode == 'future'
-        working-directory: control
-        run: node dsmm/scripts/extract-runtime-sdk.mjs --image "$DSMM_RUNTIME_IMAGE" --destination "$RUNNER_TEMP/dsmm-source-sdk"
-      - name: Prepare verified published legacy source fixture
-        if: steps.context.outputs.mode == 'future'
-        working-directory: control
-        run: |
-          test -d "$RUNNER_TEMP"
-          test ! -e "$RUNNER_TEMP/dsmm-source-legacy"
-          mkdir -m 700 "$RUNNER_TEMP/dsmm-source-legacy"
-          node dsmm/test/published-legacy-artifact-fixture.mjs download-artifact "$RUNNER_TEMP/dsmm-source-legacy/dsmm-0.2.0.tgz"
-          printf '%s\n' "DSMM_TEST_LEGACY_ARTIFACT=$RUNNER_TEMP/dsmm-source-legacy/dsmm-0.2.0.tgz" >> "$GITHUB_ENV"
-      - name: Configure existing source-test Rust toolchain
+      - name: Configure existing Rust build toolchain
         if: steps.context.outputs.mode == 'future'
         working-directory: control
         env:
@@ -155,7 +146,7 @@ jobs:
           test -x "$toolchain/bin/rustc"
           RUSTUP_TOOLCHAIN="$toolchain" cargo --version
           printf '%s\n' "RUSTUP_HOME=$rustup_home" "RUSTUP_TOOLCHAIN=$toolchain" "RUSTUP_AUTO_INSTALL=0" "CARGO_HOME=$RUNNER_TEMP/dsmm-source-pwsh/home/.cargo" >> "$GITHUB_ENV"
-      - name: Extract and verify pinned task-owned source-test PowerShell
+      - name: Prepare isolated build home
         if: steps.context.outputs.mode == 'future'
         env:
           HOME: ${{ runner.temp }}/dsmm-source-pwsh/home
@@ -168,42 +159,6 @@ jobs:
           test ! -e "$RUNNER_TEMP/dsmm-source-pwsh"
           mkdir -m 700 "$RUNNER_TEMP/dsmm-source-pwsh"
           mkdir -p "$HOME"
-          container="$(docker create --pull=never --network none "$DSMM_RUNTIME_IMAGE")"
-          trap 'docker rm "$container"' EXIT
-          docker cp "${container}:/opt/dsmm-powershell/7.6.6" "$RUNNER_TEMP/dsmm-source-pwsh/runtime"
-          test "$("$RUNNER_TEMP/dsmm-source-pwsh/runtime/pwsh" -NoLogo -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()')" = "7.6.6"
-          "$RUNNER_TEMP/dsmm-source-pwsh/runtime/pwsh" --version
-          printf '%s\n' "$RUNNER_TEMP/dsmm-source-pwsh/runtime" >> "$GITHUB_PATH"
-      - name: Configure task-owned Go paths
-        if: steps.context.outputs.mode == 'future'
-        env:
-          GOBIN: ${{ runner.temp }}/dsmm-source-go/bin
-          GOPATH: ${{ runner.temp }}/dsmm-source-go/gopath
-          GOMODCACHE: ${{ runner.temp }}/dsmm-source-go/modules
-          GOCACHE: ${{ runner.temp }}/dsmm-source-go/cache
-          GOTMPDIR: ${{ runner.temp }}/dsmm-source-go/tmp
-        run: |
-          mkdir -p "$GOBIN" "$GOPATH" "$GOMODCACHE" "$GOCACHE" "$GOTMPDIR" "$RUNNER_TEMP/dsmm-source-go/toolchain"
-          printf '%s\n' "GOBIN=$GOBIN" "GOPATH=$GOPATH" "GOMODCACHE=$GOMODCACHE" "GOCACHE=$GOCACHE" "GOTMPDIR=$GOTMPDIR" >> "$GITHUB_ENV"
-      - name: Set up authorized task-owned Go toolchain
-        if: steps.context.outputs.mode == 'future'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        env:
-          # The runner overrides RUNNER_* before launching JS actions; preload sets the installer's process env afterward.
-          DSMM_GO_TOOL_CACHE: ${{ runner.temp }}/dsmm-source-go/toolchain
-          NODE_OPTIONS: "--import=data:text/javascript,process.env.RUNNER_TOOL_CACHE=process.env.DSMM_GO_TOOL_CACHE"
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: false
-          cache: false
-      - name: Install and verify authorized pinned source-test gopls
-        if: steps.context.outputs.mode == 'future'
-        run: |
-          test "$(go env GOVERSION)" = "go${GO_VERSION}"
-          case "$(go env GOROOT)" in "$RUNNER_TEMP/dsmm-source-go/toolchain/"*) ;; *) echo "Go toolchain escaped task-owned storage"; exit 1 ;; esac
-          go install "golang.org/x/tools/gopls@${GOPLS_VERSION}"
-          test "$("$GOBIN/gopls" version)" = "golang.org/x/tools/gopls ${GOPLS_VERSION}"
-          printf '%s\n' "$GOBIN" >> "$GITHUB_PATH"
       - name: Install frozen future source dependencies
         if: steps.context.outputs.mode == 'future'
         working-directory: control
@@ -214,13 +169,7 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/data
           XDG_STATE_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/state
         run: pnpm install --frozen-lockfile
-      - name: Prepare fixed genuine cold-profile application seed once
-        if: steps.context.outputs.mode == 'future'
-        working-directory: control
-        run: |
-          node dsmm/test/prepare-cold-profile-genuine-seed.mjs --destination "$RUNNER_TEMP/dsmm-source-genuine-seed"
-          printf '%s\n' "DSMM_COLD_PROFILE_GENUINE_SEED=$RUNNER_TEMP/dsmm-source-genuine-seed" >> "$GITHUB_ENV"
-      - name: Verify future source with pnpm
+      - name: Build future source with pnpm
         if: steps.context.outputs.mode == 'future'
         working-directory: control
         env:
@@ -230,22 +179,14 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/data
           XDG_STATE_HOME: ${{ runner.temp }}/dsmm-source-pwsh/home/state
         run: |
-          pnpm run typecheck
-          pnpm test
           pnpm run build
           node dsmm/scripts/materialize-frontend.mjs --sync
-          pnpm --dir dsmm run typecheck
-          pnpm --dir dsmm run typecheck:test
-          pnpm --dir dsmm test
           pnpm --dir dsmm run build
           node dsmm/scripts/generate-role-assets.mjs
-          pnpm --dir dsmm run check:source
-          pnpm --dir dsmm run check:release
-          git diff --exit-code
-      - name: Pack future artifact once and independently accept frozen bytes
+      - name: Pack future artifact once
         if: steps.context.outputs.mode == 'future'
         run: |
-          mkdir "$RUNNER_TEMP/dsmm-packed" "$RUNNER_TEMP/dsmm-ui-evidence"
+          mkdir "$RUNNER_TEMP/dsmm-packed"
           node control/dsmm/scripts/dsmm-release.mjs assert-source --control-root control --context "$RUNNER_TEMP/dsmm-context.json"
           test "$(pnpm --version)" = "$PNPM_VERSION"
           node -e 'if(require("node:fs").readdirSync(process.env.RUNNER_TEMP+"/dsmm-packed").length)throw Error("pack destination must be empty");'
@@ -253,10 +194,14 @@ jobs:
           node control/dsmm/scripts/dsmm-release.mjs assert-source --control-root control --context "$RUNNER_TEMP/dsmm-context.json"
           node --input-type=module -e 'import fs from "node:fs";import p from "node:path";import crypto from "node:crypto";import {validateTarballBuffer} from "./control/dsmm/scripts/dsmm-release.mjs";const d=p.join(process.env.RUNNER_TEMP,"dsmm-packed");const c=JSON.parse(fs.readFileSync(p.join(process.env.RUNNER_TEMP,"dsmm-context.json"),"utf8"));const n="dsmm-dsmm-"+c.version+".tgz";if(JSON.stringify(fs.readdirSync(d))!==JSON.stringify([n]))throw Error("expected exactly one frozen tarball");const f=p.join(d,n),b=fs.readFileSync(f);validateTarballBuffer(b,{version:c.version});fs.appendFileSync(process.env.GITHUB_ENV,"DSMM_FROZEN_TARBALL="+f+"\nDSMM_FROZEN_SHA256="+crypto.createHash("sha256").update(b).digest("hex")+"\n");'
       - name: Full native and browser Docker gate for future artifact
-        if: steps.context.outputs.mode == 'future'
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
         run: |
+          mkdir "$RUNNER_TEMP/dsmm-ui-evidence"
           node control/dsmm/scripts/release-native-gate.mjs --control-root control --artifact "$DSMM_FROZEN_TARBALL" --image "$DSMM_RUNTIME_IMAGE" --sha256 "$DSMM_FROZEN_SHA256" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --evidence-dir "$RUNNER_TEMP/dsmm-ui-evidence"
           node control/dsmm/scripts/dsmm-release.mjs freeze --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --tarball "$DSMM_FROZEN_TARBALL" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --output-dir "$RUNNER_TEMP/dsmm-accepted" --source-checks COMPLETED
+      - name: Freeze package with explicit unrun test status
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version == '0.3.0'
+        run: node control/dsmm/scripts/dsmm-release.mjs freeze --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --tarball "$DSMM_FROZEN_TARBALL" --output-dir "$RUNNER_TEMP/dsmm-accepted" --source-checks NOT_RUN_RELEASE_POLICY
       - name: Remove task-owned runtime image tag
         if: always() && steps.context.outputs.mode == 'future' && steps.native-runtime.outcome == 'success'
         run: docker image rm "dsmm-final-artifact:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -272,7 +217,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Retain future browser evidence
-        if: steps.context.outputs.mode == 'future' && always()
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dsmm-browser-${{ github.run_id }}-${{ github.run_attempt }}

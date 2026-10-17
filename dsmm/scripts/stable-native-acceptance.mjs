@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { STABLE_UI_CHECKS_021, isStableNativeSource, publicRuntimeExportsForVersion, stableUiKindForVersion, startupProfileContract } from "./release-contract.mjs";
+import { STABLE_UI_CHECKS_021, isSource030, isStableNativeSource, publicRuntimeExportsForVersion, stableUiKindForVersion, startupProfileContract } from "./release-contract.mjs";
 
 export const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export const STABLE_UI_CHECKS = STABLE_UI_CHECKS_021;
@@ -18,7 +18,7 @@ export function stableCompositionBundle(compositionId) {
     const {installConnection}=require('@deepseek-ai/dsh-client-connection/client');
     const {LocaleRuntime}=require('@deepseek-ai/dsh-client-locale/client');
     return {inject:['slots'],apply(ctx){
-      installConnection(ctx,{transport:{rpc:window.__dsmmOwnedCarrier,ownsHost:true}});
+      installConnection(ctx,{interactions:'answer',transport:{rpc:window.__dsmmOwnedCarrier,ownsHost:true}});
       const locale=new LocaleRuntime(ctx,undefined,{languages:['en'],preference:'en'});
       ctx.provide('locale',locale);ctx.slots.installLocale(locale);
       document.body.style.overflow='auto';document.getElementById('root').style.height='auto';
@@ -31,29 +31,40 @@ export function stableCompositionBundle(compositionId) {
   }});`;
 }
 
-export function stableRuntimeStartupRows() {
+export function stableRuntimeStartupRows(version) {
+  if (isSource030(version)) return [
+    { id: "agent", name: "@deepseek-ai/dsh-agent", disabled: true },
+    { id: "subagent", name: "@deepseek-ai/dsh-subagent", disabled: true },
+    { insert: [{ id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} }] },
+    { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: { maxDepth: 3, maxActiveSubagents: 8 } }] },
+  ];
   return [
     { id: "subagent", name: "@deepseek-ai/dsh-subagent", disabled: true },
     { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: { maxDepth: 3, maxActiveSubagents: 8 } }] },
   ];
 }
 
-export function stableMainStartupRow(config) {
+export function stableMainStartupRow(config, version) {
   assert.equal(config.experimentalLegacyRead, undefined, "experimental LegacyRead is programmatic-only and must remain off");
   assert.equal(config.legacyRead, undefined, "obsolete legacyRead is not a startup acceptance input");
-  return { id: "dsmm", name: "@dsmm/dsmm", inject: ["subagents"], config };
+  return { id: "dsmm", name: "@dsmm/dsmm", inject: isSource030(version) ? ["profileContext", "agents"] : ["subagents"], config };
 }
 
 /** Capture actual settled Loader and Host authority, never patch intent alone. */
-export function inspectStableBootstrap(ctx, { template = "web", requireDeliveryFence = true } = {}) {
+export function inspectStableBootstrap(ctx, { template = "web", requireDeliveryFence = true, version } = {}) {
   const profile = ctx.get("profileContext"), entries = [...ctx.get("loader").entries()];
   const startedBundles = [...profile.startedBundles];
   assert.deepEqual(startedBundles, ["@deepseek-ai/dsh-base", template === "web" ? "@deepseek-ai/dsh-web-app" : "@deepseek-ai/dsh-headless", "@dsmm/dsmm"]);
   const stock = entries.filter((entry) => entry.options.id === "subagent");
   assert.equal(stock.length, 1); assert.equal(stock[0].options.name, "@deepseek-ai/dsh-subagent"); assert.equal(stock[0].disabled, true);
+  const stockAgent = entries.filter((entry) => entry.options.id === "agent");
+  if (isSource030(version)) { assert.equal(stockAgent.length, 1); assert.equal(stockAgent[0].options.name, "@deepseek-ai/dsh-agent"); assert.equal(stockAgent[0].disabled, true); }
+  const registry = entries.filter((entry) => entry.options.name === "@dsmm/dsmm/agent-registry");
   const custom = entries.filter((entry) => entry.options.name === "@dsmm/dsmm/subagent-runtime");
   const main = entries.filter((entry) => entry.options.name === "@dsmm/dsmm");
   assert.equal(custom.length, 1); assert.equal(main.length, 1);
+  if (isSource030(version)) assert.equal(registry.length, 1); else assert.equal(registry.length, 0);
+  if (isSource030(version)) assert.equal(registry[0].fiber.state, 2);
   assert.equal(custom[0].fiber.state, 2); assert.equal(main[0].fiber.state, 2);
   assert.equal(entries.some((entry) => entry.options.name === "@dsmm/dsmm/legacy-read-host"), false);
   const runtime = ctx.get("dsmmProfileRuntime"), integration = ctx.get("dsmmRuntimeIntegration");
@@ -64,10 +75,18 @@ export function inspectStableBootstrap(ctx, { template = "web", requireDeliveryF
     assert.equal(integration.legacyRead, undefined);
     assert.equal(integration.runtime.authority.view().deliveryFenceReady, true);
   } else assert.equal(integration, undefined, "cold-off Core must not install managed role integration");
-  return { startedBundles, stockSubagentDisabled: stock[0].disabled, customRuntimeEntries: custom.length, mainEntries: main.length,
+  const result = { startedBundles, stockSubagentDisabled: stock[0].disabled, customRuntimeEntries: custom.length, mainEntries: main.length,
     runtimeLoaded: custom[0].fiber.state === 2, mainLoaded: main[0].fiber.state === 2, ...binding,
-    experimentalLegacyRead: "unconfigured/unavailable",
-    loader: [...main, ...custom].map((entry) => ({ id: entry.id, name: entry.options.name, state: entry.fiber.state })) };
+    ...(isSource030(version) ? { legacyCompatibility: "not-composed" } : { experimentalLegacyRead: "unconfigured/unavailable" }),
+    loader: [...main, ...registry, ...custom].map((entry) => ({ id: entry.id, name: entry.options.name, state: entry.fiber.state })) };
+  if (isSource030(version)) Object.assign(result, {
+    stockAgentDisabled: stockAgent[0].disabled,
+    registryEntries: registry.length,
+    registryLoaded: registry[0].fiber.state === 2,
+    agentsService: ctx.get("agents")?.constructor?.name,
+    subagentsService: ctx.get("subagents")?.constructor?.name,
+  });
+  return result;
 }
 
 export function stableNativeProofIdentity(manifest, { sourceContract = "0.2.1" } = {}) {
@@ -93,6 +112,11 @@ export async function inspectStableExports(packageRoot, profilePackage, options 
     exports.push(row);
   }
   assert.equal(require.resolve("@dsmm/dsmm/subagent-runtime"), join(packageRoot, "lib", "runtime-integration.js"));
+  if (isSource030(manifest.version)) {
+    const registry = await import(pathToFileURL(require.resolve("@dsmm/dsmm/agent-registry")).href);
+    assert.equal(typeof registry.default, "function"); assert.equal(registry.default.name, "DsmmAgentRegistry");
+    return { exports, agentRegistryClass: true };
+  }
   assert.equal(require.resolve("@dsmm/dsmm/legacy-read-host"), join(packageRoot, "lib", "legacy-read-host.js"));
   const legacy = await import(pathToFileURL(require.resolve("@dsmm/dsmm/legacy-read-host")).href);
   assert.equal(typeof legacy.createLegacyReadHost, "function"); assert.equal(legacy.default, undefined);

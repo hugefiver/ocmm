@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRoleProfile, fixture } from "./host-llm-review-fixture.mjs";
+import { applyRoleProfile, fixture, startDoc } from "./host-llm-review-fixture.mjs";
 
 for (const passthrough of [true, false]) test(`a parent admission change cancels a real child's credential wait under policy ${passthrough} before HTTP`, async t => {
   const entered = Promise.withResolvers();
@@ -13,18 +13,18 @@ for (const passthrough of [true, false]) test(`a parent admission change cancels
   } });
   const primary = { provider: "apai", model: "gpt-6.1-sol", reasoningEffort: "medium", original: false };
   await applyRoleProfile(f, "epoch-a", { primary, fallbackRoutes: [] }, { modelParameters: { passthrough } });
-  const child = await f.ctx.subagents.start("dsmm-role-doc-search", { parent: f.agent, prompt: [{ type: "text", text: "Wait for this exact admission" }], signal: new AbortController().signal });
+  const { run, agent } = await startDoc(f, { prompt: [{ type: "text", text: "Wait for this exact admission" }] });
   try {
     const signal = await entered.promise;
-    const admitted = f.ctx.dsmmProfileRuntime.admission(child.localAgent);
+    const admitted = f.ctx.dsmmProfileRuntime.admission(agent);
     await applyRoleProfile(f, "epoch-b", { primary: { provider: "apai", model: "gpt-5.6-terra", reasoningEffort: "high" }, fallbackRoutes: [] });
     assert.equal(signal.aborted, true);
-    assert.equal((await child.result).stopReason, "aborted");
+    assert.equal((await run.result).stopReason, "aborted");
     assert.equal(f.bodies.length, 0);
-    assert.equal(f.ctx.dsmmProfileRuntime.admission(child.localAgent), admitted);
+    assert.equal(f.ctx.dsmmProfileRuntime.admission(agent), admitted);
     assert.deepEqual(admitted.childCapture.invocation.requestedRoute, primary);
-    assert.equal(child.localAgent.session.requestHeader().config.reasoningEffort, passthrough ? "medium" : undefined);
-  } finally { await child.dispose(); }
+    assert.equal(agent.session.requestHeader().config.reasoningEffort, passthrough ? "medium" : undefined);
+  } finally { await run.dispose(); }
 });
 
 test("cancel reaches request-time credentials before the stream watchdog starts", async t => {

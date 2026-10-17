@@ -38,15 +38,17 @@ test("explicit runtime publishes subagents early but readiness requires real spa
 });
 
 test("stock conflict rejects without replacing or draining the existing native service", async () => {
-  const ctx = new Context();
+  const f = await deliveryFixture({ bind: false });
+  const ctx = f.ctx;
   try {
+    await f.runtimeFiber.dispose();
     await ctx.plugin(SubagentRuntime, {}).await();
     const stock = Reflect.get(ctx.subagents, symbols.original) ?? ctx.subagents;
     assert.throws(() => new DsmmSubagentRuntime(ctx, { maxDepth: { get: () => 3 }, maxActiveSubagents: { get: () => 8 } }),
       (error: unknown) => error instanceof SubagentError && error.code === "DUPLICATE_PROVIDER");
     assert.equal(Reflect.get(ctx.subagents, symbols.original) ?? ctx.subagents, stock);
     assert.ok(stock instanceof SubagentRuntime);
-  } finally { await ctx.fiber.dispose(); }
+  } finally { await f.dispose(); }
 });
 
 test("unbound policy is fail closed; explicitly native sendMessage and Gateway prompt retain their native path", async () => {
@@ -55,16 +57,17 @@ test("unbound policy is fail closed; explicitly native sendMessage and Gateway p
   f.adapter.beforeStream = () => stream.promise;
   try {
     const native = await f.create(false);
+    await assert.rejects(f.start(native), unauthorized);
+    await assert.rejects(f.runtime.sendMessage(native, SessionId("unknown-child"), [{ type: "text", text: "unbound refused" }], { signal: new AbortController().signal }), unauthorized);
+    await assert.rejects(f.prompt(f.request(native, SessionId("unknown-child"), "unbound Gateway refused")), (error: unknown) => remoteErrorOf(error)?.code === "subagent/unauthorized");
+    f.bind(); f.runtime.authority.enablePolicy(f.owner);
     const started = await f.start(native);
     const child = f.ctx.agents.get(started.childId)!;
-    await assert.rejects(f.runtime.sendMessage(native, child.id, [{ type: "text", text: "unbound refused" }], { signal: new AbortController().signal }), unauthorized);
-    await assert.rejects(f.prompt(f.request(native, child.id, "unbound Gateway refused")), (error: unknown) => remoteErrorOf(error)?.code === "subagent/unauthorized");
-    assert.equal(accepted(child).length, 1);
-    f.bind(); f.runtime.authority.enablePolicy(f.owner);
+    const count = accepted(child).length;
     await f.runtime.sendMessage(native, child.id, [{ type: "text", text: "native direct message" }], { signal: new AbortController().signal });
     const receipt = await f.prompt(f.request(native, child.id, "native queue")) as { messageId: string };
     assert.ok(accepted(child).some((message) => message.id === receipt.messageId));
-    assert.equal(accepted(child).length, 3);
+    assert.equal(accepted(child).length, count + 2);
   } finally { stream.release(); f.adapter.beforeStream = undefined; await f.dispose(); }
 });
 
@@ -167,9 +170,10 @@ test("binding setup on a disposed scope leaves authority available for a normal 
 
 test("public owner restart start revokes borrowed tickets while its fiber uid remains live", async () => {
   const f = await deliveryFixture();
-  const stream = gate(); f.adapter.beforeStream = () => stream.promise;
+  const stream = gate(), running = gate(); f.adapter.beforeStream = () => { running.release(); return stream.promise; };
   try {
     const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
+    await running.promise;
     const queued = await f.prompt(f.request(parent, child.id, "accepted before owner restart")) as { messageId: string };
     const ticket = f.runtime.authority.acquireParentTicket(parent), uid = f.bindingFiber.uid;
     const restarted = f.bindingFiber.restart();
@@ -197,9 +201,10 @@ test("Host disposal start rejects even an already registered provider barrier", 
 
 test("publication install failure revokes old and prepared authority without cancelling accepted work", async () => {
   const f = await deliveryFixture();
-  const stream = gate(); f.adapter.beforeStream = () => stream.promise;
+  const stream = gate(), running = gate(); f.adapter.beforeStream = () => { running.release(); return stream.promise; };
   try {
     const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
+    await running.promise;
     const receipt = await f.prompt(f.request(parent, child.id, "accepted before failed publication")) as { messageId: string };
     const ticket = f.runtime.authority.acquireParentTicket(parent), next = { epoch: "failed-install", permitted: true };
     const count = accepted(child).length, failure = new Error("trusted installation failed");
@@ -214,8 +219,8 @@ test("publication install failure revokes old and prepared authority without can
     assert.ok(child.inbox.nextTurn.some((message) => message.id === receipt.messageId));
     assert.equal(child.status, "running");
     assert.equal(f.adapter.calls[0].signal?.aborted, false);
-    const reply = await f.runtime.sendMessage(child, parent.id, [{ type: "text", text: "native report survives failed publication" }], { signal: new AbortController().signal });
-    assert.ok(accepted(parent).some((message) => message.id === reply));
+    const reportId = await f.runtime.sendMessage(child, parent.id, [{ type: "text", text: "accepted child reports after publication failure" }], { signal: new AbortController().signal });
+    assert.ok(accepted(parent).some((message) => message.id === reportId));
   } finally { stream.release(); f.adapter.beforeStream = undefined; await f.dispose(); }
 });
 
@@ -223,11 +228,12 @@ test("Gateway and direct preparation cancellation admits zero new messages under
   for (const surface of ["Gateway", "direct"] as const) for (const change of ["epoch", "owner", "caller", "parent"] as const) {
     await t.test(`${surface}: ${change}`, async () => {
       const f = await deliveryFixture();
-      const stream = gate(), preparation = gate(), entered = gate();
+      const stream = gate(), preparation = gate(), entered = gate(), running = gate();
       const caller = new AbortController();
-      f.adapter.beforeStream = () => stream.promise;
+      f.adapter.beforeStream = () => { running.release(); return stream.promise; };
       try {
         const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
+        await running.promise;
         const count = accepted(child).length;
         f.setBeforeEvidence(async () => { entered.release(); await preparation.promise; });
         const pending = surface === "Gateway" ? f.prompt(f.request(parent, child.id, "pending cancelled"), caller.signal)
@@ -247,19 +253,20 @@ test("Gateway and direct preparation cancellation admits zero new messages under
   }
 });
 
-test("original Gateway cancels prepared messages on real operator disposal and Connection replacement without mutating readonly operator", async (t) => {
-  for (const change of ["operator", "connection"] as const) await t.test(change, async () => {
+test("original Gateway cancels prepared messages on real browserPeer disposal and Connection replacement", async (t) => {
+  for (const change of ["browserPeer", "connection"] as const) await t.test(change, async () => {
     const f = await deliveryFixture();
-    const stream = gate(), entered = gate(), preparation = gate();
-    f.adapter.beforeStream = () => stream.promise;
+    const stream = gate(), entered = gate(), preparation = gate(), running = gate();
+    f.adapter.beforeStream = () => { running.release(); return stream.promise; };
     try {
       const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
+      await running.promise;
       const count = accepted(child).length;
       f.setBeforeEvidence(async () => { entered.release(); await preparation.promise; });
       const pending = f.prompt(f.request(parent, child.id, "old connection pending"));
       const refused = assert.rejects(pending, cancelled);
       await entered.promise;
-      if (change === "operator") await f.connectionOwner().operator.dispose();
+      if (change === "browserPeer") await f.connectionOwner().browserPeer.dispose();
       else await f.replaceConnection();
       preparation.release(); await refused;
       assert.equal(accepted(child).length, count);
@@ -270,9 +277,10 @@ test("original Gateway cancels prepared messages on real operator disposal and C
 
 test("an accepted receipt is not relabeled failed by a publication in the inbox event; no retry or child cancellation", async () => {
   const f = await deliveryFixture();
-  const stream = gate(); f.adapter.beforeStream = () => stream.promise;
+  const stream = gate(), running = gate(); f.adapter.beforeStream = () => { running.release(); return stream.promise; };
   try {
     const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
+    await running.promise;
     let published = false;
     f.ctx.on("session/event", (session, event) => {
       if (session.id === child.id && event.type === "agent/inbox/spliced" && event.data.inserted.length > 0 && !published) {
@@ -295,15 +303,16 @@ test("Gateway rejects a claimed Peer id or unscoped public prompt before evidenc
   try {
     const parent = await f.create(), started = await f.start(parent), child = f.ctx.agents.get(started.childId)!;
     f.setBeforeEvidence(async () => { reads++; });
+    const count = accepted(child).length;
     const request = f.request(parent, child.id, "impostor browser");
-    const operator = f.ctx.connection.operator;
-    const impostor = { id: operator.id, ctx: new Context(), async dispose() {} };
+    const peer = f.ctx.connection.browserPeer;
+    const impostor = { id: peer.id, ctx: new Context(), principal: peer.principal, interactions: peer.interactions, signal: new AbortController().signal, async dispose() {} };
     await assert.rejects(f.ctx.typertGateway.invoke({ namespace: "subagents", method: "prompt", args: { request }, peer: impostor }),
       (error: unknown) => remoteErrorOf(error)?.code === "subagent/unauthorized");
     await assert.rejects(f.runtime.prompt(request, new AbortController().signal),
       (error: unknown) => remoteErrorOf(error)?.code === "subagent/unauthorized");
     assert.equal(reads, 0);
-    assert.equal(accepted(child).length, 1);
+    assert.equal(accepted(child).length, count);
   } finally { stream.release(); f.adapter.beforeStream = undefined; await f.dispose(); }
 });
 
@@ -323,7 +332,7 @@ test("direct delegating child owns grandchild adjacency; cold new Agent keeps or
     assert.equal(oldTicket.signal.aborted, false);
     await f.ctx.sessionPersistence.flush();
     stream.release(); f.adapter.beforeStream = undefined;
-    await f.runtime.drainContinuableChildren(parent, [child.id]);
+    await f.runtime.drainChildren(parent, [child.id]);
     assert.equal(oldTicket.signal.aborted, true);
     await assert.rejects(f.runtime.sendMessage(child, grandchild.id, [{ type: "text", text: "old Agent refused" }], { signal: new AbortController().signal }), unauthorized);
     f.publish(parent, true);

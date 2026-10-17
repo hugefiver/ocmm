@@ -8,7 +8,7 @@ import { canonicalModelRouteJson, normalizeModelRouteJson, sameModelRouteJson } 
 import { DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, deploymentEditorSchema, normalizeLevelOverride, resolveConfig, resolveDeployment, validateDeploymentPath, validateSparseConfig } from "../src/settings.ts";
 import { parseProfileDocument, resolveProfileSettings, validateProfileOverlay } from "../src/profiles.ts";
 import { admissionFromChildCapture, parseChildAdmissionCapture } from "../src/child-capture.ts";
-import type { ChildAdmissionCapture, ChildAdmissionCaptureV2 } from "../src/child-capture.ts";
+import type { ChildAdmissionCapture, ChildAdmissionCaptureV3 } from "../src/child-capture.ts";
 import { resolvedModelParameterPolicy } from "../src/model-parameter-policy.ts";
 import { ProfileStore } from "../src/profile-store.ts";
 import { parseDsmmInvocationView, TYPERT_REMOTE } from "../src/profile-remote.ts";
@@ -109,9 +109,9 @@ test("complete-value canonical identity ignores object key order but retains own
   assert.equal(sameModelRouteJson({ provider: "p", model: "m" }, { provider: "p", model: "m", value: null }), false);
 });
 
-function capture(initialRoute: ChildAdmissionCapture["invocation"]["initialRoute"]): ChildAdmissionCaptureV2 {
+function capture(initialRoute: ChildAdmissionCapture["invocation"]["initialRoute"]): ChildAdmissionCaptureV3 {
   const settings = resolveConfig(overlay);
-  return { version: 2, modelParameterPolicy: { mode: "passthrough" }, childSessionId: "opaque-child", parentSessionId: "opaque-parent", role: "dsmm-reviewer", profilePin: null,
+  return { version: 3, delegationMode: "continuable", modelParameterPolicy: { mode: "passthrough" }, childSessionId: "opaque-child", parentSessionId: "opaque-parent", role: "dsmm-reviewer", profilePin: null,
     originalAdmissionEpoch: "a".repeat(64), invocation: { level: "max", initialRoute, requestedRoute: initialRoute, effortSource: "dsmm-config", routeSource: "level" },
     runtimePolicyCapture: { modules: settings.modules, skills: settings.skills, defaultActive: settings.defaultActive,
       roleRouting: settings.roleRouting, runtimePolicy: settings.runtimePolicy, workflow: settings.workflow, guards: settings.guards,
@@ -121,7 +121,7 @@ function capture(initialRoute: ChildAdmissionCapture["invocation"]["initialRoute
     authorityCeiling: { roles: ["dsmm-reviewer"], readOnly: true, allowRouteOverride: false, maxDepth: 1 }, toolTopology: "per-role" };
 }
 
-test("v2 persists full routes and strict v1 restores historical policy without rewriting its original file", async () => {
+test("v3 persists full routes and strict v1 restores historical policy without rewriting its original file", async () => {
   const root = await mkdtemp(join(tmpdir(), "dsmm-route-json-"));
   try {
     const store = new ProfileStore(join(root, "dsmm-profiles"));
@@ -132,7 +132,7 @@ test("v2 persists full routes and strict v1 restores historical policy without r
     assert.deepEqual(written, input);
     assert.ok(Object.isFrozen(written.invocation.initialRoute.custom_nested));
     assert.deepEqual(await new ProfileStore(store.profileDir).readChildAdmission(input.childSessionId, input.parentSessionId), input);
-    const { modelParameterPolicy: _policy, invocation: { requestedRoute: _requested, effortSource: _source, ...invocation }, ...legacy } = capture({ provider: "fixture", model: "old", reasoningEffort: "low" });
+    const { modelParameterPolicy: _policy, delegationMode: _delegationMode, invocation: { requestedRoute: _requested, effortSource: _source, ...invocation }, ...legacy } = capture({ provider: "fixture", model: "old", reasoningEffort: "low" });
     const old: ChildAdmissionCapture = { ...legacy, version: 1, invocation };
     old.childSessionId = "old-child"; old.runtimePolicyCapture.roleRouting = {};
     old.runtimePolicyCapture.runtimeRecovery.fallbackRoutes = [];

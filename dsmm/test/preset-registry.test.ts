@@ -52,14 +52,16 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
       assert.equal(Object.hasOwn(parameters.properties, "route"), false);
       assert.equal(Object.hasOwn(parameters.properties, "run_in_background"), false);
     }
-    const plan = await f.subagents.start("dsmm-role-plan-critic", { parent: root, prompt: [], signal: new AbortController().signal });
+    const plan = await f.subagents.startActivation({ provider: "dsmm-role-plan-critic", label: "Readonly critic", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: root, prompt: [] } });
     try {
-      assert.equal((await plan.result).stopReason, "completed");
-      const child = plan.localAgent!;
+      const child = f.agents.get(plan.childId)!;
+      assert.ok(child);
       const names = child.ctx.tools.schemas(child).map(schema => schema.name);
       assert.ok(names.includes("read") && names.includes("dsmm_code_search"));
       assert.equal((await child.ctx.tools.execute({ agent: child, name: "write", arguments: {}, callId: ToolCallId("registry-readonly"), signal: new AbortController().signal })).isError, true);
       assert.equal((await child.ctx.tools.execute({ agent: child, name: "read", arguments: {}, callId: ToolCallId("registry-read"), signal: new AbortController().signal })).value, "read");
+      assert.equal((await plan.result).stopReason, "completed");
     } finally { await plan.dispose(); }
   } finally { await f.dispose(); }
 });
@@ -188,7 +190,8 @@ test("native preset child inventory is profile-invariant and retains deployment 
       assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [primary]);
       assert.deepEqual(headerRoutes(root), [], "child route admission does not modify the native root route");
       for (const role of ["dsmm-builder", "dsmm-oracle"]) {
-        await assert.rejects(f.subagents.start(`dsmm-role-${role.slice(5)}`, { parent: root, prompt: [], signal: new AbortController().signal }));
+        await assert.rejects(f.subagents.startActivation({ provider: `dsmm-role-${role.slice(5)}`, label: "Disabled role", delivery: "caller", signal: new AbortController().signal,
+          request: { parent: root, prompt: [] } }));
         const denied = await tools.execute({ agent: root, name: toolTopology === "per-role" ? role.replace(/-/gu, "_") : "dsmm_role",
           arguments: { description: "Disabled role", prompt: "No publication", role }, callId: ToolCallId(role), signal: new AbortController().signal });
         assert.equal(denied.isError, true);

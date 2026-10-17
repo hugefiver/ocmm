@@ -58,12 +58,12 @@ test("foreign native creation provenance survives provider retirement without de
       await deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["modules", "deepwork", "enabled"], value: false }] }, () => {});
       const spawn = ctx.subagents.getProvider("spawn")!;
       unregister = ctx.subagents.registerProvider({ name: "dsmm-role-coding", capabilities: spawn.capabilities, inheritsParentContext: false,
-        start: request => spawn.start(request), prepareContinuable: request => spawn.prepareContinuable!(request) });
+        prepareContinuable: request => spawn.prepareContinuable!(request) });
     },
   });
   try {
     const root = await f.create();
-    const started = await f.subagents.startContinuable({ provider: "dsmm-role-coding", label: "Foreign native child",
+    const started = await f.subagents.startActivation({ provider: "dsmm-role-coding", label: "Foreign native child", delivery: "parent",
       request: { parent: root, prompt: [] }, signal: new AbortController().signal });
     try {
       const child = f.agents.get(started.childId)!;
@@ -82,6 +82,6 @@ test("foreign native creation provenance survives provider retirement without de
       unregister();
       assert.equal(f.subagents.getProvider("dsmm-role-coding"), undefined);
       assert.equal(classifyDsmmAgent(child), "native");
-    } finally { await f.subagents.drainContinuableChildren(root, [started.childId]); }
+    } finally { await f.subagents.drainChildren(root, [started.childId]); }
   } finally { await f.dispose(); }
 });

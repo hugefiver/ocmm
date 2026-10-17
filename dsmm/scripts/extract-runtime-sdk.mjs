@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { DSH_VERSION } from "./dsmm-registry-install-probe.mjs";
+import { dshPolicyForVersion } from "./release-contract.mjs";
 
 export const SOURCE_SDK_INPUTS = Object.freeze([
   "tool-web", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo",
@@ -15,10 +15,10 @@ function docker(args) {
   assert.equal(result.error, undefined); assert.equal(result.status, 0, "native source SDK Docker operation failed");
   return result.stdout.trim();
 }
-export function validateSourceSdk(manifest) {
+export function validateSourceSdk(manifest, version) {
   assert.equal(lstatSync(manifest).isFile(), true);
   const metadata = JSON.parse(readFileSync(manifest, "utf8"));
-  assert.equal(metadata.name, "@deepseek-ai/dsh"); assert.equal(metadata.version, DSH_VERSION);
+  assert.equal(metadata.name, "@deepseek-ai/dsh"); assert.equal(metadata.version, dshPolicyForVersion(version).sdkVersion);
   const sdk = createRequire(manifest), root = realpathSync(dirname(manifest));
   for (const name of SOURCE_SDK_INPUTS) {
     const path = relative(root, realpathSync(sdk.resolve(`@deepseek-ai/dsh-${name}`)));
@@ -26,7 +26,7 @@ export function validateSourceSdk(manifest) {
   }
   return manifest;
 }
-export function extractRuntimeSdk({ image, destination }, execute = docker) {
+export function extractRuntimeSdk({ image, destination, version }, execute = docker) {
   assert.match(image, /^sha256:[a-f0-9]{64}$/u, "source SDK must use the exact locally built image ID");
   assert.equal(isAbsolute(destination), true);
   assert.equal(lstatSync(dirname(destination)).isDirectory(), true);
@@ -41,7 +41,7 @@ export function extractRuntimeSdk({ image, destination }, execute = docker) {
     container = created;
     const manifest = join(destination, "dsh", "package.json");
     execute(["cp", `${container}:/usr/local/lib/node_modules/@deepseek-ai/dsh`, join(destination, "dsh")]);
-    validateSourceSdk(manifest);
+    validateSourceSdk(manifest, version);
     result = { outcome: "READY", image, manifest, sourceOnly: true };
   } catch (error) { primary = error; }
   if (container !== undefined) {
@@ -52,9 +52,9 @@ export function extractRuntimeSdk({ image, destination }, execute = docker) {
   return result;
 }
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { image: { type: "string" }, destination: { type: "string" } } });
-  assert.ok(values.image && values.destination);
-  const result = extractRuntimeSdk({ image: values.image, destination: resolve(values.destination) });
+  const { values } = parseArgs({ options: { image: { type: "string" }, destination: { type: "string" }, version: { type: "string" } } });
+  assert.ok(values.image && values.destination && values.version);
+  const result = extractRuntimeSdk({ image: values.image, destination: resolve(values.destination), version: values.version });
   if (process.env.GITHUB_ENV !== undefined) appendFileSync(process.env.GITHUB_ENV, `DSMM_TEST_DSH_ENTRY=${result.manifest}\nDSMM_COLD_PROFILE_SDK_ANCHOR=${result.manifest}\n`);
   console.log(JSON.stringify(result));
 }

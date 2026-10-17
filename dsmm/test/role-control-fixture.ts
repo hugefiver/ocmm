@@ -87,7 +87,7 @@ export async function controlDeliveryFixture(images = false) {
     });
   } });
   await rpc.await();
-  const invoke = (method: string, args: Record<string, unknown>, signal?: AbortSignal) => f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method, args, ...(signal === undefined ? {} : { signal }) });
+  const invoke = (method: string, args: Record<string, unknown>, signal?: AbortSignal) => f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method, args, peer: f.ctx.connection.browserPeer, ...(signal === undefined ? {} : { signal }) });
   const create = () => f.create(true, { epoch: newEpoch(), permitted: true });
   const publish = (parent: Agent, permitted = true) => {
     const previous = f.admissions.get(parent)!;
@@ -111,10 +111,12 @@ export async function controlRunFixture() {
   const { TypertGatewayService } = await import("@deepseek-ai/dsh-api-gateway");
   const Connection = await import("@deepseek-ai/dsh-client-connection");
   const { CredentialProvider } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-credentials")).href);
+  const { RemoteAccessService } = await import(pathToFileURL(sdk.resolve("@deepseek-ai/dsh-api-remote-access")).href);
   class MemoryCredentials extends CredentialProvider {
     readonly records = new Map<string, unknown>();
     async modifyRecord(key: string, modify: (current: unknown) => Promise<unknown>) { const next = await modify(this.records.get(key)); if (next !== undefined) this.records.set(key, next); return this.records.get(key); }
   }
+  await f.ctx.plugin(RemoteAccessService).await();
   await f.ctx.plugin(TypertRegistry).await();
   await f.ctx.plugin(TypertGatewayService, {}).await();
   await f.ctx.plugin(MemoryCredentials).await();
@@ -128,11 +130,12 @@ export async function controlRunFixture() {
       capabilities() { return { background: enabled, prompt: enabled, interrupt: enabled, images: { enabled: false, reason: "unavailable" }, runtime: f.runtime.authority.view() }; },
       projectRun() { return projected("one-shot"); },
       async backgroundAvailability(_ticket, _identity, signal) { await beforeBackground?.(); signal.throwIfAborted(); return enabled; },
-      async observeChild() { return { prompt: enabled, interrupt: enabled }; },
+      async observeChild(_ticket, entry) { return { prompt: enabled, interrupt: enabled,
+        ...(f.runs.some(run => run.childId === entry.id) ? { invocation: { ...projected("one-shot"), childId: entry.id } } : {}) }; },
     });
   } });
   await rpc.await();
-  const invoke = (method: string, args: Record<string, unknown>) => f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method, args });
+  const invoke = (method: string, args: Record<string, unknown>) => f.ctx.typertGateway.invoke({ namespace: "dsmmChildren", method, args, peer: f.ctx.connection.browserPeer });
   return { ...f, rpc, invoke, connectionFiber,
     setBeforeBackground(fn: typeof beforeBackground) { beforeBackground = fn; },
     async replaceConnection() {

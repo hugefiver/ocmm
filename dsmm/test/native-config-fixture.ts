@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import type { Fiber } from "@deepseek-ai/cordis";
 import { AgentRegistry } from "@deepseek-ai/dsh-agent";
+import { DsmmAgentRegistry } from "../lib/agent-registry.js";
 import type { Agent, AgentHandle } from "@deepseek-ai/dsh-agent";
 import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
 import { LlmRuntime, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
@@ -105,18 +106,23 @@ export function nativeConfigRun(options: { managedPermissionSettings?: boolean; 
     const loaded = loadProfileDirectory("dsh", dir, presetSdk.resolve("@deepseek-ai/dsh-app-boot"));
     assert.deepEqual(loaded.layers, []);
     assert.deepEqual(loaded.skippedBundles, []);
-    assert.equal(getDshRuntimeVersion(), "0.2.0-rc.2");
+    assert.equal(getDshRuntimeVersion(), "0.2.1-rc.1");
     const profileContext = { ...loaded, home, installAnchor: presetSdk.resolve("@deepseek-ai/dsh-app-boot"), overlays: [], startedBundles: [] };
     const ctx = new Context();
     const handles: AgentHandle[] = [];
     try {
       ctx.provide("profileContext", profileContext);
       await Promise.all([
-        ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
+        ctx.plugin(options.managedRuntime ? DsmmAgentRegistry : AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
         ctx.plugin(LlmRuntime), ctx.plugin(SystemPrompt, {}), ctx.plugin(ToolRuntime, { mode: "native" }), ctx.plugin(SkillRegistry, {})
       ].map((fiber) => fiber.await()));
       if (options.managedRuntime) {
-        await ctx.plugin(SubagentRuntimePlugin, {}).await();
+        const filesystem = await nativeFixturePlugin("@deepseek-ai/dsh-fs-local");
+        await ctx.plugin(filesystem.default, { cwd: dir }).await();
+        const workingDirectory = await nativeFixturePlugin("@deepseek-ai/dsh-working-directory");
+        await ctx.plugin(workingDirectory.default, { defaultDirectory: dir }).await();
+        const startup = ctx.plugin(SubagentRuntimePlugin, {}); await startup.await();
+        assert.equal(startup.state, 2, "managed runtime must activate before Core startup");
         const { SessionQueryEngine } = await nativeFixturePlugin("@deepseek-ai/dsh-session-query", "@deepseek-ai/dsh-subagent-spawn-in-process");
         class ExactQuery extends SessionQueryEngine {
           async searchSessions(): Promise<never> { throw new Error("config fixture does not offer full-text search"); }

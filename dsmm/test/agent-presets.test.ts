@@ -32,9 +32,9 @@ test("static agent preset files exactly match role render helpers", () => {
   }
 });
 
-test("native preset delegation schemas and delivery follow admitted topology, routes and role ceilings", async () => {
-  const primary = { provider: "fixture", model: "preset-review", reasoningEffort: "max" };
-  for (const toolTopology of ["per-role", "parameterized"] as const) {
+for (const toolTopology of ["per-role", "parameterized"] as const) {
+  test(`native preset delegation schemas and delivery follow admitted ${toolTopology} topology, routes and role ceilings`, async () => {
+    const primary = { provider: "fixture", model: "preset-review", reasoningEffort: "max" };
     const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, subagents: { toolTopology }, roles: { "dsmm-oracle": false },
       skills: { "writing-plans": false }, roleRouting: { "dsmm-reviewer": { primary } } }, {
       nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
@@ -98,7 +98,6 @@ test("native preset delegation schemas and delivery follow admitted topology, ro
         callId: ToolCallId(`disabled-${toolTopology}`), signal: new AbortController().signal });
       assert.equal(denied.isError, true);
       assert.equal(f.subagents.getProvider("dsmm-role-oracle"), undefined);
-      await assert.rejects(f.subagents.start("dsmm-role-oracle", { parent: root, prompt: [], signal: new AbortController().signal }), { code: "NO_PROVIDER" });
       assert.equal(f.adapter.calls.length, 1);
       assert.deepEqual(f.agents.list(), [root]);
       const planner = await f.create({ agentPreset: "dsmm-planner" });
@@ -109,9 +108,11 @@ test("native preset delegation schemas and delivery follow admitted topology, ro
       assert.equal(write.isError, true);
       assert.equal(existsSync(sentinel), false);
       assert.equal(f.adapter.calls.length, 1);
+      await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-oracle", label: "Disabled oracle", delivery: "caller",
+        request: { parent: root, prompt: [] }, signal: new AbortController().signal }), { code: "NO_PROVIDER" });
     } finally { await f.dispose(); }
-  }
-});
+  });
+}
 
 test("optional native default patch does not configure removed directory discovery", () => {
   const patch = readFileSync(join(packageRoot, "patches", "agent-presets-root.example.cordis.patch.yml"), "utf8");

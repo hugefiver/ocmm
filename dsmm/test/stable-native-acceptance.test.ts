@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 // @ts-expect-error Native release harnesses are source-only modules.
-import { digest, inspectStableProfileStorage, stableNativeProofIdentity } from "../scripts/stable-native-acceptance.mjs";
+import { digest, inspectStableExports, inspectStableProfileStorage, stableCompositionBundle, stableMainStartupRow, stableNativeProofIdentity, stableRuntimeStartupRows } from "../scripts/stable-native-acceptance.mjs";
 // @ts-expect-error Native release harnesses are source-only modules.
 import { createStableNativeBridge } from "../scripts/profile-ui-harness-stable021-native.mjs";
 // @ts-expect-error Native release harnesses are source-only modules.
@@ -13,17 +13,17 @@ import { runStable021Acceptance } from "../scripts/profile-ui-harness-stable021.
 import { validateStableBootstrap } from "../scripts/release-contract.mjs";
 
 test("stable producers bind their proof identity to the installed manifest and explicit reviewed contract", async () => {
-  for (const version of ["0.2.1", "0.2.2"]) {
+  for (const version of ["0.2.1", "0.2.2", "0.3.0"]) {
     const manifest = { name: "@dsmm/dsmm", version };
     assert.deepEqual(stableNativeProofIdentity(manifest, { sourceContract: version }), {
-      kind: version === "0.2.2" ? "native-client-stable-first-022" : "native-client-stable-first-021", sourceContract: version, packageVersion: version,
+      kind: version === "0.3.0" ? "native-client-stable-first-030" : version === "0.2.2" ? "native-client-stable-first-022" : "native-client-stable-first-021", sourceContract: version, packageVersion: version,
     });
-    assert.throws(() => stableNativeProofIdentity(manifest, { sourceContract: version === "0.2.2" ? "0.2.1" : "0.2.2" }));
+    assert.throws(() => stableNativeProofIdentity(manifest, { sourceContract: version === "0.2.1" ? "0.2.2" : "0.2.1" }));
     assert.throws(() => stableNativeProofIdentity({ ...manifest, name: "dsmm" }, { sourceContract: version }));
   }
   assert.equal(stableNativeProofIdentity({ name: "@dsmm/dsmm", version: "0.2.1" }).sourceContract, "0.2.1");
   assert.throws(() => stableNativeProofIdentity({ name: "@dsmm/dsmm", version: "0.2.2" }));
-  for (const version of ["0.2.0", "0.2.3", "1.0.0"]) assert.throws(() => stableNativeProofIdentity({ name: "@dsmm/dsmm", version }, { sourceContract: version }));
+  for (const version of ["0.2.0", "0.2.3", "0.3.1", "1.0.0"]) assert.throws(() => stableNativeProofIdentity({ name: "@dsmm/dsmm", version }, { sourceContract: version }));
   await assert.rejects(runStable021Acceptance({ sourceContract: "0.2.2" }));
 });
 
@@ -53,6 +53,57 @@ test("stable native bootstrap refuses stock, duplicate, unready and legacy-enabl
     assert.throws(() => validateStableBootstrap({ ...proof, ...change }));
   }
   assert.equal(validateStableBootstrap({ ...proof, deliveryFenceReady: false, restartRequired: true }, { requireDeliveryFence: false }).binding, "dsmm");
+});
+
+test("030 startup explicitly replaces both stock owners with one settled DSMM registry/runtime/Main composition", () => {
+  assert.deepEqual(stableRuntimeStartupRows("0.3.0"), [
+    { id: "agent", name: "@deepseek-ai/dsh-agent", disabled: true },
+    { id: "subagent", name: "@deepseek-ai/dsh-subagent", disabled: true },
+    { insert: [{ id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} }] },
+    { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: { maxDepth: 3, maxActiveSubagents: 8 } }] },
+  ]);
+  assert.deepEqual(stableMainStartupRow({}, "0.3.0"), { id: "dsmm", name: "@dsmm/dsmm", inject: ["profileContext", "agents"], config: {} });
+  const proof = { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], stockAgentDisabled: true, stockSubagentDisabled: true,
+    registryEntries: 1, customRuntimeEntries: 1, mainEntries: 1, registryLoaded: true, runtimeLoaded: true, mainLoaded: true,
+    agentsService: "DsmmAgentRegistry", subagentsService: "DsmmSubagentRuntime", binding: "dsmm", deliveryFenceReady: true, restartRequired: false,
+    legacyCompatibility: "not-composed", loader: [
+      { id: "include:dsmm", name: "@dsmm/dsmm", state: 2 },
+      { id: "include:dsmm-registry", name: "@dsmm/dsmm/agent-registry", state: 2 },
+      { id: "include:dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 },
+    ] };
+  assert.equal(validateStableBootstrap(proof, { version: "0.3.0" }), proof);
+  for (const change of [{ stockAgentDisabled: false }, { registryEntries: 2 }, { registryLoaded: false }, { legacyCompatibility: "enabled" }, { agentsService: "AgentRegistry" },
+    { subagentsService: "SubagentRuntime" }, { loader: proof.loader.slice(1) }]) assert.throws(() => validateStableBootstrap({ ...proof, ...change }, { version: "0.3.0" }));
+});
+
+test("030 native export inspection resolves AgentRegistry without requiring the retired legacy entry", async () => {
+  const packageRoot = join(import.meta.dirname, "..");
+  const proof = await inspectStableExports(packageRoot, join(packageRoot, "package.json"), { sourceContract: "0.3.0" });
+  assert.equal(proof.agentRegistryClass, true);
+  assert.equal("legacyReadHostLibraryFactory" in proof, false);
+});
+
+test("stable browser composition installs an answering owned connection", () => {
+  const carrier = {}, root = { style: {} };
+  let connectionOptions: unknown;
+  const ctx = {
+    provide() {},
+    slots: { installLocale() {}, register() {} },
+  };
+  const scope = {
+    __dsmmOwnedCarrier: carrier,
+    __ModuleLoader__: { load(module: { factory: (require: (id: string) => unknown) => { apply(context: typeof ctx): void } }) {
+      const plugin = module.factory((id) => {
+        if (id === "react") return { createElement() { return {}; } };
+        if (id === "@deepseek-ai/dsh-client-connection/client") return { installConnection(_ctx: unknown, options: unknown) { connectionOptions = options; } };
+        if (id === "@deepseek-ai/dsh-client-locale/client") return { LocaleRuntime: class {} };
+        throw new Error(`unexpected composition import: ${id}`);
+      });
+      plugin.apply(ctx);
+    } },
+  };
+  Function("window", "document", stableCompositionBundle("stable-browser-composition"))(scope, { body: { style: {} }, getElementById() { return root; } });
+  assert.deepEqual(connectionOptions, { interactions: "answer", transport: { rpc: carrier, ownsHost: true } });
 });
 
 test("stable carrier forwards only approved native operations with exact owner Peer and closes observed streams", async () => {

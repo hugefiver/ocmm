@@ -26,14 +26,13 @@ interface ReleaseReceipt {
 
 const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
-  "scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs",
-  "scripts/migrate-cold-profile.mjs", "scripts/cold-profile-composition.mjs", "scripts/cold-profile-sources.mjs",
   "locale/en.json", "locale/zh.json",
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
   "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
+  "lib/agent-registry.js", "lib/agent-registry.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  ...["runtime-integration", "legacy-read-host"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
+  ...["runtime-integration"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/deferred-native-approval-risk.md", "docs/lsp.md",
   "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/native-permissions.md", "docs/profiles.md", "docs/releasing.md",
   "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
@@ -41,6 +40,8 @@ const requiredExact = [
 ];
 
 const requiredTrees = ["agent-presets", "docs/research", "patches", "prompts", "skills"];
+const retiredCompatibilityFiles = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]
+  .flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]));
 
 function compareBytewise(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left), Buffer.from(right));
@@ -57,7 +58,7 @@ function compiledOutputPaths(root: string, current = join(root, "src")): string[
     if (entry.isDirectory()) paths.push(...compiledOutputPaths(root, entryPath));
     else if (entry.isFile() && /\.tsx?$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) {
       const base = normalizePackagePath(join(root, "src"), entryPath).replace(/\.tsx?$/u, "");
-      paths.push(`lib/${base}.js`, `lib/${base}.d.ts`);
+      for (const path of [`lib/${base}.js`, `lib/${base}.d.ts`]) if (!retiredCompatibilityFiles.has(path)) paths.push(path);
     }
   }
   return paths;
@@ -176,17 +177,6 @@ test("release readiness checker accepts the current package without creating a t
   assert.deepEqual(listTgzPaths(packageRoot), tgzBefore);
 });
 
-test("release readiness checker rejects a package missing its cold migration executable", () => {
-  const fixtureRoot = createReleaseFixture();
-  try {
-    assert.equal(runReleaseChecker(fixtureRoot).status, 0);
-    rmSync(join(fixtureRoot, "scripts", "migrate-cold-profile.mjs"));
-    const { receipt, status } = runReleaseChecker(fixtureRoot);
-    assert.equal(status, 1); assert.equal(receipt.outcome, "failed");
-    assert.ok(receipt.fileCount > 0); assert.ok(receipt.errors.length > 0);
-  } finally { removeReleaseFixture(fixtureRoot); }
-});
-
 test("release readiness checker rejects the superseded unscoped package identity", () => {
   const fixtureRoot = createReleaseFixture();
   const tgzBefore = listTgzPaths(fixtureRoot);
@@ -296,6 +286,16 @@ test("release readiness checker requires native client and each profile runtime 
   }
 });
 
+test("release readiness checker rejects a packed module whose relative import target is not delivered", () => {
+  const fixtureRoot = createReleaseFixture();
+  try {
+    writeFixtureFile(fixtureRoot, "lib/index.js", 'import "./missing-runtime.js";\n');
+    const { receipt, status } = runReleaseChecker(fixtureRoot);
+    assert.equal(status, 1);
+    assert.ok(receipt.errors.includes("packed module closure missing target: lib/index.js -> lib/missing-runtime.js"));
+  } finally { removeReleaseFixture(fixtureRoot); }
+});
+
 test("release readiness checker recursively requires nested TSX runtime and declaration outputs", () => {
   const fixtureRoot = createReleaseFixture();
   try {
@@ -319,18 +319,6 @@ test("release readiness checker requires every history compatibility companion a
         assert.ok(receipt.errors.includes(`missing required package surface: ${path}`), path);
       } finally { removeReleaseFixture(fixtureRoot); }
     }
-  }
-});
-
-test("release readiness checker requires both exact operator repair scripts", () => {
-  for (const path of ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"]) {
-    const fixtureRoot = createReleaseFixture();
-    try {
-      rmSync(join(fixtureRoot, ...path.split("/")));
-      const { receipt, status } = runReleaseChecker(fixtureRoot);
-      assert.equal(status, 1, path);
-      assert.deepEqual(receipt.errors, [`missing required package surface: ${path}`]);
-    } finally { removeReleaseFixture(fixtureRoot); }
   }
 });
 

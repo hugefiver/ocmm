@@ -1,29 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
 import { childFixture, accepted } from "./child-admission-native-fixture.mjs";
-import { parseChildAdmissionEvidenceView } from "../src/child-evidence.ts";
 import { projectChildAdmissionEvidence } from "../src/child-admission.ts";
-import { verifyPublishedLegacyArtifact } from "./published-legacy-artifact-fixture.mjs";
 
-const [phase, root, artifact] = process.argv.slice(2);
+const [phase, root] = process.argv.slice(2);
 assert.ok(root);
 await mkdir(root, { recursive: true });
-let oldPackage;
-if (phase === "old-create") {
-  await verifyPublishedLegacyArtifact(artifact);
-  const extracted = join(root, "published");
-  await mkdir(extracted);
-  const extraction = spawnSync("tar", ["-xf", artifact, "-C", extracted], { encoding: "utf8" });
-  assert.equal(extraction.status, 0, extraction.stderr);
-  oldPackage = await import(pathToFileURL(join(extracted, "package", "lib", "index.js")));
-}
-const f = await childFixture(root, { oldPackage });
+const f = await childFixture(root);
 const rows = [];
 try {
-  if (phase === "old-create" || phase === "captured-create") {
+  if (phase === "captured-create") {
     for (const role of ["reviewer", "coding"]) {
       const parent = await f.create(`owned-${role}`);
       await f.applyOriginal(parent, role);
@@ -33,7 +20,7 @@ try {
       assert.equal((await f.execute(child, "read")).isError, false);
       const push = await f.execute(child, "pwsh", { command: "git push origin task-counter-only" });
       assert.equal(push.isError, true); assert.equal(f.bodies.pwsh, 0);
-      const capture = phase === "captured-create" ? await f.runtime.childCaptureStore.readChildAdmission(child.id, parent.id) : null;
+      const capture = await f.runtime.childCaptureStore.readChildAdmission(child.id, parent.id);
       await f.ctx.sessions.flush(child.session);
       const readHandle = await f.ctx.sessionPersistence.open(child.id, "read");
       let ownEvents;
@@ -53,8 +40,7 @@ try {
       assert.equal(previous, undefined);
       const ticket = f.bridge.authority.acquireParentTicket(parent);
       const evidence = await f.bridge.authority.resolveChildEvidence(ticket, row.childId, new AbortController().signal);
-      if (row.originalEpoch === undefined) assert.equal(evidence.mode, "legacy-conservative");
-      else { assert.equal(evidence.originalAdmissionEpoch, row.originalEpoch); assert.deepEqual(evidence.profilePin, row.originalProfile); }
+      assert.equal(evidence.originalAdmissionEpoch, row.originalEpoch); assert.deepEqual(evidence.profilePin, row.originalProfile);
       await f.native.sendMessage(parent, row.childId, [{ type: "text", text: "same ID next useful turn" }], { signal: new AbortController().signal });
       let child = f.ctx.agents.get(row.childId);
       assert.ok(child); assert.equal(child.id, row.childId);
@@ -62,11 +48,10 @@ try {
       const originalPrefix = child.session.ownEvents().slice(0, row.ownEvents.length);
       assert.deepEqual(originalPrefix, row.ownEvents, "Native continuation only appends; old records are not rewritten");
       const read = await f.execute(child, "read");
-      if (row.originalEpoch !== undefined) { assert.equal(read.isError, false); assert.equal(read.value, "useful permitted read"); }
-      else { assert.equal(read.isError, true); assert.equal(f.bodies.read, 0, "Captureless history alone cannot authorize an unleased native read"); }
+      assert.equal(read.isError, false); assert.equal(read.value, "useful permitted read");
       for (const name of ["write", "pwsh"]) {
         const result = await f.execute(child, name, name === "pwsh" ? { command: "git push origin task-counter-only" } : {});
-        if (row.originalEpoch === undefined || name === "pwsh" || row.role === "reviewer") assert.equal(result.isError, true);
+        if (name === "pwsh" || row.role === "reviewer") assert.equal(result.isError, true);
         else { assert.equal(result.isError, false); assert.equal(result.value, "counter-only body"); }
       }
       assert.equal(f.bodies.pwsh, 0);
@@ -77,24 +62,12 @@ try {
       if (row.role === "coding") {
         assert.equal(f.runtime.admission(parent).settings.guards.gitWriteGuard, "off", "The new parent really has the expanded setting");
         assert.equal(f.runtime.admission(parent).settings.roleRouting["dsmm-coding"].primary.model, "coding-parent-new");
-        if (row.originalEpoch !== undefined) assert.equal(f.runtime.admission(parent).settings.locale, "en");
+        assert.equal(f.runtime.admission(parent).settings.locale, "en");
       }
-      if (row.originalEpoch !== undefined) {
-        assert.equal(admitted.epoch, row.originalEpoch);
-        assert.equal(admitted.settings.guards.gitWriteGuard, "deny");
-        assert.equal(admitted.settings.locale, "ja");
-        assert.equal(projection.originalAdmissionEpoch, row.originalEpoch);
-      } else {
-        const view = parseChildAdmissionEvidenceView(admitted.childEvidence);
-        assert.equal(view.mode, "legacy-conservative"); assert.equal(view.parentAdmissionEpoch, parentEpoch);
-        assert.equal(Object.hasOwn(view, "originalAdmissionEpoch"), false);
-        assert.ok(view.limitations.some(item => item.field === "max-tokens" && item.effect === "native-default"));
-        assert.ok(view.provenFields.includes("max-tokens"), "The actual historical request budget is observable but not restored");
-        assert.ok(view.limitations.some(item => item.field === "output-schema" && item.effect === "capability-denied"));
-        assert.equal(admitted.profile, null);
-        assert.equal(admitted.settings.guards.gitWriteGuard, "deny");
-        assert.equal(await f.runtime.childCaptureStore.readChildAdmission(child.id, parent.id), null);
-      }
+      assert.equal(admitted.epoch, row.originalEpoch);
+      assert.equal(admitted.settings.guards.gitWriteGuard, "deny");
+      assert.equal(admitted.settings.locale, "ja");
+      assert.equal(projection.originalAdmissionEpoch, row.originalEpoch);
       assert.equal(child.options.maxTokens, undefined);
       const receipt = await f.prompt(parent, row.childId, "native browser protocol continuation");
       child = f.ctx.agents.get(row.childId);
@@ -109,7 +82,6 @@ try {
       rows.push({ parentId: parent.id, childId: child.id, role: row.role, parentEpoch, mode: evidence.mode ?? "captured",
         readUseful: !read.isError, originalEpoch: row.originalEpoch, maxTokensDefault: child.options.maxTokens === undefined });
     }
-    if (saved.every(row => row.originalEpoch === undefined)) assert.equal(f.bodies.write, 0);
   } else throw new Error("Unknown process fixture phase");
 } finally { await f.dispose(); }
 // A terminated producer is required before the parent launches this resumer.

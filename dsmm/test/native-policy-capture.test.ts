@@ -20,18 +20,18 @@ function categoryTargets(agent: import("@deepseek-ai/dsh-agent").Agent): string[
 }
 
 test("retired DSMM entry rejects live authority while exact native owned run cleanup still releases its children", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { maxDepth: 3 } });
-  const runs: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { maxDepth: 3, enableRunInBackground: true, backgroundMode: "continuable" } }, { persistence: true });
+  const runs: Array<Awaited<ReturnType<typeof f.subagents.startActivation>>> = [];
   try {
     const root = await f.create();
-    const reviewer = await f.subagents.start("dsmm-role-reviewer", { parent: root, prompt: [], signal: new AbortController().signal });
+    const reviewer = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", delivery: "parent", label: "Owned reviewer", request: { parent: root, prompt: [] }, signal: new AbortController().signal });
     runs.push(reviewer);
-    assert.equal((await reviewer.result).stopReason, "completed");
-    const child = reviewer.localAgent!;
-    const leafRun = await f.subagents.start("dsmm-role-code-search", { parent: child, prompt: [], signal: new AbortController().signal });
+    const child = f.agents.get(reviewer.childId)!; await child.whenIdle();
+    const leafRun = await f.subagents.startActivation({ provider: "dsmm-role-code-search", delivery: "parent", label: "Owned leaf", request: { parent: child, prompt: [] }, signal: new AbortController().signal });
     runs.push(leafRun);
-    assert.equal((await leafRun.result).stopReason, "completed");
-    const leaf = leafRun.localAgent!;
+    const leaf = f.agents.get(leafRun.childId)!; await leaf.whenIdle();
+    assert.ok(child.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
+    assert.ok(leaf.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
     const integration = f.ctx.get("dsmmRuntimeIntegration")!;
     const childTicket = integration.runtime.authority.acquireParentTicket(child);
     const leafTicket = integration.runtime.authority.acquireParentTicket(leaf);
@@ -80,10 +80,11 @@ test("old busy parent and future native children retain effective epoch while ne
       { op: "set", path: ["runtimeRecovery", "enabled"], value: false }
     ] }, () => {});
     assert.equal(parent.status, "running"); assert.equal(runtime.admission(admitted), before);
-    const future = await f.subagents.start("dsmm-role-coding", { parent, prompt: [{ type: "text", text: "Future child uses original admission" }], signal: new AbortController().signal });
+    const future = await f.subagents.startActivation({ provider: "dsmm-role-coding", delivery: "caller", label: "Original admission", request: { parent, prompt: [{ type: "text", text: "Future child uses original admission" }] }, signal: new AbortController().signal });
+    const futureChild = f.agents.get(future.childId)!;
     try {
       assert.equal((await future.result).stopReason, "completed");
-      const childAdmission = runtime.admission(future.localAgent as unknown as DshAgent);
+      const childAdmission = runtime.admission(futureChild as unknown as DshAgent);
       assert.equal(childAdmission.epoch, before.epoch);
       assert.equal(childAdmission.childCapture?.originalAdmissionEpoch, before.epoch);
       assert.equal(childAdmission.childCapture?.parentSessionId, parent.id);
@@ -96,7 +97,7 @@ test("old busy parent and future native children retain effective epoch while ne
     assert.equal(offAdmission.settings.roles["dsmm-coding"], false);
     assert.equal(offAdmission.settings.skills.debugging, false); assert.equal(offAdmission.settings.runtimeRecovery.enabled, false);
     assert.equal(categoryTargets(off).includes("dsmm-coding"), false);
-    await assert.rejects(f.subagents.start("dsmm-role-coding", { parent: off, prompt: [], signal: new AbortController().signal }), /cannot delegate/);
+    await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-coding", delivery: "caller", label: "Disabled role", request: { parent: off, prompt: [] }, signal: new AbortController().signal }), /cannot delegate/);
     assert.equal((await off.ctx.get("tools")!.execute({ agent: off, name: "dsmm_category", arguments: { category: "dsmm-coding", description: "Disabled", prompt: "Must not dispatch" }, callId: ToolCallId("disabled-role"), signal: new AbortController().signal })).isError, true);
     assert.equal((await f.ctx.get("skills")!.list({ scope: off })).some((row) => row.name === "debugging"), false);
     assert.equal((await f.ctx.get("skills")!.list({ scope: parent })).some((row) => row.name === "debugging"), true);
@@ -136,7 +137,7 @@ test("retained native reviewer keeps its own immutable admission after parent mo
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
     const parent = await f.create();
-    const started = await f.subagents.startContinuable({ provider: "dsmm-role-reviewer", label: "Retained reviewer", request: { parent, prompt: [], toolFilter: { deny: ["write"] } }, signal: new AbortController().signal });
+    const started = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", delivery: "parent", label: "Retained reviewer", request: { parent, prompt: [] }, signal: new AbortController().signal });
     let child = f.agents.get(started.childId)!;
     try {
       await child.whenIdle();
@@ -147,8 +148,8 @@ test("retained native reviewer keeps its own immutable admission after parent mo
       assert.equal(classifyDsmmAgent(child), "dsmm");
       assert.ok((await f.ctx.skills.list({ scope: child })).some(skill => skill.name === "debugging"));
       assert.equal(identity.readOnly, true);
-      assert.deepEqual(identity.toolFilter, { deny: ["write"] });
-      assert.ok(Object.isFrozen(identity.toolFilter!.deny));
+      assert.equal(captured.childCapture?.authorityCeiling.readOnly, true);
+      assert.ok(Object.isFrozen(captured.childCapture!.authorityCeiling));
       const mode = await runtime.getSession(parent as DshAgent);
       await runtime.selectMode({ sessionId: parent.id, active: false, expectedModeRevision: mode.deepwork!.revision, expectedAdmissionEpoch: mode.admissionEpoch }, parent as DshAgent);
       const execute = (name: string, id: string) => child.ctx.tools.execute({ agent: child, name, arguments: {}, callId: ToolCallId(id), signal: new AbortController().signal });
@@ -169,11 +170,12 @@ test("retained native reviewer keeps its own immutable admission after parent mo
       assert.equal(classifyDsmmAgent(original), "dsmm");
       const spawn = f.subagents.getProvider("spawn")!;
       const detachForeign = f.subagents.registerProvider({ name: "dsmm-role-reviewer", capabilities: spawn.capabilities,
-        inheritsParentContext: false, start: request => spawn.start(request) });
+        inheritsParentContext: false, prepareContinuable: request => { assert.ok(spawn.prepareContinuable); return spawn.prepareContinuable(request); } });
       try { assert.equal(classifyDsmmAgent(original), "dsmm"); }
       finally { detachForeign(); }
       reinstall = f.ctx.plugin({ name: "dsmm-retained-child-reinstall", inject: [...dsmmPlugin.inject], apply(ctx) { return dsmmPlugin.apply(ctx as unknown as DshContext, config); } });
       await reinstall.await();
+      await f.ctx.get("dsmmRuntimeIntegration")!.ready();
       const replacement = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
       assert.ok(replacement !== runtime);
       assert.ok(f.agents.get(original.id) === original);
@@ -197,7 +199,7 @@ test("retained native reviewer keeps its own immutable admission after parent mo
       assert.equal(reboundIdentity.readOnly, true); assert.deepEqual(reboundIdentity.toolFilter, identity.toolFilter);
       assert.throws(() => reboundPolicy.admit({ id: child.id, session: child.session } as DshAgent), { code: "UNAUTHORIZED" });
       t.diagnostic(`same native child id=${child.id}; original epoch preserved; read=${JSON.stringify(read.value)}; write bodies=${writes}`);
-    } finally { await f.subagents.drainContinuableChildren(parent, [child.id]); }
+    } finally { await f.subagents.drainChildren(parent, [child.id]); }
   } finally { await reinstall?.dispose(); await f.dispose(); }
 });
 
@@ -212,7 +214,7 @@ test("replacement runtime preserves a retained coding child's captured Git denia
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
     const parent = await f.create();
-    const started = await f.subagents.startContinuable({ provider: "dsmm-role-coding", label: "Retained coding", request: { parent, prompt: [] }, signal: new AbortController().signal });
+    const started = await f.subagents.startActivation({ provider: "dsmm-role-coding", delivery: "parent", label: "Retained coding", request: { parent, prompt: [] }, signal: new AbortController().signal });
     let child = f.agents.get(started.childId)!;
     try {
       await child.whenIdle();
@@ -234,6 +236,7 @@ test("replacement runtime preserves a retained coding child's captured Git denia
       assert.ok(f.agents.get(original.id) === original);
       reinstall = f.ctx.plugin({ name: "dsmm-retained-coding-reinstall", inject: [...dsmmPlugin.inject], apply(ctx) { return dsmmPlugin.apply(ctx as unknown as DshContext, config); } });
       await reinstall.await();
+      await f.ctx.get("dsmmRuntimeIntegration")!.ready();
       const replacement = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
       assert.ok(replacement !== runtime);
       assert.ok(f.agents.get(original.id) === original);
@@ -254,6 +257,6 @@ test("replacement runtime preserves a retained coding child's captured Git denia
       assert.equal((await child.ctx.tools.execute({ agent: child, name: "read", arguments: {}, callId: ToolCallId("retained-coding-read"), signal: new AbortController().signal })).value, "read");
       assert.equal((await execute(parent, "admitted-root-counter-only")).isError, false);
       assert.equal(bodies, 1, "the same admitted counter-only definition remains callable by the authorized parent");
-    } finally { await f.subagents.drainContinuableChildren(parent, [child.id]); }
+    } finally { await f.subagents.drainChildren(parent, [child.id]); }
   } finally { await reinstall?.dispose(); await f.dispose(); }
 });

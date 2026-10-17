@@ -8,7 +8,7 @@ import type { TestContext } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
 import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionLogOffset } from "@deepseek-ai/dsh-session";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
@@ -109,7 +109,7 @@ test("native maintenance race and mode persistence refusal leave accepted mode a
 
 test("native idle switches isolate two roots and global default; old/new children keep their exact admission snapshots", async () => {
   const f = await nativeRoutingFixture({}, { headless: true });
-  const children: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const children: Array<Awaited<ReturnType<typeof f.subagents.startActivation>>> = [];
   try {
     const runtime = runtimeOf(f);
     const a = await runtime.save({ id: "a", content: profile("a", "session-a"), expectedRevision: null });
@@ -120,10 +120,13 @@ test("native idle switches isolate two roots and global default; old/new childre
     const switchedA = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     assert.deepEqual(switchedA.configuration, (await runtime.getSession(structural(first))).configuration);
     const oldAdmission = runtime.admission(structural(first));
-    const oldChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the old admission" }], signal: new AbortController().signal });
+    const oldChildRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Old admission", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: first, prompt: [{ type: "text", text: "capture the old admission" }] } });
     children.push(oldChildRun);
+    const oldChild = f.agents.get(oldChildRun.childId)!;
+    assert.ok(oldChild);
+    await assert.rejects(async () => runtime.selectSession(await request(runtime, first, "b", b.revision), structural(oldChild)), { code: "not-owned" });
     assert.equal((await oldChildRun.result).stopReason, "completed");
-    const oldChild = oldChildRun.localAgent!;
     const oldChildAdmission = runtime.admission(structural(oldChild));
     assert.equal(oldChildAdmission.epoch, oldAdmission.epoch);
     assert.equal(oldChildAdmission.appliedRevision, a.revision);
@@ -142,10 +145,12 @@ test("native idle switches isolate two roots and global default; old/new childre
     const reapplied = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
     assert.notEqual(reapplied.admissionEpoch, switchedA.admissionEpoch, "same revision explicitly reapplied starts a fenced epoch");
     assert.equal(runtime.admission(structural(oldChild)), oldChildAdmission, "already-created child is never recursively rebound");
-    const newChildRun = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "capture the reapplied admission" }], signal: new AbortController().signal });
+    const newChildRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Reapplied admission", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: first, prompt: [{ type: "text", text: "capture the reapplied admission" }] } });
     children.push(newChildRun);
+    const newChild = f.agents.get(newChildRun.childId)!;
+    assert.ok(newChild);
     assert.equal((await newChildRun.result).stopReason, "completed");
-    const newChild = newChildRun.localAgent!;
     const newChildAdmission = runtime.admission(structural(newChild));
     assert.equal(newChildAdmission.epoch, reapplied.admissionEpoch);
     assert.equal(newChildAdmission.appliedRevision, a.revision);
@@ -156,21 +161,26 @@ test("native idle switches isolate two roots and global default; old/new childre
     const lineageOnly = await f.create({ parentSession: first.id, isSeeded: true, agentPreset: "dsmm-orchestrator" }, undefined, { seed: first.session.snapshotEvents(), inheritedEventCount: SessionLogOffset(first.session.snapshotEvents().length) });
     assert.equal(runtime.admission(structural(lineageOnly)).scope, "global-default", "durable fork lineage never transfers a session choice without live ownership");
     assert.equal(runtime.admission(structural(lineageOnly)).appliedRevision, null);
-    await assert.rejects(async () => runtime.selectSession(await request(runtime, first, "b", b.revision), structural(oldChild)), { code: "not-owned" });
     await runtime.save({ id: "a", content: profile("a", "edited-only"), expectedRevision: a.revision });
     assert.equal(runtime.admission(structural(first)).appliedRevision, a.revision);
     assert.equal(runtime.admission(structural(second)).appliedRevision, b.revision);
-    const oldRoleChild = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "old child snapshot" }], signal: new AbortController().signal });
+    const oldRoleChild = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Old role snapshot", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: first, prompt: [{ type: "text", text: "old child snapshot" }] } });
+    const oldRoleAgent = f.agents.get(oldRoleChild.childId)!;
+    assert.ok(oldRoleAgent);
     try {
       assert.equal((await oldRoleChild.result).stopReason, "completed");
-      assert.equal(headerRoutes(oldRoleChild.localAgent!).at(-1)?.model, "session-a-review");
+      assert.equal(headerRoutes(oldRoleAgent).at(-1)?.model, "session-a-review");
       await runtime.selectSession(await request(runtime, first, "b", b.revision), structural(first));
-      const newRoleChild = await f.subagents.start("dsmm-role-reviewer", { parent: first, prompt: [{ type: "text", text: "new child snapshot" }], signal: new AbortController().signal });
+      const newRoleChild = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "New role snapshot", delivery: "caller", signal: new AbortController().signal,
+        request: { parent: first, prompt: [{ type: "text", text: "new child snapshot" }] } });
+      const newRoleAgent = f.agents.get(newRoleChild.childId)!;
+      assert.ok(newRoleAgent);
       try {
         assert.equal((await newRoleChild.result).stopReason, "completed");
-        assert.equal(headerRoutes(newRoleChild.localAgent!).at(-1)?.model, "session-b-review");
-        assert.equal(runtime.admission(structural(oldRoleChild.localAgent!)).appliedRevision, a.revision);
-        assert.equal(runtime.admission(structural(newRoleChild.localAgent!)).appliedRevision, b.revision);
+        assert.equal(headerRoutes(newRoleAgent).at(-1)?.model, "session-b-review");
+        assert.equal(runtime.admission(structural(oldRoleAgent)).appliedRevision, a.revision);
+        assert.equal(runtime.admission(structural(newRoleAgent)).appliedRevision, b.revision);
       } finally { await newRoleChild.dispose(); }
     } finally { await oldRoleChild.dispose(); }
   } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
@@ -202,7 +212,7 @@ test("an unscoped root displays its exact captured global profile after the futu
 
 test("profile model metadata follows the admitted ordinary root role without changing native selection or locks", async () => {
   const f = await nativeRoutingFixture();
-  const children: Array<Awaited<ReturnType<typeof f.subagents.start>>> = [];
+  const children: Array<Awaited<ReturnType<typeof f.subagents.startActivation>>> = [];
   try {
     const runtime = runtimeOf(f);
     const nativeSelection: ModelSelectionRef = { current: { provider: "fixture", model: "native-tab", reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
@@ -239,11 +249,13 @@ test("profile model metadata follows the admitted ordinary root role without cha
     assert.equal((await runtime.getSession(structural(root))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
     root.session.append("deepwork/mode", { active: true });
     assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
-    const childRun = await f.subagents.start("dsmm-role-reviewer", { parent: root, prompt: [{ type: "text", text: "complete the admitted child" }], signal: new AbortController().signal });
+    const childRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Admitted child", delivery: "caller", signal: new AbortController().signal,
+      request: { parent: root, prompt: [{ type: "text", text: "complete the admitted child" }] } });
     children.push(childRun);
-    assert.equal((await childRun.result).stopReason, "completed");
-    const child = childRun.localAgent!;
+    const child = f.agents.get(childRun.childId)!;
+    assert.ok(child);
     await assert.rejects(runtime.getSession(structural(child)), { code: "not-owned" });
+    assert.equal((await childRun.result).stopReason, "completed");
     const noPrimary = await runtime.save({ id: "no-primary", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-primary", settings: { roleRouting: { "dsmm-orchestrator": { fallbackRoutes: [route("fallback-only")] } } } }) });
     const applied = await runtime.selectSession(await request(runtime, root, noPrimary.id, noPrimary.revision), structural(root));
     assert.equal(applied.profileModel, undefined, "fallbacks and actual native route never become a declared profile primary");

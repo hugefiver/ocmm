@@ -74,17 +74,16 @@ async function foreignContinuableFixture(t, name) {
   assert.equal((await runtime.getSession(root)).deepwork.active, false);
   assert.equal(classifyDsmmAgent(root), "native");
   assert.ok(f.ctx.subagents.getProvider("dsmm-role-reviewer"));
-  await assert.rejects(f.ctx.subagents.startContinuable({ provider: "dsmm-role-reviewer", label: "Owned inactive role stays denied",
+  await assert.rejects(f.ctx.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Owned inactive role stays denied", delivery: "parent",
     request: { parent: root, prompt: [] }, signal: new AbortController().signal }), { code: "UNAUTHORIZED" });
   assert.equal(f.bodies.length, 0);
   assert.equal(f.ctx.subagents.getProvider(name), undefined);
-  if (name === "dsmm-role-coding") await assert.rejects(f.ctx.subagents.startContinuable({ provider: name, label: "Missing native provider",
+  if (name === "dsmm-role-coding") await assert.rejects(f.ctx.subagents.startActivation({ provider: name, label: "Missing native provider", delivery: "parent",
     request: { parent: root, prompt: [] }, signal: new AbortController().signal }), { code: "NO_PROVIDER" });
   const spawn = f.ctx.subagents.getProvider("spawn");
   assert.equal(typeof spawn.prepareContinuable, "function");
   let preparations = 0;
   const foreign = { name, capabilities: spawn.capabilities, inheritsParentContext: false,
-    start: request => spawn.start(request),
     prepareContinuable(request) { preparations++; return spawn.prepareContinuable(request); } };
   const unregister = f.ctx.subagents.registerProvider(foreign); t.after(unregister);
   assert.equal(f.ctx.subagents.getProvider(name), foreign);
@@ -96,7 +95,7 @@ async function startAndDeliverForeignChild(t, name) {
   const prompt = "Return a native response from the live foreign continuable provider";
   let started;
   try {
-    started = await f.ctx.subagents.startContinuable({ provider: name, label: "Foreign native continuation",
+    started = await f.ctx.subagents.startActivation({ provider: name, label: "Foreign native continuation", delivery: "parent",
       request: { parent: root, prompt: [{ type: "text", text: prompt }], agentOptions: { provider: "local", model: "root-model" } },
       signal: new AbortController().signal });
   } finally { t.diagnostic(JSON.stringify({ provider: name, preparations: preparations(), httpDispatches: f.bodies.length })); }
@@ -144,7 +143,7 @@ async function startAndDeliverForeignChild(t, name) {
       await assert.rejects(authority.resolveChildEvidence(ticket, child.id, new AbortController().signal));
       assert.equal(f.bodies.length, 2);
     }
-  } finally { await f.ctx.subagents.drainContinuableChildren(root, [started.childId]); }
+  } finally { await f.ctx.subagents.drainChildren(root, [started.childId]); }
   await root.whenIdle();
   const postDrainDispatches = f.bodies.length;
   const authority = integration.runtime.authority, ticket = authority.acquireParentTicket(root);
@@ -152,8 +151,7 @@ async function startAndDeliverForeignChild(t, name) {
   assert.throws(() => authority.assertDelivery(ticket, started.childId, evidence), { code: "UNAUTHORIZED" });
   if (name === "dsmm-role-coding") {
     assert.equal(f.ctx.subagents.getProvider(name), foreign);
-    const historical = await authority.resolveChildEvidence(ticket, started.childId, new AbortController().signal);
-    assert.throws(() => authority.assertDelivery(ticket, started.childId, historical));
+    await assert.rejects(authority.resolveChildEvidence(ticket, started.childId, new AbortController().signal), { code: "UNSUPPORTED_CAPABILITY" });
     assert.equal(f.bodies.length, postDrainDispatches);
     await t.test("native delivery evidence refuses a real same-ID replacement from another registry", async replacementTest => {
       const second = await nativeRootLlmFixture(replacementTest, { defaultActive: false }, { approvalPolicy: "ask" });
@@ -165,8 +163,7 @@ async function startAndDeliverForeignChild(t, name) {
         assert.equal(f.ctx.agents.get(started.childId), replacement.agent);
         assert.equal(f.ctx.agents.isOwnedBy(started.childId, root), true);
         assert.throws(() => authority.assertDelivery(ticket, started.childId, evidence), { code: "UNAUTHORIZED" });
-        const replaced = await authority.resolveChildEvidence(ticket, started.childId, new AbortController().signal);
-        assert.throws(() => authority.assertDelivery(ticket, started.childId, replaced));
+        await assert.rejects(authority.resolveChildEvidence(ticket, started.childId, new AbortController().signal));
         assert.equal(f.bodies.length, postDrainDispatches); assert.equal(second.bodies.length, 0);
       } finally { detach(); }
       assert.throws(() => authority.assertDelivery(ticket, started.childId, evidence), { code: "UNAUTHORIZED" });

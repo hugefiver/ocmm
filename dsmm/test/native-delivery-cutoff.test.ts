@@ -79,7 +79,7 @@ test("Gateway and direct cold materialization retain the current parent ticket t
         const parent = await f.create(), started = await f.start(parent), original = f.ctx.agents.get(started.childId)!;
         const count = accepted(original).length;
         stream.release(); f.adapter.beforeStream = undefined;
-        await f.runtime.drainContinuableChildren(parent, [original.id]);
+        await f.runtime.drainChildren(parent, [original.id]);
         await f.ctx.sessionPersistence.flush();
         assert.equal(f.ctx.agents.get(original.id), undefined);
         f.ctx.on("agent/created", async ({ agent, source }) => {
@@ -119,7 +119,7 @@ test("actual delegating Agent residency teardown revokes its pending direct-pare
     const refusal = assert.rejects(pending);
     await entered.promise;
     stream.release(); f.adapter.beforeStream = undefined;
-    await f.runtime.drainContinuableChildren(root, [parent.id]);
+    await f.runtime.drainChildren(root, [parent.id]);
     assert.equal(ticket.signal.aborted, true);
     evidence.release(); await refusal;
     assert.equal(accepted(child).length, count);
@@ -131,23 +131,24 @@ test("dispose start synchronously fences borrowed signals racing native image, p
   for (const phase of ["image", "prepare", "cold"] as const) for (const owner of ["Host", "policy", "residency", "owned handle", "operator", "Connection"] as const) {
     await t.test(`${phase}: ${owner}`, async (t) => {
       const f = await deliveryFixture({ images: phase === "image" });
-      const stream = gate(), entered = gate(), completion = gate(), began = gate();
-      f.adapter.beforeStream = () => stream.promise;
+      const stream = gate(), streamEntered = gate(), entered = gate(), completion = gate(), began = gate();
+      f.adapter.beforeStream = () => { streamEntered.release(); return stream.promise; };
       const llm = f.ctx.llm, resolve = llm.resolveModelInfo.bind(llm);
       let disposal: Promise<void> | undefined;
       let ticket!: ParentAdmissionTicket<FixtureAdmission>, deliverySignal!: AbortSignal;
       let atStart: { uid: number | null; ticketAborted: boolean; deliveryAborted: boolean; ready: boolean; acceptsTicket: boolean; taskAborted: boolean } | undefined;
       try {
         const parent = await f.create(), started = await f.start(parent), original = f.ctx.agents.get(started.childId)!;
+        await streamEntered.promise;
         let child = original;
         const count = accepted(child).length;
         const retiring = owner === "Host" ? f.runtimeFiber.ctx : owner === "policy" ? f.bindingScope : owner === "residency" || owner === "owned handle" ? parent.ctx
-          : owner === "operator" ? f.connectionOwner().operator.ctx : f.connectionScope();
+          : owner === "operator" ? f.connectionOwner().browserPeer.ctx : f.connectionScope();
         const begin = () => {
           if (owner === "owned handle") f.runtime.authority.revokeParent(parent, "owned-handle-teardown-start");
           disposal = owner === "Host" ? f.runtimeFiber.dispose() : owner === "policy" ? f.bindingFiber.dispose()
             : owner === "residency" ? parent.ctx.fiber.dispose() : owner === "owned handle" ? f.beginAgentDisposal(parent)
-            : owner === "operator" ? f.connectionOwner().operator.dispose() : f.beginConnectionDisposal();
+            : owner === "operator" ? f.connectionOwner().browserPeer.dispose() : f.beginConnectionDisposal();
           let acceptsTicket = true;
           try { f.runtime.authority.assertTicket(ticket); } catch { acceptsTicket = false; }
           atStart = { uid: retiring.fiber.uid, ticketAborted: ticket.signal.aborted, deliveryAborted: deliverySignal.aborted,
@@ -170,7 +171,7 @@ test("dispose start synchronously fences borrowed signals racing native image, p
           };
         } else if (phase === "cold") {
           stream.release(); f.adapter.beforeStream = undefined;
-          await f.runtime.drainContinuableChildren(parent, [child.id]);
+          await f.runtime.drainChildren(parent, [child.id]);
           await f.ctx.sessionPersistence.flush();
           f.ctx.on("agent/created", async ({ agent, source }) => {
             if (source !== "resume" || agent.id !== original.id) return;
@@ -189,7 +190,7 @@ test("dispose start synchronously fences borrowed signals racing native image, p
         assert.equal(atStart.deliveryAborted, true);
         if (owner === "Host" || owner === "policy") assert.equal(atStart.ready, false);
         assert.equal(atStart.acceptsTicket, owner === "operator" || owner === "Connection");
-        assert.equal(atStart.taskAborted, false);
+        assert.equal(atStart.taskAborted, phase === "cold", "only the original residency deliberately drained for cold resume has ended");
         assert.ok("error" in outcome);
         assert.equal(remoteErrorOf(outcome.error)?.code, "gateway/cancelled");
         assert.equal(acceptedDelta, 0);
@@ -213,7 +214,7 @@ test("accepted queue, running task and native child reports survive policy, oper
       await entered.promise;
       const queued = await f.prompt(f.request(parent, child.id, "already accepted queue")) as { messageId: string };
       const count = accepted(child).length;
-      const disposed = owner === "policy" ? f.bindingFiber.dispose() : owner === "operator" ? f.connectionOwner().operator.dispose() : f.beginConnectionDisposal();
+      const disposed = owner === "policy" ? f.bindingFiber.dispose() : owner === "operator" ? f.connectionOwner().browserPeer.dispose() : f.beginConnectionDisposal();
       assert.equal(f.adapter.calls[0].signal?.aborted, false);
       await disposed;
       assert.equal(f.adapter.calls[0].signal?.aborted, false);

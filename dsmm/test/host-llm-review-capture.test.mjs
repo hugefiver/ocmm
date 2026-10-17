@@ -13,15 +13,18 @@ for (const passthrough of [true, false]) test(`fresh Host continuation retains c
     created.set(agent.id, agent); disposed.set(agent.id, Promise.withResolvers());
   }, { global: true });
   f.ctx.on("agent/disposed", ({ agent }) => disposed.get(agent.id)?.resolve(), { global: true });
-  const receipt = await f.ctx.subagents.startContinuable({ provider: "dsmm-role-doc-search", label: "Original route capture",
+  const receipt = await f.ctx.subagents.startActivation({ provider: "dsmm-role-doc-search", label: "Original route capture", delivery: "parent",
     request: { parent: f.agent, prompt: [{ type: "text", text: "First durable documentation request" }] }, signal: new AbortController().signal });
+  f.activations.add(receipt);
   const child = created.get(receipt.childId);
   assert.ok(child);
-  await child.whenIdle(); await disposed.get(child.id).promise;
+  assert.equal((await receipt.result).stopReason, "completed");
+  await receipt.dispose();
+  await disposed.get(child.id).promise;
   assert.ok(f.bodies.some(isChildBody));
   const originalHeader = child.session.requestHeader();
   const captureA = await f.ctx.dsmmProfileRuntime.childCaptureStore.readChildAdmission(child.id, f.agent.id);
-  assert.equal(captureA.version, 2);
+  assert.equal(captureA.version, 3);
   assert.deepEqual(captureA.invocation.requestedRoute, primary);
   assert.equal(captureA.modelParameterPolicy.mode, passthrough ? "passthrough" : "native-defaults");
   const replacement = { provider: "apai", model: "gpt-5.6-terra", reasoningEffort: "high", route_marker: "new-parent", new_only: true };

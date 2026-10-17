@@ -177,11 +177,14 @@ test("a parent's explicit native model choice does not replace auxiliary role de
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
     const parent = await fixture.create({}, selection); await nativeSelect(parent, selection, manual); await runFixtureTurn(parent);
     for (const overridden of [false, true]) {
-      const child = await fixture.subagents.start("dsmm-role-reviewer", { parent, signal: new AbortController().signal, prompt: [{ type: "text", text: "Use the auxiliary role's native route" }],
-        ...(overridden ? { agentOptions: { ...manual, reasoningEffort: ReasoningEffortId("low") } } : {}) });
+      const child = await fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Auxiliary route", delivery: "caller", signal: new AbortController().signal,
+        request: { parent, prompt: [{ type: "text", text: "Use the auxiliary role's native route" }],
+          ...(overridden ? { agentOptions: { ...manual, reasoningEffort: ReasoningEffortId("low") } } : {}) } });
+      const childAgent = fixture.agents.get(child.childId);
+      assert.ok(childAgent);
       try {
-        assert.equal((await child.result).stopReason, "completed"); assert.ok(child.localAgent);
-        assert.deepEqual(headerRoutes(child.localAgent), [overridden ? manual : reviewer]);
+        assert.equal((await child.result).stopReason, "completed");
+        assert.deepEqual(headerRoutes(childAgent), [overridden ? manual : reviewer]);
       } finally { await child.dispose(); }
     }
   } finally { await fixture.dispose(); }

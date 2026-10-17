@@ -9,11 +9,12 @@ import * as Cordis from "@deepseek-ai/cordis";
 import { Context } from "@deepseek-ai/cordis";
 import { AgentRegistry } from "@deepseek-ai/dsh-agent";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
+import { Peer } from "@deepseek-ai/dsh-client-connection";
 import type { ClientRemote } from "@deepseek-ai/dsh-api-gateway/client";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
-import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import type { ConnectionInstallOptions } from "@deepseek-ai/dsh-client-connection/client";
 import { TYPERT_REMOTE } from "../lib/profile-remote.js";
 import { registerProfilesRpc } from "../lib/profile-rpc.js";
@@ -30,9 +31,17 @@ import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 useIsolatedDshEnvironment();
 
 const require = createRequire(import.meta.url);
+async function installAccess(ctx: Context) {
+  const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
+  const { RemoteAccessService } = sdk("@deepseek-ai/dsh-api-remote-access");
+  await ctx.plugin(RemoteAccessService).await();
+}
 type NativeClientModule = { inject: string[]; apply(ctx: Context): void; installConnection?(ctx: Context, options: ConnectionInstallOptions): void };
 async function nativeClient(packageName: string): Promise<NativeClientModule> {
-  const source = await readFile(join(dirname(require.resolve(`${packageName}/package.json`)), "lib/client.js"), "utf8");
+  const manifestPath = require.resolve(`${packageName}/package.json`);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const entry = manifest.exports["./client"];
+  const source = await readFile(join(dirname(manifestPath), entry.browser ?? entry.default), "utf8");
   let factory: ((require: (id: string) => unknown) => NativeClientModule) | undefined;
   const realm = createContext({ crypto: globalThis.crypto, AbortController, AbortSignal, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout, queueMicrotask, console, window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } } });
   runInContext(source, realm);
@@ -46,7 +55,9 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "dsmm-profile-rpc-"));
   const host = new Context();
   const client = new Context();
+  const peer = new Peer(host, { principal: { kind: "owner" } });
   try {
+  await installAccess(host);
   const hostTypert = host.plugin(TypertRegistry);
   const gatewayFiber = host.plugin(TypertGatewayService, {});
   const clientTypert = client.plugin(TypertRegistry);
@@ -68,7 +79,7 @@ async function fixture() {
       if (offline) throw new Error("PRIVATE_TRANSPORT_SENTINEL");
       const [namespace, method] = endpoint.split("/");
       const args = (payload as { args: Record<string, unknown> }).args;
-      try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal }) }; }
+      try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal, peer }) }; }
       catch (error) {
         const failure = remoteErrorOf(error);
         if (failure === undefined) throw error;
@@ -77,7 +88,7 @@ async function fixture() {
     },
     async *open(channel, endpoint, payload, signal, uplink) {
       assert.equal(channel, "/api");
-      yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), undefined, signal);
+      yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), peer, signal);
     },
   } } });
   const remoteModule = await nativeClient("@deepseek-ai/dsh-api-gateway");
@@ -86,7 +97,7 @@ async function fixture() {
   await remoteFiber.await();
   const remote: ClientRemote = client.remote;
   const unmount = await remote.$mount(TYPERT_REMOTE);
-  return { host, client, gateway, store, runtime, remote, unmount, rpcFiber, offline(value: boolean) { offline = value; }, async dispose() { await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true }); } };
+  return { host, client, gateway, peer, store, runtime, remote, unmount, rpcFiber, offline(value: boolean) { offline = value; }, async dispose() { await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true }); } };
   } catch (error) {
     await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true });
     throw error;
@@ -95,7 +106,9 @@ async function fixture() {
 
 async function anotherHost(profileDir: string) {
   const host = new Context();
+  const peer = new Peer(host, { principal: { kind: "owner" } });
   try {
+    await installAccess(host);
     const registry = host.plugin(TypertRegistry);
     const gateway = host.plugin(TypertGatewayService, {});
     await Promise.all([registry.await(), gateway.await()]);
@@ -104,7 +117,7 @@ async function anotherHost(profileDir: string) {
     const rpc = host.plugin({ name: "external-profile-rpc", inject: ["typert"], apply(ctx: Context) { registerProfilesRpc(ctx, runtime); } });
     await rpc.await();
     return { runtime, async select(id: string | null, revision?: string) {
-      return host.typertGateway.invoke({ namespace: "dsmmProfiles", method: "select", args: { request: { id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: (await runtime.describe()).selectionRevision } } });
+      return host.typertGateway.invoke({ namespace: "dsmmProfiles", method: "select", peer, args: { request: { id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: (await runtime.describe()).selectionRevision } } });
     }, dispose: () => host.fiber.dispose() };
   } catch (error) { await host.fiber.dispose(); throw error; }
 }
@@ -126,6 +139,7 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     return initialize.call(this);
   });
   try {
+    await installAccess(ctx);
     const registry = ctx.plugin(TypertRegistry);
     const gateway = ctx.plugin(TypertGatewayService, {});
     await Promise.all([registry.await(), gateway.await(), ctx.plugin(AgentRegistry).await()]);
@@ -173,7 +187,8 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     assert.ok(ctx.get("dsmmProfileRuntime"));
     assert.ok(ctx.get("dsmmProfiles"));
     assert.deepEqual(ctx.typert.local.list().filter((descriptor) => descriptor.service === "dsmmProfiles").map((descriptor) => descriptor.method), ["selectMode", "describe", "read", "save", "select", "describeSession", "selectSession"]);
-    const described = await ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }) as Awaited<ReturnType<DsmmProfileRuntime["describe"]>>;
+    const peer = new Peer(ctx, { principal: { kind: "owner" } });
+    const described = await ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {}, peer }) as Awaited<ReturnType<DsmmProfileRuntime["describe"]>>;
     assert.deepEqual({ profiles: described.profiles, selectedId: described.selectedId, appliedRevision: described.appliedRevision, selectionRevision: described.selectionRevision }, {
       profiles: [], selectedId: null, appliedRevision: null, selectionRevision: "absent",
     });
@@ -186,7 +201,8 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     if (durable) {
       assert.equal(storageFibers.length, 1, "the production entry owns one internal companion, not a second Loader entry");
       assert.equal(storageFibers[0].state, 2);
-      assert.deepEqual(storageFibers[0].config, storage, "the explicit native root and compression must survive configuration");
+      assert.equal(storageFibers[0].config.root, storage.root);
+      assert.equal(storageFibers[0].config.compression, storage.compression);
       assert.ok(startupOrder.indexOf("storage-ready") >= 0);
       assert.ok(startupOrder.indexOf("profiles-start") > startupOrder.indexOf("storage-ready"), "native storage init must finish before profile runtime installation");
       const persistence = ctx.sessionPersistence;
@@ -212,9 +228,9 @@ async function verifyProductionProfileInjection(plugin: typeof dsmmPlugin, durab
     assert.equal(ctx.typert.local.hasSeen("dsmmProfiles/describe"), true);
     assert.equal(ctx.typert.local.get("dsmmConfig/describe"), undefined);
     assert.equal(ctx.typert.local.hasSeen("dsmmConfig/describe"), true);
-    await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }),
+    await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {}, peer }),
       (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
-    await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmConfig", method: "describe", args: {} }),
+    await assert.rejects(ctx.typertGateway.invoke({ namespace: "dsmmConfig", method: "describe", args: {}, peer }),
       (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
     if (durable) {
       assert.equal(ctx.get("sessionPersistence"), undefined, "the configured companion is owned by the production entry");
@@ -361,8 +377,8 @@ test("genuine Gateway supplies the operator invocation; save is not apply and co
   const f = await fixture();
   try {
     await assert.rejects(f.host.dsmmProfiles.describe(), (error: unknown) => remoteErrorOf(error)?.code === "dsmm-profiles/peer-required");
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "save", args: { request: { id: "../escape", content: "{}", expectedRevision: null } } }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/input-invalid");
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: { peer: { id: "forged" } } }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/arguments-invalid");
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "save", peer: f.peer, args: { request: { id: "../escape", content: "{}", expectedRevision: null } } }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/input-invalid");
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "describe", peer: f.peer, args: { peer: { id: "forged" } } }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/arguments-invalid");
     assert.equal((await f.store.describe()).profiles.length, 0);
     const controller = new ProfilesController(f.remote.dsmmProfiles);
     await controller.refresh();
@@ -435,7 +451,7 @@ test("editor switching requires explicit discard and disposal ignores late nativ
     await pending;
     assert.strictEqual(controller.store.getSnapshot(), before);
     await f.rpcFiber.dispose();
-    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {} }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
+    await assert.rejects(f.gateway.invoke({ namespace: "dsmmProfiles", method: "describe", args: {}, peer: f.peer }), (error: unknown) => String(remoteErrorOf(error)?.code) === "gateway/definition-unavailable");
   } finally { await f.dispose(); }
 });
 

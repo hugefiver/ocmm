@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { resolvePermissionControl, permissionControlSchema } from "../src/permission-settings.ts";
 import { applyPermissionRulesSave, importPermissionRules, operatorPermissionRulesSource, parsePermissionRulesSave, permissionRevision, PermissionRulesRuntimeSync } from "../src/permission-rules.ts";
 import { parsePermissionRulesResult } from "../src/permission-remote.ts";
@@ -206,11 +207,22 @@ test("central save RPC requires live Root operator, readonly and current CAS and
     assert.equal(signal.aborted, true); assert.notEqual(sync.signal, signal);
     await assert.rejects(save(originalToken)); assert.equal(saved.revision, savedToken);
     writable = false; await assert.rejects(save(savedToken)); assert.equal(saved.revision, savedToken); writable = true;
-    const other = await f.create(); await assert.rejects(f.invoke("saveRules", { sessionId: other.id, request: { expectedRevision: savedToken, upsert: [shell] } }, {}));
+    const other = await f.create(), foreign = f.ctx.connection.createPeer({ principal: { kind: "owner" } });
+    const denied = { sessionId: other.id, request: { expectedRevision: savedToken, upsert: [shell] } }, unchanged = saved;
+    await assert.rejects(f.invoke("saveRules", denied, foreign), error => {
+      const remote = remoteErrorOf(error);
+      return remote?.code === "dsmm-permissions/refused" && remote.details.code === "not-owned";
+    });
+    await assert.rejects(Promise.resolve().then(() => Reflect.apply(f.ctx.typertGateway.invoke, f.ctx.typertGateway,
+      [{ namespace: "dsmmPermissions", method: "saveRules", args: denied }])));
+    assert.equal(saved, unchanged);
     let release!: () => void, entered!: () => void;
     const ready = new Promise<void>(yes => { entered = yes; }); const wait = new Promise<void>(yes => { release = yes; });
     hold = () => { entered(); return wait; };
+    const previousPeer = f.ctx.connection.browserPeer;
     const raced = save(savedToken); await ready; await f.replaceConnection(); release(); await assert.rejects(raced); assert.equal(saved.revision, savedToken);
+    await assert.rejects(f.invoke("saveRules", denied, previousPeer));
+    assert.equal(saved, unchanged);
   } finally { await f.dispose(); }
 });
 

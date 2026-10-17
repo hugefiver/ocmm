@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createRequire } from "node:module";
 import test from "node:test";
 // @ts-expect-error Owned diagnostic harnesses are not published library modules.
 import { nativePickerClosure, pickerCompositionBundle, PICKER_ENTRY_PACKAGES } from "../scripts/native-picker-browser.mjs";
@@ -16,12 +15,35 @@ test("picker diagnostic decodes only the native singleton wire envelope without 
   for (const invalid of [null, [], {}, { request: args.request }, { args, extra: true }, { args: [] }, { args: null }]) assert.throws(() => decodeNativePickerArgs(invalid));
 });
 
-test("cold mode reader mounts the actual stock persistence default plugin, never its ESM namespace", async () => {
+test("cold mode reader mounts the native JSONL namespace and reads back its native session", async () => {
   const native = await import("@deepseek-ai/dsh-session-persistence-jsonl");
-  assert.equal(typeof native.default.apply, "function", "published native persistence default is the Cordis plugin");
-  assert.equal(Reflect.get(native, "apply"), undefined, "the ESM namespace is not a Cordis plugin");
-  const harness = await readFile(new URL("../scripts/native-picker-harness.mjs", import.meta.url), "utf8");
-  assert.ok(/const \{ default: StockPersistence \} = await load\("@deepseek-ai\/dsh-session-persistence-jsonl"\)/u.test(harness), "cold mode reader must mount the native default export");
+  const { Context } = await import("@deepseek-ai/cordis");
+  const { Session, SessionId } = await import("@deepseek-ai/dsh-session");
+  const { createUserMessage } = await import("@deepseek-ai/dsh-llm");
+  const root = await mkdtemp(join(tmpdir(), "dsmm-picker-cold-reader-"));
+  const writerCtx = new Context(), readerCtx = new Context();
+  try {
+    await writerCtx.plugin(native, { root, compression: "none" }).await();
+    const session = Session.create(SessionId("picker-cold-mode"));
+    const event = session.append("user/message", createUserMessage({ content: [{ type: "text", text: "cold reader history" }], source: { kind: "user" } }), { surfaceOp: "append" });
+    const writer = await writerCtx.sessionPersistence.create(session.header);
+    await writer.append([event]);
+    await writer.flush();
+    await writer.close();
+    await writerCtx.sessionPersistence.flush();
+    await readerCtx.plugin(native, { root, compression: "none" }).await();
+    const reader = await readerCtx.sessionPersistence.open(session.id, "read");
+    assert.ok(reader);
+    try {
+      assert.equal(reader.header.id, session.id);
+      assert.deepEqual((await reader.read()).events, [event]);
+    }
+    finally { await reader.close(); }
+  } finally {
+    await readerCtx.fiber.dispose();
+    await writerCtx.fiber.dispose();
+    await rm(root, { recursive: true, force: false });
+  }
 });
 
 test("raw native mode roots dispatch a genuine user followup and await native idle, without a Workspace composer", async () => {
@@ -60,14 +82,18 @@ test("view withdrawal waits on exact held old-session intent, never a settled ne
   assert.equal(heldProfileIntentCall([legacy], legacy.endpoint, "old"), legacy);
 });
 
-test("native Store is an installed library consumed by ModelDirectory, not a declared client-plugin asset", async () => {
-  const nativeRequire = createRequire(import.meta.url);
-  const manifest = JSON.parse(await readFile(nativeRequire.resolve("@deepseek-ai/dsh-client-store/package.json"), "utf8"));
-  assert.equal(manifest.version, "0.2.0-rc.2"); assert.equal(manifest.dsh?.client, undefined);
+test("native Store seed publishes model snapshots to native observers", async () => {
   const store = await import("@deepseek-ai/dsh-client-store");
-  assert.equal(typeof store.defineStore, "function"); assert.equal(typeof store.createSnapshotStore, "function");
-  const modelClient = await readFile(nativeRequire.resolve("@deepseek-ai/dsh-client-ui-model-selection/client"), "utf8");
-  assert.ok(modelClient.includes('require("@deepseek-ai/dsh-client-store")'), "unchanged native ModelDirectory must consume the seeded library");
+  const initial = { provider: "fixture", model: "initial" };
+  const target = { provider: "fixture", model: "target" };
+  const snapshots = store.createSnapshotStore(initial);
+  const observed: Array<typeof initial> = [];
+  const unsubscribe = snapshots.subscribe(() => observed.push(snapshots.getSnapshot()));
+  try {
+    snapshots.set(target);
+    assert.deepEqual(snapshots.getSnapshot(), target);
+    assert.deepEqual(observed, [target]);
+  } finally { unsubscribe(); }
 });
 
 test("owned picker composition installs only the supported carrier and locale; native Layout/Conversation/ModelSelect own slots", () => {
@@ -86,7 +112,7 @@ test("native picker dependency closure follows published metadata exactly and to
     for (const [index, id] of ids.entries()) {
       const directory = join(owned, String(index)); await mkdir(directory);
       const path = join(directory, "package.json"); paths.set(`${id}/package.json`, path);
-      await writeFile(path, JSON.stringify({ version: "0.2.0-rc.2", dsh: { client: { inject: index < 3 ? [ids[3]] : [ids[0]] } } }));
+      await writeFile(path, JSON.stringify({ version: "0.2.1-rc.1", dsh: { client: { inject: index < 3 ? [ids[3]] : [ids[0]] } } }));
     }
     const resolver = { resolve(specifier: string) { const path = paths.get(specifier); assert.ok(path); return path; } };
     const closure = await nativePickerClosure(resolver);

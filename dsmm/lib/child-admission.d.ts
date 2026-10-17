@@ -5,7 +5,6 @@ import type { ChildAdmissionEvidence, ChildAdmissionEvidenceView, ChildEvidenceF
 import type { DeliveryPolicyBinding, DsmmDeliveryAuthority } from "./delivery-authority.js";
 import type { DshAgent } from "./dsh-types.js";
 import type { NativeChildHistory } from "./native-child-evidence.js";
-import type { LegacyCapabilityCollaborators } from "./legacy-child-policy.js";
 import type { DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 export interface ChildAdmissionCollaborators {
     /** A owns resident/durable capture lookup and corruption-vs-absence decisions. */
@@ -23,7 +22,6 @@ export interface ChildAdmissionBindingOptions {
     readonly nativeSubstrate: DsmmSettings;
     /** The exact public Host query service, borrowed in the same scope as the native catalog. */
     readonly nativeHistory: NativeChildHistory;
-    readonly legacyCapabilities: LegacyCapabilityCollaborators;
 }
 /** Connects A's structural contract to C1's opaque ticket provenance without manufacturing Agents. */
 export declare function createChildAdmissionBinding(options: ChildAdmissionBindingOptions): {
