@@ -119,7 +119,7 @@ $protectedPaths = @(
   "docs/superpowers/specs/2026-07-28-idle-continuation-fencing-design.md",
   "docs/superpowers/specs/2026-07-28-model-chain-opus5-calibration-design.md"
 )
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "Approved temp parent missing" }
 $receiptPath = Join-Path $tempParent "ocmm-model-chain-opus5-protected.json"
 $hashes = [ordered]@{}
@@ -1135,7 +1135,7 @@ Expected: all tests and `git diff --check` pass. Return hand-edited paths separa
 
 **Files:**
 - Verify only: all paths from Tasks 1-4.
-- Temporary only: unique children of `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode`.
+- Temporary only: unique task-owned children of the approved OS temporary parent.
 - Modify: no repository file.
 
 **Interfaces:**
@@ -1183,7 +1183,7 @@ Expected: strict TypeScript check exits 0; all Node tests and `cargo test -p ocm
 
 ```powershell
 $root = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "Approved temp parent missing" }
 $buildEvidenceDir = Join-Path $tempParent ("ocmm-opus5-build-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $buildEvidenceDir | Out-Null
@@ -1229,7 +1229,7 @@ Use this assertion helper in the same PowerShell session:
 
 ```powershell
 $root = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $buildStatePath = Join-Path $tempParent "ocmm-model-chain-opus5-build-state.json"
 if (-not (Test-Path -LiteralPath $buildStatePath -PathType Leaf)) { throw "Build state missing" }
 $buildState = [IO.File]::ReadAllText($buildStatePath) | ConvertFrom-Json
@@ -1294,7 +1294,7 @@ Run this complete block; it restores every environment variable and deletes raw 
 
 ```powershell
 $root = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $liveRoot = Join-Path $tempParent ("ocmm-opus5-live-" + [guid]::NewGuid().ToString("N"))
 $xdgNames = @("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
 $controlledNames = @($xdgNames + @(
@@ -1407,7 +1407,7 @@ Expected: one concise `live_surface=PASS ...` line. No model request is sent, no
 Run from repository root:
 
 ```powershell
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $receiptPath = Join-Path $tempParent "ocmm-model-chain-opus5-protected.json"
 if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw "Protected receipt missing" }
 $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
@@ -1503,7 +1503,7 @@ Expected: protected count 12 unchanged; HEAD unchanged; empty index; no out-of-s
 - [ ] **Step 7: Clean temporary receipts and return the final implementation evidence**
 
 ```powershell
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $receiptPath = Join-Path $tempParent "ocmm-model-chain-opus5-protected.json"
 $buildStatePath = Join-Path $tempParent "ocmm-model-chain-opus5-build-state.json"
 $buildEvidenceDir = $null

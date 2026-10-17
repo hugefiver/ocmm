@@ -9,19 +9,22 @@ The default scope is `deepwork-or-dsmm-agent`: helpers apply when the agent is i
 ## Settings
 
 ```yaml
-dsmm:
-  guards:
-    scope: deepwork-or-dsmm-agent
-    shellCommandSafety: true
-    gitWriteGuard: ask
-    toolOutputTruncation:
-      enabled: true
-      maxInlineBytes: 12000
-    planFormatValidation: true
-    questionLabelHelper:
-      enabled: true
-      maxLabelChars: 30
-    todoDisciplineHelper: true
+- id: dsmm
+  name: '@dsmm/dsmm'
+  config:
+    # Retain other existing DSMM values when editing the native entry.
+    guards:
+      scope: deepwork-or-dsmm-agent
+      shellCommandSafety: true
+      gitWriteGuard: ask
+      toolOutputTruncation:
+        enabled: true
+        maxInlineBytes: 12000
+      planFormatValidation: true
+      questionLabelHelper:
+        enabled: true
+        maxLabelChars: 30
+      todoDisciplineHelper: true
 ```
 
 ## Failure messages
@@ -48,7 +51,7 @@ Known write operations are `add`, `am`, `apply`, `branch`, `checkout`, `cherry-p
 
 DSMM's pre-execute handler runs before downstream handlers. Its own deny wins immediately. For its own ask, DSMM calls downstream and returns the ask only when downstream allowed the call; a downstream ask or deny is preserved. This keeps another safety policy's stricter decision intact rather than replacing it with DSMM's request. Structured-value replacements, errors, and blocked post-tool results are not truncated into apparently successful text.
 
-Workflow and role instructions also prefer short shell operations and repository-native tools, prohibit cross-shell destructive path composition, require exact path checks before recursive deletion, and prohibit autonomous Git writes. These instructions complement—not replace—the host sandbox and approval pipeline. Read-only role authority is bound to exact live Agent ownership/admission, not a persona label. Native caller filters remain intact. Agent admission restricts inherited tools and installs monotonic execution guards; own-layer definitions are identity-fenced, including a re-registered `read` impersonating a safe operation. rc.2 has no public hide-own-layer filter: a registration may remain displayed, but forbidden/unadmitted invocation must fail. Native sandbox/approval/observation remain authoritative.
+Workflow and role instructions also prefer short shell operations and repository-native tools, prohibit cross-shell destructive path composition, require exact path checks before recursive deletion, and prohibit autonomous Git writes. These instructions complement, not replace, the host sandbox and approval pipeline. Read-only role authority is bound to exact live Agent ownership/admission, not a persona label. Native caller filters remain intact. Agent admission restricts inherited tools and installs monotonic execution guards; own-layer definitions are identity-fenced, including a re-registered `read` impersonating a safe operation. rc.2 has no public hide-own-layer filter: a registration may remain displayed, but forbidden/unadmitted invocation must fail. Native sandbox/approval/observation remain authoritative.
 
 ## Plan mutation validation
 
@@ -56,4 +59,4 @@ Plan validation recognizes `docs/superpowers/plans/*.md` and `.omo/plans/*.md` b
 
 On rc.2, protected `edit` has no proven authorized complete pre-commit document preview. When enabled, this helper returns typed pre-execute denial with `unsupported-full-preview`, after checking public edit argument shape. Use an authorized complete-document write instead. DSMM never reads the target with Node FS, proactively invokes native read, refreshes observation/CAS, parses opaque target identity, accepts caller content as a fake preview, or treats a truncated line view/new-string fragment as the final document. This is a fail-closed unsupported seam, not successful format validation or N/A. Native matching/CAS remain untouched; ordinary non-plan edits remain native. Helper off makes no final-document formatting guarantee and does not lift role/host permissions.
 
-Planner main/child roles return complete Markdown for native `exit_plan_mode` review; `/plan` is collaboration state, not a sandbox or upgrade. An authorized coordinator persists through native write. Tests retain the original private-checklist regression, with zero target reads/body executions, no leaked sentinel and unchanged bytes, plus actual native complete writes, stronger denial, stale version and ordinary unique-match/replace-all coverage.
+Planner main/child roles return complete Markdown for native `exit_plan_mode` review; `/plan` is collaboration state, not a sandbox or upgrade. An authorized coordinator persists through native write. A failed format check doesn't grant permission to read private targets or bypass native matching/CAS.

@@ -22,6 +22,14 @@ The rules RPC writes Global. A native override of outside-read, web or rule poli
 
 Storage CAS and runtime adoption are separate from native call approval. Saves recheck authoritative storage and await notification before publishing synchronized policy. Notification failure leaves saved/runtime revisions visibly unsynchronized; recovery rereads storage, and conflicts preserve dirty drafts. These checks don't cancel pending native approval or override an actual approved call. New calls consume current policy, with no cross-call reuse of a once grant.
 
+## Configuration drawer and exact native commands
+
+Use **Plugins → DSMM bundle config → Permissions**. The selected Global/native-profile scope edits its sparse deployment policy; a separate Root-rules transaction writes Global only under the existing live operator, exact open Root, registration and synchronized-policy authority. A child, stale connection, read-only Host or shadowing native policy doesn't acquire a fallback Global write. Named Profiles can't grant these permissions. No duplicate Settings permission page or Conversation permission tab is registered.
+
+`permissionControl.nativeCommands` defaults off. Exact entries match tool, executable, optional subcommand, ordered arguments, absolute Host working directory and sandbox mode. They don't use wildcards, parse an arbitrary shell command or normalize caller values into a match. New UI entries use Ask and `workspace-write`, not full access; an Allow entry can't replace downstream Ask/Deny or a role's read-only ceiling.
+
+Observed `kind:shell` registration isn't proof of the actual executor, environment, executable or sandbox. The editor doesn't auto-certify those values. Missing/stale controller or registration identity still refuses consumption. Saving an exact rule isn't native manual approval and doesn't solve an unexplained read-only Git prompt; that investigation needs the full triggering call and approval reason.
+
 ## Capability limits
 
 ### Deferred P1: admission changes during one-shot approval

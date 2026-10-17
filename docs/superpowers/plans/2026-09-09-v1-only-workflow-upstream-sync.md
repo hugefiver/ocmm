@@ -150,7 +150,7 @@ docs/prompt-sync.md
 
 - [ ] 查看 `git status --short`、`git diff --stat`、`node --version`、`pnpm --version`、`cargo --version`、`Get-Command opencode -ErrorAction SilentlyContinue`。逐项执行，不因缺工具自动安装。
 - [ ] 有有效近期基线则复用；没有时运行 `pnpm run typecheck` 和与首批改动相关的现有测试了解起点。无需在每波前重复全套检查；最终完整检查仍见 T10。
-- [ ] 先检查 `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode` 父目录，再用专用文件工具建立唯一临时目录。config/data/state/cache/evidence 全在其内，不复制真实用户配置或凭据。
+- [ ] 先检查获准的操作系统临时父目录，再用专用文件工具建立唯一的本任务目录。config/data/state/cache/evidence 全在其内，不复制真实用户配置或凭据。
 
 **Evidence:** 起点和用户改动范围明确，缺失工具如实列出；没有 Git 写。无需固定格式的基线 receipt。
 

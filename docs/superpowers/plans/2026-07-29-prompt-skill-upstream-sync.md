@@ -26,7 +26,7 @@
 
 ## Baseline and file map
 
-Run all repository commands from `C:\Users\hugefiver\source\ocmm`. Before Task 1, verify:
+Run repository commands from the repository root. Before Task 1, verify:
 
 ```powershell
 git rev-parse HEAD
@@ -755,7 +755,7 @@ Run this PowerShell block exactly. It treats `.agents/plugins/marketplace.json`,
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$evidenceRoot = Join-Path "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode" ("project4-generation-" + [guid]::NewGuid().ToString("N"))
+$evidenceRoot = Join-Path $env:TEMP ("prompt-generation-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 
 function Get-GeneratedManifest([string]$Root) {
@@ -842,7 +842,7 @@ Run the following PowerShell script after `pnpm run build`. It snapshots and res
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$testRoot = Join-Path "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode" ("project4-prompt-load-" + [guid]::NewGuid().ToString("N"))
+$testRoot = Join-Path $env:TEMP ("prompt-load-" + [guid]::NewGuid().ToString("N"))
 $envNames = @(
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
   "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR", "OPENCODE_DISABLE_AUTOUPDATE",
@@ -948,7 +948,7 @@ Run this PowerShell script from the repository root. It registers only the local
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$testRoot = Join-Path "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode" ("project4-codex-plugin-" + [guid]::NewGuid().ToString("N"))
+$testRoot = Join-Path $env:TEMP ("codex-plugin-check-" + [guid]::NewGuid().ToString("N"))
 $envNames = @(
   "CODEX_HOME", "CODEX_DISABLE_AUTO_UPDATE",
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",

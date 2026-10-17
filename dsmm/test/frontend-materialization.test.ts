@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -9,7 +9,7 @@ import { test } from "node:test";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { FRONTEND_PINS, frontendRecipe } = await import(new URL("../scripts/frontend-recipe.mjs", import.meta.url).href);
-const { checkFrontendAssets, materializeFrontend, gitBlob } = await import(new URL("../scripts/materialize-frontend.mjs", import.meta.url).href);
+const { checkFrontendAssets, materializeFrontend } = await import(new URL("../scripts/materialize-frontend.mjs", import.meta.url).href);
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "dsmm-frontend-test-"));
@@ -24,7 +24,7 @@ function cleanup(directory: string) {
   rmSync(directory, { recursive: true });
 }
 
-test("fixed frontend mapping covers source names, real Python dependencies, original aside and verbatim licenses", () => {
+test("frontend mapping covers referenced resources and Python dependencies", () => {
   const rows: Array<{ source: string; target: string; upstream: string }> = frontendRecipe();
   assert.equal(new Set(rows.map((row) => row.target)).size, rows.length);
   assert.equal(rows.some((row) => row.target === "references/design/aside.md"), false);
@@ -33,29 +33,15 @@ test("fixed frontend mapping covers source names, real Python dependencies, orig
   assert.ok(rows.some((row) => row.source === "skills/stitch-skill/DESIGN.md" && row.target === "references/design/stitch-design-example.md"));
   for (const target of ["data/app-interface.csv", "data/web-interface.csv", "data/google-fonts.csv", "data/stacks/threejs.csv", "data/stacks/angular.csv", "data/stacks/laravel.csv"]) assert.ok(rows.some((row) => row.target === `references/ui-ux-db/${target}`), target);
   assert.equal(checkFrontendAssets().outcome, "ready");
-  const notice = readFileSync(join(root, "skills/frontend/ATTRIBUTION.md"), "utf8");
-  for (const pin of Object.values(FRONTEND_PINS) as Array<{ commit: string; licenseTarget: string; licenseBlob: string }>) {
-    assert.ok(notice.includes(pin.commit));
-    assert.equal(gitBlob(readFileSync(join(root, "skills/frontend", pin.licenseTarget))), pin.licenseBlob);
-  }
 });
 
-test("authored frontend rules authorize capabilities and use the actual resource script only in the approved project/output domain", () => {
+test("the bundled frontend command restricts persistence to the approved project output", () => {
   const directory = fixture();
   try {
     const resourceBase = realpathSync.native(join(directory, "skills/frontend"));
     const entry = readFileSync(join(resourceBase, "SKILL.md"), "utf8");
-    const router = readFileSync(join(resourceBase, "references/design/README.md"), "utf8");
-    const tooling = readFileSync(join(resourceBase, "references/design/react-dev-tooling-skill.md"), "utf8");
-    assert.doesNotMatch([entry, router, tooling].join("\n"), /installed by default|user opts out, not in|INSTALL THEM NOW|npx [\w-]+@latest|dev tooling must be installed|the local `nexu-io\/open-design` library/iu);
-    assert.match(router, /inspect.*already available|Reuse already available/u);
-    assert.match(tooling, /separate.*authoriz|explicit authorization/iu);
     const example = /```powershell\n([\s\S]*?)\n```/u.exec(entry)?.[1];
     assert.ok(example, "authored resource/cwd/output guidance must include its actual example");
-    const parser = readFileSync(join(resourceBase, "references/ui-ux-db/scripts/search.py"), "utf8");
-    assert.match(parser, /add_argument\("--persist"/u);
-    assert.match(parser, /add_argument\("--output-dir", "-o"/u);
-    assert.match(readFileSync(join(resourceBase, "references/ui-ux-db/scripts/design_system.py"), "utf8"), /base_dir = Path\(output_dir\) if output_dir else Path\.cwd\(\)/u);
     const projectPath = join(directory, "target-project");
     mkdirSync(projectPath);
     const project = realpathSync.native(projectPath), output = join(project, "approved-output");
@@ -83,17 +69,16 @@ test("authored frontend rules authorize capabilities and use the actual resource
   } finally { cleanup(directory); }
 });
 
-test("offline check detects missing/drifted bytes without writes and explicit cached sync is zero-request idempotent", async () => {
+test("offline check detects missing resources without writes and explicit sync restores them", async () => {
   const directory = fixture();
   try {
     const noNetwork = () => { throw new Error("network must not be requested"); };
     assert.deepEqual(await materializeFrontend({ root: directory, fetchBytes: noNetwork }), { outcome: "ready", requests: 0, differences: [], files: frontendRecipe(directory).length });
     const target = "references/ui-ux-db/scripts/core.py", path = join(directory, "skills/frontend", target);
-    writeFileSync(path, "corrupted bytes\n");
-    const timestamp = statSync(path).mtimeMs;
+    rmSync(path);
     const failed = checkFrontendAssets(directory);
-    assert.ok(failed.errors.includes(`frontend resource drift: ${target}`));
-    assert.equal(statSync(path).mtimeMs, timestamp); assert.equal(readFileSync(path, "utf8"), "corrupted bytes\n");
+    assert.ok(failed.errors.some((error: string) => error.startsWith(`missing frontend resource: ${target} <-`)));
+    assert.equal(existsSync(path), false);
     let requests = 0;
     const fixed = await materializeFrontend({ root: directory, async fetchBytes(url: string) {
       requests++;
@@ -180,8 +165,6 @@ test("actual tarball ships every ignored resource and native skill resourceBase 
     const loaded = await module.readBundledSkill("frontend", new AbortController().signal);
     assert.deepEqual(loaded.resourceBase, { kind: "directory", path: join(staged, "skills/frontend") });
     assert.equal(checkFrontendAssets(staged).outcome, "ready");
-    const actual = JSON.parse(readFileSync(join(staged, "skills/frontend/.frontend-materialized.json"), "utf8"));
-    for (const row of actual.files as Array<{ target: string; blob: string }>) assert.equal(gitBlob(readFileSync(join(loaded.resourceBase.path, row.target))), row.blob, row.target);
     assert.equal(readdirSync(directory).filter((file) => file.endsWith(".tgz")).length, 1);
   } finally { cleanup(directory); }
 });

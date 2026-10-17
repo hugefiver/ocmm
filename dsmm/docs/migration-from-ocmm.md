@@ -1,70 +1,57 @@
-# Migrating from ocmm to DSMM 0.1.1
+# Migrating from ocmm to DSMM
 
-## Current source-content checkpoint (2026-10-07)
+DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer. Don't copy `.opencode/ocmm.jsonc` into DSH. This guide describes current source behavior targeting DSH `0.2.0-rc.2`, including changes not delivered by the published `@dsmm/dsmm@0.2.2` artifact. Check the actual candidate before configuring it.
 
-The historical 0.1.1 mapping below is preserved, not current full-parity evidence. Working Stage B content now has the complete 11 base roles + 11 categories (22 canonical IDs) and fourteen configurable lazy skills. Cross-cutting is opt-in/default false, creative retains its existing identity, and root eligibility remains Orchestrator/Builder/Planner only. No source OCMM provider preferences, .opencode config, credentials or private profiles are copied. The native model picker and actual catalog remain authoritative.
-
-Use [role catalog](agent-presets.md) and [deterministic source sync](skill-sync.md) for current content and source → artifact → consumer mapping. Full default workflow, all nine source model/compatibility variants, source category calibrations, actual TS catalog responsibilities and terminal delegation policy are preserved with DSH-specific tools/authority. Source-generated files do not prove callable native roles, plan-only writes, continuation, background or execution guards. C/D own those remaining runtime/settings mechanisms.
-
-All fourteen skills load through native metadata/get/resourceBase, not seven-core fulltext injection plus an unconfigurable debugging exception. Explicit off preserves persona/access but withdraws common and DSMM skills. The full frontend taste/brand/ui-ux-db library uses an explicit, fixed-pin materialization recipe; package/runtime checks refuse missing or changed resources offline. A new source checkout must follow the documented explicit sync step, while a complete distributed package includes the full ignored library and real license notices. This is source/resource parity, not completed C/D runtime or publication/host-install proof. Installation/login/Git/destructive migration operations below require separate exact authorization; they are guidance, not automatic actions.
-
-DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer; .opencode/ocmm.jsonc cannot be copied into DSH. This guide describes the 0.1.1 routing surface targeting DSH 0.2.0-rc.2, not a full host-feature parity claim.
-
-## Hard boundary
-
-Model selection, authentication, permissions, session ownership, and package loading remain DSH-native. Existing ocmm/OpenCode configuration and sessions can coexist, but do not become DSMM configuration or fallback sessions.
+Model selection, authentication, permissions, session ownership and package loading remain DSH-native. Existing OpenCode configuration and sessions may coexist, but they don't become DSMM configuration or fallback sessions. Migration doesn't copy credentials, account records or private provider preferences.
 
 ## Feature mapping
 
-| ocmm area | DSMM migration | State |
-| --- | --- | --- |
-| Deepwork gates | Risk-scaled discovery; authorized bounded implementation proceeds; complex behavior uses planner → critic → implementation; completion requires relevant evidence. | equivalent core intent |
-| Seven workflow skills | Current workflow intent adapted to native DSH tools, scopes, authorization, and review ownership. | equivalent core intent |
-| Twelve role presets | Native definitions plus role-specific delegation composition, including builder, creative, reviewer, oracle, and oracle-2nd. | redesigned for DSH |
-| Per-role model/effort and DeepSeek calibration | Explicit `roleRouting`, fixed native child options, direct-role request policy, exact configured efforts, and compatible legacy calibration. | redesigned for DSH |
-| Safety guards | Native pre/post tool policies; host approval/cancellation remain authoritative. | redesigned for DSH |
-| LSP/MCP | Implementation, interfaces and original config retained, but DSMM automatic MCP mounting stays off even with `lsp.enabled:true`; LSP settings UI is hidden. DSH's own LSP and independently configured MCP are unaffected. | not enabled in this version |
-| Runtime fallback | Host-first, opt-in role/global ordered chains with exact efforts, cancellation, duplicate, and step fences. | redesigned for DSH |
-| Idle continuation | Separately enabled, bounded steering from durable unfinished work. | redesigned for DSH |
-| Subagent interruption recovery | Native durable child/session control and explicit continuation; no guessed task IDs, synthesized parent messages, or independent automatic retry dispatcher. | redesigned for DSH |
-| Settings/status | Restart-scoped Loader plugin config and normalized read-only status; old settings namespaces need explicit migration. | redesigned for DSH |
-| Prompt/cache hooks | No OpenCode history mutation or cache-hook compatibility layer. | unavailable |
-| OpenCode commands/hooks | Native equivalents only; OpenCode registrations cannot be copied. | unavailable |
-| Model categories and Oracle tiers | User-controlled native agent/model composition; normal roles have no suffix and tier routes require explicit configuration. | optional/manual |
-| Codex marketplace | DSH plugin/profile loading, not Codex marketplace installation. | unavailable |
-| Release surfaces | Local packed-readiness checks; no root ocmm release authority. | redesigned for DSH |
+| ocmm area | DSMM contract |
+| --- | --- |
+| Deepwork workflow | Risk-based discovery and planning adapted to native tools. Complex product behavior retains orchestrator-owned planning/criticism; bounded routine work doesn't require a ceremonial approval loop. |
+| Roles and categories | 11 base roles and 11 categories with canonical `dsmm-*` IDs. Cross-cutting defaults off. Only enabled Orchestrator, Builder and opted-in Planner are standing-root eligible. |
+| Skills | Fourteen configurable lazy native skills, discovered through metadata and loaded through `get`/`resourceBase`, not full bodies injected every turn. |
+| Model routing | Generic native capabilities, `modelParameters`, role primary/fallback routes and explicit invocation levels. Ordinary root model/effort stays native-owned. |
+| Settings | Sparse Global/native deployment layers plus independent named Profiles. Save, future default, current-session Apply and native model selection remain separate actions. |
+| Safety | Native tool policies and scoped helpers; mandatory role/read-only/delegation fences remain independent of optional workflow mode. DSH owns approval and cancellation. |
+| Child lifecycle | Native one-shot/jobs/continuable interfaces with immutable captures and current direct-parent delivery authority. No guessed task IDs or second retry dispatcher. |
+| Recovery | Startup locks and explicitly configured bounded rate-limit fallback, requiring positive no-output evidence. Idle continuation is separately opt-in. |
+| LSP/MCP | DSMM automatic integration remains off, even with `lsp.enabled:true`; original interfaces/config remain. Native DSH LSP and independently configured MCP are unaffected. |
+| OpenCode hooks and Codex marketplace | No hook ABI, history/cache mutation or marketplace compatibility. Use native DSH installation and actual exposed capabilities. |
+| Release | Dedicated DSMM workflow and checker, not the root ocmm completion authority. |
 
-The seven core skills are `brainstorming`, `writing-plans`, `subagent-driven-development`, `requesting-code-review`, `receiving-code-review`, `dispatching-parallel-agents`, and `remove-ai-slops`. Debugging is available on demand, without injecting its full references into every prompt.
+See [Agent presets](agent-presets.md) for the canonical inventory and permission matrix. An exported template isn't a callable role. Reviewer is primary-lane self-review; Oracle is an external-model check only when the observed route actually differs. A role name alone doesn't prove model heterogeneity.
 
-The role set includes `dsmm-orchestrator`, `dsmm-planner`, `dsmm-plan-critic`, `dsmm-reviewer`, `dsmm-code-search`, `dsmm-doc-search`, `dsmm-clarifier`, `dsmm-media-reader`, `dsmm-builder`, `dsmm-oracle`, `dsmm-oracle-2nd`, and `dsmm-creative`. File existence is not callable evidence. Check the active native preset and tool inventories. Reviewer is primary-lane self-review; Oracle is an external-model cross-check only when the actual user-selected route differs. Running all roles with Flash does not prove model heterogeneity.
+[Source synchronization](skill-sync.md) defines prompt/resource provenance and fixed-pin distribution. The full frontend library and licenses must be present in the packed artifact; build/check refuses missing or changed resources offline. Resource parity doesn't establish native execution or installed-carrier acceptance.
 
-## Migration sequence
+## Configuration sequence
 
-1. Use an isolated `DSH_HOME` and a dedicated profile built from the pinned DSH 0.2.0-rc.2 headless template.
-2. Install a locally packed reviewed DSMM artifact; registry publication remains separately authorized.
-3. Configure the actual native provider/model and credentials; V41 Flash is `deepseek-flash`, not a guessed `deepseek-v4.1-flash` alias.
-4. Move DSMM settings into the `id: dsmm` profile patch's `config` object and restart; do not copy old settings.yaml into the new home.
-5. Use `workflow.policy: risk-based` for the current workflow. Explicit legacy controls remain supported; inspect normalized status instead of assuming omitted and explicit defaults are equivalent.
-6. Inspect native roles and role-specific tools; do not configure removed `roots/includeUserRoot` or count exported template directories as discovery.
-7. Don't use `lsp.enabled:true` or the retained historical manual patch as a DSMM activation entry in this version. Existing release checks still independently validate the retained LSP interface; see [LSP boundary](lsp.md). Recovery stays disabled unless explicitly configured.
-8. Validate the packed profile and the real specified model's read/write/tool-result round-trip before changing your default workflow.
+These steps are operator guidance, not authorization to install or change user profiles:
 
-Model IDs belong to their native provider routes: `deepseek-account/deepseek-flash` and a custom `hoo/deepseek-v4.1-flash` are distinct routes. Configure custom routes through DSH's pi-ai adapter, using credential references rather than literal keys. Provider SDK identity alone is not wire-protocol proof. For the inspected Anthropic gateway, terminal `/v1` must be removed from its source SDK baseURL to retain the same native request path; adaptive thinking compatibility and exact high/max declarations preserve effort. This rule is not a global URL rewrite for other protocols.
+1. Evaluate a reviewed packed candidate in an isolated `DSH_HOME` and dedicated native profile. The [README](../README.md#use-a-local-artifact) gives the minimal CLI example. Keep the original OpenCode configuration until the intended DSH carrier has passed its own checks.
+2. Configure actual providers, model IDs, exact efforts and credential references through native DSH. Discover the real catalog and adapter capabilities; don't infer aliases, vision support or protocol behavior from another provider's SDK name.
+3. Translate intended behavior into DSMM's sparse Global or exact native entry `config`, preserving unrelated settings and Loader rows. Use **Plugins → DSMM bundle config** for module drawers; named **Deepwork Profiles** remains separate. Don't copy the removed `settings.yaml` namespace or merged defaults into a sparse layer.
+4. Use `workflow.policy: risk-based` unless deliberately retaining supported legacy controls. Inspect normalized status because omitted values and explicit same-default pins have different inheritance effects.
+5. Configure canonical `roleRouting` IDs and explicit low/high/max levels where needed. Source tier guidance doesn't create suffix roles. Preserve disabled roles; a source `explore` alias maps to `dsmm-code-search`, not another role/tool.
+6. Check cold runtime composition and persistence independently. Main native-only `runtime.enabled` defaults true; false selects official stock on restart. Its Save records desired state without replacing the current owner. Durable DW child delegation still needs compatible Main `sessionPersistence`; stock JSONL zero-configuration support is [deferred](roadmap.md#stock-jsonl-delegation-alpha4-migration-candidate).
+7. Verify actual native delegation, useful read/write/tool-result behavior, read-only denial and the child's own request route. Config/catalog inspection isn't execution evidence. Don't enable DSMM LSP through the retained historical manual patch; see [LSP boundary](lsp.md).
 
-Translate source agents into canonical `roleRouting` entries with primary and ordered fallback efforts. Keep explicit disabled roles disabled. A source `explore` alias to code-search maps to `dsmm-code-search`, not a new role/tool. Missing source model capabilities require discovery and actual validation; do not copy another version's vision capabilities or silently replace the media model. The checkout migration helper defaults to a sanitized dry run; applying credentials/profile changes is explicit and requires concurrency/backup safeguards.
+Headless task execution uses an effective `defaultActive:true` and a native provider; it doesn't select Agent presets. Command-capable Hosts execute `/deepwork` and `/dsmm-status` through the command adapter, not as model task text. `--dump-config` shows Loader composition, not complete Global-aware DSMM admission.
 
-The inspected pi-ai adapter exposes stable transient codes but no stable HTTP status. The migration candidate explicitly opts in to `RATE_LIMIT`, `SERVER`, `TIMEOUT`, and `TRANSPORT` through `runtimeRecovery.retryOnCodes`, after native host retries decline. Authentication, quota, and invalid-request failures are not included. Package recovery defaults remain unchanged.
+## Retired fields and retained history
 
-## Coexistence and cutover
+Brand-calibration/default-effort and MaxReasoningPresets fields reject with `deprecated-field`; [model routing](model-routing.md#generic-model-parameters) lists their exact names. Edit the invalid configuration deliberately using generic routes, parameters and levels. There is no automatic migration or silent field rewrite.
 
-Keep the existing OpenCode configuration until the DSH profile has independently passed its required evidence. Headless configuration uses profile files and `--dump-config`; command-capable hosts execute `/deepwork` and `/dsmm-status` through the command adapter, not by sending those strings as model tasks.
+Exact legacy profile libraries remain read-only with original immutable pins. V1 pointers and digest-shaped revision names remain references, not recomputed configuration checksums or permission to adopt the latest draft. Source versions and snapshot IDs distinguish observed/saved state; native CAS, admission epochs, child envelopes and release/resource integrity keep their separate contracts.
 
-DSH owns subagent depth and permission ceilings. DSMM does not raise the native default depth or use workflow instructions to bypass plan mode, user approval, read-only roles, or provider authentication.
+Older auxiliary-root sessions can fail native cold resume when the root preset is no longer registered. Preserve history and obtain direction rather than substituting a persona. Child v1/v2/v3 readers retain original versioned evidence and integrity checks without rewriting old captures or reconstructing permissions from the current parent.
 
-## Successor 0.1.5 migration note
+Current-session Apply is exact-root, idle and CAS/epoch-fenced. It leaves the native model and existing children unchanged; later children inherit the new admission. **Use profile model** separately requests the admitted immutable profile's model, not a later draft, and newer observed native model/effort intent wins. See [Profiles](profiles.md).
 
-The mapping above is the historical 0.1.1 contract. For 0.1.5, use [runtime profiles](profiles.md), [model routing](model-routing.md) and [runtime recovery](runtime-recovery.md) as the current source contract, not as evidence of completed publication or Desktop activation. Global apply changes future unscoped Agents; an explicit idle current-session apply commits only that root's sidecar and admission epoch. Existing children keep their snapshots, later owned children inherit the new epoch, and cold resume uses an explicit immutable sidecar or, when absent, the current global default.
+## Carrier and permission limits
 
-An omitted strategy now means `startup-lock`: primary or first native-resolvable candidate is admitted once and retained across turns. Opt into `rate-limit-fallback` per role/profile to enable threshold-ordered rate-limit switching within finite retry/delay/switch bounds. Legacy `runtimeRecovery.enabled` does not select or disable these strategies. Every automatic retry requires positively correlated no-output evidence; partial text, reasoning or tool fragments forbid retry. Older generic fallback behavior is not silently carried forward. Preserve deployment/provider/account/authentication and native history; migration does not rewrite old logs or immutable release identities.
+Real Desktop and CLI/TUI installations require separate exact authorization. Use the installation-owned carrier, preserve provider/account state and unrelated rows, and follow cold-start requirements. A fully quit Desktop, standalone CLI package check or source compatibility check doesn't by itself prove Electron activation. Don't copy credentials or browser storage into tests.
 
-The native user's explicit provider/model/exact effort remains authoritative over a profile's default, including effort-only changes, later turns and cold resume. Applying a profile does not silently erase that choice; configured children retain their own role-route authority. A native selection made after assembly starts applies to a later assembly, while a fresh same-value choice invalidates stale retry reservations. Profile form controls do not call native `session/selectModel` or change the native global model default.
+DSH owns depth, sandbox and approval. DSMM doesn't raise those ceilings or infer approval from configuration. The accepted [P1 pending one-shot approval/parent epoch risk](deferred-native-approval-risk.md) remains unresolved. Repeated approval for read-only Git also remains unclassified until the exact call and approval reason are supplied.
+
+Any profile/log repair or rollback needs its own data-preserving scope, concurrency checks and recoverable backup. Migration never authorizes rewriting immutable releases, deleting history or restoring credentials. [Release controls](releasing.md) separate npm publication completion from GitHub Release delivery and installed-carrier acceptance.

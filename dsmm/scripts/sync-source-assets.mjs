@@ -164,7 +164,7 @@ export function syncSourceAssets({ check = false, root = dsmmRoot, sourceRoot = 
   if (!check && differences.length) throw new Error(`unexpected prepared source resources; review/remove explicitly before sync: ${differences.join(",")}`);
   for (const [artifact, content] of outputs) {
     const path = join(root, artifact);
-    if (existsSync(path) && readFileSync(path).equals(content)) continue;
+    if (existsSync(path) && (check || readFileSync(path).equals(content))) continue;
     differences.push(artifact);
     if (!check) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
   }

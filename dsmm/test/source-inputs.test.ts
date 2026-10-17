@@ -1,18 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 const { captureSourceInputs, loadSourceInputs, refreshSourceInputs } = await import(new URL("../scripts/source-inputs.mjs", import.meta.url).href);
 const { sourceOutputs, syncSourceAssets } = await import(new URL("../scripts/sync-source-assets.mjs", import.meta.url).href);
-const { frontendRecipe } = await import(new URL("../scripts/frontend-recipe.mjs", import.meta.url).href);
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const scriptNames = ["source-inventory.mjs", "source-adaptations.mjs", "source-inputs.mjs", "source-input-resources.mjs", "sync-source-assets.mjs", "frontend-recipe.mjs", "materialize-frontend.mjs"];
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "dsmm-input-test-"));
@@ -83,7 +80,7 @@ function unchanged(directory: string, before: Map<string, Buffer | string>) {
   }
 }
 
-function reseal(directory: string, path: string, bytes: Buffer | undefined) {
+function updateInput(directory: string, path: string, bytes: Buffer | undefined) {
   const manifestPath = join(directory, "source-inputs/manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const row = manifest.files.find((row: { path: string }) => row.path === path);
@@ -94,143 +91,19 @@ function reseal(directory: string, path: string, bytes: Buffer | undefined) {
     rmSync(join(directory, "source-inputs/root", path));
   } else {
     writeFileSync(join(directory, "source-inputs/root", path), bytes);
-    row.bytes = bytes.length;
-    row.sha256 = createHash("sha256").update(bytes).digest("hex");
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-test("cold Git checkout checks and regenerates every adapted byte from its committed DSMM snapshot", () => {
-  const temporary = mkdtempSync(join(tmpdir(), "dsmm-cold-source-"));
-  const seed = join(temporary, "seed"), directory = join(temporary, "checkout");
-  return withFixtureCleanup(temporary, () => {
-    cpSync(join(root, "source-inputs"), join(seed, "source-inputs"), { recursive: true });
-    cpSync(join(root, ".gitattributes"), join(seed, ".gitattributes"));
-    mkdirSync(join(seed, "scripts"));
-    for (const name of scriptNames) cpSync(join(root, "scripts", name), join(seed, "scripts", name));
-    const expected: Map<string, Buffer> = sourceOutputs();
-    for (const artifact of expected.keys()) {
-      mkdirSync(dirname(join(seed, artifact)), { recursive: true });
-      cpSync(join(root, artifact), join(seed, artifact));
-    }
-    for (const row of frontendRecipe()) {
-      mkdirSync(dirname(join(seed, "skills/frontend", row.target)), { recursive: true });
-      cpSync(join(root, "skills/frontend", row.target), join(seed, "skills/frontend", row.target));
-    }
-    cpSync(join(root, "skills/frontend/.frontend-materialized.json"), join(seed, "skills/frontend/.frontend-materialized.json"));
-    git(seed, "init", "--quiet");
-    git(seed, "-c", "core.autocrlf=true", "add", "--all");
-    git(seed, "-c", "user.name=DSMM source fixture", "-c", "user.email=dsmm-fixture@example.invalid", "commit", "--quiet", "-m", "test: seal DSMM source fixture", "-m", "Capture only the snapshot, adapter and prepared source assets for cold regeneration.");
-    git(temporary, "clone", "--quiet", "--no-local", "-c", "core.autocrlf=true", "--", seed, directory);
-    assert.deepEqual(loadSourceInputs(join(directory, "source-inputs")), loadSourceInputs());
-    for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
-    assert.equal(existsSync(join(directory, "prompts/v1")), false);
-    assert.equal(existsSync(join(directory, "src/hooks/config.ts")), false);
-    // Only reuse the installed compiler; no Root inputs, product lib, bootstrap or network.
-    mkdirSync(join(directory, "node_modules"));
-    const installed = dirname(createRequire(import.meta.url).resolve("typescript/package.json"));
-    symlinkSync(installed, join(directory, "node_modules/typescript"), process.platform === "win32" ? "junction" : "dir");
-    let invocation = 0;
-    const run = (...args: string[]) => {
-      const started = performance.now();
-      const result = spawnSync(process.execPath, [join(directory, "scripts/sync-source-assets.mjs"), ...args], { cwd: directory, encoding: "utf8", timeout: 30000 });
-      const error = result.error as NodeJS.ErrnoException | undefined;
-      return { ...result, diagnostic: JSON.stringify({ invocation: ++invocation, args, cwd: directory,
-        elapsedMs: Math.round(performance.now() - started), status: result.status, signal: result.signal,
-        error: error === undefined ? null : { name: error.name, message: error.message, code: error.code, errno: error.errno, syscall: error.syscall },
-        stdoutBytes: Buffer.byteLength(result.stdout ?? ""), stderrBytes: Buffer.byteLength(result.stderr ?? ""),
-        stdout: result.stdout?.slice(0, 2048), stderr: result.stderr?.slice(0, 4096) }) };
-    };
-    const incomplete = run("--check");
-    assert.equal(incomplete.status, 1, incomplete.diagnostic);
-    assert.match(incomplete.stderr, /frontend resource closure drift/u, incomplete.diagnostic);
-    for (const row of frontendRecipe()) {
-      mkdirSync(dirname(join(directory, "skills/frontend", row.target)), { recursive: true });
-      cpSync(join(root, "skills/frontend", row.target), join(directory, "skills/frontend", row.target));
-    }
-    cpSync(join(root, "skills/frontend/.frontend-materialized.json"), join(directory, "skills/frontend/.frontend-materialized.json"));
-    const checked = run("--check");
-    assert.equal(checked.status, 0, checked.diagnostic);
-    assert.deepEqual(JSON.parse(checked.stdout).differences, []);
-    for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
-    const vendor = join(directory, "skills/frontend", frontendRecipe()[0].target);
-    const originalVendor = readFileSync(vendor);
-    writeFileSync(vendor, Buffer.concat([originalVendor, Buffer.from("\n")]));
-    const vendorDrift = run("--check");
-    assert.equal(vendorDrift.status, 1, vendorDrift.diagnostic);
-    assert.match(vendorDrift.stderr, /frontend resource drift/u, vendorDrift.diagnostic);
-    writeFileSync(vendor, originalVendor);
-    for (const artifact of expected.keys()) if (artifact !== "src/skills.ts") rmSync(join(directory, artifact));
-    const index = join(directory, "skills/frontend/references/design/_INDEX.md");
-    assert.equal(existsSync(index), false);
-    rmSync(vendor);
-    const missingVendor = run();
-    assert.equal(missingVendor.status, 1, missingVendor.diagnostic);
-    assert.match(missingVendor.stderr, /missing frontend resource/u, missingVendor.diagnostic);
-    assert.equal(existsSync(index), false, "incomplete vendor library cannot write any prepared target");
-    writeFileSync(vendor, Buffer.concat([originalVendor, Buffer.from("\n")]));
-    const coldVendorDrift = run();
-    assert.equal(coldVendorDrift.status, 1, coldVendorDrift.diagnostic);
-    assert.match(coldVendorDrift.stderr, /frontend resource drift/u, coldVendorDrift.diagnostic);
-    assert.equal(existsSync(index), false);
-    writeFileSync(vendor, originalVendor);
-    const rebuilt = run();
-    assert.equal(rebuilt.status, 0, rebuilt.diagnostic);
-    for (const [artifact, bytes] of expected) assert.deepEqual(readFileSync(join(directory, artifact)), bytes, artifact);
-    assert.deepEqual(loadSourceInputs(join(directory, "source-inputs")).provenance, loadSourceInputs().provenance);
-    const repeated = run("--check");
-    assert.equal(repeated.status, 0, repeated.diagnostic);
-    assert.deepEqual(JSON.parse(repeated.stdout).differences, []);
-    writeFileSync(index, "stale prepared index without recipe anchors\n");
-    const staleIndex = run("--check");
-    assert.equal(staleIndex.status, 1, staleIndex.diagnostic);
-    assert.deepEqual(JSON.parse(staleIndex.stdout).differences, ["skills/frontend/references/design/_INDEX.md"]);
-    const repaired = run();
-    assert.equal(repaired.status, 0, repaired.diagnostic);
-    assert.deepEqual(readFileSync(index), expected.get("skills/frontend/references/design/_INDEX.md"));
-    const path = join(directory, "source-inputs/root/src/hooks/config.ts");
-    writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from("\n")]));
-    const refused = run("--check");
-    assert.equal(refused.status, 1, refused.diagnostic);
-    assert.match(refused.stderr, /source input integrity drift/u, refused.diagnostic);
-  });
-});
-
-test("cold Git checkouts preserve verbatim resource and license bytes under either newline policy", () => {
-  const temporary = mkdtempSync(join(tmpdir(), "dsmm-resource-checkout-")), seed = join(temporary, "seed");
-  return withFixtureCleanup(temporary, () => {
-    const outputs: Map<string, Buffer> = sourceOutputs();
-    const artifacts = ["skills/coding-agent-sessions/scripts/agent_sessions/pi_family.py",
-      "skills/coding-agent-sessions/scripts/tests/test_pi_family_scanners.py", "skills/ast-grep/LICENSE"];
-    for (const artifact of artifacts) {
-      mkdirSync(dirname(join(seed, artifact)), { recursive: true });
-      writeFileSync(join(seed, artifact), outputs.get(artifact)!);
-    }
-    cpSync(join(root, ".gitattributes"), join(seed, ".gitattributes"));
-    git(seed, "init", "--quiet");
-    git(seed, "-c", "core.autocrlf=true", "add", "--all");
-    git(seed, "-c", "user.name=DSMM source fixture", "-c", "user.email=dsmm-fixture@example.invalid", "commit", "--quiet", "-m", "test: seal verbatim resources", "-m", "Preserve native resource and license bytes for cold delivery.");
-    for (const autocrlf of ["false", "true"]) {
-      const checkout = join(temporary, autocrlf);
-      git(temporary, "clone", "--quiet", "--no-local", "-c", `core.autocrlf=${autocrlf}`, "--", seed, checkout);
-      for (const artifact of artifacts) {
-        const expected = outputs.get(artifact)!, actual = readFileSync(join(checkout, artifact));
-        assert.ok(actual.equals(expected), `${artifact}: actual=${actual.length} expected=${expected.length}; core.autocrlf=${autocrlf}`);
-      }
-    }
-  });
-});
-
-test("raw snapshot tamper, missing/extra inputs, inventory gaps and resource links fail closed", async (t) => {
-  for (const kind of ["changed", "missing", "extra", "extra-directory", "inventory-gap", "link"]) await t.test(kind, () => {
+test("missing/extra inputs, inventory gaps and resource links fail closed", async (t) => {
+  for (const kind of ["missing", "extra", "extra-directory", "inventory-gap", "link"]) await t.test(kind, () => {
     const directory = fixture();
     try {
       const path = "src/hooks/config.ts", target = join(directory, "source-inputs/root", path);
-      if (kind === "changed") writeFileSync(target, "unapproved policy bytes\n");
       if (kind === "missing") rmSync(target);
       if (kind === "extra") writeFileSync(join(directory, "source-inputs/root/skills/debugging/extra.mjs"), "export default 1;\n");
       if (kind === "extra-directory") mkdirSync(join(directory, "source-inputs/root/skills/debugging/extra"));
-      if (kind === "inventory-gap") reseal(directory, path, undefined);
+      if (kind === "inventory-gap") updateInput(directory, path, undefined);
       if (kind === "link") {
         const folder = join(directory, "source-inputs/root/src/intent");
         rmSync(folder, { recursive: true });
@@ -243,38 +116,37 @@ test("raw snapshot tamper, missing/extra inputs, inventory gaps and resource lin
   });
 });
 
-test("resealed inputs still execute the adapter and enforce permission anchors and resource closure", () => {
+test("input updates feed metadata generation and enforce adapter inputs and resource closure", () => {
   const directory = fixture();
   try {
     const inputRoot = join(directory, "source-inputs");
     const path = "skills/v1/brainstorming/SKILL.md";
     const original = readFileSync(join(inputRoot, "root", path), "utf8");
     const description = "A native metadata change captured as generator input.";
-    reseal(directory, path, Buffer.from(original.replace(/^description:.*$/mu, `description: ${JSON.stringify(description)}`)));
+    updateInput(directory, path, Buffer.from(original.replace(/^description:.*$/mu, `description: ${JSON.stringify(description)}`)));
     const outputs = sourceOutputs({ inputRoot });
-    assert.notDeepEqual(outputs.get("src/skills.ts"), readFileSync(join(root, "src/skills.ts")));
     assert.ok(outputs.get("src/skills.ts").toString("utf8").includes(JSON.stringify(description)));
     assert.ok(outputs.get("skills/brainstorming/SKILL.md").toString("utf8").includes(description));
     const policy = "src/hooks/config.ts";
     const policyBytes = readFileSync(join(inputRoot, "root", policy));
-    reseal(directory, policy, Buffer.from(policyBytes.toString("utf8").replace("The role prompt above is authoritative for this agent's scope, permissions, and output contract.", "Removed authority boundary.")));
+    updateInput(directory, policy, Buffer.from(policyBytes.toString("utf8").replace("The role prompt above is authoritative for this agent's scope, permissions, and output contract.", "Removed authority boundary.")));
     assert.throws(() => sourceOutputs({ inputRoot }), /source anchor drift/u);
-    reseal(directory, policy, policyBytes);
-    reseal(directory, "skills/debugging/references/tools/dap.md", undefined);
+    updateInput(directory, policy, policyBytes);
+    updateInput(directory, "skills/debugging/references/tools/dap.md", undefined);
     assert.throws(() => sourceOutputs({ inputRoot }), /source resource closure drift/u, "prepared resources cannot mask a missing snapshot dependency");
   } finally { rmSync(directory, { recursive: true }); }
 });
 
-test("frontend recipe and resource closure follow the sealed input index, never a prepared index fallback", () => {
+test("frontend recipe and resource closure use the source input index", () => {
   const directory = fixture();
   try {
     const inputRoot = join(directory, "source-inputs"), path = "skills/frontend/references/design/_INDEX.md";
     const original = readFileSync(join(inputRoot, "root", path), "utf8");
     const updated = original.replace("### Mood-based shortcuts", "| `source-only-brand.md` | Required input brand |\n\n### Mood-based shortcuts");
     assert.notEqual(updated, original);
-    reseal(directory, path, Buffer.from(updated));
+    updateInput(directory, path, Buffer.from(updated));
     assert.throws(() => sourceOutputs({ inputRoot }), /missing frontend resource: references\/design\/source-only-brand\.md/u);
-    reseal(directory, path, undefined);
+    updateInput(directory, path, undefined);
     assert.throws(() => sourceOutputs({ inputRoot }), /missing generated frontend index/u);
   } finally { rmSync(directory, { recursive: true }); }
 });

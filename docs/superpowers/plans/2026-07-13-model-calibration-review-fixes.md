@@ -9,7 +9,7 @@
 **Tech Stack:** TypeScript 6, Node test runner, Zod configuration, pnpm, Rust/Cargo build verification.
 
 **Global Constraints:**
-- Work only in `C:/Users/hugefiver/source/ocmm-wt-fix-051-review` on `codex/fix-0.5.1-review`.
+- Work only in the explicitly authorized repository or worktree; don't create or switch worktrees implicitly.
 - Do not commit, push, tag, or modify the main worktree without explicit user authorization.
 - Preserve explicit model choice and alias inheritance.
 - GPT reviewer/oracle reasoning is never below `xhigh`; local `max` remains available for complex/high-risk work.

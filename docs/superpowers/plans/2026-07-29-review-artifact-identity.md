@@ -27,7 +27,7 @@
 
 ## Baseline, file map, and dependency order
 
-Run all repository commands from `C:\Users\hugefiver\source\ocmm`.
+Run repository commands from the repository root.
 
 ### Authoritative source, test, and documentation files
 
@@ -1037,7 +1037,7 @@ Run this complete PowerShell transaction. It uses only the approved temp parent 
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "approved temp parent missing" }
 $evidenceRoot = Join-Path $tempParent ("project5-generation-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
@@ -1118,7 +1118,7 @@ Expected: both Project 5 and Project 4 named tests pass; tracked fresh output eq
 **Files:**
 - Verify only: every Task 1 and Task 2 source/test/doc/generated path
 - Verify only: `package.json`, `schema.json`, `src/config/schema.ts`, `.github/workflows/release.yml`, `crates/ocmm-lsp/Cargo.toml`
-- Create temporarily and clean: unique directories under `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode`
+- Create temporarily and clean: unique task-owned directories under the approved OS temporary parent.
 
 **Interfaces:**
 - Consumes: Task 1's marker-delimited canonical algorithm and Task 2's fresh generated trees; exact final target tests and existing CLIs.
@@ -1246,7 +1246,7 @@ Run this block outside `Invoke-IdentityBoundGate` so the exact root failure can 
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "approved temp parent missing" }
 $buildEvidenceRoot = Join-Path $tempParent ("project5-build-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $buildEvidenceRoot | Out-Null
@@ -1323,7 +1323,7 @@ Run this complete PowerShell block. It saves, clears, and restores inherited con
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $testRoot = Join-Path $tempParent ("project5-opencode-" + [guid]::NewGuid().ToString("N"))
 $envNames = @(
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
@@ -1401,7 +1401,7 @@ Run this complete block from the repository root:
 
 ```powershell
 $repoRoot = (Get-Location).Path
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 $testRoot = Join-Path $tempParent ("project5-codex-" + [guid]::NewGuid().ToString("N"))
 $envNames = @(
   "CODEX_HOME", "CODEX_DISABLE_AUTO_UPDATE",
@@ -1557,7 +1557,7 @@ Still in the same session, run:
 $finalIdentity = Get-CurrentArtifactIdentity
 if ($finalIdentity -ne $qaIdentity) { throw "final artifact identity drifted from QA identity" }
 
-$evidenceParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$evidenceParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $evidenceParent -PathType Container)) { throw "approved evidence parent is missing" }
 $reviewEvidenceRoot = Join-Path $evidenceParent ("project5-review-packet-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $reviewEvidenceRoot | Out-Null

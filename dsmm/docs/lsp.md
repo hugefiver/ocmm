@@ -37,4 +37,4 @@ DSMM's read-only role restrictions don't grant rename or format permission. The 
 
 DSMM's automatic external LSP integration isn't a delivered feature in this version. The existing release validator still requires a completed `receipt.lsp` with `directNativeDiagnosticsAndFormat` and `nativeDshMcpClient`; Docker smoke independently exercises the retained interface. These release checks remain required and don't establish a supported DSMM activation path or certify an independently configured server.
 
-The workspace executable entry has an unresolved `EPERM` failure creating a child log in the inspected Windows environment. Repairing that path isn't a prerequisite for implementing this version's DSMM features, but it doesn't waive required release checks. Independently managed MCP users must check their actual server entry; this version doesn't certify or repair that environment.
+Independently managed MCP users must verify their actual executable and language-server availability. DSMM doesn't certify or repair the operator's execution environment, and unavailable tools don't waive required release checks.

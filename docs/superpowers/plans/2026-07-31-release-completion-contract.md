@@ -1299,7 +1299,7 @@ Expected: publish is discovered as a shared skill, excluded from v1 lists, conta
 Run:
 
 ```powershell
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"
+$tempParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "approved temp parent is missing" }
 $snapshot = Join-Path $tempParent ("ocmm-release-completion-generated-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $snapshot | Out-Null

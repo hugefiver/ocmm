@@ -1,278 +1,53 @@
-# dsmm dsh Migration Design
-
-Date: 2026-08-21
-
-## Current native configuration design (stage D, 2026-10-08)
-
-The historical MVP proposal below is retained as design history, not today's
-scope. The authority is the native parity plan §3.3/stage D and [DESIGN.md](../DESIGN.md).
-The product is the existing official Plugins page, not a new SPA or skin.
-
-- `plugins.item` owns DSMM's summary/page contribution; `plugins.bundle.config`
-  keys `@dsmm/dsmm`; `plugins.row.config` keys `@dsmm/dsmm#<actual-row-id>`.
-  Runtime entry ID, native form namespace, row ID and package ID are not
-  interchangeable. Identity is verified by server projection and the exact
-  native form descriptor/revision/base/user metadata before a profile write.
-- Global edits use only the fixed Core `dsmmConfig` service. Profile edits use
-  only the actual entry's public ConfigForms/ConfigPageForm transport. Separate
-  buttons/revisions preserve untouched sparse fields; no merged-default copy,
-  new store, root-path RPC, or cross-layer Save-all exists. Bundle views obtain
-  the verified actual namespace's public form; a standalone page without a
-  form honestly marks the profile region unavailable while Core remains usable.
-- All applicable feature families are exposed by structural controls and
-  bounded, closed-schema Advanced JSON. Unknown/duplicate/prototype keys and
-  invalid numbers remain visible and refuse save. Arrays replace, objects
-  inherit recursively; empty/default values remain explicit pins. Higher Host
-  pins are displayed, never promised removable by a lower-layer unset.
-- Desired, startup-mounted/captured, next-root preview and actual admitted
-  session are separate projections. Preview reuses the runtime's admission
-  preparation without creating a session. The host bundle state is unknown
-  when unobservable; module availability is not bundle enablement or mode.
-  Missing sessions stay unknown. Save never restarts, remounts, cancels or
-  reconciles running work; cold-off desired-on requires an independent restart.
-- Drafts retain their original CAS on refresh/conflict. Explicit discard alone
-  rebases. Entry/connection-generation changes and component disposal fence
-  stale writes; native readonly/nonloopback/operator refusal is not bypassed by
-  the global route. Named JSONC/model selection/session actions stay independent.
-- UI uses Host colors, font, controls, borders/radius and focus tokens; 14px/22px
-  reading rhythm, maximum 760px, native disclosures and wrapping actions. No new
-  brand, shadows or decorative motion. EN/ZH, sanitized alerts and polite live
-  feedback accompany real 375/768/1280 light/dark native Web evidence.
-
-The SDK stays rc.2. The official Desktop shared source contract is pinned at
-`5badb15009ae1756c3afe0ae0cef1faafc290ccc` (0.2.1-alpha.1); actual Electron is
-uninstalled/unverified here. Web screenshots are not Desktop acceptance.
-
-## Goal
-
-Build `dsmm` as a dsh-native subtree project that brings ocmm's deepwork workflow, role prompts, skills, model calibration, and safety conventions to DeepSeek Harness without globally enabling them for every session.
-
-The first deliverable is an MVP dsh bundle that installs into a profile, registers a `deepwork` mode through dsmm's own Host plugin, and makes the mode's behavior configurable. Later versions add full role/category coverage, guard hooks, model routing, and runtime recovery. DSMM-managed external LSP isn't enabled in this version: the implementation, interfaces and original configuration remain, automatic MCP mounting stays off even with `lsp.enabled:true`, and DSMM's settings UI hides LSP controls. This doesn't affect DSH's own LSP or independently configured MCP. The retained manual patch isn't a supported DSMM activation entry; no LSP delivery is scheduled here.
-
-## Non-goals
-
-- Do not load the existing ocmm OpenCode plugin inside dsh.
-- Do not emulate OpenCode's `config`, `chat.params`, `system.transform`, or `tool.execute.*` hook ABI.
-- Do not globally replace the user's dsh persona or every session's system prompt.
-- Do not make DeepSeek V4 Pro-specific prompt tuning mandatory for non-DeepSeek models.
-- Do not include UI skins, desktop shell features, or plugin-marketplace functionality in the MVP.
-
-## Source references
-
-The design is based on:
-
-- dsh's Cordis architecture: plugin rows, reversible effects, profile bundles, and services such as `ctx.systemPrompt`, `ctx.tools`, `ctx.agents`, `ctx.llm`, and `ctx.sessions`.
-- dsh's current plan-mode package: logged per-agent mode state, prompt-section activation, `/plan`, and `exit_plan_mode`. Current public docs expose `@deepseek-ai/dsh-plan-mode`, not a generic arbitrary named `dsh-mode` package.
-- `hust-open-atom-club/oh-dsh`: profile/bundle composition, Host/Client separation, surface contracts, settings seam, and archived mode notes.
-- ocmm's existing feature surface: deepwork prompts, v1 workflow skills, role/category metadata, model-family routing, MCP/LSP integration, runtime fallback, and safety guards.
-- DeepSeek API and DeepSeek V4 Pro public documentation: thinking mode, `reasoning_effort`, tool-call reasoning-content retention, and max-reasoning prompt implications.
-
-## Architectural choice
-
-`dsmm` should be a dsh-native bundle package, not a compatibility shim.
-
-The package should eventually declare:
-
-```json
-{
-  "name": "@dsmm/dsmm",
-  "type": "module",
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
-}
-```
-
-The bundle patch should layer dsmm above normal dsh base/web/headless profiles. It should insert dsmm plugin rows and mode configuration, while leaving users free to override rows in their profile-level `cordis.patch.yml`.
-
-## Subtree layout
-
-The planned project boundary is:
-
-```text
-dsmm/
-  README.md
-  package.json
-  cordis.patch.yml
-  src/
-    index.ts
-    config/
-    mode/
-    prompt/
-    skills/
-    agents/
-    routing/
-    guards/
-    mcp/
-  docs/
-    design.md
-    roadmap.md
-    research/
-  tests/
-```
-
-The initial commit intentionally contains only documentation. Package files and source code come after the MVP implementation plan is reviewed.
-
-## dsh integration model
-
-### Composition plane
-
-The composition plane is `cordis.patch.yml` and profile bundle ordering. It decides which plugins exist and how dsh services are wired.
-
-MVP composition rows should cover:
+# DSMM native architecture
 
-- a dsmm Host plugin row;
-- dsmm's own `deepwork` mode registration, modelled on dsh plan-mode semantics but not limited to planning;
-- optional prompt/skill provider rows if dsh expects separate providers;
-- default disabled rows for features that are not active in MVP.
-
-This follows oh-dsh's pattern: shipped bundles own default composition, while profile patch layers own user overrides.
-
-### Settings plane
-
-The settings plane is for user-editable behavior. dsmm should expose one namespace, tentatively `dsmm`, with settings such as:
-
-```yaml
-dsmm:
-  mode:
-    name: deepwork
-    enabled: true
-    autoEnter: false
-  workflow:
-    approvalGate: conditional
-    usePlanCritic: true
-    finalReview: simple-oracle-complex-reviewer
-  prompts:
-    locale: zh-Hans
-    deepseekV4ProCalibration: auto
-    verbosity: concise
-  skills:
-    brainstorming: true
-    writingPlans: true
-    requestingCodeReview: true
-    receivingCodeReview: true
-  models:
-    defaultReasoningEffort: high
-    maxReasoningForArchitecturalWork: true
-  guards:
-    shellSafety: true
-    gitWriteGuard: true
-    toolOutputTruncation: true
-```
-
-Composition config should define availability. Settings should define preferences and toggles that a user could reasonably edit in a settings page.
-
-## Deepwork as a custom mode
-
-The central requirement is that deepwork must be opt-in.
-
-MVP uses dsh mode semantics instead of global system-prompt injection. Current public dsh docs expose a concrete `@deepseek-ai/dsh-plan-mode` package rather than a generic arbitrary-mode package. Therefore dsmm should implement a small Host plugin, `dsmm-deepwork-mode`, that follows the same dsh-native principles: mode state is session-scoped, prompt contribution is active only while the mode is active, and command/tool affordances are stable enough not to surprise the model.
+DSMM is a DSH-native Cordis bundle. It supplies Core configuration and permission integration plus an optional Deepwork workflow, native role delegation and captured-child controls. It doesn't load the OpenCode plugin or emulate OpenCode hooks. The supported integration target is DSH `0.2.0-rc.2`; current source changes aren't proof of publication or installed Desktop acceptance.
 
-The default custom mode name is `deepwork`. Entering the mode should add a model-visible section that explains the deepwork routing, brainstorming gate, planning workflow, review gates, and scope discipline. Leaving the mode should restore ordinary dsh behavior.
-
-Conceptual dsh patch:
+## Composition and authority
 
-```yaml
-- id: dsmm-deepwork-mode
-  name: 'dsmm'
-  config:
-    modeName: deepwork
-    section: |
-      You are in dsmm deepwork mode. Use the dsmm workflow only for this session mode.
-      Classify the user's intent, use dsh tools deliberately, keep implementation scope exact,
-      and follow the configured design, plan, implementation, and review gates.
-```
-
-The real implementation should keep the default full prompt in source files and allow `section` or overlay settings to replace it. If dsh later exposes a generic mode package, dsmm can replace this plugin with configuration rows while preserving the public settings shape.
-
-## Prompt architecture
-
-Prompt content should be split by responsibility:
-
-- `mode/deepwork`: mode activation text and workflow contract.
-- `prompt/orchestrator`: intent routing and dsh tool-use policy.
-- `prompt/model/deepseek-v4-pro`: DeepSeek V4 Pro calibration overlay.
-- `prompt/safety`: shell, git, Docker, and scope safety.
-- `prompt/review`: final review and evidence requirements.
-
-The MVP should register only the mode prompt and the minimal orchestrator/safety sections needed for useful behavior. Later versions can add scoped role prompts for planner, reviewer, and specialized agents.
-
-## DeepSeek V4 Pro calibration policy
-
-The user's field observation is that DeepSeek V4 Pro can under-activate unless prompted carefully. Public sources do not establish a formal vendor statement that the model is "overfit" in that sense. Official/public documentation does establish several relevant facts:
-
-- `deepseek-v4-pro` supports thinking mode through `reasoning_effort` and `extra_body: { thinking: { type: "enabled" } }`.
-- Thinking mode with tools requires reasoning content to be preserved across subsequent tool-calling turns, otherwise API-compatible integrations can fail or lose continuity.
-- Thinking mode ignores sampling controls such as `temperature` and `top_p` in the official API path.
-- DeepSeek V4 Pro has explicit non-think, think-high, and think-max operating modes; max reasoning uses an additional prompt prefix in the model encoding.
-
-dsmm should therefore treat "DeepSeek V4 Pro calibration" as a model-family overlay, not as a universal prompt. The overlay should:
-
-1. ask for deliberate decomposition before tool use on architectural, debugging, migration, and multi-file tasks;
-2. state that tools are part of the reasoning loop and must be used for repository-specific claims;
-3. avoid vague encouragement such as "be smart" and instead encode concrete trigger/action rules;
-4. preserve concise final answers while allowing deeper private reasoning through the provider's thinking controls;
-5. recommend `reasoning_effort: high` for normal deepwork tasks and `max` only for architecture, review, migration, runtime-safety, or hard-reasoning work;
-6. avoid the unsupported `developer` role for general DeepSeek API usage.
-
-## MVP scope
-
-MVP v0.1 builds a minimal, installable dsh bundle with:
-
-- `deepwork` custom mode implemented by dsmm, disabled outside explicit mode activation;
-- dsmm settings namespace with documented defaults;
-- core deepwork prompt section;
-- four workflow skills: brainstorming, writing-plans, requesting-code-review, receiving-code-review;
-- minimal role definitions for orchestrator, planner, reviewer, code-search, and doc-search if dsh agent presets are available in the target profile;
-- DeepSeek V4 Pro calibration overlay gated by model/settings.
-
-MVP excludes:
-
-- complete ocmm category matrix;
-- OpenCode runtime fallback and idle continuation;
-- MCP/LSP server packaging;
-- tool guard parity;
-- web/client UI panels;
-- Docker-based dsh integration tests beyond a smoke harness.
-
-## Configuration strategy
-
-Every dsmm feature should have a clear control surface:
-
-| Feature | Default | Control surface |
-|---|---:|---|
-| `deepwork` mode registration | on | composition config |
-| auto-enter deepwork | off | settings |
-| DeepSeek V4 Pro calibration | auto | settings + model detection |
-| workflow skills | on for MVP set | settings |
-| role presets | on when dsh agent presets available | composition config |
-| safety guards | staged, mostly off until implemented | settings |
-| DSMM-managed external LSP | always off in this version | original configuration retained; settings UI hidden; no activation entry |
-
-## Docker debugging strategy
-
-Docker is allowed for dsh debugging, but dsmm should keep it as a verification surface rather than a runtime assumption.
-
-Planned checks:
-
-1. build dsmm package;
-2. start a disposable dsh profile inside Docker;
-3. install dsmm into that profile using a local path or packed tarball;
-4. verify the profile includes the dsmm bundle;
-5. run a headless prompt that enters `deepwork` mode and confirms dsmm prompt sections are active;
-6. remove the container and disposable profile artifacts.
-
-Docker checks must not require publishing dsmm or writing to user-level dsh config.
-
-## Risks
-
-- dsh mode APIs may differ from the archived oh-dsh notes; implementation must verify against the current dsh package version.
-- DeepSeek V4 Pro calibration is partly based on user observation and community experience; official claims are limited to thinking/tool-call behavior and model modes.
-- Some ocmm features are OpenCode-specific and must be redesigned instead of ported line by line.
-- Full reviewer/oracle semantics may require dsh-native agent routing work before parity is possible.
-
-## Acceptance criteria for this design phase
-
-- `dsmm/` contains all current dsmm project materials.
-- The MVP explicitly uses dsh custom mode rather than global prompt injection.
-- The roadmap separates MVP from parity features.
-- DeepSeek V4 Pro tuning is documented as a configurable overlay, not a universal assumption.
-- The first commit contains only dsmm project documentation and no runtime code.
+The bundle's `cordis.patch.yml` composes with native base/Web/headless profiles. DSH owns authentication, model selection, session storage, approval, jobs and lifecycle. DSMM narrows role/tool/delegation authority within those services, without a second scheduler or approval queue.
+
+Main entry `dsmm` accepts native-only `runtime.enabled`, a strict boolean defaulting to true. At cold startup it selects `dsmm-auto-subagent-runtime`, a subclass of the official `SubagentRuntime`, or leaves the official stock owner when false. The automatic entry inherits the final stock depth/capacity configuration. The explicit manual runtime overlay remains supported with its own Config semantics. Unsupported topology or ambiguous ownership refuses activation, not implicit owner replacement.
+
+A native runtime save records desired state only. It doesn't dispose Main, cancel an active request or replace the resident owner; convergence requires an independent restart. Actual lifecycle loss and relevant permission changes still revoke stale authority. Desired enablement, actual binding, delivery-fence readiness and restart requirement are separate facts.
+
+Default runtime selection doesn't establish stock-persistence readiness. Durable DSMM mode and role-policy events require compatible Main `sessionPersistence`. Native JSONL can retain ignorable extension records, but stock ownership doesn't satisfy DSMM's present compatibility guard. The [roadmap](roadmap.md) records the deferred official PluginRecord route; a Host upgrade alone isn't a fix.
+
+## Configuration and admission
+
+Effective settings resolve as defaults → sparse Global deployment → explicit native entry/profile → immutable named overlay. Objects merge; arrays replace. An explicit same-default value remains a pin, and Unset removes only the current layer's key.
+
+Core remains available without a session and with Deepwork cold-off. Global storage lives under `<resolvedDshHome>/plugins/dsmm`; native profile patches remain Host-owned. Global saves use metadata-version CAS, cooperative locking, final recheck and atomic replacement. Native form CAS, session selection CAS and admission epochs keep their separate authorities. Stat versions, snapshot references and historical digest-shaped references aren't configuration-content proofs. Child capture envelopes, source/resource integrity and release checksums retain their own integrity contracts.
+
+Startup captures mounted capabilities. New ordinary roots admit current valid desired deployment within that startup ceiling. Existing roots, including blank ones, and their future children retain their captured baseline. Explicit idle current-session Apply replaces only the permitted named overlay on that baseline. Existing children retain original settings, locale, route and authority.
+
+Named profile Save, future-default selection and current-session Apply are distinct operations. Neither ordinary profile switching nor Save changes the native root model. **Use profile model** is a separate explicit native selection action, fenced against newer observed manual model/effort intent. Exact legacy libraries remain read-only; no automatic migration or same-name fallback is supplied. See [Profiles](profiles.md).
+
+## Native client surfaces
+
+**Plugins → DSMM bundle config** is the single deployment editor. DSMM registers `plugins.bundle.config` for `@dsmm/dsmm`, not duplicate item/row configuration pages or Conversation configuration tabs. A scope selector chooses Global or the current native profile, and module buttons open one in-area nonmodal drawer. [DESIGN.md](../DESIGN.md) defines the native tokens and interaction contract.
+
+The bundle owner passes `view`; authenticated server metadata resolves the optional native form. Entry ID, row ID, package ID and form namespace aren't interchangeable. Writes require matching identity, revision and raw base/user provenance. Missing or stale form authority makes that scope read-only, never a guessed namespace or Global fallback.
+
+Each scope saves sparse explicit values. Dirty drafts survive drawer changes and native unmount/remount; invalid input or conflicts retain the draft and original CAS. Accepted-but-unrefreshed saves remain committed and can't be replayed. Browsing and saving don't create sessions, select profiles, call providers, restart services or mount LSP.
+
+The Permissions drawer includes exact native-command entries and a separate Root-rules transaction. Default-off command configuration doesn't certify an executor or grant full access. Root rules retain live operator, exact open Root, registration and synchronization gates. Named **Deepwork Profiles** keeps its independent Settings section and compact Conversation header menu.
+
+Native delegation call views distinguish requested identity from validated actual invocation metadata. Raw arguments, errors, metadata and nontext results remain inspectable as JSON without a rich preview. The view changes neither routing nor approval; calls without a native window use the native fallback. These are presentation interfaces, not proof that a target is callable.
+
+## Workflow, identity and routing
+
+The source inventory contains 11 base roles, 11 categories and fourteen configurable lazy skills. Only enabled Orchestrator, Builder and opted-in Planner are standing-root eligible. File/catalog presence isn't execution admission. See [Agent presets](agent-presets.md) and [source synchronization](skill-sync.md).
+
+Ordinary native identity remains Host-owned. DSMM-managed scopes supply their own `harness:identity` system section while preserving role, read-only and permission boundaries. Deepwork off withdraws common workflow and DSMM skills, not mandatory persona or access restrictions. The global module ceiling, session mode and runtime owner are separate controls.
+
+Providers use generic native capabilities, `modelParameters`, role routes, configured invocation levels and explicit deployment-authorized per-call overrides. Omitted effort stays native-owned. Retired brand-calibration/default-effort and MaxReasoningPresets fields reject with `deprecated-field`; no automatic migration is provided. [Model routing](model-routing.md) defines exact route precedence and captured-version compatibility.
+
+Native jobs own permitted background execution. Handoff transfers the same running one-shot rather than starting another child. Continuable delivery retains the durable child ID and current direct-parent authority; inbox acceptance isn't execution completion. Retries require positive correlated no-output evidence, and partial text/reasoning/tool fragments forbid replay. See [runtime recovery](runtime-recovery.md).
+
+## Verification and remaining limits
+
+Packed-artifact, native Web and actual Electron/Desktop acceptance are different surfaces. Source compatibility with official Desktop shared contracts doesn't prove executable activation. Verification must preserve user profiles, credentials, history and immutable release identities; software installation and real-carrier changes need separate authorization.
+
+The accepted P1 pending one-shot approval/parent-epoch defect remains [deferred](deferred-native-approval-risk.md). Repeated approval for read-only Git awaits an exact triggering command and reason; its cause isn't established. The [roadmap](roadmap.md) retains both limits and the official prerelease evidence.
+
+DSMM-managed external LSP remains off, even with `lsp.enabled:true`. Retained interfaces and release checks don't provide an automatic activation entry. DSH's own LSP and independently configured MCP remain unaffected; see [LSP boundary](lsp.md).

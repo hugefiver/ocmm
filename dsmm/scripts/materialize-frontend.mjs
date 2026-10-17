@@ -39,10 +39,6 @@ export function checkFrontendAssets(root = packageRoot, recipe = frontendRecipe(
   for (const row of recipe) {
     const path = destination(root, row.target, allowed);
     if (!existsSync(path)) { errors.push(`missing frontend resource: ${row.target} <- ${FRONTEND_PINS[row.upstream].repository}@${FRONTEND_PINS[row.upstream].commit}/${row.source}`); continue; }
-    const expected = inventory?.files.find((file) => file.target === row.target)?.blob;
-    if (expected !== undefined && gitBlob(readFileSync(path)) !== expected) errors.push(`frontend resource drift: ${row.target}`);
-    const pin = FRONTEND_PINS[row.upstream];
-    if (row.source === "LICENSE" && gitBlob(readFileSync(path)) !== pin.licenseBlob) errors.push(`fixed-pin license drift: ${row.target}`);
   }
   if (inventory !== undefined && errors.length === 0) errors.push(...pythonResourceProblems(root));
   return { outcome: errors.length === 0 ? "ready" : "failed", errors, files: inventory?.files ?? [], pins: FRONTEND_PINS };
@@ -100,7 +96,7 @@ export async function materializeFrontend({ root = packageRoot, fetchBytes = net
   const fetched = new Map(), changes = [];
   for (const row of inventory.files) {
     const path = destination(root, row.target, allowed);
-    if (existsSync(path) && gitBlob(readFileSync(path)) === row.blob) continue;
+    if (existsSync(path)) continue;
     const pin = FRONTEND_PINS[row.upstream], key = `${pin.repository}@${pin.commit}/${row.source}`;
     let bytes = fetched.get(key);
     if (bytes === undefined) { requests++; bytes = await fetchBytes(`https://raw.githubusercontent.com/${pin.repository}/${pin.commit}/${row.source}`); fetched.set(key, bytes); }

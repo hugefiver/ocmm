@@ -2,41 +2,63 @@
 
 ## 0. Native contract
 
-This is an extension of the existing DSH Settings interface, not a new application or a redesign. The selected reference is the native DSH 0.2.0-rc.2 system; no unrelated brand, font, styling framework or animation dependency is needed. Historical design research is unavailable and is not reconstructed here.
+This extends the native DSH 0.2.0-rc.2 Settings and Plugins interface, not a new application or redesign. Native tokens and components remain authoritative; no unrelated brand, font, styling framework or animation dependency is needed.
 
-Read-only extraction used the installed DSH package's `dsh-client-ui-theme`, `dsh-client-ui-primitives`, `dsh-client-ui-settings-general`, `dsh-client-ui-settings-models` and `dsh-client-ui-settings-plugins`. Relevant authored sources are `ui-theme/src/styles/{base,design-platform,focus}.css`, `ui-primitives/src/{Button,Input}.module.css`, and the Settings/Models section CSS embedded in their published client bundles. The values below describe the shipped default theme; installed theme overrides remain authoritative. No vendor code, theme or user configuration is changed.
+The native reference packages are `dsh-client-ui-theme`, `dsh-client-ui-primitives`, `dsh-client-ui-settings-general`, `dsh-client-ui-settings-models` and `dsh-client-ui-settings-plugins`. Relevant sources are `ui-theme/src/styles/{base,design-platform,focus}.css`, `ui-primitives/src/{Button,Input}.module.css`, and the Settings/Models section CSS in their published client bundles. The values below describe the shipped default theme; installed theme overrides remain authoritative. DSMM doesn't change vendor code, theme or user configuration.
 
 DSMM-owned settings extend public native slots and preserve native authentication, navigation, model selection and service ownership. Browser verification does not prove installed Electron behavior or publication.
 
 ## 1. Atmosphere & Identity
 
-### Native Plugins (parity stage D)
+### Native Plugins configuration
 
-DSMM contributes to the official shared `plugins.item`, `plugins.bundle.config`
-and `plugins.row.config` ledgers. The standalone DSMM card opens a sessionless
-core page. Bundle and row pages use the exact public owner `view` and optional
-`form`; a package key, row ID, runtime entry ID and form namespace are separate
-identities. A profile editor is enabled only after the server's captured entry
-and native descriptor revision match the supplied form. Unmatched/absent forms
-are explained as unavailable, never replaced with a guessed namespace.
+The canonical entry is native sidebar **Plugins → DSMM bundle**. DSMM registers
+only `plugins.bundle.config` with package key `@dsmm/dsmm`; the native owner passes
+`view`, not a form. Core configuration is available without `configForms`. The
+authenticated snapshot's namespace resolves the optional native form; exact
+entry, profile, connection, mode, writable state, base/user values and form
+revision must agree. Absent, stale or mismatched forms are explained as read-only,
+never replaced with a guessed namespace or a Global write.
 
-The page has two independently saved layers: **DSMM Global config** (one trusted
-home's central base, shared by its DSH profiles) and **Current DSH profile
-overrides** (only the selected native entry). Deepwork master is global-only;
-profile controls cannot lift this ceiling. Named **Deepwork Profiles** remains
-an independent JSONC runtime-resource editor with its existing model catalog and
-explicit Use profile model action. No control changes the ordinary native model.
+One scope selector chooses **DSMM Global config** (the trusted Home's shared
+base) or **Current DSH profile overrides** (the current native entry). Module
+buttons open one in-area, nonmodal drawer: run/modules/model parameters; model
+routes/recovery; workflow/roles/skills; subagent configuration; permissions/guards;
+other schema settings; and the read-only state inspector. Every editable schema
+field belongs to one module. Deepwork master is Global-only; native runtime
+mounting is native-only and startup-captured. Session persistence is inspection-only.
+Named **Deepwork Profiles** remains in its independent Settings/header surface.
+Configuration browsing and saves do not select a profile, change a native model,
+create a session or call a provider.
 
-Each layer uses sparse explicit values: unset means defaults globally, inheritance
-in the profile. Explicit same-default pins are visible. Native composition/base
-pins are identified separately; clearing a user override never promises to clear
-an upper host layer. Structured boolean/enum/number/string controls cover ordinary
-features, including roles and skills. Bounded, schema-described advanced groups
-cover nested routes and retry arrays without arbitrary paths,
-unknown modules or executable schema callbacks. No merged/default-filled object
-is ever saved. A read-only field state inspector separates desired/source,
-startup capture, next-root constraints and an exact current-session admission;
-sessionless is unknown, not active.
+Native `runtime.enabled` is a strict boolean with native default On, subject to
+Host base pins; it is never added to Global/default/admitted settings. Its native
+form CAS stages desired state only. Runtime-off does not gate the Core editor.
+Observed runtime composition, saved desired, delivery-fence readiness and restart
+state remain distinct. A ready fence or responding root is not persistence or
+child-delegation readiness: compatible DSMM custom-event persistence requires
+separate verification. The UI does not select a storage owner, edit persistence
+bindings or suppress actual Host errors.
+
+Each scope saves sparse explicit values: Global Unset restores defaults, ordinary
+native Unset inherits Global plus Host base pins. Same-default, false and empty-array
+pins remain explicit. Boolean/enum/number/string controls cover ordinary fields;
+bounded, schema-described JSON covers nested routes, policies and rule arrays.
+Objects expose an explicit whole-group Unset, including empty native policy
+containers. It removes only that layer's chosen group and its raw child drafts;
+leaf Unset leaves unrelated overrides intact.
+No merged/default-filled document, unknown field or executable schema callback is
+submitted. Exact native commands use the existing tool/executable/subcommand,
+ordered arguments, Host working directory, sandbox and ask/allow schema. New
+entries use Ask/workspace-write and do not create full-access or wildcard grants.
+Observed tool registration is not executor, environment or sandbox certification.
+
+The Permissions drawer includes a separate Root-rules transaction. A trusted open
+Root, writable operator, synchronized policy and current registration/controller
+remain required; child/readonly/disconnected/profile-override refusals are visible.
+There is no cross-scope Save all or fallback Global write. The selected config
+scope's save bar lists all its pending modules. Saved/startup/next-root/current
+admission are separate inspector states; missing session data is unknown.
 
 LSP controls are hidden in DSMM's settings UI for this version. The implementation,
 interfaces and original configuration remain, but automatic MCP mounting stays off
@@ -49,35 +71,37 @@ private directories and continuation prompt text on the Host, before transport.
 LSP environment names are anonymous counted entries; source/capture metadata is
 aggregated at `lsp.env` (mixed is explicit), never credential-bearing key paths.
 Only the authenticated editor's sparse input/provenance retains editable raw
-values. The inspector takes a stable sorted union of the safe layers and their
-source/capture paths: missing fields are absent, not defaults. A known native
-session keeps its ID/epoch/scope visible even when its projection is unavailable;
-successful named Apply/Baseline returns the already-committed safe admission.
+values. The inspector takes a stable sorted union of safe layers and their
+source/capture paths: missing fields are absent, not defaults. Configuration versions
+are ordinary metadata observations, not content-integrity proofs. UI distinguishes
+observed, not-stored and unavailable states. Raw hashes, stat strings, internal CAS
+counters, long source identities and epochs aren't presentation labels.
 
-The two save bars are local to their sections. Refresh preserves dirty edits and
-does not silently rebase revision conflicts; discard/reload is a separate explicit
-action. A conflict or disconnected/unavailable scope keeps the draft. Identity
-change/disposal fences retained actions. Save announces only the accepted layer;
-it never restarts, cancels, reconciles, applies a named profile or mounts LSP.
-Restart-required text explains an independent native restart and its session
-cancellation semantics. Host bundle enabled/loaded is unknown unless observed;
-Deepwork desired/startup/admitted are not host installation status.
+Drafts and invalid JSON/number/argument text live in contribution memory, isolated
+by real source identity and connection generation, never localStorage. Closing a
+drawer or changing module/scope offers Continue editing, Keep draft and return,
+or explicit Discard. Native navigation unmount/remount retains these drafts and
+their Save locks. Refresh does not merge dirty drafts or silently rebase conflicts.
+Accepted mutations remain committed when reread is unavailable: show Saved /
+refresh required and block replay until refreshed. A native form result that
+does not confirm mutation is explicitly unconfirmed, not proof of rejection;
+retain the draft and require source reread before any retry. Source-version relationships
+use optional `sourceRevision`; missing metadata is unknown, not equality between
+an immutable applied reference and a live source version. Save never restarts,
+cancels, reconciles, applies a profile or mounts LSP. Cold-switch text explains
+independent native restart and possible session cancellation.
 
-The existing native typography, colors, spacing, radii, focus, motion and
-borders-only tokens below are authoritative. One column avoids a cramped native
-panel at 375px; wrapping source rows keep long EN/ZH labels readable at 768px;
-the 760px cap preserves the native reading measure at 1280px. No new font/brand,
-shadow, animation, dependencies or React audit packages are introduced.
+The drawer is a side column above 768px and full-width within the configuration
+area at narrower viewports, with no backdrop, focus trap or `aria-modal`. Opening
+focuses its heading; clean close returns focus to its module button. Escape first
+belongs to an internal native menu, then to the drawer/leave confirmation. Native
+typography, colors, spacing, radii, focus and borders-only surfaces below remain
+authoritative. Controls have visible focus, associated invalid hints, explicit
+unavailable/busy reasons and polite commit announcements. Reduced motion retains
+the same hierarchy. Browser verification must cover the real native Plugins owner,
+not a standalone section; it doesn't prove installed official Electron or publication.
 
-Stage-D interaction matrix: controls have native default/hover/pressed and visible
-focus states, local busy/disabled explanations, labeled invalid fields, retained
-error drafts and polite save announcements. Disclosures use native keyboard
-behavior; focus stays on save or moves to an invalid advanced group after a
-user-triggered validation refusal. Reduced motion preserves all information.
-Actual native Plugins browser evidence (375/768/1280, light/dark, keyboard,
-refusals and saves) is required; Web does not prove installed official Electron.
-
-A quiet, practical part of DSH Settings: system typography, compact controls, a readable configuration editor, clear selection and explicit save outcomes. Its signature is continuity with the host. The section is displayed as **Deepwork Profiles** / **Deepwork 配置档**, without replacing navigation, opening another application shell or relabeling native agent presets as configuration profiles. Native role display names use `DW …`; technical section, RPC, package and role IDs retain their DSMM identity. The naming/resource contract introduced in 0.1.3 changes no layout, theme, animation, component or dependency contract below.
+A quiet, practical part of DSH: system typography, compact controls, a readable configuration editor, clear selection and explicit save outcomes. The independent named-profile section is displayed as **Deepwork Profiles** / **Deepwork 配置档**, without replacing navigation, opening another application shell or relabeling native agent presets as configuration profiles. Native role display names use `DW …`; technical section, RPC, package and role IDs retain their DSMM identity.
 
 ## 2. Color
 
@@ -149,19 +173,21 @@ The native interface uses a 4px rhythm plus explicit compact-control exceptions.
 | Field height | 32px | Native Input and Models select |
 | Default action height | 36px | Native Button `size="md"` |
 | Compact action height | 28px | Native Button `size="sm"`; not the default form action |
+| Select / module rail width | 240px | Existing native select measure; bounded by available width |
 | Section maximum width | 760px | Native Plugins section; DSMM remains `width: 100%`, `min-width: 0` |
+| Drawer reflow breakpoint | 768px | Side-by-side above; full-width module below |
 
 Native radii: `--dsw-radius-xs` 4px, `--dsw-radius-sm` 8px, `--dsw-radius-md` 12px, `--dsw-radius-lg` 16px, `--dsw-radius-xl` 20px and `--dsw-radius-panel` 28px. Controls use md; DSMM does not create another panel.
 
-The host owns its 800px Settings panel, 188px navigation and scroll container. DSMM owns only its section: one column, wrapping action rows, full-width fields and contained editor overflow. A profile selector follows the native Models select's 240px maximum and also obeys `max-width: 100%`. Long names and diagnostics wrap; code may scroll inside the editor but must not create document-level horizontal overflow. A textarea uses semantic rows and vertical resizing rather than a viewport-sized editor.
+The host owns its Settings panel, native Plugins shell, navigation and scroll containers. DSMM owns only its content area: a bounded module rail and in-area drawer at wide widths, one full-width drawer at narrow widths, wrapping action rows, full-width fields and contained editor overflow. A profile selector follows the native Models select's 240px maximum and obeys `max-width: 100%`. Long names and diagnostics wrap; code may scroll inside the editor but must not create document-level horizontal overflow. A textarea uses semantic rows and vertical resizing rather than a viewport-sized editor.
 
 No new responsive framework or fixed sidebar. Verify the section at 375, 768 and 1280px, including the narrower space the host navigation leaves. Do not claim the host shell's independent responsive behavior was changed or verified by a standalone section test.
 
 ## 5. Components
 
-### Planned Showcase Primitives
+### Interaction states
 
-This matrix is the pre-implementation checklist for the new section, not documentation of completed reusable components. Mount the same production component in an isolated native-client test surface to exercise these states before delivery.
+Exercise these production components through the native owner in an isolated client context.
 
 | Primitive | Default / hover / focus / pressed | Disabled / loading | Empty / success / error |
 | --- | --- | --- | --- |
@@ -180,13 +206,13 @@ This matrix is the pre-implementation checklist for the new section, not documen
 
 DW presets default on but are not locked; explicit off retains persona, read-only and Git/host permissions. A captured module-off ceiling remains unavailable, not a profile-editable bypass.
 
-Current-session scope text displays the exact live admitted profile/revision separately from the future global default. Session-selection CAS continues to use only the sidecar selection state; an absent sidecar is not relabeled as baseline or as a newly changed global default. Older responses without the optional admitted identity use explicit captured-default wording.
+Current-session text distinguishes the admitted profile from the future default. Source-version metadata is displayed only when known; internal immutable references, CAS counters and epochs remain protocol values, not labels. Session-selection CAS uses only the sidecar selection state; an absent sidecar is not relabeled as a newer future default. Missing optional admitted/source identity stays unknown or captured.
 
 The Conversation header is a compact session switch, not another Settings surface: one icon-only native 28px Button with the host's 16px branch SVG and an accessible **Current-session profile** name opens the native Menu. There is no visible standalone label, selected-profile text, status, tooltip copy or instruction outside the menu. Use one profile list, one **Use profile model** action, the Deepwork toggle/locked label and refresh; omit verbose normal-menu descriptions and the duplicate profile-model list. A visually hidden live region announces successful outcomes; no persistent visible success text is rendered. Short sanitized errors and necessary disabled/locked reasons remain visible inside the menu. Native Menu owns keyboard navigation, Escape/outside dismissal, focus return and body-portal placement, so native clipping ancestors cannot crop the popup. Choosing a saved profile or explicit baseline immediately invokes the existing session-choice/apply actions; accepted backend CAS/maintenance state remains authoritative. Refusal keeps the prior admission. Never silently discard a Settings draft, create a session or change a global default to operate this control.
 
 Menu refusal diagnostics show only a finite known reason code and an optional closed canonical configuration-field grammar, with bounded length. Never echo raw Host/provider messages, arbitrary wire fields, paths, identifiers or credential values. Unknown transport/domain errors map to safe generic codes. Explain activation, maintenance and conflict distinctly and offer refresh plus an idle retry hint; refresh is read-only, not an automatic queued apply. These details remain inside the menu and its visually hidden accessible announcement. A native idle snapshot is not a reservation: another activity may acquire maintenance before CAS, in which case the previous profile remains applied and retry must remain explicit.
 
-One root-scoped `conversation.header.leading` contribution is used for active, retained blank and genuinely sessionless welcome states. Unlike the old utilities seat, the shipped native header renders this slot even when `hideChrome` is true. Its numeric priority is `Number.MAX_SAFE_INTEGER`: native SlotCore chooses the lowest numeric priority, so ordinary existing native/plugin navigation wins. DSMM does not replace the header or another leading owner; a host whose plugin owns this single slot may not display the profile icon, a documented compatibility boundary. The root menu follows the existing public current-session adapter/controller identity, and retained action callbacks reject a changed identity before dispatch. With no real current identity it remains inspectable but all profile mutations are disabled. Binding a real native session enables the same menu without another seat or automatic session creation.
+One root-scoped `conversation.header.leading` contribution serves active, retained blank and sessionless states, including `hideChrome`. Its numeric priority is `Number.MAX_SAFE_INTEGER`: native SlotCore chooses the lowest numeric priority, so existing native/plugin navigation wins. DSMM does not replace the header or another leading owner; a host whose plugin owns this single slot may not display the profile icon. The menu follows the public current-session adapter/controller identity, and retained callbacks reject a changed identity before dispatch. Without a real current identity the menu remains inspectable but profile mutations are disabled; no session is created automatically.
 
 The single profile list switches the profile while preserving the chosen native main model, with zero native selection calls. Exactly one `@use-model` **Use profile model** action requests the current admitted immutable profile's configured ordinary-root primary through native `session.selectModel`. It does not reapply a subsequently saved draft revision, increment the profile epoch or write a profile sidecar. There is no local model echo, shadow selector or DOM/native-store patch: the native model-selection projection/picker is authoritative. Missing model configuration, withdrawn selector or native selection failure retains the admitted profile and reports a short sanitized error. This explicit action has the same native semantics as choosing the Models tab, including native default-model persistence in the background; normal switching, profile saving and route-field editing never invoke it.
 
@@ -208,27 +234,19 @@ Native `SettingsFormModel`/`configForms` manage the host plugin-config document,
 
 Browse lists saved labels, IDs, immutable revisions and persistent warnings/errors. Opening changes only the editor; dirty changes require explicit discard confirmation with Escape cancellation and focus return. Edit shows draft and saved revision separately, with Save/Reload at the top. Structured routes, invocation levels, business locale, optional roles and topology share the original JSONC draft. Structured edits change only their addressed path; comments and unrelated bytes remain untouched. Blank labels retain their original bytes and use the ID as display fallback.
 
-Future default shows the exact `selectedId`, `appliedRevision` and `selectionRevision` pin. Only a saved revision can be selected; Save neither selects a future default nor applies to the current session. Reset affects only future sessions. Current session displays exact `admittedSelection` and `admissionEpoch`; the sidecar selection remains CAS authority, not inferred live admission. Missing admission identity is unknown/captured, never inferred from a newer future default. Apply/Baseline retain exact-root idle/CAS authority and leave the native root model untouched; Use profile model remains an explicit separate native action.
+Future default displays the selected profile and known source-version relationship. Immutable applied references and selection/admission tokens remain internal authorities. Only a usable saved version can be selected; Save neither selects a future default nor applies to the current session. Reset affects only future sessions. Missing admission/source metadata is unknown/captured, never inferred from a newer default or compared across unlike identities. Accepted-but-refresh-required responses remain committed and block replay until reread. Apply/Baseline retain exact-root idle/CAS authority and leave the native root model untouched; Use profile model remains a separate explicit action.
 
 Advanced JSONC is initially collapsed. A user-triggered validation refusal opens it and focuses/selects the Host's UTF-16 location; background refresh never steals focus. Persistent warning rows expose code, field and a nonblocking marker outside any disclosure; optional explanations may collapse. Draft, saved, future-pin and current-admission warnings remain separate. Unknown fields and exceptions never echo raw diagnostic values. Error code, safe field and location remain actionable; all errors other than blank-label warnings still block their operation.
 
 Invocation `normal` is a read-only default-route alias; only low/high/max overrides are editable, and orchestrator has no levels. Each override is inherit, exact effort-only, or a complete provider/model route; changing mode replaces that override, and an explicit model change clears only its stale effort. Catalog refresh/unavailability preserves manual values. Business locale is inherited when omitted and does not change the en/zh interface locale. Named profiles expose only subagent topology, never deployment-only permissions/background/depth. Role required/ceiling state comes from server metadata, with reasons adjacent to controls; absent metadata stays unknown and cannot justify lifting a ceiling. Current-session startup-binding readiness uses only the server admission DTO, never desired settings as actual state.
 
-Each zone is a one-column, borders-only semantic section using the existing spacing and type tokens. No session means an explicit unavailable current zone. Child lists, queue/steer and same-run handoff belong in the Conversation runtime surface only after a real child DTO/RPC exists; no pending/fake child controls are part of Profiles.
+Each zone is a one-column, borders-only semantic section using the existing spacing and type tokens. No session means an explicit unavailable current zone. Profiles contains no child-control panel. Child DTO/RPC availability alone doesn't establish an exposed UI: the current client registers no separate Conversation child/configuration tabs.
 
-### Conversation child controls
+### Delegation call presentation
 
-An additive `conversation.view` entry with id `dsmm-children` supplies the native Deepwork children tab; the host owns tab navigation and Session scope. The view uses the existing one-column 760px measure, native typography, wrapping IDs, borders-only fieldsets, Button and semantic forms. It does not replace Profiles or the native composer/attachment surface.
+Native `tool.call.toolview` contributions cover per-role tools and the parameterized role/category entries. A pending argument-derived label is **requested**, not actual admission. Completed results use **actual** only when validated native invocation metadata matches the tool and canonical target; errors or missing metadata don't manufacture an executed role or route. Native request/capture evidence remains the authority for route claims.
 
-The child controller consumes the separate `@dsmm/dsmm-children` remote contribution and binds the exact public native Session binding and connection generation. Session/owner/connection replacement and observed parent admission changes fence callbacks and late responses. Missing scope/service is unavailable, not an empty successful catalog. Describe and descendants are independently diagnosable; mismatched epochs are not combined. Status is explicitly last observed and refreshed read-only, without a second scheduler or fabricated activity.
-
-Run rows display only published invocation identity, role, level, route source, mode and run/child/job IDs. A starting row has no fabricated invocation or action ID. Same-run background transition uses its observed toolCallId/runId and captured parent epoch; a pending click is single-flight, and accepted job receipts are retained without claiming the child completed. Compatibility `route` and `routeSource` are labelled as invocation projections, not route comparison or verified live headers.
-
-Route comparison uses only the shared `DsmmRoleRouteComparison`: Initial route is separately known from `invocation-capture` or unknown with `missing-invocation-capture`; Latest own native request route is separately known from `own-native-request-header` or unknown with its reported `no-own-request-header`, `invalid-own-request-header` or `not-observed` reason. The two routes and their effort values never substitute for each other. Run details use `invocation.routeComparison`; the child row presents its top-level `routeComparison` before invocation details, including legacy rows with no invocation. Missing comparison is explicitly unobserved, not repaired from compatibility route, root/profile settings or route-lock lookup. A legacy native execution observation is not labelled as an initial capture; missing invocation never creates a role or invocation level. These semantic definition lists remain one-column, use the existing metadata tokens and wrap long provider/model/source text.
-
-Direct continuable children have labelled Queue/Steer message forms, native text/image ContentBlocks and interrupt actions only when the server capabilities and row controls both permit them. Picked image bytes are encoded as image bodies, never fabricated durable attachment references or Agent senders. Image capability refusal leaves text and picked drafts available for correction; no automatic upload retry or message resend occurs. Accepted messages and interrupt acknowledgements do not alter observed execution/activity or completion. Transport loss retains the draft with an unknown-outcome guard; the user must check the native child conversation and explicitly allow a new message before sending again.
-
-Descendant rows remain inspection-only even when the caller can see the subtree; diagnostics for corrupt/unsupported/unavailable branches remain visible. Captured and legacy-conservative evidence, original/parent epochs, proven fields and all limitations are persistent semantic text, not hidden behind a badge or inferred from desired settings. Disabled controls expose finite local bilingual explanations and a Refresh recovery path. Native focus rings and form keyboard semantics remain; no motion, shadow, framework, font or dependency is added. Browser/native QA remains distinct from controller/component tests and compile/bundle evidence.
+Use native disclosure, status and code-block primitives. Arguments, output, errors and metadata stay inspectable; nontext content is represented as JSON, without an image, audio or rich-media preview. Native disclosure and Inspect behavior remain available. A call without a usable native window returns to the native fallback rather than inventing a client binding. Presentation never changes routing, permission or approval.
 
 The host primitives above are dependencies, not package-owned implementations. Package-owned patterns below are implemented and reused at least twice.
 

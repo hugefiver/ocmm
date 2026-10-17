@@ -79,7 +79,7 @@
 
 - [ ] **Step 1: Re-read the design and confirm protected paths are currently unchanged**
 
-Read `docs/superpowers/specs/2026-07-20-codex-prompt-policy-design.md` through `## Self-Review`. Then run in `C:\Users\hugefiver\source\ocmm`:
+Read `docs/superpowers/specs/2026-07-20-codex-prompt-policy-design.md`. Run from the repository root:
 
 ```powershell
 git status --short --untracked-files=all -- prompts/v1/deepwork/codex.md prompts/omo/deepwork/codex.md prompts/codex/deepwork/codex.md src/intent/prompt-loader.test.ts src/codex/plugin-generator.ts src/codex/plugin-generator.test.ts docs/v1-maintenance.md docs/prompt-sync.md .agents/plugins/marketplace.json .codex/agents plugins/deepwork
@@ -90,7 +90,7 @@ Expected: only this task's specification and plan may be untracked outside the p
 
 - [ ] **Step 2: Run the existing generator compatibility test as a characterization PIN**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 node --test --experimental-strip-types --test-reporter=spec src/codex/plugin-generator.test.ts
@@ -223,7 +223,7 @@ test("Codex deepwork prompts use incremental validation and evidence-bounded del
 
 - [ ] **Step 4: Run the prompt-loader test and capture the intended RED**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 node --test --experimental-strip-types --test-reporter=spec src/intent/prompt-loader.test.ts
@@ -363,7 +363,7 @@ The omo bullet must preserve its local conditional gate wording:
 
 - [ ] **Step 6: Run the affected prompt-loader test and capture GREEN**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 node --test --experimental-strip-types --test-reporter=spec src/intent/prompt-loader.test.ts
@@ -417,7 +417,7 @@ Add this section immediately before `## Observation-Only Upstream Items (2026-07
 
 - [ ] **Step 3: Check the edited text surfaces and whitespace without rerunning unchanged tests**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 rg -n "only the tests and scenarios touched or affected|GOAL|STOP WHEN|EVIDENCE|Stop the parent run ONLY" prompts/v1/deepwork/codex.md prompts/omo/deepwork/codex.md prompts/codex/deepwork/codex.md
@@ -445,7 +445,7 @@ The Task 2 prompt-loader GREEN and Task 1 generator characterization remain curr
 
 - [ ] **Step 1: Confirm generated roots and protected runtime files are clean before generation**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 $protected = @(
@@ -464,7 +464,7 @@ Expected: no status entries. If any appear, stop without generating or cleaning 
 
 - [ ] **Step 2: Run one latest full integrated repository pass**
 
-Run each command once in this order in `C:\Users\hugefiver\source\ocmm`:
+Run the following commands from the repository root, checking each result:
 
 ```powershell
 pnpm run typecheck
@@ -538,7 +538,7 @@ Expected: both generated orchestrator copies show the compatibility gate and loc
 
 - [ ] **Step 1: Run the plan/spec self-review and placeholder scan**
 
-Run in `C:\Users\hugefiver\source\ocmm`:
+Run from the repository root:
 
 ```powershell
 $placeholderPatterns = @(

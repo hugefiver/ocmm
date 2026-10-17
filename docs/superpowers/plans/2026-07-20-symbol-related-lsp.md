@@ -23,7 +23,7 @@
 - MCP input uses one-based `line` and zero-based `character`; one fresh session requests definition, implementation, and references in order; references set `includeDeclaration: true`.
 - JSON-RPC `-32601` is `unsupported`; other response/client failures are `error`; successful `null` is `ok` with no items.
 - Deduplicate only within each group by URI plus complete range, preserve first-seen order, and prefer `LocationLink.targetSelectionRange` before `targetRange`.
-- Run commands from `C:\Users\hugefiver\source\ocmm` with PowerShell syntax.
+- Run commands from the repository root with PowerShell syntax.
 - The final implementation remains one semantic commit over the exact seven-file allowlist, but no Git write occurs without explicit execution-time authorization.
 - The prior final-review receipt is invalid. Do not implement until the orchestrator records a passing receipt for this exact revision; current status: `waiting for fresh receipt`.
 

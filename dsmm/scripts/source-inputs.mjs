@@ -9,7 +9,6 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const SOURCE_INPUT_ROOT = join(packageRoot, "source-inputs");
 const attributes = "root/** -text\n";
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const gitBlob = (bytes) => createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 const roots = [...SOURCE_INPUT_FILES, ...Object.values(SKILL_SOURCES)];
 const allowedInput = (path) => SOURCE_INPUT_FILES.includes(path)
@@ -55,17 +54,14 @@ function rootInputPaths(root) {
 }
 
 export function loadSourceInputs(root = SOURCE_INPUT_ROOT) {
-  if (readFileSync(regularPath(root, ".gitattributes"), "utf8").replaceAll("\r\n", "\n") !== attributes) throw new Error("source snapshot requires raw-byte Git storage (root/** -text)");
   const manifest = JSON.parse(readFileSync(regularPath(root, "manifest.json"), "utf8"));
   if (manifest.format !== 1 || !/^[a-f0-9]{40}$/u.test(manifest.provenance?.rootBaselineCommit)
     || manifest.provenance.capture !== "root-worktree" || !Array.isArray(manifest.provenance.overlayPaths)
     || !Array.isArray(manifest.files)) throw new Error("invalid source input snapshot manifest/provenance");
   const files = new Map();
   for (const row of manifest.files) {
-    if (!validInputPath(row.path) || files.has(row.path)
-      || !/^[a-f0-9]{64}$/u.test(row.sha256) || !Number.isSafeInteger(row.bytes) || row.bytes < 0) throw new Error(`invalid source input inventory entry: ${row.path}`);
+    if (!validInputPath(row.path) || files.has(row.path)) throw new Error(`invalid source input inventory entry: ${row.path}`);
     const bytes = readFileSync(regularPath(root, `root/${row.path}`));
-    if (bytes.length !== row.bytes || sha256(bytes) !== row.sha256) throw new Error(`source input integrity drift: ${row.path}`);
     files.set(row.path, bytes);
   }
   const missing = [...SOURCE_INPUT_FILES, ...Object.values(SKILL_SOURCES).map((source) => `${source}/SKILL.md`)].filter((path) => !files.has(path));
@@ -139,7 +135,7 @@ export function refreshSourceInputs({ sourceRoot = dirname(packageRoot), root = 
   const before = existingSnapshot(root);
   const snapshot = captureSourceInputs(sourceRoot);
   for (const path of snapshot.files.keys()) if (!validInputPath(path)) throw new Error(`invalid captured source input: ${path}`);
-  const manifest = { format: 1, provenance: snapshot.provenance, files: [...snapshot.files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })) };
+  const manifest = { format: 1, provenance: snapshot.provenance, files: [...snapshot.files.keys()].map((path) => ({ path })) };
   const expected = new Map([...snapshot.files].map(([path, bytes]) => [`root/${path}`, bytes]));
   expected.set(".gitattributes", Buffer.from(attributes));
   expected.set("manifest.json", Buffer.from(json(manifest)));

@@ -214,7 +214,7 @@ Report the live `git status --short`, marker-gate output, focused test counts, t
 **Files:**
 - Create: `src/runtime-fallback/fixtures/opencode-task-interruption.json`
 - Create: `docs/superpowers/evidence/2026-07-15-subagent-interruption-open-code.md`
-- Temporary only: `C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\ocmm-interruption-probe\**`
+- Temporary only: a fresh task-owned interruption-probe directory under the approved OS temporary parent.
 
 **Interfaces:**
 - Consumes: the integrated 429 runtime from Task 1, built `dist/index.js`, installed `opencode` with its bundled `@ai-sdk/openai-compatible` provider, a Node-built-ins fake provider, and isolated XDG directories.
@@ -224,10 +224,10 @@ Report the live `git status --short`, marker-gate output, focused test counts, t
 
 ```powershell
 pnpm run build
-$probeParent = 'C:\Users\HUGEFI~1\AppData\Local\Temp\opencode'
+$probeParent = $env:TEMP
 if (-not (Test-Path -LiteralPath $probeParent)) { throw "Pre-approved temp parent is missing: $probeParent" }
-$probeRoot = 'C:\Users\HUGEFI~1\AppData\Local\Temp\opencode\ocmm-interruption-probe'
-if (Test-Path -LiteralPath $probeRoot) { Remove-Item -LiteralPath $probeRoot -Recurse -Force }
+$probeRoot = Join-Path $probeParent ("ocmm-interruption-probe-" + [guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $probeRoot) { throw 'Probe destination already exists' }
 New-Item -ItemType Directory -Path $probeRoot, "$probeRoot\xdg-config\opencode", "$probeRoot\xdg-data\opencode", "$probeRoot\xdg-state", "$probeRoot\xdg-cache", "$probeRoot\.opencode" -Force | Out-Null
 $env:XDG_CONFIG_HOME = "$probeRoot\xdg-config"
 $env:XDG_DATA_HOME = "$probeRoot\xdg-data"

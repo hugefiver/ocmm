@@ -449,7 +449,7 @@ The implementation scope remains exactly these seven files. `crates/ocmm-lsp/Car
 
 ## Verification
 
-Run from `C:\Users\hugefiver\source\ocmm` with PowerShell-compatible syntax:
+Run from the repository root with PowerShell-compatible syntax:
 
 ```powershell
 cargo fmt --check --package ocmm-lsp

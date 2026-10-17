@@ -1183,13 +1183,7 @@ $env:OCMM_PROFILE = $null; $env:OCMM_NO_PROFILE = $null; $env:OCMM_FAST = $null;
 
 Expected: each exits `0`; typecheck emits no diagnostics; `pnpm test` completes TypeScript and Cargo tests; build emits TypeScript plus release/native LSP artifacts under `dist/`.
 
-If and only if the root build fails because a live Windows process locks an `ocmm-lsp` artifact, preserve the failure output, do not terminate that process, and run this isolated-copy build:
-
-```powershell
-$tempParent = "C:\Users\HUGEFI~1\AppData\Local\Temp\opencode"; if (-not (Test-Path -LiteralPath $tempParent)) { throw "approved temp parent missing" }; $isolated = Join-Path $tempParent ("ocmm-fast-default-build-" + [Guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path $isolated | Out-Null; try { robocopy.exe . $isolated /E /XD .git node_modules dist target /NFL /NDL /NJH /NJS /NP | Out-Null; $copyExit = $LASTEXITCODE; if ($copyExit -ge 8) { throw "robocopy failed with exit $copyExit" }; if (-not (Test-Path -LiteralPath (Join-Path $PWD "node_modules"))) { throw "existing node_modules missing; do not install" }; New-Item -ItemType Junction -Path (Join-Path $isolated "node_modules") -Target (Join-Path $PWD "node_modules") | Out-Null; $env:OCMM_PROFILE = $null; $env:OCMM_NO_PROFILE = $null; $env:OCMM_FAST = $null; pnpm --dir $isolated run build; if ($LASTEXITCODE -ne 0) { throw "isolated build failed" }; "isolated build passed; root artifact remained locked" } finally { rm.exe -rf $isolated }
-```
-
-Expected fallback evidence: `isolated build passed; root artifact remained locked`. Mark the root build as blocked by the live lock and the isolated build as passed; do not represent the root build itself as green. Any non-lock build failure remains a real failure and must not use this exception.
+If a live Windows process locks a native output, preserve the failure and don't terminate the user process. Any separately authorized isolated-copy build must use the same relevant source inputs and existing dependencies, report its distinct scope and remove only its exact task-owned resources. It doesn't turn the failed root build into a pass or waive pre-commit gates. A non-lock build failure remains a product/build failure.
 
 - [ ] **Step 5: Inspect formatting, scope, logging, and the final working tree**
 
